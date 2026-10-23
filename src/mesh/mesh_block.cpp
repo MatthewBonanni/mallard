@@ -13,18 +13,22 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <filesystem>
+#include <mutex>
 #include <stdexcept>
 
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
 #include "input.h"
+#include "file_format.h"
+#include "log.h"
 
 #include "hdf5_util.h"
 
 std::array<rtype, 2> wedge_node(rtype x, rtype y, rtype Ly) {
-    const rtype wedge_theta = 8 * Kokkos::numbers::pi / 180.0;
+    const rtype wedge_theta = static_cast<rtype>(8 * Kokkos::numbers::pi / 180.0);
     const rtype wedge_x = 0.5;
     if (x > wedge_x) {
         const rtype y_bottom = (x - wedge_x) * std::tan(wedge_theta);
@@ -40,20 +44,117 @@ rtype stretched_coordinate(uint32_t i, uint32_t n, rtype L, rtype beta) {
     return 0.5_r * L * (1.0_r + std::tanh(beta * s) / std::tanh(beta));
 }
 
-Stretching mesh_stretching(const toml::value & input) {
+Stretching mesh_stretching(const Input & input) {
     Stretching stretching{};
     if (!input.contains("mesh") || !input.at("mesh").contains("stretching")) return stretching;
-    const std::vector<rtype> beta = find_real_vector(input, "mesh", "stretching");
+    const std::vector<rtype> beta = find_real_vector(input, "mesh", "stretching", dim::none);
     if (beta.size() != N_DIM) {
         throw InputError("[mesh] stretching must have " + std::to_string(N_DIM) + " components.");
     }
-    for (int d = 0; d < N_DIM; d++) {
+    for (size_t d = 0; d < N_DIM; d++) {
         if (!(beta[d] >= 0.0_r) || !std::isfinite(beta[d])) {
             throw InputError("[mesh] stretching factors must be finite and non-negative.");
         }
         stretching[d] = beta[d];
     }
     return stretching;
+}
+
+namespace {
+
+std::vector<double> transform_vector(const Input & v, const std::string & key, const Dimension & dimension) {
+    if (!v.is_array() || v.as_array().size() != N_DIM) {
+        throw InputError("mesh.transform." + key + " must have " + std::to_string(N_DIM) + " components.");
+    }
+    std::vector<double> out;
+    for (const auto & item : v.as_array()) out.push_back(as_double(item, "mesh.transform." + key, dimension));
+    for (double x : out) {
+        if (!std::isfinite(x)) throw InputError("mesh.transform." + key + " must be finite.");
+    }
+    return out;
+}
+
+std::string vector_text(const std::vector<double> & v) {
+    std::string s;
+    for (double x : v) s += (s.empty() ? "[" : ", ") + logging::real(x);
+    return s + "]";
+}
+
+} // namespace
+
+MeshTransform mesh_transform(const Input & input) {
+    MeshTransform t;
+    if (!input.contains("mesh") || !input.at("mesh").contains("transform")) return t;
+    if (find_value_or<std::string>(input, "mesh", "type", "file") != "file") {
+        throw InputError("[mesh.transform] applies to mesh files.");
+    }
+    const Input & table = input.at("mesh").at("transform");
+    if (!table.is_table()) throw InputError("mesh.transform must be a table.");
+    for (const auto & entry : table.as_table()) {
+        if (entry.first != "scale" && entry.first != "rotate" && entry.first != "translate") {
+            throw InputError("mesh.transform: unknown key " + entry.first + " (keys: scale, rotate, translate).");
+        }
+    }
+    std::vector<std::string> parts;
+    std::array<double, N_DIM> scale;
+    scale.fill(1.0);
+    if (table.contains("scale")) {
+        const Input & s = table.at("scale");
+        if (s.is_array()) {
+            const std::vector<double> v = transform_vector(s, "scale", dim::length);
+            std::copy(v.begin(), v.end(), scale.begin());
+            parts.push_back("scale " + vector_text(v));
+        } else {
+            scale.fill(as_double(s, "mesh.transform.scale", dim::length));
+            parts.push_back("scale " + logging::real(scale[0]));
+        }
+        for (double x : scale) {
+            if (!std::isfinite(x) || x == 0.0) throw InputError("mesh.transform.scale must be finite and nonzero.");
+        }
+    }
+    std::array<std::array<double, 3>, 3> R = {{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    if (table.contains("rotate")) {
+        const Input & r = table.at("rotate");
+        std::array<double, 3> axis = {0.0, 0.0, 1.0};
+        double degrees;
+        if constexpr (N_DIM == 2) {
+            degrees = as_double(r, "mesh.transform.rotate", dim::angle_degrees);
+            parts.push_back("rotate " + logging::real(degrees) + " deg");
+        } else {
+            if (!r.is_table() || !r.contains("axis") || !r.contains("angle") || r.as_table().size() != 2) {
+                throw InputError("mesh.transform.rotate must be {axis = [x, y, z], angle = degrees}.");
+            }
+            const std::vector<double> a = transform_vector(r.at("axis"), "rotate.axis", dim::none);
+            const double norm = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+            if (!(norm > 0.0)) throw InputError("mesh.transform.rotate.axis must be nonzero.");
+            for (size_t i = 0; i < 3; i++) axis[i] = a[i] / norm;
+            degrees = as_double(r.at("angle"), "mesh.transform.rotate.angle", dim::angle_degrees);
+            parts.push_back("rotate " + logging::real(degrees) + " deg about " + vector_text(a));
+        }
+        if (!std::isfinite(degrees)) throw InputError("mesh.transform.rotate must be finite.");
+        // Rodrigues: R = cos I + sin [axis]x + (1 - cos) axis axis^T
+        const double theta = degrees * Kokkos::numbers::pi / 180.0, c = std::cos(theta), s = std::sin(theta);
+        const double cross[3][3] = {{0, -axis[2], axis[1]}, {axis[2], 0, -axis[0]}, {-axis[1], axis[0], 0}};
+        for (size_t i = 0; i < 3; i++) {
+            for (size_t j = 0; j < 3; j++) R[i][j] = (i == j ? c : 0.0) + s * cross[i][j] + (1 - c) * axis[i] * axis[j];
+        }
+    }
+    for (size_t i = 0; i < N_DIM; i++) {
+        for (size_t j = 0; j < N_DIM; j++) t.matrix[i][j] = R[i][j] * scale[j];
+    }
+    if (table.contains("translate")) {
+        const std::vector<double> v = transform_vector(table.at("translate"), "translate", dim::length);
+        std::copy(v.begin(), v.end(), t.translation.begin());
+        parts.push_back("translate " + vector_text(v));
+    }
+    for (const auto & p : parts) t.description += (t.description.empty() ? "" : ", ") + p;
+    return t;
+}
+
+void transform_block(MeshBlock & block, const MeshTransform & transform) {
+    if (transform.is_identity()) return;
+    for (auto & x : block.node_coords) x = transform(x);
+    for (auto & x : block.face_high_order_nodes) x = transform(x);
 }
 
 MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshType kind, int r, int p,
@@ -66,18 +167,18 @@ MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshT
     block.first_node = block_begin(n_nodes, r, p);
     block.zone_names = {"right", "top", "left", "bottom"};
     enum { RIGHT, TOP, LEFT, BOTTOM };
-    const rtype dx = Lx / nx;
-    const rtype dy = Ly / ny;
+    const rtype dx = Lx / static_cast<rtype>(nx);
+    const rtype dy = Ly / static_cast<rtype>(ny);
     for (uint64_t g = block.first_node; g < block_begin(n_nodes, r + 1, p); g++) {
-        const uint32_t i = g / (ny + 1), j = g % (ny + 1);
-        std::array<rtype, 2> x = {stretching[0] > 0.0_r ? stretched_coordinate(i, nx, Lx, stretching[0]) : i * dx,
-                                  stretching[1] > 0.0_r ? stretched_coordinate(j, ny, Ly, stretching[1]) : j * dy};
+        const uint32_t i = static_cast<uint32_t>(g / (ny + 1)), j = static_cast<uint32_t>(g % (ny + 1));
+        std::array<rtype, 2> x = {stretching[0] > 0.0_r ? stretched_coordinate(i, nx, Lx, stretching[0]) : static_cast<rtype>(i) * dx,
+                                  stretching[1] > 0.0_r ? stretched_coordinate(j, ny, Ly, stretching[1]) : static_cast<rtype>(j) * dy};
         if (kind == MeshType::WEDGE) x = wedge_node(x[0], x[1], Ly);
         block.node_coords.push_back({double(x[0]), double(x[1])});
     }
     for (uint64_t c = block.first_cell; c < block_begin(n_cells, r + 1, p); c++) {
         const uint64_t quad = tri ? c / 2 : c;
-        const uint32_t ic = quad / ny, jc = quad % ny;
+        const uint32_t ic = static_cast<uint32_t>(quad / ny), jc = static_cast<uint32_t>(quad % ny);
         const uint64_t tr = uint64_t(ic + 1) * (ny + 1) + jc + 1;
         const uint64_t tl = uint64_t(ic) * (ny + 1) + jc + 1;
         const uint64_t bl = uint64_t(ic) * (ny + 1) + jc;
@@ -99,6 +200,69 @@ MeshBlock cartesian_2d_block(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, MeshT
         if (has[BOTTOM] && jc == 0) block.add_face(std::array{bl, br}, BOTTOM);
     }
     return block;
+}
+
+MeshBlock annulus_block(uint32_t n_theta, uint32_t n_r, uint32_t n_z, double r_in, double r_out, double angle,
+                        double Lz, int r, int p) {
+    const bool full = angle >= 2.0 * std::numbers::pi;
+    const uint64_t layers = N_DIM == 3 ? uint64_t(n_z) + 1 : 1;
+    const uint64_t n_t_nodes = full ? n_theta : uint64_t(n_theta) + 1;
+    const uint64_t per_layer = n_t_nodes * (n_r + 1);
+    const uint64_t n_cells = uint64_t(n_theta) * n_r * (N_DIM == 3 ? n_z : 1);
+    const uint64_t n_nodes = per_layer * layers;
+    MeshBlock block;
+    block.first_cell = block_begin(n_cells, r, p);
+    block.first_node = block_begin(n_nodes, r, p);
+    block.zone_names = {"inner", "outer", "start", "end", "back", "front"};
+    enum { INNER, OUTER, START, END, BACK, FRONT };
+    const double sweep = full ? 2.0 * std::numbers::pi : angle;
+    for (uint64_t g = block.first_node; g < block_begin(n_nodes, r + 1, p); g++) {
+        const uint64_t k = g / per_layer, in_layer = g % per_layer;
+        const uint64_t i = in_layer / (n_r + 1), j = in_layer % (n_r + 1);
+        const double theta = sweep * double(i) / double(n_theta);
+        const double radius = r_in + (r_out - r_in) * double(j) / double(n_r);
+        std::array<double, N_DIM> x;
+        x[0] = radius * std::cos(theta);
+        x[1] = radius * std::sin(theta);
+        if constexpr (N_DIM == 3) x[2] = Lz * double(k) / double(n_z);
+        block.node_coords.push_back(x);
+    }
+    auto node = [&](uint64_t i, uint64_t j, uint64_t k) { return k * per_layer + (i % n_t_nodes) * (n_r + 1) + j; };
+    for (uint64_t c = block.first_cell; c < block_begin(n_cells, r + 1, p); c++) {
+        const uint64_t k = c / (uint64_t(n_theta) * n_r), in_layer = c % (uint64_t(n_theta) * n_r);
+        const uint64_t i = in_layer / n_r, j = in_layer % n_r;
+        const std::array<uint64_t, 4> q0 = {node(i, j, k), node(i + 1, j, k), node(i + 1, j + 1, k), node(i, j + 1, k)};
+        if constexpr (N_DIM == 2) {
+            block.add_cell(q0);
+            if (j == 0) block.add_face(std::array{q0[0], q0[1]}, INNER);
+            if (j + 1 == n_r) block.add_face(std::array{q0[2], q0[3]}, OUTER);
+            if (!full && i == 0) block.add_face(std::array{q0[3], q0[0]}, START);
+            if (!full && i + 1 == n_theta) block.add_face(std::array{q0[1], q0[2]}, END);
+        } else {
+            const std::array<uint64_t, 4> q1 = {node(i, j, k + 1), node(i + 1, j, k + 1), node(i + 1, j + 1, k + 1),
+                                                node(i, j + 1, k + 1)};
+            block.add_cell({q0[0], q0[1], q0[2], q0[3], q1[0], q1[1], q1[2], q1[3]});
+            if (j == 0) block.add_face(std::array{q0[0], q0[1], q1[1], q1[0]}, INNER);
+            if (j + 1 == n_r) block.add_face(std::array{q0[3], q0[2], q1[2], q1[3]}, OUTER);
+            if (!full && i == 0) block.add_face(std::array{q0[0], q0[3], q1[3], q1[0]}, START);
+            if (!full && i + 1 == n_theta) block.add_face(std::array{q0[1], q0[2], q1[2], q1[1]}, END);
+            if (k == 0) block.add_face(q0, BACK);
+            if (k + 1 == n_z) block.add_face(q1, FRONT);
+        }
+    }
+    return block;
+}
+
+MeshBlock annulus_block(const Input & input, int r, int p) {
+    const double angle = double(find_real_or(input, "mesh", "angle", dim::angle_degrees, 360.0_r));
+    if (!(angle > 0.0 && angle <= 360.0)) throw InputError("[mesh] angle must be in (0, 360] degrees.");
+    const double r_in = double(find_real_or(input, "mesh", "r_inner", dim::length, 1.0_r));
+    const double r_out = double(find_real_or(input, "mesh", "r_outer", dim::length, 2.0_r));
+    if (!(r_in > 0.0 && r_out > r_in)) throw InputError("[mesh] annulus needs 0 < r_inner < r_outer.");
+    return annulus_block(find_value_or<uint32_t>(input, "mesh", "Ntheta", 64),
+                         find_value_or<uint32_t>(input, "mesh", "Nr", 16), find_value_or<uint32_t>(input, "mesh", "Nz", 16),
+                         r_in, r_out, angle * std::numbers::pi / 180.0,
+                         double(find_real_or(input, "mesh", "Lz", dim::length, 1.0_r)), r, p);
 }
 
 namespace {
@@ -154,13 +318,13 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
     auto grid_node = [&](uint32_t i, uint32_t j, uint32_t k) { return (uint64_t(i) * (ny + 1) + j) * (nz + 1) + k; };
     const uint32_t n[3] = {nx, ny, nz};
     const rtype L[3] = {Lx, Ly, Lz};
-    auto node_coordinate = [&](int d, uint32_t i) {
+    auto node_coordinate = [&](uint32_t d, uint32_t i) {
         if (stretching[d] > 0.0_r) return stretched_coordinate(i, n[d], L[d], stretching[d]);
-        return i == n[d] ? L[d] : L[d] * i / n[d];
+        return i == n[d] ? L[d] : L[d] * static_cast<rtype>(i) / static_cast<rtype>(n[d]);
     };
-    auto center_coordinate = [&](int d, uint32_t i) {
+    auto center_coordinate = [&](uint32_t d, uint32_t i) {
         return stretching[d] > 0.0_r ? 0.5_r * (node_coordinate(d, i) + node_coordinate(d, i + 1))
-                                     : L[d] * (i + 0.5_r) / n[d];
+                                     : L[d] * (static_cast<rtype>(i) + 0.5_r) / static_cast<rtype>(n[d]);
     };
     auto grid_coords = [&](uint32_t i, uint32_t j, uint32_t k) {
         return std::array<rtype, 3>{node_coordinate(0, i), node_coordinate(1, j), node_coordinate(2, k)};
@@ -174,13 +338,14 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
     };
     auto coords = [&](uint64_t g) {
         if (g < n_grid) {
-            return grid_coords(g / ((uint64_t(ny) + 1) * (nz + 1)), (g / (nz + 1)) % (ny + 1), g % (nz + 1));
+            return grid_coords(static_cast<uint32_t>(g / ((uint64_t(ny) + 1) * (nz + 1))), static_cast<uint32_t>((g / (nz + 1)) % (ny + 1)),
+                               static_cast<uint32_t>(g % (nz + 1)));
         }
         const uint64_t a = g - n_grid;
-        const uint32_t i = std::upper_bound(layout.apexes_before.begin(), layout.apexes_before.end(), a) -
-                           layout.apexes_before.begin() - 1;
+        const uint32_t i = static_cast<uint32_t>(std::upper_bound(layout.apexes_before.begin(), layout.apexes_before.end(), a) -
+                           layout.apexes_before.begin() - 1);
         const uint64_t local = a - layout.apexes_before[i];
-        return apex_coords(i, local / nz, local % nz);
+        return apex_coords(i, static_cast<uint32_t>(local / nz), static_cast<uint32_t>(local % nz));
     };
 
     MeshBlock block;
@@ -200,11 +365,11 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
         block.add_cell(nodes);
         // Boundary faces: cell faces whose nodes all lie on one side of the box
         cell.assign(nodes);
-        for (const auto & local : cell_local_faces(cell.size())) {
-            for (int d = 0; d < 3; d++) {
-                for (int side = 0; side < 2; side++) {
+        for (const auto & local : cell_local_faces(static_cast<uint32_t>(cell.size()))) {
+            for (uint32_t d = 0; d < 3; d++) {
+                for (uint32_t side = 0; side < 2; side++) {
                     bool on = true;
-                    for (uint8_t k : local) on = on && std::abs(coords(cell[k])[d] - side * L[d]) < 1e-12_r * L[d];
+                    for (uint8_t k : local) on = on && std::abs(coords(cell[k])[d] - static_cast<rtype>(side) * L[d]) < 1e-12_r * L[d];
                     if (!on) continue;
                     std::vector<uint64_t> fn;
                     for (uint8_t k : local) fn.push_back(cell[k]);
@@ -214,15 +379,15 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
         }
     };
     if (first_cell >= end_cell) return block;
-    uint32_t i = std::upper_bound(layout.cells_before.begin(), layout.cells_before.end(), first_cell) -
-                 layout.cells_before.begin() - 1;
+    uint32_t i = static_cast<uint32_t>(std::upper_bound(layout.cells_before.begin(), layout.cells_before.end(), first_cell) -
+                 layout.cells_before.begin() - 1);
     uint64_t b = (first_cell - layout.cells_before[i]) / layout.cells_per_block(i);
     for (; i < nx && layout.cells_before[i] < end_cell; i++, b = 0) {
         const uint32_t per_block = layout.cells_per_block(i);
         for (; b < uint64_t(ny) * nz; b++) {
             const uint64_t g0 = layout.cells_before[i] + b * per_block;
             if (g0 >= end_cell) break;
-            const uint32_t j = b / nz, k = b % nz;
+            const uint32_t j = static_cast<uint32_t>(b / nz), k = static_cast<uint32_t>(b % nz);
             const uint64_t v[8] = {grid_node(i, j, k), grid_node(i + 1, j, k), grid_node(i + 1, j + 1, k),
                                    grid_node(i, j + 1, k), grid_node(i, j, k + 1), grid_node(i + 1, j, k + 1),
                                    grid_node(i + 1, j + 1, k + 1), grid_node(i, j + 1, k + 1)};
@@ -234,7 +399,7 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
                     // Kuhn subdivision along the main diagonal v0-v6: conforming
                     // across blocks because every block uses the same diagonal
                     static const uint8_t paths[6][2] = {{1, 2}, {1, 5}, {3, 2}, {3, 7}, {4, 5}, {4, 7}};
-                    for (int m = 0; m < 6; m++) add(g0 + m, {v[0], v[paths[m][0]], v[paths[m][1]], v[6]});
+                    for (uint32_t m = 0; m < 6; m++) add(g0 + m, {v[0], v[paths[m][0]], v[paths[m][1]], v[6]});
                     break;
                 }
                 case MeshType::CARTESIAN_PRISM:
@@ -243,7 +408,7 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
                     break;
                 case MeshType::CARTESIAN_PYRAMID: {
                     const uint64_t apex = apex_node(i, j, k);
-                    int m = 0;
+                    uint32_t m = 0;
                     for (const auto & face : cell_local_faces(8)) {
                         add(g0 + m++, {v[face[0]], v[face[1]], v[face[2]], v[face[3]], apex});
                     }
@@ -262,22 +427,25 @@ bool is_hdf5_mesh(const std::string & filename) {
     return ext == ".h5" || ext == ".hdf5";
 }
 
-MeshBlock read_mesh_block(const toml::value & input) {
-    const std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
-    const auto it = MESH_TYPES.find(type_str);
-    if (it == MESH_TYPES.end()) throw unknown_option(MESH_TYPES, "mesh.type", type_str);
+MeshBlock read_mesh_block(const Input & input) {
+    const std::string type_str = find_value_or<std::string>(input, "mesh", "type", "file");
+    const auto it = find_option(MESH_TYPES, "mesh.type", type_str);
     const MeshType type = it->second;
+    const MeshTransform transform = mesh_transform(input);
     if (type == MeshType::FROM_FILE) {
-        const std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
-        return is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_gmsh_block(filename);
+        const std::string filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_file_block(filename);
+        transform_block(block, transform);
+        return block;
     }
-    const uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
-    const uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-    const rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
-    const rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
+    if (type == MeshType::ANNULUS) return annulus_block(input, comm::rank(), comm::size());
+    const uint32_t Nx = find_value_or<uint32_t>(input, "mesh", "Nx", 100);
+    const uint32_t Ny = find_value_or<uint32_t>(input, "mesh", "Ny", 100);
+    const rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
+    const rtype Ly = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
     if constexpr (N_DIM == 3) {
-        const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
-        const rtype Lz = find_real_or(input, "mesh", "Lz", 1.0);
+        const uint32_t Nz = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
+        const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
         if (type == MeshType::CARTESIAN_TRI || type == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
         }
@@ -301,7 +469,6 @@ using namespace h5;
 
 constexpr bool PARALLEL_HDF5 = h5::PARALLEL;
 constexpr const char * FORMAT = "mallard-mesh";
-constexpr int VERSION = 1;
 
 } // namespace
 
@@ -310,6 +477,7 @@ bool have_hdf5() { return true; }
 bool have_parallel_hdf5() { return PARALLEL_HDF5; }
 
 void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
     const int p = comm::size(), r = comm::rank();
     if (p > 1 && !PARALLEL_HDF5) {
         throw std::runtime_error("Writing an HDF5 mesh from several ranks needs parallel HDF5.");
@@ -322,8 +490,8 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
     uint64_t total[N_COUNTS] = {}, first[N_COUNTS] = {};
     for (int q = 0; q < p; q++) {
         for (int k = 0; k < N_COUNTS; k++) {
-            if (q < r) first[k] += all[q * N_COUNTS + k];
-            total[k] += all[q * N_COUNTS + k];
+            if (q < r) first[k] += all[static_cast<size_t>(q * N_COUNTS + k)];
+            total[k] += all[static_cast<size_t>(q * N_COUNTS + k)];
         }
     }
     if (first[CELLS] != block.first_cell || first[NODES] != block.first_node) {
@@ -343,7 +511,7 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
         write_strings_attribute(root, "format", {FORMAT});
-        write_int_attribute(root, "version", VERSION);
+        write_int_attribute(root, "version", static_cast<int>(file_format::MESH.version));
         write_int_attribute(root, "dimension", N_DIM);
     }
     {
@@ -364,10 +532,31 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
                    block.face_nodes.data(), dxpl);
         write_rows(group, "zone", total[FACES], 1, first[FACES], block.n_faces(), block.face_zone.data(), dxpl);
         write_strings_attribute(group, "zone_names", block.zone_names);
+        // High-order boundary faces (curved walls): all their nodes' coordinates, CSR per face
+        const bool has_high_order = block.face_high_order_offsets.size() == block.n_faces() + 1;
+        const uint64_t n_high = has_high_order ? block.face_high_order_nodes.size() : 0;
+        const std::vector<uint64_t> all_high = comm::allgatherv(std::vector<uint64_t>{uint64_t(has_high_order), n_high});
+        uint64_t any = 0, total_high = 0, first_high = 0;
+        for (size_t q = 0; q < size_t(p); q++) {
+            any |= all_high[2 * q];
+            if (q < size_t(r)) first_high += all_high[2 * q + 1];
+            total_high += all_high[2 * q + 1];
+        }
+        if (any) {
+            Handle high(H5Gcreate2(group, "high_order", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
+            std::vector<uint64_t> offsets(block.n_faces() + (last ? 1 : 0), 0);
+            for (size_t f = 0; f < offsets.size(); f++) {
+                offsets[f] = first_high + (has_high_order ? block.face_high_order_offsets[f] : 0);
+            }
+            write_rows(high, "offsets", total[FACES] + 1, 1, first[FACES], offsets.size(), offsets.data(), dxpl);
+            write_rows(high, "coordinates", total_high, N_DIM, first_high, n_high,
+                       n_high ? block.face_high_order_nodes[0].data() : nullptr, dxpl);
+        }
     }
 }
 
 MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
     const int p = whole ? 1 : comm::size(), r = whole ? 0 : comm::rank();
     Handle fapl(whole ? H5Pcreate(H5P_FILE_ACCESS) : file_access(), H5Pclose, "H5Pcreate");
     Handle dxpl(whole ? H5Pcreate(H5P_DATASET_XFER) : transfer(), H5Pclose, "H5Pcreate");
@@ -380,9 +569,7 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
         if (format.size() != 1 || format[0] != FORMAT) {
             throw std::runtime_error(filename + " is not a Mallard HDF5 mesh file.");
         }
-        if (read_int_attribute(root, "version") != VERSION) {
-            throw std::runtime_error(filename + ": unsupported mesh file version.");
-        }
+        file_format::check_version(file_format::MESH, filename, read_int_attribute(root, "version"));
         const int dim = read_int_attribute(root, "dimension");
         if (dim != N_DIM) {
             throw std::runtime_error(filename + " is a " + std::to_string(dim) +
@@ -390,13 +577,25 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
         }
     }
     MeshBlock block;
-    // A CSR block: rows [first, first + n) of offsets and the values they span
+    const uint64_t n_nodes = [&] {
+        Handle group(H5Gopen2(file, "nodes", H5P_DEFAULT), H5Gclose, "opening nodes");
+        return n_rows(group, "coordinates");
+    }();
+    auto read_offsets = [&](hid_t group, uint64_t first, uint64_t n) {
+        std::vector<uint64_t> offsets = read_rows<uint64_t>(group, "offsets", first, n + 1, 1, dxpl);
+        if (!std::is_sorted(offsets.begin(), offsets.end())) throw std::runtime_error(filename + ": offsets decrease.");
+        return offsets;
+    };
+    // A CSR block of node ids: rows [first, first + n) of offsets and the values they span
     auto read_csr = [&](hid_t group, uint64_t first, uint64_t n, std::vector<uint64_t> & offsets,
                         std::vector<uint64_t> & values) {
-        offsets = read_rows<uint64_t>(group, "offsets", first, n + 1, 1, dxpl);
+        offsets = read_offsets(group, first, n);
         const uint64_t begin = offsets.front();
         values = read_rows<uint64_t>(group, "nodes", begin, offsets.back() - begin, 1, dxpl);
         for (uint64_t & o : offsets) o -= begin;
+        for (uint64_t v : values) {
+            if (v >= n_nodes) throw std::runtime_error(filename + ": node id out of range.");
+        }
     };
     {
         Handle group(H5Gopen2(file, "cells", H5P_DEFAULT), H5Gclose, "opening cells");
@@ -423,6 +622,16 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
         block.zone_names = read_strings_attribute(group, "zone_names");
         for (uint32_t z : block.face_zone) {
             if (z >= block.zone_names.size()) throw std::runtime_error(filename + ": boundary zone out of range.");
+        }
+        if (H5Lexists(group, "high_order", H5P_DEFAULT) > 0) {
+            Handle high(H5Gopen2(group, "high_order", H5P_DEFAULT), H5Gclose, "opening boundary/high_order");
+            block.face_high_order_offsets = read_offsets(high, first, n_local);
+            const uint64_t begin = block.face_high_order_offsets.front();
+            const uint64_t n_high = block.face_high_order_offsets.back() - begin;
+            for (uint64_t & o : block.face_high_order_offsets) o -= begin;
+            const std::vector<double> x = read_rows<double>(high, "coordinates", begin, n_high, N_DIM, dxpl);
+            block.face_high_order_nodes.resize(n_high);
+            for (uint64_t k = 0; k < n_high; k++) FOR_I_DIM block.face_high_order_nodes[k][i] = x[k * N_DIM + i];
         }
     }
     return block;

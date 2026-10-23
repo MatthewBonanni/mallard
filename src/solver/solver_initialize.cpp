@@ -17,11 +17,9 @@
 #include <array>
 #include <atomic>
 #include <exception>
-#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -32,36 +30,39 @@
 #include <exprtk.hpp>
 
 #include "quadrature.h"
+#include "remap.h"
 
 enum class InitType {
     CONSTANT,
     ANALYTICAL,
-    RESTART
+    RESTART,
+    REMAP
 };
 
 static const std::unordered_map<std::string, InitType> INIT_TYPES = {
     {"constant", InitType::CONSTANT},
     {"analytical", InitType::ANALYTICAL},
-    {"restart", InitType::RESTART}
+    {"restart", InitType::RESTART},
+    {"remap", InitType::REMAP}
 };
 
 void Solver::init_solution() {
-    const std::string type_str = toml::find_or<std::string>(input, "initialize", "type", "constant");
-    auto it = INIT_TYPES.find(type_str);
-    if (it == INIT_TYPES.end()) {
-        throw unknown_option(INIT_TYPES, "initialize.type", type_str);
-    }
+    const std::string type_str = find_value_or<std::string>(input, "initialize", "type", "constant");
+    auto it = find_option(INIT_TYPES, "initialize.type", type_str);
     initial_state = type_str;
     if (it->second == InitType::CONSTANT) {
         init_solution_constant();
     } else if (it->second == InitType::ANALYTICAL) {
         init_solution_analytical();
-    } else {
+    } else if (it->second == InitType::RESTART) {
         init_solution_restart();
+    } else {
+        init_solution_remap();
     }
     copy_host_to_device();
-    if (it->second != InitType::RESTART) statistics.start(t);
-    if (is_mixture() && it->second != InitType::RESTART) init_temperature_seed();
+    const bool from_file = it->second == InitType::RESTART || it->second == InitType::REMAP;
+    if (!from_file) statistics.start(t);
+    if (is_mixture() && !from_file) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();
 }
@@ -70,7 +71,7 @@ void Solver::init_solution_restart() {
     if (!input.at("initialize").contains("file")) {
         throw std::runtime_error("Missing file for initialization: restart.");
     }
-    const std::string file = toml::find<std::string>(input, "initialize", "file");
+    const std::string file = find_value<std::string>(input, "initialize", "file");
     // Restart files hold cells in global order, so any number of ranks can read
     // them; each rank reads only its local cells
     const bool distributed = mesh->n_global_cells > 0;
@@ -79,6 +80,20 @@ void Solver::init_solution_restart() {
     if (restart.n_cells != n_expected) {
         throw std::runtime_error("Restart file " + file + " does not match the mesh.");
     }
+    apply_restart(restart, file, true);
+    initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
+}
+
+void Solver::init_solution_remap() {
+    remap::Report report;
+    const RestartData restart = remap::remap_restart(input, *mesh, mesh->axisymmetric, report);
+    const std::string file = find_value<std::string>(input, "initialize", "file");
+    apply_restart(restart, file, false);
+    initial_state = "remap of " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
+                    "): " + remap::describe(report, restart.names);
+}
+
+void Solver::apply_restart(const RestartData & restart, const std::string & file, bool resume_output) {
     // Variables map by name: the flow block, then one RHOY_<name> per species
     // CHEM_H (last chemistry sub-step) only seeds the integrator: a reacting run
     // may start from a non-reacting one, and a non-reacting run ignores it
@@ -89,7 +104,8 @@ void Solver::init_solution_restart() {
     };
     for (const auto & name : restart.names) {
         // Averages carry over only into a run that keeps them
-        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0) continue;
+        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0 ||
+            name.rfind("PHASE_", 0) == 0) continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
@@ -113,7 +129,7 @@ void Solver::init_solution_restart() {
         if (values == nullptr) {
             throw std::runtime_error("Restart file " + file + " has no variable " + expected[v] + ".");
         }
-        const uint32_t n_species = species_names.size();
+        const uint32_t n_species = static_cast<uint32_t>(species_names.size());
         for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
             if (v < N_CONSERVATIVE) {
                 h_conservatives(i_cell, v) = (*values)[i_cell];
@@ -125,28 +141,31 @@ void Solver::init_solution_restart() {
         }
     }
     step = restart.step;
-    t = restart.t;
+    t = static_cast<rtype>(restart.t);
     statistics.restore(restart, file, t);
+    if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
+    if (!resume_output) return;
     for (auto & writer : data_writers) {
         writer->resume(step, t);
     }
-    initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
+    if (checkpoint_writer) checkpoint_writer->resume(step, t);
+    probes.resume(step, t);
 }
 
 void Solver::init_solution_constant() {
-    const toml::value & init = input.at("initialize");
+    const Input & init = input.at("initialize");
     for (const char * key : {"u", "p", "T"}) {
         if (!init.contains(key)) {
             throw std::runtime_error(std::string("Missing ") + key + " for initialization: constant.");
         }
     }
-    std::vector<rtype> u = find_real_vector(input, "initialize", "u");
+    std::vector<rtype> u = find_real_vector(input, "initialize", "u", dim::velocity);
     if (u.size() != N_DIM) {
         throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: constant.");
     }
-    const rtype p = find_real(input, "initialize", "p");
-    const rtype T = find_real(input, "initialize", "T");
+    const rtype p = find_real(input, "initialize", "p", dim::pressure);
+    const rtype T = find_real(input, "initialize", "T", dim::temperature);
     if (is_mixture()) {
         const std::vector<double> Y = mixture_model->mass_fractions(init, "initialize");
         rtype cons[N_CONSERVATIVE];
@@ -198,7 +217,7 @@ struct PointState {
             expr.register_symbol_table(table);
             if (!parser.compile(expr_str, expr)) {
                 throw std::runtime_error("Failed to parse initialization expression for " + name + ": " +
-                                         parser.error());
+                                         parser.error() + expression_unit_hint(expr_str));
             }
         };
         for (size_t i = 0; i < u.size(); i++) compile("u[" + std::to_string(i) + "]", text.u[i], u[i]);
@@ -231,7 +250,7 @@ struct PointState {
 template <typename F>
 void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double weight_sum, uint32_t n_sub,
                      uint32_t i_cell, PointState & s, const F & f) {
-    const uint32_t n_quad = quad.h_weights.extent(0);
+    const uint32_t n_quad = static_cast<uint32_t>(quad.h_weights.extent(0));
     const uint32_t n_nodes = mesh.h_n_nodes_of_cell(i_cell);
     std::fill(s.sum.begin(), s.sum.end(), 0.0);
     double area_sum = 0.0, revolved_sum = 0.0;
@@ -304,7 +323,7 @@ struct TetrahedronRule {
         std::vector<std::array<double, 4>> bary;
         std::vector<double> w;
         for (int i = 0; i < 2; i++) {
-            for (int k = 0; k < 4; k++) {
+            for (size_t k = 0; k < 4; k++) {
                 std::array<double, 4> l;
                 l.fill(a[i]);
                 l[k] = 1.0 - 3.0 * a[i];
@@ -312,8 +331,8 @@ struct TetrahedronRule {
                 w.push_back(wa[i]);
             }
         }
-        for (int j = 0; j < 4; j++) {
-            for (int k = j + 1; k < 4; k++) {
+        for (size_t j = 0; j < 4; j++) {
+            for (size_t k = j + 1; k < 4; k++) {
                 std::array<double, 4> l;
                 l.fill(0.5 - b);
                 l[j] = l[k] = b;
@@ -326,8 +345,8 @@ struct TetrahedronRule {
             const Lattice * v[4] = {&p0, &p1, &p2, &p3};
             for (size_t q = 0; q < w.size(); q++) {
                 std::array<double, 3> x = {0.0, 0.0, 0.0};
-                for (int k = 0; k < 4; k++) {
-                    for (int d = 0; d < 3; d++) x[d] += bary[q][k] * (*v[k])[d];
+                for (size_t k = 0; k < 4; k++) {
+                    for (size_t d = 0; d < 3; d++) x[d] += bary[q][k] * (*v[k])[d];
                 }
                 for (double & xd : x) xd /= n_sub;
                 points.push_back(x);
@@ -361,8 +380,8 @@ void cell_average_3d(const Mesh & mesh, const TetrahedronRule & rule, uint32_t i
     double vol_sum = 0.0;
     for (const auto & tet : s.tets) {
         double e[3][3];
-        for (int k = 0; k < 3; k++) {
-            for (int d = 0; d < 3; d++) e[k][d] = tet[k + 1][d] - tet[0][d];
+        for (size_t k = 0; k < 3; k++) {
+            for (size_t d = 0; d < 3; d++) e[k][d] = tet[k + 1][d] - tet[0][d];
         }
         const double six_vol = std::abs(e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
                                         e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
@@ -370,12 +389,30 @@ void cell_average_3d(const Mesh & mesh, const TetrahedronRule & rule, uint32_t i
         for (size_t q = 0; q < rule.weights.size(); q++) {
             const std::array<double, 3> & r = rule.points[q];
             double p[3];
-            for (int d = 0; d < 3; d++) p[d] = tet[0][d] + r[0] * e[0][d] + r[1] * e[1][d] + r[2] * e[2][d];
+            for (size_t d = 0; d < 3; d++) p[d] = tet[0][d] + r[0] * e[0][d] + r[1] * e[1][d] + r[2] * e[2][d];
             f(s, p[0], p[1], p[2]);
             const double weight = rule.weights[q] * six_vol;
             for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += weight * double(s.cons[i]);
             vol_sum += weight;
         }
+    }
+    for (double & v : s.sum) v /= vol_sum;
+}
+
+/**
+ * @brief Average of f over a curved cell, with its cone rule (curved::Geometry::cell_rule).
+ */
+template <typename F>
+void cell_average_curved(const curved::Geometry & geometry, uint32_t i_cell, PointState & s, const F & f) {
+    std::vector<curved::Vec3> x;
+    std::vector<double> w;
+    geometry.cell_rule(i_cell, N_DIM == 2 ? 10 : 8, x, w);
+    std::fill(s.sum.begin(), s.sum.end(), 0.0);
+    double vol_sum = 0.0;
+    for (size_t q = 0; q < w.size(); q++) {
+        f(s, x[q][0], x[q][1], x[q][2]);
+        for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += w[q] * double(s.cons[i]);
+        vol_sum += w[q];
     }
     for (double & v : s.sum) v /= vol_sum;
 }
@@ -389,13 +426,14 @@ void cell_average_3d(const Mesh & mesh, const TetrahedronRule & rule, uint32_t i
  * Dunavant rule; in 3D, the tetrahedra of Mesh::h_cell_tetrahedra, each
  * subdivided into n_sub^3 sub-tetrahedra with a 14-point degree-5 rule. This resolves
  * discontinuous initial data that do not align with the mesh and is
- * high-order accurate for smooth data. Cells are averaged in parallel on the
+ * high-order accurate for smooth data. Curved cells use their own rule
+ * (curved::Geometry::cell_rule). Cells are averaged in parallel on the
  * host, each thread with its own compiled expressions; every cell's sum runs
  * in the same order as on one thread, so the result does not depend on the
  * thread count.
  */
 void Solver::init_solution_analytical() {
-    const toml::value & init = input.at("initialize");
+    const Input & init = input.at("initialize");
     if (!init.contains("u") || init.at("u").as_array().size() != N_DIM) {
         throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: analytical.");
     }
@@ -405,13 +443,13 @@ void Solver::init_solution_analytical() {
     if (rho_in + p_in + T_in != 2) {
         throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
     }
-    const uint32_t n_sub = toml::find_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
+    const uint32_t n_sub = find_value_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
 
     InitialStateText text;
-    text.u = toml::find<std::vector<std::string>>(input, "initialize", "u");
-    if (rho_in) text.rho = toml::find<std::string>(input, "initialize", "rho");
-    if (p_in) text.p = toml::find<std::string>(input, "initialize", "p");
-    if (T_in) text.T = toml::find<std::string>(input, "initialize", "T");
+    for (const auto & u : init.at("u").as_array()) text.u.push_back(quantity_or_expression(u, "initialize.u", dim::velocity));
+    if (rho_in) text.rho = quantity_or_expression(init.at("rho"), "initialize.rho", dim::density);
+    if (p_in) text.p = quantity_or_expression(init.at("p"), "initialize.p", dim::pressure);
+    if (T_in) text.T = quantity_or_expression(init.at("T"), "initialize.T", dim::temperature);
 
     // Mixtures: one expression per listed species of X or Y, and optionally a
     // balance species taking the rest; otherwise the listed values are normalized
@@ -429,21 +467,15 @@ void Solver::init_solution_analytical() {
             const int32_t k = mixture_model->mechanism().species_index(name);
             if (k < 0) throw InputError("initialize." + key + ": no species " + name + " in the mechanism.");
             listed.push_back(k);
-            std::ostringstream expr;
-            if (value.is_string()) {
-                expr << value.as_string();
-            } else {
-                expr << std::setprecision(17) << static_cast<double>(as_real(value, name));
-            }
-            text.fractions.emplace_back(key + "." + name, expr.str());
+            text.fractions.emplace_back(key + "." + name, quantity_or_expression(value, name, dim::none));
         }
         if (init.contains("balance")) {
-            const std::string name = toml::find<std::string>(init, "balance");
+            const std::string name = find_value<std::string>(init, "balance");
             balance = mixture_model->mechanism().species_index(name);
             if (balance < 0) throw InputError("initialize.balance: no species " + name + " in the mechanism.");
         }
     }
-    const uint32_t n_species = species_names.size();
+    const uint32_t n_species = static_cast<uint32_t>(species_names.size());
     const uint32_t n_vars = N_CONSERVATIVE + n_species;
 
     // Sets s.cons to the conservatives at (px, py, pz)
@@ -457,12 +489,12 @@ void Solver::init_solution_analytical() {
             std::fill(fractions.begin(), fractions.end(), 0.0);
             double sum = 0.0;
             for (size_t i = 0; i < listed.size(); i++) {
-                fractions[listed[i]] = std::max(s.fractions[i].value(), 0.0);
-                if (listed[i] != balance) sum += fractions[listed[i]];
+                fractions[static_cast<size_t>(listed[i])] = std::max(s.fractions[i].value(), 0.0);
+                if (listed[i] != balance) sum += fractions[static_cast<size_t>(listed[i])];
             }
             if (balance >= 0) {
-                fractions[balance] = std::max(1.0 - sum, 0.0);
-                sum += fractions[balance];
+                fractions[static_cast<size_t>(balance)] = std::max(1.0 - sum, 0.0);
+                sum += fractions[static_cast<size_t>(balance)];
             }
             if (!(sum > 0.0)) throw InputError("initialize: the composition is zero at a point.");
             for (double & f : fractions) f /= sum;
@@ -478,9 +510,9 @@ void Solver::init_solution_analytical() {
             mixture_model->conservatives(p_m, T_m, u, Y, cons, cons + N_CONSERVATIVE);
             return;
         }
-        rtype rho = rho_in ? s.rho.value() : 0.0;
-        rtype p = p_in ? s.p.value() : 0.0;
-        const rtype T = T_in ? s.T.value() : 0.0;
+        rtype rho = static_cast<rtype>(rho_in ? s.rho.value() : 0.0);
+        rtype p = static_cast<rtype>(p_in ? s.p.value() : 0.0);
+        const rtype T = static_cast<rtype>(T_in ? s.T.value() : 0.0);
         if (!rho_in) rho = physics.get_density_from_pressure_temperature(p, T);
         if (!p_in) p = physics.get_pressure_from_density_temperature(rho, T);
         rtype W[N_CONSERVATIVE];
@@ -508,14 +540,16 @@ void Solver::init_solution_analytical() {
                          [&](const uint32_t i_cell) {
         if (failed.load(std::memory_order_relaxed)) return;
         const int32_t id = token.acquire();
-        PointState & s = *states[id];
+        PointState & s = *states[static_cast<size_t>(id)];
         try {
-            if constexpr (N_DIM == 3) {
+            if (mesh->curved_geometry && mesh->curved_geometry->cell_is_curved(i_cell)) {
+                cell_average_curved(*mesh->curved_geometry, i_cell, s, point_conservatives);
+            } else if constexpr (N_DIM == 3) {
                 cell_average_3d(*mesh, tet_rule, i_cell, s, point_conservatives);
             } else {
                 cell_average_2d(*mesh, quad, weight_sum, n_sub, i_cell, s, point_conservatives);
             }
-            FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = s.sum[i];
+            FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = static_cast<rtype>(s.sum[i]);
             for (uint32_t k = 0; k < n_species; k++) {
                 h_species(i_cell, k) = static_cast<rtype>(s.sum[N_CONSERVATIVE + k]);
             }

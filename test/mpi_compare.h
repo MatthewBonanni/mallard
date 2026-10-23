@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -28,11 +29,13 @@
  * @brief Run the input distributed and serially; every rank compares the
  *        gathered distributed solution with its serial one.
  */
-inline void expect_matches_serial(const std::string & input) {
+inline void expect_matches_serial(const std::string & input,
+                                  const std::function<void(const Solver &)> & check_distributed = {}) {
     Solver distributed;
     distributed.init(parse_toml(input));
     distributed.run();
     distributed.copy_device_to_host();
+    if (check_distributed) check_distributed(distributed);
 
     Solver serial;
     serial.set_distributed(false);
@@ -43,7 +46,7 @@ inline void expect_matches_serial(const std::string & input) {
     const uint32_t n_global = serial.get_mesh()->n_cells;
     const auto & dist = distributed.get_distribution();
     // Conservatives, then species partial densities
-    const uint32_t n_species = serial.get_species_names().size();
+    const uint32_t n_species = static_cast<uint32_t>(serial.get_species_names().size());
     const uint32_t n_vars = N_CONSERVATIVE + n_species;
     auto value = [&](const Solver & s, uint32_t c, uint32_t i) {
         return static_cast<double>(i < N_CONSERVATIVE ? s.h_conservatives(c, i) : s.h_species(c, i - N_CONSERVATIVE));

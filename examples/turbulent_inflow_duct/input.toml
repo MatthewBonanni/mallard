@@ -18,7 +18,7 @@
 #   zero_net_flux = false    p'_rms / (rho u'^2) = 7.8 everywhere (a plane acoustic wave)
 #
 # Run:
-#   mpirun -n 1 ../../build3d/src/Mallard -i input.toml
+#   mpirun -n 1 ../../build3d/src/mallard -i input.toml
 #   python ../../tools/plane_average.py stats/duct_000003.vtu --average y z --out profile.csv
 #
 # Cost: 65,000 steps, 85 ms each on one A100 (1.5 hours).

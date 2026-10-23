@@ -20,7 +20,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "expression.h"
@@ -43,10 +43,10 @@ using Point = std::array<double, N_DIM>;
  */
 class InletProfile {
     public:
-        InletProfile(const toml::value & boundary, const std::string & where);
+        InletProfile(const Input & boundary, const std::string & where);
 
         /** @brief Whether the boundary has a [boundaries.turbulence] table. */
-        static bool turbulent(const toml::value & boundary) { return boundary.contains("turbulence"); }
+        static bool turbulent(const Input & boundary) { return boundary.contains("turbulence"); }
 
         /** @brief Whether the mean velocity is the same everywhere. */
         bool uniform() const { return uniform_; }
@@ -71,7 +71,7 @@ class InletProfile {
         std::vector<double> coordinate;
         std::vector<std::vector<double>> columns;
 
-        void read_table(const toml::value & turbulence, const std::string & where);
+        void read_table(const Input & turbulence, const std::string & where);
         double table(size_t column, double s) const;
 };
 
@@ -104,7 +104,7 @@ class SyntheticInflow {
          * @param faces The inlet's faces on this rank.
          * @param char_index Index of each face into BoundaryData::char_*.
          */
-        SyntheticInflow(const toml::value & boundary, const std::string & where, uint64_t stream, const Mesh & mesh,
+        SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream, const Mesh & mesh,
                         const std::vector<uint32_t> & faces, const std::vector<int32_t> & char_index);
 
         /** @brief Write the target velocity (mean plus fluctuation) of the inlet's faces at time t into target(k). */
@@ -132,8 +132,8 @@ class SyntheticInflow {
         std::string summary_;
         uint64_t seed = 1;
         uint64_t stream = 0;
-        int normal_axis = 0;
-        int axes[N_T] = {};  // global axes of the transverse directions
+        uint32_t normal_axis = 0;
+        uint32_t axes[N_T] = {};  // global axes of the transverse directions
         // Auxiliary grid: points, spacing, origin and periodicity per transverse direction
         int32_t n_grid[N_T] = {};
         double spacing[N_T] = {};

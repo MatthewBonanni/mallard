@@ -5,20 +5,32 @@ fields per snapshot, every array in global cell order, with the XDMF indexes
 PREFIX_NNNNNN.xmf and PREFIX.xmf (the time series) for ParaView.
 """
 import functools
+import json
 import os
 import re
 
 import h5py
 import numpy as np
 
+# Newest format version (the root attribute "version") this reader knows
+H5_FORMAT_VERSION = 1
+
 # XDMF Mixed topology codes -> (VTK cell type, node count)
 XDMF_CELLS = {4: (5, 3), 5: (9, 4), 6: (10, 4), 7: (14, 5), 8: (13, 6), 9: (12, 8)}
+
+
+def _check_version(path, f):
+    version = int(f.attrs.get("version", 1))
+    if version > H5_FORMAT_VERSION:
+        raise ValueError(f"{path} is a Mallard HDF5 output file of format version {version}, written by a newer "
+                         f"Mallard; this script reads versions up to {H5_FORMAT_VERSION}: update tools/")
 
 
 @functools.lru_cache(maxsize=4)
 def _read_mesh(path, mtime):
     del mtime  # part of the cache key only
     with h5py.File(path, "r") as f:
+        _check_version(path, f)
         x = f["nodes/coordinates"][...].astype(float)
         topology = f["cells/topology"][...]
         starts = f["cells/offsets"][...]
@@ -51,6 +63,7 @@ def read_fields(path, names=None):
     """Cell fields (vectors as (n_cells, 3)) of a snapshot, plus "TIME"."""
     out = {}
     with h5py.File(path, "r") as f:
+        _check_version(path, f)
         group = f["fields"]
         for name in (group.keys() if names is None else names):
             out[name] = np.asarray(group[name][...], dtype=float)
@@ -73,3 +86,13 @@ def read_series(path):
     entries = re.findall(r'<Grid Name="([^"]+)" GridType="Uniform">\s*<Time Value="([^"]+)"/>', text)
     base = os.path.dirname(path)
     return [(float(t), os.path.join(base, name + ".h5")) for name, t in entries]
+
+
+def provenance(path):
+    """The provenance block of an HDF5 file (the root group's attribute), as a dict; None if it has none."""
+    with h5py.File(path, "r") as f:
+        value = f["/"].attrs.get("provenance")
+    if value is None:
+        return None
+    value = value[0]
+    return json.loads(value.decode() if isinstance(value, bytes) else value)

@@ -16,7 +16,7 @@
 #include <unordered_map>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "log.h"
@@ -39,14 +39,22 @@ static const std::unordered_map<std::string, SGSModel> SGS_MODELS = {
  */
 struct LES {
     SGSModel model = SGSModel::SIGMA;
-    rtype C = 1.35;
-    rtype Pr_t = 0.9;
-    rtype Sc_t = 0.9;
+    rtype C = 1.35_r;
+    rtype Pr_t = 0.9_r;
+    rtype Sc_t = 0.9_r;
+    bool scotti = false;
+    bool dynamic = false;  // C from the Germano identity over the whole domain, once per step (see Solver)  // the eddy viscosity's width V^(1/3) f(a_1, a_2) (Scotti, Meneveau & Lilly 1993)
 
     /** @brief The [les] table of an input (see in_input). */
-    static LES from_input(const toml::value & input);
+    static LES from_input(const Input & input);
 
-    static bool in_input(const toml::value & input) { return input.contains("les"); }
+    static bool in_input(const Input & input) { return input.contains("les"); }
+
+    /**
+     * @brief Scotti, Meneveau & Lilly's (1993) factor cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))
+     *        for a cell of extents h_1 <= h_2 <= h_3, a_1 = h_1 / h_3, a_2 = h_2 / h_3.
+     */
+    static double scotti_factor(double h1, double h2, double h3);
 
     /** @brief Model constant by default: Lilly's C_s, Nicoud & Ducros's C_w, Vreman's c, Nicoud et al.'s C_sigma. */
     static rtype default_constant(SGSModel model);

@@ -1,7 +1,7 @@
 # Design: finite-rate chemistry
 
 Status: accepted (see [Decisions on the open questions](#decisions-on-the-open-questions)).
-Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10.
+Implementation follows the [milestones](#10-milestones); done: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11.
 
 Mallard today solves a single calorically perfect gas. This document adds
 multicomponent, thermally perfect mixtures and finite-rate chemistry with
@@ -30,10 +30,13 @@ existing C++20 / Kokkos / CMake / TOML stack.
 ## Non-goals
 
 - Real-fluid equations of state (cubic EOS, transcritical injection),
-  multiphase and spray, soot, radiation, plasma and ionized species, surface
+  multiphase and spray, soot, radiation beyond the optically thin limit, plasma
+  and ionized species, surface
   chemistry and catalytic walls.
-- Full multicomponent (Stefan-Maxwell) transport, Soret and Dufour effects,
-  bulk viscosity. The transport interface leaves room for them.
+- Full multicomponent (Stefan-Maxwell) transport, the Dufour effect and bulk
+  viscosity. The transport interface leaves room for them; thermal diffusion
+  (the Soret effect) was added later (#158, [below](#thermal-diffusion-soret-effect)),
+  with an assessment of multicomponent transport.
 - Turbulence-chemistry interaction models (LES closures such as thickened
   flame, flamelet tables, PaSR). Mallard resolves the flame or detonation.
 - Implicit time stepping of the flow. The flow stays explicit (SSPRK3); only
@@ -307,7 +310,7 @@ stored but recomputed from the stencil weights twice per stage, once for
 `theta` and the face values of `gamma` and `e0` before the flux, once for the
 species slots after it. The local-range bound of troubled cells clips smooth
 extrema where the indicator flags a smooth but coarsely resolved field: a
-smooth composition wave on 16^3 hexahedra flags every cell at TENO5 and
+smooth composition wave on $16^3$ hexahedra flags every cell at TENO5 and
 converges at about third order there, at fifth order once resolved (2D).
 At sharp contacts between gases of different `gamma` the conservative
 scheme's pressure error stays at 2-3% under refinement with TENO5 (the contact
@@ -424,6 +427,160 @@ U^n --chem(dt/2)--> U* --SSPRK3 flow step(dt)--> U** --chem(dt/2)--> U^{n+1}
   difference to be below the pass tolerance; if it is not, the forcing option
   above is the remedy.
 
+### SIMPLER balanced splitting (option)
+
+`[chemistry] coupling = "simpler"` (#233): the SIMPLER scheme of
+[Wu, Ma & Ihme 2019](https://doi.org/10.1016/j.cpc.2019.04.016) (eqs. 3.18,
+arXiv:1712.00953), with `T` the flow's right-hand side (fluxes, sources,
+sponges) and `R` the chemistry:
+
+```text
+c   = -T(U^n)
+U*  = U(t_n + dt)  of  dU/dt = R(U) - c,  U(t_n) = U^n           (reaction substep, over dt)
+U^{n+1} = U(t_n + dt)  of  dU/dt = T(U) + c,  U(t_n + dt/2) = U*   (transport substep, over dt/2)
+```
+
+- **Second order.** For `U' = (A + B) U` the reaction substep gives
+  `U^n + dt (A + B) U^n + dt^2/2 (A^2 + AB) U^n + O(dt^3)`, and the
+  transport substep of length `tau` adds `tau B dt (A + B) U^n`; matching
+  the exact `dt^2/2 (A + B)^2` needs `tau = dt / 2`, as in the paper (a
+  transport substep over the whole step is first order).
+  `ReactingTest.SimplerSplittingIsSecondOrderInTime` measures error ratios
+  of 3.7 and 4.0 per halving of `dt` on an igniting, advected hot spot.
+- **Steady states are kept.** If `R(U^n) + T(U^n) = 0`, the reaction
+  substep starts at rest and stays there, and the transport substep's
+  right-hand side `T(U) - T(U^n)` vanishes: a steady state of the ODE is a
+  fixed point at every `dt`. Strang splitting's fixed point moves with `dt`.
+  `ReactingTest.SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves`
+  marches a burning stirred reactor (a periodic box with a sponge toward
+  fresh H2/air at 2000 1/s) to steady state with SIMPLER (residual of the
+  ODE 1.6e-12 of the chemical rates), then takes 40 steps of a quarter of
+  the step: SIMPLER moves the state by 2e-16, Strang splitting by 2.3e-3.
+  At `dt = 5e-4 s` the Strang reactor settles 38 K hotter (2908.6 K against
+  2870.3 K) and costs 160 sub-steps per cell and step instead of 1.
+- **The flow's time integrator changes.** Every cell receives `dt T(U^n)`
+  in the reaction substep (cells without chemistry take it as a forward
+  Euler step), so without chemistry a step is `U^n + dt T(U^n)` followed by
+  the configured integrator over `dt/2` on `T(U) - T(U^n)`. With SSPRK3 the
+  stability polynomial becomes `1 + z + z^2/2 + z^3/8 + z^4/48` instead of
+  `1 + z + z^2/2 + z^3/6`: second order, a larger limit for upwind operators
+  (first-order upwind `cfl` 1.60 against 1.26 in the 1D Courant number;
+  Fromm's second-order upwind 0.80 against 0.63) but none on the imaginary
+  axis (`|P(iy)|^2 = 1 + y^4/24 + O(y^6)`). The upwind dissipation of the
+  Riemann solvers keeps TENO5 stable in practice (a smooth acoustic and
+  entropy wave on a periodic strip at `cfl` 0.5 and 1.0).
+  `|P(iy)|^2 = 1 + y^4/24 - y^6/192 + y^8/2304 > 1` for every `y != 0`, so
+  a non-dissipative operator is unstable at any `dt`, and
+  `convective_flux = "hybrid"` (central KEEP flux away from shocks) is
+  rejected as an input error: use Strang splitting or the Riemann flux.
+  On a 2D Taylor-Green vortex (air, $48^2$, periodic, `u0` = 50 m/s, 30 m/s
+  vortex, Euler, SSPRK3), the integral of `(div u)^2` stays at 0.01-0.03
+  after 3000 steps for Strang + hybrid and SIMPLER + `riemann`, but
+  SIMPLER + hybrid grows exponentially until the shock sensor caps it in
+  grid-scale acoustic noise: with MUSCL at `cfl` 1.0, 10x per 50 steps to
+  1.4e4 (pressure 6% off); 740 with `upwind_floor` 0.05; 150 at `cfl` 0.5
+  (after 7000 steps); with TENO5 at `cfl` 1.0, 10x per 300 steps, 800 and
+  still growing at step 3000.
+- **Cost.** One more evaluation of `T` per step (four with SSPRK3) and one
+  chemistry call per step instead of two half steps (no fused half steps
+  needed, and none to restart).
+
+As implemented: `Solver::take_simpler_step` evaluates `T(U^n)` into one
+extra state (`transport_rate`), then `CellChemistry::advance` with a
+`ChemistryForcing` (the rates and a scratch state), then the configured
+time integrator from `t + dt/2` over `dt/2` with `T(U^n)` subtracted from
+each right-hand side. In the reaction substep every owned cell moves to
+`U^n + dt T(U^n)` in `rho`, `rho u`, `rho E`, and in `rho Y_k` unless it
+reacts; a cell reacts if its chemistry is active (as for Strang splitting)
+at `U^n` or at that end state. A reacting cell is the constant-volume
+reactor with constant sources (`ConstantVolumeReactor::forcing`): with
+`y_k = rho Y_k / rho^n`, `dy_k/dt = W_k omega_k / rho^n + g_k` with
+`g_k = T_k(U^n) / rho^n`, and the internal energy per volume linear in time
+between `U^n` and the end state (`g_e`), which gives
+`dT/dt = (g_e - sum_k e_k g_k - sum_k u_k omega_k / rho^n) / sum_k y_k cv_k`.
+The system stays autonomous; the species rows of the Jacobian are
+unchanged and the `T` row gains `-sum_k cv_k g_k / cv` and the forcing in
+`dT/dt` (checked against finite differences). The end mass fractions are
+clipped and renormalized as before, at the end density `rho^n (1 + dt
+sum_k g_k)`. A forcing that removes a species can make the exact solution
+negative by up to `dt max(0, -g_k)` (the source does not vanish with the
+species, chemistry may not restore it), so sub-steps are rejected only
+below `-atol - dt max(0, -g_k)`. With TFLES's or PaSR's rate multiplier `s` the
+reactor runs over `s dt` with `g / s`, which is the same ODE. Simplified
+SDC ([Zingale et al. 2022](https://arxiv.org/abs/2206.01285)) needs the same
+call with another constant forcing (the advective tendency of the last
+iterate) per iteration. Not combined with `double_flux` (its thermodynamics
+are frozen for the step, which the reaction substep would leave stale),
+`fuse_half_steps` or the hybrid convective flux (rejected as input errors). Strang runs compile to the
+same arithmetic and are bitwise unchanged (restart files of sod, shu_osher,
+double_mach, riemann_2d, wedge, sedov_axisymmetric, viscous_shock_tube,
+poiseuille_pipe, reactive_shock_tube and flame_outflow identical to main's
+after 40 steps); SIMPLER runs are bitwise independent of the rank count
+and across restarts (`MPITest.GasMixtureMatchesSerial`,
+`ThickenedFlameMatchesSerial`, `MixtureTest.RestartedRunMatchesUninterruptedRunExactly`).
+
+Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):
+
+- **V7 detonation** (`examples/detonation_1d`, 10 and 20 cells per ZND
+  induction length). Induction length against the ZND value, first with
+  `tools/plot_detonation.py` (cell-quantized, as quoted above), then with
+  sub-cell shock and heat-release positions (shock at half its pressure
+  rise, which puts the whole table half a cell to a cell short) and the standard
+  deviation over the outputs of the second half:
+
+  | `cfl` | 0.35 | 0.5 | 0.7 | 1.0 | 1.2 | 1.4 |
+  |---|---|---|---|---|---|---|
+  | Strang, 10 cells | -4.5% | -5.5% | -8.2% | -25.5% | -36.4% | |
+  | SIMPLER, 10 cells | -7.3% | -7.3% | 0.0% | -0.9% | -5.5% | -8.2% |
+  | Strang, 10 cells, sub-cell | -12.0 +- 0.3% | -12.6 +- 0.3% | -14.2 +- 0.2% | -30.9 +- 0.6% | -42.1 +- 0.5% | |
+  | SIMPLER, 10 cells, sub-cell | -10.8 +- 0.5% | -9.8 +- 0.2% | -5.5 +- 0.1% | -6.7 +- 5.5% | -9.4 +- 7.1% | -13.7 +- 9.6% |
+  | Strang, 20 cells | -1.4% | | | -11.4% | | |
+  | SIMPLER, 20 cells | -0.9% | | +2.3% | +3.2% | | |
+  | Strang, 20 cells, sub-cell | -4.0 +- 2.6% | | | -14.6 +- 1.6% | | |
+  | SIMPLER, 20 cells, sub-cell | -3.4 +- 2.2% | | -1.8 +- 3.6% | -0.5 +- 4.5% | | |
+
+  The front speed is within 0.16% of `D_CJ` in every run. SIMPLER removes
+  the shortening of the induction zone with `dt`: at `cfl` = 1.0 its mean is
+  -0.9% (10 cells) and +3.2% (20 cells) off the ZND value, against -25.5%
+  and -11.4% for Strang splitting, so the 5% criterion on the mean holds up
+  to `cfl` 1.0 instead of 0.35. What it does not remove: from `cfl` = 1.0
+  the induction length oscillates from output to output (a sawtooth of
+  period about 70 us at 10 cells, standard deviation 5.5% of `L_ZND`,
+  against 0.3% for Strang splitting at 0.35); at 20 cells both schemes
+  pulsate (2-3%) and SIMPLER's amplitude grows with `cfl` (4.5% at 1.0).
+  Cost (one 8-thread CPU, 3934 cells): Strang 19.9 ms per step (chemistry
+  71%), SIMPLER 15.6 ms (52%: half the chemistry calls, one more right-hand
+  side), so SIMPLER at `cfl` 1.0 takes 60 s where Strang at 0.35 takes 222 s
+  (3.7x).
+- **V8 premixed flames** (H2/air, mixture-averaged, $\phi$ 0.6, 1.0, 1.4, 20
+  cells per thermal thickness, two flame times): consumption speeds against
+  Cantera at `cfl` 0.2 / 1.0 / 2.0, Strang +0.60 / +0.53 / +0.50%, +0.24 /
+  +0.24 / +0.24%, -0.20 / -0.20 / -0.21%; SIMPLER +0.53 / +0.48 / +0.46%,
+  +0.24 / +0.24 / +0.23%, -0.20% at all three. Neither splitting error is
+  measurable on these steady flames (at most 0.1%, within the runs' spread),
+  so SIMPLER brings no accuracy here; a step is 9-15% cheaper (chemistry 34%
+  of the step instead of 53%).
+- **Stirred reactor near extinction** (the steady-state test's box, fresh
+  stoichiometric H2/air at 300 K, residence time `tau = 1/s`, started burnt,
+  steady temperature after `max(300, 30 tau / dt)` steps):
+
+  | `tau` | `dt / tau` | SIMPLER | Strang | Strang sub-steps per step |
+  |---|---|---|---|---|
+  | 1 ms | 0.01 / 0.1 / 0.3 / 1 | 2752.6 K at all four | 2754.4 / 2763.6 / 2763.6 K / extinct | 51 / 114 / 153 / - |
+  | 100 us | 0.01 / 0.1 / 0.3 / 1 | 2671.9 K at all four | 2672.0 / 2695.8 K / extinct / extinct | 37 / 91 / - / - |
+  | 67 us | 0.01 / 0.1 / 0.3 | 2636.2 K at all three | 2636.2 / 2655.9 K / extinct | |
+  | 50 us | 0.01 / 0.1 / 0.3 | 2604.7 K at all three | 2604.7 K / extinct / extinct | |
+  | 40 us | 0.01 / 0.1 / 0.3 | extinct | extinct | |
+
+  SIMPLER's reactor is the same at every step (the ODE's steady state) and
+  takes one sub-step per step once steady (the exact extinction residence
+  time lies between 40 and 50 us). Strang splitting runs up to 24 K hot and
+  goes out early: at 50 us with `dt = 0.1 tau`, at 100 us (twice the exact
+  limit) with `dt = 0.3 tau`, and at any residence time with `dt = tau`,
+  where its transport step replaces most of the reactor with fresh gas
+  before the chemistry sees it. A cell whose transport time is a few time
+  steps is in the same position.
+
 ### Stiffness, load imbalance and skipped cells
 
 - **Skipping inactive cells.** A cell is chemically frozen when
@@ -451,6 +608,9 @@ U^n --chem(dt/2)--> U* --SSPRK3 flow step(dt)--> U** --chem(dt/2)--> U^{n+1}
   flow work (TENO troubled cells, species fluxes) uses the dynamic mesh
   rebalancing prepared in [mpi.md, section 10](mpi.md#10-dynamic-load-balancing),
   with the measured per-cell chemistry cost added to the partition weights.
+  Implemented in milestone 11 ([below](#as-implemented-milestone-11)), with
+  the cost from the cells' last sub-step counts and without partition
+  weights.
 
 ### As implemented (milestone 8)
 
@@ -480,9 +640,9 @@ Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
 - V7 (`examples/detonation_1d`): with this mechanism the recombination zone
   of 2H2-O2-7Ar at 6.67 kPa is about 0.8 m (ZND), so a detonation started by
   a driver at a closed end stays under-supported over practical tubes (it
-  ran steadily 9% below D_CJ over 0.6 m). The case therefore starts from the
+  ran steadily 9% below $D_\mathrm{CJ}$ over 0.6 m). The case therefore starts from the
   ZND profile (`tools/znd_restart.py`) instead of an overdriven start. Front
-  speed against D_CJ = 1616.9 m/s: +0.11%, +0.01%, 0.00% at 10, 20, 40 cells
+  speed against $D_\mathrm{CJ}$ = 1616.9 m/s: +0.11%, +0.01%, 0.00% at 10, 20, 40 cells
   per ZND induction length (1.525 mm); induction length -4.5%, -1.8%, +2.7%
   (one cell at 40 is 2.5%); peak pressure 174.8 kPa against the von
   Neumann 174.7 kPa. Roe and RHLL (milestone 12; in 1D RHLL is HLL, the
@@ -498,6 +658,78 @@ Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
   at 0.2-2 M cells/s, latency-bound (4-14 ms per step, 60-90% in chemistry);
   a CPU with 8 threads reaches 0.6 M cells/s on them. Milestone 10's
   team-per-cell kernels and larger meshes are what the GPU needs.
+
+### Radiative heat loss (optically thin; issue #160)
+
+`[radiation]` adds the optically thin model of the TNF workshop. Each cell
+loses $q = 4\sigma\sum_i p_i a_i(T)\,(T^4 - T_\mathrm{amb}^4)$ [W/m³], where $p_i$ are
+the partial pressures [atm] of H2O, CO2, CO and CH4 and $a_i(T)$ their
+Planck-mean absorption coefficients. The coefficients are fits to RADCAL
+([Grosshandler 1993](https://doi.org/10.6028/NIST.TN.1402)) over 300-2500 K,
+distributed with the TNF radiation model
+([Barlow et al. 2001](https://doi.org/10.1016/S0010-2180(01)00313-3)): H2O
+and CO2 as fifth-order polynomials in 1000/T, CH4 as a quartic in T, and CO
+as two quartics joined at 750 K (`src/chemistry/radiation.h`).
+
+- **Where.** The loss is a pointwise sink of `rho E` in the flow RHS
+  (`src/solver/solver_radiation.cpp`, after the other sources). SSPRK3
+  integrates it with the flow, outside the chemistry's half steps, so the
+  constant-volume reactors stay adiabatic. The term is not stiff: the
+  radiative time `rho cp T / q` is 0.1-1 s in flames, against flow steps of
+  about 1e-7 s. `T` is `p / (rho R)` from the cell's state and
+  `p_i = rho_i R_u T / W_i`, all in double precision.
+- **Determinism.** One kernel runs over the owned cells, each from its own
+  state, so runs stay bitwise independent of the rank count (the MPI test
+  covers it). Runs without `[radiation]` launch nothing and are unchanged.
+- **Cantera.** Cantera's flames with `radiation_enabled` use the same H2O and
+  CO2 fits with no background term (its boundary emissivities are zero).
+  `species = ["H2O", "CO2"]` with `T_ambient = 0` reproduces it, to 1e-9 in
+  the unit test.
+- **Limits.**
+  - No absorption: the model holds where the gas is optically thin, such as
+    laboratory-scale flames at 1 atm. With reabsorption, the limits and the
+    limit speeds move ([Ju, Masuya & Ronney 1998](https://doi.org/10.1016/S0082-0784(98)80116-1)).
+  - The fits cover 300-2500 K.
+
+#### Validation
+
+- **Homogeneous gas** (`RadiationTest`): H2O, CO2, CO, CH4 and N2 at 2000 K
+  against a 1000 K background, in a quiescent periodic box without
+  chemistry. After 0.2 s, by which `T` has fallen by more than 100 K, it
+  matches RK4 on `de/dt = -q / rho` to 1e-6.
+- **1D flames against Cantera with the same model.**
+  - Setup: `tools/flame_restart.py --radiation cantera`, 12 cells per
+    thermal thickness of the adiabatic flame, MUSCL, HLLC, SSPRK3, CFL 1.2.
+  - $S_c$ is the consumption speed averaged over the last third of each run.
+  - The runs last 3.5 ($\phi = 0.6$), 5 ($\phi = 0.5$) or 3 ($\phi = 0.44$) flame
+    times. Started from Cantera's profile, the GRI-3.0 flames relax for about
+    3 flame times, and shorter runs overestimate their speed by 1-2%.
+  - Cantera's flames are on 5-10 cm domains. The radiating speed is the same
+    at 5 and 10 cm, so the burnt gas cooling far downstream does not matter.
+
+  | Mixture | Cantera S_L adiabatic / radiating [cm/s] | Mallard S_c adiabatic / radiating | S_rad / S_ad: Cantera, Mallard |
+  |---|---|---|---|
+  | CH4/air phi = 0.6, GRI-3.0 | 11.436 / 11.136 | 11.263 / 10.964 | 0.9738 / 0.9735 |
+  | CH4/air phi = 0.5, GRI-3.0 | 4.880 / 3.958 | 4.772 / 3.855 | 0.811 / 0.808 |
+  | CH4/air phi = 0.44, two-step (`ch4_bfer.yaml`) | 4.231 / 3.600 | 4.194 / 3.568 | 0.8509 / 0.8507 |
+
+  The TNF model (all four species, 300 K background) gives 3.563 cm/s for
+  the two-step flame at $\phi = 0.44$, against 3.568 with Cantera's model.
+  CFL 0.8 gives the same speed to four digits.
+- **Radiative flammability limit.**
+  - Two-step mechanism: Cantera finds a radiating flame at $\phi = 0.41$ and
+    none at 0.405. Mallard's flame at 0.41 burns at 2.152 cm/s (Cantera
+    2.181). At 0.40, started from the adiabatic profile, its speed falls from
+    2.0 to 0.2 cm/s within 17 flame times and the flame dies.
+  - GRI-3.0: Cantera's limit lies between $\phi = 0.48$ and 0.49. At 0.49,
+    $S_\mathrm{rad}/S_\mathrm{ad} = 0.73$, near the theoretical $e^{-1/2} = 0.61$ at the turning
+    point that Ju, Masuya & Ronney report for optically thin CH4/air.
+    Mallard's flame at 0.47, started from the adiabatic profile, slows
+    steadily from 3.2 to 1.8 cm/s in 2.7 flame times. That is below Cantera's
+    slowest steady flame (3.19 cm/s at 0.49) and still falling.
+- **Flame-vortex quenching.** `examples/flame_vortex_quenching` reproduces
+  the quenching zone of the spectral diagram of Poinsot, Veynante & Candel
+  (1991) with this model.
 
 ## 5. Chemistry
 
@@ -659,10 +891,16 @@ step-size control stalls at depletion. Cantera evaluates the exact law
 pow otherwise); its CVODES integration of the two-step propane mechanism fails
 at fuel depletion at `rtol = 1e-12`, and its reference data are generated at
 `1e-10`. Mallard regularizes the rate law itself, below
-`C_reg = 1e-12` kmol/m^3 (`KineticsTable::C_REG`):
+`C_reg = 1e-12` kmol/m³ (`KineticsTable::C_REG`):
 
-    C^n  ->  C_reg^n x ((2 - n) + (n - 1) x),   x = C / C_reg,   0 <= x < 1
-    C^n  ->  C_reg^n (2 - n) x,                 x < 0
+$$
+C^n \to
+\begin{cases}
+C_\mathrm{reg}^n\,x\left((2 - n) + (n - 1)\,x\right) & 0 \le x < 1, \\
+C_\mathrm{reg}^n\,(2 - n)\,x & x < 0,
+\end{cases}
+\qquad x = \frac{C}{C_\mathrm{reg}},
+$$
 
 the quadratic through the origin that matches `C^n` and its slope at
 `C_reg` (`C^1`), continued linearly to negative concentrations as integer
@@ -673,9 +911,12 @@ Jacobian of the right-hand side it integrates. Below `C_reg` the reactant
 decays exponentially instead of vanishing in finite time. `C_reg` is a fixed
 concentration at the scale of the default `atol = 1e-10` on `Y`: the
 concentration `rho Y / W` of a fuel at that mass fraction is about `1e-12`
-kmol/m^3 at 1 atm and above it at higher pressures, so the regularization acts
-where the error control already treats the reactant as zero. The fixed value
-keeps the reaction tables free of the integrator's options. Integer orders,
+kmol/m³ at 1 atm and above it at higher pressures, so the regularization acts
+where the error control already treats the reactant as zero. It is the
+default of `chemistry.C_reg`: trace fuel that the flow step carries into hot
+burnt gas burns out along `C^0.1` within the step and costs RODAS 20 to 130
+sub-steps (against 2 elsewhere); a larger `C_reg` (opt-in, results change)
+cuts that (performance.md, section 5). Integer orders,
 orders above 1 (bounded slope) and negative orders (whose rates diverge
 themselves) are unchanged. Tests: the Jacobian of the two-step propane
 mechanism against finite differences as each fractional-order reactant goes
@@ -742,7 +983,7 @@ each call, negative `Y_k` are clipped, `Y` renormalized and `T` recomputed
 from the initial `e`. The reactor Jacobian in `(Y, T)` includes the `T`
 dependence of `cv` (a new `d cp / dT` in the thermo tables); it matches
 finite differences to 1e-6 of the row norm for the three test mechanisms.
-`MallardReactor` is constant volume only; constant pressure (another
+`mallard reactor` is constant volume only; constant pressure (another
 Jacobian, no solver use) is left until a case needs it. V1/V2 at the
 default tolerances, in device kernels, with each run split into three
 calls as splitting steps would: ignition delays within 1.4e-4 (H2/air,
@@ -826,6 +1067,25 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   Sherman-Morrison adds the rank-one part with one more solve per
   factorization. GRI-3.0 fills 1,545 of 2,916 entries; the NUIG n-hexane
   mechanism (1268 species) 56,591 of 1.6 million, 3.5%.
+- **Stages, levels and a dense chain for teams** (#146). Pivot by pivot, a
+  team's factorization takes one barrier per pivot and each solve two, and
+  the igniting cells of n-hexane spent 58% of their time in the solves and
+  33% in the factorization (clock64 timers in the wide teams), each round a
+  barrier behind a few dependent global loads. Teams instead factor in
+  stages of independent pivots (pivot k runs after every j < k with L(k, j)
+  or U(j, k) nonzero): the stage's L entries are scaled, then each entry it
+  updates goes to one lane, which applies its updates in pivot order. The
+  solves take the rows outside the chain by levels of independent rows,
+  each row by one lane with its terms in column order. The chain, the last
+  pivots each alone in its stage (the dense core of radicals, and T), is
+  stored dense by columns (structural zeros padded) and factored and solved
+  a pivot at a time with coalesced updates across the lanes. Every entry
+  thus gets its terms in the order of the elimination pivot by pivot, which
+  one thread still does: the factors and solves are the same bits for any
+  lanes (`SparseLUSolvesLikeTheDenseOne` checks the stages and the solves
+  bitwise against elimination column by column), up to the sign of zeros.
+  n-hexane: 203 stages instead of 1269 pivots, a chain of 145 (573 padded
+  entries), 59 + 58 levels in the solves outside it.
 - **Fused half steps** (`[chemistry] fuse_half_steps`, default off): the
   half steps of consecutive steps are one chemistry call, except where output,
   checks or the end of the run read the state (and the next step's `dt` comes
@@ -847,12 +1107,12 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   GPU and CPU builds different layouts by default; the option stays for
   large-mechanism runs to measure.
 
-Validation: V3 at 100 species (n-dodecane/air, 20 atm, phi 0.5-2, 1000-1400 K,
+Validation: V3 at 100 species (n-dodecane/air, 20 atm, $\phi$ 0.5-2, 1000-1400 K,
 `test/data/chemistry/ndodecane_ignition.csv`): ignition delays within 5.4e-6
 of Cantera's with the dense and the sparse LU, `T` at 0.5 and 2 delays within
 1% (the mechanism's irreversible soot-precursor reactions keep it from its UV
 equilibrium, which is therefore not compared). At 1268 species
-(`tools/v3_check.py`, 10 atm, phi 1, 1000-1400 K): delays within 4e-6, about a
+(`tools/v3_check.py`, 10 atm, $\phi$ 1, 1000-1400 K): delays within 4e-6, about a
 second per case on one CPU core with the sparse LU (128 s with the dense one).
 V1/V2/V6/V7 unchanged within their tolerances.
 
@@ -899,6 +1159,20 @@ every cell 4 warps instead (no cost threshold) reaches 45.2k for n-dodecane
 at 1e-6 s but costs a third at 1e-8 s (195k), where every cell takes one
 sub-step. The h2o2 run at 1e-8 s (6.08M against 6.53M) does not involve the
 change (one thread per cell) and is run-to-run variation.
+
+With stages, levels and the dense chain for teams (#146; main before the
+change against it, built and run alternately in the same A100 pod, best of
+two runs, which agreed within 1%):
+
+| Case | dt = 1e-8 s, before | after | dt = 1e-6 s, before | after |
+|---|---|---|---|---|
+| GRI-3.0 | 510k | 535k | 514k | 541k |
+| n-dodecane | 299k | 307k | 48.0k | 60.2k |
+| n-hexane | 5.02k | 6.28k | 576 | 1.28k |
+
+The igniting cells' teams gain most: n-hexane at 1e-6 s 2.2x, n-dodecane
+1.26x. Where every cell takes one sub-step (1e-8 s) one-warp teams gain
+3-25% from the staged factorization too, so it serves every team width.
 
 Sub-steps per cell at 1e-6 s (the benchmark's histogram): h2o2 127k cells
 with 1, 53k with 2, 57k with 3-4, 16k with 5-8, 8k with 9-16; GRI-3.0 64.5k
@@ -975,6 +1249,103 @@ above. The published GPU numbers (Niemeyer & Sung, Curtis et al., Balos et
 al.) use other GPUs, mechanisms or measures (per-reactor wall time of a
 whole ignition) and were not compared.
 
+### As implemented (milestone 11)
+
+`src/solver/chemistry_balance.*`; `[chemistry] load_balance = true` (off
+by default).
+
+**Where the imbalance comes from.** In the reacting examples (h2o2, one
+thread per cell) every active cell takes one or two RODAS sub-steps per call
+at their time steps (1e-9 to 2e-8 s; at most 2-10 in the steepest cells), so
+a rank's chemistry time is its count of active cells: about 155-160 ns per
+cell once the queue fills the A100 (31.6 ms for 200k cells), plus the
+activity check over every owned cell (5-7 ms per 300k-900k cells). Below one
+wave of threads a call costs a fixed ~7 ms whatever the count (autoignition,
+40k cells per rank). Fresh gas is inactive, so the Hilbert slabs of a
+channel put the burnt gas, and all the integration, on some ranks: in the
+first 3,000 steps of `detonation_2d` two of four ranks integrate 200k cells
+each and two none (36.8 ms against 5.9 ms per call).
+
+**Scheme.** `CellChemistry::advance` flags every owned cell first and
+compacts one queue (before: per chunk of the work memory), then integrates it
+in batches of the work memory. Between the two, `ChemistryBalance`:
+
+- gathers each rank's work, the sum over its queued cells of the sub-steps
+  of their last call (at least 1): one `allgatherv` of two numbers per rank
+  and call;
+- if the largest exceeds the mean by more than 5%, pairs ranks above the
+  mean with ranks below it in rank order and turns each pair's share into a
+  count of cells (the sender's mean cost per cell): every rank computes the
+  same plan from the same numbers;
+- each sender packs the end of its queue (the cheapest cells: the queue is
+  ordered by cost on GPUs) as raw bits, `N_CONSERVATIVE + Ns + 4` values per
+  cell (state, partial densities, `T_SEED`, `CHEM_H`, last cost, multiplier
+  of `dt`; with SIMPLER also the cell's forcing, its `Ns` species rates
+  `T_k(U^n)` and the `N_CONSERVATIVE` values of its end state
+  `U^n + dt T(U^n)`), and sends them (GPU-aware where available). The transfer is
+  completed before the sender integrates its own cells: large GPU messages
+  progress only inside MPI calls, and a first version that left them pending
+  over the sender's integration made receivers wait for it (det2d on 4 GPUs:
+  45 ms per call instead of 37.5 without balancing);
+- receivers integrate their own queue, then the guests with the same kernel
+  (sorted by cost, in batches), and return `Ns + 3` values per cell
+  (partial densities, those of the end state with SIMPLER, `CHEM_H`,
+  sub-steps, last cost).
+
+Each cell's integration reads only its own inputs and takes the same code
+path on every rank (decision 6, [Determinism](#determinism)), so results are
+bitwise those of an unbalanced run and of a serial one;
+`MPITest.ChemistryLoadBalancingMatchesSerial` checks it on 1-4 ranks (Euler,
+Navier-Stokes with fused half steps, the thickened flame's multiplier of
+`dt`, SIMPLER with and without it) and that cells did move. Restarts are unaffected: the plan uses only
+the last call's costs, which are not restarted, and changes only where cells
+are integrated. The summary reports, for every distributed reacting run,
+the sum over calls of the slowest rank's chemistry time against the mean,
+and with balancing the share of integrations done elsewhere.
+
+**Measurements** (A100-80GB, CUDA-aware Open MPI; 4 GPUs: three on one node
+and one over HDR InfiniBand; 8 GPUs: one node over NVLink; Hilbert
+partition; the production inputs without output, from restarts of the
+production runs; time per step and, in parentheses, the share of stepping
+spent waiting for the slowest rank's chemistry):
+
+| Case | Cells | Steps | GPUs | Without | With | Speedup |
+|---|---|---|---|---|---|---|
+| `detonation_2d` (first 3,000 steps) | 1.2M | 3,000 | 4 | 86.3 ms (35.9%) | 69.4 ms (6.0%) | 1.24 |
+| | | | 8 | 56.5 ms (51.6%) | 35.1 ms (8.0%) | 1.61 |
+| `flame_turbulence` (DNS) | 3.67M | 1,000 | 4 | 384 ms (17.8%) | 349 ms (3.5%) | 1.10 |
+| | | | 8 | 191 ms (18.7%) | 165 ms (0.3%) | 1.16 |
+| `detonation_3d` | 19.2M | 1,142 | 4 | 1.27 s (8.2%) | 1.22 s (1.1%) | 1.04 |
+| | | | 8 | 631 ms (7.1%) | 596 ms (0.4%) | 1.06 |
+| `autoignition_2d` (T' = 15 K, igniting) | 160k | 20,000 | 4 | 10.8 ms (0.8%) | 10.8 ms (0.8%) | 1.00 |
+| | | | 8 | 8.05 ms (0.5%) | 7.85 ms (0.4%) | 1.00 |
+
+- Balancing turns 48-73% of the waiting into saved time: it removes the wait but adds
+  work, seen as a higher mean over ranks of the chemistry time (det2d on 8
+  GPUs: 10.3 to 13.0 ms per call; flame: 43 to 53 ms). That is the
+  transfers (~250 bytes per moved cell and both ways; 0.4M cells per sender
+  in the flame on 4 GPUs), pack and unpack, and partial waves: two ranks with
+  100k cells each take longer than one with 200k (17-18 ms against 31.6 ms
+  per call). The rank across InfiniBand was 3-6 ms per call slower than its
+  on-node peers.
+- `autoignition_2d` is balanced already (every cell ignites, 40k cells per
+  rank are below one wave): the 5% threshold is never reached, and the cost
+  is one `allgatherv` per call.
+- The imbalance grows with the rank count where fronts sit in slabs
+  (det2d: 36% to 52% of the step from 4 to 8 GPUs), which is where the scheme
+  pays most. It shrinks where most of the domain is active (`detonation_3d`
+  late in the window: 76% to 99.6% of the cells react).
+- Not measured: larger mechanisms (a warp per cell, wide teams), where a
+  cell's work grows faster with the species count than its message does.
+
+**Not done.** Chemistry cost in the mesh partition weights: the expensive
+cells (burnt gas behind a front) move with the front, so weights would go
+stale as they did for TENO's troubled cells ([mpi.md, section 10](mpi.md#10-dynamic-load-balancing)),
+while moving states adapts every call at no setup cost. A cheaper activity
+test for near-equilibrium burnt gas (most of the integrated cells in the
+detonations take one sub-step and change little) would cut the work being
+balanced; it is a separate question of accuracy.
+
 ## 6. Transport
 
 ### Models
@@ -1045,7 +1416,7 @@ q    = -lambda grad T + sum_k h_k j_k
   `1 - Y_k` in `D_km = (1 - Y_k) / sum_(j != k) X_j / D_kj` is summed from the
   other species (Cantera's `(W - X_k W_k) / W` leaves round-off over a
   denominator of order 1e-20 in a nearly pure species, which gave `D_km` of
-  1e8 m^2/s and a vanishing time step), and negative mass fractions count as
+  1e8 m²/s and a vanishing time step), and negative mass fractions count as
   zero. Mixture properties match Cantera to 1e-6.
 - **Fluxes** as in the formulas above (Cantera's default mole-fraction flux
   basis), with the face `Y` normalized so that `sum_k j_k = 0` to round-off.
@@ -1054,9 +1425,11 @@ q    = -lambda grad T + sum_k h_k j_k
   half the `O(Ns^2)` work on hexahedra and a third on triangles, at the same
   order. The gradients of `[u, T, X_1 .. X_Ns]` use the viscous gradient's
   stencil and weights; boundary ghosts take the ghost state's velocity
-  (no-slip walls), and the prescribed `T` and `X` at `upt` faces. Walls and
-  symmetry planes carry no heat or species flux; transmissive faces take
-  their image face's values; outflow faces have zero normal derivatives.
+  (no-slip walls), and the prescribed `T` and `X` at `upt` faces; isothermal
+  walls give the mirror image of the centroid `2 T_w - T`, heat-flux walls
+  `T + 2 d q / lambda`. Symmetry planes carry no heat or species flux;
+  transmissive faces take their image face's values; outflow faces have zero
+  normal derivatives.
   `T = p / (rho R)` from `W`, also under double flux.
 - **Positivity**: explicit diffusion with the correction velocity can make
   mass fractions slightly negative (1e-8 seen next to a contact); the
@@ -1064,8 +1437,28 @@ q    = -lambda grad T + sum_k h_k j_k
   chemistry call (renormalizing at the same energy), since a negative
   starting `Y_k` would reject every sub-step. Cells without negative mass
   fractions integrate exactly as before.
-- Walls of mixture runs are no-slip under `navier_stokes`; isothermal walls
-  (which need `R(Y)` in the ghost state) are still rejected for mixtures.
+- **Walls** are no-slip under `navier_stokes` and non-catalytic: `j_k . n =
+  0` for every species, Soret part included, so the enthalpy flux
+  `sum_k h_k j_k` vanishes there too and the wall's energy flux is the
+  conduction alone (no Dufour effect). Adiabatic walls conduct nothing,
+  heat-flux walls the given `q`; isothermal walls conduct `lambda_w dT/dn`,
+  the one-sided difference from the boundary cell's centroid to `T_w` (as the
+  wall velocity), with `lambda_w = lambda_c (1 + lambda(T_w, Y_c) /
+  lambda(T_c, Y_c)) / 2`: the mean of the two ends, as interior faces average
+  their two cells', and a ratio rather than `lambda(T_w)` itself so that a
+  thickened or otherwise scaled cell conductivity carries over. The mixture
+  conductivity alone is `O(Ns)` (`TransportTable::conductivity`); with the
+  cell's conductivity instead, steady conduction between walls at 300 and
+  900 K is off by 1 K on 16 cells, 0.005 K with the mean. The ghost states of
+  every wall keep the interior density, pressure and composition with the
+  mirrored velocity, so the Riemann solver carries no mass through the wall
+  (a single gas's isothermal ghost density `p / (R T_g)` would need `R(Y)`
+  and lets HLL-type solvers leak mass in proportion to `T_c - T_w`); the wall
+  temperature enters only the diffusive fluxes and the gradients above.
+- **Double flux** with `navier_stokes`: the diffusive energy flux of a face
+  enters both sides' energy fluxes (`face_energy_1` as well as `face_flux`);
+  before, cells on side 1 of a face missed it, which conducted heat one way
+  (steady conduction between walls ended 500 K off).
 - The frozen-coefficient option is not implemented: transport is 25% of the
   GRI-3.0 flame's step on a CPU core, chemistry 75%.
 - Output: `MU`, `LAMBDA`, `D_<species>` (`D_km`), and `OMEGA_<species>`
@@ -1079,6 +1472,19 @@ stays isothermal within 2 K (76 K without the enthalpy flux); periodic shear
 and temperature waves decay at `mu k^2 / rho` (to 3e-6) and
 `lambda k^2 / (rho cp)` (to 3e-3, the coupling to acoustics). Reacting
 viscous runs are bitwise identical on 1-4 ranks and across restarts.
+Walls (O2/N2 and H2/N2 of `test/data/chemistry/test_wall.yaml`, 16 cells
+across 1 mm at 1000 Pa, against variable-property exact solutions from the
+host transport tables): steady conduction between isothermal walls at 300 and
+900 K, `int lambda dT` linear across the gap, within 0.005 K, the same with
+double flux; heat-flux wall (2e4 W/m²) and isothermal wall at 300 K, within
+0.007 K; Couette flow with heat transfer (walls at 300 K at rest and 500 K at
+300 m/s, 7.7 K of viscous heating) against the shooting solution of
+`(u, T)' = (tau / mu, (C - u tau) / lambda)`: `u` within 0.15 m/s, `T` within
+0.05 K. Closed channels of H2/N2 with the Soret effect between isothermal,
+heat-flux or adiabatic walls keep every species' total to 1e-13 (and the
+total energy, between adiabatic walls), with hydrogen gathering at the hot
+end. Isothermal and heat-flux walls with chemistry and Soret, and with
+double flux (inert), are bitwise identical on 1-4 ranks.
 
 V8 (`examples/premixed_flame`, `tools/flame_reference.py`,
 `flame_restart.py`, `flame_speed.py`): a 1D strip in
@@ -1113,10 +1519,10 @@ Cantera's discretization to Mallard's.
 | Mallard `S_d` error | -0.84% | -0.74% | -0.81% | -0.72% | -0.61% |
 
 All within the 2% criterion at 20 cells per `delta_T`. CFL 0.1 against 0.2
-(phi 0.6, 1.0, 1.4, both models): the consumption speeds differ by at most
+($\phi$ 0.6, 1.0, 1.4, both models): the consumption speeds differ by at most
 0.01%, against the 0.5% criterion, so Strang splitting adds no measurable
 error at these steps. Temperature and heat-release profiles overlay
-Cantera's (`tools/plot_flame.py`; below, phi = 1, mixture-averaged): peak heat
+Cantera's (`tools/plot_flame.py`; below, $\phi = 1$, mixture-averaged): peak heat
 release within 2%, temperature within 10-30 K where the profile is steepest
 (a fraction of a cell of offset). The unity-Lewis flames are consistently
 0.6-0.8% slow; Cantera's "unity-Lewis-number" model with its default
@@ -1125,25 +1531,181 @@ not a modeling difference, but its source has not been isolated.
 
 ![H2/air flame, phi = 1](../images/premixed_flame_h2.png)
 
-CH4/air with GRI-3.0 costs about 15x more per step and needs 4-20x more steps
-per flame time (slower flames, the acoustic time step), so only phi = 1 is
-run here, over 1.5 flame times (three hours on six CPU threads):
+CH4/air with GRI-3.0 (53 species) costs about 15x more per step and needs
+4-20x more steps per flame time (slower flames, the acoustic time step):
+0.4-1.0 million steps for five flame times at 20 cells per `delta_T`. The
+sweep (`tools/flame_sweep.py`, `examples/premixed_flame/ch4` for $\phi = 1$)
+therefore runs on A100s, one 300-cell flame at 16.5 ms per step, or 5-8
+flames sharing a GPU through MPS at 13-28 ms per step each. Every flame runs
+five flame times at CFL 1 (the [time step](../numerics/overview.md#time-step)
+of main); `S_c` and `S_d` are taken over the last flame time:
 
-| CH4/air, phi = 1 | Cantera `S_L` [m/s] | `S_c` error | `S_d` error |
-|---|---|---|---|
-| mixture-averaged (CFL 0.1) | 0.3758 | -0.93% | -1.80% |
-| unity Lewis (CFL 0.2) | 0.2865 | -0.04% | -0.78% |
+| CH4/air, phi | 0.6 | 0.8 | 1.0 | 1.2 | 1.4 |
+|---|---|---|---|---|---|
+| Cantera `S_L` [m/s], mixture-averaged | 0.1144 | 0.2711 | 0.3758 | 0.3325 | 0.1388 |
+| Mallard `S_c` error, 10 cells per `delta_T` | -2.42% | -2.50% | -3.08% | -4.19% | -3.53% |
+| Mallard `S_c` error, 20 cells | -0.97% | -1.17% | -1.31% | -1.82% | -1.11% |
+| Mallard `S_c` error, 40 cells | -0.37% (2.2 flame times) | -0.70% (3.4 flame times) | -0.78% (4.0 flame times) | -1.01% (3.4 flame times) | -0.60% (2.2 flame times) |
+| Mallard `S_d` error, 20 cells | -1.12% | -1.48% | -1.62% | -2.08% | -1.38% |
+| Cantera `S_L` [m/s], unity Lewis | 0.1177 | 0.2460 | 0.2865 | 0.2132 | 0.1048 |
+| Mallard `S_c` error, 10 cells | -2.29% | -1.14% | -1.00% | -2.07% | -2.82% |
+| Mallard `S_c` error, 20 cells | -0.69% | -0.45% | -0.42% | -0.72% | -0.80% |
+| Mallard `S_c` error, 40 cells | -0.61% (4.1 flame times) | -0.40% | -0.30% | -0.35% | -0.32% (3.3 flame times) |
+| Mallard `S_d` error, 20 cells | -0.77% | -0.79% | -0.82% | -1.05% | -0.94% |
 
-Both are within 2%; the mixture-averaged consumption speed was still falling
-(0.4% over the last half flame time, and slowing), and the displacement speed,
-averaged over a longer window, still carries some of the initial transient.
-CFL 0.2 against 0.1 (mixture-averaged, at equal times up to 1.15 flame
-times): within 0.03%. The other equivalence ratios (references in
-`examples/premixed_flame/reference/`) are left as a follow-up for the GPU
-kernels of milestone 10.
+At 20 cells per `delta_T` every consumption speed is within the 2% criterion:
+mixture-averaged 1.0-1.8% slow, unity Lewis 0.4-0.8% slow; 10 cells is not
+enough (1.0-4.2% slow). At 40 cells
+the mixture-averaged errors roughly halve (0.4-1.0% slow; the runs marked
+with fewer than five flame times are still settling, slowly downward), while
+the unity-Lewis ones level off at 0.3-0.6% slow, like the H2 flames' offset. The displacement speeds are 0.1-0.4% below
+the consumption speeds (mixture-averaged $\phi = 1.2$: 2.1% slow). The flames
+take about two flame times to relax from Cantera's discretization to
+Mallard's, longer than the H2 flames' half flame time, which is why the
+earlier 1.5-flame-time run at $\phi = 1$ was still drifting; over the last two
+flame times the 20-cell consumption speeds vary by at most 0.4%
+(mixture-averaged $\phi = 1.2$ by ±0.2% around its mean). Peak heat release is
+within 3.1% of Cantera's and the temperature within 6-19 K at 20 cells. CFL
+0.5 against 1 ($\phi$ 0.6, 1.0 and 1.4, both models, at equal times over 2.5
+flame times): the consumption speeds differ by at most 0.05%, against the
+0.5% criterion.
+
+![CH4/air flame speeds against phi](../images/premixed_flame_ch4.png)
 
 On a CPU core, chemistry is 68% of the H2 flame's step (h2o2) and 75% of the
 CH4 flame's (GRI-3.0); transport is most of the rest of the latter.
+
+### Thermal diffusion (Soret effect)
+
+`physics.soret = true` (mixture-averaged transport only, as in Cantera, whose
+1D flames accept it with the mixture-averaged and multicomponent models) adds
+the thermal diffusion fluxes `-D^T_k grad T / T` to the species fluxes, with
+Cantera's mixture-averaged thermal diffusion coefficients (Cantera 3.2,
+`MixTransport::getThermalDiffCoeffs`): the model of
+[Chapman & Cowling](../references.md#chapman-cowling-1970) as given by
+[Zirwes & Kronenburg 2025](../references.md#zirwes-kronenburg-2025),
+
+```text
+D^T_k  = W_k W D_km sum_(j != k) (1.2 C*_kj - 1) / (D_kj (W_k + W_j)) (Y_k a_j - Y_j a_k),
+a_k    = (15/4) (mu_k / W_k) / (1 + 1.065 sum_(j != k) X_j Phi_kj / X_k)    (0 where Y_k < 1e-20),
+D^T_k <- D^T_k - Y_k sum_j D^T_j                                       (so that they sum to zero)
+```
+
+with `D_km` the mixture-averaged coefficients, `Phi_kj` Wilke's mixing
+operator, and `C*_kj` the reduced collision integral of
+[Monchick & Mason](../references.md#monchick-mason-1961) at
+`T* = k_B T / epsilon_kj`, fitted, as Cantera does, by a polynomial of degree 8
+in `ln T*` over the table rows bracketing the mechanism's `T*` range (with the
+fits in the reduced dipole moment for polar pairs). The model covers every
+species, not only the light ones: in lean H2/air flames H and H2 carry almost
+all of the effect (they diffuse toward hot gas, `D^T < 0`), and the
+normalization moves the balance to the abundant species.
+
+- **Fluxes.** `j_k = -rho D_km (W_k / W) grad X_k + Y_k V_c - D^T_k grad T / T`.
+  The thermal diffusion fluxes sum to zero, so the correction velocity
+  stays that of the Fickian part, as in Cantera's 1D flames; the energy flux
+  carries their enthalpy `sum_k h_k j_k` (without it, the temperature wave
+  of the test below ends 2.7% off the conduction-only solution).
+  `D^T_k` is computed per cell with the other coefficients and averaged to
+  faces; `grad T / T` uses the face's `T` and gradient, as the heat flux.
+  Walls, symmetry planes and outflow faces carry no thermal diffusion flux,
+  as they carry no species flux. No Dufour effect (as Cantera).
+- **Time step.** Unchanged: thermal diffusion couples the species to `T` one
+  way and adds no diffusive eigenvalue.
+- **Cost.** One more pass over the species pairs, with a degree-8
+  polynomial: on one A100 the properties alone go from 3.6 to 11.9 ns per
+  cell for h2o2 (10 species, 1M cells) and from 172 to 424 ns for GRI-3.0;
+  a step of the 2D lean H2 flame (`examples/flame_2d`, 72,576 cells, where
+  chemistry is 90% of the step) from 20.5 to 22.3 ms (+9%).
+- **Off by default**, and runs without it are bitwise identical to before
+  (checked on CPU and GPU on premixed flames with both transport models).
+- TFLES thickens `D^T_k` with the other molecular diffusivities; output
+  `DT_<species>`.
+
+Verification (`test/chemistry_transport_test.cpp`,
+`test/mixture_transport_test.cpp`, `test/mpi_test.cpp`): the coefficients match
+Cantera's at random states of h2o2 and GRI-3.0 (with absent species and a pure
+species) to 6e-13 of their largest magnitude and sum to zero; in an H2/N2
+mixture at uniform composition and pressure with a temperature wave
+(600 ± 30 K, 1 mm), the hydrogen mode grows as the linear solution with
+Fickian relaxation, `-D^T k^2 dT_0 / (rho T_0) (exp(-a k^2 t) - exp(-D_12 k^2 t)) / ((D_12 - a) k^2)`
+(to 0.5%; zero without the option), while the temperature wave decays at
+`lambda / (rho cp)` (to 0.03%); runs are bitwise identical on 1 and 2+ ranks.
+
+Validation against Cantera's `FreeFlame` with the same model
+(`soret_enabled`, mixture-averaged; `tools/flame_reference.py --soret`,
+`examples/premixed_flame/reference/soret_flames.csv`): the V8 setup above
+(20 cells per `delta_T`, CFL 0.2, two flame times, consumption speed over the
+last third), H2/air at 300 K and 1 atm:
+
+| H2/air, phi | 0.4 | 0.5 | 0.6 | 1.0 |
+|---|---|---|---|---|
+| Cantera `S_L` [m/s], mixture-averaged | 0.16013 | 0.42969 | 0.80829 | 2.33237 |
+| Mallard `S_c` error | +0.40% | +0.19% | +0.28% | +0.21% |
+| Cantera `S_L` [m/s], with Soret | 0.15516 | 0.39969 | 0.73527 | 2.13546 |
+| Mallard `S_c` error | -0.58% | -0.07% | +0.34% | +0.41% |
+| Mallard `S_d` error | -0.16% | -0.01% | +0.24% | +0.23% |
+| Soret effect on `S_L`, Cantera | -3.10% | -6.98% | -9.04% | -8.44% |
+| Soret effect on `S_L`, Mallard (`S_c`) | -4.05% | -7.23% | -8.98% | -8.26% |
+| Peak `Y_H` with Soret, Mallard / Cantera | 1.013 | 1.016 | 1.014 | 1.006 |
+
+All within the 2% criterion; the Soret effect, 3-9% here, is reproduced to
+within a point (at $\phi = 0.4$, the slowest flame, over two flame times, its
+two errors of +0.4% and -0.6% add up). Profiles aligned at the maximum of `dT/dx`
+differ from Cantera's by at most 0.3-1.5% of the peak for `T` and `Y_H2`
+and 1.3-5% for H, O and OH at $\phi = 0.4$–0.6, up to 3-9% at $\phi = 1$, where
+the profiles are steepest (as without thermal diffusion, see above). Runs: 300 cells, OpenMP, 3 threads,
+4.3-5.1 ms per step (thermal diffusion +11%), up to 1.3M steps at $\phi = 0.4$.
+
+### Multicomponent transport: assessment
+
+Cantera's `multicomponent` model (`MultiTransport`, the L-matrix formulation of
+[Dixon-Lewis 1968](../references.md#dixon-lewis-1968)) replaces the
+mixture-averaged diffusion coefficients by the full matrix `D_kj`, with fluxes
+`j_k = rho (W_k / W^2) sum_j W_j D_kj grad X_j - D^T_k grad T / T`, and also
+changes the conductivity and the thermal diffusion coefficients. Per state it
+assembles the `3K x 3K` L matrix (A*, B*, C* collision integrals for every
+pair, Parker's rotational relaxation), solves it by LU for the conductivity and
+`D^T_k`, and inverts its `K x K` block for `D_kj`: `O(9 K^3)` work and
+`O(10 K^2)` memory per cell, against `O(K^2)` for the mixture-averaged model.
+
+A device port of it (one cell per thread, local arrays, LU with partial
+pivoting; a prototype, not merged) matches Cantera's `lambda`, `D_kj` and
+`D^T_k` to 1e-14 for h2o2 and GRI-3.0. On one A100:
+
+| Properties per cell | mixture-averaged | with Soret | multicomponent |
+|---|---|---|---|
+| h2o2 (10 species), 1M cells | 3.6 ns | 11.9 ns | 213 ns (59x, 18x) |
+| GRI-3.0 (53 species), 20k cells | 172 ns | 424 ns | 57,700 ns (336x, 136x) |
+
+The 2D lean H2 flame above costs 282 ns per cell and step; the
+multicomponent properties alone, at three RK stages, would add 640 ns
+(3.3x the step), before the `O(K^2)` fluxes per face and the `K^2` matrix
+per cell they need (100 doubles for h2o2, 2,809 for GRI-3.0: 22 GB for a
+million cells). For GRI-3.0 one thread per cell also holds 300 KB of local
+arrays. What it buys, from Cantera's flames (`soret_flames.csv`): flame
+speeds within 0.1-3% of the mixture-averaged ones, and the same Soret effect to
+within a point:
+
+| H2/air, `S_L` [m/s] | phi 0.4 | 0.5 | 0.6 | 1.0 |
+|---|---|---|---|---|
+| mixture-averaged | 0.16013 | 0.42969 | 0.80829 | 2.33237 |
+| + Soret | 0.15516 (-3.1%) | 0.39969 (-7.0%) | 0.73527 (-9.0%) | 2.13546 (-8.4%) |
+| multicomponent | 0.16520 | 0.43639 | 0.80862 | 2.28956 |
+| + Soret | 0.16095 (-2.6%) | 0.40929 (-6.2%) | 0.74458 (-7.9%) | 2.11317 (-7.7%) |
+
+**Decision: not now.** Thermal diffusion is the larger effect (3-9% here)
+and the mixture-averaged model carries it at +9% of a flame's step; the
+multicomponent model's remaining 1-4% (1.1-1.3% at $\phi = 0.6$–1, 3.6% at
+$\phi = 0.4$, a weakly burning flame) would multiply the step cost by about four for hydrogen and is
+out of reach for larger mechanisms with one thread per cell. A later
+implementation should not port the L matrix as is: the iterative algorithms
+of [Ern & Giovangigli](../references.md#ern-giovangigli-1994) (a few
+`O(K^2)` conjugate-gradient or Jacobi iterations from the mixture-averaged
+approximation, which converge to the exact coefficients; see
+[Ern & Giovangigli 1998](../references.md#ern-giovangigli-1998) for their
+thermal diffusion in H2 and CH4 flames) keep the mixture-averaged cost scaling,
+and the fluxes can use the matrix-vector product without storing `D_kj`.
 
 ### Inviscid runs
 
@@ -1227,7 +1789,7 @@ surrogate `(gamma, e0)`:
 | Boundary | Species | Thermo |
 |---|---|---|
 | `extrapolation`, image faces | from the image | from the image |
-| `symmetry`, walls | interior `Y` (zero normal diffusive flux) | interior; isothermal walls use `R(Y)` |
+| `symmetry`, walls | interior `Y` (zero normal diffusive flux) | interior (wall temperatures and heat fluxes enter the diffusive fluxes only) |
 | `upt`, `farfield`, `dirichlet` | given `Y`/`X` (expressions for `dirichlet`) | from given `p`, `T`, `Y` |
 | `p_out`, `p_out_average` | interior `Y` | interior `gamma` |
 
@@ -1264,7 +1826,7 @@ are unchanged.
 - **Diagnostics**: `check_interval` prints min/max `T`, `max |sum Y - 1|`,
   the number of active chemistry cells and the max/mean sub-steps, and the
   chemistry wall time fraction.
-- **0D tool**: `MallardReactor`, a small executable built from the same
+- **0D tool**: `mallard reactor`, a subcommand built from the same
   kernels, runs constant-volume or constant-pressure reactors from TOML and
   writes CSV. It backs the 0D validation and the chemistry benchmarks without
   a mesh.
@@ -1296,7 +1858,7 @@ until milestone 8 (the 0D tool arrives in milestone 7).
 6. **Kinetics.** Rate tables, elementary/three-body/falloff, production
    rates and analytical Jacobian. Tests: rates vs Cantera at random states;
    Jacobian vs finite differences.
-7. **0D reactor and integrator.** Rosenbrock with dense LU; `MallardReactor`.
+7. **0D reactor and integrator.** Rosenbrock with dense LU; `mallard reactor`.
    Tests: ignition delays and equilibrium end states vs Cantera.
 8. **Coupling.** Strang splitting in the solver; `[chemistry]` input;
    active-cell queue; PLOG and Chebyshev. Tests: reactive shock tube, 1D
@@ -1308,6 +1870,9 @@ until milestone 8 (the 0D tool arrives in milestone 7).
     sparse LU for large mechanisms, benchmark suite with recorded baselines.
 11. **MPI.** Chemistry load balancing; chemistry cost in partition weights.
     Tests: rank-count independence with chemistry; imbalance benchmark.
+    Done: state migration (`chemistry.load_balance`), the slowest rank's
+    chemistry time in the summary, and the measurements of
+    [section 5](#as-implemented-milestone-11); partition weights not added.
 12. **Extensions, each optional and driven by need:** Roe/RHLL for mixtures
     (done);
     BDF integrator; SDC coupling; mechanism-specialized (code-generated)
@@ -1363,7 +1928,7 @@ Species counts are taken from the files when they are added.
 
 | # | Case | Reference | Pass criterion | Milestone |
 |---|---|---|---|---|
-| V1 | **0D constant-volume ignition delay**, H2/air (Burke) and CH4/air (GRI-3.0), `T0` 1000-1500 K, `phi` 0.5-2, 1 and 10 atm (`MallardReactor` and a single-cell solver run) | Cantera `IdealGasReactor` at tight tolerances | Ignition delay (max `dT/dt`) within 0.5%; `T(t)` and major species within 1% over the trajectory | 7 |
+| V1 | **0D constant-volume ignition delay**, H2/air (Burke) and CH4/air (GRI-3.0), `T0` 1000-1500 K, `phi` 0.5-2, 1 and 10 atm (`mallard reactor` and a single-cell solver run) | Cantera `IdealGasReactor` at tight tolerances | Ignition delay (max `dT/dt`) within 0.5%; `T(t)` and major species within 1% over the trajectory | 7 |
 | V2 | **Equilibrium end states** of V1 | Cantera `equilibrate("UV")` | `T` within 0.1 K, major species within 1e-4 absolute | 7 |
 | V3 | **Large-mechanism ignition** (~100 and ~500+ species) | Cantera | As V1; also the performance baseline | 7, 10 |
 | V4 | **Species interface advection**, 1D and 2D (skewed triangles), H2 or He into air at different `T`, uniform `p` and `u` | Exact: uniform `p`, `u` | Conservative scheme: report max `|p - p0| / p0` and require it to converge under refinement; double flux: `p`, `u` uniform to 1e-12 after 10 flow-throughs | 3, 5 |
@@ -1405,6 +1970,29 @@ profiles overlay Cantera's at matched `K_ox`. Results, plots and the
 resolution and domain-size variants are in the example's README.
 
 ![Peak temperature against strain](../images/counterflow_strain.png)
+
+Flame-wall interaction (`tools/flame_wall.py`): head-on quenching of the
+stoichiometric H2/air flame (h2o2.yaml, mixture-averaged transport, 300 K,
+1 atm; Cantera: `S_L` = 2.332 m/s, `T_b` = 2379 K, thermal thickness
+`delta_T` = 329 um, `delta_L = lambda_u / (rho_u cp_u S_L)` = 19.9 um)
+against an isothermal wall at 300 K. A 1D strip of 4 um cells, started from
+Cantera's flame 0.4 mm from the wall with the fresh gas at rest and the
+burnt gas leaving through a pressure outlet; MUSCL, HLLC, SSPRK3, CFL 1.
+The wall heat flux is the solver's (the boundary cell's conduction to the
+wall), the flame position the wall distance of the largest H2 consumption
+rate. The flame quenches at `x_q` = 90 um, with a peak wall heat flux of
+2.19 MW/m²: `Pe_q = x_q / delta_L` = 4.5 (`x_q / delta_T` = 0.27) and
+`phi_q = q_max / (rho_u cp_u S_L (T_b - T_u))` = 0.38. Classical head-on
+quenching gives `phi_q` 0.34-0.4 and `Pe_q` near 3 for hydrocarbon flames
+(Vosen, Greif & Westbrook 1984; Poinsot, Haworth & Bruneaux 1993);
+hydrogen's `delta_L` is several times smaller for a quenching distance
+similar to heptane's (Owston, Magi & Abraham 2007), so its `Pe_q` is larger.
+Conduction across the quenching distance, `int_Tw^Tb lambda dT / x_q`
+(Cantera's burnt-gas conductivity), predicts `phi_q` = 0.45, consistent with
+the measured 0.38 (the gas next to the wall is cooler than `T_b` at
+quenching). With 2 um cells: `x_q` = 89 um, 2.22 MW/m², `phi_q` = 0.39
+(within 1% of the 4 um run). Runs: 256k steps in 17 min (4 um) and 907k in
+62 min (2 um) on one A100, chemistry 90%.
 
 ### Performance benchmarks
 

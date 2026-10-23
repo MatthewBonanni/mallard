@@ -1,29 +1,35 @@
 # Taylor-Green vortex at Re = 1600 and M = 0.1, the DNS benchmark of the
 # International Workshop on High-Order CFD Methods (case C3.5; Brachet et al.,
-# J. Fluid Mech. 130, 1983; van Rees et al., J. Comput. Phys. 230, 2011). Needs
-# the 3D build (cmake -DMallard_DIM=3).
+# J. Fluid Mech. 130, 1983; van Rees et al., J. Comput. Phys. 230, 2011), on
+# the full periodic box. Needs the 3D build (cmake -DMallard_DIM=3).
 #
 # u = sin x cos y cos z, v = -cos x sin y cos z, w = 0 and
 # p = p0 + (cos 2x + cos 2y)(cos 2z + 2) / 16 with rho0 = V0 = L = 1, uniform
-# temperature, p0 = 1 / (gamma M^2), mu = 1 / 1600 and Pr = 0.71. The flow keeps
-# the mirror symmetries of its initial state, so only the octant [0, pi]^3 of the
-# periodic box [-pi, pi]^3 is computed, with symmetry planes on all six faces:
-# 8x fewer cells for the same resolution. TENO5 on Nx^3 hexahedra; Nx = 64 is
-# the workshop's 128^3, Nx = 128 its 256^3.
+# temperature, p0 = 1 / (gamma M^2), mu = 1 / 1600 and Pr = 0.71, in the box
+# [0, 2 pi]^3, periodic in x, y and z (the workshop's [-pi, pi]^3 shifted by
+# half a period, which changes nothing on the torus). TENO5, HLLC and SSPRK3
+# on Nx^3 hexahedra: Nx = 128 is the workshop's 128^3, Nx = 256 its 256^3.
 #
-# Run (to t = 20 in convective units L / V0):
-#   ../../build3d/src/Mallard -i input.toml
+# Run to t = 20 (convective units L / V0) on several GPUs (3D build with MPI).
+# TENO's setup runs on the host and needs about 30 KB per local cell there
+# (owned plus halo), so use enough ranks: on 4 A100s (16 host threads each),
+# Nx = 128 takes 1m 15s of setup, then 0.21 s per step:
+#   mpirun -n 4 --bind-to none ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
 #   python ../../tools/plot_taylor_green.py integrals.csv --ref spectral_Re1600_512.gdiag
+#   python ../../tools/animate_taylor_green.py solut integrals.csv tgv --ref spectral_Re1600_512.gdiag
 # with the workshop's 512^3 pseudo-spectral reference
-# (https://cfd.ku.edu/hiocfd/spectral_Re1600_512.gdiag).
+# (https://cfd.ku.edu/hiocfd/spectral_Re1600_512.gdiag). Nx = 128 is
+# 2,097,152 cells and 12,900 steps: about 45 minutes on 4 A100s (25 on 8).
 #
 # Expected result: the kinetic energy decays slowly until t ~ 4, then the
 # vortex sheets roll up and break down, and the dissipation rate
-# eps = -dE/dt peaks at t ~ 9 before turbulent decay. The reference peak is
-# 0.01286 at t = 8.97. Nx = 64 gives 0.01302 at t = 8.12: TENO's numerical
-# dissipation stands in for the unresolved scales (the enstrophy-based
-# 2 mu E_omega only reaches 0.0049), so the peak comes early. Nx = 64
-# (262,144 cells, 12,900 steps) takes about 25 minutes on one A100 GPU.
+# eps = -dE/dt peaks at t ~ 9 before turbulent decay; the reference peak is
+# 0.01286 at t = 8.97. At cfl = 0.4, Nx = 128 keeps E_k within 2.6% of the
+# DNS to t = 20 and -dE/dt peaks at 0.01161 at t = 8.39, 10% low and early;
+# the resolved viscous dissipation 2 mu E (enstrophy of TENO's polynomial
+# gradients) peaks at only 0.0072: TENO's numerical dissipation stands in for
+# the unresolved scales. Nx = 256 (65,000 steps on 14 A100s) peaks at 0.01289
+# at t = 8.83, with 2 mu E at 0.0109 and E_k within 1% of the DNS to t = 12.
 
 [run]
 t_stop = 20.0
@@ -31,42 +37,19 @@ cfl = 1.0
 
 [mesh]
 type = "cartesian"
-Nx = 64
-Ny = 64
-Nz = 64
-Lx = 3.141592653589793
-Ly = 3.141592653589793
-Lz = 3.141592653589793
+Nx = 128
+Ny = 128
+Nz = 128
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+periodic = ["x", "y", "z"]
 
 [initialize]
 type = "analytical"
 u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"]
 p = "71.42857142857143 + (cos(2 * x) + cos(2 * y)) * (cos(2 * z) + 2) / 16"
 T = "1.0"
-
-[[boundaries]]
-name = "left"
-type = "symmetry"
-
-[[boundaries]]
-name = "right"
-type = "symmetry"
-
-[[boundaries]]
-name = "bottom"
-type = "symmetry"
-
-[[boundaries]]
-name = "top"
-type = "symmetry"
-
-[[boundaries]]
-name = "back"
-type = "symmetry"
-
-[[boundaries]]
-name = "front"
-type = "symmetry"
 
 [numerics]
 riemann_solver = "HLLC"
@@ -94,12 +77,12 @@ interval = 5
 file = "integrals.csv"
 
 [[write_data]]
-prefix = "./solut/tgv"
-format = "vtu"
-time_interval = 0.1
-variables = ["U"]
-
-[[write_data]]
 prefix = "./restart/tgv"
 format = "restart"
 interval = 2000
+
+[[write_data]]
+prefix = "./solut/tgv"
+format = "vtu"
+time_interval = 0.2
+variables = ["U"]

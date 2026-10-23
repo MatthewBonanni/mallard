@@ -31,7 +31,7 @@ struct ScalarLimiterFunctor {
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *[N_DIM]> face_normals;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype *> cell_volume;
     BoundaryData boundaries;
@@ -55,15 +55,19 @@ struct ScalarLimiterFunctor {
         prescribed = false;
         if (c1 >= 0) {
             const uint8_t s = face_shift(f);
-            if (c0 == static_cast<int32_t>(c)) {
-                FOR_I_DIM dx[i] = (cell_coords(c1, i) + shifts(s, i)) - cell_coords(c, i);
-                return c1;
+            const bool from_0 = c0 == static_cast<int32_t>(c);
+            const int32_t nb = from_0 ? c1 : c0;
+            rtype x[N_DIM];
+            FOR_I_DIM x[i] = cell_coords(nb, i);
+            if (from_0) {
+                periodic.forward(s, x, dx);
+            } else {
+                periodic.backward(s, x, dx);
             }
-            FOR_I_DIM dx[i] = (cell_coords(c0, i) - shifts(s, i)) - cell_coords(c, i);
-            return c0;
+            FOR_I_DIM dx[i] = dx[i] - cell_coords(c, i);
+            return nb;
         }
-        const BoundaryType type = boundaries.bcs(boundaries.face_bc(f)).type;
-        if (type == BoundaryType::DIRICHLET || type == BoundaryType::UPT || type == BoundaryType::FARFIELD) {
+        if (boundaries.bcs(boundaries.face_bc(f)).ghost_at_face()) {
             prescribed = true;
             FOR_I_DIM dx[i] = face_coords(f, i) - cell_coords(c, i);
         } else {
@@ -82,10 +86,8 @@ struct ScalarLimiterFunctor {
     rtype neighbor_value(const uint32_t c, const uint32_t f, const int32_t nb, const bool prescribed,
                          const uint32_t j) const {
         if (nb >= 0) return scalars(nb, j);
-        if (prescribed && boundaries.bcs(boundaries.face_bc(f)).type == BoundaryType::UPT) {
-            const int32_t i_bc = boundaries.face_bc(f);
-            return j < n_species ? boundaries.bc_Y(i_bc, j) : boundaries.bc_thermo(i_bc, j - n_species);
-        }
+        rtype value;
+        if (prescribed && boundaries.prescribed_scalar(boundaries.face_bc(f), j, n_species, value)) return value;
         return scalars(c, j);
     }
 
@@ -106,16 +108,28 @@ struct ScalarLimiterFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
-        const uint32_t k_begin = offsets_faces_of_cell(c), k_end = offsets_faces_of_cell(c + 1);
+        const uint32_t k_begin = offsets_faces_of_cell(c);
+        const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(c + 1) - k_begin);
+        // Per face: the neighbor, the offset to it with its weight, and the offset to the face centroid
+        uint32_t faces[teno::MAX_FACES] = {};
+        int32_t nbs[teno::MAX_FACES] = {};
+        bool prescribed[teno::MAX_FACES] = {};
+        rtype dx[teno::MAX_FACES][N_DIM] = {}, w[teno::MAX_FACES] = {}, r[teno::MAX_FACES][N_DIM] = {};
         rtype M[N_DIM * N_DIM] = {};
-        for (uint32_t k = k_begin; k < k_end; k++) {
-            rtype dx[N_DIM];
-            bool prescribed;
-            neighbor(c, faces_of_cell(k), dx, prescribed);
-            const rtype w = 1.0_r / dot<N_DIM>(dx, dx);
+        for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
+            if (m >= n_faces) continue;
+            const uint32_t f = faces_of_cell(k_begin + m);
+            faces[m] = f;
+            nbs[m] = neighbor(c, f, dx[m], prescribed[m]);
+            w[m] = 1.0_r / dot<N_DIM>(dx[m], dx[m]);
             for (uint8_t a = 0; a < N_DIM; a++) {
-                for (uint8_t b = 0; b < N_DIM; b++) M[a * N_DIM + b] += w * dx[a] * dx[b];
+                for (uint8_t b = 0; b < N_DIM; b++) M[a * N_DIM + b] += w[m] * dx[m][a] * dx[m][b];
             }
+            const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
+            rtype x_f[N_DIM];
+            FOR_I_DIM x_f[i] = face_coords(f, i);
+            periodic.backward(s, x_f, r[m]);
+            FOR_I_DIM r[m][i] = r[m][i] - cell_coords(c, i);
         }
         rtype M_inv[N_DIM * N_DIM];
         invert_matrix<N_DIM>(M, M_inv);
@@ -131,14 +145,10 @@ struct ScalarLimiterFunctor {
             const rtype S_c = scalars(c, j);
             rtype b[N_DIM] = {};
             rtype S_min = S_c, S_max = S_c;
-            for (uint32_t k = k_begin; k < k_end; k++) {
-                const uint32_t f = faces_of_cell(k);
-                rtype dx[N_DIM];
-                bool prescribed;
-                const int32_t nb = neighbor(c, f, dx, prescribed);
-                const rtype S_n = neighbor_value(c, f, nb, prescribed, j);
-                const rtype w = 1.0_r / dot<N_DIM>(dx, dx);
-                FOR_I_DIM b[i] += w * dx[i] * (S_n - S_c);
+            for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
+                if (m >= n_faces) continue;
+                const rtype S_n = neighbor_value(c, faces[m], nbs[m], prescribed[m], j);
+                FOR_I_DIM b[i] += w[m] * dx[m][i] * (S_n - S_c);
                 S_min = Kokkos::fmin(S_min, S_n);
                 S_max = Kokkos::fmax(S_max, S_n);
             }
@@ -147,12 +157,9 @@ struct ScalarLimiterFunctor {
             FOR_I_DIM gradients(c, j, i) = g[i];
             if (limiter_type == LimiterType::NONE) continue;
             const rtype scale = j < n_species ? 1.0_r : (j == n_species ? gamma_c : e_scale);
-            for (uint32_t k = k_begin; k < k_end; k++) {
-                const uint32_t f = faces_of_cell(k);
-                const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
-                rtype r[N_DIM];
-                FOR_I_DIM r[i] = (face_coords(f, i) - shifts(s, i)) - cell_coords(c, i);
-                const rtype d = dot<N_DIM>(g, r);
+            for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
+                if (m >= n_faces) continue;
+                const rtype d = dot<N_DIM>(g, r[m]);
                 const rtype phi_f = limiter_type == LimiterType::BARTH_JESPERSEN
                                         ? barth_jespersen(d, S_max - S_c, S_min - S_c)
                                         : venkatakrishnan(d, S_max - S_c, S_min - S_c, Kh3 * scale * scale);
@@ -161,14 +168,11 @@ struct ScalarLimiterFunctor {
         }
 
         // Physical bounds at every face: 0 <= Y_k <= 1 and gamma above 1
-        for (uint32_t k = k_begin; k < k_end; k++) {
-            const uint32_t f = faces_of_cell(k);
-            const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
-            rtype r[N_DIM];
-            FOR_I_DIM r[i] = (face_coords(f, i) - shifts(s, i)) - cell_coords(c, i);
+        for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
+            if (m >= n_faces) continue;
             for (uint32_t j = 0; j <= n_species; j++) {
                 rtype d = 0.0_r;
-                FOR_I_DIM d += gradients(c, j, i) * r[i];
+                FOR_I_DIM d += gradients(c, j, i) * r[m][i];
                 const rtype S_c = scalars(c, j);
                 if (j < n_species) {
                     if (d > 0.0_r) phi = Kokkos::fmin(phi, (1.0_r - S_c) / d);
@@ -191,8 +195,9 @@ struct FaceThermoFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t f) const {
         for (uint8_t side = 0; side < 2; side++) {
-            const int32_t c = values.cells_of_face(f, side);
-            if (c < 0) continue;
+            const int32_t c_index = values.cells_of_face(f, side);
+            if (c_index < 0) continue;
+            const uint32_t c = static_cast<uint32_t>(c_index);
             rtype r[N_DIM];
             values.offset(c, f, side, r);
             face_thermo(f, 0, side, 0) = values.value(c, n_species, r);
@@ -302,7 +307,7 @@ void ScalarReconstruction::init(std::shared_ptr<Mesh> mesh_in, const BoundaryDat
 
 ScalarFaceValues ScalarReconstruction::face_values(ScalarView scalars) const {
     return ScalarFaceValues{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face, mesh->cell_coords,
-                            mesh->face_coords, mesh->shifts, mesh->face_shift, scalars, gradients, limiter};
+                            mesh->face_coords, mesh->periodic_maps(), mesh->face_shift, scalars, gradients, limiter};
 }
 
 template <uint8_t DEG>
@@ -327,8 +332,8 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
     }
     if (linear) {
         ScalarLimiterFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->shifts,
-                                     mesh->face_shift, mesh->cell_volume, boundaries, scalars, W, gradients,
+                                     mesh->cell_coords, mesh->face_coords, mesh->face_normals,
+                                     mesh->periodic_maps(), mesh->face_shift, mesh->cell_volume, boundaries, scalars, W, gradients,
                                      limiter, limiter_type, venkat_K, n_species};
         Kokkos::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
     }

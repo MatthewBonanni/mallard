@@ -1,0 +1,54 @@
+# Pre-run of examples/flame_turbulence (3D build): the turbulence of the
+# fresh gas, as a single gas with the density (0.849 kg/m^3), viscosity
+# (1.835e-5 Pa s) and ratio of specific heats (1.401) of H2/air at phi = 1,
+# 300 K and 1 atm, decaying from random phases (tools/flame_turbulence.py
+# hit) for 0.08 ms (half an eddy turnover) on the DNS mesh, so that the
+# flame meets a developed field. The run's end state is the HIT.restart of
+# tools/flame_turbulence.py init.
+
+[run]
+t_stop = 8.0e-5
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 128
+Ny = 128
+Nz = 128
+Lx = 0.004225788952895495
+Ly = 0.004225788952895495
+Lz = 0.004225788952895495
+periodic = ["x", "y", "z"]
+
+[initialize]
+type = "restart"
+file = "hit_random.restart"
+
+[numerics]
+riemann_solver = "HLLC"
+convective_flux = "hybrid"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+limiter = "none"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4008750762916216
+p_ref = 101325.0
+T_ref = 300.0
+rho_ref = 0.8494721085515865
+mu = 1.8346476839430128e-05
+Pr = 0.7
+
+[output]
+check_interval = 500
+
+[integrals]
+interval = 20
+
+[[write_data]]
+prefix = "./restart/hit"
+format = "restart"
+time_interval = 4.0e-5

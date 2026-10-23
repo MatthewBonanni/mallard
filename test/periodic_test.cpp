@@ -23,6 +23,7 @@
 #include "periodic_fixtures.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "verification.h"
 
 namespace {
 
@@ -177,11 +178,11 @@ double advection_error(const std::string & mesh, const std::string & recon, int 
     c.mesh = mesh;
     c.n = n;
     c.recon = recon;
-    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : "limiter = \"none\"\n";
+    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : recon == "MUSCL" ? "limiter = \"none\"\n" : "";
     c.integrator = "RK4";
     const double T = 0.25;
     const double h = 1.0 / n;
-    const uint32_t steps = std::ceil(T / (0.25 * std::pow(h, std::max(1.0, order / 4.0))));
+    const uint32_t steps = static_cast<uint32_t>(std::ceil(T / (0.25 * std::pow(h, std::max(1.0, order / 4.0)))));
     c.run = "t_stop = " + std::to_string(T) + "\ndt = " + std::to_string(T / steps) + "\n";
     auto wave = [](double t) {
         return [t](double x, double y, double * W) {
@@ -206,7 +207,7 @@ double advection_error(const std::string & mesh, const std::string & recon, int 
     return err;
 }
 
-using OrderParam = std::tuple<std::string, std::string>;  // mesh type, MUSCL or TENO<order>
+using OrderParam = std::tuple<std::string, std::string>;  // mesh type, FO, MUSCL or TENO<order>
 class PeriodicAdvection2D : public ::testing::TestWithParam<OrderParam> {};
 
 } // namespace
@@ -214,16 +215,16 @@ class PeriodicAdvection2D : public ::testing::TestWithParam<OrderParam> {};
 TEST_P(PeriodicAdvection2D, SmoothWaveConvergesAtDesignOrder) {
     const auto [mesh, scheme] = GetParam();
     if (scheme == "TENO6") SKIP_IN_SINGLE_PRECISION("the TENO6 error on the 32-cell mesh is at its ~3e-6 single-precision floor");
-    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : "MUSCL";
-    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : 2;
-    const double e1 = advection_error(mesh, recon, order, 16);
-    const double e2 = advection_error(mesh, recon, order, 32);
-    EXPECT_GT(std::log2(e1 / e2), order - 0.25) << e1 << " " << e2;
+    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : scheme;
+    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : recon == "MUSCL" ? 2 : 1;
+    verification::expect_order({"advection", scheme, verification::cells_of(mesh), "max density error", {16, 32},
+                                {advection_error(mesh, recon, order, 16), advection_error(mesh, recon, order, 32)},
+                                double(order), order - 0.25});
 }
 
 INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicAdvection2D,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"),
-                       ::testing::Values("MUSCL", "TENO3", "TENO4", "TENO5", "TENO6")));
+                       ::testing::Values("FO", "MUSCL", "TENO3", "TENO4", "TENO5", "TENO6")));
 
 namespace {
 
@@ -309,7 +310,7 @@ TEST(PeriodicSetup2D, TransmissiveImagesAreFoundAcrossTheSeam) {
     const rtype h = 1.0_r / n;
     std::vector<std::array<rtype, N_DIM>> nodes;
     for (uint32_t j = 0; j <= n; j++) {
-        for (uint32_t i = 0; i <= n; i++) nodes.push_back({i * h + j * h, j * h});
+        for (uint32_t i = 0; i <= n; i++) nodes.push_back({static_cast<rtype>(i) * h + static_cast<rtype>(j) * h, static_cast<rtype>(j) * h});
     }
     auto id = [&](uint32_t i, uint32_t j) { return j * (n + 1) + i; };
     std::vector<std::vector<uint32_t>> cells;

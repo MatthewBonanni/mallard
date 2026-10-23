@@ -14,13 +14,16 @@
 
 #include <array>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 #include <unordered_map>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
+#include "curved.h"
+#include "periodic_maps.h"
 #include "zone.h"
 
 enum class MeshType {
@@ -31,7 +34,8 @@ enum class MeshType {
     CARTESIAN_TET,
     CARTESIAN_PRISM,
     CARTESIAN_PYRAMID,
-    CARTESIAN_MIXED
+    CARTESIAN_MIXED,
+    ANNULUS
 };
 
 static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
@@ -42,7 +46,8 @@ static const std::unordered_map<std::string, MeshType> MESH_TYPES = {
     {"cartesian_tet", MeshType::CARTESIAN_TET},
     {"cartesian_prism", MeshType::CARTESIAN_PRISM},
     {"cartesian_pyramid", MeshType::CARTESIAN_PYRAMID},
-    {"cartesian_mixed", MeshType::CARTESIAN_MIXED}
+    {"cartesian_mixed", MeshType::CARTESIAN_MIXED},
+    {"annulus", MeshType::ANNULUS}
 };
 
 static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
@@ -53,11 +58,31 @@ static const std::unordered_map<MeshType, std::string> MESH_NAMES = {
     {MeshType::CARTESIAN_TET, "cartesian_tet"},
     {MeshType::CARTESIAN_PRISM, "cartesian_prism"},
     {MeshType::CARTESIAN_PYRAMID, "cartesian_pyramid"},
-    {MeshType::CARTESIAN_MIXED, "cartesian_mixed"}
+    {MeshType::CARTESIAN_MIXED, "cartesian_mixed"},
+    {MeshType::ANNULUS, "annulus"}
 };
 
 /** @brief Tanh stretching factor of each direction of a generated mesh, 0 for uniform spacing. */
 using Stretching = std::array<rtype, 3>;
+
+/** @brief Affine map x -> matrix x + translation applied to the nodes of a mesh file on read ([mesh.transform]). */
+struct MeshTransform {
+    std::array<std::array<double, N_DIM>, N_DIM> matrix{};
+    std::array<double, N_DIM> translation{};
+    std::string description;  // empty for the identity
+
+    MeshTransform() {
+        for (size_t i = 0; i < N_DIM; i++) matrix[i][i] = 1.0;
+    }
+    bool is_identity() const { return description.empty(); }
+    std::array<double, N_DIM> operator()(const std::array<double, N_DIM> & x) const {
+        std::array<double, N_DIM> y = translation;
+        for (size_t i = 0; i < N_DIM; i++) {
+            for (size_t j = 0; j < N_DIM; j++) y[i] += matrix[i][j] * x[j];
+        }
+        return y;
+    }
+};
 
 enum class CellType {
     TRIANGLE,
@@ -84,6 +109,18 @@ static const std::unordered_map<CellType, std::string> CELL_NAMES = {
     {CellType::PYRAMID, "pyramid"},
     {CellType::PRISM, "prism"},
     {CellType::HEXAHEDRON, "hexahedron"}
+};
+
+/**
+ * @brief The rotation of a periodic lattice: lattice direction `direction`
+ *        (-1 if no pair rotates) turns by angle (radians, right-handed) about
+ *        the axis through center along axis (the z axis in 2D).
+ */
+struct PeriodicRotation {
+    int direction = -1;
+    double angle = 0.0;
+    std::array<double, 3> center = {0.0, 0.0, 0.0};
+    std::array<double, 3> axis = {0.0, 0.0, 1.0};
 };
 
 /**
@@ -120,25 +157,30 @@ class Mesh {
 
         /**
          * @brief A periodic pair of boundary zones: zone_b is zone_a translated
-         *        by translation.
+         *        by translation, or, with a nonzero angle, zone_a rotated by
+         *        angle (radians, right-handed about axis) about the axis
+         *        through center (2D: about the point center).
          */
         struct PeriodicPair {
             std::string zone_a, zone_b;
-            std::array<rtype, N_DIM> translation;
+            std::array<rtype, N_DIM> translation{};
+            rtype angle = 0.0;
+            std::array<rtype, N_DIM> center{};
+            std::array<rtype, 3> axis = {0.0, 0.0, 1.0};
         };
 
         /**
          * @brief Initialize the mesh.
          * @param input TOML input data.
          */
-        void init(const toml::value & input);
+        void init(const Input & input);
 
         /**
          * @brief Periodic pairs from [[periodic]] entries, and for generated
          *        meshes from [mesh] periodic: left/right for x, bottom/top for
          *        y, back/front for z.
          */
-        static std::vector<PeriodicPair> periodic_pairs(const toml::value & input);
+        static std::vector<PeriodicPair> periodic_pairs(const Input & input);
 
         /**
          * @brief Get the type of mesh.
@@ -195,7 +237,7 @@ class Mesh {
          * @param i_node_local Index of the node.
          * @return Node id.
          */
-        uint32_t h_node_of_cell(uint32_t i_cell, uint8_t i_node_local) const;
+        uint32_t h_node_of_cell(uint32_t i_cell, uint32_t i_node_local) const;
 
         /**
          * @brief Get the id of the i-th face of a cell - host version.
@@ -203,7 +245,7 @@ class Mesh {
          * @param i_face_local Index of the face.
          * @return Face id.
          */
-        uint32_t h_face_of_cell(uint32_t i_cell, uint8_t i_face_local) const;
+        uint32_t h_face_of_cell(uint32_t i_cell, uint32_t i_face_local) const;
 
         /**
          * @brief Get the id of the i-th node of a face - host version.
@@ -211,7 +253,7 @@ class Mesh {
          * @param i_node_local Index of the node.
          * @return Node id.
          */
-        uint32_t h_node_of_face(uint32_t i_face, uint8_t i_node_local) const;
+        uint32_t h_node_of_face(uint32_t i_face, uint32_t i_node_local) const;
 
         /**
          * @brief Get the type of a cell.
@@ -363,24 +405,53 @@ class Mesh {
          */
         void init_from_block(const MeshBlock & block, const std::vector<PeriodicPair> & periodic = {});
 
+        /**
+         * @brief Curve the faces on the given surfaces (see curved::Geometry):
+         *        3D area vectors of the curved faces, and the volumes and
+         *        centroids of the cells touching them, on the host. Nothing
+         *        changes for empty surfaces. Collective (checks the analytic
+         *        shapes against the zones' nodes on every rank).
+         */
+        void apply_curved(const curved::Surfaces & surfaces);
+
+        /** @brief The face zones (host). */
+        const std::vector<FaceZone> & h_face_zones() const { return m_face_zones; }
+
         /** @brief Whether some zones were joined periodically. */
         bool is_periodic() const { return !periodic_translations.empty(); }
 
-        /**
-         * @brief Component i of the translation from face f's frame (that of
-         *        its cell 0) to cell c's frame: the face seen from c is at
-         *        h_face_coords(f) - h_face_offset(f, c, i).
-         */
-        rtype h_face_offset(uint32_t f, uint32_t c, int i) const {
-            return (h_cells_of_face(f, 1) == int32_t(c)) ? h_shifts(h_face_shift(f), i) : rtype(0);
+        /** @brief Whether some periodic pair rotates, so that vectors turn across it. */
+        bool is_rotational() const { return periodic_rotation.direction >= 0; }
+
+        /** @brief Whether shift row s turns vectors. */
+        bool h_rotated_row(uint8_t s) const {
+            return is_rotational() && shift_lattice[s][static_cast<size_t>(periodic_rotation.direction)] != 0;
         }
 
+        /** @brief The device maps of the shift rows. */
+        PeriodicMaps periodic_maps() const { return PeriodicMaps{shifts, shift_rotations}; }
+
+        /** @brief Host point x of the frame of cell 1 of face f seen from cell 0 (Q x + t). */
+        void h_forward(uint8_t s, const rtype * x, rtype * y) const;
+
+        /** @brief Host inverse of h_forward: Q^T (y - t). */
+        void h_backward(uint8_t s, const rtype * x, rtype * y) const;
+
         /**
-         * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5), or an ASCII Gmsh
-         *        mesh (format 2.2 or 4.1) whose named physical curves (surfaces
-         *        in 3D) become boundary zones.
+         * @brief Face f's centroid in the frame of cell c, one of its cells
+         *        (the face is stored in its cell 0's frame).
          */
-        void init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic = {});
+        std::array<rtype, N_DIM> h_face_point(uint32_t f, uint32_t c) const;
+
+        /** @brief Face f's (area-weighted, out of cell 0) normal in the frame of cell c, one of its cells. */
+        std::array<rtype, N_DIM> h_face_normal(uint32_t f, uint32_t c) const;
+
+        /**
+         * @brief Read a Mallard HDF5 mesh file (.h5, .hdf5) or another mesh
+         *        file (see read_mesh_file), and map its nodes by transform.
+         */
+        void init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic = {},
+                       const MeshTransform & transform = MeshTransform());
 
         /**
          * @brief Initialize the supersonic wedge mesh.
@@ -402,6 +473,10 @@ class Mesh {
         }
 
         uint32_t n_cells, n_nodes, n_faces;
+        // High-order boundary elements of the mesh file (global node ids), for curved::surfaces_of_mesh
+        std::vector<curved::SurfaceFace> high_order_faces;
+        // Curved geometry, or null for straight-sided meshes; it refers to this mesh
+        std::shared_ptr<const curved::Geometry> curved_geometry;
         // Cells [0, n_owned()) are owned by this rank; the rest are halo cells
         uint32_t n_owned_cells = 0;
         uint32_t n_owned() const { return n_owned_cells ? n_owned_cells : n_cells; }
@@ -443,10 +518,13 @@ class Mesh {
         Kokkos::View<int32_t *[2]> cells_of_face;
         Kokkos::View<uint32_t *> cells_of_cell;            // Vertex neighbors (CSR)
         Kokkos::View<uint32_t *> offsets_cells_of_cell;
-        // Periodic translations: row 0 of shifts is zero. Cell 1 of face f, seen
-        // from cell 0, is at cell_coords(c1) + shifts(face_shift(f)); vertex
-        // neighbor k of a cell is at cell_coords(cells_of_cell(k)) + shifts(cells_of_cell_shift(k))
+        // Periodic maps: row 0 is the identity. Cell 1 of face f, seen from
+        // cell 0, is at Q cell_coords(c1) + shifts(face_shift(f)); vertex
+        // neighbor k of a cell is at Q cell_coords(cells_of_cell(k)) +
+        // shifts(cells_of_cell_shift(k)), with Q that row of shift_rotations
+        // (empty, and Q the identity, without rotational pairs)
         Kokkos::View<rtype *[N_DIM]> shifts;
+        Kokkos::View<rtype *[N_DIM][N_DIM]> shift_rotations;
         Kokkos::View<uint8_t *> face_shift;
         Kokkos::View<uint8_t *> cells_of_cell_shift;
 
@@ -466,14 +544,17 @@ class Mesh {
         Kokkos::View<uint32_t *>::host_mirror_type h_cells_of_cell;
         Kokkos::View<uint32_t *>::host_mirror_type h_offsets_cells_of_cell;
         Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_shifts;
+        Kokkos::View<rtype *[N_DIM][N_DIM]>::host_mirror_type h_shift_rotations;
         Kokkos::View<uint8_t *>::host_mirror_type h_face_shift;
         Kokkos::View<uint8_t *>::host_mirror_type h_cells_of_cell_shift;
 
-        // Periodicity (host): the translation of each periodic pair, the zones
-        // the pairs joined, and per node its key (the lowest node id of its
-        // periodic class) and lattice offset, x_n = x_key + sum_j L_j T_j
-        // (empty for meshes without periodic pairs)
+        // Periodicity (host): the translation of each lattice direction (zero
+        // for the rotation's), the rotation, the zones the pairs joined, and
+        // per node its key (the lowest node id of its periodic class) and
+        // lattice offset L, x_n = M(L) x_key with M the composed rigid maps
+        // (see periodic_lattice_map; empty for meshes without periodic pairs)
         std::vector<std::array<rtype, N_DIM>> periodic_translations;
+        PeriodicRotation periodic_rotation;
         std::vector<std::string> periodic_zones;
         std::vector<uint32_t> h_node_key;
         std::vector<std::array<int8_t, 3>> h_node_lattice;

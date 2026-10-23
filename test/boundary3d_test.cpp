@@ -23,11 +23,11 @@
 
 namespace {
 
-constexpr rtype GAMMA = 1.4;
-constexpr rtype R_GAS = 1.0 / 1.4;
+constexpr rtype GAMMA = 1.4_r;
+constexpr rtype R_GAS = 1.0_r / 1.4_r;
 
-const rtype N[3] = {2.0 / 7.0, 3.0 / 7.0, 6.0 / 7.0};
-const rtype W_I[N_CONSERVATIVE] = {1.2, 0.3, -0.5, 0.4, 0.9};
+const rtype N[3] = {2.0_r / 7.0_r, 3.0_r / 7.0_r, 6.0_r / 7.0_r};
+const rtype W_I[N_CONSERVATIVE] = {1.2_r, 0.3_r, -0.5_r, 0.4_r, 0.9_r};
 
 Euler gas() {
     return Euler::from_reference(GAMMA, 1.0_r, 1.0_r / R_GAS, 1.0_r);
@@ -68,7 +68,7 @@ TEST(Boundary3DTest, InviscidWallIsASlipWall) {
 
 TEST(Boundary3DTest, NoSlipMovingWallAveragesToTheWallVelocity) {
     BoundaryCondition bc = parse("type = \"wall_adiabatic\"\nu = [0.2, -0.1, 0.7]\n");
-    const rtype u_wall[3] = {0.2, -0.1, 0.7};
+    const rtype u_wall[3] = {0.2_r, -0.1_r, 0.7_r};
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, true, W_g);
     FOR_I_DIM EXPECT_NEAR(0.5_r * (W_g[1 + i] + W_I[1 + i]), u_wall[i], roundoff(1e-14));
@@ -112,7 +112,7 @@ TEST(Boundary3DTest, PressureOutletImposesSubsonicBackPressureAtFixedTemperature
     BoundaryCondition bc = parse("type = \"p_out\"\np = 0.6\n");
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, false, W_g);
-    EXPECT_RTYPE_EQ(W_g[4], 0.6);
+    EXPECT_RTYPE_EQ(W_g[4], 0.6_r);
     EXPECT_NEAR(W_g[4] / W_g[0], W_I[4] / W_I[0], 1e-14);
     FOR_I_DIM EXPECT_RTYPE_EQ(W_g[1 + i], W_I[1 + i]);
 }
@@ -133,10 +133,10 @@ TEST(Boundary3DTest, FarfieldSupersonicInflowAndOutflow) {
 TEST(Boundary3DTest, FarfieldSubsonicStateKeepsRiemannInvariantsAndUpwindTangentialVelocity) {
     BoundaryCondition bc = parse("type = \"farfield\"\nu = [0.3, -0.2, 0.1]\np = 1.0\nT = 1.0\n");
     const rtype * W_inf = bc.data;
-    for (const rtype sign : {1.0, -1.0}) {
+    for (const rtype sign : {1.0_r, -1.0_r}) {
         // Subsonic outflow (sign = 1) and inflow (sign = -1) through n
-        rtype W_i[N_CONSERVATIVE] = {1.3, 0.0, 0.0, 0.0, 1.05};
-        const rtype tang[3] = {3.0 / 7.0, -6.0 / 7.0, 2.0 / 7.0};
+        rtype W_i[N_CONSERVATIVE] = {1.3_r, 0.0_r, 0.0_r, 0.0_r, 1.05_r};
+        const rtype tang[3] = {3.0_r / 7.0_r, -6.0_r / 7.0_r, 2.0_r / 7.0_r};
         for (int d = 0; d < 3; d++) W_i[1 + d] = sign * 0.6_r * N[d] + 0.25_r * tang[d];
         rtype W_g[N_CONSERVATIVE];
         bc.ghost_W(W_i, N, GAMMA, R_GAS, false, W_g);
@@ -203,7 +203,7 @@ TEST(Boundary3DTest, TransmissiveImageFaceIsTheOppositeFaceOfAHexCell) {
     auto h_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image);
     auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
     auto h_side = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_side);
-    const rtype h[3] = {0.5, 0.25, 0.4};
+    const rtype h[3] = {0.5_r, 0.25_r, 0.4_r};
     uint32_t n_boundary = 0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         if (mesh->h_cells_of_face(f, 1) >= 0) continue;
@@ -235,13 +235,15 @@ TEST(Boundary3DTest, CharacteristicNeighborsContinueAcrossPeriodicSeams) {
     auto h_dx = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_neighbor_dx);
     ASSERT_EQ(h_faces.extent(0), 2u * 4 * 5);
     for (uint32_t k = 0; k < h_faces.extent(0); k++) {
-        // Every face of the x planes has its 8 neighbors of the periodic 4 x 5 lattice, one spacing away
-        EXPECT_EQ(h_offsets(k + 1) - h_offsets(k), 8u) << "face " << h_faces(k);
+        // Every face of the x planes has the 4 neighbors sharing an edge in the periodic 4 x 5 lattice, one
+        // spacing away along y or z
+        EXPECT_EQ(h_offsets(k + 1) - h_offsets(k), 4u) << "face " << h_faces(k);
         for (uint32_t j = h_offsets(k); j < h_offsets(k + 1); j++) {
-            EXPECT_NEAR(std::abs(double(h_dx(j, 1))), 0.25 * std::round(std::abs(double(h_dx(j, 1))) / 0.25), double(precision_tol(1e-12, 1e-5)));
-            EXPECT_LE(std::abs(double(h_dx(j, 1))), 0.25 + double(precision_tol(1e-12, 1e-5)));
-            EXPECT_LE(std::abs(double(h_dx(j, 2))), 0.4 + double(precision_tol(1e-12, 1e-5)));
-            EXPECT_NEAR(double(h_dx(j, 0)), 0.0, double(precision_tol(1e-12, 1e-5)));
+            const double dy = std::abs(double(h_dx(j, 1))), dz = std::abs(double(h_dx(j, 2)));
+            const double tol = double(precision_tol(1e-12, 1e-5));
+            EXPECT_TRUE((std::abs(dy - 0.25) < tol && dz < tol) || (dy < tol && std::abs(dz - 0.4) < tol))
+                << "face " << h_faces(k) << ": " << dy << ", " << dz;
+            EXPECT_NEAR(double(h_dx(j, 0)), 0.0, tol);
         }
     }
 }
@@ -254,7 +256,7 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
         uint32_t n_moved = 0;
         for (uint32_t f = 0; f < mesh->n_faces; f++) {
             if (mesh->h_cells_of_face(f, 1) >= 0) continue;
-            const int32_t c = mesh->h_cells_of_face(f, 0);
+            const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(f, 0));
             rtype n_in[3], depth = 0.0;
             for (int k = 0; k < 3; k++) n_in[k] = -mesh->h_face_normals(f, k) / mesh->h_face_area(f);
             for (uint32_t j = 0; j < mesh->h_n_nodes_of_cell(c); j++) {
@@ -263,13 +265,14 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
                 for (int k = 0; k < 3; k++) d += (mesh->h_node_coords(node, k) - mesh->h_face_coords(f, k)) * n_in[k];
                 depth = std::max(depth, d);
             }
-            const int32_t img = h_image(f);
-            ASSERT_GE(img, 0) << type;
+            const int32_t img_index = h_image(f);
+            ASSERT_GE(img_index, 0) << type;
+            const uint32_t img = static_cast<uint32_t>(img_index);
             if (img != c) n_moved++;
             // The image point, 3/4 of the boundary cell's depth inward, is inside the image cell
             for (int k = 0; k < 3; k++) {
                 const rtype p = mesh->h_face_coords(f, k) + 0.75_r * depth * n_in[k];
-                rtype lo = 1e30, hi = -1e30;
+                rtype lo = 1e30_r, hi = -1e30_r;
                 for (uint32_t j = 0; j < mesh->h_n_nodes_of_cell(img); j++) {
                     lo = std::min(lo, mesh->h_node_coords(mesh->h_node_of_cell(img, j), k));
                     hi = std::max(hi, mesh->h_node_coords(mesh->h_node_of_cell(img, j), k));
@@ -332,4 +335,46 @@ TEST(Boundary3DTest, CharacteristicOutletLetsAPlaneWaveLeave) {
                   0.03);
         EXPECT_GT(reflection_3d(mesh, "type = \"p_out\"\np = 0.7142857142857143\n"), 0.9);
     }
+}
+
+TEST(Boundary3DTest, CharacteristicOutletSurvivesEddiesThatReverseTheFlow) {
+    // Eddies four times faster than the mean flow cross the outlet with local
+    // backflow, in a box with symmetry sides. The transverse terms, fitted over
+    // corner neighbors and applied at edges and on reversed faces, drove the
+    // outlet's incoming waves away until the run diverged (t = 9.8).
+    const std::string p0 = "0.7142857142857143";
+    const std::string k = "6.283185307179586", k2 = "12.566370614359172";
+    const std::string u = "0.2 + 0.8 * sin(" + k + " * x) * cos(" + k + " * y + 0.3) * cos(" + k +
+                          " * z + 0.7) + 0.4 * sin(" + k2 + " * y + 1.1) * cos(" + k2 + " * z)";
+    const std::string v = "-0.8 * cos(" + k + " * x) * sin(" + k + " * y + 0.3) * cos(" + k +
+                          " * z + 0.7) + 0.4 * sin(" + k2 + " * z + 0.4) * cos(" + k2 + " * x)";
+    const std::string w = "0.4 * sin(" + k2 + " * x + 2.0) * cos(" + k2 + " * y + 1.1)";
+    std::string input = "[run]\nt_stop = 12.0\ncfl = 0.4\n[mesh]\ntype = \"cartesian\"\nNx = 24\nNy = 12\nNz = 12\n"
+                        "Lx = 2.0\nLy = 1.0\nLz = 1.0\n[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
+                        "u = [\"" + u + "\", \"" + v + "\", \"" + w + "\"]\np = \"" + p0 + "\"\n"
+                        "[[boundaries]]\nname = \"left\"\ntype = \"nscbc_inlet\"\nu = [0.2, 0.0, 0.0]\np = " + p0 +
+                        "\nT = " + p0 + "\nL = 1.0\n"
+                        "[[boundaries]]\nname = \"right\"\ntype = \"nscbc_outlet\"\np = " + p0 + "\nL = 12.0\n";
+    for (const char * side : {"bottom", "top", "back", "front"}) {
+        input += std::string("[[boundaries]]\nname = \"") + side + "\"\ntype = \"symmetry\"\n";
+    }
+    input += "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
+             "[numerics.face_reconstruction]\ntype = \"MUSCL\"\nlimiter = \"none\"\n"
+             "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = " + p0 + "\nT_ref = " + p0 +
+             "\nrho_ref = 1.0\nmu = 2e-4\nPr = 0.72\n[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(input));
+    ASSERT_NO_THROW(solver.run());
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    double max_speed = 0.0, max_dp = 0.0;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        double speed2 = 0.0;
+        for (int i = 0; i < N_DIM; i++) speed2 += std::pow(double(solver.h_primitives(c, i)), 2);
+        max_speed = std::max(max_speed, std::sqrt(speed2));
+        max_dp = std::max(max_dp, std::abs(double(solver.h_primitives(c, N_DIM)) - 1.0 / 1.4));
+    }
+    // Bounded: the inflow is 0.2, and the weakly held mean pressure (L = 12) is still settling
+    EXPECT_LT(max_speed, 0.6);
+    EXPECT_LT(max_dp, 0.15);
 }

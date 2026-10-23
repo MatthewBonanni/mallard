@@ -13,7 +13,7 @@
 
 #include <algorithm>
 
-void Solver::init_inlets(const std::vector<toml::value> & input_boundaries,
+void Solver::init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets) {
     inflows.clear();
     t_inflow = -1.0;
@@ -21,8 +21,8 @@ void Solver::init_inlets(const std::vector<toml::value> & input_boundaries,
     auto h_target = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.char_target);
     bool profiled = false;
     for (const auto & [i_bc, faces] : inlets) {
-        const toml::value & bound = input_boundaries[i_bc];
-        const std::string name = toml::find<std::string>(bound, "name");
+        const Input & bound = input_boundaries[i_bc];
+        const std::string name = find_value<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         const InletProfile profile(bound, where);
         std::vector<int32_t> chars;
@@ -30,9 +30,9 @@ void Solver::init_inlets(const std::vector<toml::value> & input_boundaries,
         if (!profile.uniform()) {
             for (size_t i = 0; i < faces.size(); i++) {
                 Point x;
-                for (int d = 0; d < N_DIM; d++) x[d] = double(mesh->h_face_coords(faces[i], d));
+                for (size_t d = 0; d < N_DIM; d++) x[d] = double(mesh->h_face_coords(faces[i], d));
                 const std::array<double, N_DIM> u = profile.velocity(x);
-                for (int d = 0; d < N_DIM; d++) h_target(chars[i], d) = static_cast<rtype>(u[d]);
+                for (size_t d = 0; d < N_DIM; d++) h_target(chars[i], d) = static_cast<rtype>(u[d]);
             }
             profiled = true;
         }

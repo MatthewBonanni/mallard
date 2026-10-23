@@ -29,6 +29,7 @@
 #include "data_writer.h"
 #include "hdf5_output.h"
 #include "mesh_block.h"
+#include "scratch.h"
 
 namespace {
 
@@ -255,7 +256,7 @@ struct CellFields {
         : values(Kokkos::create_mirror_view(Kokkos::View<rtype **>("values", n_cells, names.size()))) {
         for (size_t v = 0; v < names.size(); v++) {
             data.push_back(Data(names[v], Kokkos::subview(values, Kokkos::ALL(), v)));
-            for (uint32_t c = 0; c < n_cells; c++) values(c, v) = 100.0 * v + c;
+            for (uint32_t c = 0; c < n_cells; c++) values(c, v) = static_cast<rtype>(100.0 * static_cast<double>(v) + c);
         }
     }
 };
@@ -276,20 +277,30 @@ TEST(IO3DTest, ReadsGmsh41MixedMesh) {
     check_mixed_mesh(write_temp("mallard_mixed3d_41.msh", MSH41));
 }
 
-TEST(IO3DTest, HigherOrderElementsAreRejected) {
-    // A 10-node tetrahedron (type 11) in place of the linear one
+TEST(IO3DTest, HigherOrderCellsKeepTheirCornersAndUnsupportedOrdersAreRejected) {
+    // A 10-node tetrahedron (type 11) in place of the linear one: its corners
+    // make the same mesh (curved walls come from high-order boundary faces)
     std::string msh = MSH22;
-    msh.replace(msh.find("21 4 2 4 1 5 8 9 12"), 19, "21 11 2 4 1 5 8 9 12 1 2 3 4 6 7 10");
+    const std::string linear = "21 4 2 4 1 5 8 9 12";
+    msh.replace(msh.find(linear), linear.size(), "21 11 2 4 1 5 8 9 12 1 2 3 4 6 7 10");
+    Mesh quadratic, reference;
+    quadratic.init_file(write_temp("mallard_tet10.msh", msh));
+    reference.init_file(write_temp("mallard_tet4.msh", MSH22));
+    EXPECT_EQ(quadratic.n_cells, reference.n_cells);
+    EXPECT_EQ(quadratic.n_faces, reference.n_faces);
+    // A 35-node (quartic) tetrahedron is not supported
+    msh = MSH22;
+    msh.replace(msh.find(linear), linear.size(), "21 30 2 4 1 5 8 9 12");
     try {
-        Mesh().init_file(write_temp("mallard_tet10.msh", msh));
-        ADD_FAILURE() << "a 10-node tetrahedron was accepted";
+        Mesh().init_file(write_temp("mallard_tet35.msh", msh));
+        ADD_FAILURE() << "a 35-node tetrahedron was accepted";
     } catch (const std::runtime_error & e) {
-        EXPECT_NE(std::string(e.what()).find("element type 11"), std::string::npos) << e.what();
+        EXPECT_NE(std::string(e.what()).find("element type 30"), std::string::npos) << e.what();
     }
 }
 
 TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_vtu3d").string();
+    const std::string dir = (scratch_dir() / "mallard_vtu3d").string();
     std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
@@ -322,9 +333,9 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
     std::map<uint8_t, int> n_of_type;
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         const int64_t start = c == 0 ? 0 : offsets[c - 1];
-        const uint32_t n = offsets[c] - start;
+        const uint32_t n = static_cast<uint32_t>(offsets[c] - start);
         n_of_type[types[c]]++;
-        auto x = [&](int k, int d) { return static_cast<double>(points[3 * connectivity[start + k] + d]); };
+        auto x = [&](int k, int d) { return static_cast<double>(points[static_cast<size_t>(3 * connectivity[static_cast<size_t>(start + k)] + d)]); };
         for (const auto & conv : conventions) {
             if (conv.n_nodes != n) continue;
             EXPECT_EQ(types[c], conv.type);
@@ -336,8 +347,8 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
                 e1[d] = x(b[tri ? 1 : 2], d) - x(b[0], d);
                 e2[d] = x(b[tri ? 2 : 3], d) - x(b[tri ? 0 : 1], d);
                 double base_center = 0.0, opposite_center = 0.0;
-                for (int k : b) base_center += x(k, d) / b.size();
-                for (int k : conv.opposite) opposite_center += x(k, d) / conv.opposite.size();
+                for (int k : b) base_center += x(k, d) / static_cast<double>(b.size());
+                for (int k : conv.opposite) opposite_center += x(k, d) / static_cast<double>(conv.opposite.size());
                 to_opposite[d] = opposite_center - base_center;
             }
             for (int d = 0; d < 3; d++) normal[d] = e1[(d + 1) % 3] * e2[(d + 2) % 3] - e1[(d + 2) % 3] * e2[(d + 1) % 3];
@@ -360,7 +371,7 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
 TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
 #ifdef Mallard_HAS_HDF5
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_h5_3d").string();
+    const std::string dir = (scratch_dir() / "mallard_h5_3d").string();
     std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
@@ -390,8 +401,8 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     EXPECT_EQ(starts.back(), int64_t(topology.size()));
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         const int64_t begin = c == 0 ? 0 : offsets[c - 1];
-        ASSERT_TRUE(vtk_of_xdmf.count(topology[starts[c]])) << topology[starts[c]];
-        EXPECT_EQ(vtk_of_xdmf.at(topology[starts[c]]), types[c]);
+        ASSERT_TRUE(vtk_of_xdmf.count(topology[static_cast<size_t>(starts[c])])) << topology[static_cast<size_t>(starts[c])];
+        EXPECT_EQ(vtk_of_xdmf.at(topology[static_cast<size_t>(starts[c])]), types[c]);
         const std::vector<int64_t> nodes(topology.begin() + starts[c] + 1, topology.begin() + starts[c + 1]);
         EXPECT_EQ(nodes, std::vector<int64_t>(connectivity.begin() + begin, connectivity.begin() + offsets[c]));
     }
@@ -406,7 +417,7 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
 }
 
 TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_vtu3d_faces").string();
+    const std::string dir = (scratch_dir() / "mallard_vtu3d_faces").string();
     std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO"});
@@ -440,7 +451,7 @@ TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
 }
 
 TEST(IO3DTest, RestartRoundTripCarriesAllConservatives) {
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_restart3d").string();
+    const std::string dir = (scratch_dir() / "mallard_restart3d").string();
     std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());

@@ -16,9 +16,11 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <iomanip>
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "exact_riemann.h"
 #include "input.h"
 #include "les.h"
@@ -33,8 +35,8 @@ const SGSModel MODELS[] = {SGSModel::SMAGORINSKY, SGSModel::WALE, SGSModel::VREM
 
 double D(const SGSModel model, const Gradient & g) {
     double a[3][3];
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) a[i][j] = g[i][j];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) a[i][j] = g[i][j];
     }
     return LES::operator_of(model, a);
 }
@@ -43,9 +45,9 @@ Gradient zero() { return Gradient{}; }
 
 Gradient matmul(const Gradient & a, const Gradient & b) {
     Gradient c{};
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            for (int k = 0; k < 3; k++) c[i][j] += a[i][k] * b[k][j];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) {
+            for (size_t k = 0; k < 3; k++) c[i][j] += a[i][k] * b[k][j];
         }
     }
     return c;
@@ -53,8 +55,8 @@ Gradient matmul(const Gradient & a, const Gradient & b) {
 
 Gradient transpose(const Gradient & a) {
     Gradient t{};
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) t[i][j] = a[j][i];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) t[i][j] = a[j][i];
     }
     return t;
 }
@@ -63,9 +65,9 @@ const Gradient GENERIC = {{{-0.7819, -0.2572, 0.0081}, {-0.2756, 1.2941, 1.0067}
 
 /** @brief Eigenvalues of a symmetric 3x3 matrix by cyclic Jacobi rotations, descending. */
 std::array<double, 3> jacobi_eigenvalues(Gradient a) {
-    for (int sweep = 0; sweep < 50; sweep++) {
-        for (int p = 0; p < 2; p++) {
-            for (int q = p + 1; q < 3; q++) {
+    for (size_t sweep = 0; sweep < 50; sweep++) {
+        for (size_t p = 0; p < 2; p++) {
+            for (size_t q = p + 1; q < 3; q++) {
                 if (std::abs(a[p][q]) < 1e-300) continue;
                 const double theta = 0.5 * std::atan2(2.0 * a[p][q], a[q][q] - a[p][p]);
                 const double c = std::cos(theta), s = std::sin(theta);
@@ -110,10 +112,10 @@ TEST(LESModels, SolidRotationHasNoEddyViscosityForSigmaAndSmagorinskyOnly) {
 
 TEST(LESModels, SigmaVanishesForExpansionsAndTwoComponentFlows) {
     Gradient isotropic = zero(), axisymmetric = zero(), planar = GENERIC;
-    for (int i = 0; i < 3; i++) isotropic[i][i] = 1.5;
+    for (size_t i = 0; i < 3; i++) isotropic[i][i] = 1.5;
     axisymmetric[0][0] = axisymmetric[1][1] = -0.8;
     axisymmetric[2][2] = 1.6;
-    for (int i = 0; i < 3; i++) planar[2][i] = planar[i][2] = 0.0;
+    for (size_t i = 0; i < 3; i++) planar[2][i] = planar[i][2] = 0.0;
     const double scale = D(SGSModel::SMAGORINSKY, GENERIC);
     EXPECT_LT(D(SGSModel::SIGMA, isotropic), 1e-12 * scale);
     EXPECT_LT(D(SGSModel::SIGMA, planar), 1e-12 * scale);
@@ -146,8 +148,8 @@ TEST(LESModels, EddyViscosityIsRotationAndFrameInvariant) {
     const double axis[3] = {0.48, -0.64, 0.6}, angle = 1.1;
     Gradient K = {{{0, -axis[2], axis[1]}, {axis[2], 0, -axis[0]}, {-axis[1], axis[0], 0}}};
     Gradient R = matmul(K, K);
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) R[i][j] = (i == j) + std::sin(angle) * K[i][j] + (1 - std::cos(angle)) * R[i][j];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) R[i][j] = (i == j) + std::sin(angle) * K[i][j] + (1 - std::cos(angle)) * R[i][j];
     }
     const Gradient rotated = matmul(R, matmul(GENERIC, transpose(R)));
     for (const SGSModel model : MODELS) {
@@ -157,8 +159,8 @@ TEST(LESModels, EddyViscosityIsRotationAndFrameInvariant) {
 
 TEST(LESModels, EddyViscosityScalesWithTheConstantGradientAndFilterWidth) {
     double g[3][3], g2[3][3];
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) {
             g[i][j] = GENERIC[i][j];
             g2[i][j] = 2.0 * GENERIC[i][j];
         }
@@ -184,8 +186,8 @@ TEST(LESModels, NearWallEddyViscosityGrowsAsTheCubeOfTheWallDistanceForWALEAndSi
     G0[2][1] = -0.7;
     auto at = [&](double y) {
         Gradient g;
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) g[i][j] = G0[i][j] + y * G1[i][j] + y * y * G2[i][j];
+        for (size_t i = 0; i < 3; i++) {
+            for (size_t j = 0; j < 3; j++) g[i][j] = G0[i][j] + y * G1[i][j] + y * y * G2[i][j];
         }
         return g;
     };
@@ -245,8 +247,8 @@ Gradient box_gradient(const double * x) {
 /** @brief tau : grad u / mu for the deviatoric stress tau = mu (g + g^T - 2/3 div I). */
 double dissipation_per_viscosity(const Gradient & g) {
     double div = g[0][0] + g[1][1] + g[2][2], sum = 0.0;
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) sum += (g[i][j] + g[j][i] - (i == j ? 2.0 / 3.0 * div : 0.0)) * g[i][j];
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) sum += (g[i][j] + g[j][i] - (i == j ? 2.0 / 3.0 * div : 0.0)) * g[i][j];
     }
     return sum;
 }
@@ -286,7 +288,7 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
                      : "u = [\"0.3 * x - 0.7 * y\", \"0.9 * x + 0.1 * y\"]\n")
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1e-3\n"
-      << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"wale\"\nC = 0.4\nPr_t = 0.6\n";
+      << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"wale\"\nC = 0.4\nPr_t = 0.6\nfilter_width = \"volume\"\n";
     for (const char * side : {"left", "right", "bottom", "top", "back", "front"}) {
         if (N_DIM == 2 && (std::string(side) == "back" || std::string(side) == "front")) continue;
         s << "[[boundaries]]\nname = \"" << side << "\"\ntype = \"extrapolation\"\n";
@@ -314,6 +316,100 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
         checked++;
     }
     EXPECT_GT(checked, 10u);
+}
+
+TEST(LESModels, ScottiFactorOfTheAspectRatios) {
+    // Scotti, Meneveau & Lilly (1993): 1 for cubes, about 1.2 and 1.4 for aspect ratios 5 and 10
+    EXPECT_DOUBLE_EQ(LES::scotti_factor(1.0, 1.0, 1.0), 1.0);
+    EXPECT_NEAR(LES::scotti_factor(1.0, 1.0, 5.0), 1.198, 1e-3);
+    EXPECT_NEAR(LES::scotti_factor(1.0, 1.0, 10.0), 1.420, 1e-3);
+    // Only the ratios count
+    EXPECT_DOUBLE_EQ(LES::scotti_factor(0.2, 0.5, 2.0), LES::scotti_factor(1.0, 2.5, 10.0));
+}
+
+#if Mallard_DIM == 3
+
+TEST(LESSolver, ScottiWidthUsesTheExtentsOfEachCell) {
+    // Boxes of 0.1 x 0.02 x 0.05 and a linear velocity: the eddy viscosity grows by the factor squared of
+    // the extents' ratios (0.2, 0.5), against the volume width
+    auto input = [](const std::string & width) {
+        std::ostringstream s;
+        s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 20\nNz = 10\n"
+          << "Lx = 0.8\nLy = 0.4\nLz = 0.5\nperiodic = [\"x\", \"y\", \"z\"]\n"
+          << "[initialize]\ntype = \"analytical\"\nrho = \"2.0\"\np = \"10.0\"\n"
+          << "u = [\"0.4 * sin(7.853981633974483 * y)\", \"0.3 * sin(12.566370614359172 * z)\", "
+             "\"0.2 * sin(7.853981633974483 * x)\"]\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+          << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1e-3\n"
+          << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"vreman\"\n" << width;
+        return make_solver(s.str());
+    };
+    auto volume = input("filter_width = \"volume\"\n");
+    auto scotti = input("filter_width = \"scotti\"\n");
+    volume->copy_device_to_host();
+    scotti->copy_device_to_host();
+    const double f = LES::scotti_factor(0.02, 0.05, 0.1);
+    EXPECT_GT(f, 1.1);
+    const auto & a = volume->get_les_coefficients();
+    const auto & b = scotti->get_les_coefficients();
+    uint32_t checked = 0;
+    for (uint32_t c = 0; c < volume->get_mesh()->n_owned(); c++) {
+        if (double(a(c, 0)) < 1e-12) continue;
+        EXPECT_NEAR(double(b(c, 0)), f * f * double(a(c, 0)), precision_tol<double>(1e-12, 1e-5) * f * f * double(a(c, 0)) + 1e-300) << "cell " << c;
+        checked++;
+    }
+    EXPECT_GT(checked, 100u);
+}
+
+#endif
+
+namespace {
+
+/** @brief <L:M> / <M:M> of the dynamic procedure after one step of a periodic box of side length with velocity scale u0 plus u_shift. */
+double dynamic_constant(const std::string & model, double length, double u0, double u_shift) {
+    std::ostringstream s;
+    const double k = 6.283185307179586 / length;
+    // Modulated plane waves (sums of plain plane waves give <L:M> = 0 exactly), arbitrary phases per component
+    const int waves[4][3] = {{1, 2, 0}, {0, 1, 3}, {2, -1, 1}, {3, 1, -2}};
+    auto component = [&](int i) {
+        std::ostringstream m;
+        m << std::setprecision(17) << u_shift;
+        for (int w = 0; w < 4; w++) {
+            m << " + " << u0 * (1.0 + 0.3 * i - 0.2 * w) << " * sin(" << k << " * (" << waves[w][0] << " * x + "
+              << waves[w][1] << " * y" << (N_DIM == 3 ? " + " + std::to_string(waves[w][2]) + " * z" : std::string())
+              << ") + " << 0.7 * i + 1.3 * w << ") * (1.2 + cos(" << k << " * (x - 2 * y) + " << w << "))";
+        }
+        return m.str();
+    };
+    s << std::setprecision(17) << "[run]\nn_steps = 1\ncfl = 0.1\n[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\n"
+      << "Lx = " << length << "\nLy = " << length << "\n"
+      << (N_DIM == 3 ? "Nz = 12\nLz = " + std::to_string(length) + "\nperiodic = [\"x\", \"y\", \"z\"]\n"
+                     : std::string("periodic = [\"x\", \"y\"]\n"))
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"100.0\"\n";
+    if constexpr (N_DIM == 3) {
+        s << "u = [\"" << component(0) << "\", \"" << component(1) << "\", \"" << component(2) << "\"]\n";
+    } else {
+        s << "u = [\"" << component(0) << "\", \"" << component(1) << "\"]\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1e-6\n"
+      << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"" << model << "\"\ndynamic = true\n";
+    auto solver = make_solver(s.str());
+    solver->run();
+    return solver->les_dynamic_ratio();
+}
+
+} // namespace
+
+TEST(LESSolver, DynamicConstantIsGalileanAndScaleInvariant) {
+    // L, M and so C depend on velocity differences only, and C^2 = <L:M> / <M:M> is dimensionless: a
+    // missing Delta^2, a test-filter width in the wrong units or a non-central L would break these
+    const std::string model = N_DIM == 3 ? "sigma" : "wale";
+    const double c = dynamic_constant(model, 1.0, 1.0, 0.0);
+    EXPECT_GT(std::abs(c), 1e-3);
+    EXPECT_NEAR(dynamic_constant(model, 1.0, 1.0, 0.7), c, precision_tol<double>(1e-6, 2e-2) * std::abs(c));
+    EXPECT_NEAR(dynamic_constant(model, 10.0, 1.0, 0.0), c, precision_tol<double>(1e-6, 2e-2) * std::abs(c));
+    EXPECT_NEAR(dynamic_constant(model, 1.0, 5.0, 0.0), c, precision_tol<double>(1e-6, 2e-2) * std::abs(c)) << c;
 }
 
 TEST(LESSolver, BudgetSplitsTheKineticEnergyRateOfTheRightHandSide) {
@@ -454,7 +550,7 @@ std::string mixture_box(const std::string & les, const std::string & composition
       << (N_DIM == 3 ? ", \"10 * cos(628.3185307179586 * (x + y))\"]\n" : "]\n")
       << composition
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
-      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
       << "[output]\ncheck_interval = 1000000\n" << les;
     return s.str();
 }
@@ -492,7 +588,7 @@ TEST(LESMixture, SchmidtNumberActsOnCompositionGradientsOnly) {
     auto low_s = run("[les]\n" + model + "Sc_t = 0.3\n", STRATIFIED);
     auto high_s = run("[les]\n" + model + "Sc_t = 3.0\n", STRATIFIED);
     double species_effect = 0.0;
-    const uint32_t ns = low_s->get_species_names().size();
+    const uint32_t ns = static_cast<uint32_t>(low_s->get_species_names().size());
     for (uint32_t c = 0; c < n; c++) {
         double sum = 0.0;
         for (uint32_t k = 0; k < ns; k++) {
@@ -559,8 +655,46 @@ TEST(HybridFlux, CentralFluxChangesKineticEnergyOnlyByThePressureWork) {
         scale += double(std::abs(central->h_conservatives(c, 1)) * central->get_mesh()->h_cell_measure(c));
     }
     EXPECT_NEAR(central->kinetic_energy_budget().convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
+    EXPECT_NEAR(central->kinetic_energy_budget().pressure_work, work, precision_tol<double>(1e-12, 1e-5) * scale);
     // The Riemann solver dissipates on top of it
     EXPECT_LT(upwind->kinetic_energy_budget().convective, work - 1e-3 * scale);
+}
+
+TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
+    // An expanding flow at high pressure leaving through an outlet (a flame's
+    // burnt gas): p int div u is orders of magnitude above the dissipation, so
+    // the numerical dissipation must come from the scheme's own pressure work
+    // and leave the boundary fluxes out, or it measures the discretization
+    // error of p div u instead
+    std::ostringstream s;
+    const uint32_t n = N_DIM == 2 ? 16 : 8;
+    s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"" << MESH << "\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\nperiodic = [\"y\", \"z\"]\n"
+                                                : std::string("periodic = [\"y\"]\n"))
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.5 * x\"\np = \"1000.0\"\n"
+      << (N_DIM == 3 ? "u = [\"-20.0 * x * x + 0.3 * sin(6.283185307179586 * y)\", \"0.2 * cos(6.283185307179586 * (x + z))\", "
+                       "\"0.1 * sin(6.283185307179586 * y)\"]\n"
+                     : "u = [\"-20.0 * x * x + 0.3 * sin(6.283185307179586 * y)\", \"0.2 * cos(6.283185307179586 * x)\"]\n")
+      << "[[boundaries]]\nname = \"left\"\ntype = \"p_out\"\np = 1000.0\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"symmetry\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\nconvective_flux = \"hybrid\"\n[numerics.hybrid]\nsensor_threshold = 1.0\n"
+      << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    auto central = make_solver(s.str());
+    const KineticEnergyBudget b = central->kinetic_energy_budget();
+    // p int div u from the cell gradients: of order -p0 * 20 (less on the 2D mesh), 1e3-1e4 times the kinetic-energy rates
+    const double pi = double(central->integrate_flow_statistics()[3]);
+    const double scale = 1000.0 * 20.0;
+    EXPECT_GT(std::abs(pi), 0.1 * scale);
+    // The central flux with cell values adds no dissipation, open boundary or not
+    EXPECT_NEAR(b.pressure_work - b.convective, 0.0, precision_tol<double>(1e-11, 1e-4) * scale);
+    std::string upwind_input = s.str();
+    const std::string hybrid = "convective_flux = \"hybrid\"\n[numerics.hybrid]\nsensor_threshold = 1.0\n";
+    upwind_input.replace(upwind_input.find(hybrid), hybrid.size(), "");
+    auto upwind = make_solver(upwind_input);
+    const KineticEnergyBudget u = upwind->kinetic_energy_budget();
+    EXPECT_GT(double(u.pressure_work - u.convective), 1e-3 * std::abs(double(u.pressure_work)));
 }
 
 #if Mallard_DIM == 2

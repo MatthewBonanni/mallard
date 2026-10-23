@@ -16,7 +16,7 @@
 #
 # Results (statistics over t = 40-110, averaged over z; against the periodic
 # channel, docs/design/synthetic_inflow.md):
-#   wall shear C_f            within 5% everywhere, 2% from x = 2h
+#   wall shear C_f            up to 6.5% high near x = 0.7h; within 5% from 1.1h
 #   peak -u'v'+               57% at the inlet, within 5% from x = 4.6h
 #   peak u_rms+, v_rms+       dip to 85% at x = 2-4h; within 5% from 13.7h, 16.6h
 #   all of them               within 5% from about 17h (Keating et al. 2004: about 20h)
@@ -24,7 +24,7 @@
 # Run:
 #   (the periodic channel example, to its restart files and inflow_profile.csv)
 #   python ../../tools/tile_restart.py ../channel_retau180/restart/channel_<last>.restart 192 2 init.restart
-#   mpirun -n 4 ../../build3d/src/Mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
+#   mpirun -n 4 ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
 #   python ../../tools/plane_average.py stats/channel_000002.pvtu --average z --out profile_xy.csv
 #
 # Cost: 337,000 steps of 3.27e-4 h/U_b, 27 ms each on four A100s (2.5 hours).

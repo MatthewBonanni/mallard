@@ -17,6 +17,7 @@
 #include <string>
 
 #include "test_fixtures.h"
+#include "verification.h"
 #include "solver.h"
 
 namespace {
@@ -107,7 +108,8 @@ TEST_P(ViscousMesh, StokesFirstProblemMatchesErfcProfile) {
     };
     const double e1 = error(32), e2 = error(64);
     EXPECT_LT(e2, 0.01 * 0.05);
-    EXPECT_GT(std::log2(e1 / e2), 1.8);
+    verification::expect_order({"viscous", "Stokes' first problem", verification::cells_of(GetParam()),
+                                "max velocity error", {32, 64}, {e1, e2}, 2.0, 1.8});
 }
 
 TEST_P(ViscousMesh, ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder) {
@@ -134,8 +136,8 @@ TEST_P(ViscousMesh, ForcedChannelFlowWithTransmissiveEndsConvergesAtSecondOrder)
         }
         return err;
     };
-    const double e1 = error(8), e2 = error(16);
-    EXPECT_GT(std::log2(e1 / e2), 1.8);
+    verification::expect_order({"viscous", "Forced channel, transmissive ends", verification::cells_of(GetParam()),
+                                "max velocity error", {8, 16}, {error(8), error(16)}, 2.0, 1.8});
 }
 
 TEST_P(ViscousMesh, ConductionBetweenIsothermalWallsIsLinear) {

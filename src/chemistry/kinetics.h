@@ -119,6 +119,10 @@ struct KineticsTable {
      *        n C^(n - 1) diverges.
      */
     static constexpr double C_REG = 1e-12;
+    double C_reg = C_REG;  // the concentration used (chemistry.C_reg)
+
+    /** @brief Factors C^order of a reaction's products that the derivatives reuse. */
+    static constexpr uint32_t MAX_KEPT = 4;
 
     /** @brief C^order: repeated products for integer orders, pow of max(C, 0) otherwise. */
     KOKKOS_INLINE_FUNCTION
@@ -132,23 +136,23 @@ struct KineticsTable {
         return Kokkos::pow(Kokkos::fmax(C, 0.0), order);
     }
 
-    /** @brief Mass-action factor C^order, regularized below C_REG for 0 < order < 1. */
+    /** @brief Mass-action factor C^order, regularized below C_reg for 0 < order < 1. */
     KOKKOS_INLINE_FUNCTION
-    static double power(const double C, const double order) {
-        if (order > 0.0 && order < 1.0 && C < C_REG) {
-            const double x = C / C_REG;
-            return Kokkos::pow(C_REG, order) * x * ((2.0 - order) + (order - 1.0) * Kokkos::fmax(x, 0.0));
+    static double power(const double C, const double order, const double C_reg = C_REG) {
+        if (order > 0.0 && order < 1.0 && C < C_reg) {
+            const double x = C / C_reg;
+            return Kokkos::pow(C_reg, order) * x * ((2.0 - order) + (order - 1.0) * Kokkos::fmax(x, 0.0));
         }
         return plain_power(C, order);
     }
 
     /** @brief d power(C, order) / dC. */
     KOKKOS_INLINE_FUNCTION
-    static double power_derivative(const double C, const double order) {
+    static double power_derivative(const double C, const double order, const double C_reg = C_REG) {
         if (order == 0.0) return 0.0;
-        if (order > 0.0 && order < 1.0 && C < C_REG) {
-            const double x = C / C_REG;
-            return Kokkos::pow(C_REG, order - 1.0) * ((2.0 - order) + 2.0 * (order - 1.0) * Kokkos::fmax(x, 0.0));
+        if (order > 0.0 && order < 1.0 && C < C_reg) {
+            const double x = C / C_reg;
+            return Kokkos::pow(C_reg, order - 1.0) * ((2.0 - order) + 2.0 * (order - 1.0) * Kokkos::fmax(x, 0.0));
         }
         return order * plain_power(C, order - 1.0);
     }
@@ -353,9 +357,13 @@ struct KineticsTable {
                 dk_dM = k0 * F / (1.0 + Pr) * (1.0 / (1.0 + Pr) + dlnF_dlnPr);
                 kf *= Pr / (1.0 + Pr) * F;
             }
+            // The factors C^order, kept for the derivatives (the first MAX_KEPT of each product)
+            double kept_f[MAX_KEPT] = {}, kept_r[MAX_KEPT] = {};
             double prod_f = 1.0;
             for (uint32_t j = forward_offset(i); j < forward_offset(i + 1); j++) {
-                prod_f *= power(C[forward_species(j)], forward_order(j));
+                const double factor = power(C[forward_species(j)], forward_order(j), C_reg);
+                if (j - forward_offset(i) < MAX_KEPT) kept_f[j - forward_offset(i)] = factor;
+                prod_f *= factor;
             }
             double kr = 0.0, prod_r = 0.0, dlnKc_dT = 0.0;
             if (reversible(i)) {
@@ -369,7 +377,9 @@ struct KineticsTable {
                 kr = kf * inv_Kc;
                 prod_r = inv_Kc;
                 for (uint32_t j = reverse_offset(i); j < reverse_offset(i + 1); j++) {
-                    prod_r *= power(C[reverse_species(j)], reverse_order(j));
+                    const double factor = power(C[reverse_species(j)], reverse_order(j), C_reg);
+                    if (j - reverse_offset(i) < MAX_KEPT) kept_r[j - reverse_offset(i)] = factor;
+                    prod_r *= factor;
                 }
                 // d(g/RT)/dT = -h/(R T^2), d ln(p_atm / RT) / dT = -1/T
                 dlnKc_dT = (sum_h - delta_nu(i)) * inv_T;
@@ -380,18 +390,22 @@ struct KineticsTable {
             d->dq_dT[i] = fwd * dlnkf_dT - rev * (dlnkf_dT - dlnKc_dT);
             // Mass-action terms: kf d(prod C^o)/dC_j and kr d(prod C^nu'')/dC_j
             for (uint32_t a = forward_offset(i); a < forward_offset(i + 1); a++) {
-                double dd = kf * power_derivative(C[forward_species(a)], forward_order(a));
+                double dd = kf * power_derivative(C[forward_species(a)], forward_order(a), C_reg);
                 for (uint32_t b = forward_offset(i); b < forward_offset(i + 1); b++) {
-                    if (b != a) dd *= power(C[forward_species(b)], forward_order(b));
+                    if (b == a) continue;
+                    dd *= b - forward_offset(i) < MAX_KEPT ? kept_f[b - forward_offset(i)]
+                                                           : power(C[forward_species(b)], forward_order(b), C_reg);
                 }
                 d->d_forward[a] = dd;
             }
             for (uint32_t a = reverse_offset(i); a < reverse_offset(i + 1); a++) {
                 double dd = 0.0;
                 if (reversible(i)) {
-                    dd = kr * power_derivative(C[reverse_species(a)], reverse_order(a));
+                    dd = kr * power_derivative(C[reverse_species(a)], reverse_order(a), C_reg);
                     for (uint32_t b = reverse_offset(i); b < reverse_offset(i + 1); b++) {
-                        if (b != a) dd *= power(C[reverse_species(b)], reverse_order(b));
+                        if (b == a) continue;
+                        dd *= b - reverse_offset(i) < MAX_KEPT ? kept_r[b - reverse_offset(i)]
+                                                               : power(C[reverse_species(b)], reverse_order(b), C_reg);
                     }
                 }
                 d->d_reverse[a] = dd;
@@ -550,14 +564,20 @@ struct KineticsTable {
     }
 };
 
-/** @brief Copy a mechanism's reactions to MemorySpace. */
+/**
+ * @brief Copy a mechanism's reactions to MemorySpace.
+ * @param C_reg Concentration of the regularization of orders 0 < n < 1 (KineticsTable::C_REG by default).
+ */
 template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
-KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism) {
+KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism,
+                                               const double C_reg = KineticsTable<MemorySpace>::C_REG) {
     using Table = KineticsTable<MemorySpace>;
     Table t;
-    t.n_species = static_cast<uint32_t>(mechanism.n_species());
+    t.C_reg = C_reg;
+    t.n_species = mechanism.n_species();
     t.n_reactions = static_cast<uint32_t>(mechanism.reactions.size());
     const uint32_t nr = t.n_reactions;
+    auto u32 = [](size_t n) { return static_cast<uint32_t>(n); };
     std::vector<uint8_t> type(nr), falloff(nr), reversible(nr);
     std::vector<double> rate(3 * nr), low(3 * nr), params(5 * nr), delta_nu(nr), default_eff(nr);
     std::vector<uint32_t> f_off{0}, r_off{0}, n_off{0}, e_off{0}, f_sp, r_sp, n_sp, e_sp;
@@ -568,13 +588,13 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism) {
         const Reaction & r = mechanism.reactions[i];
         for (size_t e = 0; e < r.plog.size(); e++) {
             if (e == 0 || r.plog[e].first != r.plog[e - 1].first) {
-                if (e > 0) plog_rate_off.push_back(plog_rate.size() / 3);
+                if (e > 0) plog_rate_off.push_back(u32(plog_rate.size() / 3));
                 plog_ln_p.push_back(std::log(r.plog[e].first));
             }
             plog_rate.insert(plog_rate.end(), {r.plog[e].second.A, r.plog[e].second.b, r.plog[e].second.Ea_R});
         }
-        if (!r.plog.empty()) plog_rate_off.push_back(plog_rate.size() / 3);
-        plog_off.push_back(plog_ln_p.size());
+        if (!r.plog.empty()) plog_rate_off.push_back(u32(plog_rate.size() / 3));
+        plog_off.push_back(u32(plog_ln_p.size()));
         if (r.type == ReactionType::CHEBYSHEV) {
             cheb.insert(cheb.end(), r.chebyshev.begin(), r.chebyshev.end());
             cheb_n_p[i] = r.chebyshev_n_p;
@@ -583,7 +603,7 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism) {
             cheb_range[4 * i + 2] = std::log(r.chebyshev_range[2]);
             cheb_range[4 * i + 3] = std::log(r.chebyshev_range[3]);
         }
-        cheb_off.push_back(cheb.size());
+        cheb_off.push_back(u32(cheb.size()));
         type[i] = static_cast<uint8_t>(r.type);
         falloff[i] = static_cast<uint8_t>(r.falloff);
         reversible[i] = r.reversible;
@@ -594,17 +614,17 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism) {
             dst[3 * i + 1] = arr[a].b;
             dst[3 * i + 2] = arr[a].Ea_R;
         }
-        for (int p = 0; p < 5; p++) params[5 * i + p] = r.falloff_params[p];
+        for (uint32_t p = 0; p < 5; p++) params[5 * i + p] = r.falloff_params[p];
         for (const auto & [k, order] : r.orders) {
             f_sp.push_back(k);
             f_ord.push_back(order);
         }
-        f_off.push_back(f_sp.size());
+        f_off.push_back(u32(f_sp.size()));
         for (const auto & [k, nu] : r.products) {
             r_sp.push_back(k);
             r_ord.push_back(nu);
         }
-        r_off.push_back(r_sp.size());
+        r_off.push_back(u32(r_sp.size()));
         std::vector<double> net(t.n_species, 0.0);
         for (const auto & [k, nu] : r.products) net[k] += nu;
         for (const auto & [k, nu] : r.reactants) net[k] -= nu;
@@ -615,14 +635,14 @@ KineticsTable<MemorySpace> make_kinetics_table(const Mechanism & mechanism) {
             n_nu.push_back(net[k]);
             sum += net[k];
         }
-        n_off.push_back(n_sp.size());
+        n_off.push_back(u32(n_sp.size()));
         delta_nu[i] = sum;
         default_eff[i] = r.default_efficiency;
         for (const auto & [k, eff] : r.efficiencies) {
             e_sp.push_back(k);
             e_extra.push_back(eff - r.default_efficiency);
         }
-        e_off.push_back(e_sp.size());
+        e_off.push_back(u32(e_sp.size()));
     }
     auto copy = [](const auto & v, const char * label) {
         using T = typename std::decay_t<decltype(v)>::value_type;

@@ -32,9 +32,9 @@ double dot3(const Vec3 & a, const Vec3 & b) { return a[0] * b[0] + a[1] * b[1] +
 Vec3 average(const std::vector<Vec3> & p) {
     Vec3 c = {0.0, 0.0, 0.0};
     for (const Vec3 & q : p) {
-        for (int i = 0; i < 3; i++) c[i] += q[i];
+        for (size_t i = 0; i < 3; i++) c[i] += q[i];
     }
-    for (int i = 0; i < 3; i++) c[i] /= p.size();
+    for (size_t i = 0; i < 3; i++) c[i] /= static_cast<double>(p.size());
     return c;
 }
 
@@ -80,7 +80,7 @@ void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
                      std::vector<std::array<std::array<double, 3>, 4>> & tets) {
     tets.clear();
     const Vec3 o = average(nodes);
-    for (const auto & face : cell_local_faces(nodes.size())) {
+    for (const auto & face : cell_local_faces(static_cast<uint32_t>(nodes.size()))) {
         std::vector<Vec3> p;
         for (uint8_t k : face) p.push_back(nodes[k]);
         if (p.size() == 3) {
@@ -94,9 +94,9 @@ void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
 
 void Mesh::h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<double, 3>, 4>> & tets) const {
     std::vector<Vec3> p(h_n_nodes_of_cell(i_cell));
-    for (size_t k = 0; k < p.size(); k++) {
+    for (uint32_t k = 0; k < p.size(); k++) {
         const uint32_t node = h_node_of_cell(i_cell, k);
-        for (int i = 0; i < 3; i++) p[k][i] = (i < N_DIM) ? double(h_node_coords(node, i)) : 0.0;
+        for (size_t i = 0; i < 3; i++) p[k][i] = (i < N_DIM) ? double(h_node_coords(node, i)) : 0.0;
     }
     cell_tetrahedra(p, tets);
 }
@@ -120,13 +120,13 @@ void Mesh::compute_geometry() {
     // average, which stays exact for warped quadrilaterals and closes every cell
     for (uint32_t f = 0; f < n_faces; f++) {
         std::vector<Vec3> p(h_n_nodes_of_face(f));
-        for (size_t k = 0; k < p.size(); k++) p[k] = coords(h_node_of_face(f, k));
+        for (uint32_t k = 0; k < p.size(); k++) p[k] = coords(h_node_of_face(f, k));
         const Vec3 c = average(p);
         Vec3 A = {0.0, 0.0, 0.0};
         std::vector<Vec3> a(p.size());
         for (size_t k = 0; k < p.size(); k++) {
             a[k] = cross(sub(p[k], c), sub(p[(k + 1) % p.size()], c));
-            for (int i = 0; i < 3; i++) A[i] += 0.5 * a[k][i];
+            for (size_t i = 0; i < 3; i++) A[i] += 0.5 * a[k][i];
         }
         const double area = std::sqrt(dot3(A, A));
         Vec3 x = {0.0, 0.0, 0.0};
@@ -134,13 +134,13 @@ void Mesh::compute_geometry() {
         for (size_t k = 0; k < p.size(); k++) {
             const double w = 0.5 * dot3(a[k], A) / area;
             const Vec3 & q = p[(k + 1) % p.size()];
-            for (int i = 0; i < 3; i++) x[i] += w * (c[i] + p[k][i] + q[i]) / 3.0;
+            for (size_t i = 0; i < 3; i++) x[i] += w * (c[i] + p[k][i] + q[i]) / 3.0;
             w_sum += w;
         }
-        h_face_area(f) = area;
+        h_face_area(f) = static_cast<rtype>(area);
         FOR_I_DIM {
-            h_face_normals(f, i) = A[i];
-            h_face_coords(f, i) = x[i] / w_sum;
+            h_face_normals(f, i) = static_cast<rtype>(A[i]);
+            h_face_coords(f, i) = static_cast<rtype>(x[i] / w_sum);
         }
     }
     // Cells: volume and centroid by tetrahedral decomposition
@@ -152,13 +152,13 @@ void Mesh::compute_geometry() {
         for (const auto & t : tets) {
             const double v = dot3(sub(t[1], t[0]), cross(sub(t[2], t[0]), sub(t[3], t[0]))) / 6.0;
             V += v;
-            for (int i = 0; i < 3; i++) x[i] += v * (t[0][i] + t[1][i] + t[2][i] + t[3][i]) / 4.0;
+            for (size_t i = 0; i < 3; i++) x[i] += v * (t[0][i] + t[1][i] + t[2][i] + t[3][i]) / 4.0;
         }
         if (V <= 0.0) {
             throw std::runtime_error("Mesh: cell " + std::to_string(c) + " has non-positive volume.");
         }
-        h_cell_volume(c) = V;
-        FOR_I_DIM h_cell_coords(c, i) = x[i] / V;
+        h_cell_volume(c) = static_cast<rtype>(V);
+        FOR_I_DIM h_cell_coords(c, i) = static_cast<rtype>(x[i] / V);
     }
     compute_cell_neighbors();
 }
@@ -170,7 +170,7 @@ void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
     cell_nodes.clear();
     std::vector<Vec3> p;
     for (const auto & c : cells) {
-        cell_local_faces(c.size());
+        cell_local_faces(static_cast<uint32_t>(c.size()));
         p.clear();
         for (uint32_t node : c) {
             Vec3 x = {0.0, 0.0, 0.0};
@@ -183,7 +183,7 @@ void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
         } else {
             cell_nodes.insert(cell_nodes.end(), c.begin(), c.end());
         }
-        offsets.push_back(cell_nodes.size());
+        offsets.push_back(static_cast<uint32_t>(cell_nodes.size()));
     }
 }
 

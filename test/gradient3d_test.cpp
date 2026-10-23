@@ -23,13 +23,13 @@
 namespace {
 
 // Linear field W = c + g . x, positive in the unit cube
-constexpr rtype C[N_CONSERVATIVE] = {2.0, 0.3, -0.2, 0.1, 3.0};
+constexpr rtype C[N_CONSERVATIVE] = {2.0_r, 0.3_r, -0.2_r, 0.1_r, 3.0_r};
 constexpr rtype G[N_CONSERVATIVE][3] = {
-    {0.5, -0.25, 0.3},
-    {-1.0, 0.5, 0.2},
-    {0.25, 1.5, -0.7},
-    {0.4, -0.3, 1.1},
-    {0.75, -0.5, 0.6},
+    {0.5_r, -0.25_r, 0.3_r},
+    {-1.0_r, 0.5_r, 0.2_r},
+    {0.25_r, 1.5_r, -0.7_r},
+    {0.4_r, -0.3_r, 1.1_r},
+    {0.75_r, -0.5_r, 0.6_r},
 };
 
 rtype linear(uint8_t i, const rtype * x) {
@@ -57,7 +57,7 @@ BoundaryData linear_dirichlet_boundaries(const Mesh & mesh) {
     for (uint32_t f = 0; f < mesh.n_faces; f++) face_bc[f] = mesh.h_cells_of_face(f, 1) < 0 ? 0 : -1;
     BoundaryCondition dir;
     dir.type = BoundaryType::DIRICHLET;
-    BoundaryData bd = make_boundary_data(mesh, face_bc, {dir}, 1.4);
+    BoundaryData bd = make_boundary_data(mesh, face_bc, {dir}, 1.4_r);
     auto h_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_state_index);
     auto h_state = Kokkos::create_mirror_view(bd.face_state);
     for (uint32_t f = 0; f < mesh.n_faces; f++) {
@@ -125,7 +125,7 @@ TEST_P(MeshTypes3D, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         for (uint8_t side = 0; side < 2; side++) {
             const int32_t c = mesh->h_cells_of_face(f, side);
-            if (c < 0 || is_boundary_cell(*mesh, c)) continue;
+            if (c < 0 || is_boundary_cell(*mesh, static_cast<uint32_t>(c))) continue;
             FOR_I_CONSERVATIVE {
                 ASSERT_NEAR(h_face_W(f, 0, side, i), linear_at(i, mesh->h_face_coords, f), roundoff(1e-10))
                     << "face " << f << " side " << static_cast<int>(side);
@@ -140,10 +140,10 @@ INSTANTIATE_TEST_SUITE_P(Gradient3D, MeshTypes3D,
 
 TEST(ViscousTraction3DTest, RigidRotationAndIsotropicExpansionAreStressFree) {
     // Stokes' hypothesis: no deviatoric stress for isotropic dilation in 3D
-    const rtype mu = 0.7;
-    const rtype n[3] = {2.0 / 7.0, 3.0 / 7.0, 6.0 / 7.0};
-    const rtype rotation[3][3] = {{0.0, -0.3, 0.5}, {0.3, 0.0, -0.2}, {-0.5, 0.2, 0.0}};
-    const rtype dilation[3][3] = {{0.4, 0.0, 0.0}, {0.0, 0.4, 0.0}, {0.0, 0.0, 0.4}};
+    const rtype mu = 0.7_r;
+    const rtype n[3] = {2.0_r / 7.0_r, 3.0_r / 7.0_r, 6.0_r / 7.0_r};
+    const rtype rotation[3][3] = {{0.0_r, -0.3_r, 0.5_r}, {0.3_r, 0.0_r, -0.2_r}, {-0.5_r, 0.2_r, 0.0_r}};
+    const rtype dilation[3][3] = {{0.4_r, 0.0_r, 0.0_r}, {0.0_r, 0.4_r, 0.0_r}, {0.0_r, 0.0_r, 0.4_r}};
     rtype tau_n[3];
     viscous_traction(mu, rotation, n, tau_n);
     for (int d = 0; d < 3; d++) EXPECT_NEAR(tau_n[d], 0.0, 1e-15);
@@ -153,7 +153,7 @@ TEST(ViscousTraction3DTest, RigidRotationAndIsotropicExpansionAreStressFree) {
 
 TEST(ViscousTraction3DTest, SimpleShearGivesTangentialTraction) {
     // u_x = s z: the traction on a z-plane is mu s along x, on an x-plane mu s along z
-    const rtype mu = 0.7, s = 1.3;
+    const rtype mu = 0.7_r, s = 1.3_r;
     const rtype g[3][3] = {{0.0, 0.0, s}, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
     const rtype nz[3] = {0.0, 0.0, 1.0}, nx[3] = {1.0, 0.0, 0.0};
     rtype tau_n[3];

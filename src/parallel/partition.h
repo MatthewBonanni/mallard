@@ -36,6 +36,22 @@ uint64_t hilbert_key(const std::array<double, N_DIM> & x, const std::array<doubl
 std::vector<int> partition_hilbert(const DistributedMesh & mesh, int n_parts);
 
 /**
+ * @brief Parts per axis of the grid of n_parts blocks of a box with these
+ *        extents that has the least total area between blocks.
+ */
+std::array<int, N_DIM> grid_shape(int n_parts, const std::array<double, N_DIM> & extent);
+
+/**
+ * @brief Owner rank of every block cell of a distributed mesh by multi-jagged
+ *        coordinate partitioning (collective): the cells, keyed by the
+ *        coordinates of their vertex averages (ties by global id), are split
+ *        along x into equal slabs, each slab along y, and so on, with the
+ *        number of pieces per axis from grid_shape() on their bounding box.
+ *        A box of cuboid cells gives cuboid parts.
+ */
+std::vector<int> partition_multijagged(const DistributedMesh & mesh, int n_parts);
+
+/**
  * @brief Owner rank of every block cell of a distributed mesh from dKaMinPar
  *        on its dual graph (collective). Requires Mallard_ENABLE_KAMINPAR.
  */
@@ -43,5 +59,20 @@ std::vector<int> partition_graph(const DistributedMesh & mesh, int n_parts);
 
 /** @brief Whether this build has a graph partitioner. */
 bool have_graph_partitioner();
+
+struct MeshBlock;
+
+/** @brief Cells of the part with the most local (owned and halo) cells. */
+struct PartSize {
+    uint64_t owned = 0;
+    uint64_t halo = 0;
+};
+
+/**
+ * @brief The largest part of a partition of a whole mesh (owner of each block
+ *        cell), with halo layers of cells sharing a node as in a distributed
+ *        run; neighbors across periodic seams are not counted.
+ */
+PartSize largest_part(const MeshBlock & block, const std::vector<int> & owner, int n_parts, int halo_layers);
 
 #endif // PARTITION_H

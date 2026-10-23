@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "test_fixtures.h"
 #include "solver.h"
 
@@ -135,15 +136,78 @@ TEST(BoundaryTest, AveragePressureOutletKeepsTransversePressureProfile) {
 
 namespace {
 
+/** @brief A Mach 5 jet through the left boundary into gas at rest: the first time step and the solution after 40 steps. */
+struct JetStart {
+    double dt_first = 0.0;
+    double min_p = 0.0;
+};
+
+JetStart jet_into_rest(const std::string & left, const std::string & gas) {
+    JetStart r;
+    for (const uint32_t n_steps : {1u, 40u}) {
+        std::ostringstream s;
+        s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.8\n"
+          << "[mesh]\ntype = \"cartesian\"\nNx = 40\nNy = 4\nLx = 1.0\nLy = 0.1\n"
+          << "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0]\np = 1.0e5\nT = 300.0\n" << (gas.empty() ? "" : "Y = { AIR = 1.0 }\n")
+          << "[[boundaries]]\nname = \"left\"\n" << left << (gas.empty() ? "" : "Y = { AIR = 1.0 }\n")
+          << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+          << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+          << "[output]\ncheck_interval = 1000000\n"
+          << (gas.empty() ? "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0e5\nT_ref = 300.0\n"
+                            "rho_ref = 1.1614401858304297\n"
+                          : gas);
+        Solver solver;
+        solver.init(parse_toml(s.str()));
+        solver.run();
+        solver.update_primitives();
+        solver.copy_device_to_host();
+        if (n_steps == 1) {
+            r.dt_first = double(solver.get_time());
+            continue;
+        }
+        r.min_p = 1e300;
+        for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+            const double p = double(solver.h_primitives(c, 2));
+            r.min_p = std::isfinite(p) ? std::min(r.min_p, p) : -1.0;
+        }
+    }
+    return r;
+}
+
+} // namespace
+
+TEST(BoundaryTest, FastInflowIntoGasAtRestStartsAtTheTargetCFL) {
+    // The stable step of the boundary cell sees the jet's |u| + c on its
+    // inflow face before the jet has entered: dt = 2 V CFL / sum(lambda A)
+    // with lambda = u + c there and c on its three other faces
+    const double R = 287.0, c = std::sqrt(1.4 * R * 300.0), u = 5.0 * c, h = 0.025;
+    const double dt_expected = 0.8 * 2.0 * h * h / (h * (u + c) + 3.0 * h * c);
+    const std::string jet = "u = [" + std::to_string(u) + ", 0.0]\np = 1.0e5\nT = 300.0\n";
+    const std::string perfect_air =
+        "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
+"/test/data/chemistry/perfect_air.yaml\"\nphase = \"air\"\n";
+    for (const auto & [left, gas] : {std::pair<std::string, std::string>{"type = \"upt\"\n" + jet, ""},
+                                     {"type = \"nscbc_inlet\"\nL = 1.0\n" + jet, ""},
+                                     {"type = \"upt\"\n" + jet, perfect_air}}) {
+        const JetStart r = jet_into_rest(left, gas);
+        EXPECT_NEAR(r.dt_first, dt_expected, 1e-4 * dt_expected) << left << gas;
+        EXPECT_GT(r.min_p, 0.5e5) << left << gas;
+    }
+}
+
+namespace {
+
 struct FarfieldCase {
     BoundaryCondition bc;
     rtype W_g[N_CONSERVATIVE];
-    rtype n[N_DIM] = {0.6, 0.8};
-    static constexpr rtype G = 1.4;
+    rtype n[N_DIM] = {0.6_r, 0.8_r};
+    static constexpr rtype G = 1.4_r;
 
     FarfieldCase(const rtype * W_i) {
         bc.type = BoundaryType::FARFIELD;
-        const rtype W_inf[N_CONSERVATIVE] = {1.0, 0.3, -0.1, 1.0_r / G};
+        const rtype W_inf[N_CONSERVATIVE] = {1.0_r, 0.3_r, -0.1_r, 1.0_r / G};
         FOR_I_CONSERVATIVE bc.data[i] = W_inf[i];
         bc.ghost_W(W_i, n, G, 1.0, false, W_g);
     }
@@ -158,7 +222,7 @@ struct FarfieldCase {
 } // namespace
 
 TEST(BoundaryTest, FarfieldReturnsTheFreeStreamForTheFreeStream) {
-    const rtype W_inf[N_CONSERVATIVE] = {1.0, 0.3, -0.1, 1.0 / 1.4};
+    const rtype W_inf[N_CONSERVATIVE] = {1.0_r, 0.3_r, -0.1_r, 1.0_r / 1.4_r};
     FarfieldCase c(W_inf);
     FOR_I_CONSERVATIVE EXPECT_NEAR(c.W_g[i], W_inf[i], roundoff(1e-14));
 }
@@ -168,7 +232,7 @@ TEST(BoundaryTest, FarfieldTakesEachCharacteristicFromItsUpwindSide) {
     const rtype * W_inf = nullptr;
     // Subsonic outflow (u_n > 0): outgoing invariant, entropy and tangential
     // velocity from the interior; incoming invariant from the free stream
-    const rtype W_out[N_CONSERVATIVE] = {1.1, 0.4, 0.2, 0.8};
+    const rtype W_out[N_CONSERVATIVE] = {1.1_r, 0.4_r, 0.2_r, 0.8_r};
     F out(W_out);
     W_inf = out.bc.data;
     ASSERT_GT(F::u_n(out.W_g, out.n), 0.0);
@@ -178,7 +242,7 @@ TEST(BoundaryTest, FarfieldTakesEachCharacteristicFromItsUpwindSide) {
     EXPECT_NEAR(F::u_t(out.W_g, out.n), F::u_t(W_out, out.n), roundoff(1e-12));
 
     // Subsonic inflow (u_n < 0): entropy and tangential velocity from the free stream
-    const rtype W_in[N_CONSERVATIVE] = {0.9, -0.5, -0.3, 0.6};
+    const rtype W_in[N_CONSERVATIVE] = {0.9_r, -0.5_r, -0.3_r, 0.6_r};
     F in(W_in);
     ASSERT_LT(F::u_n(in.W_g, in.n), 0.0);
     EXPECT_NEAR(F::r_plus(in.W_g, in.n), F::r_plus(W_in, in.n), roundoff(1e-12));
@@ -187,10 +251,10 @@ TEST(BoundaryTest, FarfieldTakesEachCharacteristicFromItsUpwindSide) {
     EXPECT_NEAR(F::u_t(in.W_g, in.n), F::u_t(W_inf, in.n), roundoff(1e-12));
 
     // Supersonic outflow keeps the interior, supersonic inflow takes the free stream
-    const rtype W_sup_out[N_CONSERVATIVE] = {1.0, 1.2, 1.6, 1.0 / 1.4};
+    const rtype W_sup_out[N_CONSERVATIVE] = {1.0_r, 1.2_r, 1.6_r, 1.0_r / 1.4_r};
     F sup_out(W_sup_out);
     FOR_I_CONSERVATIVE EXPECT_EQ(sup_out.W_g[i], W_sup_out[i]);
-    const rtype W_sup_in[N_CONSERVATIVE] = {1.0, -1.2, -1.6, 1.0 / 1.4};
+    const rtype W_sup_in[N_CONSERVATIVE] = {1.0_r, -1.2_r, -1.6_r, 1.0_r / 1.4_r};
     F sup_in(W_sup_in);
     FOR_I_CONSERVATIVE EXPECT_EQ(sup_in.W_g[i], W_inf[i]);
 }

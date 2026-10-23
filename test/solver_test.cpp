@@ -26,8 +26,10 @@
 #include <vector>
 
 #include "test_fixtures.h"
+#include "verification.h"
 #include "exact_riemann.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -54,7 +56,8 @@ std::string make_input(const CaseConfig & c) {
       << "[[boundaries]]\nname = \"top\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[numerics]\nriemann_solver = \"" << c.riemann << "\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
-      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\nlimiter = \"" << c.limiter << "\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\n"
+      << (c.recon == "MUSCL" ? "limiter = \"" + c.limiter + "\"\n" : "")
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n";
     return s.str();
@@ -343,8 +346,9 @@ TEST_P(SodMesh, TENOConvergesFasterThanMUSCLForSmoothFlow) {
     // Time integration (SSPRK3, dt ~ h) caps the observed order at 3
     const double m1 = advection_error(GetParam(), "MUSCL", 32), m2 = advection_error(GetParam(), "MUSCL", 64);
     const double t1 = advection_error(GetParam(), "TENO", 32), t2 = advection_error(GetParam(), "TENO", 64);
-    std::cout << "advection L1: MUSCL " << m1 << " -> " << m2 << ", TENO " << t1 << " -> " << t2 << std::endl;
-    EXPECT_GT(std::log2(t1 / t2), 2.7);
+    std::cout << "advection L1: MUSCL " << m1 << " -> " << m2 << std::endl;
+    verification::expect_order({"advection", "TENO5, SSPRK3", verification::cells_of(GetParam()),
+                                "L1 density error, pulse", {32, 64}, {t1, t2}, 3.0, 2.7});
     EXPECT_LT(t2, 0.2 * m2);
 }
 
@@ -428,16 +432,20 @@ TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
 namespace {
 
 /**
- * @brief Largest transverse velocity after 3000 steps of a standing Mach 6
- *        normal shock on a grid-aligned quad mesh with a tiny density bump
- *        behind it (the setup that triggers the carbuncle instability).
+ * @brief Largest transverse velocity after 10000 steps of a Mach 6 normal
+ *        shock on a grid-aligned quad mesh with a tiny density bump behind
+ *        it (the setup that triggers the carbuncle instability). The shock
+ *        drifts downstream at w, about eight cells over the run, so that no
+ *        face holds it at rest, where Einfeldt's left wave speed is the sonic
+ *        Roe-averaged one and its sign is round-off (docs/numerics/overview.md).
  */
 double carbuncle_growth(const std::string & riemann) {
-    const double rho1 = 1.0, u1 = 6.0, p1 = 1.0 / 1.4;
-    const double rho2 = 5.2682926829268295, u2 = 1.1388888888888888, p2 = 29.880952380952383;
+    const double w = 0.03;
+    const double rho1 = 1.0, u1 = 6.0 + w, p1 = 1.0 / 1.4;
+    const double rho2 = 5.2682926829268295, u2 = 1.1388888888888888 + w, p2 = 29.880952380952383;
     std::ostringstream s;
     s << std::setprecision(17)
-      << "[run]\nn_steps = 3000\ncfl = 0.2\n"
+      << "[run]\nn_steps = 10000\ncfl = 0.2\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 40\nNy = 40\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\ntype = \"analytical\"\n"
       << "rho = \"x < 0.5 ? " << rho1 << " : " << rho2
@@ -471,8 +479,8 @@ double carbuncle_growth(const std::string & riemann) {
 TEST(SolverValidation, RotatedHybridRiemannSolverIsCarbuncleFree) {
     SKIP_IN_SINGLE_PRECISION("at Mach 6, p = (gamma - 1) (E - rho u^2 / 2) has relative round-off ~3e-6, "
                              "which this shock amplifies to O(0.1) cross-flow for HLL and HLLC too");
-    EXPECT_GT(carbuncle_growth("Roe"), 0.1);
-    EXPECT_LT(carbuncle_growth("RHLL"), 1e-10);
+    EXPECT_GT(carbuncle_growth("Roe"), 1.0);
+    EXPECT_LT(carbuncle_growth("RHLL"), 1e-4);
 }
 
 TEST(SolverTest, ResultIsIndependentOfThreadCount) {
@@ -501,11 +509,11 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
         solver.run();
         solver.copy_device_to_host();
         std::ofstream(out, std::ios::binary).write(reinterpret_cast<const char *>(solver.h_conservatives.data()),
-                                                   solver.h_conservatives.span() * sizeof(rtype));
+                                                   static_cast<std::streamsize>(solver.h_conservatives.span() * sizeof(rtype)));
         return;
     }
     const std::string exe = ::testing::internal::GetArgvs()[0];
-    const auto dir = std::filesystem::temp_directory_path();
+    const auto dir = scratch_dir();
     auto run = [&](int threads) {
         const std::string out = (dir / ("mallard_threads_" + std::to_string(threads) + ".bin")).string();
         std::filesystem::remove(out);
@@ -545,7 +553,7 @@ double vortex_energy_loss(double low_mach_cutoff) {
       << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = " << p0 << "\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n"
-      << "[integrals]\nfile = \"" << (std::filesystem::temp_directory_path() / "mallard_vortex.csv").string()
+      << "[integrals]\nfile = \"" << (scratch_dir() / "mallard_vortex.csv").string()
       << "\"\ninterval = 1000000\n";
     Solver solver;
     solver.init(parse_toml(s.str()));

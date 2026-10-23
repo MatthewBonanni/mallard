@@ -23,13 +23,19 @@
 #include <vector>
 
 #include "comm.h"
+#include "compression.h"
+#include "data_paths.h"
+#include "device_comm.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
+#include "json_reader.h"
+#include "provenance.h"
 #include "test_fixtures.h"
 #include "solver.h"
+#include "scratch.h"
 
 namespace {
 
@@ -73,7 +79,7 @@ std::string mixture_input(const std::string & extra, const std::string & reconst
            "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
            "[[boundaries]]\nname = \"top\"\ntype = \"p_out\"\np = 3.0e4\n"
            "[numerics]\nriemann_solver = \"HLLC\"\n" + extra + "[numerics.face_reconstruction]\n" + reconstruction +
-           "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n"
+           "[physics]\ntype = \"" + type + "\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
            "[output]\ncheck_interval = 1000000\n" + chemistry;
 }
 
@@ -90,26 +96,30 @@ TEST(MPITest, HaloExchangeFillsEveryHaloCellFromItsOwner) {
     if (!solver.is_distributed()) GTEST_SKIP() << "needs more than one rank";
     const auto & dist = solver.get_distribution();
     const uint32_t n_local = solver.get_mesh()->n_cells;
-    HaloExchange halo(dist);
-    // Flow block alone, then with species, through the same exchange object
-    for (const uint32_t n_species : {0u, 3u}) {
-        State U("U", n_local, n_species);
-        auto h_flow = Kokkos::create_mirror_view(U.flow);
-        auto h_species = Kokkos::create_mirror_view(U.species);
-        for (uint32_t c = 0; c < n_local; c++) {
-            const bool owned = c < dist.n_owned;
-            FOR_I_CONSERVATIVE h_flow(c, i) = owned ? dist.global_cell[c] + 0.25 * i : -1.0;
-            for (uint32_t k = 0; k < n_species; k++) h_species(c, k) = owned ? dist.global_cell[c] + 0.125 * k : -1.0;
-        }
-        Kokkos::deep_copy(U.flow, h_flow);
-        Kokkos::deep_copy(U.species, h_species);
-        halo.exchange(U);
-        Kokkos::deep_copy(h_flow, U.flow);
-        Kokkos::deep_copy(h_species, U.species);
-        for (uint32_t c = 0; c < n_local; c++) {
-            FOR_I_CONSERVATIVE EXPECT_EQ(h_flow(c, i), dist.global_cell[c] + 0.25 * i) << "local cell " << c;
-            for (uint32_t k = 0; k < n_species; k++) {
-                EXPECT_EQ(h_species(c, k), dist.global_cell[c] + 0.125 * k) << "local cell " << c;
+    std::vector<bool> backends = {false};
+    if (comm::nccl_available()) backends.push_back(true);
+    for (const bool nccl : backends) {
+        HaloExchange halo(dist, nccl);
+        // Flow block alone, then with species, through the same exchange object
+        for (const uint32_t n_species : {0u, 3u}) {
+            State U("U", n_local, n_species);
+            auto h_flow = Kokkos::create_mirror_view(U.flow);
+            auto h_species = Kokkos::create_mirror_view(U.species);
+            for (uint32_t c = 0; c < n_local; c++) {
+                const bool owned = c < dist.n_owned;
+                FOR_I_CONSERVATIVE h_flow(c, i) = static_cast<rtype>(owned ? static_cast<double>(dist.global_cell[c]) + 0.25 * i : -1.0);
+                for (uint32_t k = 0; k < n_species; k++) h_species(c, k) = static_cast<rtype>(owned ? static_cast<double>(dist.global_cell[c]) + 0.125 * k : -1.0);
+            }
+            Kokkos::deep_copy(U.flow, h_flow);
+            Kokkos::deep_copy(U.species, h_species);
+            halo.exchange(U);
+            Kokkos::deep_copy(h_flow, U.flow);
+            Kokkos::deep_copy(h_species, U.species);
+            for (uint32_t c = 0; c < n_local; c++) {
+                FOR_I_CONSERVATIVE EXPECT_EQ(h_flow(c, i), static_cast<double>(dist.global_cell[c]) + 0.25 * i) << "local cell " << c;
+                for (uint32_t k = 0; k < n_species; k++) {
+                    EXPECT_EQ(h_species(c, k), static_cast<double>(dist.global_cell[c]) + 0.125 * k) << "local cell " << c;
+                }
             }
         }
     }
@@ -123,19 +133,87 @@ TEST(MPITest, FirstOrderMatchesSerial) {
                                         "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 30));
 }
 
+TEST(MPITest, LowStorageIntegratorsAndErrorControlMatchSerial) {
+    // The error is a maximum over all ranks' cells, so every rank count takes the same steps
+    const std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                        bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                            "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 30);
+    const std::string ssprk3 = "time_integrator = \"SSPRK3\"\n";
+    for (const std::string numerics : {"time_integrator = \"SSPRK54\"\n", "time_integrator = \"CK45\"\n",
+                                       "time_integrator = \"RDPK3Sp35\"\n[numerics.error_control]\ntolerance = 1e-4\n"}) {
+        std::string s = input;
+        s.replace(s.find(ssprk3), ssprk3.size(), numerics);
+        expect_matches_serial(s);
+    }
+}
+
 TEST(MPITest, GasMixtureMatchesSerial) {
     // Species and the temperature seeds of halo cells follow the same history
     // as their owners'; with TENO also the troubled cells' stencil choices and
     // the scalars' bound-preserving factors, and with double flux the frozen
-    // thermodynamics of each step; with chemistry each cell's reactor; with
-    // transport the halo cells' coefficients and gradients
+    // thermodynamics of each step (of halo cells, after their owners'
+    // chemistry); with chemistry each cell's reactor; with
+    // transport the halo cells' coefficients and gradients; radiation is pointwise
     const std::array<std::string, 4> schemes[] = {{"", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"TENO\"\norder = 3\n", "", "euler"},
                                                   {"double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n", "euler"},
-                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"}};
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes"},
+                                                  {"double_flux = true\n", "type = \"MUSCL\"\n", "[chemistry]\n",
+                                                   "navier_stokes"},
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"},
+                                                  {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
+                                                   "navier_stokes"}};
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
         expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
+    }
+}
+
+TEST(MPITest, ChemistryLoadBalancingMatchesSerial) {
+    // The hot half of the channel reacts and the cold half does not, so ranks
+    // integrate each other's cells; each cell's reactor gives the same bits
+    // wherever it runs, also with fused half steps, the thickened flame's
+    // multiplier of dt and SIMPLER's forcing
+    const std::string balanced = "[chemistry]\nload_balance = true\n";
+    const std::string tfles = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
+    const std::string inputs[] = {mixture_input("", "type = \"MUSCL\"\n", balanced, "euler"),
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "fuse_half_steps = true\n",
+                                                "navier_stokes"),
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles,
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
+                                                "navier_stokes"),
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
+                                                "navier_stokes") + tfles};
+    for (const std::string & input : inputs) {
+        expect_matches_serial(input, [](const Solver & s) {
+            if (s.is_distributed()) {
+                EXPECT_GT(s.chemistry_cells_sent(), 0.0);
+            }
+        });
+    }
+}
+
+TEST(MPITest, ThermalDiffusionMatchesSerial) {
+    // The halo cells' thermal diffusion coefficients follow their owners'
+    std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
+    input.insert(input.find("[physics]\n") + 10, "soret = true\n");
+    expect_matches_serial(input);
+}
+
+TEST(MPITest, MixtureWallsMatchSerial) {
+    // Isothermal and heat-flux walls of a reacting mixture with thermal
+    // diffusion, also with double flux
+    std::string input = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes");
+    input.insert(input.find("[physics]\n") + 10, "soret = true\n");
+    const std::string adiabatic = "type = \"wall_adiabatic\"\n";
+    for (const std::string wall : {"type = \"wall_isothermal\"\nT = 500.0\nu = [10.0, 0.0]\n",
+                                   "type = \"wall_heat_flux\"\nq = 1e6\n"}) {
+        std::string walled = input;
+        walled.replace(walled.find(adiabatic), adiabatic.size(), wall);
+        expect_matches_serial(walled);
+        walled.insert(walled.find("[numerics]\n") + 11, "double_flux = true\n");
+        expect_matches_serial(walled);
     }
 }
 
@@ -206,7 +284,7 @@ TEST(MPITest, PeriodicRunsMatchSerialAcrossSeamsCutByThePartition) {
 TEST(MPITest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     const std::string file = write_temp_shared("mallard_mpi_periodic.msh", jittered_mixed_mesh(16));
     std::string input = box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER, "", 12);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0]\n"
              "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0]\n"
@@ -228,6 +306,14 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
         25));
 }
 
+TEST(MPITest, InletsMatchSerial) {
+    expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
+                                    bcs("type = \"stagnation_inlet\"\np0 = 1.5\nT0 = 1.1\ndirection = [1.0, 0.3]\n",
+                                        "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n"),
+                                    25));
+}
+
 TEST(MPITest, LargeEddySimulationMatchesSerial) {
     // Eddy viscosity of halo cells from their own gradients, as their owners'
     for (const char * model : {"wale", "vreman"}) {
@@ -244,10 +330,17 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
 }
 
 TEST(MPITest, ThickenedFlameMatchesSerial) {
-    // The vorticity and the flame fields are exchanged to the halo once per step
-    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") +
-                          "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
-                          "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n");
+    // The dynamic efficiency's test filter passes exchange the filtered field and its exponent is an exact
+    // domain sum; Charlette's efficiency exchanges the vorticity; the flame fields are exchanged once per step
+    const std::string flame = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
+                              "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
+    for (const std::string coupling : {"strang", "simpler"}) {
+        expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"" + coupling + "\"\n",
+                                            "navier_stokes") + flame,
+                              [](const Solver & s) { EXPECT_GT(s.tfles_beta(), 0.0); });
+    }
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") + flame +
+                          "efficiency = \"charlette\"\n");
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
@@ -279,6 +372,26 @@ TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
     }
 }
 
+TEST(MPITest, SourcesInRegionsMatchSerial) {
+    // Totals over regions are normalized by integrals summed in global cell
+    // order; sources of t and of the solution are local to each cell
+    const std::string ring =
+        "[[sources]]\ntotal = true\nrhoE = \"2 + sin(20 * t)\"\n"
+        "region = {type = \"annulus\", center = [0.4, 0.4], radius = 0.25, inner_radius = 0.1, edge = 0.05}\n";
+    const std::string relax =
+        "[[sources]]\nrho = \"-0.5 * (rho - 1)\"\n"
+        "region = {type = \"rectangle\", center = [0, 0], size = [0.5, 0.2], rotate = 30, translate = [0.6, 0.4]}\n";
+    const std::string plain = "[[sources]]\nrhoE = \"0.1 * x\"\n";
+    for (const std::string & sources : {plain, ring, relax}) {
+        SCOPED_TRACE(sources);
+        expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", "type = \"euler\"\n",
+                                        bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",
+                                            "type = \"symmetry\"\n"),
+                                        20) +
+                              sources);
+    }
+}
+
 TEST(MPITest, AxisymmetricRunsMatchSerial) {
     // Revolved geometry, r-weighted stencils, the high-order geometric source
     // and the axis-corrected viscous gradients of halo cells
@@ -306,7 +419,7 @@ namespace {
 
 std::string io_dir() {
     // Same path on every rank (they share a file system)
-    return (std::filesystem::temp_directory_path() / "mallard_mpi_io").string();
+    return (scratch_dir() / "mallard_mpi_io").string();
 }
 
 std::string restart_case(uint32_t n_steps, const std::string & output) {
@@ -378,6 +491,61 @@ TEST(MPITest, RestartFilesDoNotDependOnTheRankCount) {
     comm::barrier();
 }
 
+TEST(MPITest, AsynchronousAndCompressedRestartFilesDoNotDependOnTheRankCount) {
+    // Each rank writes its runs of cells (or chunks) on its own, at offsets
+    // agreed on beforehand: the file is that of a serial run byte for byte
+    const std::string dir = io_dir() + "_async";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    std::vector<std::string> variants = {""};
+    if (compression::have_zlib()) variants.push_back("compression = \"zlib\"\nchunk_cells = 40\n");
+
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(restart_case(20, "")));
+    reference.run();
+    const auto U_ref = gather(reference);
+
+    for (size_t k = 0; k < variants.size(); k++) {
+        auto writing = [&](const std::string & name) {
+            std::string input = restart_case(10, "[[write_data]]\nprefix = \"" + dir + "/" + name + std::to_string(k) +
+                                                     "\"\nformat = \"restart\"\ninterval = 10\n" + variants[k]);
+            const std::string output = "[output]\n";
+            input.insert(input.find(output) + output.size(), "async = true\nio_threads = 2\n");
+            return parse_toml(input);
+        };
+        {
+            Solver distributed;
+            distributed.init(writing("d"));
+            distributed.run();
+            Solver serial;
+            serial.set_distributed(false);
+            serial.init(writing("s"));
+            serial.run();
+        }
+        comm::barrier();
+        const std::string file = dir + "/d" + std::to_string(k) + "_000010.restart";
+        if (comm::is_root()) {
+            for (const char * step : {"_000000", "_000010"}) {
+                const std::string d = dir + "/d" + std::to_string(k) + step + ".restart";
+                const std::string s = dir + "/s" + std::to_string(k) + step + ".restart";
+                std::ifstream a(d, std::ios::binary), b(s, std::ios::binary);
+                const std::string bytes_d((std::istreambuf_iterator<char>(a)), std::istreambuf_iterator<char>());
+                const std::string bytes_s((std::istreambuf_iterator<char>(b)), std::istreambuf_iterator<char>());
+                EXPECT_FALSE(bytes_s.empty()) << s;
+                EXPECT_TRUE(without_provenance(bytes_d) == without_provenance(bytes_s)) << d << " on " << comm::size() << " ranks";
+            }
+        }
+        std::string input = restart_case(20, "");
+        input.replace(input.find("[initialize]\n") + 13, std::strlen(BLAST), "type = \"restart\"\nfile = \"" + file + "\"\n");
+        Solver second;
+        second.init(parse_toml(input));
+        second.run();
+        EXPECT_EQ(max_rel_diff(gather(second), U_ref), 0.0) << variants[k];
+    }
+    comm::barrier();
+}
+
 TEST(MPITest, CharacteristicBoundaryStateRestartsOnAnyRankCount) {
     // The faces' pressure and normal velocity are keyed by cell global ids, so
     // a file written on any rank count continues on any other bitwise
@@ -441,7 +609,7 @@ std::vector<double> gather_statistics(Solver & solver) {
     const auto mesh = solver.get_mesh();
     const auto & mean = solver.get_statistics().host_means();
     const auto & cov = solver.get_statistics().host_covariances();
-    const uint32_t n_vars = mean.extent(1) + cov.extent(1);
+    const uint32_t n_vars = static_cast<uint32_t>(mean.extent(1) + cov.extent(1));
     const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
     std::vector<double> values(n_global * n_vars, 0.0);
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
@@ -496,9 +664,80 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
             ss << in.rdbuf();
             return ss.str();
         };
-        const std::string a = read(dir + "/reference.csv");
+        const std::string a = without_comment_lines(read(dir + "/reference.csv"));
         EXPECT_FALSE(a.empty());
-        EXPECT_EQ(read(dir + "/distributed.csv"), a);
+        EXPECT_EQ(without_comment_lines(read(dir + "/distributed.csv")), a);
+    }
+    comm::barrier();
+}
+
+TEST(MPITest, EveryRankWritesRankZerosProvenance) {
+    const std::string dir = io_dir() + "_provenance";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    Solver solver;
+    solver.init(parse_toml(restart_case(2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
+                                                  "interval = 2\nvariables = [\"RHO\"]\n"
+                                                  "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\n"
+                                                  "interval = 2\n")));
+    solver.run();
+    comm::barrier();
+    const std::string expected = provenance::json();
+    EXPECT_EQ(comm::broadcast(expected), expected);
+    EXPECT_EQ(json_reader::parse(expected)["run"]["ranks"].number, comm::size());
+    std::ostringstream piece;
+    piece << dir << "/f_000002";
+    if (comm::size() > 1) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
+    std::ifstream in(piece.str() + ".vtu");
+    std::stringstream ss;
+    ss << in.rdbuf();
+    EXPECT_EQ(provenance::parse_comment(ss.str()), expected) << piece.str();
+    EXPECT_EQ(read_restart(dir + "/r_000002.restart").provenance, expected);
+    comm::barrier();
+}
+
+TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
+    // TENO point values (least squares in troubled cells), sample order and
+    // reductions summed on rank 0 in that order: the files match bitwise
+    const std::string dir = io_dir() + "_probes";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto probes = [&](const std::string & sub) {
+        const std::string at = "file = \"" + dir + "/" + sub;
+        return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nvariables = [\"RHO\", \"U\", \"T\", \"H\"]\n"
+               "sampling = \"point\"\nshape = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
+               "interval = 5\nreductions = [\"integral\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_" + at +
+               "/circle_red.csv\"\n"
+               "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nvariables = [\"P\"]\n"
+               "sampling = \"point\"\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 31\ninterval = 10\n";
+    };
+    auto input = [&](const std::string & sub) {
+        return box_input("cartesian_tri", "type = \"TENO\"\norder = 3\n", EULER,
+                         bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                             "type = \"extrapolation\"\n"),
+                         20) +
+               probes(sub);
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(input("serial")));
+    reference.run();
+    Solver distributed;
+    distributed.init(parse_toml(input("ranks")));
+    distributed.run();
+    comm::barrier();
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        for (const char * file : {"circle.csv", "circle_red.csv", "line.pvd", "line_000020.vtp"}) {
+            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            EXPECT_FALSE(a.empty()) << file;
+            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+        }
     }
     comm::barrier();
 }
@@ -549,7 +788,7 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
-    const std::string generated = "type = \"cartesian\"\n";
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
                                       "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
@@ -575,11 +814,37 @@ TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {
     if (!solver.is_distributed()) return;
     const uint64_t n_owned = solver.get_distribution().n_owned;
     const uint64_t n_global = solver.get_mesh()->n_global_cells;
-    EXPECT_LE(comm::allreduce(n_owned, comm::Op::MAX), 1.03 * n_global / comm::size() + 1);
+    EXPECT_LE(comm::allreduce(n_owned, comm::Op::MAX), 1.03 * static_cast<double>(n_global) / comm::size() + 1);
+}
+
+TEST(MPITest, MultiJaggedPartitionCutsABoxIntoBlocksAndMatchesSerial) {
+    const std::string input =
+        box_input("cartesian", "type = \"TENO\"\norder = 4\n", EULER,
+                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                      "type = \"extrapolation\"\n"),
+                  10) +
+        "[parallel]\npartitioner = \"multijagged\"\n";
+    expect_matches_serial(input);
+    Solver solver;
+    solver.init(parse_toml(input));
+    if (!solver.is_distributed()) return;
+    const uint32_t n_owned = solver.get_distribution().n_owned;
+    const uint64_t n_global = solver.get_mesh()->n_global_cells;
+    EXPECT_LE(comm::allreduce(uint64_t(n_owned), comm::Op::MAX), n_global / uint64_t(comm::size()) + 2);
+    // 24 x 18 cells: a grid of blocks that divides them is cut by straight lines only
+    const auto shape = grid_shape(comm::size(), {1.0 - 1.0 / 24, 0.8 - 0.8 / 18});
+    if (24 % shape[0] != 0 || 18 % shape[1] != 0) return;
+    const auto & mesh = *solver.get_mesh();
+    uint64_t cut = 0;
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        const int32_t a = mesh.h_cells_of_face(f, 0), b = mesh.h_cells_of_face(f, 1);
+        cut += b >= 0 && (uint32_t(a) < n_owned) != (uint32_t(b) < n_owned);
+    }
+    EXPECT_EQ(comm::allreduce(cut, comm::Op::SUM) / 2, uint64_t((shape[0] - 1) * 18 + (shape[1] - 1) * 24));
 }
 
 TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
-    const std::string cache = (std::filesystem::temp_directory_path() / "mallard_mpi_teno_cache.bin").string();
+    const std::string cache = (scratch_dir() / "mallard_mpi_teno_cache.bin").string();
     const std::string rank_file =
         comm::size() > 1 ? cache + ".r" + std::to_string(comm::rank()) + "-of-" + std::to_string(comm::size()) : cache;
     std::filesystem::remove(rank_file);
@@ -634,15 +899,79 @@ TEST(MPITest, TENOCacheOfEachRankReproducesItsSetupAndHalo) {
 TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5 to write the mesh";
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_mpi_mesh.h5").string();
+    const std::string file = (scratch_dir() / "mallard_mpi_mesh.h5").string();
     write_mesh_h5(file, read_mesh_block(parse_toml("[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 18\n"
                                                    "Lx = 1.0\nLy = 0.8\n")));
     comm::barrier();
     std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                   bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
                                       "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 10);
-    const std::string generated = "type = \"cartesian_tri\"\n";
+    const std::string generated = "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_matches_serial(input);
+    comm::barrier();
+}
+
+TEST(MPITest, CurvedWallsMatchSerial) {
+    // Walls from P3 lines of the file, or projected onto circles; the HDF5
+    // copy of the file keeps the P3 lines
+    const char * shapes = "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                          "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
+    for (int order : {1, 3}) {
+        const std::string file =
+            write_temp_shared("mallard_mpi_annulus_" + std::to_string(order) + ".msh", annulus_gmsh(5, 60, order, order == 3));
+        std::string input = box_input("cartesian", "type = \"TENO\"\norder = 5\ncurved_mirrors = false\n", EULER,
+                                      "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
+                                      "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n", 10);
+        const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
+        input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + (order == 1 ? shapes : ""));
+        expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
+            const std::string h5 = (scratch_dir() / "mallard_mpi_annulus_3.h5").string();
+            write_mesh_h5(h5, read_file_block(file));
+            std::string from_h5 = input;
+            from_h5.replace(from_h5.find(file), file.size(), h5);
+            expect_matches_serial(from_h5, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        }
+    }
+    comm::barrier();
+}
+
+TEST(MPITest, RemapDoesNotDependOnTheRankCount) {
+    // Restart files of a coarse triangle run and of a reacting mixture, each
+    // remapped to a quad mesh of another size: contributions are summed by
+    // source cell id, so no partition of either mesh changes a bit
+    const std::string dir = io_dir() + "_remap";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    {
+        Solver coarse;
+        coarse.init(parse_toml(restart_case(5, "[[write_data]]\nprefix = \"" + dir +
+                                                   "/c\"\nformat = \"restart\"\ninterval = 5\n")));
+        coarse.run();
+    }
+    std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "euler");
+    mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 5");
+    {
+        Solver coarse;
+        coarse.init(parse_toml(mixture + "[[write_data]]\nprefix = \"" + dir +
+                               "/m\"\nformat = \"restart\"\ninterval = 5\n"));
+        coarse.run();
+    }
+    comm::barrier();
+    auto remapped = [](std::string input, const std::string & init, const std::string & source) {
+        const size_t at = input.find("[initialize]\n");
+        const size_t end = input.find("[[boundaries]]", at);
+        input.replace(at, end - at, "[initialize]\n" + init + "[initialize.mesh]\n" + source);
+        input.replace(input.find("type = \"cartesian_tri\""), 22, "type = \"cartesian\"");
+        input.replace(input.find("Nx = 24"), 7, "Nx = 31");
+        return input;
+    };
+    expect_matches_serial(remapped(restart_case(8, ""),
+                                   "type = \"remap\"\nfile = \"" + dir + "/c_000005.restart\"\ndegree = 3\n",
+                                   "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n"));
+    mixture.replace(mixture.find("n_steps = 5"), 11, "n_steps = 7");
+    expect_matches_serial(remapped(mixture, "type = \"remap\"\nfile = \"" + dir + "/m_000005.restart\"\n",
+                                   "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n"));
     comm::barrier();
 }

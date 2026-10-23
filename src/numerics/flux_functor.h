@@ -16,6 +16,7 @@
 
 #include "common.h"
 #include "boundary.h"
+#include "periodic_maps.h"
 #include "riemann_solver.h"
 
 /**
@@ -40,6 +41,18 @@ void low_mach_correction(rtype * W_l, rtype * W_r, const rtype gamma, const rtyp
         W_l[1 + i] = mean + z * half_jump;
         W_r[1 + i] = mean - z * half_jump;
     }
+}
+
+/**
+ * @brief Unit normal at quadrature point q of face f: the point's own on
+ *        curved meshes (quad_normals, (face, q, dim)), else the face's n_face.
+ */
+KOKKOS_INLINE_FUNCTION
+const rtype * quad_normal(const Kokkos::View<rtype ***> & quad_normals, const uint32_t f, const uint8_t q,
+                          const rtype * n_face, rtype * n_q) {
+    if (quad_normals.extent(0) == 0) return n_face;
+    FOR_I_DIM n_q[i] = quad_normals(f, q, i);
+    return n_q;
 }
 
 /**
@@ -79,7 +92,7 @@ struct UpwindSensorFunctor {
         } else {
             omega2 = 0.0_r;
             for (uint8_t k = 0; k < 3; k++) {
-                const uint8_t a = (k + 1) % 3, b = (k + 2) % 3;
+                const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
                 const rtype w = gradients(c, 1 + b, a) - gradients(c, 1 + a, b);
                 omega2 += w * w;
             }
@@ -116,14 +129,15 @@ struct ConvectiveFluxFunctor {
     rtype gamma;
     rtype low_mach_cutoff;  // 1 disables the low-Mach correction
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell (UpwindSensorFunctor), else empty
+    Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
         uint8_t n_quad;
         if constexpr (N_DIM == 2) {
-            n_quad = quad_weights.extent(0);
+            n_quad = static_cast<uint8_t>(quad_weights.extent(0));
         } else {
-            n_quad = face_weights.extent(1);
+            n_quad = static_cast<uint8_t>(face_weights.extent(1));
         }
         const int32_t c1 = cells_of_face(i_face, 1);
         rtype n_unit[N_DIM];
@@ -137,6 +151,8 @@ struct ConvectiveFluxFunctor {
 
         rtype flux[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
+            rtype n_q[N_DIM];
+            const rtype * n_point = quad_normal(quad_normals, i_face, i_quad, n_unit, n_q);
             rtype w_q;
             if constexpr (N_DIM == 2) {
                 w_q = face_weights.extent(0) ? face_weights(i_face, i_quad) : quad_weights(i_quad);
@@ -149,16 +165,16 @@ struct ConvectiveFluxFunctor {
             if (c1 >= 0) {
                 FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
             } else {
-                boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_unit, W_cells, face_solution, W_r);
+                boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, W_cells, face_solution, W_r);
             }
             rtype central[N_CONSERVATIVE] = {};
-            if (hybrid) riemann::KEEP::calc_flux(central, n_unit, W_l, W_r, gamma);
+            if (hybrid) riemann::KEEP::calc_flux(central, n_point, W_l, W_r, gamma);
             if (phi > 0.0_r) {
                 if (low_mach_cutoff < 1.0_r &&
                     (c1 >= 0 || boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic())) {
                     low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
                 }
-                T_riemann_solver::calc_flux(flux_q, n_unit, W_l, W_r, gamma);
+                T_riemann_solver::calc_flux(flux_q, n_point, W_l, W_r, gamma);
                 if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = central[i] + phi * (flux_q[i] - central[i]);
             } else {
                 FOR_I_CONSERVATIVE flux_q[i] = central[i];
@@ -166,7 +182,8 @@ struct ConvectiveFluxFunctor {
             FOR_I_CONSERVATIVE flux[i] += w_q * flux_q[i];
         }
 
-        // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D)
+        // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D), on curved faces
+        // to twice their area over face_area
         const rtype scale = 0.5_r * face_area(i_face);
         FOR_I_CONSERVATIVE face_flux(i_face, i) = -scale * flux[i];
     }
@@ -182,13 +199,24 @@ struct FaceFluxSumFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_cell) const {
         rtype sum[N_CONSERVATIVE] = {};
+        const bool rotated = periodic.rotated();
         for (uint32_t k = offsets_faces_of_cell(i_cell); k < offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces_of_cell(k);
             const rtype sign = (cells_of_face(i_face, 0) == static_cast<int32_t>(i_cell)) ? 1.0 : -1.0;
+            if (rotated && sign < 0.0_r) {
+                // The flux is in the face's (cell 0's) frame
+                rtype F[N_CONSERVATIVE];
+                FOR_I_CONSERVATIVE F[i] = face_flux(i_face, i);
+                periodic.rotate_state(face_shift(i_face), F, true);
+                FOR_I_CONSERVATIVE sum[i] -= F[i];
+                continue;
+            }
             FOR_I_CONSERVATIVE sum[i] += sign * face_flux(i_face, i);
         }
         FOR_I_CONSERVATIVE rhs(i_cell, i) = sum[i];

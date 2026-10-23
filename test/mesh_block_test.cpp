@@ -20,9 +20,12 @@
 #include <vector>
 
 #include "comm.h"
+#include "gmsh_fixtures.h"
+#include "input.h"
 #include "mesh.h"
 #include "mesh_block.h"
 #include "test_fixtures.h"
+#include "scratch.h"
 
 namespace {
 
@@ -34,7 +37,8 @@ namespace {
 MeshBlock synthetic_block(const std::vector<double> & split) {
     const uint64_t n_cells = 37, n_nodes = 53, n_faces = 23;
     const int r = comm::rank();
-    auto range = [&](uint64_t n) { return std::pair<uint64_t, uint64_t>(n * split[r], n * split[r + 1]); };
+    auto range = [&](uint64_t n) { return std::pair<uint64_t, uint64_t>(static_cast<uint64_t>(static_cast<double>(n) * split[static_cast<size_t>(r)]),
+                                                                    static_cast<uint64_t>(static_cast<double>(n) * split[static_cast<size_t>(r) + 1])); };
     MeshBlock block;
     block.zone_names = {"inlet", "wall", "outlet"};
     const auto [c0, c1] = range(n_cells);
@@ -50,21 +54,21 @@ MeshBlock synthetic_block(const std::vector<double> & split) {
     }
     for (uint64_t g = n0; g < n1; g++) {
         std::array<double, N_DIM> x;
-        FOR_I_DIM x[i] = (i == 0) ? 0.5 * g : (i == 1) ? 1e-3 * g * g : -double(g);
+        FOR_I_DIM x[i] = (i == 0) ? 0.5 * double(g) : (i == 1) ? 1e-3 * double(g) * double(g) : -double(g);
         block.node_coords.push_back(x);
     }
     for (uint64_t f = f0; f < f1; f++) {
         std::vector<uint64_t> nodes;
         for (uint32_t k = 0; k < (N_DIM == 2 ? 2 : 3 + f % 2); k++) nodes.push_back((f * 5 + k * 3) % n_nodes);
-        block.add_face(nodes, f % 3);
+        block.add_face(nodes, static_cast<uint32_t>(f % 3));
     }
     return block;
 }
 
 std::vector<double> fractions(bool even) {
     const int p = comm::size();
-    std::vector<double> split(p + 1);
-    for (int r = 0; r <= p; r++) split[r] = even ? double(r) / p : double(r * r) / (p * p);
+    std::vector<double> split(static_cast<size_t>(p + 1));
+    for (int r = 0; r <= p; r++) split[static_cast<size_t>(r)] = even ? double(r) / p : double(r * r) / (p * p);
     return split;
 }
 
@@ -73,7 +77,7 @@ std::vector<double> fractions(bool even) {
 TEST(MeshBlockTest, HDF5FileReadsBackInEvenBlocksWhateverTheWrittenSplit) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_block_test.h5").string();
+    const std::string file = (scratch_dir() / "mallard_block_test.h5").string();
     // Written from uneven blocks, so every offset in the file depends on the other ranks
     write_mesh_h5(file, synthetic_block(fractions(false)));
     comm::barrier();
@@ -111,7 +115,7 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
     for (const std::string & type : generated_types()) {
       for (const std::string & stretching : {std::string(), stretched}) {
         SCOPED_TRACE(type + " " + stretching);
-        const toml::value input = parse_toml("[mesh]\ntype = \"" + type +
+        const Input input = parse_toml("[mesh]\ntype = \"" + type +
                                              "\"\nNx = 6\nNy = 5\nNz = 3\nLx = 1.5\nLy = 1.0\nLz = 0.7\n" +
                                              stretching);
         Mesh serial;
@@ -124,11 +128,11 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
         }
         for (uint64_t c = 0; c < block.n_cells(); c++) {
             // The serial 3D mesh reorients cells, which permutes their nodes
-            std::vector<uint64_t> nodes(block.cell_nodes.begin() + block.cell_offsets[c],
-                                        block.cell_nodes.begin() + block.cell_offsets[c + 1]);
+            std::vector<uint64_t> nodes(block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c]),
+                                        block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c + 1]));
             std::vector<uint64_t> expected;
-            for (uint32_t k = 0; k < serial.h_n_nodes_of_cell(block.first_cell + c); k++) {
-                expected.push_back(serial.h_node_of_cell(block.first_cell + c, k));
+            for (uint32_t k = 0; k < serial.h_n_nodes_of_cell(static_cast<uint32_t>(block.first_cell + c)); k++) {
+                expected.push_back(serial.h_node_of_cell(static_cast<uint32_t>(block.first_cell + c), k));
             }
             std::sort(nodes.begin(), nodes.end());
             std::sort(expected.begin(), expected.end());
@@ -151,8 +155,8 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
         for (const auto & [name, faces] : serial_faces) n_serial += faces.size();
         EXPECT_EQ(comm::allreduce(block.n_faces(), comm::Op::SUM), n_serial);
         for (uint64_t f = 0; f < block.n_faces(); f++) {
-            std::vector<uint64_t> nodes(block.face_nodes.begin() + block.face_offsets[f],
-                                        block.face_nodes.begin() + block.face_offsets[f + 1]);
+            std::vector<uint64_t> nodes(block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f]),
+                                        block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f + 1]));
             std::sort(nodes.begin(), nodes.end());
             EXPECT_TRUE(serial_faces[block.zone_names[block.face_zone[f]]].count(nodes))
                 << "boundary face " << f << " of zone " << block.zone_names[block.face_zone[f]];
@@ -170,7 +174,7 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
 TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
     const double beta = 1.7, Ly = 2.0;
     const uint32_t ny = 8;
-    const toml::value input = parse_toml(
+    const Input input = parse_toml(
         std::string("[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 8\nNz = 4\nLx = 1.5\nLy = 2.0\nLz = 0.5\n") +
         (N_DIM == 2 ? "stretching = [0.0, 1.7]\nperiodic = [\"x\"]\n" : "stretching = [0.0, 1.7, 0.0]\nperiodic = [\"x\", \"z\"]\n"));
     Mesh mesh;
@@ -198,4 +202,70 @@ TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
         if (zone.get_type() == FaceZoneType::BOUNDARY) zones.insert(zone.get_name());
     }
     EXPECT_EQ(zones, (std::set<std::string>{"bottom", "top"}));
+}
+
+TEST(MeshBlockTest, TransformOnReadMapsNodesAndHighOrderNodes) {
+    // 2D: scale [2, 3], rotate 90 deg, translate [1, -1]: (x, y) -> (1 - 3y, 2x - 1).
+    // 3D: scale 2, rotate 120 deg about [1, 1, 1] (cycles the axes), translate [1, 2, 3]: (x, y, z) -> (2z + 1, 2x + 2, 2y + 3)
+#if N_DIM == 2
+    const std::string file = write_temp_shared("mallard_transform.msh", annulus_gmsh(3, 16, 2));
+    const std::string transform = "[mesh.transform]\nscale = [2, 3]\nrotate = 90\ntranslate = [1, -1]\n";
+    auto expected = [](const auto & x) {
+        return std::array<double, N_DIM>{1.0 - 3.0 * double(x[1]), 2.0 * double(x[0]) - 1.0};
+    };
+    const double det = 6.0;
+#else
+    const std::string file = write_temp_shared("mallard_transform_3d.msh", shell_gmsh(2, 2, false, true));
+    const std::string transform =
+        "[mesh.transform]\nscale = 2\nrotate = {axis = [1, 1, 1], angle = 120}\ntranslate = [1, 2, 3]\n";
+    auto expected = [](const auto & x) {
+        return std::array<double, N_DIM>{2.0 * double(x[2]) + 1.0, 2.0 * double(x[0]) + 2.0, 2.0 * double(x[1]) + 3.0};
+    };
+    const double det = 8.0;
+#endif
+    const double tol = precision_tol<double>(1e-12, 1e-5);
+    const Input input = parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + transform);
+
+    const MeshBlock plain = read_file_block(file), moved = read_mesh_block(input);
+    ASSERT_EQ(moved.n_nodes(), plain.n_nodes());
+    for (uint64_t n = 0; n < plain.n_nodes(); n++) {
+        FOR_I_DIM EXPECT_NEAR(moved.node_coords[n][i], expected(plain.node_coords[n])[i], tol);
+    }
+    ASSERT_EQ(moved.face_high_order_nodes.size(), plain.face_high_order_nodes.size());
+    ASSERT_FALSE(plain.face_high_order_nodes.empty());
+    for (size_t k = 0; k < plain.face_high_order_nodes.size(); k++) {
+        FOR_I_DIM EXPECT_NEAR(moved.face_high_order_nodes[k][i], expected(plain.face_high_order_nodes[k])[i], tol);
+    }
+
+    if (comm::size() > 1) return;
+    Mesh a, b;
+    a.init_file(file);
+    b.init(input);
+    ASSERT_EQ(b.n_cells, a.n_cells);
+    ASSERT_EQ(b.n_faces, a.n_faces);
+    for (uint32_t c = 0; c < a.n_cells; c++) {
+        EXPECT_NEAR(double(b.h_cell_volume(c)), det * double(a.h_cell_volume(c)), tol * det);
+        std::array<rtype, N_DIM> x;
+        FOR_I_DIM x[i] = a.h_cell_coords(c, i);
+        FOR_I_DIM EXPECT_NEAR(double(b.h_cell_coords(c, i)), expected(x)[i], 10 * tol);
+    }
+    for (FaceZone & zone : *a.face_zones()) {
+        ASSERT_NE(b.get_face_zone(zone.get_name()), nullptr) << zone.get_name();
+        EXPECT_EQ(b.get_face_zone(zone.get_name())->n_faces(), zone.n_faces()) << zone.get_name();
+    }
+    ASSERT_EQ(b.high_order_faces.size(), a.high_order_faces.size());
+    for (size_t f = 0; f < a.high_order_faces.size(); f++) {
+        for (size_t k = 0; k < a.high_order_faces[f].nodes.size(); k++) {
+            const auto y = expected(a.high_order_faces[f].nodes[k]);
+            FOR_I_DIM EXPECT_NEAR(b.high_order_faces[f].nodes[k][i], y[i], tol);
+        }
+    }
+}
+
+TEST(MeshBlockTest, TransformIsRejectedForGeneratedMeshesAndUnknownKeys) {
+    EXPECT_THROW(mesh_transform(parse_toml("[mesh]\ntype = \"cartesian\"\n[mesh.transform]\nscale = 2\n")),
+                 InputError);
+    EXPECT_THROW(mesh_transform(parse_toml("[mesh]\ntype = \"file\"\n[mesh.transform]\nshift = [1, 1]\n")),
+                 InputError);
+    EXPECT_THROW(mesh_transform(parse_toml("[mesh]\ntype = \"file\"\n[mesh.transform]\nscale = 0\n")), InputError);
 }

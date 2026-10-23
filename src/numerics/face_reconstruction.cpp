@@ -22,7 +22,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "quadrature.h"
@@ -59,6 +59,33 @@ void FaceReconstruction::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVA
 
 void FaceReconstruction::set_mesh(std::shared_ptr<Mesh> mesh_in) {
     this->mesh = mesh_in;
+    rotated_faces_found = false;
+}
+
+void FaceReconstruction::rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
+    if (!mesh->is_rotational()) return;
+    if (!rotated_faces_found) {
+        std::vector<uint32_t> faces;
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            if (mesh->h_cells_of_face(f, 1) >= 0 && mesh->h_rotated_row(mesh->h_face_shift(f))) faces.push_back(f);
+        }
+        rotated_faces = Kokkos::View<uint32_t *>("rotated_faces", faces.size());
+        Kokkos::deep_copy(rotated_faces, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(faces.data(), faces.size()));
+        rotated_faces_found = true;
+    }
+    const auto faces = rotated_faces;
+    const auto face_shift = mesh->face_shift;
+    const PeriodicMaps periodic = mesh->periodic_maps();
+    const uint32_t n_quad = static_cast<uint32_t>(face_solution.extent(1));
+    Kokkos::parallel_for("rotate_periodic_faces", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+        const uint32_t f = faces(k);
+        for (uint32_t q = 0; q < n_quad; q++) {
+            rtype u[N_DIM];
+            FOR_I_DIM u[i] = face_solution(f, q, 1, 1 + i);
+            periodic.rotate(face_shift(f), u);
+            FOR_I_DIM face_solution(f, q, 1, 1 + i) = u[i];
+        }
+    });
 }
 
 void FaceReconstruction::set_boundaries(const BoundaryData & boundaries_in) {
@@ -72,8 +99,10 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     const uint8_t tri_rule = (degree <= 2) ? degree : (degree <= 4 ? 4 : 5);
     const int n_gp = std::min(3, std::max(1, (degree + 1) / 2));
     const TriangleDunavant tri(std::max<uint8_t>(tri_rule, 1));
-    const GaussLegendre gl(n_gp);
+    const GaussLegendre gl(static_cast<uint8_t>(n_gp));
     size_t n_max = 1;
+    const curved::Geometry * geometry = mesh->curved_geometry.get();
+    std::vector<std::vector<curved::Vec3>> curved_normals(geometry ? n_faces : 0);
     for (uint32_t f = 0; f < n_faces; f++) {
         const uint32_t n = mesh->h_n_nodes_of_face(f);
         std::vector<std::array<double, 3>> v(n);
@@ -82,6 +111,33 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         }
         auto & pts = points[f];
         auto & w = weights[f];
+        if (geometry && degree > 1 && geometry->face_is_curved(f)) {
+            // The flat rule mapped onto the curved face; weights twice its area elements over face_area
+            std::vector<std::array<double, 2>> ref;
+            std::vector<double> ref_w;
+            if (n == 3) {
+                for (uint32_t q = 0; q < tri.h_weights.extent(0); q++) {
+                    ref.push_back({double(tri.h_points(q, 0)), double(tri.h_points(q, 1))});
+                    ref_w.push_back(0.5 * double(tri.h_weights(q)));
+                }
+            } else {
+                for (int a = 0; a < n_gp; a++) {
+                    for (int b = 0; b < n_gp; b++) {
+                        ref.push_back({double(gl.h_points(a, 0)), double(gl.h_points(b, 0))});
+                        ref_w.push_back(double(gl.h_weights(a)) * double(gl.h_weights(b)));
+                    }
+                }
+            }
+            std::vector<curved::Vec3> x, nq;
+            geometry->face_rule(f, ref, ref_w, x, nq, w);
+            for (size_t q = 0; q < x.size(); q++) {
+                pts.push_back(x[q]);
+                w[q] *= 2.0 / double(mesh->h_face_area(f));
+            }
+            curved_normals[f] = nq;
+            n_max = std::max(n_max, pts.size());
+            continue;
+        }
         if (degree <= 1) {
             std::array<double, 3> c;
             FOR_I_DIM c[i] = double(mesh->h_face_coords(f, i));
@@ -91,7 +147,7 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
             for (uint32_t q = 0; q < tri.h_weights.extent(0); q++) {
                 const double a = double(tri.h_points(q, 0)), b = double(tri.h_points(q, 1));
                 std::array<double, 3> p;
-                for (int i = 0; i < 3; i++) p[i] = v[0][i] + a * (v[1][i] - v[0][i]) + b * (v[2][i] - v[0][i]);
+                for (size_t i = 0; i < 3; i++) p[i] = v[0][i] + a * (v[1][i] - v[0][i]) + b * (v[2][i] - v[0][i]);
                 pts.push_back(p);
                 w.push_back(double(tri.h_weights(q)));
             }
@@ -104,8 +160,8 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
                     const double dNs[4] = {-0.25 * (1 - t), 0.25 * (1 - t), 0.25 * (1 + t), -0.25 * (1 + t)};
                     const double dNt[4] = {-0.25 * (1 - s), -0.25 * (1 + s), 0.25 * (1 + s), 0.25 * (1 - s)};
                     std::array<double, 3> p = {0, 0, 0}, xs = {0, 0, 0}, xt = {0, 0, 0};
-                    for (int k = 0; k < 4; k++) {
-                        for (int i = 0; i < 3; i++) {
+                    for (size_t k = 0; k < 4; k++) {
+                        for (size_t i = 0; i < 3; i++) {
                             p[i] += N[k] * v[k][i];
                             xs[i] += dNs[k] * v[k][i];
                             xt[i] += dNt[k] * v[k][i];
@@ -131,20 +187,36 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     for (uint32_t f = 0; f < n_faces; f++) {
         for (size_t q = 0; q < n_max; q++) {
             const size_t qq = std::min(q, points[f].size() - 1);
-            FOR_I_DIM h_points(f, q, i) = points[f][qq][i];
-            h_weights(f, q) = (q < points[f].size()) ? weights[f][q] : 0.0;
+            FOR_I_DIM h_points(f, q, i) = static_cast<rtype>(points[f][qq][i]);
+            h_weights(f, q) = static_cast<rtype>((q < points[f].size()) ? weights[f][q] : 0.0);
         }
     }
     Kokkos::deep_copy(face_quad_points, h_points);
     Kokkos::deep_copy(face_quad_weights, h_weights);
+    if (geometry) {
+        face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_faces, n_max, N_DIM);
+        auto h_normals = Kokkos::create_mirror_view(face_quad_normals);
+        for (uint32_t f = 0; f < n_faces; f++) {
+            for (size_t q = 0; q < n_max; q++) {
+                if (!curved_normals[f].empty()) {
+                    const size_t qq = std::min(q, curved_normals[f].size() - 1);
+                    FOR_I_DIM h_normals(f, q, i) = rtype(curved_normals[f][qq][i]);
+                } else {
+                    FOR_I_DIM h_normals(f, q, i) = mesh->h_face_normals(f, i) / mesh->h_face_area(f);
+                }
+            }
+        }
+        Kokkos::deep_copy(face_quad_normals, h_normals);
+    }
 
     if (boundaries.face_image_quad.extent(0) != n_faces) return;
     auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_face);
     auto h_image_quad = Kokkos::create_mirror_view(boundaries.face_image_quad);
     for (uint32_t f = 0; f < n_faces; f++) {
-        for (size_t q = 0; q < h_image_quad.extent(1); q++) h_image_quad(f, q) = q;
-        const int32_t g = h_image_face(f);
-        if (g < 0) continue;
+        for (size_t q = 0; q < h_image_quad.extent(1); q++) h_image_quad(f, q) = static_cast<uint8_t>(q);
+        const int32_t g_index = h_image_face(f);
+        if (g_index < 0) continue;
+        const uint32_t g = static_cast<uint32_t>(g_index);
         for (size_t q = 0; q < points[f].size() && q < h_image_quad.extent(1); q++) {
             double best = std::numeric_limits<double>::max();
             for (size_t r = 0; r < points[g].size(); r++) {
@@ -155,12 +227,59 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
                 }
                 if (d2 < best) {
                     best = d2;
-                    h_image_quad(f, q) = r;
+                    h_image_quad(f, q) = static_cast<uint8_t>(r);
                 }
             }
         }
     }
     Kokkos::deep_copy(boundaries.face_image_quad, h_image_quad);
+}
+
+void FaceReconstruction::init_face_quadrature_2d_curved() {
+    if (N_DIM != 2 || !mesh->curved_geometry) return;
+    const curved::Geometry & geometry = *mesh->curved_geometry;
+    const uint32_t n_faces = mesh->n_faces;
+    const uint32_t n_q = static_cast<uint32_t>(quadrature_face.h_points.extent(0));
+    std::vector<std::array<double, 2>> ref(n_q);
+    std::vector<double> ref_w(n_q);
+    for (uint32_t q = 0; q < n_q; q++) {
+        ref[q] = {double(quadrature_face.h_points(q, 0)), 0.0};
+        ref_w[q] = double(quadrature_face.h_weights(q));
+    }
+    face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_faces, n_q, N_DIM);
+    face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_faces, n_q);
+    face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_faces, n_q, N_DIM);
+    auto h_points = Kokkos::create_mirror_view(face_quad_points);
+    auto h_weights = Kokkos::create_mirror_view(face_quad_weights);
+    auto h_normals = Kokkos::create_mirror_view(face_quad_normals);
+    std::vector<curved::Vec3> x, n;
+    std::vector<double> w;
+    for (uint32_t f = 0; f < n_faces; f++) {
+        if (geometry.face_is_curved(f)) {
+            geometry.face_rule(f, ref, ref_w, x, n, w);
+            for (uint32_t q = 0; q < n_q; q++) {
+                FOR_I_DIM {
+                    h_points(f, q, i) = rtype(x[q][i]);
+                    h_normals(f, q, i) = rtype(n[q][i]);
+                }
+                h_weights(f, q) = rtype(2.0 * w[q] / double(mesh->h_face_area(f)));
+            }
+            continue;
+        }
+        // Straight faces: the points the schemes compute on the fly
+        const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
+        for (uint32_t q = 0; q < n_q; q++) {
+            const rtype s_q = 0.5_r * quadrature_face.h_points(q, 0);
+            FOR_I_DIM {
+                h_points(f, q, i) = mesh->h_face_coords(f, i) + s_q * (mesh->h_node_coords(b, i) - mesh->h_node_coords(a, i));
+                h_normals(f, q, i) = mesh->h_face_normals(f, i) / mesh->h_face_area(f);
+            }
+            h_weights(f, q) = quadrature_face.h_weights(q);
+        }
+    }
+    Kokkos::deep_copy(face_quad_points, h_points);
+    Kokkos::deep_copy(face_quad_weights, h_weights);
+    Kokkos::deep_copy(face_quad_normals, h_normals);
 }
 
 FirstOrder::FirstOrder() {
@@ -172,9 +291,10 @@ FirstOrder::~FirstOrder() {
     // Empty
 }
 
-void FirstOrder::init(const toml::value & input) {
+void FirstOrder::init(const Input & input) {
     (void)(input);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
+    init_face_quadrature_2d_curved();
 }
 
 uint8_t FirstOrder::n_face_quadrature_points() const {
@@ -232,18 +352,16 @@ MUSCL::~MUSCL() {
     // Empty
 }
 
-void MUSCL::init(const toml::value & input) {
-    const std::string limiter_str = toml::find_or<std::string>(input, "limiter", "venkatakrishnan");
-    auto it = LIMITER_TYPES.find(limiter_str);
-    if (it == LIMITER_TYPES.end()) {
-        throw unknown_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
-    }
+void MUSCL::init(const Input & input) {
+    const std::string limiter_str = find_value_or<std::string>(input, "limiter", "venkatakrishnan");
+    auto it = find_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
     limiter = it->second;
-    venkat_K = find_real_or(input, "venkatakrishnan_K", 5.0);
+    venkat_K = find_real_or(input, "venkatakrishnan_K", dim::none, 5.0);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
     limiters = Kokkos::View<rtype *[N_CONSERVATIVE]>("limiters", mesh->n_cells);
     gradient = make_vertex_gradient(make_gradient(*mesh, boundaries, {}, gradients), *mesh, false);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
+    init_face_quadrature_2d_curved();
 }
 
 logging::Items MUSCL::summary() const {
@@ -348,8 +466,10 @@ struct LimiterFunctor {
                 const uint32_t i_face = neighbors.faces_of_cell(k);
                 // The face centroid is in its cell 0's frame
                 const uint8_t s = (neighbors.cells_of_face(i_face, 1) == static_cast<int32_t>(i_cell)) ? neighbors.face_shift(i_face) : 0;
-                rtype r[N_DIM];
-                FOR_I_DIM r[i] = (neighbors.face_coords(i_face, i) - neighbors.shifts(s, i)) - neighbors.cell_coords(i_cell, i);
+                rtype x_f[N_DIM], r[N_DIM];
+                FOR_I_DIM x_f[i] = neighbors.face_coords(i_face, i);
+                neighbors.periodic.backward(s, x_f, r);
+                FOR_I_DIM r[i] = r[i] - neighbors.cell_coords(i_cell, i);
                 FOR_I_CONSERVATIVE {
                     rtype grad[N_DIM];
                     for (uint8_t d = 0; d < N_DIM; d++) grad[d] = neighbors.gradients(i_cell, i, d);
@@ -371,15 +491,15 @@ struct LimiterFunctor {
 };
 
 /**
- * @brief Linear extrapolation of the limited cell states to face centroids.
- *        Falls back to first order on a face if density or pressure would
- *        become non-positive.
+ * @brief Linear extrapolation of the limited cell states to face centroids,
+ *        one side of a face at a time. Falls back to first order on a face
+ *        side if density or pressure would become non-positive.
  */
 struct MUSCLFaceFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
@@ -389,26 +509,105 @@ struct MUSCLFaceFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
         for (uint8_t side = 0; side < 2; side++) {
-            const int32_t c = cells_of_face(i_face, side);
-            if (c < 0) continue;
-            // The face centroid is in cell 0's frame
-            const uint8_t s = side ? face_shift(i_face) : 0;
-            rtype r[N_DIM];
-            FOR_I_DIM r[i] = (face_coords(i_face, i) - shifts(s, i)) - cell_coords(c, i);
-            rtype W_f[N_CONSERVATIVE];
-            FOR_I_CONSERVATIVE {
-                rtype grad[N_DIM];
-                for (uint8_t d = 0; d < N_DIM; d++) grad[d] = gradients(c, i, d);
-                W_f[i] = W(c, i) + limiters(c, i) * dot<N_DIM>(grad, r);
-            }
-            const bool admissible = (W_f[0] > 0.0_r) && (W_f[N_CONSERVATIVE - 1] > 0.0_r);
-            FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = admissible ? W_f[i] : W(c, i);
+            if (cells_of_face(i_face, side) >= 0) this->side(i_face, side);
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void side(const uint32_t i_face, const uint8_t side) const {
+        const int32_t c = cells_of_face(i_face, side);
+        // The face centroid is in cell 0's frame; side 1 is in cell 1's until
+        // FaceReconstruction::rotate_periodic_faces
+        const uint8_t s = side ? face_shift(i_face) : 0;
+        rtype x_f[N_DIM], r[N_DIM];
+        FOR_I_DIM x_f[i] = face_coords(i_face, i);
+        periodic.backward(s, x_f, r);
+        FOR_I_DIM r[i] = r[i] - cell_coords(c, i);
+        rtype W_f[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE {
+            rtype grad[N_DIM];
+            for (uint8_t d = 0; d < N_DIM; d++) grad[d] = gradients(c, i, d);
+            W_f[i] = W(c, i) + limiters(c, i) * dot<N_DIM>(grad, r);
+        }
+        const bool admissible = (W_f[0] > 0.0_r) && (W_f[N_CONSERVATIVE - 1] > 0.0_r);
+        FOR_I_CONSERVATIVE face_solution(i_face, 0, side, i) = admissible ? W_f[i] : W(c, i);
+    }
+};
+
+/**
+ * @brief Gradient, limiter and face states of each listed cell, on its own
+ *        side of its faces, with the arithmetic of the per-cell gradient and
+ *        limiter kernels and of MUSCLFaceFunctor.
+ */
+struct MUSCLCellFunctor {
+    MUSCLGradientFunctor gradient;
+    LimiterFunctor limiter;
+    MUSCLFaceFunctor face;
+    Kokkos::View<uint32_t *> cells;  // empty: all cells
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t k) const {
+        const uint32_t c = cells.extent(0) ? cells(k) : k;
+        gradient(c);
+        limiter(c);
+        const auto & mesh_faces = limiter.neighbors;
+        for (uint32_t j = mesh_faces.offsets_faces_of_cell(c); j < mesh_faces.offsets_faces_of_cell(c + 1); j++) {
+            const uint32_t f = mesh_faces.faces_of_cell(j);
+            face.side(f, (face.cells_of_face(f, 0) == static_cast<int32_t>(c)) ? 0 : 1);
         }
     }
 };
 
+// Measured on A100s: one fused kernel per cell is faster from about 2^17 cells,
+// separate kernels (more parallel, shorter chains) below
+constexpr uint32_t MUSCL_FUSED_CELLS = 1u << 17;
+
+std::vector<uint32_t> MUSCL::cells_independent_of_halo(const uint32_t n_owned) const {
+    // Subsets run fused; smaller meshes exchange first and reconstruct in separate kernels
+    if (n_owned < MUSCL_FUSED_CELLS) return {};
+    // Gradients read the face or vertex neighbors, limiters the face neighbors
+    std::vector<uint32_t> cells;
+    for (uint32_t c = 0; c < n_owned; c++) {
+        bool independent = true;
+        for (uint32_t k = mesh->h_offsets_cells_of_cell(c); k < mesh->h_offsets_cells_of_cell(c + 1); k++) {
+            independent = independent && mesh->h_cells_of_cell(k) < n_owned;
+        }
+        for (uint32_t k = 0; k < mesh->h_n_faces_of_cell(c); k++) {
+            const uint32_t f = mesh->h_face_of_cell(c, k);
+            for (uint8_t side = 0; side < 2; side++) {
+                independent = independent && mesh->h_cells_of_face(f, side) < static_cast<int32_t>(n_owned);
+            }
+        }
+        if (independent) cells.push_back(c);
+    }
+    return cells;
+}
+
+void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                  Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution,
+                                  Kokkos::View<uint32_t *> cells) {
+    LSQVertexGradientFunctor g = gradient;
+    g.faces = make_gradient(*mesh, boundaries, solution, gradients);
+    MUSCLCellFunctor functor{MUSCLGradientFunctor{g},
+                             LimiterFunctor{g.faces, mesh->cell_volume, limiters, limiter, venkat_K},
+                             MUSCLFaceFunctor{mesh->cells_of_face, mesh->cell_coords, mesh->face_coords,
+                                              mesh->periodic_maps(), mesh->face_shift, solution, gradients, limiters,
+                                              face_solution},
+                             cells};
+    const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : mesh->n_cells;
+    Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, n),
+                         functor);
+}
+
+void MUSCL::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]>, Kokkos::View<rtype **[2][N_CONSERVATIVE]>) {}
+
 void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                              Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
+    if (mesh->n_cells >= MUSCL_FUSED_CELLS) {
+        calc_cell_face_values(Kokkos::DefaultExecutionSpace(), solution, face_solution, Kokkos::View<uint32_t *>());
+        return;
+    }
     gradient.faces = make_gradient(*mesh, boundaries, solution, gradients);
     Kokkos::parallel_for("lsq_gradient", HeavyRange<>(0, mesh->n_cells), MUSCLGradientFunctor{gradient});
 
@@ -418,7 +617,7 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
     MUSCLFaceFunctor face_functor{mesh->cells_of_face,
                                   mesh->cell_coords,
                                   mesh->face_coords,
-                                  mesh->shifts,
+                                  mesh->periodic_maps(),
                                   mesh->face_shift,
                                   solution,
                                   gradients,

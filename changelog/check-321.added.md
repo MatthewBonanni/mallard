@@ -1,0 +1,1 @@
+- `mallard check input.toml`: a pre-flight check without time stepping that reports unused or misspelled input keys (with line numbers and suggestions), boundary zones without a condition, mesh quality with the worst cells (optional VTU), the stable time step and the cell that limits it, memory per rank (also for a target rank count) and the cost of the run (#321, #362).

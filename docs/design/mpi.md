@@ -36,7 +36,7 @@ Setup-time communication (partitioning, migration, I/O) always uses MPI.
 ### 2. Mesh input
 
 - **Format:** an HDF5 mesh file with global arrays, global ids being row indices: node coordinates, cell connectivity (CSR of node ids; the cell type follows from the node count), boundary faces (CSR) with zone ids, and zone names (layout in `docs/input.md`). Each rank reads a contiguous block of cells, of nodes and of boundary faces, with collective parallel HDF5 I/O (independent reads when HDF5 is not parallel). Node coordinates a rank needs but did not read are fetched later from the rank that read them (section 5).
-- **Converter:** `mallard-mesh-convert` turns Gmsh (2.2/4.1) files into this format, or writes a generated mesh described by an input file in parallel. A Gmsh file is read whole, since it is converted once per mesh; later the converter can stream meshes that don't fit in memory.
+- **Converter:** `mallard mesh convert` turns Gmsh (2.2/4.1) files into this format, or writes a generated mesh described by an input file in parallel. A Gmsh file is read whole, since it is converted once per mesh; later the converter can stream meshes that don't fit in memory.
 - Generated meshes (`cartesian`, `wedge`, ...) are produced directly in blocks per rank, numbered as the serial generators number them.
 - A Gmsh file is read whole by every rank, which keeps only its block; meshes too large for that are converted first. Every source then goes through the same distributed path (`DistributedMesh`); only single-rank runs build the mesh directly.
 
@@ -46,14 +46,15 @@ Two cells are adjacent if they share a face. Each rank hashes every face of its 
 
 ### 4. Partitioning
 
-A `Partitioner` interface with two backends:
+Three backends:
 
 | Backend | When |
 |---|---|
-| **dKaMinPar** ([KaHIP/KaMinPar](https://github.com/KaHIP/KaMinPar), MIT, C++20; `FetchContent`) | Default when available. Distributed, scales to trillion-edge graphs, guarantees balance. Built with 64-bit ids for hero meshes. New dependency: oneTBB. |
-| **Hilbert curve** (built in) | No-dependency fallback; also used everywhere to order cells within a rank for memory locality. |
+| **Multi-jagged** (built in) | Default. Equal-count slabs along x, each split along y, then z, with the pieces per axis of the grid of blocks of the bounding box that has the least area between blocks: cuboid parts on box meshes at any rank count. |
+| **Hilbert curve** (built in) | Equally compact at power-of-two rank counts on cubes, less at others (12 ranks: 40-80% more halo layer-1 cells per rank). |
+| **dKaMinPar** ([KaHIP/KaMinPar](https://github.com/KaHIP/KaMinPar), MIT, C++20; `FetchContent`) | Opt-in (`Mallard_ENABLE_KAMINPAR`, needs oneTBB). Distributed, scales to trillion-edge graphs. With its default preset its parts are 3% out of balance and cut 40-50% more faces than the multi-jagged parts of a box. |
 
-The Hilbert backend sorts cells by the curve key of their vertex average (not their centroid, which needs the geometry a rank does not have yet) with a distributed sample sort, so its partitions differ from a global-mesh Hilbert partition but are equally valid; dKaMinPar works directly on the distributed dual graph (section 3).
+The Hilbert backend sorts cells by the curve key of their vertex average (not their centroid, which needs the geometry a rank does not have yet) with a distributed sample sort, so its partitions differ from a global-mesh Hilbert partition but are equally valid; the multi-jagged backend finds its cuts by distributed bisection on the same keys, so no cell moves before migration; dKaMinPar works directly on the distributed dual graph (section 3). Measurements: `performance.md`, "Partitions".
 
 Vertex weights model cost: a base weight per cell plus a term for the TENO stencil size. ParMETIS or PT-Scotch can be added behind the same interface if needed.
 
@@ -112,7 +113,7 @@ These are found during per-rank precomputation on owned plus halo cells, and wit
 
 Status: prototyped and measured on A100s (milestone 7); not adopted, because a rebalance does not pay for itself on the cases below. The prototype is kept in draft PRs #103 (weighted partitioners), #104 (runtime migration), #105 (cost model and trigger) and #108 (TENO data migration).
 
-**Why it was tried.** TENO's troubled cells (near shocks) cost several times a smooth cell, cluster on the ranks a shock crosses, and move with the shocks, so a static partition can't balance them. Chemistry will add larger per-cell cost variation, which it balances by moving chemistry states between ranks without touching the mesh (`chemistry.md`, decision 9).
+**Why it was tried.** TENO's troubled cells (near shocks) cost several times a smooth cell, cluster on the ranks a shock crosses, and move with the shocks, so a static partition can't balance them. Chemistry will add larger per-cell cost variation, which it balances by moving chemistry states between ranks without touching the mesh (`chemistry.md`, decision 9; implemented and measured in its milestone 11, where moving states every call recovers half or more of the waiting at a cost of a few milliseconds per call).
 
 **Invariant.** Results must stay bitwise identical with and without rebalancing, as they are on any rank count. The prototype keeps it: stencils, pseudo-inverses and face orders are functions of global ids, reductions are exact or ordered by global keys, and state and per-cell data move as raw bits. Its tests compare rebalanced runs with serial ones bitwise (TENO with mirror faces and periodic seams, MUSCL Navier-Stokes with Dirichlet and average-pressure boundaries, 2D and 3D, 2-4 ranks, CPU and A100).
 

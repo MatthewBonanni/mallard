@@ -19,11 +19,13 @@
 #include <algorithm>
 #include <limits>
 #include <numeric>
+#include <numbers>
 
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
 #include "boundary.h"
+#include "periodic.h"
 
 Mesh::Mesh() {
     // Empty
@@ -33,29 +35,29 @@ Mesh::~Mesh() {
     // Empty
 }
 
-void Mesh::init(const toml::value & input) {
-    std::string type_str = toml::find_or<std::string>(input, "mesh", "type", "file");
-    typename std::unordered_map<std::string, MeshType>::const_iterator it = MESH_TYPES.find(type_str);
-    if (it == MESH_TYPES.end()) {
-        throw unknown_option(MESH_TYPES, "mesh.type", type_str);
-    } else {
-        set_type(it->second);
-    }
+void Mesh::init(const Input & input) {
+    std::string type_str = find_value_or<std::string>(input, "mesh", "type", "file");
+    set_type(find_option(MESH_TYPES, "mesh.type", type_str)->second);
 
     const std::vector<PeriodicPair> periodic = periodic_pairs(input);
+    const MeshTransform transform = mesh_transform(input);
     if (get_type() == MeshType::FROM_FILE) {
-        std::string filename = toml::find_or<std::string>(input, "mesh", "filename", "mesh.msh");
-        this->init_file(filename, periodic);
+        std::string filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        this->init_file(filename, periodic, transform);
         return;
     }
-    uint32_t Nx = toml::find_or<uint32_t>(input, "mesh", "Nx", 100);
-    uint32_t Ny = toml::find_or<uint32_t>(input, "mesh", "Ny", 100);
-    rtype Lx = find_real_or(input, "mesh", "Lx", 1.0);
-    rtype Ly = find_real_or(input, "mesh", "Ly", 1.0);
+    if (get_type() == MeshType::ANNULUS) {
+        init_from_block(annulus_block(input, 0, 1), periodic);
+        return;
+    }
+    uint32_t Nx = find_value_or<uint32_t>(input, "mesh", "Nx", 100);
+    uint32_t Ny = find_value_or<uint32_t>(input, "mesh", "Ny", 100);
+    rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
+    rtype Ly = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
     const Stretching stretching = mesh_stretching(input);
     if constexpr (N_DIM == 3) {
-        const uint32_t Nz = toml::find_or<uint32_t>(input, "mesh", "Nz", 100);
-        const rtype Lz = find_real_or(input, "mesh", "Lz", 1.0);
+        const uint32_t Nz = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
+        const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
         if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
             throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
         }
@@ -84,31 +86,81 @@ void Mesh::init(const toml::value & input) {
     }
 }
 
-std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) {
+std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     std::vector<PeriodicPair> pairs;
     if (input.contains("periodic")) {
-        const auto entries = toml::find<std::vector<toml::value>>(input, "periodic");
+        const auto entries = find_value<std::vector<Input>>(input, "periodic");
         for (const auto & entry : entries) {
-            const auto zones = toml::find<std::vector<std::string>>(entry, "zones");
-            const std::vector<rtype> t = find_real_vector(entry, "translation");
-            if (zones.size() != 2 || t.size() != N_DIM) {
-                throw InputError("[[periodic]] needs zones = [A, B] and a translation with " +
-                                 std::to_string(N_DIM) + " components.");
+            const auto zones = find_value<std::vector<std::string>>(entry, "zones");
+            const bool rotation = entry.contains("angle");
+            if (zones.size() != 2 || rotation == entry.contains("translation")) {
+                throw InputError("[[periodic]] needs zones = [A, B] and either a translation or an angle.");
             }
-            PeriodicPair pair{zones[0], zones[1], {}};
-            FOR_I_DIM pair.translation[i] = t[i];
+            PeriodicPair pair{zones[0], zones[1]};
+            if (!rotation) {
+                const std::vector<rtype> t = find_real_vector(entry, "translation", dim::length);
+                if (t.size() != N_DIM) {
+                    throw InputError("[[periodic]] needs zones = [A, B] and a translation with " +
+                                     std::to_string(N_DIM) + " components (or an angle).");
+                }
+                FOR_I_DIM pair.translation[i] = t[i];
+                pairs.push_back(pair);
+                continue;
+            }
+            pair.angle = find_real_or(entry, "angle", dim::angle_degrees, 0.0_r) * rtype(std::numbers::pi / 180.0);
+            if (pair.angle == 0.0_r) throw InputError("[[periodic]] angle must be nonzero.");
+            if (entry.contains("center")) {
+                const std::vector<rtype> c = find_real_vector(entry, "center", dim::length);
+                if (c.size() != N_DIM) {
+                    throw InputError("[[periodic]] center needs " + std::to_string(N_DIM) + " components.");
+                }
+                FOR_I_DIM pair.center[i] = c[i];
+            }
+            if (entry.contains("axis")) {
+                if constexpr (N_DIM == 2) {
+                    throw InputError("[[periodic]] axis: 2D rotations turn about the point center.");
+                } else {
+                    const std::vector<rtype> a = find_real_vector(entry, "axis", dim::none);
+                    if (a.size() != 3) throw InputError("[[periodic]] axis needs 3 components.");
+                    for (size_t i = 0; i < 3; i++) pair.axis[i] = a[i];
+                }
+            }
             pairs.push_back(pair);
         }
     }
     if (!input.contains("mesh") || !input.at("mesh").contains("periodic")) return pairs;
-    if (toml::find_or<std::string>(input, "mesh", "type", "file") == "file") {
+    const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
+    if (type == "file") {
         throw InputError("[mesh] periodic applies to generated meshes; pair the zones of a mesh file with "
                          "[[periodic]].");
     }
-    const rtype L[3] = {find_real_or(input, "mesh", "Lx", 1.0), find_real_or(input, "mesh", "Ly", 1.0),
-                        find_real_or(input, "mesh", "Lz", 1.0)};
+    if (type == "annulus") {
+        // theta: the sector's start and end; z (3D): back and front
+        for (const std::string & dir : find_value<std::vector<std::string>>(input, "mesh", "periodic")) {
+            PeriodicPair pair;
+            if (dir == "theta") {
+                pair = PeriodicPair{"start", "end"};
+                pair.angle = find_real_or(input, "mesh", "angle", dim::angle_degrees, 360.0_r) *
+                             rtype(std::numbers::pi / 180.0);
+            } else if (dir == "z" && N_DIM == 3) {
+                pair = PeriodicPair{"back", "front"};
+                pair.translation[N_DIM - 1] = find_real_or(input, "mesh", "Lz", dim::length, 1.0_r);
+            } else {
+                throw InputError("[mesh] periodic: the annulus is periodic in theta" +
+                                 std::string(N_DIM == 3 ? " or z." : "."));
+            }
+            for (const auto & other : pairs) {
+                if (other.zone_a == pair.zone_a) throw InputError("[mesh] periodic lists " + dir + " twice.");
+            }
+            pairs.push_back(pair);
+        }
+        return pairs;
+    }
+    const rtype L[3] = {find_real_or(input, "mesh", "Lx", dim::length, 1.0),
+                        find_real_or(input, "mesh", "Ly", dim::length, 1.0),
+                        find_real_or(input, "mesh", "Lz", dim::length, 1.0)};
     const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
-    for (const std::string & dir : toml::find<std::vector<std::string>>(input, "mesh", "periodic")) {
+    for (const std::string & dir : find_value<std::vector<std::string>>(input, "mesh", "periodic")) {
         const int d = (dir == "x") ? 0 : (dir == "y") ? 1 : (dir == "z") ? 2 : -1;
         if (d < 0 || d >= N_DIM) {
             throw std::runtime_error("[mesh] periodic: unknown direction " + dir + " (one of x, y" +
@@ -117,8 +169,8 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const toml::value & input) 
         for (const auto & pair : pairs) {
             if (pair.zone_a == zones[d][0]) throw std::runtime_error("[mesh] periodic lists " + dir + " twice.");
         }
-        PeriodicPair pair{zones[d][0], zones[d][1], {}};
-        pair.translation[d] = L[d];
+        PeriodicPair pair{zones[d][0], zones[d][1]};
+        pair.translation[static_cast<size_t>(d)] = L[static_cast<size_t>(d)];
         pairs.push_back(pair);
     }
     return pairs;
@@ -133,7 +185,7 @@ void Mesh::set_type(MeshType type_in) {
 }
 
 uint32_t Mesh::n_face_zones() const {
-    return m_face_zones.size();
+    return static_cast<uint32_t>(m_face_zones.size());
 }
 
 std::vector<FaceZone> * Mesh::face_zones() {
@@ -180,15 +232,15 @@ uint32_t Mesh::h_n_nodes_of_face(uint32_t i_face) const {
     return h_offsets_nodes_of_face(i_face + 1) - h_offsets_nodes_of_face(i_face);
 }
 
-uint32_t Mesh::h_node_of_cell(uint32_t i_cell, uint8_t i_node_local) const {
+uint32_t Mesh::h_node_of_cell(uint32_t i_cell, uint32_t i_node_local) const {
     return h_nodes_of_cell(h_offsets_nodes_of_cell(i_cell) + i_node_local);
 }
 
-uint32_t Mesh::h_face_of_cell(uint32_t i_cell, uint8_t i_face_local) const {
+uint32_t Mesh::h_face_of_cell(uint32_t i_cell, uint32_t i_face_local) const {
     return h_faces_of_cell(h_offsets_faces_of_cell(i_cell) + i_face_local);
 }
 
-uint32_t Mesh::h_node_of_face(uint32_t i_face, uint8_t i_node_local) const {
+uint32_t Mesh::h_node_of_face(uint32_t i_face, uint32_t i_node_local) const {
     return h_nodes_of_face(h_offsets_nodes_of_face(i_face) + i_node_local);
 }
 
@@ -214,9 +266,9 @@ void Mesh::h_neighbors_of_cell_helper(uint32_t i_cell, uint8_t n_order, std::vec
             } else {
                 // Recursively call the function for the neighbor cv
                 if (i_cell_0 == static_cast<int32_t>(i_cell)) {
-                    h_neighbors_of_cell_helper(i_cell_1, n_order - 1, neighbors);
+                    h_neighbors_of_cell_helper(static_cast<uint32_t>(i_cell_1), n_order - 1, neighbors);
                 } else {
-                    h_neighbors_of_cell_helper(i_cell_0, n_order - 1, neighbors);
+                    h_neighbors_of_cell_helper(static_cast<uint32_t>(i_cell_0), n_order - 1, neighbors);
                 }
             }
         }
@@ -371,10 +423,10 @@ void Mesh::compute_face_areas() {
     for (uint32_t i_face = 0; i_face < n_faces; ++i_face) {
         uint32_t i_node_0 = h_node_of_face(i_face, 0);
         uint32_t i_node_1 = h_node_of_face(i_face, 1);
-        h_face_area(i_face) = std::sqrt(std::pow(h_node_coords(i_node_1, 0) -
+        h_face_area(i_face) = static_cast<rtype>(std::sqrt(std::pow(h_node_coords(i_node_1, 0) -
                                                  h_node_coords(i_node_0, 0), 2) +
                                         std::pow(h_node_coords(i_node_1, 1) -
-                                                 h_node_coords(i_node_0, 1), 2));
+                                                 h_node_coords(i_node_0, 1), 2)));
     }
 }
 
@@ -431,11 +483,11 @@ std::vector<uint32_t> Mesh::cells_by_global_id() const {
 
 uint8_t Mesh::shift_index(const std::array<int8_t, 3> & lattice) {
     for (size_t i = 0; i < shift_lattice.size(); i++) {
-        if (shift_lattice[i] == lattice) return i;
+        if (shift_lattice[i] == lattice) return static_cast<uint8_t>(i);
     }
     if (shift_lattice.size() == 256) throw std::runtime_error("Mesh: too many periodic translations.");
     shift_lattice.push_back(lattice);
-    return shift_lattice.size() - 1;
+    return static_cast<uint8_t>(shift_lattice.size() - 1);
 }
 
 void Mesh::compute_cell_neighbors() {
@@ -479,7 +531,7 @@ void Mesh::compute_cell_neighbors() {
                 uint8_t shift = 0;
                 if (periodic) {
                     std::array<int8_t, 3> lattice;
-                    for (int j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
+                    for (size_t j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
                     shift = shift_index(lattice);
                 }
                 if (other == c && shift == 0) continue;
@@ -492,7 +544,7 @@ void Mesh::compute_cell_neighbors() {
         }
         // By global id, so that neighbor order does not depend on the local numbering
         std::sort(nb.begin(), nb.end(), [&](uint64_t a, uint64_t b) {
-            return std::make_pair(h_global_cell(a >> 8), a & 0xff) < std::make_pair(h_global_cell(b >> 8), b & 0xff);
+            return std::make_pair(h_global_cell(static_cast<uint32_t>(a >> 8)), a & 0xff) < std::make_pair(h_global_cell(static_cast<uint32_t>(b >> 8)), b & 0xff);
         });
         nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
         for (size_t i = 1; i < nb.size(); i++) {
@@ -502,7 +554,7 @@ void Mesh::compute_cell_neighbors() {
             }
         }
         flat.insert(flat.end(), nb.begin(), nb.end());
-        offsets[c + 1] = flat.size();
+        offsets[c + 1] = static_cast<uint32_t>(flat.size());
     }
     offsets_cells_of_cell = Kokkos::View<uint32_t *>("offsets_cells_of_cell", n_cells + 1);
     cells_of_cell = Kokkos::View<uint32_t *>("cells_of_cell", flat.size());
@@ -512,26 +564,76 @@ void Mesh::compute_cell_neighbors() {
     h_cells_of_cell_shift = Kokkos::create_mirror_view(cells_of_cell_shift);
     for (uint32_t i = 0; i <= n_cells; i++) h_offsets_cells_of_cell(i) = offsets[i];
     for (size_t i = 0; i < flat.size(); i++) {
-        h_cells_of_cell(i) = flat[i] >> 8;
+        h_cells_of_cell(i) = static_cast<uint32_t>(flat[i] >> 8);
         h_cells_of_cell_shift(i) = flat[i] & 0xff;
     }
 
     shifts = Kokkos::View<rtype *[N_DIM]>("shifts", shift_lattice.size());
     h_shifts = Kokkos::create_mirror_view(shifts);
+    shift_rotations = Kokkos::View<rtype *[N_DIM][N_DIM]>("shift_rotations", is_rotational() ? shift_lattice.size() : 0);
+    h_shift_rotations = Kokkos::create_mirror_view(shift_rotations);
     for (size_t r = 0; r < shift_lattice.size(); r++) {
+        const std::array<int, 3> L = {shift_lattice[r][0], shift_lattice[r][1], shift_lattice[r][2]};
+        double Q[3][3], t[3];
+        periodic_lattice_map(periodic_translations, periodic_rotation, L, Q, t);
         FOR_I_DIM {
-            double x = 0.0;
-            for (size_t j = 0; j < periodic_translations.size(); j++) {
-                x += shift_lattice[r][j] * double(periodic_translations[j][i]);
+            h_shifts(r, i) = static_cast<rtype>(t[i]);
+            if (is_rotational()) {
+                for (uint8_t j = 0; j < N_DIM; j++) h_shift_rotations(r, i, j) = static_cast<rtype>(Q[i][j]);
             }
-            h_shifts(r, i) = x;
         }
     }
     Kokkos::deep_copy(offsets_cells_of_cell, h_offsets_cells_of_cell);
     Kokkos::deep_copy(cells_of_cell, h_cells_of_cell);
     Kokkos::deep_copy(cells_of_cell_shift, h_cells_of_cell_shift);
     Kokkos::deep_copy(shifts, h_shifts);
+    Kokkos::deep_copy(shift_rotations, h_shift_rotations);
     Kokkos::deep_copy(face_shift, h_face_shift);
+}
+
+void Mesh::h_forward(const uint8_t s, const rtype * x, rtype * y) const {
+    FOR_I_DIM y[i] = x[i];
+    if (is_rotational()) {
+        rtype r[N_DIM];
+        FOR_I_DIM {
+            r[i] = 0.0_r;
+            for (uint8_t j = 0; j < N_DIM; j++) r[i] += h_shift_rotations(s, i, j) * x[j];
+        }
+        FOR_I_DIM y[i] = r[i];
+    }
+    FOR_I_DIM y[i] = y[i] + h_shifts(s, i);
+}
+
+void Mesh::h_backward(const uint8_t s, const rtype * x, rtype * y) const {
+    rtype d[N_DIM];
+    FOR_I_DIM d[i] = x[i] - h_shifts(s, i);
+    FOR_I_DIM y[i] = d[i];
+    if (!is_rotational()) return;
+    FOR_I_DIM {
+        y[i] = 0.0_r;
+        for (uint8_t j = 0; j < N_DIM; j++) y[i] += h_shift_rotations(s, j, i) * d[j];
+    }
+}
+
+std::array<rtype, N_DIM> Mesh::h_face_point(const uint32_t f, const uint32_t c) const {
+    std::array<rtype, N_DIM> x;
+    FOR_I_DIM x[i] = h_face_coords(f, i);
+    if (h_cells_of_face(f, 1) != int32_t(c)) return x;
+    std::array<rtype, N_DIM> y;
+    h_backward(h_face_shift(f), x.data(), y.data());
+    return y;
+}
+
+std::array<rtype, N_DIM> Mesh::h_face_normal(const uint32_t f, const uint32_t c) const {
+    std::array<rtype, N_DIM> n;
+    FOR_I_DIM n[i] = h_face_normals(f, i);
+    if (h_cells_of_face(f, 1) != int32_t(c) || !h_rotated_row(h_face_shift(f))) return n;
+    std::array<rtype, N_DIM> m;
+    FOR_I_DIM {
+        m[i] = 0.0_r;
+        for (uint8_t j = 0; j < N_DIM; j++) m[i] += h_shift_rotations(h_face_shift(f), j, i) * n[j];
+    }
+    return m;
 }
 
 void Mesh::copy_host_to_device() {
@@ -554,6 +656,7 @@ void Mesh::copy_host_to_device() {
     Kokkos::deep_copy(offsets_nodes_of_face, h_offsets_nodes_of_face);
     Kokkos::deep_copy(cells_of_face, h_cells_of_face);
     Kokkos::deep_copy(shifts, h_shifts);
+    Kokkos::deep_copy(shift_rotations, h_shift_rotations);
     Kokkos::deep_copy(face_shift, h_face_shift);
     for (auto & zone : m_face_zones) {
         zone.copy_host_to_device();
@@ -582,6 +685,7 @@ void Mesh::copy_device_to_host() {
     Kokkos::deep_copy(h_offsets_nodes_of_face, offsets_nodes_of_face);
     Kokkos::deep_copy(h_cells_of_face, cells_of_face);
     Kokkos::deep_copy(h_shifts, shifts);
+    Kokkos::deep_copy(h_shift_rotations, shift_rotations);
     Kokkos::deep_copy(h_face_shift, face_shift);
     for (auto & zone : m_face_zones) {
         zone.copy_device_to_host();
@@ -592,12 +696,12 @@ void Mesh::copy_device_to_host() {
 }
 
 void Mesh::init_box(uint32_t nx, uint32_t ny, rtype Lx, rtype Ly, bool triangles, bool wedge) {
-    const rtype dx = Lx / nx;
-    const rtype dy = Ly / ny;
+    const rtype dx = Lx / static_cast<rtype>(nx);
+    const rtype dy = Ly / static_cast<rtype>(ny);
     std::vector<std::array<rtype, N_DIM>> nodes;
     for (uint32_t i = 0; i < nx + 1; ++i) {
         for (uint32_t j = 0; j < ny + 1; ++j) {
-            std::array<rtype, 2> x = {i * dx, j * dy};
+            std::array<rtype, 2> x = {static_cast<rtype>(i) * dx, static_cast<rtype>(j) * dy};
             if (wedge) x = wedge_node(x[0], x[1], Ly);
             std::array<rtype, N_DIM> p{};
             p[0] = x[0];

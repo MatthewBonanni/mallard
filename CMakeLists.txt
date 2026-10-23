@@ -1,16 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-project(Mallard VERSION 0.6.0 LANGUAGES CXX)
+project(Mallard VERSION 0.8.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 
-# Version string for the run header, fixed at configure time
-set(Mallard_GIT_DESCRIBE "")
 find_package(Git QUIET)
-if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE Mallard_GIT_DESCRIBE
-        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-endif()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -19,7 +11,7 @@ endif()
 # Warnings for Mallard's own targets; third-party headers are included as SYSTEM
 option(${PROJECT_NAME}_WARNINGS_AS_ERRORS "Treat warnings in Mallard's own code as errors" OFF)
 function(mallard_target_warnings target)
-    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
         return()
     endif()
     # Kokkos builds for CUDA with nvcc_wrapper, which CMake identifies as GNU
@@ -28,7 +20,8 @@ function(mallard_target_warnings target)
     endif()
     set(warnings
         -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wcast-align -Wunused
-        -Woverloaded-virtual -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough)
+        -Woverloaded-virtual -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough
+        -Wconversion -Wsign-conversion)
     # nvcc rewrites functional casts such as T(x) into C-style casts before the host compiler sees them
     if(NOT nvcc)
         list(APPEND warnings -Wold-style-cast)
@@ -48,8 +41,27 @@ function(mallard_target_warnings target)
     target_compile_options(${target} PRIVATE ${warnings})
 endfunction()
 
+# Intel's oneAPI compiler defaults to -fp-model=fast, which assumes no NaN or
+# infinity; Mallard's NaN checks and IEEE results need the precise model
+if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+    add_compile_options(-fp-model=precise)
+endif()
+
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
     set(MALLARD_THIRD_PARTY SYSTEM)
+endif()
+
+# libFuzzer harnesses of the input and mesh readers (test/fuzz), with every
+# target built with the sanitizers of Mallard_FUZZ_SANITIZERS
+option(${PROJECT_NAME}_ENABLE_FUZZING "Build the libFuzzer harnesses (Clang)" OFF)
+set(${PROJECT_NAME}_FUZZ_SANITIZERS "address,undefined" CACHE STRING "Sanitizers of the fuzzing build")
+if(${PROJECT_NAME}_ENABLE_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "Mallard_ENABLE_FUZZING needs Clang (libFuzzer).")
+    endif()
+    add_compile_options(-fsanitize=fuzzer-no-link,${${PROJECT_NAME}_FUZZ_SANITIZERS}
+                        -fno-sanitize-recover=all -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=${${PROJECT_NAME}_FUZZ_SANITIZERS})
 endif()
 
 # Compile-time options
@@ -76,6 +88,15 @@ if(${PROJECT_NAME}_ENABLE_MPI)
     find_package(MPI REQUIRED COMPONENTS CXX)
     message(STATUS "Mallard: MPI ${MPI_CXX_VERSION}")
     option(${PROJECT_NAME}_GPU_AWARE_MPI "Pass device buffers to MPI directly (CUDA- or ROCm-aware MPI)" OFF)
+    option(${PROJECT_NAME}_ENABLE_NCCL "Halo exchanges and reductions of device buffers with NCCL (CUDA)" OFF)
+    if(${PROJECT_NAME}_ENABLE_NCCL)
+        if(NOT Kokkos_ENABLE_CUDA)
+            message(FATAL_ERROR "Mallard_ENABLE_NCCL needs Kokkos_ENABLE_CUDA.")
+        endif()
+        find_path(NCCL_INCLUDE_DIR nccl.h HINTS $ENV{NCCL_HOME} ENV NCCL_ROOT PATH_SUFFIXES include REQUIRED)
+        find_library(NCCL_LIBRARY nccl HINTS $ENV{NCCL_HOME} ENV NCCL_ROOT PATH_SUFFIXES lib lib64 REQUIRED)
+        message(STATUS "Mallard: NCCL ${NCCL_LIBRARY}")
+    endif()
     option(${PROJECT_NAME}_ENABLE_KAMINPAR "Graph partitioning with dKaMinPar (needs oneTBB)" OFF)
     if(${PROJECT_NAME}_ENABLE_KAMINPAR)
         include(FetchContent)
@@ -97,7 +118,7 @@ if(${PROJECT_NAME}_ENABLE_MPI)
 endif()
 
 # HDF5 mesh files (parallel HDF5 when MPI is on and the library supports it)
-option(${PROJECT_NAME}_ENABLE_HDF5 "HDF5 mesh files and the mallard-mesh-convert tool" OFF)
+option(${PROJECT_NAME}_ENABLE_HDF5 "HDF5 mesh files and mallard mesh convert" OFF)
 option(USE_SYSTEM_HDF5 "Use system-installed HDF5" ON)
 if(${PROJECT_NAME}_ENABLE_HDF5)
     if(USE_SYSTEM_HDF5)
@@ -114,6 +135,57 @@ if(${PROJECT_NAME}_ENABLE_HDF5)
     endif()
 endif()
 
+# Compressed output and restart files
+option(${PROJECT_NAME}_ENABLE_ZLIB "zlib compression of VTU and restart files (compression = \"zlib\")" OFF)
+if(${PROJECT_NAME}_ENABLE_ZLIB)
+    find_package(ZLIB REQUIRED)
+    message(STATUS "Mallard: zlib ${ZLIB_VERSION_STRING}")
+endif()
+# Asynchronous output writes files on threads
+find_package(Threads REQUIRED)
+
+# CGNS mesh files (the CGNS library, HDF5-based)
+option(${PROJECT_NAME}_ENABLE_CGNS "Read CGNS mesh files" OFF)
+option(USE_SYSTEM_CGNS "Use system-installed CGNS" ON)
+if(${PROJECT_NAME}_ENABLE_CGNS)
+    if(USE_SYSTEM_CGNS)
+        find_package(CGNS CONFIG QUIET)
+        if(TARGET CGNS::cgns_shared)
+            set(MALLARD_CGNS_LIBRARY CGNS::cgns_shared)
+        elseif(TARGET CGNS::cgns_static)
+            set(MALLARD_CGNS_LIBRARY CGNS::cgns_static)
+        else()
+            find_path(CGNS_INCLUDE_DIR cgnslib.h HINTS ENV CGNS_ROOT PATH_SUFFIXES include REQUIRED)
+            find_library(CGNS_LIBRARY cgns HINTS ENV CGNS_ROOT PATH_SUFFIXES lib lib64 REQUIRED)
+            add_library(mallard_cgns INTERFACE)
+            target_include_directories(mallard_cgns SYSTEM INTERFACE ${CGNS_INCLUDE_DIR})
+            target_link_libraries(mallard_cgns INTERFACE ${CGNS_LIBRARY})
+            set(MALLARD_CGNS_LIBRARY mallard_cgns)
+        endif()
+        message(STATUS "Mallard: CGNS ${MALLARD_CGNS_LIBRARY} ${CGNS_VERSION}${CGNS_LIBRARY}")
+    else()
+        include(FetchContent)
+        FetchContent_Declare(cgns
+            GIT_REPOSITORY https://github.com/CGNS/CGNS.git
+            GIT_TAG v4.5.0
+            EXCLUDE_FROM_ALL
+            ${MALLARD_THIRD_PARTY})
+        set(CGNS_ENABLE_HDF5 ON CACHE BOOL "" FORCE)
+        set(CGNS_ENABLE_FORTRAN OFF CACHE BOOL "" FORCE)
+        set(CGNS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+        set(CGNS_BUILD_CGNSTOOLS OFF CACHE BOOL "" FORCE)
+        set(CGNS_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+        set(CGNS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(cgns)
+        # A parallel HDF5's headers include mpi.h
+        if(${PROJECT_NAME}_ENABLE_MPI)
+            target_link_libraries(cgns_static PUBLIC MPI::MPI_CXX)
+        endif()
+        set(MALLARD_CGNS_LIBRARY cgns_static)
+        message(STATUS "Mallard: CGNS v4.5.0 (built from source)")
+    endif()
+endif()
+
 # Add Kokkos dependency
 option(USE_SYSTEM_KOKKOS "Use system-installed Kokkos" ON)
 if(USE_SYSTEM_KOKKOS)
@@ -123,30 +195,44 @@ else()
 endif()
 
 # Cantera YAML mechanism files
-include(FetchContent)
-FetchContent_Declare(yaml-cpp
-    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-    GIT_TAG yaml-cpp-0.9.0
-    EXCLUDE_FROM_ALL
-    ${MALLARD_THIRD_PARTY})
-set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
-set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(yaml-cpp)
-# yaml-cpp has no device code, and nvcc cannot compile its bundled dragonbox:
-# Kokkos' nvcc_wrapper passes it to the host compiler
-if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
-    target_compile_options(yaml-cpp PRIVATE --host-only)
+option(USE_SYSTEM_YAML_CPP "Use system-installed yaml-cpp" OFF)
+if(USE_SYSTEM_YAML_CPP)
+    find_package(yaml-cpp 0.8 REQUIRED)
+else()
+    include(FetchContent)
+    FetchContent_Declare(yaml-cpp
+        GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+        GIT_TAG yaml-cpp-0.9.0
+        EXCLUDE_FROM_ALL
+        ${MALLARD_THIRD_PARTY})
+    set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+    set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(yaml-cpp)
+    # yaml-cpp has no device code, and nvcc cannot compile its bundled dragonbox:
+    # Kokkos' nvcc_wrapper passes it to the host compiler
+    if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+        target_compile_options(yaml-cpp PRIVATE --host-only)
+    endif()
 endif()
 
 # Include other external libraries
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/include")
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
 
-# Add your main project source
+set(${PROJECT_NAME}_EXECUTABLE_SUFFIX "" CACHE STRING
+    "Appended to the names of mallard and mallard-test (e.g. 3d, to install both dimensions side by side)")
+option(${PROJECT_NAME}_ENABLE_TESTS "Build the test suite (fetches GoogleTest)" ON)
+option(${PROJECT_NAME}_INSTALL_TESTS "Install mallard-test and its data, for mallard test on an installed build" ON)
+
 add_subdirectory(src)
-add_subdirectory(test)
+if(${PROJECT_NAME}_ENABLE_TESTS)
+    add_subdirectory(test)
+endif()
+if(${PROJECT_NAME}_ENABLE_FUZZING)
+    add_subdirectory(test/fuzz)
+endif()
 
 # Documentation setup
 option(BUILD_DOCS "Build documentation" OFF)
@@ -159,21 +245,30 @@ if(BUILD_DOCS)
             COMMENT "Generating documentation with Doxygen"
             VERBATIM
         )
-        add_dependencies(Mallard docs)
+        add_dependencies(mallard docs)
     else()
         message(WARNING "Doxygen not found. Documentation won't be generated.")
     endif()
 endif()
 
-# Installation setup
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX /path/to/install/dir CACHE PATH "Default installation path" FORCE)
+include(GNUInstallDirs)
+# OPTIONAL: an install after building only some targets (e.g. --target mallard)
+install(TARGETS mallard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+if(${PROJECT_NAME}_ENABLE_TESTS AND ${PROJECT_NAME}_INSTALL_TESTS)
+    install(TARGETS mallard-test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+    install(DIRECTORY test/data DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/test)
 endif()
+# Case templates (mallard new) and what they are made from: bin/../share/mallard.
+# Examples keep their relative paths to ../../mechanisms
+install(DIRECTORY templates examples mechanisms tools tutorials
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard
+    USE_SOURCE_PERMISSIONS
+    PATTERN __pycache__ EXCLUDE
+    PATTERN solut EXCLUDE)
+install(FILES LICENSE NOTICE DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(DIRECTORY licenses DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
-install(TARGETS Mallard
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
-)
-
-# Enable testing
-enable_testing()
-add_test(NAME MallardTest COMMAND MallardTest)
+if(${PROJECT_NAME}_ENABLE_TESTS)
+    enable_testing()
+    add_test(NAME mallard-test COMMAND mallard-test)
+endif()

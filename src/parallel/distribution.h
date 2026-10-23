@@ -41,4 +41,10 @@ struct Distribution {
  */
 void plan_halo_exchange(Distribution & dist, const std::vector<int> & halo_owner);
 
+/**
+ * @brief Keep in the exchange plan only the halo cells marked in needed (local
+ *        cells); each neighbor stops sending the others. Collective.
+ */
+void trim_halo_exchange(Distribution & dist, const std::vector<uint8_t> & needed);
+
 #endif // DISTRIBUTION_H

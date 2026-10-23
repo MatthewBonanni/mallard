@@ -15,11 +15,15 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <sstream>
 
 #include "comm.h"
 #include "common_io.h"
+#include "compression.h"
+#include "file_format.h"
 #include "hdf5_util.h"
+#include "provenance.h"
 
 namespace {
 
@@ -31,6 +35,7 @@ void write_xdmf_file(const std::string & filename, const std::string & grids) {
     std::ofstream out(filename);
     if (!out.good()) throw std::runtime_error("DataWriter: Could not open file: " + filename + ".");
     out << "<?xml version=\"1.0\" ?>\n"
+        << provenance::xml_comment() << "\n"
         << "<!DOCTYPE Xdmf SYSTEM \"Xdmf.dtd\" []>\n"
         << "<Xdmf Version=\"3.0\">\n"
         << "  <Domain>\n"
@@ -69,11 +74,11 @@ std::string DataWriter::xdmf_grid(const std::string & stem, double t, const std:
     return out.str();
 }
 
-void DataWriter::write_xdmf(const std::string & stem) const {
-    write_xdmf_file(stem + ".xmf", xdmf_grid(stem, double(history.back().first), "    "));
+void DataWriter::write_xdmf(const std::string & stem, const std::vector<std::pair<rtype, std::string>> & series) const {
+    write_xdmf_file(stem + ".xmf", xdmf_grid(stem, double(series.back().first), "    "));
     std::string grids =
         "    <Grid Name=\"" + file_name(prefix) + "\" GridType=\"Collection\" CollectionType=\"Temporal\">\n";
-    for (const auto & [t, file] : history) {
+    for (const auto & [t, file] : series) {
         grids += xdmf_grid(std::filesystem::path(file).replace_extension().string(), double(t), "      ");
     }
     grids += "    </Grid>\n";
@@ -110,7 +115,6 @@ namespace {
 
 constexpr const char * MESH_FORMAT = "mallard-solution-mesh";
 constexpr const char * SOLUTION_FORMAT = "mallard-solution";
-constexpr int OUTPUT_VERSION = 1;
 
 /** @brief XDMF code of a cell in a Mixed topology, by node count. */
 uint64_t xdmf_type(uint32_t n_nodes) {
@@ -124,13 +128,57 @@ uint64_t xdmf_type(uint32_t n_nodes) {
                              std::to_string(n_nodes) + " nodes.");
 }
 
+/**
+ * @brief write_rows: compressed with HDF5's shuffle and deflate filters, which
+ *        compress on one thread, or, in a file of this rank alone (serial),
+ *        with the same chunks compressed on n_threads threads and written
+ *        directly.
+ */
+template <typename T>
+void write_dataset(hid_t parent, const char * name, uint64_t n_rows, int cols, uint64_t first, uint64_t n,
+                   const T * data, hid_t dxpl, bool deflate, bool serial, unsigned n_threads) {
+    if (!(deflate && serial && compression::have_zlib() && n_rows > 0 && first == 0 && n == n_rows)) {
+        write_rows(parent, name, n_rows, cols, first, n, data, dxpl, deflate);
+        return;
+    }
+    const int rank = cols > 1 ? 2 : 1;
+    const hsize_t dims[2] = {n_rows, hsize_t(cols)};
+    const hsize_t chunk_rows = std::min<hsize_t>(n_rows, CHUNK_ROWS);
+    const hsize_t chunk[2] = {chunk_rows, hsize_t(cols)};
+    Handle space(H5Screate_simple(rank, dims, nullptr), H5Sclose, "H5Screate_simple");
+    Handle dcpl(H5Pcreate(H5P_DATASET_CREATE), H5Pclose, "H5Pcreate");
+    check(H5Pset_chunk(dcpl, rank, chunk), "H5Pset_chunk");
+    check(H5Pset_shuffle(dcpl), "H5Pset_shuffle");
+    check(H5Pset_deflate(dcpl, 1), "H5Pset_deflate");
+    Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, dcpl, H5P_DEFAULT), H5Dclose,
+                std::string("creating ") + name);
+    // Chunks are stored whole: the last one is padded with zeros (HDF5's fill value)
+    const size_t chunk_values = size_t(chunk_rows) * size_t(cols);
+    std::vector<std::vector<char>> chunks((n_rows + chunk_rows - 1) / chunk_rows);
+    compression::parallel_for(chunks.size(), n_threads, [&](size_t c) {
+        std::vector<T> values(chunk_values, T(0));
+        const size_t at = c * chunk_values;
+        std::copy(data + at, data + std::min(at + chunk_values, size_t(n_rows) * size_t(cols)), values.begin());
+        chunks[c] = compression::deflate(values.data(), values.size() * sizeof(T), sizeof(T));
+    });
+    for (size_t c = 0; c < chunks.size(); c++) {
+        const hsize_t offset[2] = {c * chunk_rows, 0};
+        check(H5Dwrite_chunk(dset, dxpl, 0, offset, chunks[c].size(), chunks[c].data()), std::string("writing ") + name);
+    }
+}
+
 } // namespace
 
+bool have_hdf5_deflate() {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    return H5Zfilter_avail(H5Z_FILTER_DEFLATE) > 0 && H5Zfilter_avail(H5Z_FILTER_SHUFFLE) > 0;
+}
+
+// Serial runs on several ranks (tests) hold the whole mesh on every rank: the root writes alone
 void DataWriter::write_hdf5_mesh() {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
     hdf5_mesh_written = true;
     const bool distributed = mesh->n_global_cells > 0;
-    // Serial runs on several ranks (tests) hold the whole mesh on every rank
-    if (!distributed && !comm::is_root()) return;
     const uint32_t n_owned = mesh->n_owned();
     const uint64_t n_cells = distributed ? mesh->n_global_cells : mesh->n_cells;
     const uint64_t n_nodes = distributed ? mesh->n_global_nodes : mesh->n_nodes;
@@ -170,8 +218,8 @@ void DataWriter::write_hdf5_mesh() {
         const std::vector<uint64_t> sizes = comm::allgatherv(std::vector<uint64_t>{total});
         total = 0;
         for (int r = 0; r < comm::size(); r++) {
-            if (r < comm::rank()) first += sizes[r];
-            total += sizes[r];
+            if (r < comm::rank()) first += sizes[static_cast<size_t>(r)];
+            total += sizes[static_cast<size_t>(r)];
         }
         last = comm::rank() == comm::size() - 1;
     }
@@ -181,52 +229,64 @@ void DataWriter::write_hdf5_mesh() {
     for (size_t i = 0; i < starts.size(); i++) starts[i] = int64_t(first + block_offsets[i]);
     const std::vector<int64_t> records(block_topology.begin(), block_topology.end());
 
-    Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
-    Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
+    const std::string & provenance = provenance::json();
+    const bool deflate = compression == Compression::ZLIB;
     const std::string filename = mesh_file(prefix);
-    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl), H5Fclose, "creating " + filename);
+    Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
+    Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
+    Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
+    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
+        write_strings_attribute(root, "provenance", {provenance});
         write_strings_attribute(root, "format", {MESH_FORMAT});
-        write_int_attribute(root, "version", OUTPUT_VERSION);
+        write_int_attribute(root, "version", static_cast<int>(file_format::HDF5_OUTPUT.version));
         write_int_attribute(root, "dimension", N_DIM);
     }
     {
         Handle group(H5Gcreate2(file, "nodes", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
-        write_rows(group, "coordinates", n_nodes, N_DIM, node_order.first(), node_order.size(), block_coords.data(),
-                   dxpl);
+        write_dataset(group, "coordinates", n_nodes, N_DIM, node_order.first(), node_order.size(), block_coords.data(),
+                      dxpl, deflate, !distributed, io_threads);
     }
     {
         Handle group(H5Gcreate2(file, "cells", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
-        write_rows(group, "offsets", n_cells + 1, 1, cell_order.first(), starts.size(), starts.data(), dxpl);
-        write_rows(group, "topology", total, 1, first, records.size(), records.data(), dxpl);
+        write_dataset(group, "offsets", n_cells + 1, 1, cell_order.first(), starts.size(), starts.data(), dxpl, deflate,
+                      !distributed, io_threads);
+        write_dataset(group, "topology", total, 1, first, records.size(), records.data(), dxpl, deflate, !distributed,
+                      io_threads);
     }
 }
 
-void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t) const {
+void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t, const Values & snapshot) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
     const bool distributed = mesh->n_global_cells > 0;
-    if (!distributed && !comm::is_root()) return;
     const uint32_t n_owned = mesh->n_owned();
     uint32_t width = 0;
     for (const auto & field : fields) width += field.n_vtk_components();
     std::vector<rtype> values(size_t(n_owned) * width);
     size_t at = 0;
     for (uint32_t i = 0; i < n_owned; i++) {
-        for (const auto & field : fields) {
-            for (uint32_t k = 0; k < field.n_vtk_components(); k++) values[at++] = field.value(i, k);
+        for (size_t f = 0; f < fields.size(); f++) {
+            const uint32_t n_comp = fields[f].n_vtk_components();
+            for (uint32_t k = 0; k < n_comp; k++) values[at++] = snapshot[f][size_t(i) * n_comp + k];
         }
     }
+    if (relative_error > 0.0) compression::round_to_relative_error(values, relative_error);
     const std::vector<rtype> block = cell_order.gather<rtype>(values, width);
     const uint64_t n = cell_order.size();
 
-    Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
-    Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
+    const std::string & provenance = provenance::json();
+    const bool deflate = compression == Compression::ZLIB;
     const std::string filename = stem + ".h5";
-    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl), H5Fclose, "creating " + filename);
+    Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
+    Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
+    Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
+    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
+        write_strings_attribute(root, "provenance", {provenance});
         write_strings_attribute(root, "format", {SOLUTION_FORMAT});
-        write_int_attribute(root, "version", OUTPUT_VERSION);
+        write_int_attribute(root, "version", static_cast<int>(file_format::HDF5_OUTPUT.version));
         write_int_attribute(root, "dimension", N_DIM);
         write_attribute(root, "step", step);
         write_attribute(root, "time", double(t));
@@ -241,17 +301,19 @@ void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t) co
         for (uint64_t row = 0; row < n; row++) {
             for (uint32_t k = 0; k < n_comp; k++) column[row * n_comp + k] = block[row * width + c0 + k];
         }
-        write_rows(group, field.name.c_str(), cell_order.n_global(), int(n_comp), cell_order.first(), n,
-                   column.data(), dxpl);
+        write_dataset(group, field.name.c_str(), cell_order.n_global(), int(n_comp), cell_order.first(), n,
+                      column.data(), dxpl, deflate, !distributed, io_threads);
         c0 += n_comp;
     }
 }
 
 #else
 
+bool have_hdf5_deflate() { return false; }
+
 void DataWriter::write_hdf5_mesh() { throw std::logic_error("DataWriter: HDF5 output without HDF5"); }
 
-void DataWriter::write_hdf5(const std::string &, uint64_t, rtype) const {
+void DataWriter::write_hdf5(const std::string &, uint64_t, rtype, const Values &) {
     throw std::logic_error("DataWriter: HDF5 output without HDF5");
 }
 

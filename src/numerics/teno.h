@@ -26,9 +26,9 @@ constexpr uint8_t MAX_DEGREE = 5;
 KOKKOS_INLINE_FUNCTION
 constexpr uint8_t n_dof(const uint8_t r) {
     if constexpr (N_DIM == 2) {
-        return (r + 1) * (r + 2) / 2 - 1;
+        return static_cast<uint8_t>((r + 1) * (r + 2) / 2 - 1);
     } else {
-        return (r + 1) * (r + 2) * (r + 3) / 6 - 1;
+        return static_cast<uint8_t>((r + 1) * (r + 2) * (r + 3) / 6 - 1);
     }
 }
 
@@ -38,12 +38,60 @@ constexpr uint8_t MAX_FACES = (N_DIM == 2) ? 4 : 6;
 constexpr uint8_t MAX_FACE_QUAD = (N_DIM == 2) ? 4 : 9;
 
 /**
+ * @brief Stencil entries reached across a periodic rotation. The face field
+ *        of a stencil slot holds the mirror face (or -1) of an entry whose
+ *        cell and mirror face do not turn. Otherwise it holds
+ *        -2 - ((b + 1) ROTATION_SPAN + (rel + REL_BIAS) TURN_SPAN + turns + TURN_BIAS),
+ *        with b the mirror face's boundary ordinal (TENO::boundary_faces, -1
+ *        if none), turns the turns about the axis of the cell (or of the
+ *        mirror face) that bring it into the reconstructed cell's frame, and
+ *        rel those of the cell relative to its mirror face: its state turns
+ *        by rel into the face's frame, takes the ghost there, then by turns.
+ */
+constexpr int32_t TURN_SPAN = 64;
+constexpr int32_t TURN_BIAS = 32;
+constexpr int32_t REL_SPAN = 5;
+constexpr int32_t REL_BIAS = 2;
+constexpr int32_t ROTATION_SPAN = TURN_SPAN * REL_SPAN;
+constexpr int64_t MAX_ROTATED_BOUNDARY_FACES = (int64_t(1) << 31) / ROTATION_SPAN - 2;
+
+/** @brief Face field of an entry with mirror face `face` (or -1; boundary ordinal `boundary`). */
+KOKKOS_INLINE_FUNCTION
+int32_t entry_code(const int32_t face, const int32_t boundary, const int turns, const int rel) {
+    if (turns == 0 && rel == 0) return face;
+    if (turns <= -TURN_BIAS || turns >= TURN_BIAS || rel < -REL_BIAS || rel > REL_BIAS) {
+        Kokkos::abort("TENO: a stencil turns too often about the periodic rotation's axis.");
+    }
+    return -2 - ((boundary + 1) * ROTATION_SPAN + (rel + REL_BIAS) * TURN_SPAN + (turns + TURN_BIAS));
+}
+
+/**
+ * @brief The mirror face (or -1) of a face field, the row of
+ *        TENO::entry_rotations that turns the entry into the reconstructed
+ *        cell's frame (-1: none) and the row that turns the cell into its
+ *        mirror face's (-1: none).
+ */
+template <typename Faces>
+KOKKOS_INLINE_FUNCTION
+int32_t entry_face(const int32_t code, const Faces & boundary_faces, int32_t & row, int32_t & rel_row) {
+    row = -1;
+    rel_row = -1;
+    if (code >= -1) return code;
+    const int32_t x = -2 - code;
+    row = x % TURN_SPAN;
+    const int32_t rel = (x / TURN_SPAN) % REL_SPAN - REL_BIAS;
+    if (rel != 0) rel_row = rel + TURN_BIAS;
+    const int32_t b = x / ROTATION_SPAN - 1;
+    return b < 0 ? -1 : boundary_faces(b);
+}
+
+/**
  * @brief Index of entry (l, m), l <= m, of a symmetric n x n matrix stored as
  *        its upper triangle, row by row.
  */
 KOKKOS_INLINE_FUNCTION
 constexpr uint16_t upper_index(const uint8_t l, const uint8_t m, const uint8_t n) {
-    return l * n - l * (l - 1) / 2 + (m - l);
+    return static_cast<uint16_t>(l * n - l * (l - 1) / 2 + (m - l));
 }
 
 /**
@@ -60,6 +108,8 @@ constexpr uint8_t SLICE_SHIFT =
  *        cell, its mirror boundary face (or -1) and `width` pseudo-inverse
  *        entries. Consecutive cells form slices of 2^shift cells; a slice is
  *        padded to its largest stencil and interleaves its cells' slots.
+ *        With single, pinv holds the pseudo-inverse entries as floats, two to
+ *        an element, at the same indices.
  */
 struct PackedStencils {
     Kokkos::View<uint64_t *> slice_start;  // (slice): first slot of the slice
@@ -68,10 +118,18 @@ struct PackedStencils {
     Kokkos::View<rtype *> pinv;
     uint8_t shift = SLICE_SHIFT;
     uint8_t width = 0;
+    bool single = false;
 
-    /** @brief One cell's stencil, resolved once per cell. */
-    struct Row {
-        const rtype * pinv_;
+    /** @brief Elements of pinv that hold n entries. */
+    KOKKOS_INLINE_FUNCTION
+    static size_t pinv_elements(const size_t n, const bool single) {
+        return single ? (n * sizeof(float) + sizeof(rtype) - 1) / sizeof(rtype) : n;
+    }
+
+    /** @brief One cell's stencil, resolved once per cell, for pseudo-inverse entries of type T. */
+    template <typename T>
+    struct RowT {
+        const T * pinv_;
         const int32_t * cells_;
         const int32_t * faces_;
         uint8_t shift;
@@ -85,19 +143,80 @@ struct PackedStencils {
         /** @brief Entry l of slot s, for pseudo-inverses of WIDTH entries per slot. */
         template <uint8_t WIDTH>
         KOKKOS_INLINE_FUNCTION
-        rtype pinv(const uint32_t s, const uint32_t l) const { return pinv_[(s * WIDTH + l) << shift]; }
+        rtype pinv(const uint32_t s, const uint32_t l) const { return rtype(pinv_[(s * WIDTH + l) << shift]); }
     };
+    using Row = RowT<rtype>;
 
     // The arrays are single allocations whose base pointers reach the kernels
     // as parameters: pointers loaded from device memory (e.g. a table of
     // separately allocated chunks) compile to generic loads, which made the
     // reconstruction up to 30% slower
+    // T: float if single, else rtype
+    template <typename T = rtype>
     KOKKOS_INLINE_FUNCTION
-    Row row(const uint32_t c) const {
+    RowT<T> row(const uint32_t c) const {
         const uint64_t start = slice_start(c >> shift);
         const uint32_t lane = c & ((1u << shift) - 1);
-        return Row{pinv.data() + ((start * width) << shift) + lane, cells.data() + (start << shift) + lane,
-                   faces.data() + (start << shift) + lane, shift};
+        return RowT<T>{reinterpret_cast<const T *>(pinv.data()) + ((start * width) << shift) + lane,
+                       cells.data() + (start << shift) + lane, faces.data() + (start << shift) + lane, shift};
+    }
+};
+
+/** @brief (cell, k): central moments of each cell, mean of ((x - x_c) / h_c)^a ... (3D). */
+using Moments = Kokkos::View<double **, Kokkos::LayoutRight>;
+
+/**
+ * @brief The terms of the smoothness-indicator matrix (3D): entry e
+ *        (upper_index(l, m)) is sum_t weight(t) moments(cell, moment(t)) over
+ *        t in [start(e), start(e + 1)), with products of D^beta factors (whole
+ *        numbers below 2^16) as weights; term(t) holds weight(t) << 16 | moment(t).
+ */
+struct SmoothnessTerms {
+    Kokkos::View<uint32_t *> start;
+    Kokkos::View<uint32_t *> term;
+
+    /**
+     * @brief Entries [e0, e0 + G) below n from one cell's moments into out,
+     *        each summed in term order and rounded as the setup's sum was,
+     *        which contracted no multiply and add into an FMA; the G sums are
+     *        interleaved so that their latencies overlap.
+     */
+    template <uint32_t G>
+    KOKKOS_INLINE_FUNCTION
+    void entries(const uint32_t e0, const uint32_t n, const double * moments, rtype * out) const {
+        uint32_t t[G], end[G];
+        double sum[G];
+        uint32_t longest = 0;
+        for (uint32_t g = 0; g < G; g++) {
+            const bool in = e0 + g < n;
+            t[g] = in ? start(e0 + g) : 0;
+            end[g] = in ? start(e0 + g + 1) : 0;
+            sum[g] = 0.0;
+            longest = (end[g] - t[g]) > longest ? end[g] - t[g] : longest;
+        }
+        for (uint32_t k = 0; k < longest; k++) {
+            for (uint32_t g = 0; g < G; g++) {
+                if (t[g] + k < end[g]) {
+                    const uint32_t w = term(t[g] + k);
+                    sum[g] = add_product_rn(sum[g], double(w >> 16), moments[w & 0xFFFFu]);
+                }
+            }
+        }
+        for (uint32_t g = 0; g < G; g++) {
+            if (e0 + g < n) out[e0 + g] = rtype(sum[g]);
+        }
+    }
+
+    /** @brief s + a b, each rounded, never fused. */
+    KOKKOS_INLINE_FUNCTION
+    static double add_product_rn(const double s, const double a, const double b) {
+#if defined(KOKKOS_ENABLE_CUDA) || defined(KOKKOS_ENABLE_HIP)
+        KOKKOS_IF_ON_DEVICE((return __dadd_rn(s, __dmul_rn(a, b));))
+        KOKKOS_IF_ON_HOST((const volatile double p = a * b; return s + p;))
+#else
+        const volatile double p = a * b;
+        return s + p;
+#endif
     }
 };
 
@@ -110,11 +229,11 @@ void exponents(const uint8_t l, uint8_t & a, uint8_t & b) {
     uint8_t d = 1;
     uint8_t first = 0;
     while (l >= first + d + 1) {
-        first += d + 1;
+        first = static_cast<uint8_t>(first + d + 1);
         d++;
     }
-    a = d - (l - first);
-    b = l - first;
+    a = static_cast<uint8_t>(d - (l - first));
+    b = static_cast<uint8_t>(l - first);
 }
 
 /**
@@ -126,12 +245,12 @@ KOKKOS_INLINE_FUNCTION
 void exponents(const uint8_t l, uint8_t & a, uint8_t & b, uint8_t & c) {
     uint8_t idx = 0;
     for (uint8_t d = 1;; d++) {
-        for (int8_t i = d; i >= 0; i--) {
-            for (int8_t j = d - i; j >= 0; j--) {
+        for (int i = d; i >= 0; i--) {
+            for (int j = d - i; j >= 0; j--) {
                 if (idx == l) {
-                    a = i;
-                    b = j;
-                    c = d - i - j;
+                    a = static_cast<uint8_t>(i);
+                    b = static_cast<uint8_t>(j);
+                    c = static_cast<uint8_t>(d - i - j);
                     return;
                 }
                 idx++;
@@ -182,9 +301,10 @@ template <typename T> KOKKOS_INLINE_FUNCTION
 void monomials(const uint8_t r, const T xi, const T eta, const T zeta, T * phi) {
     uint8_t l = 0;
     for (uint8_t d = 1; d <= r; d++) {
-        for (int8_t i = d; i >= 0; i--) {
-            for (int8_t j = d - i; j >= 0; j--) {
-                phi[l++] = ipow(xi, i) * ipow(eta, j) * ipow(zeta, d - i - j);
+        for (int i = d; i >= 0; i--) {
+            for (int j = d - i; j >= 0; j--) {
+                phi[l++] = ipow(xi, static_cast<uint8_t>(i)) * ipow(eta, static_cast<uint8_t>(j)) *
+                           ipow(zeta, static_cast<uint8_t>(d - i - j));
             }
         }
     }

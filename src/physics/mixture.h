@@ -17,7 +17,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "log.h"
@@ -85,9 +85,10 @@ class MixtureModel {
         /**
          * @brief From the [physics] table: mechanism and optional phase; for
          *        type = "navier_stokes" the transport model ("mixture_averaged",
-         *        "unity_lewis" or "constant_lewis" with lewis = { species = Le }).
+         *        "unity_lewis" or "constant_lewis" with lewis = { species = Le }),
+         *        and soret = true for thermal diffusion (mixture_averaged).
          */
-        static MixtureModel from_input(const toml::value & input);
+        static MixtureModel from_input(const Input & input);
 
         const chemistry::Mechanism & mechanism() const { return mech; }
         const Mixture & device() const { return gas; }
@@ -102,13 +103,13 @@ class MixtureModel {
          * @param table Table holding X or Y.
          * @param where Name of the table for error messages.
          */
-        std::vector<double> mass_fractions(const toml::value & table, const std::string & where) const;
+        std::vector<double> mass_fractions(const Input & table, const std::string & where) const;
 
         /**
          * @brief Whether the X or Y of a table varies in space: some value is
          *        an expression (a string) or a balance species is named.
          */
-        static bool composition_varies(const toml::value & table);
+        static bool composition_varies(const Input & table);
 
         /** @brief Mass fractions from mole fractions. */
         std::vector<double> mass_fractions_from_mole(const std::vector<double> & X) const;
@@ -147,6 +148,6 @@ class MixtureModel {
  *        rtol, atol (on mass fractions), max_steps (sub-steps per call),
  *        sparse (the linear solver; automatic by default, see use_sparse_lu).
  */
-chemistry::ReactorOptions reactor_options(const toml::value & input);
+chemistry::ReactorOptions reactor_options(const Input & input);
 
 #endif // MIXTURE_H

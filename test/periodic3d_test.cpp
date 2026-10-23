@@ -14,16 +14,21 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include "gmsh_fixtures.h"
 #include "periodic_fixtures.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "verification.h"
 
 namespace {
 
@@ -51,7 +56,7 @@ struct Case {
 std::string make_input(const Case & c) {
     std::ostringstream s;
     s << "[run]\n" << c.run << "[mesh]\ntype = \"" << c.mesh << "\"\n";
-    for (int d = 0; d < 3; d++) s << "N" << "xyz"[d] << " = " << c.n[d] << "\nL" << "xyz"[d] << " = " << c.L[d] << "\n";
+    for (size_t d = 0; d < 3; d++) s << "N" << "xyz"[d] << " = " << c.n[d] << "\nL" << "xyz"[d] << " = " << c.L[d] << "\n";
     s << "periodic = " << periodic_list(c.dirs) << "\n"
       << "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0, 0.0]\np = 1.0\nT = 1.0\n"
       << c.boundaries
@@ -121,7 +126,7 @@ TEST_P(PeriodicBox3D, PreservesUniformFlowAndConservesMassMomentumAndEnergy) {
     uniform->copy_device_to_host();
     const double U[4] = {1.3, 1.3 * 0.4, -1.3 * 0.25, 1.3 * 0.1};
     for (uint32_t cell = 0; cell < uniform->get_mesh()->n_owned(); cell++) {
-        for (int i = 0; i < 4; i++) EXPECT_NEAR(uniform->h_conservatives(cell, i), U[i], roundoff(1e-12));
+        for (size_t i = 0; i < 4; i++) EXPECT_NEAR(uniform->h_conservatives(cell, i), U[i], roundoff(1e-12));
     }
     // With no boundary at all, momentum is conserved too
     auto blob = start(c, [](double x, double y, double z, double * W) {
@@ -146,24 +151,40 @@ namespace {
 
 /**
  * @brief Max density error after advecting a periodic density wave for a
- *        quarter period with RK4, with dt ~ h^(order / 4).
+ *        quarter period with RK4, with dt ~ h^(order / 4). Along a direction
+ *        that the mesh type cannot make periodic, the wave is uniform and
+ *        bounded by symmetry walls.
  */
-double advection_error(const std::string & recon, int order, uint32_t n) {
+double advection_error(const std::string & mesh, const std::string & dirs, const std::string & recon, int order,
+                       uint32_t n) {
     Case c;
+    c.mesh = mesh;
+    c.dirs = dirs;
     c.n = {n, n, n};
     c.recon = recon;
-    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : "limiter = \"none\"\n";
+    c.extra_recon = recon == "TENO" ? "order = " + std::to_string(order) + "\n" : recon == "MUSCL" ? "limiter = \"none\"\n" : "";
     c.integrator = "RK4";
+    const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
+    std::array<double, 3> velocity = {1.0, 0.5, 0.25};
+    for (size_t d = 0; d < 3; d++) {
+        if (dirs.find("xyz"[d]) != std::string::npos) continue;
+        velocity[d] = 0.0;
+        for (const char * zone : zones[d]) c.boundaries += "[[boundaries]]\nname = \"" + std::string(zone) + "\"\ntype = \"symmetry\"\n";
+    }
     const double T = 0.25;
-    const uint32_t steps = std::ceil(T / (0.25 * std::pow(1.0 / n, std::max(1.0, order / 4.0))));
+    // RK4 at dt = h / 4 is stable on hexahedra only: the other cells are thinner
+    const double dt_scale = mesh == "cartesian" ? 0.25 : 0.0625;
+    const uint32_t steps = static_cast<uint32_t>(std::ceil(T / (dt_scale * std::pow(1.0 / n, std::max(1.0, order / 4.0)))));
     c.run = "t_stop = " + std::to_string(T) + "\ndt = " + std::to_string(T / steps) + "\n";
-    auto wave = [](double t) {
-        return [t](double x, double y, double z, double * W) {
-            W[0] = 1.0 + 0.2 * std::sin(2.0 * M_PI * (x - t)) * std::sin(2.0 * M_PI * (y - 0.5 * t)) *
-                             std::cos(2.0 * M_PI * (z - 0.25 * t));
-            W[1] = 1.0;
-            W[2] = 0.5;
-            W[3] = 0.25;
+    auto wave = [velocity](double t) {
+        return [t, velocity](double x, double y, double z, double * W) {
+            const double fx = std::sin(2.0 * M_PI * (x - velocity[0] * t));
+            const double fy = velocity[1] != 0.0 ? std::sin(2.0 * M_PI * (y - velocity[1] * t)) : 1.0;
+            const double fz = velocity[2] != 0.0 ? std::cos(2.0 * M_PI * (z - velocity[2] * t)) : 1.0;
+            W[0] = 1.0 + 0.2 * fx * fy * fz;
+            W[1] = velocity[0];
+            W[2] = velocity[1];
+            W[3] = velocity[2];
             W[4] = 1.0;
         };
     };
@@ -177,25 +198,57 @@ double advection_error(const std::string & recon, int order, uint32_t n) {
     });
     double err = 0.0;
     for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {
-        err = std::max(err, std::abs(double(solver->h_conservatives(i, 0)) - double(exact(i, 0))));
+        const double e = std::abs(double(solver->h_conservatives(i, 0)) - double(exact(i, 0)));
+        err = std::isfinite(e) ? std::max(err, e) : std::numeric_limits<double>::infinity();
     }
     return err;
 }
 
-class PeriodicAdvection3D : public ::testing::TestWithParam<std::string> {};
+// mesh type, FO, MUSCL or TENO<order>, coarse n, how far below the design order the observed one may fall
+using AdvectionParam = std::tuple<std::string, std::string, uint32_t, double>;
+class PeriodicAdvection3D : public ::testing::TestWithParam<AdvectionParam> {};
+
+/** @brief The directions in which each generated mesh type can be periodic. */
+std::string periodic_directions(const std::string & mesh) {
+    if (mesh == "cartesian_prism") return "xz";
+    if (mesh == "cartesian_pyramid") return "xy";
+    return "xyz";
+}
 
 } // namespace
 
-TEST_P(PeriodicAdvection3D, SmoothWaveConvergesAtDesignOrderOnHexahedra) {
-    const std::string scheme = GetParam();
-    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : "MUSCL";
-    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : 2;
-    const double e1 = advection_error(recon, order, 8);
-    const double e2 = advection_error(recon, order, 16);
-    EXPECT_GT(std::log2(e1 / e2), order - 0.25) << e1 << " " << e2;
+TEST_P(PeriodicAdvection3D, SmoothWaveConvergesAtDesignOrder) {
+    const auto [mesh, scheme, n, slack] = GetParam();
+    const std::string recon = scheme.rfind("TENO", 0) == 0 ? "TENO" : scheme;
+    const int order = recon == "TENO" ? std::stoi(scheme.substr(4)) : recon == "MUSCL" ? 2 : 1;
+    const std::string dirs = periodic_directions(mesh);
+    verification::expect_order({"advection", scheme, verification::cells_of(mesh), "max density error",
+                                {double(n), double(2 * n)},
+                                {advection_error(mesh, dirs, recon, order, n), advection_error(mesh, dirs, recon, order, 2 * n)},
+                                double(order), order - slack});
 }
 
-INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicAdvection3D, ::testing::Values("MUSCL", "TENO4"));
+INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicAdvection3D,
+    ::testing::Values(AdvectionParam{"cartesian", "MUSCL", 8, 0.25}, AdvectionParam{"cartesian", "TENO4", 8, 0.25}));
+
+// The rest of the verification manual's matrix of reconstructions and cell
+// types: run by tools/docs/verification.py, too slow for every CI run. First
+// order, MUSCL and TENO3 need 12 to 16 cells per wavelength to approach their
+// rates, and the meshes stay coarse enough that the bound is the design order
+// less 0.5, as for the 3D reconstruction (TENO3DOrder). TENO5 and TENO6 run on
+// hexahedra only (several minutes on the other cells), their reconstruction
+// on every cell type.
+std::vector<AdvectionParam> verification_matrix() {
+    std::vector<AdvectionParam> cases = {{"cartesian", "FO", 16, 0.5}, {"cartesian", "TENO3", 12, 0.5},
+                                         {"cartesian", "TENO5", 12, 0.5}, {"cartesian", "TENO6", 8, 0.5}};
+    for (const char * mesh : {"cartesian_tet", "cartesian_prism", "cartesian_pyramid", "cartesian_mixed"}) {
+        cases.insert(cases.end(), {{mesh, "FO", 16, 0.5}, {mesh, "MUSCL", 12, 0.5}, {mesh, "TENO3", 12, 0.5},
+                                   {mesh, "TENO4", 8, 0.5}});
+    }
+    return cases;
+}
+
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, PeriodicAdvection3D, ::testing::ValuesIn(verification_matrix()));
 
 namespace {
 

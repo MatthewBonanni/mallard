@@ -2,6 +2,7 @@
 
     python tools/flame_vortex.py FULL.csv MECHANISM PHASE RUN_DIR --r R --u U
         [--cells 12] [--cfl 0.4] [--flame-times T] [--outputs 100] [--transport mixture_averaged]
+        [--radiation cantera|tnf]
 
 A planar flame in its frame (tools/flame_restart.py: the fresh gas enters on
 the left at the flame speed S_L, cells of delta / --cells, delta the thermal
@@ -26,7 +27,8 @@ sets the run's length in delta / S_L (default: the time for the pair to reach
 the flame at 0.3 u' + S_L, plus 3 flame times). Writes RUN_DIR/input.toml,
 RUN_DIR/flame.restart and a copy of FULL.csv as RUN_DIR/planar_full.csv (the
 reference of tools/flame_vortex_analysis.py); outputs RUN_DIR/solut/flame.pvd
-(T, HRR, velocity, density, H2 and O2).
+(T, HRR, velocity, density, the fuel's (H2 or CH4) and O2's mass fractions,
+and with --radiation QRAD).
 """
 import argparse
 import os
@@ -74,11 +76,12 @@ def main():
     ap.add_argument("--flame-times", type=float)
     ap.add_argument("--outputs", type=int, default=100)
     ap.add_argument("--transport", default="mixture_averaged")
+    ap.add_argument("--radiation", choices=["cantera", "tnf"], help="as tools/flame_restart.py")
     args = ap.parse_args()
 
     data = np.loadtxt(args.full, delimiter=",", skiprows=1)
     x, u, T = data[:, 0], data[:, 1], data[:, 2]
-    delta = (T[-1] - T[0]) / np.gradient(T, x).max()
+    delta = (T.max() - T[0]) / np.gradient(T, x).max()
     S_L, rho_u, T_u = u[0], data[0, 3], T[0]
     tau = delta / S_L
     r = args.r * delta
@@ -94,6 +97,8 @@ def main():
            str(args.cells), args.run_dir, "--cfl", str(args.cfl), "--transport", args.transport,
            "--ny", str(H_cells), "--upstream", f"{upstream:.6f}", "--downstream", f"{downstream:.6f}",
            "--t-stop", f"{t_stop:.9e}", "--outputs", str(args.outputs)]
+    if args.radiation:
+        cmd += ["--radiation", args.radiation]
     subprocess.run(cmd, check=True)
     shutil.copyfile(args.full, os.path.join(args.run_dir, "planar_full.csv"))
 
@@ -104,7 +109,9 @@ def main():
     text = text.replace('name = "right"\ntype = "p_out"\np = 101325.0\n',
                         'name = "right"\ntype = "p_out"\np = 101325.0\n\n[[boundaries]]\nname = "bottom"\n'
                         'type = "symmetry"\n\n[[boundaries]]\nname = "top"\ntype = "symmetry"\n')
-    text = re.sub(r"variables = \[.*\]", 'variables = ["RHO", "U", "P", "T", "HRR", "Y_H2", "Y_O2"]', text)
+    fuel = "CH4" if "Y_CH4" in open(args.full).readline() else "H2"
+    variables = ["RHO", "U", "P", "T", "HRR", "Y_" + fuel, "Y_O2"] + (["QRAD"] if args.radiation else [])
+    text = re.sub(r"variables = \[.*\]", "variables = [" + ", ".join(f'"{v}"' for v in variables) + "]", text)
     dx = delta / args.cells
     nx = int(re.search(r"Nx = (\d+)", text).group(1))
     ny = H_cells

@@ -24,6 +24,7 @@
 #include "solver.h"
 #include "synthetic_inflow.h"
 #include "test_fixtures.h"
+#include "scratch.h"
 
 namespace {
 
@@ -81,7 +82,7 @@ Sampled sample(const std::string & boundary, Mesh & mesh, uint32_t n_t, double d
         Kokkos::deep_copy(h_target, target);
         s.u.emplace_back(s.faces.size());
         for (size_t i = 0; i < s.faces.size(); i++) {
-            for (int d = 0; d < N_DIM; d++) s.u.back()[i][d] = double(h_target(i, d));
+            for (size_t d = 0; d < N_DIM; d++) s.u.back()[i][d] = double(h_target(i, d));
         }
     }
     return s;
@@ -126,14 +127,14 @@ TEST(SyntheticInflowTest, InletPlaneReproducesTargetStressesAndScales) {
     double mean[N_DIM] = {}, cov[N_DIM][N_DIM] = {};
     for (const auto & row : s.u) {
         for (const auto & u : row) {
-            for (int i = 0; i < N_DIM; i++) mean[i] += u[i];
+            for (size_t i = 0; i < N_DIM; i++) mean[i] += u[i];
         }
     }
     for (double & m : mean) m /= double(n_t * n_f);
     for (const auto & row : s.u) {
         for (const auto & u : row) {
-            for (int i = 0; i < N_DIM; i++) {
-                for (int j = 0; j < N_DIM; j++) cov[i][j] += (u[i] - mean[i]) * (u[j] - mean[j]);
+            for (size_t i = 0; i < N_DIM; i++) {
+                for (size_t j = 0; j < N_DIM; j++) cov[i][j] += (u[i] - mean[i]) * (u[j] - mean[j]);
             }
         }
     }
@@ -276,7 +277,7 @@ TEST(SyntheticInflowTest, FieldDependsOnlyOnTimeAndSeed) {
     auto hc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), uc);
     double diff = 0.0;
     for (size_t i = 0; i < faces.size(); i++) {
-        for (int d = 0; d < N_DIM; d++) {
+        for (size_t d = 0; d < N_DIM; d++) {
             EXPECT_EQ(ha(i, d), hb(i, d));
             diff = std::max(diff, std::abs(double(ha(i, d) - hc(i, d))));
         }
@@ -286,7 +287,7 @@ TEST(SyntheticInflowTest, FieldDependsOnlyOnTimeAndSeed) {
 
 TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     // The generator has no state; the characteristic faces' state goes into the restart file
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_inflow_restart_test").string();
+    const std::string dir = (scratch_dir() / "mallard_inflow_restart_test").string();
     std::filesystem::remove_all(dir);
     Solver straight;
     straight.init(parse_toml(duct_input(dir + "/a", duct_constant(), 40)));

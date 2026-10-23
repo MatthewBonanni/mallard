@@ -1,0 +1,1 @@
+- **`[source]` expressions of `t` are now re-evaluated at every Runge-Kutta stage, on the device; before, they were evaluated once unless `time_dependent = true`.** `[source]` expressions may also read the solution, like `[[sources]]`. `time_dependent` is ignored with a warning; for a source frozen at its initial value, write it without `t` (#384).

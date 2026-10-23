@@ -111,7 +111,7 @@ EquationSide parse_side(const std::string & text, const std::string & where) {
     return side;
 }
 
-void merge(std::vector<std::pair<int32_t, double>> & terms, int32_t k, double nu) {
+void merge(std::vector<std::pair<uint32_t, double>> & terms, uint32_t k, double nu) {
     for (auto & [species, coefficient] : terms) {
         if (species == k) {
             coefficient += nu;
@@ -267,7 +267,7 @@ bool Reader::parse_reaction(const YAML::Node & node, const Source & source, cons
                 if (declared_only) return false;
                 throw std::runtime_error(where + ": no species " + name + " in the phase.");
             }
-            merge(*terms, k, nu);
+            merge(*terms, static_cast<uint32_t>(k), nu);
         }
     }
 
@@ -295,7 +295,7 @@ bool Reader::parse_reaction(const YAML::Node & node, const Source & source, cons
             const int32_t k = mech.species_index(kv.first.as<std::string>());
             bool found = false;
             for (auto & [species, order] : r.orders) {
-                if (species == k) {
+                if (k >= 0 && species == static_cast<uint32_t>(k)) {
                     order = kv.second.as<double>();
                     found = true;
                 }
@@ -357,8 +357,8 @@ bool Reader::parse_reaction(const YAML::Node & node, const Source & source, cons
               r.chebyshev_range[2] > 0.0 && r.chebyshev_range[3] > r.chebyshev_range[2])) {
             throw std::runtime_error(where + ": invalid Chebyshev ranges.");
         }
-        r.chebyshev_n_T = data.size();
-        r.chebyshev_n_p = data[0].size();
+        r.chebyshev_n_T = static_cast<uint32_t>(data.size());
+        r.chebyshev_n_p = static_cast<uint32_t>(data[0].size());
         // The rate constant's units (those of A for this order) enter through the first coefficient
         const Dimension dimension{0, 3.0 * (order - 1.0), -1.0, 0, 1.0 - order, 0, 0};
         const double factor = source.units.convert(YAML::Node(1.0), dimension, where + " data");
@@ -380,14 +380,14 @@ bool Reader::parse_reaction(const YAML::Node & node, const Source & source, cons
             const int32_t k = mech.species_index(lhs.third_body);
             if (k < 0) throw std::runtime_error(where + ": no third-body species " + lhs.third_body + ".");
             r.default_efficiency = 0.0;
-            r.efficiencies = {{k, 1.0}};
+            r.efficiencies = {{static_cast<uint32_t>(k), 1.0}};
         } else {
             if (node["default-efficiency"]) r.default_efficiency = node["default-efficiency"].as<double>();
             if (node["efficiencies"]) {
                 for (const auto & kv : node["efficiencies"]) {
                     const int32_t k = mech.species_index(kv.first.as<std::string>());
                     if (k < 0) continue;  // as Cantera: efficiencies of species outside the phase are ignored
-                    r.efficiencies.emplace_back(k, kv.second.as<double>());
+                    r.efficiencies.emplace_back(static_cast<uint32_t>(k), kv.second.as<double>());
                 }
             }
         }

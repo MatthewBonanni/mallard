@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -33,6 +34,15 @@ inline constexpr bool PARALLEL = true;
 #else
 inline constexpr bool PARALLEL = false;
 #endif
+
+/**
+ * @brief Held around every HDF5 call: the library is not thread-safe, and
+ *        asynchronous output writers call it from their own threads.
+ */
+inline std::mutex & mutex() {
+    static std::mutex m;
+    return m;
+}
 
 /** @brief Owns an HDF5 identifier. */
 class Handle {
@@ -88,6 +98,24 @@ inline hid_t file_access(bool collective = true) {
     return fapl;
 }
 
+/**
+ * @brief File creation, for attributes of up to largest_attribute bytes:
+ *        those over 64 KiB need dense attribute storage, of the HDF5 1.8
+ *        file format, set on fapl.
+ */
+inline hid_t file_creation(hid_t fapl, size_t largest_attribute) {
+    const hid_t fcpl = H5Pcreate(H5P_FILE_CREATE);
+    if (largest_attribute > 60000) {
+        check(H5Pset_attr_phase_change(fcpl, 0, 0), "H5Pset_attr_phase_change");
+#if H5_VERSION_GE(1, 10, 0)
+        check(H5Pset_libver_bounds(fapl, H5F_LIBVER_V18, H5F_LIBVER_LATEST), "H5Pset_libver_bounds");
+#else
+        check(H5Pset_libver_bounds(fapl, H5F_LIBVER_LATEST, H5F_LIBVER_LATEST), "H5Pset_libver_bounds");
+#endif
+    }
+    return fcpl;
+}
+
 /** @brief Dataset transfer: collective MPI-IO (parallel HDF5), or independent. */
 inline hid_t transfer(bool collective = true) {
     const hid_t dxpl = H5Pcreate(H5P_DATASET_XFER);
@@ -112,17 +140,28 @@ inline void select_rows(hid_t space, uint64_t first, uint64_t n) {
     check(H5Sselect_hyperslab(space, H5S_SELECT_SET, start, nullptr, count, nullptr), "H5Sselect_hyperslab");
 }
 
+/** @brief Rows per chunk of compressed datasets. */
+inline constexpr hsize_t CHUNK_ROWS = 65536;
+
 /**
  * @brief Create a dataset of n_rows x cols values (one dimension if cols is 1)
- *        and write this rank's rows [first, first + n) from data, with dxpl.
+ *        and write this rank's rows [first, first + n) from data, with dxpl;
+ *        with deflate, chunked, byte-shuffled and deflated.
  */
 template <typename T>
 void write_rows(hid_t parent, const char * name, uint64_t n_rows, int cols, uint64_t first, uint64_t n,
-                const T * data, hid_t dxpl) {
+                const T * data, hid_t dxpl, bool deflate = false) {
     const int rank = cols > 1 ? 2 : 1;
     const hsize_t dims[2] = {n_rows, hsize_t(cols)}, local[2] = {n, hsize_t(cols)};
     Handle space(H5Screate_simple(rank, dims, nullptr), H5Sclose, "H5Screate_simple");
-    Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Dclose,
+    Handle dcpl(H5Pcreate(H5P_DATASET_CREATE), H5Pclose, "H5Pcreate");
+    if (deflate && n_rows > 0) {
+        const hsize_t chunk[2] = {std::min<hsize_t>(n_rows, CHUNK_ROWS), hsize_t(cols)};
+        check(H5Pset_chunk(dcpl, rank, chunk), "H5Pset_chunk");
+        check(H5Pset_shuffle(dcpl), "H5Pset_shuffle");
+        check(H5Pset_deflate(dcpl, 1), "H5Pset_deflate");
+    }
+    Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, dcpl, H5P_DEFAULT), H5Dclose,
                 std::string("creating ") + name);
     Handle memory(H5Screate_simple(rank, local, nullptr), H5Sclose, "H5Screate_simple");
     select_rows(space, first, n);
@@ -143,10 +182,15 @@ inline uint64_t n_rows(hid_t parent, const char * name) {
 
 /** @brief Read rows [first, first + n) of a dataset (cols values each). */
 template <typename T>
-std::vector<T> read_rows(hid_t parent, const char * name, uint64_t first, uint64_t n, int cols, hid_t dxpl) {
+std::vector<T> read_rows(hid_t parent, const char * name, uint64_t first, uint64_t n, uint32_t cols, hid_t dxpl) {
     Handle dset(H5Dopen2(parent, name, H5P_DEFAULT), H5Dclose, std::string("opening ") + name);
     Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
     const int rank = cols > 1 ? 2 : 1;
+    hsize_t dims[2] = {0, 0};
+    if (H5Sget_simple_extent_ndims(space) != rank || H5Sget_simple_extent_dims(space, dims, nullptr) != rank ||
+        (rank == 2 && dims[1] != cols) || n > dims[0] || first > dims[0] - n) {
+        throw std::runtime_error(std::string("reading ") + name + ": rows out of range.");
+    }
     const hsize_t local[2] = {n, hsize_t(cols)};
     Handle memory(H5Screate_simple(rank, local, nullptr), H5Sclose, "H5Screate_simple");
     select_rows(space, first, n);
@@ -203,11 +247,11 @@ inline std::vector<std::string> read_strings_attribute(hid_t object, const char 
     Handle memory_type(H5Tcopy(H5T_C_S1), H5Tclose, "H5Tcopy");
     check(H5Tset_size(memory_type, width), "H5Tset_size");
     check(H5Tset_strpad(memory_type, H5T_STR_NULLPAD), "H5Tset_strpad");
-    std::vector<char> buffer(std::max<hssize_t>(n, 1) * width, '\0');
+    std::vector<char> buffer(static_cast<size_t>(std::max<hssize_t>(n, 1)) * width, '\0');
     check(H5Aread(attr, memory_type, buffer.data()), name);
     std::vector<std::string> strings;
     for (hssize_t i = 0; i < n; i++) {
-        const char * s = &buffer[i * width];
+        const char * s = &buffer[static_cast<size_t>(i) * width];
         strings.emplace_back(s, std::find(s, s + width, '\0'));
     }
     return strings;

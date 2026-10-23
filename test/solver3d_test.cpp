@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <map>
@@ -25,6 +26,8 @@
 #include "test_fixtures.h"
 #include "exact_riemann.h"
 #include "solver.h"
+#include "scratch.h"
+#include "verification.h"
 
 namespace {
 
@@ -44,6 +47,7 @@ struct Case3D {
     std::string run = "n_steps = 10\ncfl = 0.25\n";
     std::string physics = "type = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
     std::string extra;
+    std::string mesh_options;  ///< More keys of [mesh]
 
     void set_all_bcs(const std::string & b) {
         for (auto & s : bc) s = b;
@@ -54,9 +58,11 @@ std::unique_ptr<Solver> init_case(const Case3D & c) {
     std::ostringstream s;
     s << "[run]\n" << c.run
       << "[mesh]\ntype = \"" << c.mesh << "\"\nNx = " << c.n[0] << "\nNy = " << c.n[1] << "\nNz = " << c.n[2]
-      << "\nLx = " << c.L[0] << "\nLy = " << c.L[1] << "\nLz = " << c.L[2] << "\n"
+      << "\nLx = " << c.L[0] << "\nLy = " << c.L[1] << "\nLz = " << c.L[2] << "\n" << c.mesh_options
       << "[initialize]\n" << c.init;
-    for (int k = 0; k < 6; k++) s << "[[boundaries]]\nname = \"" << ZONES[k] << "\"\n" << c.bc[k];
+    for (int k = 0; k < 6; k++) {
+        if (!c.bc[k].empty()) s << "[[boundaries]]\nname = \"" << ZONES[k] << "\"\n" << c.bc[k];
+    }
     s << "[numerics]\nriemann_solver = \"" << c.riemann << "\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
       << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\n" << c.recon_options
       << "[physics]\n" << c.physics
@@ -382,6 +388,59 @@ TEST_P(Couette3D, HeatFluxWallSetsTemperatureGradient) {
 
 INSTANTIATE_TEST_SUITE_P(Solver3D, Couette3D, ::testing::Values("cartesian", "cartesian_tet"));
 
+namespace {
+
+using ChannelParam = std::tuple<std::string, bool>;  // mesh type, periodic (or transmissive) sides
+class ForcedChannel3D : public ::testing::TestWithParam<ChannelParam> {};
+
+} // namespace
+
+TEST_P(ForcedChannel3D, SteadyProfileConvergesAtSecondOrder) {
+    // u = 0.05 (s - s^3) between walls at rest at s = 0 and 1, driven by the
+    // body force -mu u'' = 0.06 s, in a column of 3 x 3 cells with periodic sides or
+    // 2 x 2 with transmissive sides; s is z, or y on prisms, which are periodic in x and z only
+    const auto [mesh, periodic] = GetParam();
+    const int wall = mesh == "cartesian_prism" ? 1 : 2;
+    const std::string s = wall == 1 ? "y" : "z";
+    auto error = [&](uint32_t n) {
+        Case3D c;
+        c.mesh = mesh;
+        for (int d = 0; d < 3; d++) {
+            c.n[d] = d == wall ? n : periodic ? 3 : 2;
+            c.L[d] = d == wall ? 1.0 : double(c.n[d]) / n;
+        }
+        if (periodic) {
+            c.mesh_options = wall == 1 ? "periodic = [\"x\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n";
+            for (int k = 0; k < 6; k++) c.bc[k].clear();
+        }
+        c.bc[2 * wall] = c.bc[2 * wall + 1] = "type = \"wall_isothermal\"\nT = 1.0\n";
+        c.recon = "MUSCL";
+        c.recon_options = "limiter = \"venkatakrishnan\"\n";
+        c.init = "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.05 * (" + s + " - " + s + "^3)\", \"0.0\", \"0.0\"]\np = \"1.0\"\n";
+        c.run = "t_stop = 3.0\ncfl = 0.4\n";
+        c.physics = "type = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.2\nPr = 0.72\n";
+        c.extra = "[source]\nrhou = [\"0.06 * " + s + "\", \"0.0\", \"0.0\"]\n";
+        auto solver = run_case(c);
+        auto m = solver->get_mesh();
+        double err = 0.0;
+        for (uint32_t i = 0; i < m->n_cells; i++) {
+            const double x = double(m->h_cell_coords(i, wall));
+            err = std::max(err, std::abs(double(solver->h_primitives(i, 0)) - 0.05 * (x - x * x * x)));
+        }
+        return err;
+    };
+    verification::expect_order({periodic ? "viscous" : "boundaries",
+                                periodic ? "Forced channel" : "Forced channel, transmissive sides",
+                                verification::cells_of(mesh), "max velocity error", {8, 16},
+                                {error(8), error(16)}, 2.0, 1.8});
+}
+
+// Part of the verification manual's matrix: run by tools/docs/verification.py
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, ForcedChannel3D,
+    ::testing::Combine(::testing::Values("cartesian", "cartesian_tet", "cartesian_prism", "cartesian_pyramid",
+                                         "cartesian_mixed"),
+                       ::testing::Bool()));
+
 TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
     // u = (x + 2y, 3z, 5x): div u = 1 and omega = (-3, -5, -2), so the
     // integrals over the unit cube are exact for least-squares gradients when
@@ -393,7 +452,7 @@ TEST(Solver3DValidation, FlowStatisticsOfALinearVelocityField) {
     c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
     c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
     c.extra = "[integrals]\nfile = \"" +
-              (std::filesystem::temp_directory_path() / "mallard_integrals.csv").string() + "\"\n";
+              (scratch_dir() / "mallard_integrals.csv").string() + "\"\n";
     auto solver = init_case(c);
     const auto s = solver->integrate_flow_statistics();
     EXPECT_NEAR(s[1], 0.5 * (9.0 + 25.0 + 4.0), roundoff(1e-10));  // Enstrophy
@@ -415,7 +474,7 @@ TEST(Solver3DValidation, FlowStatisticsOfDensityAndTemperature) {
     c.n[0] = c.n[1] = c.n[2] = 8;
     c.init = "type = \"analytical\"\nrho = \"1 + 0.5 * x\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1 + y\"\n";
     c.extra = "[integrals]\nfile = \"" +
-              (std::filesystem::temp_directory_path() / "mallard_integrals_thermo.csv").string() + "\"\n";
+              (scratch_dir() / "mallard_integrals_thermo.csv").string() + "\"\n";
     auto solver = init_case(c);
     const auto s = solver->integrate_flow_statistics();
     EXPECT_NEAR(s[6], 19.0 / 12.0, 1e-3);
@@ -433,7 +492,7 @@ TEST(Solver3DValidation, QAndVorticityOutputOfALinearVelocityField) {
     const std::string u = "u = [\"x + 2 * y - z\", \"3 * z - 2 * x\", \"5 * x + y\"]\n";
     c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
     c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
-    c.extra = "[[write_data]]\nprefix = \"" + (std::filesystem::temp_directory_path() / "mallard_vortex").string() +
+    c.extra = "[[write_data]]\nprefix = \"" + (scratch_dir() / "mallard_vortex").string() +
               "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"Q\", \"VORTICITY\"]\n";
     auto solver = init_case(c);
     solver->copy_device_to_host();
@@ -458,7 +517,7 @@ TEST(Solver3DValidation, TENOEnstrophyOfTheTaylorGreenVortex) {
     c.init = "type = \"analytical\"\nrho = \"1.0\"\n"
              "u = [\"sin(x) * cos(y) * cos(z)\", \"-cos(x) * sin(y) * cos(z)\", \"0.0\"]\np = \"100.0\"\n";
     c.extra = "[integrals]\nfile = \"" +
-              (std::filesystem::temp_directory_path() / "mallard_integrals_tgv.csv").string() + "\"\n";
+              (scratch_dir() / "mallard_integrals_tgv.csv").string() + "\"\n";
     auto solver = init_case(c);
     const double enstrophy = double(solver->integrate_flow_statistics()[1]) / std::pow(M_PI, 3);
     EXPECT_NEAR(enstrophy, 0.375, 0.005 * 0.375);

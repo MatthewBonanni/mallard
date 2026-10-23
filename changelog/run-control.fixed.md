@@ -1,0 +1,1 @@
+- Characteristic (NSCBC) boundaries of gas mixtures read the current stage's reconstructed `gamma`, not the previous stage's (zero at the first step) (#355).

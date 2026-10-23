@@ -20,6 +20,7 @@
 #include <tuple>
 
 #include "test_fixtures.h"
+#include "verification.h"
 #include "gmsh_fixtures.h"
 #include "face_reconstruction.h"
 #include "physics.h"
@@ -27,7 +28,7 @@
 
 namespace {
 
-constexpr rtype GAMMA = 1.4;
+constexpr rtype GAMMA = 1.4_r;
 
 // Smooth field satisfying symmetry conditions on the unit cube: density,
 // pressure and tangential velocities are even across each wall, normal
@@ -156,12 +157,13 @@ TEST_P(TENO3DOrder, SmoothReconstructionConvergesAtDesignOrder) {
     // Max error at face quadrature points over all faces, with mirrored
     // stencils at the symmetry walls
     const auto [mesh_type, order, n, mode] = GetParam();
-    const double e1 = reconstruction_error(mesh_type, n, order, 0.0, mode);
-    const double e2 = reconstruction_error(mesh_type, 2 * n, order, 0.0, mode);
-    const double rate = std::log2(e1 / e2);
-    std::cout << mesh_type << " order " << order << ": max errors " << e1 << ", " << e2 << ", rate " << rate
-              << std::endl;
-    EXPECT_GT(rate, order - 0.5);
+    const bool smooth = std::string(mode) == SMOOTH;
+    verification::expect_order({"reconstruction", "TENO" + std::to_string(order) + (smooth ? "" : ", troubled"),
+                                verification::cells_of(mesh_type), "max face-value error",
+                                {double(n), double(2 * n)},
+                                {reconstruction_error(mesh_type, n, order, 0.0, mode),
+                                 reconstruction_error(mesh_type, 2 * n, order, 0.0, mode)},
+                                double(order), order - 0.5});
 }
 
 INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
@@ -170,6 +172,16 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENO3DOrder,
                       OrderParam{"cartesian_tet", 4, 4, SMOOTH}, OrderParam{"cartesian_tet", 5, 4, SMOOTH},
                       OrderParam{"cartesian", 5, 6, TROUBLED},
                       OrderParam{"cartesian_tet", 4, 4, TROUBLED}));
+
+// The rest of the verification manual's matrix: run by tools/docs/verification.py
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, TENO3DOrder,
+    ::testing::Values(OrderParam{"cartesian", 6, 6, SMOOTH}, OrderParam{"cartesian_tet", 6, 4, SMOOTH},
+                      OrderParam{"cartesian_prism", 3, 6, SMOOTH}, OrderParam{"cartesian_prism", 4, 6, SMOOTH},
+                      OrderParam{"cartesian_prism", 5, 6, SMOOTH}, OrderParam{"cartesian_prism", 6, 6, SMOOTH},
+                      OrderParam{"cartesian_pyramid", 3, 6, SMOOTH}, OrderParam{"cartesian_pyramid", 4, 6, SMOOTH},
+                      OrderParam{"cartesian_pyramid", 5, 6, SMOOTH}, OrderParam{"cartesian_pyramid", 6, 6, SMOOTH},
+                      OrderParam{"cartesian_mixed", 3, 6, SMOOTH}, OrderParam{"cartesian_mixed", 4, 6, SMOOTH},
+                      OrderParam{"cartesian_mixed", 5, 6, SMOOTH}));
 
 namespace {
 
@@ -222,7 +234,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
         in << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"extrapolation\"\n";
     }
     in << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
-       << "[numerics.face_reconstruction]\ntype = \"" << recon << "\"\norder = 5\n"
+       << "[numerics.face_reconstruction]\ntype = \"" << recon << "\"\n" << (recon == "TENO" ? "order = 5\n" : "")
        << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
        << "[output]\ncheck_interval = 1000000\n";
     Solver solver;
@@ -232,7 +244,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
     auto m = solver.get_mesh();
     auto exact = cell_averages_3d(*m, [](double x, double y, double z, double * U) {
         U[0] = 1.0 + 0.3 * std::exp(-8.0 * ((x - 1.0) * (x - 1.0) + (y - 1.0) * (y - 1.0) + (z - 1.0) * (z - 1.0)));
-        for (int i = 1; i < N_CONSERVATIVE; i++) U[i] = 0.0;
+        for (size_t i = 1; i < N_CONSERVATIVE; i++) U[i] = 0.0;
     });
     double err = 0.0;
     for (uint32_t i = 0; i < m->n_cells; i++) {
@@ -247,9 +259,8 @@ TEST(TENO3DSolver, AdvectedPulseConvergesAndBeatsMUSCL) {
     // TENO5 with SSPRK3 (dt ~ h): third order overall once resolved
     const double t1 = advection_error("cartesian", "TENO", 12), t2 = advection_error("cartesian", "TENO", 24);
     const double m2 = advection_error("cartesian", "MUSCL", 24);
-    std::cout << "advection L1: TENO5 " << t1 << " -> " << t2 << " (rate " << std::log2(t1 / t2) << "), MUSCL " << m2
-              << std::endl;
-    EXPECT_GT(std::log2(t1 / t2), 3.0);
+    verification::expect_order({"advection", "TENO5, SSPRK3", "hexahedra", "L1 density error, pulse", {12, 24},
+                                {t1, t2}, 3.0, 3.0});
     EXPECT_LT(t2, 0.25 * m2);
 }
 
@@ -276,7 +287,7 @@ double largest_speed_at_rest(const std::string & mesh, int order, const std::str
     double speed = 0.0;
     for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
         double q2 = 0.0;
-        for (int d = 0; d < N_DIM; d++) {
+        for (size_t d = 0; d < N_DIM; d++) {
             q2 += std::pow(double(solver.h_conservatives(i, 1 + d)) / double(solver.h_conservatives(i, 0)), 2);
         }
         speed = std::max(speed, std::sqrt(q2));
@@ -352,7 +363,7 @@ TEST(TENO3DStencils, MetricIsTheIdentityOnRegularTilingsOnly) {
     // Regular tilings keep stencils ranked by physical distance, walls
     // included; stretched ones do not
     auto anisotropic_cells = [](const std::string & type, double lz) {
-        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0, 1.0, lz);
+        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0_r, 1.0_r, static_cast<rtype>(lz));
         BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
         TENO teno;
         teno.set_mesh(mesh);
@@ -366,7 +377,201 @@ TEST(TENO3DStencils, MetricIsTheIdentityOnRegularTilingsOnly) {
         EXPECT_EQ(anisotropic_cells(type, 1.0), 0u) << type;
     }
     for (const char * type : {"cartesian", "cartesian_tet", "cartesian_prism"}) {
-        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0, 1.0, 1.0 / 6.25);
+        auto mesh = make_mesh_3d(type, 6, 6, 6, 1.0_r, 1.0_r, 1.0_r / 6.25_r);
         EXPECT_EQ(anisotropic_cells(type, 1.0 / 6.25), mesh->n_cells) << type;
     }
 }
+
+namespace {
+
+/** @brief Every precomputed table of a TENO, as raw bytes, by name. */
+std::vector<std::pair<std::string, std::vector<char>>> teno_tables(const TENO & teno) {
+    std::vector<std::pair<std::string, std::vector<char>>> out;
+    auto add = [&](const std::string & name, const auto & view) {
+        auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), view);
+        const char * p = reinterpret_cast<const char *>(h.data());
+        out.emplace_back(name, std::vector<char>(p, p + h.span() * sizeof(*h.data())));
+    };
+    add("scale", teno.scale);
+    add("basis_mean", teno.basis_mean);
+    add("moments", teno.moments);
+    add("large sizes", teno.stencil_large_size);
+    add("small sizes", teno.stencil_small_size);
+    add("large slices", teno.stencil_large.slice_start);
+    add("large cells", teno.stencil_large.cells);
+    add("large faces", teno.stencil_large.faces);
+    add("large pinv", teno.stencil_large.pinv);
+    add("small slices", teno.stencil_small.slice_start);
+    add("small cells", teno.stencil_small.cells);
+    add("small faces", teno.stencil_small.faces);
+    add("small pinv", teno.stencil_small.pinv);
+    out.emplace_back("gather depth", std::vector<char>(teno.gather_depth.begin(), teno.gather_depth.end()));
+    return out;
+}
+
+void expect_same_tables(const TENO & a, const TENO & b, const std::string & what) {
+    const auto ta = teno_tables(a), tb = teno_tables(b);
+    for (size_t k = 0; k < ta.size(); k++) EXPECT_TRUE(ta[k].second == tb[k].second) << what << ": " << ta[k].first;
+}
+
+/** @brief A TENO whose setup options are set before init(). */
+template <typename F>
+std::unique_ptr<TENO> make_teno_with(std::shared_ptr<Mesh> mesh, const BoundaryData & bd, int order, F && options) {
+    auto teno = std::make_unique<TENO>();
+    teno->set_mesh(mesh);
+    teno->set_boundaries(bd);
+    options(*teno);
+    teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+    return teno;
+}
+
+/**
+ * @brief Move the nodes nearest to the given points (x, y, z) by the given
+ *        offsets (dx, dy, dz), recompute the geometry; the cells that hold them.
+ */
+std::vector<uint32_t> move_nodes(Mesh & mesh, const std::vector<std::array<double, 6>> & moves) {
+    std::vector<uint32_t> moved;
+    for (const auto & m : moves) {
+        uint32_t best = 0;
+        double best_d2 = 1e300;
+        for (uint32_t n = 0; n < mesh.n_nodes; n++) {
+            double d2 = 0.0;
+            for (size_t d = 0; d < 3; d++) d2 += std::pow(double(mesh.h_node_coords(n, d)) - m[d], 2);
+            if (d2 < best_d2) {
+                best_d2 = d2;
+                best = n;
+            }
+        }
+        for (size_t d = 0; d < 3; d++) mesh.h_node_coords(best, d) += rtype(m[3 + d]);
+        moved.push_back(best);
+    }
+    mesh.compute_geometry();
+    mesh.copy_host_to_device();
+    std::vector<uint32_t> cells;
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
+            if (std::find(moved.begin(), moved.end(), mesh.h_node_of_cell(c, k)) != moved.end()) {
+                cells.push_back(c);
+                break;
+            }
+        }
+    }
+    return cells;
+}
+
+using IncrementalParam = std::tuple<std::string, int>;
+class TENO3DIncremental : public ::testing::TestWithParam<IncrementalParam> {};
+
+} // namespace
+
+TEST_P(TENO3DIncremental, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSetup) {
+    // An interior node, and a node of the x = 0 symmetry wall moved within the
+    // wall, which changes the mirror images of every stencil that reaches it
+    const auto [type, order] = GetParam();
+    auto mesh = make_mesh_3d(type, 9, 8, 6);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto incremental = make_teno(mesh, bd, order);
+    auto changed_only = make_teno(mesh, bd, order);
+    const auto before = teno_tables(*incremental);
+    const double h = 0.125;
+    const std::vector<uint32_t> changed =
+        move_nodes(*mesh, {{0.22, 0.375, 0.5, 0.06 * h, -0.04 * h, 0.05 * h}, {0.0, 0.25, 0.33, 0.0, 0.05 * h, -0.04 * h}});
+    const std::vector<uint32_t> cells = incremental->cells_within_reach(changed);
+    ASSERT_GT(cells.size(), changed.size());
+    ASSERT_LT(cells.size(), mesh->n_cells);
+    incremental->rebuild_cells(cells);
+    auto full = make_teno(mesh, bd, order);
+    expect_same_tables(*incremental, *full, "rebuilt within reach");
+    // The move changed tables beyond the moved cells: rebuilding only those is not enough
+    changed_only->rebuild_cells(changed);
+    EXPECT_FALSE(teno_tables(*changed_only) == teno_tables(*full));
+    EXPECT_FALSE(before == teno_tables(*full));
+}
+
+INSTANTIATE_TEST_SUITE_P(TENO, TENO3DIncremental,
+    ::testing::Values(IncrementalParam{"cartesian_prism", 4}, IncrementalParam{"cartesian_mixed", 4},
+                      IncrementalParam{"cartesian_tet", 3}));
+
+TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsThemUp) {
+    // Mixed cells with walls: pyramids, tetrahedra and mirror images; small
+    // batches split the cells differently, and the host setup is the fallback
+    // for cells that do not fit the device's scratch
+    auto mesh = make_mesh_3d("cartesian_mixed", 4, 4, 4);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto reference = make_teno(mesh, bd, 5);
+    auto batched = make_teno_with(mesh, bd, 5, [](TENO & t) { t.setup_batch_cells = 64; });
+    auto host = make_teno_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; });
+    expect_same_tables(*reference, *batched, "batches of 64 cells");
+    expect_same_tables(*reference, *host, "host setup");
+}
+
+TEST(TENO3DSetup, FacetedSpheresOfTetrahedraMirrorAcrossEachFacet) {
+    // Straight-sided spherical walls of tetrahedra: every facet is a mirror
+    // plane of its own, so searches near the walls meet dozens of planes. They
+    // are set up, the same on the device as on the host
+    const Shell s = tetrahedral_shell(4, 2);
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init_from_connectivity(s.nodes, s.cells, s.faces);
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto device = make_teno(mesh, bd, 3);
+    auto host = make_teno_with(mesh, bd, 3, [](TENO & t) { t.setup_on_host = true; });
+    expect_same_tables(*device, *host, "host setup");
+}
+
+TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {
+    // A blast (density and pressure jumps on a sphere) on mixed cells with walls:
+    // rounds after the first recompute the central coefficients that the smooth
+    // pass could not keep, with its arithmetic (its team kernel on GPUs from order 5)
+    auto mesh = make_mesh_3d("cartesian_mixed", 6, 6, 6);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        double r2 = 0.0;
+        for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.3, 2);
+        const bool inside = r2 < 0.16;
+        h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+        for (int d = 0; d < 3; d++) h_W(c, 1 + d) = static_cast<rtype>(0.1 * double(mesh->h_cell_coords(c, d)));
+        h_W(c, 4) = inside ? 1.0_r : 0.1_r;
+    }
+    Kokkos::deep_copy(W, h_W);
+    for (const int order : {3, 5, 6}) {
+        auto face_values = [&](const rtype capacity) {
+            auto teno = make_teno_with(mesh, bd, order, [&](TENO & t) { t.troubled_capacity = capacity; });
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+            teno->calc_face_values(W, face_W);
+            auto sigma = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->troubled);
+            uint32_t n_troubled = 0;
+            for (uint32_t c = 0; c < mesh->n_cells; c++) n_troubled += sigma(c) >= teno->sigma_threshold;
+            if (capacity < 1.0_r) {
+                EXPECT_GT(n_troubled, 20 * teno->troubled_coeffs.extent(0)) << "order " << order;
+            }
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            const char * p = reinterpret_cast<const char *>(h.data());
+            return std::vector<char>(p, p + h.span() * sizeof(rtype));
+        };
+        const auto rounds = face_values(0.001_r);
+        EXPECT_TRUE(rounds == face_values(1.0_r)) << "order " << order;
+    }
+}
+
+TEST(TENO3DSetup, SinglePrecisionTablesHalveThePseudoInversesAndKeepTheAccuracy) {
+    if (sizeof(rtype) == sizeof(float)) {
+        GTEST_SKIP() << "the tables are in single precision anyway";
+    }
+    auto mesh = make_mesh_3d("cartesian_tet", 6, 6, 6);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const std::string single = "single_precision_tables = true\n";
+    auto in_double = make_teno(mesh, bd, 5);
+    auto in_single = make_teno(mesh, bd, 5, single);
+    EXPECT_EQ(in_single->stencil_large.pinv.span(), (in_double->stencil_large.pinv.span() + 1) / 2);
+    EXPECT_EQ(in_single->stencil_small.pinv.span(), (in_double->stencil_small.pinv.span() + 1) / 2);
+    for (const char * mode : {SMOOTH, TROUBLED}) {
+        const double e_full = reconstruction_error(mesh, 5, 0.0, mode);
+        const double e_half = reconstruction_error(mesh, 5, 0.0, std::string(mode) + single);
+        EXPECT_NE(e_half, e_full) << mode;
+        EXPECT_NEAR(e_half, e_full, 1e-4 * e_full) << mode;
+    }
+}
+
