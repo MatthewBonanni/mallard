@@ -65,6 +65,7 @@ add_library(MallardCore STATIC
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
+    solver/source_terms.cpp
     solver/remap.cpp
     solver/statistics.cpp
     io/compression.cpp

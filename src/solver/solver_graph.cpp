@@ -12,9 +12,10 @@
  * device (computed there with the host's arithmetic), the halo exchanges and
  * the dt reduction are NCCL operations on the same stream, and the host waits
  * once per step, for dt. Steps whose host work depends on the time (boundary
- * or source expressions of t, characteristic boundaries, average-pressure
- * outlets) or that need host decisions inside the step (gas mixtures,
- * chemistry) run kernel by kernel as before.
+ * expressions of t, characteristic boundaries, average-pressure outlets),
+ * that sum over the domain on the host (sources of domain averages) or that
+ * need host decisions inside the step (gas mixtures, chemistry) run kernel by
+ * kernel as before.
  *
  */
 
@@ -58,7 +59,7 @@ std::string Solver::step_graph_unsupported() const {
     if (!average_pressure_outlets.empty()) return "average-pressure outlets";
     if (boundary_data.char_faces.extent(0) > 0) return "characteristic boundaries";
     if (!inflows.empty()) return "synthetic inflow turbulence";
-    if (!source_expressions.empty() && source_time_dependent) return "time-dependent sources";
+    if (source_terms && source_terms->uses_means()) return "sources of domain averages";
     for (const auto & bc : dirichlet_boundaries) {
         for (const auto & w : bc.W) {
             if (w.depends_on_time()) return "time-dependent boundary states";
@@ -113,7 +114,9 @@ void Solver::record_step() {
         c(i) = s(STEP_DT) / c(i);
     });
     // take_step
+    recording_step = true;
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func, step_scalars.data() + DT_SCALES);
+    recording_step = false;
     halo_current = false;
     Kokkos::deep_copy(exec, Kokkos::subview(step_io, IO_DT), Kokkos::subview(step_scalars, STEP_DT));
     Kokkos::deep_copy(exec, Kokkos::subview(step_io, Kokkos::make_pair(IO_REDUCED, N_STEP_IO)), step_reduce);
@@ -132,6 +135,12 @@ void Solver::record_step() {
         step_controller.update(dt, step_scalars.data() + STEP_DT, state(), solution_vec.back());
         Kokkos::deep_copy(exec, Kokkos::subview(step_io, IO_ACCEPTED), Kokkos::subview(control, int(StepController::ACCEPTED)));
     }
+}
+
+void Solver::record_stage_time(const rtype c) {
+    const Kokkos::View<rtype> st = stage_time;
+    const Kokkos::View<rtype *> s = step_scalars;
+    Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = s(T) + c * s(STEP_DT); });
 }
 
 void Solver::graph_step() {
@@ -165,6 +174,7 @@ void Solver::graph_step() {
             cudaGetLastError();
             use_step_graph = false;
             halo_current = false;
+            recording_step = false;
             logging::warning(std::string("no CUDA graph of the step (") + e.what() + "); steps run kernel by kernel");
             calc_dt();
             take_step();

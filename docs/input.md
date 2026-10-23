@@ -44,7 +44,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dynamic viscosity (Pa s) | `physics.mu` |
 | Heat flux (W/m^2) | `boundaries.q` |
 | Mass flux (kg/(m^2 s)) | `source.mass_flow` |
-| Sources (per unit volume) | `source.rho` (kg/(m^3 s)), `rhou` (N/m^3), `rhoE` (W/m^3) |
+| Sources (per unit volume) | `source.rho` (kg/(m^3 s)), `rhou` (N/m^3), `rhoE` (W/m^3), and the same of `[[sources]]` with `rhoY` (kg/(m^3 s)); with `total = true` integrated rates (kg/s, N, W) |
 | Concentration (plain numbers in kmol/m^3) | `chemistry.C_reg` |
 
 Every other real-valued key (`cfl`, `gamma`, `Pr`, mole fractions, model
@@ -78,7 +78,7 @@ The report, with an example: [Checking an input](guide/input_files.md#checking-a
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `Mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
-| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary or source expressions of `t`, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
+| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary expressions of `t`, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
 
@@ -833,15 +833,63 @@ Optional source terms, added per unit volume.
 | Key | Description |
 |---|---|
 | `gravity` | `[g_x, g_y]` (`[g_x, g_y, g_z]` in 3D); adds `rho g` to the momentum and `rho u . g` to the energy equation |
-| `rho`, `rhou`, `rhoE` | Expressions in `x`, `y`, `z`, `t` (`rhou` has one per component) for the mass, momentum and energy sources |
-| `time_dependent` | Re-evaluate the expressions at every Runge-Kutta stage (host-side, so costly on large meshes); otherwise (the default) they are evaluated once |
+| `rho`, `rhou`, `rhoE` | Expressions (default none) for the mass, momentum and energy sources, as in `[[sources]]` without a region (they read the same variables) |
+| `time_dependent` | Ignored, with a warning: expressions of `t` are re-evaluated at every stage on the device, others once (Mallard 0.8 and earlier evaluated every expression once unless this was `true`) |
 | `mass_flow` | `[m_x, m_y]` (`[m_x, m_y, m_z]` in 3D): hold the volume average of `rho u` along this vector at its magnitude with a uniform body force `f` per unit volume along it (constant mass flow, e.g. a periodic channel). At every Runge-Kutta stage `f` cancels the rate of change of that average from all other terms (one global sum) and closes any remaining gap within the time step, so a flow started at the target stays there to rounding. The energy gains the force's work `f . u`. |
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
 
+## `[[sources]]`
+
+Source terms per unit volume (or integrated totals over a region), any number
+of them, added up with `[source]`. Each is evaluated on the device: entries of
+position alone once, entries of `t`, the solution or domain averages at every
+Runge-Kutta stage, in one kernel without host round trips (steps stay CUDA
+graphs, except with domain averages, which need a global sum per stage).
+
+| Key | Default | Description |
+|---|---|---|
+| `name` | `sources[i]` | Name in the run log |
+| `region` | everywhere | A [region](#regions): the values are multiplied by each cell's volume fraction of it |
+| `total` | `false` | `true`: the values are integrated rates over the region (kg/s, N, W; per unit depth in 2D, per radian in axisymmetric runs), spread over it in proportion to the volume fraction, so that their integral is exact on any mesh; they may then depend on `t` only |
+| `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`rhoE = "5 MW/m^3"`, with `total`: `"50 W"`) or expressions (in SI units) |
+| `rhoY` | none | Mixtures: table of species partial-density sources, e.g. `{H2 = "1e-3"}`; the mass source `rho` is their sum (and `rho` itself is not allowed) |
+
+Expressions ([syntax](#regions)) read the variables `x`, `y`, `z`, `t`,
+`rho`, `u_x`, `u_y` (3D: `u_z`), `p`, `T`, for mixtures `Y_<species>` and
+`X_<species>` (characters other than letters, digits and `_` in species names
+become `_`), and the domain averages (volume-weighted over the whole mesh)
+`mean_rho`, `mean_rhou_x`, `mean_rhou_y` (`mean_rhou_z`), `mean_rhoE` and
+`mean_ke` (of `rho |u|^2 / 2`). Values are taken at cell centroids, from the
+cell averages. Domain averages are sums over ranks and, unlike the rest of a
+run, can differ in the last bits between numbers of ranks; region integrals
+for totals are summed in global cell order and do not.
+
+Sources of the solution are explicit: a source that relaxes a quantity at rate
+`k` (`-k (q - q_ref)`, or linear forcing with rate `A`) needs `k dt` below
+about 2.5 with SSPRK3 and 2.8 with RK4 (the real-axis stability limits), and
+in practice well below 1 to stay accurate; Mallard does not limit the time
+step for them.
+
+`[[write_data]]` can write the total sources per unit volume as
+`SOURCE_RHO`, `SOURCE_RHOU_X`, ..., `SOURCE_RHOE` and `SOURCE_RHOY_<species>`.
+
+```toml
+# 50 W released in a sphere of radius 2 mm during the first 0.1 ms, exactly
+[[sources]]
+name = "igniter"
+total = true
+rhoE = "t < 1e-4 ? 50 : 0"
+region = {type = "sphere", center = [0, 0, 0], radius = 2e-3, edge = 5e-4}
+
+# Linear forcing of turbulence holding k = 0.125 (see examples/forced_isotropic_turbulence)
+[[sources]]
+rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", "...", "..."]
+```
+
 ## Regions
 
-A region is a table: a primitive shape, or a boolean of regions, each with
+Regions select parts of space in `[[sources]]`. A region is a table: a primitive shape, or a boolean of regions, each with
 optional transforms, nested to any depth. Every region has a signed distance
 (negative inside) that never exceeds the distance to its surface, which gives
 smooth edges their width and lets cell volume fractions skip cells away from
@@ -938,7 +986,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>` and `COV_<A>_<B>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
 | `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
 | `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5, each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone output (`geometry`) |
 | `relative_error` | (`vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |

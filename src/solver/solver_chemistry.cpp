@@ -152,7 +152,7 @@ void Solver::take_simpler_step() {
     check_chemistry(stats, start);
     t_wall_chemistry += timer.seconds() - start;
     halo_current = false;
-    const RHSFunction corrected = [this](State solution, State rhs, rtype t_stage) {
+    const RHSFunction corrected = [this](State solution, State rhs, rtype t_stage, rtype) {
         calc_rhs(solution, rhs, t_stage);
         subtract_transport_rate(rhs);
     };
