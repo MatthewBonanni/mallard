@@ -1,0 +1,103 @@
+name: Fuzz
+
+# The libFuzzer harnesses of the input and mesh readers (test/fuzz), with ASan
+# and UBSan. CI runs each for a minute in 2D; the nightly run gives each ten
+# minutes in 2D and 3D, continuing from the corpus of the night before, and is
+# skipped when main hasn't changed. Crashing inputs are uploaded as artifacts.
+on:
+  schedule:
+    - cron: '17 8 * * *'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per harness
+        type: number
+        default: 600
+  workflow_call:
+    inputs:
+      seconds:
+        type: number
+        default: 60
+      dims:
+        type: string
+        default: '[2]'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dim: ${{ fromJSON(inputs.dims || '[2, 3]') }}
+    name: fuzz-${{ matrix.dim }}d
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Skip if main is unchanged
+        id: changed
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh run list --workflow fuzz.yml --branch main --event schedule --status success -L 1 --json headSha -q '.[0].headSha')
+          if [ "$last" = "$GITHUB_SHA" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Install libFuzzer, HDF5, CGNS and ccache
+        if: steps.changed.outputs.skip != 'true'
+        run: >
+          sudo apt-get update -qq && sudo apt-get install -y -qq
+          libclang-rt-18-dev libhdf5-dev libcgns-dev ccache
+      - name: Restore compiler cache
+        if: steps.changed.outputs.skip != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-fuzz-${{ matrix.dim }}-${{ github.sha }}
+          restore-keys: ccache-fuzz-${{ matrix.dim }}-
+      - name: Restore corpus
+        if: steps.changed.outputs.skip != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/fuzz-work/corpus
+          key: fuzz-corpus-${{ matrix.dim }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.dim }}-
+      - name: Configure
+        if: steps.changed.outputs.skip != 'true'
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_SERIAL=ON -DMallard_WARNINGS_AS_ERRORS=ON
+          -DMallard_ENABLE_FUZZING=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON
+          -DMallard_DIM=${{ matrix.dim }}
+      - name: Build
+        if: steps.changed.outputs.skip != 'true'
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 500M
+        run: cmake --build build -j $(nproc) --target fuzzers
+      - name: Save compiler cache
+        if: steps.changed.outputs.skip != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-fuzz-${{ matrix.dim }}-${{ github.sha }}
+      - name: Fuzz
+        if: steps.changed.outputs.skip != 'true'
+        run: test/fuzz/run.sh build ${{ inputs.seconds || 600 }} fuzz-work
+      - name: Save corpus
+        if: always() && steps.changed.outputs.skip != 'true' && github.event_name == 'schedule'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/fuzz-work/corpus
+          key: fuzz-corpus-${{ matrix.dim }}-${{ github.run_id }}
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ matrix.dim }}d
+          path: fuzz-work/crashes
