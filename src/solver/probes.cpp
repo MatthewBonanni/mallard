@@ -45,16 +45,13 @@ Kokkos::View<T *> to_device(const std::vector<T> & v, const char * label) {
     return d;
 }
 
-void make_parent(const std::string & file) {
-    const std::filesystem::path parent = std::filesystem::path(file).parent_path();
-    if (!parent.empty()) std::filesystem::create_directories(parent);
-}
+void make_parent(const std::string & file) { create_parent_directories("the probe file", file); }
 
 std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume, const std::string & header) {
     if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     make_parent(file);
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
-    if (!out->good()) throw std::runtime_error("Could not open " + file + ".");
+    if (!out->good()) throw cannot_write("the probe file", file);
     if (!resume) *out << header << "\n";
     return out;
 }
@@ -164,7 +161,7 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
 
     make_parent(file);
     std::ofstream out(file, std::ios::binary | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("Could not open " + file + ".");
+    if (!out.good()) throw cannot_write("the probe file", file);
     uint64_t offset = 0;
     auto data_array = [&](const Array & a) {
         out << "        <DataArray type=\"" << a.type << "\" Name=\"" << a.name << "\" NumberOfComponents=\""

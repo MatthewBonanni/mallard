@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -49,10 +50,14 @@ std::string replaced(std::string text, const std::string & from, const std::stri
     return text;
 }
 
+/** @brief The number of the first line of text that contains needle. */
+std::ptrdiff_t line_number(const std::string & text, const std::string & needle) {
+    return 1 + std::count(text.begin(), text.begin() + std::ptrdiff_t(text.find(needle)), '\n');
+}
+
 /** @brief "line N: " of the first line of text that contains needle. */
 std::string line_prefix(const std::string & text, const std::string & needle) {
-    const size_t at = text.find(needle);
-    return "line " + std::to_string(1 + std::count(text.begin(), text.begin() + std::ptrdiff_t(at), '\n')) + ": ";
+    return "line " + std::to_string(line_number(text, needle)) + ": ";
 }
 
 /** @brief The error of setting up a run of the input, or "" if there is none. */
@@ -90,7 +95,7 @@ TEST(ErrorMessages, ArrayOfTablesWrittenAsATableSaysToDoubleTheBrackets) {
         find_value<std::vector<Input>>(input, "boundaries");
         FAIL() << "no error";
     } catch (const InputError & e) {
-        expect_parts(e.what(), {"line 1: boundaries: is a table, but must be an array of tables", "[[boundaries]]"});
+        expect_parts(e.what(), {"line 1: boundaries: is a table, but must be an array", "double brackets: [[boundaries]]"});
     }
 }
 
@@ -121,9 +126,9 @@ TEST(ErrorMessages, FacesWithTwoConditionsNameBothEntries) {
     std::vector<std::string> zones = {"left", "right", "bottom", "top", "left"};
     if (N_DIM == 3) zones.insert(zones.end(), {"back", "front"});
     const std::string input = box("t_stop = 0.5\ncfl = 0.8\n", "", zones);
-    const std::string first = line_prefix(input, "name = \"left\"");
-    expect_parts(run_error(input), {"already has a condition, from the entry on " + first.substr(0, first.size() - 2) +
-                                        " (name = \"left\")",
+    // The entry's [[boundaries]] header, the line before its name
+    const std::string first = std::to_string(line_number(input, "name = \"left\"") - 1);
+    expect_parts(run_error(input), {"already has a condition, from the entry on line " + first + " (name = \"left\")",
                                     "where = "});
 }
 

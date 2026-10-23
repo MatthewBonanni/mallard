@@ -305,11 +305,12 @@ std::string explain(const Diagnostic & d) {
 
 std::string docs_of(const std::string & key) {
     const std::string section = lower(key.substr(0, key.find_first_of(".[ ")));
+    if (section == "reactor" || section == "benchmark") return "docs/input.md#mallard-reactor";
     return section.empty() ? "docs/input.md" : "docs/input.md#" + section;
 }
 
 std::string with_docs(const std::string & text) {
-    if (text.find("See docs/") != std::string::npos) return text;
+    if (text.find("See docs/") != std::string::npos || text.rfind("[error]", 0) == 0) return text;
     size_t begin = 0;
     while (begin < text.size() && text[begin] == '[') begin++;
     size_t end = begin;
@@ -433,8 +434,8 @@ InputError wrong_type(const Input & v, const std::string & key, const std::strin
         d.fix = "Remove the quotes: " + v.as_string();
     } else if (wanted.rfind("a string", 0) == 0 && !v.is_array() && !v.is_table()) {
         d.fix = "Put the value in double quotes";
-    } else if (wanted == "an array of tables" && v.is_table()) {
-        d.fix = "Write its header with double brackets, [[" + key + "]], once per entry";
+    } else if (wanted.rfind("an array", 0) == 0 && v.is_table()) {
+        d.fix = "For a list of tables, write each one's header with double brackets: [[" + key + "]]";
     } else if (wanted.rfind("an array", 0) == 0 && !v.is_array()) {
         d.fix = "Write it in square brackets, e.g. [a, b]";
     }

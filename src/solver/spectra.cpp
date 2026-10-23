@@ -22,6 +22,7 @@
 #include <sstream>
 
 #include "comm.h"
+#include "common_io.h"
 #include "input.h"
 #include "log.h"
 #include "mesh_block.h"
@@ -727,10 +728,9 @@ void Spectra::write(uint64_t step, rtype t) const {
 }
 
 void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const {
-    const std::filesystem::path parent = std::filesystem::path(name).parent_path();
-    if (!parent.empty()) std::filesystem::create_directories(parent);
+    create_parent_directories("the spectra file", name);
     std::ofstream out(name);
-    if (!out.good()) throw std::runtime_error("Could not open " + name + ".");
+    if (!out.good()) throw cannot_write("the spectra file", name);
     out << provenance::csv_comment() << "\n";
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     out << "# step = " << step << ", t = " << double(t) << ", samples = " << n_samples << ", weight = " << weight

@@ -167,6 +167,12 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
     for (const std::string & dir : find_value<std::vector<std::string>>(input, "mesh", "periodic")) {
         const int d = (dir == "x") ? 0 : (dir == "y") ? 1 : (dir == "z") ? 2 : -1;
+        if (N_DIM == 2 && d == 2) {
+            throw InputError({.key = "mesh.periodic",
+                              .line = line_of(input.at("mesh"), "periodic"),
+                              .message = "\"z\" is a direction of 3D meshes, but this is the 2D solver",
+                              .fix = "Remove \"z\", or run the 3D solver (built with -DMallard_DIM=3)"});
+        }
         if (d < 0 || d >= N_DIM) {
             throw not_accepted(input.at("mesh"), "mesh.periodic", dir,
                                N_DIM == 3 ? std::vector<std::string>{"x", "y", "z"} : std::vector<std::string>{"x", "y"});

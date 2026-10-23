@@ -12,6 +12,7 @@
 #include <stdexcept>
 
 #include "comm.h"
+#include "common_io.h"
 
 namespace run_log {
 
@@ -24,10 +25,9 @@ std::ofstream out;
 void open(const std::string & file, bool append) {
     close();
     if (!comm::is_root()) return;
-    const std::filesystem::path parent = std::filesystem::path(file).parent_path();
-    if (!parent.empty()) std::filesystem::create_directories(parent);
+    create_parent_directories("the run log", file);
     out.open(file, append ? std::ios::app : std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("Could not open the run log " + file + ".");
+    if (!out.good()) throw cannot_write("the run log", file);
 }
 
 void close() {

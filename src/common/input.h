@@ -271,10 +271,6 @@ inline KeyUse real_use(const std::string & type, const Dimension & dimension, st
     return use;
 }
 
-} // namespace input_detail
-
-namespace input_detail {
-
 /** @brief What a value of type T is called in messages: "an integer", "an array of strings". */
 template <typename T> std::string wanted() {
     if constexpr (std::is_same_v<T, bool>) return "true or false";
@@ -284,7 +280,7 @@ template <typename T> std::string wanted() {
     else if constexpr (std::is_convertible_v<T, std::string>) return "a string (in quotes)";
     else if constexpr (is_vector<T>::value) {
         using E = typename T::value_type;
-        if constexpr (std::is_same_v<E, Input>) return "an array of tables";
+        if constexpr (std::is_same_v<E, Input>) return "an array";
         else if constexpr (std::is_convertible_v<E, std::string>) return "an array of strings";
         else if constexpr (std::is_integral_v<E>) return "an array of integers";
         else return "an array of numbers";
@@ -321,7 +317,6 @@ template <typename T> T get(const Input & v, const std::string & key) {
         for (std::size_t i = 0; i < array.size(); i++) {
             using E = typename T::value_type;
             if constexpr (std::is_same_v<E, Input>) {
-                if (!array[i].is_table()) throw wrong_type(array[i], key, wanted<T>(), 0, 0);
                 out.push_back(array[i]);
             } else {
                 out.push_back(get<E>(array[i], key + "[" + std::to_string(i) + "]"));
