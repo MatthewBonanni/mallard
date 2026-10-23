@@ -172,7 +172,7 @@ jobs:
           ]'
           if [ "$ALL" != true ]; then backends=$(jq -c 'map(select(.main_only | not))' <<< "$backends"); fi
           if [ -n "$ONLY" ]; then
-            backends=$(jq -c --arg only ",$ONLY," 'map(select($only | contains("," + .name + ",")))' <<< "$backends")
+            backends=$(jq -c --arg only ",$ONLY," 'map(select(.name as $n | $only | contains("," + $n + ",")))' <<< "$backends")
           fi
           echo "any=$(jq 'length > 0' <<< "$backends")" >> "$GITHUB_OUTPUT"
           echo "backends=$(jq -c . <<< "$backends")" >> "$GITHUB_OUTPUT"
