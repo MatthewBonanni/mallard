@@ -34,7 +34,9 @@ TEST(FrontEndTest, MeshFilesOfEveryFormatHaveTheirDimension) {
             const front_end::Dimension d = front_end::mesh_file_dimension(mesh(name));
             EXPECT_EQ(d.dim, dim) << name << ": " << d.why;
         }
-        if (have_cgns()) EXPECT_EQ(front_end::mesh_file_dimension(mesh(cyl + ".cgns")).dim, dim);
+        if (have_cgns()) {
+            EXPECT_EQ(front_end::mesh_file_dimension(mesh(cyl + ".cgns")).dim, dim);
+        }
     }
     EXPECT_EQ(front_end::mesh_file_dimension(mesh("cyl3d_tet.msh")).dim, 3);
     if (have_hdf5()) {
