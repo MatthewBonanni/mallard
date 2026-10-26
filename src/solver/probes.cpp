@@ -405,6 +405,12 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         }
 
         p.from_region = entry.contains("region");
+        for (const char * k : {"sampling", "format", "file", "samples"}) {
+            if (p.from_region && entry.contains(k)) {
+                throw InputError(key + "." + k + ": a region probe writes only its reductions, to reductions_file; " +
+                                 k + " applies to points and curves.");
+            }
+        }
         const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
         record_options(key + ".sampling", {"cell", "point"});
         if (sampling == "point") {
@@ -424,17 +430,12 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         } else if (format != "csv") {
             throw InputError(key + ".format = \"" + format + "\" is not one of: csv, hdf5, vtp.");
         }
-        if (p.from_region && (p.sampling != Sampling::CELL || p.format != Format::CSV || entry.contains("file") ||
-                              find_value_or<bool>(entry, "samples", false))) {
-            throw InputError(key + ": a region probe writes only its reductions over the cells (reductions_file); "
-                             "sampling, format, file and samples are for point sets and curves.");
-        }
         const char * extension = p.format == Format::CSV ? ".csv" : p.format == Format::HDF5 ? ".h5" : ".pvd";
         p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
         p.write_samples = !p.from_region && find_value_or<bool>(entry, "samples", true);
-        const std::vector<std::string> default_reductions =
-            p.from_region ? std::vector<std::string>{"integral", "mean", "min", "max"} : std::vector<std::string>{};
-        for (const auto & r : find_value_or<std::vector<std::string>>(entry, "reductions", default_reductions)) {
+        std::vector<std::string> reductions = find_value_or<std::vector<std::string>>(entry, "reductions", {});
+        if (p.from_region && reductions.empty()) reductions = {"integral", "mean", "min", "max"};
+        for (const auto & r : reductions) {
             const auto it = find_option(REDUCTIONS, key + ".reductions", r);
             if (std::find(p.reductions.begin(), p.reductions.end(), it->second) != p.reductions.end()) {
                 throw InputError(key + ".reductions: \"" + r + "\" is listed twice.");

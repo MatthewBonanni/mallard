@@ -35,7 +35,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang or SIMPLER balanced splitting from the flow; ignition delays match Cantera up to 1268 species
 - Mixture-averaged, unity-Lewis or constant-Lewis transport; optional thermal (Soret) diffusion
 - Optically thin radiation (TNF Planck-mean model)
-- Gravity and any number of source terms: expressions of position, time and the local or domain-averaged solution (species too), compiled for the GPU, in regions built from spheres, cylinders, cones, boxes, tori, polygons or implicit shapes with unions, intersections and differences, with exact integrated totals on any mesh ([guide](docs/guide/sources.md), [regions](docs/guide/geometry.md#regions))
+- Gravity and any number of source terms: expressions of position, time and the local or domain-averaged solution (species too), compiled for the GPU, in regions built from spheres, cylinders, cones, boxes, tori, polygons or implicit shapes with unions, intersections and differences, with exact integrated totals on any mesh ([guide](docs/guide/sources.md), [regions](docs/guide/geometry.md#regions)); regions defined once by name and shared by sources, sponges and probes
 
 **Large-eddy simulation** ([guide](docs/guide/les.md))
 - Explicit LES: Sigma (default), WALE, Vreman or Smagorinsky eddy viscosity for single gases and mixtures, with Scotti's filter width on anisotropic cells and an opt-in dynamic constant
@@ -48,7 +48,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 **Boundary conditions**
 - Slip, adiabatic, isothermal and heat-flux walls, optionally moving
 - Inflow at a given velocity, mass flow, or stagnation pressure and temperature (thermally perfect mixtures included; [guide](docs/guide/boundary_conditions.md#stagnation-inlet)), characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
-- Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers
+- Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers of any expression or region
 - Zones split between conditions by expressions
 
 **Performance and parallelism**
@@ -68,7 +68,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Stable inputs and files across releases: renamed keys keep working with a warning for a release and `mallard upgrade-input` rewrites old inputs; restart, mesh and output files carry format versions, and files written since 0.6 are read by later releases
 - Conservative, high-order remap of a restart onto another mesh (any cell type, resolution or rank count): exact cell intersections, integrals kept to rounding
 - VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
-- Running means and covariances; probes on points and curves (cell averages or high-order point values, CSV, HDF5 or VTK, with integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces
+- Running means and covariances; probes on points and curves (cell averages or high-order point values, CSV, HDF5 or VTK, with integrals, means and extrema) and over regions (fraction-weighted integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces
 - Heat release, species production rates and detonation soot foils (`P_MAX`)
 - A machine-readable JSON-lines run log, and provenance (code version, build, input and mesh hashes, resolved setup) in every output file
 - `mallard reactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output

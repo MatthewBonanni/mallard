@@ -320,7 +320,7 @@ TEST(ProbesTest, RegionReductionsAreFractionWeightedIntegralsOfTheCellAverages) 
     const auto ball_rows = read_csv(dir + "/ball.csv");
     ASSERT_FALSE(ball_rows.empty());
     const auto & b = ball_rows.front();
-    EXPECT_NEAR(b.at(measure), exact, 2e-4 * exact);
+    EXPECT_NEAR(b.at(measure), exact, 2e-5 * exact);
     EXPECT_NEAR(b.at("integral_P"), b.at(measure), tol * exact);
     EXPECT_NEAR(b.at("mean_P"), 1.0, tol);
     EXPECT_NEAR(b.at("rms_P"), 1.0, tol);
