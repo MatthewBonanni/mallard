@@ -164,7 +164,10 @@ The neighbors are the face neighbors. A boundary face contributes its ghost
 state ([chapter 9](boundaries_sources.md#weak-imposition)) at the mirror
 image of the cell centroid, $\Delta\mathbf{x} = 2 d\,\mathbf{n}_f$ with $d$
 the centroid's distance to the face; prescribed states (`dirichlet`, `upt`,
-`farfield`) sit at the face centroid instead. Tetrahedra, whose four face
+`farfield`) sit at the face centroid instead. Across `extrapolation` faces
+with an image face ([chapter 9](boundaries_sources.md#transmissive-boundaries))
+the neighbor is the image cell, moved outward by the translation that takes
+the image face onto the boundary face. Tetrahedra, whose four face
 neighbors make weakly limited MUSCL unstable, and cells on characteristic
 boundaries, whose zero-gradient ghosts would halve outgoing waves, use the
 linear fit over their vertex neighbors instead (the same fit as eq. $\eqref{eq:muscl-2}$
@@ -426,7 +429,16 @@ one-sided stencils of boundary cells and on triangles, where its errors
 cancel only in the interior of regular meshes; stencils that cannot
 determine the quadratic (fewer than $d + d(d+1)/2$ points, or a Cholesky
 pivot below $10^{-10}$ of its diagonal) use the linear fit. Ghosts sit at
-the mirror image of the centroid as for MUSCL; axisymmetric runs fit
+the mirror image of the centroid as for MUSCL. Across `extrapolation`
+boundaries with image faces the stencil continues instead, as across a
+periodic seam: each boundary node maps to the matching node of its image
+face, and the cells around that node, moved back by the same translation,
+that land outside the domain join the stencil of every cell sharing the
+node (chaining the maps of two or three boundaries at edges and corners).
+Boundary cells then have the stencil of an interior cell in a flow that does
+not vary normal to the boundary; one-sided stencils carry O(h) errors on
+tetrahedra that the interior's do not, which made a channel with
+extrapolation sides first order and drove a cross flow. Axisymmetric runs fit
 r-weighted averages through the cells' second moments. Single gases
 differentiate $\mathbf{W}$, with
 $\nabla T = (\nabla p - R T\nabla\rho)/(\rho R)$; mixtures differentiate

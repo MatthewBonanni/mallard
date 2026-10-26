@@ -207,6 +207,12 @@ struct VorticityGradientFunctor {
                 FOR_I_DIM g[v][i] += w[i] * dq;
             }
         }
+        stencil.for_each_image(c, [&](const uint32_t j, const uint32_t k) {
+            for (uint8_t v = 0; v < 3; v++) {
+                const rtype dq = vorticity(j, v) - q_c[v];
+                FOR_I_DIM g[v][i] += stencil.weights.images(k, i) * dq;
+            }
+        });
         for (uint8_t v = 0; v < 3; v++) FOR_I_DIM gradients(c, v, i) = g[v][i];
     }
 };
@@ -311,6 +317,10 @@ struct GradientNormFunctor {
             const double dq = static_cast<double>(field(stencil.cells_of_cell(k), in)) - q_c;
             FOR_I_DIM g[i] += static_cast<double>(stencil.weights.cells(k, i)) * dq;
         }
+        stencil.for_each_image(c, [&](const uint32_t j, const uint32_t k) {
+            const double dq = static_cast<double>(field(j, in)) - q_c;
+            FOR_I_DIM g[i] += static_cast<double>(stencil.weights.images(k, i)) * dq;
+        });
         double norm2 = 0.0;
         FOR_I_DIM norm2 += g[i] * g[i];
         field(c, out) = static_cast<rtype>(Kokkos::sqrt(norm2));

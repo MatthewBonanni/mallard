@@ -8,7 +8,7 @@ described in the [theory manual](../theory/index.md); stability limits and
 other measurements are in [Numerical methods](../numerics/overview.md).
 
 <!-- BEGIN GENERATED summary -->
-149 convergence studies from commit `52ed962` (2026-10-22): 147 within their tests' bounds, 2 short of them for known reasons ([#420](https://github.com/MatthewBonanni/mallard/issues/420)).
+149 convergence studies from commit `6961ca7d` (2026-10-23): all within their tests' bounds.
 <!-- END GENERATED summary -->
 
 ## How the tables are made
@@ -201,8 +201,8 @@ MUSCL with the Venkatakrishnan limiter and the second-order viscous gradients.
 |---|---|---|---|---|---|---|---|---|
 | Forced channel, transmissive ends | quadrilaterals | max velocity error | 8 → 16 | 5.49e-04 → 1.42e-04 | 2 | 1.95 | > 1.8 | pass |
 | Stokes' first problem | quadrilaterals | max velocity error | 32 → 64 | 7.92e-05 → 1.98e-05 | 2 | 2.00 | > 1.8 | pass |
-| Forced channel, transmissive ends | triangles | max velocity error | 8 → 16 | 2.41e-04 → 6.33e-05 | 2 | 1.93 | > 1.8 | pass |
-| Stokes' first problem | triangles | max velocity error | 32 → 64 | 3.60e-05 → 8.04e-06 | 2 | 2.16 | > 1.8 | pass |
+| Forced channel, transmissive ends | triangles | max velocity error | 8 → 16 | 2.45e-04 → 6.33e-05 | 2 | 1.95 | > 1.8 | pass |
+| Stokes' first problem | triangles | max velocity error | 32 → 64 | 4.07e-05 → 9.72e-06 | 2 | 2.07 | > 1.8 | pass |
 | Forced channel | hexahedra | max velocity error | 8 → 16 | 5.49e-04 → 1.42e-04 | 2 | 1.95 | > 1.8 | pass |
 | Forced channel | tetrahedra | max velocity error | 8 → 16 | 1.60e-04 → 4.25e-05 | 2 | 1.91 | > 1.8 | pass |
 | Forced channel | prisms | max velocity error | 8 → 16 | 2.42e-04 → 6.27e-05 | 2 | 1.95 | > 1.8 | pass |
@@ -243,12 +243,10 @@ chemistry, runs the Van der Pol oscillator.
 
 The TENO face values next to symmetry walls, where the stencils include the
 mirror images of the cells, and the 3D forced channel of the previous section
-with transmissive sides (2 x 2 cells) in place of periodic ones. On
-tetrahedra and pyramids the transmissive sides drop the channel to first
-order ([#420](https://github.com/MatthewBonanni/mallard/issues/420)); with
-periodic sides the same cells converge at second order. The viscous studies
-also verify isothermal no-slip and moving walls; the axisymmetric studies
-below, the axis.
+with transmissive sides (2 x 2 cells) in place of periodic ones, where the
+fluxes and gradient stencils continue across the sides through the image
+cells as they would across a periodic seam. The viscous studies also verify
+isothermal no-slip and moving walls; the axisymmetric studies below, the axis.
 
 <!-- BEGIN GENERATED table-boundaries -->
 | Method | Cells | Error | Resolutions | Errors | Design | Observed | Asserted | Result |
@@ -262,10 +260,10 @@ below, the axis.
 | TENO5 | triangles | max face-value error, symmetry walls | 32 → 64 | 2.09e-06 → 6.69e-08 | 5 | 4.96 | > 4.6 | pass |
 | TENO6 | triangles | max face-value error, symmetry walls | 32 → 64 | 1.26e-07 → 2.02e-09 | 6 | 5.97 | > 5.6 | pass |
 | Forced channel, transmissive sides | hexahedra | max velocity error | 8 → 16 | 5.49e-04 → 1.42e-04 | 2 | 1.95 | > 1.8 | pass |
-| Forced channel, transmissive sides | tetrahedra | max velocity error | 8 → 16 | 2.18e-04 → 7.26e-05 | 2 | 1.59 | > 1.8 | **fail**, [#420](https://github.com/MatthewBonanni/mallard/issues/420) |
-| Forced channel, transmissive sides | prisms | max velocity error | 8 → 16 | 2.41e-04 → 6.09e-05 | 2 | 1.98 | > 1.8 | pass |
-| Forced channel, transmissive sides | pyramids | max velocity error | 8 → 16 | 9.05e-03 → 4.60e-03 | 2 | 0.98 | > 1.8 | **fail**, [#420](https://github.com/MatthewBonanni/mallard/issues/420) |
-| Forced channel, transmissive sides | mixed | max velocity error | 8 → 16 | 1.00e-03 → 2.03e-04 | 2 | 2.30 | > 1.8 | pass |
+| Forced channel, transmissive sides | tetrahedra | max velocity error | 8 → 16 | 1.94e-04 → 4.78e-05 | 2 | 2.02 | > 1.8 | pass |
+| Forced channel, transmissive sides | prisms | max velocity error | 8 → 16 | 2.45e-04 → 6.32e-05 | 2 | 1.95 | > 1.8 | pass |
+| Forced channel, transmissive sides | pyramids | max velocity error | 8 → 16 | 2.64e-04 → 6.86e-05 | 2 | 1.95 | > 1.8 | pass |
+| Forced channel, transmissive sides | mixed | max velocity error | 8 → 16 | 4.28e-04 → 1.18e-04 | 2 | 1.86 | > 1.8 | pass |
 <!-- END GENERATED table-boundaries -->
 
 ## Axisymmetric flows
@@ -304,23 +302,23 @@ in the cells whose stencils reach a curved wall.
 | P3 walls | quadrilaterals | annulus area error | 16 → 32 | 2.09e-05 → 1.32e-06 | 4 | 3.99 | > 3.8 | pass |
 | straight walls | quadrilaterals | annulus area error | 32 → 64 | 1.84e-02 → 4.62e-03 | 2 | 2.00 | 1.95 to 2.05 | pass |
 | TENO3, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 3.27e-03 → 4.34e-04 | 3 | 2.91 | > 2.5 | pass |
-| TENO3, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.09e-02 → 9.35e-03 | 2 | 1.16 | < 2.3 | pass |
+| TENO3, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.21e-02 → 1.08e-02 | 2 | 1.03 | < 2.3 | pass |
 | TENO4, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 1.37e-03 → 7.22e-05 | 4 | 4.24 | > 3.5 | pass |
-| TENO4, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.30e-02 → 1.26e-02 | 2 | 0.87 | < 2.3 | pass |
+| TENO4, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 1.53e-02 → 7.50e-03 | 2 | 1.03 | < 2.3 | pass |
 | TENO5, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 7.00e-04 → 9.72e-06 | 5 | 6.17 | > 4.5 | pass |
 | TENO5, curved walls, wall degree 3 | quadrilaterals | max wall-value error | 4 → 8 | 1.42e-03 → 7.52e-05 | 4 | 4.23 | 3.5 to 4.5 | pass |
 | TENO5, curved walls, wall degree 4 | quadrilaterals | max wall-value error | 4 → 8 | 7.00e-04 → 9.72e-06 | 5 | 6.17 | > 4.5 | pass |
-| TENO5, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 4.90e-02 → 1.82e-02 | 2 | 1.43 | < 2.3 | pass |
+| TENO5, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.16e-02 → 1.06e-02 | 2 | 1.03 | < 2.3 | pass |
 | TENO6, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 2.13e-03 → 1.43e-05 | 6 | 7.22 | > 5.5 | pass |
-| TENO6, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 5.42e-02 → 1.25e-02 | 2 | 2.12 | < 2.3 | pass |
+| TENO6, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 1.80e-02 → 8.96e-03 | 2 | 1.01 | < 2.3 | pass |
 | TENO3, curved walls | triangles | max wall-value error | 4 → 8 | 2.47e-03 → 3.30e-04 | 3 | 2.91 | > 2.5 | pass |
-| TENO3, straight-sided cells | triangles | max wall-value error | 4 → 8 | 3.25e-02 → 1.50e-02 | 2 | 1.11 | < 2.3 | pass |
+| TENO3, straight-sided cells | triangles | max wall-value error | 4 → 8 | 1.76e-02 → 8.85e-03 | 2 | 0.99 | < 2.3 | pass |
 | TENO4, curved walls | triangles | max wall-value error | 4 → 8 | 5.68e-04 → 4.27e-05 | 4 | 3.73 | > 3.5 | pass |
-| TENO4, straight-sided cells | triangles | max wall-value error | 4 → 8 | 3.39e-02 → 1.62e-02 | 2 | 1.06 | < 2.3 | pass |
+| TENO4, straight-sided cells | triangles | max wall-value error | 4 → 8 | 2.32e-02 → 1.17e-02 | 2 | 0.98 | < 2.3 | pass |
 | TENO5, curved walls | triangles | max wall-value error | 4 → 8 | 1.91e-04 → 7.51e-06 | 5 | 4.67 | > 4.5 | pass |
-| TENO5, straight-sided cells | triangles | max wall-value error | 4 → 8 | 3.42e-02 → 1.63e-02 | 2 | 1.07 | < 2.3 | pass |
+| TENO5, straight-sided cells | triangles | max wall-value error | 4 → 8 | 2.22e-02 → 1.10e-02 | 2 | 1.01 | < 2.3 | pass |
 | TENO6, curved walls | triangles | max wall-value error | 4 → 8 | 2.81e-04 → 1.40e-06 | 6 | 7.65 | > 5.5 | pass |
-| TENO6, straight-sided cells | triangles | max wall-value error | 4 → 8 | 4.62e-02 → 2.35e-02 | 2 | 0.97 | < 2.3 | pass |
+| TENO6, straight-sided cells | triangles | max wall-value error | 4 → 8 | 1.97e-02 → 9.25e-03 | 2 | 1.09 | < 2.3 | pass |
 | quadratic walls | hexahedra | spherical shell volume error | 4 → 8 | 9.63e-03 → 6.07e-04 | 4 | 3.99 | > 3.7 | pass |
 | straight walls | hexahedra | spherical shell volume error | 4 → 8 | 6.48e-01 → 1.66e-01 | 2 | 1.96 | 1.85 to 2.15 | pass |
 | quadratic walls | prisms | spherical shell volume error | 4 → 8 | 4.63e-03 → 2.91e-04 | 4 | 3.99 | > 3.7 | pass |
