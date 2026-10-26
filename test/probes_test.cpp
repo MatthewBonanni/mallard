@@ -586,7 +586,7 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
                 }
                 // The normal points out of the fluid: outward at the outer wall, inward at the inner one
                 EXPECT_GT(turn * (a.at("nx") * a.at("x") + a.at("ny") * a.at("y")), 0.0);
-                EXPECT_NEAR(a.at("MASS_FLUX"), 0.0, 1e-12);
+                EXPECT_NEAR(a.at("MASS_FLUX"), 0.0, roundoff(1e-12));
                 total += a.at("area");
                 error[k] = std::max(error[k], std::fabs(a.at("P") - p_exact(r)));
             }
