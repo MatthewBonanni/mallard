@@ -866,7 +866,8 @@ weights and the trigger state.
 
 ## `[[probes]]`
 
-Samples of the solution on a geometry (points or curves), every `interval`
+Samples of the solution on a geometry (points or curves;
+[geometry guide](guide/geometry.md#point-sets-and-curves)), every `interval`
 steps or `time_interval` of simulation time, written raw and/or reduced. Setup
 locates the samples in the cells of each rank; a write evaluates them on the
 device of the ranks that own them and gathers them on rank 0, which writes them
@@ -1008,7 +1009,8 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 
 ## Regions
 
-Regions select parts of space in `[[sources]]`. A region is a table: a primitive shape, or a boolean of regions, each with
+Regions select parts of space in `[[sources]]` (explained with figures in
+the [geometry guide](guide/geometry.md#regions)). A region is a table: a primitive shape, or a boolean of regions, each with
 optional transforms, nested to any depth. Every region has a signed distance
 (negative inside) that never exceeds the distance to its surface, which gives
 smooth edges their width and lets cell volume fractions skip cells away from

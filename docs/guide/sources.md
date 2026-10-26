@@ -81,17 +81,13 @@ act.
 
 ### Regions
 
-A region is a primitive shape — sphere, ellipsoid, cylinder (solid or
-annular), cone or frustum, box, torus, half-space, any implicit `f(x, y, z) <
-0`, and in 2D disk, annulus, ellipse, rectangle and polygon — or a union,
-intersection or difference of regions, nested freely, each scaled, rotated and
-translated. Shapes need not follow the mesh: each cell gets its volume
-fraction, computed by subdividing its simplices where the surface crosses
-them, so a coarse mesh sees the right amount of the shape instead of a
-staircase of whole cells.
-
-![Cell volume fractions of each primitive over a coarse triangle mesh, with the exact outline](../images/guide/region-primitives-light.svg#gh-light-mode-only)
-![Cell volume fractions of each primitive over a coarse triangle mesh, with the exact outline](../images/guide/region-primitives-dark.svg#gh-dark-mode-only)
+A region is a shape — sphere, cylinder (solid or annular), cone, box, torus,
+half-space, polygon, any implicit `f(x, y, z) < 0` — or a union, intersection
+or difference of shapes, each scaled, rotated and translated. Shapes need not
+follow the mesh: each cell gets its volume fraction, so a coarse mesh sees the
+right amount of the shape instead of a staircase of whole cells. `edge` (on the
+outermost region) smooths the boundary over a band of that width, so that a
+source switches on gradually and excites fewer grid-scale waves.
 
 ```toml
 # A disk with a rotated slot cut out of it
@@ -103,23 +99,7 @@ region = {type = "difference",
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-light.svg#gh-light-mode-only)
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-dark.svg#gh-dark-mode-only)
 
-In 3D the same tables describe solids; transforms take an axis and an angle,
-or the region's own axes:
-
-```toml
-region = {type = "box", center = [0, 0, 0], size = [0.65, 0.35, 0.22],
-          rotate = {axis = [1, 2, 3], angle = 35}, translate = [0.5, 0.5, 0.5]}
-```
-
-![Volume fractions in a tetrahedral mesh of a tilted annular cylinder, a rotated box and a drilled sphere, cut open](../images/guide/regions-3d-light.svg#gh-light-mode-only)
-![Volume fractions in a tetrahedral mesh of a tilted annular cylinder, a rotated box and a drilled sphere, cut open](../images/guide/regions-3d-dark.svg#gh-dark-mode-only)
-
-`edge` (on the outermost region) smooths the boundary over a band of that
-width, so that a source switches on gradually, which avoids exciting
-grid-scale waves:
-
-![Volume fraction against radius for a sharp and a smooth-edged disk, with the smoothstep](../images/guide/region-smooth-edge-light.svg#gh-light-mode-only)
-![Volume fraction against radius for a sharp and a smooth-edged disk, with the smoothstep](../images/guide/region-smooth-edge-dark.svg#gh-dark-mode-only)
+Every shape, boolean and transform, with figures: [Geometry](geometry.md#regions).
 
 ### Exact totals
 
@@ -188,12 +168,14 @@ conditions alone may reflect them or let reversed flow in.
 | `X` or `Y`, `balance` | — | Mixtures: reference composition |
 
 Several sponges add up. Strength and reference are evaluated once, at cell
-centroids. The source is explicit and caps the time step at
+centroids; a comparison in `strength` gives the layer any shape
+([Geometry](geometry.md#who-uses-what)). The source is explicit and caps the time step at
 `1 / max(strength)`. Example: `channel_inflow_retau180`, a sponge over the last
 fifth of the channel in front of its `nscbc_outlet`.
 
 ## See also
 
+- [Geometry](geometry.md): regions, their transforms and volume fractions
 - [Input reference: `[source]`](../input.md#source), [`[[sources]]`](../input.md#sources), [regions](../input.md#regions), [`[[sponges]]`](../input.md#sponges)
 - [Boundary conditions](boundary_conditions.md#characteristic-boundaries)
 - Design notes: [characteristic boundaries and sponges](../design/nscbc.md)
