@@ -16,10 +16,11 @@ LABEL org.opencontainers.image.title="Mallard" \
       org.opencontainers.image.description="High-order finite volume solver for compressible reacting flows (CPU: OpenMP + MPI)" \
       org.opencontainers.image.source="https://github.com/MatthewBonanni/mallard" \
       org.opencontainers.image.licenses="Apache-2.0"
+# OpenSSH for mpirun across the pods of a Kubernetes MPIJob; sshd makes its host keys where it runs
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libgomp1 openmpi-bin libopenmpi3t64 libhdf5-openmpi-103-1t64 libtbb12 \
-        python3 python3-numpy python3-scipy python3-matplotlib python3-h5py \
-    && rm -rf /var/lib/apt/lists/*
+        python3 python3-numpy python3-scipy python3-matplotlib python3-h5py openssh-client openssh-server \
+    && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*
 # Mallard's executables only, not the bundled Kokkos's tools
 COPY --from=build /opt/mallard/bin/mallard* /opt/mallard/bin/
 COPY --from=build /opt/mallard/share /opt/mallard/share
