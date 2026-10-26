@@ -1,4 +1,4 @@
-# Mallard for CPUs: OpenMP and MPI (with dKaMinPar), HDF5, CGNS and zlib; 2D (mallard) and 3D (mallard3d).
+# Mallard for CPUs: OpenMP and MPI (with dKaMinPar), HDF5, CGNS and zlib; 2D (mallard2d) and 3D (mallard3d), both run as mallard.
 #
 #   docker build -f docker/Dockerfile -t mallard .
 #

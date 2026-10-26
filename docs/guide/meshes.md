@@ -8,7 +8,11 @@ for large distributed runs. Each boundary face belongs to a named **zone**,
 which `[[boundaries]]` assigns a condition to.
 
 The spatial dimension is a build option (`-DMallard_DIM=2`, the default, or
-`3`): one executable per dimension, the same input keys for both.
+`3`): one solver per dimension, `mallard2d` and `mallard3d`, with the same input
+keys. `mallard` runs the one a case needs, by its mesh: a mesh file's own
+dimension, and for a generated mesh 3D when `[mesh]` sets `Nz` or `Lz` (or
+`periodic` has `z`, or the type has 3D cells). `mallard --dim 2|3 -i input.toml`
+states it.
 
 ## Generated meshes
 
@@ -245,8 +249,9 @@ Pitfalls:
   patches (OpenFOAM's 2D convention); compressed (`.gz`) and decomposed
   (`processor*`) meshes must be decompressed or reconstructed first. Cells
   must be of Mallard's types, as for Fluent.
-- A mesh of the other dimension is an error: build with the matching
-  `-DMallard_DIM`.
+- `mallard` runs the solver of the mesh's dimension, which must be installed
+  (built with the matching `-DMallard_DIM`); `mallard2d` and `mallard3d` run
+  directly reject a mesh of the other dimension.
 
 ## Transform on read
 

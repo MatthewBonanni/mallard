@@ -264,6 +264,10 @@ void print_usage(std::ostream & out) {
            "  --force      write into a directory that is not empty\n";
 }
 
+bool solver_installed(int dim) {
+    return fs::exists(executable_path().parent_path() / ("mallard" + std::to_string(dim) + "d"));
+}
+
 void print_list(const Manifest & m) {
     size_t width = 0;
     for (const auto & t : m.templates) width = std::max(width, t.name.size());
@@ -276,9 +280,11 @@ void print_list(const Manifest & m) {
                       << (t.dim == 3 ? "3D  " : "2D  ") << t.summary << "\n";
         }
     }
-    std::cout << "\nThis Mallard is a " << Mallard_DIM << "D build; "
-              << (Mallard_DIM == 2 ? "3D templates need one built with -DMallard_DIM=3.\n"
-                                   : "2D templates need one built with -DMallard_DIM=2.\n");
+    for (const int dim : {2, 3}) {
+        if (solver_installed(dim)) continue;
+        std::cout << "\n" << dim << "D templates need mallard" << dim << "d, which is not installed next to this "
+                  << "Mallard: build it with -DMallard_DIM=" << dim << ".\n";
+    }
 }
 
 /**
@@ -426,8 +432,8 @@ std::string run_script(const Template & t, const fs::path & mallard, bool mesh, 
         "#   ./run.sh           " + threads + " CPU threads (on a GPU build: the GPU)\n"
         "#   ./run.sh -t 8      8 CPU threads\n"
         "#   ./run.sh -n 4      4 MPI ranks (MPI builds; on GPU builds, one GPU per rank)\n"
-        "# Another Mallard build (this case needs a " + std::to_string(t.dim) + "D one):\n"
-        "#   MALLARD=/path/to/build/src/mallard ./run.sh\n"
+        "# Another Mallard install or build:\n"
+        "#   MALLARD=/path/to/mallard ./run.sh\n"
         "set -e\n"
         "cd \"$(dirname \"$0\")\"\n"
         "MALLARD=\"${MALLARD:-" + mallard.string() + "}\"\n"
@@ -601,7 +607,9 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
                                                 init, init_packages), true);
         written.emplace_back("init.sh", "generates the initial state, " + t.init_creates);
     }
-    write_file(dir / "run.sh", run_script(t, executable_path(), !mesh.empty(), !init.empty()), true);
+    const fs::path front_end = executable_path().parent_path() / "mallard";
+    write_file(dir / "run.sh", run_script(t, fs::exists(front_end) ? front_end : executable_path(), !mesh.empty(),
+                                          !init.empty()), true);
     written.emplace_back("run.sh", "runs it: ./run.sh [-t threads] [-n MPI ranks]");
     if (!post.empty()) {
         const std::string last =
@@ -625,10 +633,9 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     for (const auto & [file, about] : written) {
         std::cout << "  " << file << std::string(file.size() < 12 ? 12 - file.size() : 1, ' ') << about << "\n";
     }
-    if (t.dim != Mallard_DIM) {
-        std::cout << "\nNote: this case needs a " << t.dim << "D build of Mallard (cmake -DMallard_DIM=" << t.dim
-                  << "); this one is " << Mallard_DIM << "D. Run it with\n"
-                  << "  MALLARD=/path/to/build" << t.dim << "d/src/mallard ./run.sh\n";
+    if (!solver_installed(t.dim)) {
+        std::cout << "\nNote: this case needs mallard" << t.dim << "d, which is not installed next to this Mallard: "
+                  << "build it with -DMallard_DIM=" << t.dim << ".\n";
     }
     std::cout << "\nNext:\n  cd " << dir.string() << "\n";
     if (!mesh.empty()) std::cout << "  ./mesh.sh\n";
@@ -640,6 +647,13 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
 }
 
 } // namespace
+
+int template_dimension(const std::string & name) {
+    for (const auto & t : load_manifest().templates) {
+        if (t.name == name) return t.dim;
+    }
+    return 0;
+}
 
 std::string set_key(const std::string & text, const std::string & path, const std::string & value) {
     const auto dot = path.rfind('.');

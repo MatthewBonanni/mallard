@@ -37,7 +37,7 @@ spec:
           workingDir: /work/case                # <the case directory on the volume>
           env:
             - name: MALLARD
-              value: mallard                    # <mallard or mallard3d>
+              value: mallard                    # <mallard, or the path to it>
             - name: INPUT
               value: input.toml
             - name: RESTARTS
