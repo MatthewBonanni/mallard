@@ -1,0 +1,3 @@
+- Region probes: `[[probes]]` with `region = {...}` write the fraction-weighted integral, mean, min and max (and `favre`, `rms`) of any fields over a region every sampling step, the same bit for bit on any number of ranks (#499).
+- Sponge regions: `[[sponges]]` `region = {...}` scales the `strength` by the region's cell fractions, smooth `edge` included (#499).
+- Named regions: `[regions.<name>]` defines a region once; every `region` key, and the parts of `union`, `intersection` and `difference`, take its name, and its cell fractions are computed once for all its users (#499).

@@ -75,14 +75,25 @@ std::array<double, 9> basis_along(Vec a) {
 
 class Parser {
     public:
+        const Input * names = nullptr;
+        std::vector<std::string> resolving;  // the named regions being parsed, outermost first
         std::vector<Node> nodes;
         std::vector<double> vertices;
         std::vector<expr::Program> programs;
         bool bounded = true;
+        int dimension = -1;
         int depth = 0, max_depth = 0;
 
-        std::string parse(const Input & t, const std::string & where, const Frame & parent) {
-            if (!t.is_table()) throw InputError(where + " must be a table, e.g. {type = \"sphere\", ...}.");
+        std::string parse(const Input & value, const std::string & where, const Frame & parent) {
+            if (value.is_string()) return named(value.as_string(), where, parent);
+            return parse_table(value, where, parent);
+        }
+
+        std::string parse_table(const Input & t, const std::string & where, const Frame & parent) {
+            if (!t.is_table()) {
+                throw InputError(where + " must be a table, e.g. {type = \"sphere\", ...}, or the name of one in "
+                                 "[regions].");
+            }
             if (!t.contains("type")) throw InputError(where + " has no type.");
             const std::string type = find_value<std::string>(t, "type");
             record_options(where + ".type", {"sphere", "ellipsoid", "cylinder", "cone", "box", "torus", "half_space",
@@ -96,6 +107,24 @@ class Parser {
         }
 
     private:
+        std::string named(const std::string & name, const std::string & where, const Frame & parent) {
+            const Input & t = lookup(names, name, where);
+            const auto repeat = std::find(resolving.begin(), resolving.end(), name);
+            if (repeat != resolving.end()) {
+                std::string cycle;
+                for (auto it = repeat; it != resolving.end(); ++it) cycle += *it + " -> ";
+                throw InputError("regions: " + cycle + name + " is a cycle of named regions.");
+            }
+            if (t.is_table() && t.contains("edge")) {
+                throw InputError("regions." + name + ".edge: a smooth edge belongs to a whole region, but " + where +
+                                 " uses " + name + " inside another region.");
+            }
+            resolving.push_back(name);
+            const std::string text = parse_table(t, "regions." + name, parent);
+            resolving.pop_back();
+            return name + " = " + text;
+        }
+
         static double number(const Input & t, const std::string & key, const std::string & where,
                              const Dimension & dimension = dim::length) {
             if (!t.contains(key)) throw InputError(where + " needs " + key + ".");
@@ -330,6 +359,11 @@ class Parser {
                                  "box, torus, half_space, implicit, polygon, disk, annulus, ellipse, rectangle, "
                                  "union, intersection, difference.");
             }
+            // Every primitive so far is solid: a volume, or an area in 2D
+            if (dimension >= 0 && dimension != N_DIM) {
+                throw InputError(where + ": a boolean combines regions of one dimension.");
+            }
+            dimension = N_DIM;
             std::copy(frame.M.begin(), frame.M.end(), n.m);
             std::copy(frame.d.begin(), frame.d.end(), n.d);
             n.scale = frame.k;
@@ -340,9 +374,37 @@ class Parser {
 
 } // namespace
 
-Region::Region(const Input & table, const std::string & where) {
+const Input & lookup(const Input * names, const std::string & name, const std::string & where) {
+    if (names && names->as_table().entries().contains(name)) return names->at(name);
+    std::vector<std::string> defined;
+    if (names) {
+        for (const auto & [key, value] : names->as_table().entries()) defined.push_back(key);
+    }
+    std::sort(defined.begin(), defined.end());
+    std::string list;
+    for (const auto & d : defined) list += (list.empty() ? "" : ", ") + d;
+    throw InputError(where + ": no region named \"" + name + "\" in [regions] (" +
+                     (list.empty() ? std::string("none defined") : "defined: " + list) +
+                     "). See docs/guide/geometry.md#named-regions.");
+}
+
+const Input * named_regions(const Input & input) {
+    if (!input.contains("regions")) return nullptr;
+    const Input & names = input.at("regions");
+    if (!names.is_table()) throw InputError("regions must be a table of named regions: [regions.<name>].");
+    return &names;
+}
+
+Region::Region(const Input & value, const std::string & where, const Input * names) {
     Parser parser;
-    m_summary = parser.parse(table, where, Frame());
+    parser.names = names;
+    const Input & table = value.is_string() ? lookup(names, value.as_string(), where) : value;
+    if (value.is_string()) parser.resolving.push_back(value.as_string());
+    m_summary = parser.parse_table(table, value.is_string() ? "regions." + value.as_string() : where, Frame());
+    if (value.is_string()) {
+        m_name = value.as_string();
+        m_summary = m_name + " = " + m_summary;
+    }
     if (parser.max_depth > MAX_STACK) {
         throw InputError(where + " nests too many regions (a stack of " + std::to_string(parser.max_depth) +
                          ", at most " + std::to_string(MAX_STACK) + ").");
@@ -351,10 +413,12 @@ Region::Region(const Input & table, const std::string & where) {
     m_vertices = std::move(parser.vertices);
     m_programs = std::move(parser.programs);
     m_bounded = parser.bounded;
+    m_dimension = parser.dimension;
     if (table.contains("edge")) {
-        m_host.edge = as_double(table.at("edge"), where + ".edge", dim::length);
+        const std::string key = value.is_string() ? "regions." + value.as_string() : where;
+        m_host.edge = as_double(table.at("edge"), key + ".edge", dim::length);
         if (!(m_host.edge >= 0.0) || !std::isfinite(m_host.edge)) {
-            throw InputError(where + ".edge must be a non-negative width.");
+            throw InputError(key + ".edge must be a non-negative width.");
         }
         m_summary += ", edge " + logging::real(m_host.edge);
     }
@@ -495,6 +559,34 @@ std::vector<double> volume_fractions(const Mesh & mesh, const Region & region) {
         if (stopped > 0) throw InputError(region.programs()[stopped - 1].runaway_error());
     }
     return fractions;
+}
+
+void require_full_dimension(const Region & region, const std::string & where) {
+    if (region.dimension() == N_DIM) return;
+    const char * kinds[4] = {"a point", "a curve", N_DIM == 3 ? "a surface" : "an area", "a volume"};
+    const std::string what = region.name().empty() ? "this region" : "'" + region.name() + "'";
+    throw InputError(where + " needs " + kinds[N_DIM] + "; " + what + " is " +
+                     kinds[static_cast<size_t>(region.dimension())] + ".");
+}
+
+Regions::Regions(const Input & input, const Mesh & mesh) : m_names(named_regions(input)), m_mesh(mesh) {}
+
+Regions::Entry & Regions::entry(const Input & value, const std::string & where) {
+    if (value.is_string()) {
+        const auto it = m_by_name.find(value.as_string());
+        if (it != m_by_name.end()) return *m_entries[it->second];
+        m_by_name.emplace(value.as_string(), m_entries.size());
+    }
+    m_entries.push_back(std::make_unique<Entry>(Entry{Region(value, where, m_names), {}}));
+    return *m_entries.back();
+}
+
+const Region & Regions::get(const Input & value, const std::string & where) { return entry(value, where).region; }
+
+const std::vector<double> & Regions::fractions(const Input & value, const std::string & where) {
+    Entry & e = entry(value, where);
+    if (e.fractions.empty()) e.fractions = volume_fractions(m_mesh, e.region);
+    return e.fractions;
 }
 
 } // namespace region
