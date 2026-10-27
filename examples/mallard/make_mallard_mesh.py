@@ -4,7 +4,7 @@
     make_mallard_mesh.py OUTPUT.msh [--h-wall 0.0015] [--h-far 0.0045] [--preview duck.png]
 
 The duck flies in the -x direction (bill tip at the origin, length about 1.1)
-with its wing raised, inside the rectangle [x0, x1] x [y0, y1]. Its outline is
+with its wings raised, inside the rectangle [x0, x1] x [y0, y1]. Its outline is
 a periodic cubic spline through hand-placed control points. The cell size grows
 linearly with the distance from the body from h_wall to h_far. Physical curves:
 "duck" (the body), "inflow" (left), "outflow" (right), "top" and "bottom".
@@ -15,31 +15,21 @@ import argparse
 import numpy as np
 from scipy.interpolate import splev, splprep
 
-# Side profile facing +x (mirrored below), counterclockwise from the bill tip
+# Side profile facing +x (mirrored below), counterclockwise from the bill tip,
+# traced from the logo's duck
 CONTROL_POINTS = [
-    (1.000, 0.100),  # bill tip
-    (0.985, 0.112), (0.945, 0.118), (0.895, 0.128),  # bill top
-    (0.868, 0.150), (0.852, 0.195),  # forehead
-    (0.815, 0.232), (0.760, 0.240),  # crown
-    (0.712, 0.215), (0.690, 0.165),  # back of the head
-    (0.665, 0.115), (0.610, 0.088),  # nape
-    (0.545, 0.085), (0.500, 0.100),  # shoulder
-    (0.465, 0.150), (0.410, 0.245), (0.335, 0.350),  # wing leading edge
-    (0.240, 0.450), (0.130, 0.540),
-    (0.020, 0.600),  # wing tip
-    (0.045, 0.565), (0.105, 0.500),  # primaries
-    (0.160, 0.420), (0.205, 0.320), (0.250, 0.210),  # wing trailing edge
-    (0.290, 0.120),  # wing root
-    (0.200, 0.082), (0.100, 0.062),  # rump
-    (0.020, 0.052), (-0.060, 0.046),  # tail top
-    (-0.100, 0.030),  # tail tip
-    (-0.070, 0.006), (0.000, -0.020),  # under tail
-    (0.080, -0.058), (0.180, -0.092),  # belly
-    (0.300, -0.110), (0.420, -0.100),
-    (0.530, -0.068), (0.610, -0.025),  # breast
-    (0.680, 0.020), (0.740, 0.048),  # neck front
-    (0.800, 0.064), (0.850, 0.072),  # chin
-    (0.910, 0.078), (0.970, 0.082),  # bill underside
+    (1.000, 0.100), (0.980, 0.135), (0.919, 0.151), (0.858, 0.156), (0.838, 0.181),
+    (0.807, 0.217), (0.752, 0.247), (0.686, 0.247), (0.625, 0.212), (0.584, 0.156),
+    (0.549, 0.105), (0.513, 0.100), (0.488, 0.161), (0.447, 0.232), (0.397, 0.293),
+    (0.331, 0.338), (0.270, 0.374), (0.219, 0.404), (0.189, 0.409), (0.169, 0.384),
+    (0.174, 0.333), (0.159, 0.298), (0.098, 0.328), (0.027, 0.364), (-0.039, 0.394),
+    (-0.085, 0.404), (-0.100, 0.374), (-0.085, 0.303), (-0.059, 0.232), (-0.029, 0.176),
+    (0.037, 0.151), (0.001, 0.120), (0.027, 0.085), (0.098, 0.054), (0.057, 0.019),
+    (0.077, -0.017), (0.138, -0.047), (0.103, -0.098), (0.128, -0.133), (0.189, -0.153),
+    (0.138, -0.204), (0.153, -0.245), (0.108, -0.285), (0.082, -0.306), (0.164, -0.326),
+    (0.290, -0.346), (0.422, -0.346), (0.544, -0.321), (0.645, -0.275), (0.721, -0.204),
+    (0.767, -0.123), (0.782, -0.042), (0.797, 0.019), (0.838, 0.054), (0.899, 0.065),
+    (0.959, 0.075),
 ]
 
 
