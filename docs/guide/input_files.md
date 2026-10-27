@@ -352,23 +352,23 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --quality-vtu quality
 == Check ==================================================================================
   Input keys         all used
   Boundaries         every boundary face has a condition (5 conditions)
-  non-orthogonality  max 30, mean 4.87
-                     worst 30 at (0.9751, 0.05307), 29.2 at (0.4882, 0.009565)
-  skewness           max 0.396, mean 0.052
-                     worst 0.396 at (2.101, 0.02508), 0.396 at (2.13, 0.03892)
-  aspect ratio       max 2.02, mean 1.12
-  volume ratio       max 2.22, mean 1.17
-                     worst 2.22 at (0.6432, -0.6406), 2.22 at (0.6297, -0.6372)
-  Time step          0.0001446 (from run.cfl), CFL 0.25 at the initial state
-  CFL-limiting       cell 8,739 at (0.1775, 0.1768)
-                     9 cells within 10% of it, in (0.1227, -0.2567) to (0.8304, 0.1768)
-  Memory             70.8MB per rank after setup (peak 70.8MB), 9,205 cells, 1 rank
-                     on 4 ranks: about 26.1MB per rank (peak 26.1MB), largest part 2,302 + 1,087 halo cells
+  non-orthogonality  max 27.7, mean 4.87
+                     worst 27.7 at (1.222, 0.3962), 27.7 at (1.209, 0.389)
+  skewness           max 0.363, mean 0.0545
+                     worst 0.363 at (0.8478, 0.4729), 0.363 at (0.8561, 0.4827)
+  aspect ratio       max 1.95, mean 1.13
+  volume ratio       max 2.26, mean 1.18
+                     worst 2.26 at (0.8694, 0.488), 2.26 at (0.8561, 0.4827)
+  Time step          0.0001416 (from run.cfl), CFL 0.25 at the initial state
+  CFL-limiting       cell 9,273 at (0.468, 0.05182)
+                     2 cells within 10% of it, in (0.4556, 0.05182) to (0.468, 0.05629)
+  Memory             72.2MB per rank after setup (peak 72.2MB), 9,385 cells, 1 rank
+                     on 4 ranks: about 26.7MB per rank (peak 26.7MB), largest part 2,347 + 1,119 halo cells
   Throughput         50.0M cells/s per rank
-  Cost               6914 steps per unit simulated time
-                     per unit time: 318 ms wall on 4 ranks, 0.000354 rank-hours
-                     per flow-through (0.4375): 139 ms wall on 4 ranks, 0.000155 rank-hours
-                     to t_stop = 0.75: 239 ms wall on 4 ranks, 0.000265 rank-hours
+  Cost               7060 steps per unit simulated time
+                     per unit time: 331 ms wall on 4 ranks, 0.000368 rank-hours
+                     per flow-through (0.4375): 145 ms wall on 4 ranks, 0.000161 rank-hours
+                     to t_stop = 0.75: 248 ms wall on 4 ranks, 0.000276 rank-hours
   Result             ok
 ```
 

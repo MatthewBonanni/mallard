@@ -280,5 +280,5 @@ Mallard includes code and data derived from [Cantera](https://cantera.org) under
 <p align="center">
   <img src="docs/images/mallard.gif" alt="Mach 8 flow over a mallard" width="100%">
   <br>
-  <em>Mach 8 flow over a mallard: 1.04M triangles, TENO5 + RHLL (<a href="examples/mallard">examples/mallard</a>).</em>
+  <em>Mach 8 flow over a mallard: 1.05M triangles, TENO5 + RHLL (<a href="examples/mallard">examples/mallard</a>).</em>
 </p>
