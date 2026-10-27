@@ -1628,11 +1628,9 @@ int Solver::run() {
         use_step_graph = step_graph_unsupported().empty();
         while ((stop = stop_reason()).empty()) {
             Kokkos::Timer step_timer;
-            const bool sample = run_health.on && (step + 1) % check_interval == 0;
-            if (sample) begin_sample();
             // The first step runs kernel by kernel, which also sets up what the
-            // kernels allocate on first use; so do sampled steps, phase by phase
-            if (use_step_graph && step > step_run_start && !sample) {
+            // kernels allocate on first use
+            if (use_step_graph && step > step_run_start) {
                 graph_step();
             } else {
                 calc_dt();
@@ -1650,8 +1648,6 @@ int Solver::run() {
                 update_primitives();
                 statistics.sample(step, t, cell_sampler(), mesh->n_owned());
             }
-            mark_phase(StepPhase::CHECKS);
-            if (sample) end_sample();
             t_wall_stepping += step_timer.seconds();
             Kokkos::Timer output_timer;
             write_forces();
@@ -2089,7 +2085,6 @@ void Solver::take_step() {
         time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
     }
     run_health.ledger.end_step(static_cast<double>(dt));
-    mark_phase(StepPhase::UPDATE);
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -2146,7 +2141,6 @@ void Solver::calc_dt() {
     // first stage of the next one reuses them
     halo.exchange(state());
     halo_current = true;
-    mark_phase(StepPhase::HALO);
     update_boundary_states(t);
     dt_cfl1 = calc_dt_cfl1();
     if (!(dt_cfl1 > 0.0_r)) throw DivergedError();
@@ -2172,7 +2166,6 @@ void Solver::calc_dt() {
     Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
         c(i) = dt_ / c(i);
     });
-    mark_phase(StepPhase::TIME_STEP);
 }
 
 /**

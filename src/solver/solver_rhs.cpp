@@ -242,12 +242,10 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         face_reconstruction->finish_cell_face_values(W_cells, face_solution);
     } else {
         if (exchange) halo.exchange(state);
-        mark_phase(StepPhase::HALO);
         Kokkos::parallel_for("rhs_W", mesh->n_cells, w_functor);
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }
     face_reconstruction->rotate_periodic_faces(face_solution);
-    mark_phase(StepPhase::RECONSTRUCTION);
 
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
@@ -275,7 +273,6 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
             FOR_I_CONSERVATIVE F(f, i) *= factor;
         });
     }
-    mark_phase(StepPhase::CONVECTIVE_FLUX);
 
     if (budget_pass) {
         budget.convective = kinetic_energy_rate();
@@ -297,7 +294,6 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         viscous_functor.wall_model = wall_model.out;
         parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
         if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
-        mark_phase(StepPhase::VISCOUS_FLUX);
     }
 
     FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -328,10 +324,8 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         });
     }
     apply_sponges(state, rhs_state);
-    mark_phase(StepPhase::SUM_AND_SOURCES);
     if (!budget_pass && run_health.ledger.on()) {
         ledger_stage(state, physics.is_viscous() ? &viscous_functor : nullptr);
-        mark_phase(StepPhase::LEDGER);
     }
     if (budget_pass && les_on) {
         // The SGS fluxes alone, into the face fluxes this evaluation no longer needs

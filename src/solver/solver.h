@@ -563,10 +563,6 @@ class Solver {
         void init_health();
         /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
-        /** @brief Sampled step: the time since the previous mark goes to phase. */
-        void mark_phase(StepPhase phase);
-        void begin_sample();
-        void end_sample();
         void health_summary() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);

@@ -77,7 +77,7 @@ struct Report {
     std::vector<Extremum> margins_run;  // smallest at any report so far
     std::vector<Spread> activity;       // fractions of cells
     std::vector<std::pair<std::string, double>> chemistry;
-    std::vector<Spread> timing;         // seconds per step of each phase, from the sampled step
+    std::vector<Spread> timing;         // output seconds per step since the previous report
     std::vector<Repair> repairs;        // since the previous report
     std::vector<Repair> repairs_run;    // since the run started
     std::vector<Balance> balance;       // since the previous report

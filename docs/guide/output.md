@@ -193,9 +193,8 @@ writes what it finds into the progress record's `health` (and a short
 progress rows only, from the state of that step. Between rows the ledger
 adds a reduction over the boundary faces (and one over the cells where
 there are volume sources) per stage, chemistry two reductions of the
-element totals per call and a sub-step count per integrated cell, and one
-step per row is timed phase by phase (below); none of these waits for the
-device. `[output] health = false` turns
+element totals per call and a sub-step count per integrated cell; none of
+these waits for the device. `[output] health = false` turns
 it all off.
 
 | Field | Contents |
@@ -204,15 +203,14 @@ it all off.
 | `margins_run` | The smallest of each at any progress row so far |
 | `activity` | Fractions of cells, over the domain (`all`) and the least and most active rank (`rank_min`, `rank_max`): `troubled_cells` (TENO's troubled-cell indicator), `limited_cells` (MUSCL cells whose limiter is below one in some variable), `upwind_fraction` (the hybrid flux's mean upwind fraction) |
 | `chemistry` | Since the previous row: `substeps` and `rejected_substeps` of the Rosenbrock integration, `failures`, `reacting_cells` (fraction of the last call), `wall` (seconds of the slowest rank) and `imbalance` (the slowest rank's chemistry time over the ranks' mean) |
-| `timing` | Seconds of each phase of the last sampled step, `all` (mean), `rank_min`, `rank_max` over ranks: `halo`, `reconstruction`, `convective_flux`, `viscous_flux`, `sum_and_sources`, `update` (the time integrator's vector updates), `chemistry`, `time_step` (the CFL time step and its global minimum), `checks`, `ledger`; and per step since the previous row, `output_sync` (the run's own output time) and `output_async` (time of the background writers) |
+| `timing` | Per step since the previous row, `all` (mean), `rank_min`, `rank_max` over ranks: `output_sync` (the run's own output time) and `output_async` (time of the background writers). The step's own wall time and throughput are the row's `wall_per_step` and `cells_per_second` |
 | `repairs`, `repairs_run` | Each [numerical repair](#numerical-repairs), since the previous row and since the start: `activations`, `cells` (distinct owned cells) and `change`, the integrated change of each quantity it changes |
 | `balance`, `balance_run` | The [conservation ledger](#conservation-ledger), since the previous row and since the first row |
 | `element_drift` | Mixtures with chemistry: the largest change of a rank's element mass over one chemistry call, beyond the recorded repairs, relative to the rank's mass (round-off) |
 
-The sampled step is the step before each progress row: it runs kernel by
-kernel (no CUDA graph) with a fence after each phase, so its phases add up
-to its wall time but the halo exchange does not overlap the computation
-there.
+A breakdown of the step by phase is a profiling question, not a health check:
+timing phases needs a fence after each one, which a CUDA-graph step does not
+have; use a profiler (Nsight Systems, Kokkos Tools) for it.
 
 Mallard warns once per kind when the density or pressure falls below
 10<sup>-3</sup> of its domain mean, when a mass fraction is below

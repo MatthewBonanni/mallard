@@ -95,7 +95,6 @@ void Solver::allocate_chemistry() {
 }
 
 void Solver::advance_chemistry(const double dt_chem) {
-    mark_phase(StepPhase::UPDATE);
     const bool audit = run_health.clip_site != HealthState::NONE;
     const Kokkos::View<double *> clipped =
         audit ? run_health.repairs.recorder(run_health.clip_site).change : Kokkos::View<double *>();
@@ -111,7 +110,6 @@ void Solver::advance_chemistry(const double dt_chem) {
         run_health.repairs.touch(run_health.clip_site, run_health.clip_flags);
         Kokkos::deep_copy(run_health.clip_flags, uint8_t(0));
     }
-    mark_phase(StepPhase::CHEMISTRY);
 }
 
 void Solver::check_chemistry(const CellChemistry::Statistics & stats, const double start) {

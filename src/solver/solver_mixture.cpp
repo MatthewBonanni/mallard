@@ -532,10 +532,8 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
     apply_sponges(state, rhs_state);
-    mark_phase(StepPhase::SUM_AND_SOURCES);
     if (!budget_pass && run_health.ledger.on()) {
         ledger_stage(state, nullptr);
-        mark_phase(StepPhase::LEDGER);
     }
     if (budget_pass && les_on) {
         // The SGS fluxes alone, into the face fluxes this evaluation no longer needs

@@ -215,36 +215,6 @@ void Solver::init_health() {
     }
 }
 
-void Solver::mark_phase(const StepPhase phase) {
-    if (!run_health.sampling) return;
-    Kokkos::fence("health_phase");
-    const double now = timer.seconds();
-    run_health.phase_seconds[static_cast<size_t>(phase)] += now - run_health.mark;
-    run_health.mark = now;
-}
-
-void Solver::begin_sample() {
-    Kokkos::fence("health_phase");
-    run_health.sampling = true;
-    run_health.phase_seconds.fill(0.0);
-    run_health.mark = timer.seconds();
-}
-
-void Solver::end_sample() {
-    mark_phase(StepPhase::UPDATE);
-    run_health.sampling = false;
-    static const char * NAMES[] = {"halo",   "reconstruction", "convective_flux", "viscous_flux", "sum_and_sources",
-                                   "update", "chemistry",      "time_step",       "checks",       "ledger"};
-    std::vector<std::string> names;
-    std::vector<double> seconds, ones;
-    for (size_t i = 0; i < size_t(StepPhase::COUNT); i++) {
-        names.push_back(NAMES[i]);
-        seconds.push_back(run_health.phase_seconds[i]);
-        ones.push_back(1.0);
-    }
-    run_health.timing = health::spread(names, seconds, ones);
-}
-
 void Solver::report_health() {
     health::Report & report = run_health.last;
     report = health::Report{};
@@ -359,8 +329,7 @@ void Solver::report_health() {
         run_health.chemistry_wall_last = t_wall_chemistry;
     }
 
-    // Timing: the sampled step's phases, and output per step since the previous report
-    report.timing = run_health.timing;
+    // Timing: output per step since the previous report
     const uint64_t steps = step - run_health.step_last;
     if (steps > 0) {
         double writing = 0.0;

@@ -28,21 +28,6 @@ struct LedgerMutation {
     double gravity_sign = 1.0;  // of the gravity source in the RHS
 };
 
-/** @brief Phases of a sampled step: each ends at a mark. */
-enum class StepPhase {
-    HALO,
-    RECONSTRUCTION,
-    CONVECTIVE_FLUX,
-    VISCOUS_FLUX,
-    SUM_AND_SOURCES,
-    UPDATE,
-    CHEMISTRY,
-    TIME_STEP,
-    CHECKS,
-    LEDGER,
-    COUNT
-};
-
 struct HealthState {
     static constexpr size_t NONE = std::numeric_limits<size_t>::max();
 
@@ -62,10 +47,6 @@ struct HealthState {
     double output_last = 0.0, writing_last = 0.0;
     uint64_t step_last = 0;
 
-    bool sampling = false;  // the current step is timed phase by phase
-    double mark = 0.0;
-    std::array<double, size_t(StepPhase::COUNT)> phase_seconds = {};
-    std::vector<health::Spread> timing;
     std::vector<std::pair<std::string, double>> setup_phases;
     std::set<std::string> warned;
     health::Report last;

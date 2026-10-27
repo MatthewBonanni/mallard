@@ -144,7 +144,7 @@ std::vector<std::pair<std::string, std::string>> summary(const Report & report) 
     for (const auto & t : report.timing) {
         timing += (timing.empty() ? "" : ", ") + format("%s %s", t.name.c_str(), logging::duration(t.max).c_str());
     }
-    if (!timing.empty()) lines.emplace_back("Step phases", timing + " (slowest rank, last sampled step)");
+    if (!timing.empty()) lines.emplace_back("Output", timing + " per step (slowest rank)");
     return lines;
 }
 
