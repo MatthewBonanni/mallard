@@ -158,7 +158,7 @@ Every format and the transform below are illustrated in the user guide
 `x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
 Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
 (negative factors) are allowed. `[[periodic]]` translations, `[[mesh.curved]]`
-shapes, probes and every other coordinate in the input refer to the
+surfaces, regions, probes and every other coordinate in the input refer to the
 transformed mesh. `mallard mesh convert input.toml mesh.h5` writes the
 transformed mesh.
 
@@ -868,7 +868,7 @@ weights and the trigger state.
 ## `[[probes]]`
 
 Samples of the solution on a geometry (points or curves;
-[geometry guide](guide/geometry.md#point-sets-and-curves)), every `interval`
+[geometry guide](guide/geometry.md#points-and-curves)), every `interval`
 steps or `time_interval` of simulation time, written raw and/or reduced. Setup
 locates the samples in the cells of each rank; a write evaluates them on the
 device of the ranks that own them and gathers them on rank 0, which writes them
@@ -879,7 +879,7 @@ ranks. A probe that is not due costs nothing.
 |---|---|
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
-| `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
+| `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`) or `vtp` |
@@ -889,9 +889,9 @@ ranks. A probe that is not due costs nothing.
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
 | `translate`, `rotate`, `scale` | Transform of the geometry: scaled (a factor, or one per axis) about the origin, then rotated about it (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}`), then translated |
 
-Shapes (`[x, y(, z)]` points):
+Types (`[x, y(, z)]` points):
 
-| `shape` | Keys |
+| `type` | Keys |
 |---|---|
 | `point` | `point` |
 | `points` | `points = [[...], ...]`, or `points_file`: a text file of one point per row (numbers split by commas or blanks; `#` starts a comment, a header row is skipped) |
@@ -918,17 +918,17 @@ sample and step; a restarted run appends). `hdf5` holds `coordinates`
 (samples x dimension), for curves `arc_length` and `polylines/nodes` with
 `polylines/offsets`, and the extensible `step`, `time` and `fields/<variable>`
 (steps x samples); `vtp` writes one VTK PolyData file per output,
-`<stem>_<step>.vtp` (vertices for point sets, polylines with `arc_length`
+`<stem>_<step>.vtp` (vertices for points, polylines with `arc_length`
 for curves), indexed by the `.pvd` series. A restarted run cuts the HDF5 rows
 and the `.pvd` entries after the restart back and continues them.
 
-**Reductions.** Rows `step, t, length` (curves) or `count` (point sets), then
+**Reductions.** Rows `step, t, length` (curves) or `count` (points), then
 `<reduction>_<variable>` for each reduction and variable: `integral` is
 `int q ds`, `mean` `int q ds / int ds`, `favre` the density-weighted mean
 `int rho q ds / int rho ds`, `rms` `sqrt(int q^2 ds / int ds)`, and `min`, `max`
 the extrema over the samples and the integration points. Curves integrate
 with three Gauss points on each element between consecutive samples (exact for
-polynomials of degree 5 along straight elements), point sets with unit weights
+polynomials of degree 5 along straight elements), points with unit weights
 (`integral` is the sum, `mean` the arithmetic mean). Rank 0 sums them in a
 fixed order, so they too are the same bit for bit on any number of ranks.
 
@@ -937,7 +937,7 @@ fixed order, so they too are the same bit for bit on any number of ranks.
 name = "wake"
 variables = ["U", "P"]
 sampling = "point"
-shape = "arc"
+type = "arc"
 center = [0.0, 0.0]
 radius = 2.0
 angles = [-60.0, 60.0]
@@ -1011,25 +1011,27 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 ## Regions
 
 Regions select parts of space in `[[sources]]` (explained with figures in
-the [geometry guide](guide/geometry.md#regions)). A region is a table: a primitive shape, or a boolean of regions, each with
+the [geometry guide](guide/geometry.md#regions)). A region is a table: a primitive, or a boolean of regions, each with
 optional transforms, nested to any depth. Every region has a signed distance
 (negative inside) that never exceeds the distance to its surface, which gives
 smooth edges their width and lets cell volume fractions skip cells away from
 the surface. Volume fractions are cell averages of the region's indicator,
 sampled on each cell's triangles (2D) or tetrahedra (3D), subdivided where the
 surface or the smooth edge crosses them: cells entirely inside get exactly 1.
-In 2D, regions are the z = 0 slices of the 3D shapes (`z` components may be
-left out). Lengths take units (`radius = "5 mm"`) and angles are in degrees
+In 2D, regions are the z = 0 slices of the 3D primitives (`z` components may be
+left out). `circle` and `ellipse` are curves, and `disk`, `rectangle` and
+`polygon` are flat (areas in 2D, surfaces in 3D), so sources in 3D use
+`sphere`, `ellipsoid` and `box`. Lengths take units (`radius = "5 mm"`) and angles are in degrees
 unless given a unit; `axis`, `normal`, `axes` and `scale` are plain numbers.
 
-| `type` | Keys | Shape |
+| `type` | Keys | Region |
 |---|---|---|
-| `sphere` (2D: also `disk`, `circle`) | `center`, `radius` | |
-| `ellipsoid` (`ellipse`) | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`) |
+| `sphere` (2D: also `disk`) | `center`, `radius` | |
+| `ellipsoid` | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`); in 2D its slice is the area inside an ellipse |
 | `cylinder` | `center`, `axis` (default z in 2D), `radius`, `inner_radius` (default 0: solid), `length` (default infinite) | annular with `inner_radius`; centered on `center` along `axis` |
 | `annulus` (2D) | `center`, `radius`, `inner_radius` | |
 | `cone` (`frustum`) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0) | |
-| `box` (`rectangle`) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
+| `box` (2D: also `rectangle`) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | |
 | `half_space` | `point` (default origin), `normal` | the side `(x - point) . normal < 0` |
 | `polygon` (2D) | `vertices` = `[[x, y], ...]` | simple polygon |

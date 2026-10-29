@@ -348,7 +348,7 @@ interval = 10
 name = "wake"
 variables = ["U", "P"]
 sampling = "point"
-shape = "arc"
+type = "arc"
 center = [0.0, 0.0]
 radius = 5.0
 angles = [-45.0, 45.0]
@@ -362,7 +362,7 @@ reductions = ["mean", "rms"]
 |---|---|---|
 | `name` | required | Names the files |
 | `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
-| `shape` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`) |
+| `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`) |
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
 | `format` | `csv` | `csv`, `hdf5` (one extensible file) or `vtp` (one file per output and a `.pvd` series) |
@@ -375,8 +375,8 @@ the sample, so a probe converges at the scheme's order (fifth order for
 `order = 5`) instead of the first order of cell averages at points off the
 centroids. The [Sod comparison](numerics.md#reconstruction) on the Numerics
 page was read from a line probe. The full key list is in the [input reference](../input.md#probes);
-each shape, where its samples go and how to read the files, with figures:
-[Geometry](geometry.md#point-sets-and-curves).
+each type, where its samples go and how to read the files, with figures:
+[Geometry](geometry.md#points-and-curves).
 
 Pitfalls:
 
@@ -387,7 +387,7 @@ Pitfalls:
   reconstructed `p / rho` at the cell's composition.
 - CSV is for small probes: it repeats the coordinates every output. Use `hdf5`
   or `vtp` for thousands of samples.
-- Reductions of point sets weigh each point 1 (`integral` is a sum); curves
+- Reductions of points weigh each point 1 (`integral` is a sum); curves
   integrate with three Gauss points per element between samples.
 
 ## Post-processing
@@ -441,4 +441,4 @@ build reads. It is never misread.
 ## See also
 
 - [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals), [`[statistics]`](../input.md#statistics), [`[statistics.spectra]`](../input.md#statisticsspectra), [`[statistics.phase]`](../input.md#statisticsphase), [`[[probes]]`](../input.md#probes)
-- [Geometry](geometry.md): probe shapes, sample placement, reading probe files
+- [Geometry](geometry.md): probe types, sample placement, reading probe files

@@ -1,7 +1,7 @@
 # Geometry
 
 Several features take a piece of space as input: where a source acts, where a
-probe samples, which faces are curved. This page explains the shapes they share
+probe samples, which faces are curved. This page explains the regions they share
 and how Mallard puts them on a mesh. Every key, with its default, is in the
 [input reference](../input.md#regions).
 
@@ -10,23 +10,23 @@ and how Mallard puts them on a mesh. Every key, with its default, is in the
 | Feature | Geometry | Guide |
 |---|---|---|
 | `[[sources]]` `region` | a [region](#regions) | [Sources](sources.md#regions) |
-| `[[probes]]` | a [point set or curve](#point-sets-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
+| `[[probes]]` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
 | `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `[[mesh.curved]]` | `circle`, `sphere` or `cylinder` of its own keys (to move onto regions: [#407](https://github.com/MatthewBonanni/mallard/issues/407)) | [Curved boundaries](meshes.md#curved-boundaries) |
 
 Initial states and sponges take expressions rather than regions; a comparison
-such as `"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp shape there, which the
+such as `"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp region there, which the
 initial state averages over each cell.
 
 ## Coordinates and units
 
 - **Coordinates** are those of the mesh as the run sees it, after
   [`[mesh.transform]`](meshes.md#transform-on-read).
-- **2D** runs use the `z = 0` slice of each shape: a sphere is a disk, a
+- **2D** runs use the `z = 0` slice of each region: a sphere is a disk, a
   cylinder along z a disk, a cylinder along x a strip. Points have two
-  components; a third, `z`, may be given (default 0), and the shape is still
+  components; a third, `z`, may be given (default 0), and the region is still
   cut at `z = 0`.
 - **Lengths** take units: `radius = "5 mm"`, `center = ["10 cm", 0, 0]`.
 - **Angles** are plain numbers in degrees (or quantities, `"0.5 rad"`).
@@ -41,7 +41,7 @@ rhoE = "1 MW/m^3"
 region = {type = "sphere", center = [0, 0, 0], radius = "2 mm"}
 ```
 
-A region is a table: a primitive shape, or a boolean of regions, each with
+A region is a table: a primitive, or a boolean of regions, each with
 optional transforms, nested to any depth. Each has a **signed distance** φ,
 negative inside, that never exceeds the distance to its surface. Mallard uses it
 to skip cells far from the surface and to give [smooth edges](#smooth-edges)
@@ -57,19 +57,27 @@ their width.
 
 | `type` | Example |
 |---|---|
-| `sphere` (2D: `disk`, `circle`) | `{type = "sphere", center = [0, 0, 0], radius = 1}` |
-| `ellipsoid` (`ellipse`) | `{type = "ellipsoid", center = [0, 0, 0], semi_axes = [1, 0.5, 0.4]}` |
+| `sphere` (2D: also `disk`) | `{type = "sphere", center = [0, 0, 0], radius = 1}` |
+| `ellipsoid` | `{type = "ellipsoid", center = [0, 0, 0], semi_axes = [1, 0.5, 0.4]}` |
 | `cylinder` | `{type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.5, length = 2}` (no `length`: infinite) |
 | `cylinder`, annular | the same with `inner_radius = 0.3`: a pipe wall |
 | `annulus` (2D) | `{type = "annulus", center = [0, 0], radius = 1, inner_radius = 0.6}` |
 | `cone` (`frustum`) | `{type = "cone", base = [0, 0, 0], axis = [0, 0, 1], length = 1.5, base_radius = 0.8, top_radius = 0.3}` |
-| `box` (`rectangle`) | `{type = "box", center = [0, 0, 0], size = [2, 1, 0.5]}` |
+| `box` (2D: also `rectangle`) | `{type = "box", center = [0, 0, 0], size = [2, 1, 0.5]}` |
 | `torus` | `{type = "torus", center = [0, 0, 0], axis = [0, 0, 1], major_radius = 1, minor_radius = 0.25}` |
 | `half_space` | `{type = "half_space", point = [1, 0, 0], normal = [1, 0, 0]}`: the side `x < 1` |
 | `polygon` (2D) | `{type = "polygon", vertices = [[0, 0], [1, 0], [0.5, 1]]}` |
 | `implicit` | `{type = "implicit", f = "x^4 + y^4 + z^4 - 0.41"}`: where `f < 0` |
 
-In 2D, each shape is the `z = 0` slice; Mallard computes the cell volume
+Each type has one dimension, the same in every run: `circle` and `ellipse`
+are curves, and `disk`, `rectangle` and `polygon` are flat (areas in 2D,
+surfaces in 3D). Sources need regions of the run's full dimension, so 3D
+runs use `sphere`, `ellipsoid` and `box`; in 2D the `z = 0` slice of an
+`ellipsoid` is the area inside an ellipse. Older inputs with the former
+aliases (`circle` and `ellipse` for the filled regions, `disk` and
+`rectangle` in 3D) are rewritten by [`mallard upgrade-input`](input_files.md#inputs-from-older-releases).
+
+In 2D, each region is the `z = 0` slice; Mallard computes the cell volume
 fractions below on a coarse triangle mesh, with the exact outline drawn over them:
 
 ![Cell volume fractions of the 2D primitives on a coarse triangle mesh, with the exact outline](../images/guide/region-primitives-light.svg#gh-light-mode-only)
@@ -104,12 +112,12 @@ that order. `scale` and `rotate` act about `pivot` (default the origin).
 | Key | 2D | 3D |
 |---|---|---|
 | `scale` | a factor, or `[s_x, s_y]` | a factor, or `[s_x, s_y, s_z]` |
-| `rotate` | degrees, counterclockwise | `{axis = [...], angle = degrees}` (right-handed), or `{axes = [[...], [...], [...]]}`: the shape's x, y, z axes in world coordinates |
+| `rotate` | degrees, counterclockwise | `{axis = [...], angle = degrees}` (right-handed), or `{axes = [[...], [...], [...]]}`: the region's x, y, z axes in world coordinates |
 | `pivot` | center of `scale` and `rotate` | same |
 | `translate` | a displacement | same |
 
-Pitfall: without `pivot`, `rotate` turns the shape about the origin, which
-also moves it. To turn a shape in place, give its center as `pivot`.
+Pitfall: without `pivot`, `rotate` turns the region about the origin, which
+also moves it. To turn a region in place, give its center as `pivot`.
 
 **Boxes not aligned with the grid.** Rotate a box about its center: Mallard
 computes the fraction of each cell that the rotated box covers, so it needs no
@@ -123,7 +131,7 @@ region = {type = "rectangle", center = [0.5, 0.5], size = [0.66, 0.28], rotate =
 ![A rotated rectangle on an 18 by 18 Cartesian mesh: cells whose centroid is inside, Mallard's volume fractions, and the fractions with a smooth edge](../images/guide/geometry-rotated-box-light.svg#gh-light-mode-only)
 ![A rotated rectangle on an 18 by 18 Cartesian mesh: cells whose centroid is inside, Mallard's volume fractions, and the fractions with a smooth edge](../images/guide/geometry-rotated-box-dark.svg#gh-dark-mode-only)
 
-In 3D, rotate about an axis, or give the shape's own axes:
+In 3D, rotate about an axis, or give the region's own axes:
 
 ```toml
 region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2],
@@ -164,8 +172,8 @@ region = {type = "sphere", center = [0, 0, 0], radius = 2e-3, edge = 5e-4}
 region = {type = "implicit", f = "hypot(x - 0.5, y - 0.5) - 0.28 - 0.08 * cos(5 * atan2(y - 0.5, x - 0.5))"}
 ```
 
-Any shape `f(x, y, z) < 0`, in the [expression syntax](../input.md#regions).
-Implicit regions combine and transform like the others (`f` reads the shape's
+Any region `f(x, y, z) < 0`, in the [expression syntax](../input.md#regions).
+Implicit regions combine and transform like the others (`f` reads the region's
 local coordinates).
 
 Pitfalls:
@@ -207,32 +215,32 @@ region = {type = "union", regions = [
 In axisymmetric runs the fractions are weighted by the radius, so they are true
 volume fractions of the revolved cells.
 
-## Point sets and curves
+## Points and curves
 
 ```toml
 [[probes]]
 name = "wake"
 variables = ["U", "P"]
-shape = "arc"
+type = "arc"
 center = [0.0, 0.0]
 radius = 5.0
 angles = [-45.0, 45.0]
 n_points = 91
 ```
 
-Probes sample along a point set (`point`, `points`, `points_file`) or a curve
+Probes sample at points (`point`, `points`, `points_file`) or along a curve
 (`line`, `polyline`, `circle`, `arc`, `curve`). Keys:
 [`[[probes]]`](../input.md#probes).
 
-![The 2D probe shapes with the samples Mallard places on them; a ring marks each one's first sample](../images/guide/geometry-probes-light.svg#gh-light-mode-only)
-![The 2D probe shapes with the samples Mallard places on them; a ring marks each one's first sample](../images/guide/geometry-probes-dark.svg#gh-dark-mode-only)
+![The 2D probe types with the samples Mallard places on them; a ring marks each one's first sample](../images/guide/geometry-probes-light.svg#gh-light-mode-only)
+![The 2D probe types with the samples Mallard places on them; a ring marks each one's first sample](../images/guide/geometry-probes-dark.svg#gh-dark-mode-only)
 
 ![A tilted circle, a helix and a line in a 3D domain, with their samples](../images/guide/geometry-probes-3d-light.svg#gh-light-mode-only)
 ![A tilted circle, a helix and a line in a 3D domain, with their samples](../images/guide/geometry-probes-3d-dark.svg#gh-dark-mode-only)
 
 ### Where the samples go
 
-| `shape` | Samples |
+| `type` | Samples |
 |---|---|
 | `point`, `points`, `points_file` | the points as given, in order |
 | `line` | `n_points` evenly from `start` to `end`, both included |
@@ -247,7 +255,7 @@ centered at the origin, then translated. A sample outside the domain takes the
 nearest cell's average.
 
 Curve reductions (`mean`, `integral`, ...) integrate along the curve with three
-Gauss points between consecutive samples; point sets weigh each sample 1.
+Gauss points between consecutive samples; points weigh each sample 1.
 
 ### Cell averages or point values
 

@@ -125,7 +125,7 @@ double point_error(uint32_t n, const std::string & recon, const std::string & sa
         points << "]";
     }
     const std::string probe = "[[probes]]\nname = \"p\"\nfile = \"" + dir + "/p.csv\"\nvariables = [\"RHO\", \"T\"]\n"
-                              "sampling = \"" + sampling + "\"\nshape = \"points\"\npoints = [" + points.str() + "]\n";
+                              "sampling = \"" + sampling + "\"\ntype = \"points\"\npoints = [" + points.str() + "]\n";
     Solver solver;
     solver.init(parse_toml(box_case(n, SINE_RHO, recon, probe)));
     run(solver);
@@ -156,7 +156,7 @@ TEST(ProbesTest, CurvesHaveTheirLengthsAndFollowTheirTransforms) {
     };
     const std::string normal = N_DIM == 3 ? "normal = [0.0, 0.0, 1.0]\n" : "";
     const probe::Geometry circle = probe::make_geometry(
-        parse_toml("shape = \"circle\"\ncenter = " + numbers3("0.5", "0.5", "0.5") + "\nradius = 0.25\nn_points = 7\n" +
+        parse_toml("type = \"circle\"\ncenter = " + numbers3("0.5", "0.5", "0.5") + "\nradius = 0.25\nn_points = 7\n" +
                    normal),
         "circle");
     EXPECT_NEAR(length(circle), 2.0 * pi * 0.25, 1e-14);
@@ -166,7 +166,7 @@ TEST(ProbesTest, CurvesHaveTheirLengthsAndFollowTheirTransforms) {
     EXPECT_EQ(circle.polylines[0].front(), circle.polylines[0].back());
 
     const probe::Geometry arc = probe::make_geometry(
-        parse_toml("shape = \"arc\"\ncenter = " + numbers3("0", "0", "0") +
+        parse_toml("type = \"arc\"\ncenter = " + numbers3("0", "0", "0") +
                    "\nradius = 2.0\nangles = [90.0, 0.0]\nn_points = 5\n" + normal),
         "arc");
     EXPECT_NEAR(length(arc), pi, 1e-14);
@@ -176,7 +176,7 @@ TEST(ProbesTest, CurvesHaveTheirLengthsAndFollowTheirTransforms) {
 
     // x = s, y = s^2 over [0, 1]: (2 sqrt(5) + asinh(2)) / 4
     const probe::Geometry parabola = probe::make_geometry(
-        parse_toml(std::string("shape = \"curve\"\nx = \"s\"\ny = \"s^2\"\n") + (N_DIM == 3 ? "z = \"0.5\"\n" : "") +
+        parse_toml(std::string("type = \"curve\"\nx = \"s\"\ny = \"s^2\"\n") + (N_DIM == 3 ? "z = \"0.5\"\n" : "") +
                    "n_points = 41\n"),
         "parabola");
     EXPECT_NEAR(length(parabola), (2.0 * std::sqrt(5.0) + std::asinh(2.0)) / 4.0, 1e-7);
@@ -238,7 +238,7 @@ TEST(ProbesTest, CurveReductionsAreExactForPolynomialFields) {
     auto f = [](double x, double y) { return 2.0 + 0.3 * x - 0.2 * y + 0.25 * x * x + 0.15 * x * y - 0.1 * y * y; };
     const std::string dir = fresh_dir("exact");
     const std::string probe = "[[probes]]\nname = \"poly\"\nfile = \"" + dir + "/poly.csv\"\nvariables = [\"RHO\", \"P\"]\n"
-                              "sampling = \"point\"\nshape = \"polyline\"\nvertices = [" +
+                              "sampling = \"point\"\ntype = \"polyline\"\nvertices = [" +
                               numbers3("0.35", "0.42", "0.45") + ", " + numbers3("0.62", "0.57", "0.45") + ", " +
                               numbers3("0.48", "0.66", "0.45") + "]\nn_points = 4\n"
                               "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
@@ -290,7 +290,7 @@ TEST(ProbesTest, TimeIntervalsLandOnTheirTimes) {
 
 TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
     const std::string dir = fresh_dir("formats");
-    const std::string geometry = "shape = \"circle\"\ncenter = " + numbers3("0.5", "0.5", "0.5") +
+    const std::string geometry = "type = \"circle\"\ncenter = " + numbers3("0.5", "0.5", "0.5") +
                                  "\nradius = 0.3\nn_points = 12\n" + (N_DIM == 3 ? "normal = [1.0, 1.0, 1.0]\n" : "") +
                                  "variables = [\"RHO\", \"U\"]\nsampling = \"point\"\ninterval = 2\n";
     auto probes = [&](const std::string & sub) {
@@ -380,7 +380,7 @@ TEST(ProbesTest, Hdf5ProbesAndAsynchronousHdf5OutputShareTheLibrary) {
     const std::string dir = fresh_dir("async");
     const uint64_t n_steps = 40;
     const std::string extra = "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" + dir + "/h.h5\"\n"
-                              "variables = [\"RHO\", \"U\", \"P\"]\nshape = \"circle\"\ncenter = " +
+                              "variables = [\"RHO\", \"U\", \"P\"]\ntype = \"circle\"\ncenter = " +
                               numbers3("0.5", "0.5", "0.5") + "\nradius = 0.3\nn_points = 64\n" +
                               (N_DIM == 3 ? "normal = [0.0, 0.0, 1.0]\n" : "") +
                               "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"hdf5\"\ninterval = 1\n"

@@ -1,0 +1,1 @@
+- `mallard upgrade-input` changes renamed options in place inside inline tables, keeping the file's layout, and takes the case's dimension from its mesh (`--dim 2|3` states it) for renames that depend on it (#499).

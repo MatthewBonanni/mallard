@@ -521,8 +521,8 @@ def probe_inputs(probes, dim):
     out = ""
     for k, entry in enumerate(probes):
         name, keys = entry[0], entry[1]
-        shape = name.split(",")[0]
-        out += (f'[[probes]]\nname = "p{k}"\nvariables = ["RHO"]\nshape = "{shape}"\n{keys}\n'
+        kind = name.split(",")[0]
+        out += (f'[[probes]]\nname = "p{k}"\nvariables = ["RHO"]\ntype = "{kind}"\n{keys}\n'
                 f'file = "p{k}.csv"\n')
     return out
 
@@ -663,7 +663,7 @@ name = "p"
 file = "{name}.csv"
 variables = ["RHO"]
 sampling = "{sampling}"
-shape = "points"
+type = "points"
 points = [{pts}]
 {PHYSICS}""")
             rows = [r for r in probe_rows(work / f"{name}.csv") if r["step"] == 0]

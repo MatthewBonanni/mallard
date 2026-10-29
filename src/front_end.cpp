@@ -283,6 +283,14 @@ int main(int argc, char ** argv) {
         args.erase(args.begin() + std::ptrdiff_t(i), args.begin() + std::ptrdiff_t(i) + 2);
         break;
     }
+    if (!args.empty() && args[0] == "upgrade-input") {
+        // Any solver upgrades an input; some renames depend on the case's dimension
+        for (size_t i = 1; dim == 0 && i < args.size(); i++) {
+            if (args[i].rfind('-', 0) != 0) dim = input_dimension(args[i]).dim;
+        }
+        if (dim != 0) args.insert(args.begin() + 1, {"--dim", std::to_string(dim)});
+        dim = 0;
+    }
     const fs::path bin = executable_path().parent_path();
     if (!args.empty() && args[0] == "test") {
         args.erase(args.begin());

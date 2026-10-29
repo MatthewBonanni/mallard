@@ -170,3 +170,26 @@ TEST(InputUpgradeTest, KeysAreDeprecatedForAtLeastOneMinorReleaseBeforeRemoval) 
     for (const auto & rule : input_upgrade::rules().keys) check(rule.from, rule.since, rule.removed);
     for (const auto & rule : input_upgrade::rules().options) check(rule.key, rule.since, rule.removed);
 }
+
+TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
+    const std::string region = "[[sources]]\n"
+                               "rhoE = 1\n"
+                               "region = {type = \"union\", regions = [{type = \"circle\", center = [0, 0], radius = 1},\n"
+                               "          {type = \"ellipse\", center = [0, 0], semi_axes = [1, 2]}]}\n";
+    const std::string probe = "[[probes]]\nname = \"p\"\nshape = \"circle\"   # sampled\n";
+    std::vector<Finding> findings;
+    bool reformatted = false;
+    const std::string out = input_upgrade::upgrade_text(region + probe, findings, reformatted);
+    EXPECT_FALSE(reformatted);
+    EXPECT_EQ(out, "[[sources]]\n"
+                   "rhoE = 1\n"
+                   "region = {type = \"union\", regions = [{type = \"" + std::string(N_DIM == 2 ? "disk" : "sphere") +
+                       "\", center = [0, 0], radius = 1},\n"
+                       "          {type = \"ellipsoid\", center = [0, 0], semi_axes = [1, 2]}]}\n"
+                       "[[probes]]\nname = \"p\"\ntype = \"circle\"   # sampled\n");
+    EXPECT_EQ(findings.size(), 3u);
+
+    // Without the case's dimension, a rename that depends on it is an error
+    EXPECT_THROW(input_upgrade::upgrade_text(region, findings, reformatted, input_upgrade::rules(), 0), InputError);
+    EXPECT_NO_THROW(input_upgrade::upgrade_text(probe, findings, reformatted, input_upgrade::rules(), 0));
+}

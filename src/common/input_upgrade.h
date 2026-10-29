@@ -23,8 +23,9 @@ namespace input_upgrade {
 
 /**
  * @brief A key renamed, moved to another table, or removed. Paths are dotted;
- *        `name[]` stands for every table of the array of tables `name`, and
- *        `to` has the same `[]` steps as `from` (the same element).
+ *        `name[]` stands for every table of the array of tables `name`,
+ *        `**` for any number of nested tables and their arrays, and `to`
+ *        has the same `[]` steps as `from` (the same element).
  */
 struct KeyRule {
     std::string from;
@@ -41,6 +42,7 @@ struct OptionRule {
     std::string key;
     std::string from, to;
     std::string since, removed, note;
+    int dim = 0;  ///< The only dimension of runs it applies to; 0: every run
 };
 
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */
@@ -78,13 +80,15 @@ std::vector<Finding> apply(Input & input, const std::string & version = "", cons
  *        ones), changing only the lines of those keys: a renamed key keeps its
  *        line, value and comment; a moved key goes to the end of its new table;
  *        a removed key is commented out with a note. Where that is not
- *        possible (dotted keys, inline tables), the whole file is reformatted,
- *        and `reformatted` is set. `findings` gets every change.
+ *        possible (renamed or moved dotted keys, or keys of inline tables),
+ *        the whole file is reformatted, and `reformatted` is set. `findings`
+ *        gets every change. `dim` is the case's dimension (0: unknown, an
+ *        error if a rule of one dimension matches).
  */
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
-                         bool & reformatted, const Rules & table = rules());
+                         bool & reformatted, const Rules & table = rules(), int dim = N_DIM);
 
-/** @brief `mallard upgrade-input [--check] old.toml > new.toml`; arguments after the command name. */
+/** @brief `mallard upgrade-input [--check] [--dim 2|3] old.toml > new.toml`; arguments after the command name. */
 int main(int argc, char ** argv);
 
 } // namespace input_upgrade

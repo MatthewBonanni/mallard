@@ -81,11 +81,11 @@ act.
 
 ### Regions
 
-A region is a shape — sphere, cylinder (solid or annular), cone, box, torus,
-half-space, polygon, any implicit `f(x, y, z) < 0` — or a union, intersection
-or difference of shapes, each scaled, rotated and translated. Shapes need not
+A region is a primitive — sphere, cylinder (solid or annular), cone, box, torus,
+half-space, polygon (2D), any implicit `f(x, y, z) < 0` — or a union, intersection
+or difference of regions, each scaled, rotated and translated. Regions need not
 follow the mesh: each cell gets its volume fraction, so a coarse mesh sees the
-right amount of the shape instead of a staircase of whole cells. `edge` (on the
+right amount of the region instead of a staircase of whole cells. `edge` (on the
 outermost region) smooths the boundary over a band of that width, so that a
 source switches on gradually and excites fewer grid-scale waves.
 
@@ -99,7 +99,7 @@ region = {type = "difference",
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-light.svg#gh-light-mode-only)
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-dark.svg#gh-dark-mode-only)
 
-Every shape, boolean and transform, with figures: [Geometry](geometry.md#regions).
+Every primitive, boolean and transform, with figures: [Geometry](geometry.md#regions).
 
 ### Exact totals
 
@@ -168,7 +168,7 @@ conditions alone may reflect them or let reversed flow in.
 | `X` or `Y`, `balance` | — | Mixtures: reference composition |
 
 Several sponges add up. Strength and reference are evaluated once, at cell
-centroids; a comparison in `strength` gives the layer any shape
+centroids; a comparison in `strength` gives the layer any extent
 ([Geometry](geometry.md#who-uses-what)). The source is explicit and caps the time step at
 `1 / max(strength)`. Example: `channel_inflow_retau180`, a sponge over the last
 fifth of the channel in front of its `nscbc_outlet`.

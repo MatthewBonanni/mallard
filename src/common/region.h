@@ -3,7 +3,7 @@
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Regions of space by constructive solid geometry: primitives,
  *        transforms and booleans, evaluated with the same code on the host and
- *        in device kernels, and their volume fractions in mesh cells.
+ *        in device kernels, and the fraction of each mesh cell inside them.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -46,7 +46,7 @@ struct Node {
     double m[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     double d[3] = {0.0, 0.0, 0.0};
     double scale = 1.0;
-    double p[4] = {0.0, 0.0, 0.0, 0.0};  // shape parameters (see region.cpp)
+    double p[4] = {0.0, 0.0, 0.0, 0.0};  // primitive parameters (see region.cpp)
 };
 
 namespace detail {
@@ -253,13 +253,13 @@ class Region {
 };
 
 /**
- * @brief Volume fraction of the region in every cell of the mesh (owned and
- *        halo): the cell average of its indicator, sampled on the cell's
- *        simplices subdivided adaptively where the surface or smooth edge
- *        crosses them (r-weighted in axisymmetric runs). Exactly 1 in cells
- *        entirely inside, 0 in cells entirely outside.
+ * @brief Fraction of every cell of the mesh (owned and halo) inside the
+ *        region, by volume (area in 2D): the cell average of its indicator,
+ *        sampled on the cell's simplices subdivided adaptively where the
+ *        surface or smooth edge crosses them (r-weighted in axisymmetric
+ *        runs). Exactly 1 in cells entirely inside, 0 in cells entirely outside.
  */
-std::vector<double> volume_fractions(const Mesh & mesh, const Region & region);
+std::vector<double> cell_fractions(const Mesh & mesh, const Region & region);
 
 } // namespace region
 

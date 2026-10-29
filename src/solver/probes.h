@@ -1,7 +1,7 @@
 /**
  * @file probes.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief [[probes]]: samples of the solution on point sets and curves, as
+ * @brief [[probes]]: samples of the solution on points and curves, as
  *        cell averages or high-order point values, written raw (CSV, HDF5,
  *        VTK) or reduced (integrals, means, extrema).
  * @version 0.2

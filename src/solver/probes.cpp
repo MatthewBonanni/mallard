@@ -1,7 +1,7 @@
 /**
  * @file probes.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief [[probes]]: samples of the solution on point sets and curves.
+ * @brief [[probes]]: samples of the solution on points and curves.
  * @version 0.2
  * @date 2026-10-15
  *
@@ -114,7 +114,7 @@ std::vector<std::string> expand_variables(const std::vector<std::string> & liste
 
 /**
  * @brief A VTK XML PolyData file with its arrays appended raw: the points
- *        of the samples, as vertices (point sets) or polylines (curves), and
+ *        of the samples, as vertices (points) or polylines (curves), and
  *        one point-data array per variable.
  */
 void write_vtp_file(const std::string & file, const probe::Geometry & g, const std::vector<std::string> & names,
@@ -736,7 +736,7 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         std::string vars;
         for (const auto & v : p.variables) vars += (vars.empty() ? "" : ", ") + v;
         const size_t n = p.geometry.nodes.size();
-        std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.shape + " of " +
+        std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.type + " of " +
                            logging::count(n) + (n == 1 ? " point" : " points") +
                            (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
                                            : " every t = " + logging::real(double(p.time_interval))) +

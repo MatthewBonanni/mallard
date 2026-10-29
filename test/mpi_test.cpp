@@ -729,7 +729,7 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
     auto probes = [&](const std::string & sub) {
         const std::string at = "file = \"" + dir + "/" + sub;
         return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nvariables = [\"RHO\", \"U\", \"T\", \"H\"]\n"
-               "sampling = \"point\"\nshape = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
+               "sampling = \"point\"\ntype = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
                "interval = 5\nreductions = [\"integral\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_" + at +
                "/circle_red.csv\"\n"
                "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nvariables = [\"P\"]\n"
@@ -940,7 +940,7 @@ TEST(MPITest, CurvedWallsMatchSerial) {
     // Walls from P3 lines of the file, or projected onto circles; the HDF5
     // copy of the file keeps the P3 lines
     const char * shapes = "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
-                          "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
+                          "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
     for (int order : {1, 3}) {
         const std::string file =
             write_temp_shared("mallard_mpi_annulus_" + std::to_string(order) + ".msh", annulus_gmsh(5, 60, order, order == 3));

@@ -158,7 +158,7 @@ PRIMITIVES = [
      lambda x, y: np.hypot(x - 0.5, y - 0.5) < 0.32),
     ("annulus", '{type = "annulus", center = [0.5, 0.5], radius = 0.38, inner_radius = 0.2}',
      lambda x, y: (np.hypot(x - 0.5, y - 0.5) < 0.38) & (np.hypot(x - 0.5, y - 0.5) > 0.2)),
-    ("ellipse, rotated", '{type = "ellipse", center = [0, 0], semi_axes = [0.4, 0.18], rotate = 30, '
+    ("ellipsoid (slice), rotated", '{type = "ellipsoid", center = [0, 0], semi_axes = [0.4, 0.18], rotate = 30, '
      'translate = [0.5, 0.5]}',
      lambda x, y: (_rot(x, y, 30)[0] / 0.4) ** 2 + (_rot(x, y, 30)[1] / 0.18) ** 2 < 1),
     ("rectangle, rotated", '{type = "rectangle", center = [0.5, 0.5], size = [0.6, 0.3], rotate = -25, '
