@@ -463,7 +463,7 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
 #ifdef Mallard_HAS_HDF5
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_shell").string();
     std::filesystem::remove_all(dir);
-    const double tol = 64 * std::numeric_limits<rtype>::epsilon();
+    const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
     for (bool prisms : {false, true}) {
         const std::string file = write_temp("vtkhdf_shell.msh", shell_gmsh(3, 3, prisms, false));
         Solver solver;

@@ -800,7 +800,7 @@ TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_curved").string();
     std::filesystem::remove_all(dir);
     constexpr uint32_t N_T = 24;
-    const double tol = 64 * std::numeric_limits<rtype>::epsilon();
+    const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
     for (bool triangles : {false, true}) {
         const std::string file = write_temp("vtkhdf_annulus.msh", annulus_gmsh(3, N_T, 1, triangles));
         Solver solver;
