@@ -517,7 +517,7 @@ struct Evaluator {
             int32_t cut = -1;
             for (uint32_t k = 1; k < n_layers; k++) {
                 const Layer & L = layers(k);
-                status[k] = L.center ? POINT : classify(L, s, c, r);
+                status[k] = L.center ? uint8_t{POINT} : classify(L, s, c, r);
                 if (status[k] == CUT || status[k] == BAND) refine = true;
                 if (status[k] == CUT && cut < 0) cut = static_cast<int32_t>(k);
             }
