@@ -9,7 +9,8 @@ release, and `mallard upgrade-input old.toml > new.toml` rewrites old inputs
 ([deprecation policy and changed keys](guide/input_files.md#inputs-from-older-releases)).
 
 The spatial dimension is fixed at build time with the CMake option
-`-DMallard_DIM=2` (default) or `3`. Vectors in the input (`u`, `gravity`,
+`-DMallard_DIM=2` (default) or `3`, which builds `mallard2d` or `mallard3d`;
+`mallard` runs the one of the case's mesh ([Meshes](guide/meshes.md)). Vectors in the input (`u`, `gravity`,
 `rhou`) have that many components, and expressions are in `x`, `y`, `z`
 (`z` is 0 in 2D) and, where noted, `t`, in one language for every section:
 [Expressions](guide/input_files.md#expressions). Below, `[u_x, u_y]` reads

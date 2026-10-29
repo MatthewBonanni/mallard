@@ -26,7 +26,7 @@
 
 set -u
 
-MALLARD=mallard                    # <mallard, mallard3d, or the path to the executable>
+MALLARD=mallard                    # <mallard, or the path to it>
 INPUT=input.toml
 RESTARTS='restart_*.restart'       # <the restart files the run writes; the newest is resumed from>
 MAX_JOBS=20                        # resubmit at most this many times

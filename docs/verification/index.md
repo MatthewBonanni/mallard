@@ -13,7 +13,7 @@ other measurements are in [Numerical methods](../numerics/overview.md).
 
 ## How the tables are made
 
-Each study is a test of `mallard-test` that computes an error on two
+Each study is a test of the test suite (`mallard-test2d`, `mallard-test3d`) that computes an error on two
 resolutions $n_1 < n_2$ (cells per side, or time steps) and checks the
 observed order
 
@@ -40,10 +40,10 @@ and cell types, too slow for every run, is instantiated as
 precision, on the meshes of a few seconds' run.
 
 **Regenerating** (on every release, and with any change to a scheme): build
-`mallard-test` in 2D and 3D, then
+the test suite in 2D and 3D, then
 
 ```bash
-python tools/docs/verification.py --test build-2/test/mallard-test build-3/test/mallard-test
+python tools/docs/verification.py --test build-2/test/mallard-test2d build-3/test/mallard-test3d
 ```
 
 (about 10 minutes on 4 cores; `--jobs` sets the number of test processes).
