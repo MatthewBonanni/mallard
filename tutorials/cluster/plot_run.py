@@ -70,7 +70,7 @@ def main():
         fig, (ax, bx) = plt.subplots(2, 1, figsize=(8.6, 5.8), gridspec_kw={"height_ratios": [1.1, 1]})
         pc = PolyCollection(polys, array=rho, cmap="viridis", edgecolors="none", antialiased=False, rasterized=True)
         ax.add_collection(pc)
-        fig.colorbar(pc, ax=ax, shrink=0.9, label="density", pad=0.01)
+        fig.colorbar(pc, ax=ax, shrink=0.9, label="density", pad=0.025)
         if n_ranks > 1:
             ax.tricontour(c[:, 0], c[:, 1], rank, levels=np.arange(n_ranks - 1) + 0.5, colors=[t["surface"]],
                           linewidths=1.4, linestyles="--")
