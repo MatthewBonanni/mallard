@@ -172,23 +172,14 @@ std::string Args::value_or(std::string_view name, const std::string & fallback) 
     return it == values.end() ? fallback : it->second;
 }
 
-const Command * find(const std::vector<std::string> & args, size_t & words_used, const Alias ** alias) {
+const Command * find(const std::vector<std::string> & args, size_t & words_used) {
     const Command * best = nullptr;
     words_used = 0;
-    if (alias) *alias = nullptr;
     for (const Command & c : commands()) {
         const size_t n = matches(c.name, args);
         if (n > words_used) {
             best = &c;
             words_used = n;
-        }
-    }
-    for (const Alias & a : aliases()) {
-        const size_t n = matches(a.name, args);
-        if (n > words_used) {
-            best = command(a.command);
-            words_used = n;
-            if (alias) *alias = &a;
         }
     }
     if (best) return best;
@@ -302,18 +293,13 @@ int usage_error(const Command & command, const std::string & message) {
 int main(int argc, char ** argv) {
     const std::vector<std::string> args(argv + 1, argv + argc);
     size_t n = 0;
-    const Alias * alias = nullptr;
-    const Command * command = find(args, n, &alias);
+    const Command * command = find(args, n);
     if (!command) {
         for (const Family & f : families()) {
             if (args[0] == f.name) return family_main(f, {args.begin() + 1, args.end()});
         }
         std::cerr << "mallard: unknown command " << args[0] << " (see mallard --help)\n";
         return 2;
-    }
-    if (alias) {
-        (std::any_of(args.begin(), args.end(), [](const std::string & a) { return is_help(a); }) ? std::cout : std::cerr)
-            << "mallard " << alias->name << " is deprecated: use " << title(*command) << "\n";
     }
     Args parsed;
     parsed.argc = argc;

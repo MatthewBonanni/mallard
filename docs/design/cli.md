@@ -19,7 +19,7 @@ Maintain  mallard test | completion | --version
 |---|---|---|
 | `mallard -i input.toml`, `ctl`, `reactor` | Run | available |
 | `--restart latest` | Run | planned ([#510](https://github.com/MatthewBonanni/mallard/issues/510)) |
-| `new`, `input upgrade` | Set up | available (`upgrade-input` is a deprecated alias of `input upgrade`) |
+| `new`, `input upgrade` | Set up | available |
 | `input resolve` | Set up | planned ([#509](https://github.com/MatthewBonanni/mallard/issues/509)) |
 | `check input.toml` | Inspect | available |
 | `check` with no input | Inspect | planned ([#508](https://github.com/MatthewBonanni/mallard/issues/508)) |
@@ -48,9 +48,9 @@ Maintain  mallard test | completion | --version
   `--mesh-fields`, not a command of their own; there is one field registry;
   regions describe all geometry; catalogs (fields, species, templates, keys)
   are under `mallard list`.
-- **Renames keep the old name** as a deprecated alias for at least one minor
-  release: it runs the command and prints `mallard <old> is deprecated: use
-  mallard <new>` (on stderr; on stdout above the page for `--help`).
+- **Renaming a released command keeps the old name** as a deprecated alias
+  for at least one minor release, which runs the command with a notice naming
+  the new one. A command renamed before any release shipped it needs none.
 - **One table.** Every command is a row of the command table
   (`cli::commands()` in `src/commands.cpp`): its group, one-line summary,
   synopsis, description, options, arguments, examples, exit status, how the

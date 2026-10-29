@@ -24,8 +24,6 @@ A few things hold for every command:
 - **Parallel runs:** start `mallard` under `mpirun` (or `srun`); Kokkos options
   (`--kokkos-num-threads=8`, `--kokkos-device-id=1`) go after the command
   ([Running in parallel](parallel.md)).
-- **Renamed commands** keep working for at least one release, with a notice
-  naming the new one: `mallard upgrade-input` is now `mallard input upgrade`.
 
 How the commands are laid out, and which are planned:
 [design notes](../design/cli.md).

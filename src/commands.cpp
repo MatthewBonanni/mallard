@@ -318,10 +318,6 @@ constexpr Command COMMANDS[] = {
     },
 };
 
-constexpr Alias ALIASES[] = {
-    {"upgrade-input", "input upgrade"},
-};
-
 constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
     {"mesh", "Commands on meshes."},
@@ -332,7 +328,6 @@ constexpr std::string_view GROUPS[] = {"Run", "Set up", "Inspect", "Mesh", "Post
 } // namespace
 
 std::span<const Command> commands() { return COMMANDS; }
-std::span<const Alias> aliases() { return ALIASES; }
 std::span<const Family> families() { return FAMILIES; }
 std::span<const std::string_view> groups() { return GROUPS; }
 std::span<const Option> global_options() { return GLOBAL_OPTIONS; }

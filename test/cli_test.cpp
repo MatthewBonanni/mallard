@@ -131,7 +131,6 @@ TEST(CliTest, EveryCommandIsComplete) {
             })) << "no family " << w[0];
         }
     }
-    for (const cli::Alias & a : cli::aliases()) EXPECT_NE(cli::command(a.command), nullptr) << a.name;
 }
 
 TEST(CliTest, HelpOfEveryCommandCoversItsOptions) {
@@ -202,20 +201,6 @@ TEST(CliTest, UnknownOptionIsOneLinePointingAtHelp) {
     const Result r = run({"no-such-command"});
     EXPECT_EQ(r.status, 2);
     EXPECT_EQ(r.err, "mallard: unknown command no-such-command (see mallard --help)\n");
-}
-
-TEST(CliTest, DeprecatedAliasRunsItsCommandWithANotice) {
-    SKIP_UNDER_MPI();
-    for (const cli::Alias & a : cli::aliases()) {
-        const std::string notice = "mallard " + std::string(a.name) + " is deprecated: use mallard " +
-                                   std::string(a.command) + "\n";
-        const Result help = run({std::string(a.name), "--help"});
-        EXPECT_EQ(help.status, 0);
-        EXPECT_TRUE(help.out.starts_with(notice)) << help.out;
-        const Result error = run({std::string(a.name), "--no-such-option"});
-        EXPECT_EQ(error.status, 2);
-        EXPECT_TRUE(error.err.starts_with(notice)) << error.err;
-    }
 }
 
 TEST(CliTest, UserDocsShowEveryHelpPage) {

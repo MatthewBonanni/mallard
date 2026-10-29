@@ -78,14 +78,6 @@ struct Command {
 };
 
 /**
- * @brief An old name kept working for a command, with a notice.
- */
-struct Alias {
-    std::string_view name;
-    std::string_view command;
-};
-
-/**
  * @brief A noun that groups commands (`mallard mesh convert`).
  */
 struct Family {
@@ -95,8 +87,6 @@ struct Family {
 
 /** @brief Every command, in the order of the top-level page within each group. */
 std::span<const Command> commands();
-/** @brief Deprecated names of commands. */
-std::span<const Alias> aliases();
 /** @brief Command families. */
 std::span<const Family> families();
 /** @brief Groups of the top-level page, in order. */
@@ -106,12 +96,11 @@ std::span<const Option> global_options();
 
 /**
  * @brief The command the arguments name: the longest run of leading words
- *        that is a command or alias name; the run command when they name none.
+ *        that is a command name; the run command when they name none.
  * @param words set to the number of words naming it.
- * @param alias set to the alias used, or nullptr.
  * @return nullptr when the first argument is a word that names no command.
  */
-const Command * find(const std::vector<std::string> & args, size_t & words, const Alias ** alias = nullptr);
+const Command * find(const std::vector<std::string> & args, size_t & words);
 
 /** @brief The command of this name, or nullptr. */
 const Command * command(std::string_view name);
