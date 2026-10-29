@@ -25,6 +25,7 @@
 
 #include "comm.h"
 #include "common_io.h"
+#include "field_units.h"
 #include "file_format.h"
 #include "input.h"
 #include "log.h"
@@ -50,12 +51,21 @@ void make_parent(const std::string & file) {
     if (!parent.empty()) std::filesystem::create_directories(parent);
 }
 
-std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume, const std::string & header) {
+/** @brief A CSV file with a header of columns and their units, or the end of an existing one (resume). */
+std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume,
+                                        const std::vector<std::pair<std::string, Dimension>> & columns) {
     if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     make_parent(file);
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
     if (!out->good()) throw std::runtime_error("Could not open " + file + ".");
-    if (!resume) *out << header << "\n";
+    if (!resume) {
+        std::vector<Dimension> units;
+        for (size_t i = 0; i < columns.size(); i++) {
+            *out << (i ? "," : "") << columns[i].first;
+            units.push_back(columns[i].second);
+        }
+        *out << "\n" << field_units::csv_line(units) << "\n";
+    }
     return out;
 }
 
@@ -172,13 +182,23 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
         offset += sizeof(uint64_t) + a.bytes.size();
     };
     const char * cells = g.dim == 0 ? "Verts" : "Lines";
+    std::vector<std::string> point_names;
+    std::vector<FieldDescription> descriptions;
+    for (size_t a = 3; a < arrays.size(); a++) {
+        point_names.push_back(arrays[a].name);
+        descriptions.push_back(arrays[a].name == "arc_length" ? FieldDescription{dim::length, "arc length", "", ""}
+                                                              : field_units::describe(arrays[a].name));
+    }
+    // Field data belongs to the data set, before the piece, for VTK to read it
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
-           "header_type=\"UInt64\">\n  <PolyData>\n    <Piece NumberOfPoints=\""
+           "header_type=\"UInt64\">\n  <PolyData>\n";
+    out << "    <FieldData>\n      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
+           "format=\"ascii\">"
+        << file_format::PROBE_OUTPUT.version << "</DataArray>\n"
+        << field_units::vtk_field_data(point_names, descriptions, "      ") << "    </FieldData>\n";
+    out << "    <Piece NumberOfPoints=\""
         << n << "\" NumberOfVerts=\"" << (g.dim == 0 ? offsets.size() : 0) << "\" NumberOfLines=\""
         << (g.dim == 0 ? 0 : offsets.size()) << "\" NumberOfStrips=\"0\" NumberOfPolys=\"0\">\n";
-    out << "      <FieldData>\n        <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
-           "format=\"ascii\">"
-        << file_format::PROBE_OUTPUT.version << "</DataArray>\n      </FieldData>\n";
     out << "      <Points>\n";
     data_array(arrays[0]);
     out << "      </Points>\n      <" << cells << ">\n";
@@ -419,17 +439,25 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
 
         on_root(distributed, [&] {
             if (p.write_samples && p.format == Format::CSV) {
-                std::string header = "step,t,point";
-                for (size_t d = 0; d < N_DIM; d++) header += std::string(",") + "xyz"[d];
-                for (const auto & v : p.variables) header += "," + v;
-                p.out = open_csv(p.file, resume, header);
+                std::vector<std::pair<std::string, Dimension>> columns = {
+                    {"step", dim::none}, {"t", dim::time}, {"point", dim::none}};
+                for (size_t d = 0; d < N_DIM; d++) columns.emplace_back(std::string(1, "xyz"[d]), dim::length);
+                for (const auto & v : p.variables) columns.emplace_back(v, field_units::describe(v).dimension);
+                p.out = open_csv(p.file, resume, columns);
             }
             if (!p.reductions.empty()) {
-                std::string header = std::string("step,t,") + (p.geometry.dim == 0 ? "count" : "length");
+                const bool curve = p.geometry.dim > 0;
+                std::vector<std::pair<std::string, Dimension>> columns = {
+                    {"step", dim::none}, {"t", dim::time}, {curve ? "length" : "count", curve ? dim::length : dim::none}};
                 for (const Reduction r : p.reductions) {
-                    for (const auto & v : p.variables) header += "," + reduction_name(r) + "_" + v;
+                    for (const auto & v : p.variables) {
+                        const Dimension d = field_units::describe(v).dimension;
+                        // Integrals along curves are per unit length; over point sets, sums
+                        columns.emplace_back(reduction_name(r) + "_" + v,
+                                             r == Reduction::INTEGRAL && curve ? d.times(dim::length) : d);
+                    }
                 }
-                p.out_reductions = open_csv(p.reductions_file, resume, header);
+                p.out_reductions = open_csv(p.reductions_file, resume, columns);
             }
 #ifdef Mallard_HAS_HDF5
             if (p.write_samples && p.format == Format::HDF5 && output_files_enabled() &&
@@ -448,8 +476,10 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 std::vector<double> xyz;
                 for (const auto & x : p.geometry.nodes) xyz.insert(xyz.end(), x.begin(), x.end());
                 h5::write_rows(file, "coordinates", n, N_DIM, 0, n, xyz.data(), H5P_DEFAULT);
+                h5::annotate(file, "coordinates", FieldDescription{dim::length, "sample coordinates", "", ""});
                 if (!p.geometry.arc_length.empty()) {
                     h5::write_rows(file, "arc_length", n, 1, 0, n, p.geometry.arc_length.data(), H5P_DEFAULT);
+                    h5::annotate(file, "arc_length", FieldDescription{dim::length, "arc length", "", ""});
                     std::vector<uint64_t> nodes, offsets = {0};
                     for (const auto & line : p.geometry.polylines) {
                         nodes.insert(nodes.end(), line.begin(), line.end());
@@ -476,7 +506,12 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 };
                 extensible("step", H5T_STD_U64LE, 0);
                 extensible("time", H5T_IEEE_F64LE, 0);
-                for (const auto & v : p.variables) extensible("fields/" + v, H5T_IEEE_F64LE, n);
+                h5::annotate(file, "step", FieldDescription{dim::none, "time step", "", ""});
+                h5::annotate(file, "time", FieldDescription{dim::time, "time", "", ""});
+                for (const auto & v : p.variables) {
+                    extensible("fields/" + v, H5T_IEEE_F64LE, n);
+                    h5::annotate(file, "fields/" + v, field_units::describe(v));
+                }
             }
 #endif
         });

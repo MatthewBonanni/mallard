@@ -256,9 +256,10 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     }
     for (const char * csv : {"/integrals.csv", "/probe.csv"}) {
         const auto rows = lines(dir + csv);
-        ASSERT_GE(rows.size(), 3u) << csv;
+        ASSERT_GE(rows.size(), 4u) << csv;
         EXPECT_EQ(rows[0].rfind("step,t", 0), 0u) << csv;
-        EXPECT_EQ(provenance::parse_comment(rows[1]), expected) << csv;
+        EXPECT_EQ(rows[1].rfind("# units: ", 0), 0u) << csv;
+        EXPECT_EQ(provenance::parse_comment(rows[2]), expected) << csv;
     }
     EXPECT_EQ(json_reader::parse(lines(dir + "/run.jsonl").front())["provenance"].keys(), p.keys());
     EXPECT_NE(lines(dir + "/run.jsonl").front().find(expected), std::string::npos);
@@ -288,7 +289,7 @@ TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
     // Each part of a monitor file follows the provenance of the run that wrote it
     std::vector<std::string> blocks;
     for (const auto & row : lines(dir + "/integrals.csv")) {
-        if (row[0] == '#') blocks.push_back(provenance::parse_comment(row));
+        if (row.rfind("# provenance ", 0) == 0) blocks.push_back(provenance::parse_comment(row));
     }
     EXPECT_EQ(blocks, (std::vector<std::string>{first, second}));
     std::vector<std::string> starts;

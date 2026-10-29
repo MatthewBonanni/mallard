@@ -27,6 +27,7 @@
 
 #include "comm.h"
 #include "compression.h"
+#include "field_units.h"
 
 namespace h5 {
 
@@ -359,6 +360,44 @@ inline std::vector<std::string> read_strings_attribute(hid_t object, const char 
         strings.emplace_back(s, std::find(s, s + width, '\0'));
     }
     return strings;
+}
+
+/** @brief Scalar variable-length UTF-8 string attribute (as netCDF-4 writes text attributes). */
+inline void write_string_attribute(hid_t object, const char * name, const std::string & value) {
+    Handle type(H5Tcopy(H5T_C_S1), H5Tclose, "H5Tcopy");
+    check(H5Tset_size(type, H5T_VARIABLE), "H5Tset_size");
+    check(H5Tset_cset(type, H5T_CSET_UTF8), "H5Tset_cset");
+    Handle space(H5Screate(H5S_SCALAR), H5Sclose, "H5Screate");
+    Handle attr(H5Acreate2(object, name, type, space, H5P_DEFAULT, H5P_DEFAULT), H5Aclose, name);
+    const char * text = value.c_str();
+    check(H5Awrite(attr, type, &text), name);
+}
+
+/** @brief A scalar string attribute, fixed or variable length. */
+inline std::string read_string_attribute(hid_t object, const char * name) {
+    Handle attr(H5Aopen(object, name, H5P_DEFAULT), H5Aclose, name);
+    Handle type(H5Aget_type(attr), H5Tclose, "H5Aget_type");
+    if (H5Tis_variable_str(type) > 0) {
+        Handle memory_type(H5Tcopy(type), H5Tclose, "H5Tcopy");
+        char * text = nullptr;
+        check(H5Aread(attr, memory_type, &text), name);
+        std::string value = text ? text : "";
+        H5free_memory(text);
+        return value;
+    }
+    return read_strings_attribute(object, name).at(0);
+}
+
+/**
+ * @brief The CF attributes of the dataset at path (from parent) holding an
+ *        output field: units (UDUNITS), long_name, and standard_name where
+ *        the field has one. Collective where the file is.
+ */
+inline void annotate(hid_t parent, const std::string & path, const FieldDescription & field) {
+    Handle dataset(H5Dopen2(parent, path.c_str(), H5P_DEFAULT), H5Dclose, "opening " + path);
+    write_string_attribute(dataset, "units", field.units());
+    write_string_attribute(dataset, "long_name", field.long_name);
+    if (!field.standard_name.empty()) write_string_attribute(dataset, "standard_name", field.standard_name);
 }
 
 } // namespace h5

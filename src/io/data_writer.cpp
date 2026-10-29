@@ -136,7 +136,7 @@ void DataWriter::init(const Input & input,
     }
     variables = expanded;
     for (const auto & var : variables) {
-        Field field{var, {}};
+        Field field{var, {}, {}};
         if (const Data * scalar = find_data(var)) {
             field.components.push_back(scalar);
         } else if (format != DataFormat::RESTART) {
@@ -150,6 +150,7 @@ void DataWriter::init(const Input & input,
         if (field.components.empty()) {
             throw InputError("write_data.variables: unknown variable \"" + var + "\".");
         }
+        if (format != DataFormat::RESTART) field.description = field_units::describe(var);
         fields.push_back(field);
     }
 
@@ -1144,6 +1145,25 @@ void DataWriter::write_pvtu(const std::string & filename, const std::string & st
     out << "</VTKFile>\n";
 }
 
+std::string DataWriter::vtu_field_data(rtype t) const {
+    std::vector<std::string> names;
+    std::vector<FieldDescription> descriptions;
+    for (const auto & field : fields) {
+        names.push_back(field.name);
+        descriptions.push_back(field.description);
+    }
+    std::ostringstream out;
+    out << std::setprecision(17);
+    out << "    <FieldData>\n";
+    out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
+        << static_cast<double>(t) << "</DataArray>\n";
+    out << "      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" format=\"ascii\">"
+        << file_format::VTU_OUTPUT.version << "</DataArray>\n";
+    out << field_units::vtk_field_data(names, descriptions, "      ");
+    out << "    </FieldData>\n";
+    return out.str();
+}
+
 void DataWriter::write_pvd(const std::vector<std::pair<rtype, std::string>> & series) const {
     std::ofstream out(prefix + ".pvd");
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
@@ -1177,12 +1197,7 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t, const Va
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
     out << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness() << "\">\n";
     out << "  <UnstructuredGrid>\n";
-    out << "    <FieldData>\n";
-    out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
-        << static_cast<double>(t) << "</DataArray>\n";
-    out << "      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" format=\"ascii\">"
-        << file_format::VTU_OUTPUT.version << "</DataArray>\n";
-    out << "    </FieldData>\n";
+    out << vtu_field_data(t);
     out << "    <Piece NumberOfPoints=\"" << nodes.size() << "\" NumberOfCells=\"" << geometry_faces.size() << "\">\n";
     out << "      <CellData>\n";
     for (size_t i_field = 0; i_field < fields.size(); i_field++) {
@@ -1323,12 +1338,7 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
     out << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
         << "\" header_type=\"UInt64\"" << (zlib ? " compressor=\"vtkZLibDataCompressor\"" : "") << ">\n";
     out << "  <UnstructuredGrid>\n";
-    out << "    <FieldData>\n";
-    out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
-        << std::setprecision(17) << static_cast<double>(t) << "</DataArray>\n";
-    out << "      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" format=\"ascii\">"
-        << file_format::VTU_OUTPUT.version << "</DataArray>\n";
-    out << "    </FieldData>\n";
+    out << vtu_field_data(t);
     out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << n_out << "\">\n";
     out << "      <CellData>\n";
     for (size_t f = 0; f < fields.size(); f++) {

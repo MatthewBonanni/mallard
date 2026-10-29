@@ -34,6 +34,7 @@
 #include "common_io.h"
 #include "device_comm.h"
 #include "common.h"
+#include "field_units.h"
 #include "log.h"
 #include "mesh_block.h"
 #include "partition.h"
@@ -1215,12 +1216,21 @@ void Solver::init_output() {
                                     std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
                 monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
                 if (!resume) {
+                    // Over the zone's faces: per unit depth in 2D, per radian in axisymmetric runs
+                    const Dimension area = measure_dimension().times(dim::length, -1);
+                    std::vector<Dimension> units = {dim::none, dim::time};
                     *monitor.out << "step,t";
                     for (const char * kind : {"pressure", "viscous"}) {
-                        FOR_I_DIM *monitor.out << ",F" << "xyz"[i] << "_" << kind;
+                        FOR_I_DIM {
+                            *monitor.out << ",F" << "xyz"[i] << "_" << kind;
+                            units.push_back(dim::pressure.times(area));
+                        }
                     }
-                    if (monitor.modeled) *monitor.out << ",Q";
-                    *monitor.out << "\n";
+                    if (monitor.modeled) {
+                        *monitor.out << ",Q";
+                        units.push_back(dim::heat_flux.times(area));
+                    }
+                    *monitor.out << "\n" << field_units::csv_line(units) << "\n";
                 }
             }
             force_monitors.push_back(monitor);
@@ -1249,9 +1259,13 @@ void Solver::init_output() {
                                 std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
             integral_monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
             if (!resume) {
+                std::vector<Dimension> units = {dim::none, dim::time};
                 *integral_monitor.out << "step,t";
-                for (const auto & name : integral_names()) *integral_monitor.out << "," << name;
-                *integral_monitor.out << "\n";
+                for (const auto & [name, dimension] : integral_columns()) {
+                    *integral_monitor.out << "," << name;
+                    units.push_back(dimension);
+                }
+                *integral_monitor.out << "\n" << field_units::csv_line(units) << "\n";
             }
         }
     }
@@ -1284,17 +1298,29 @@ void Solver::init_output() {
     }
 }
 
-std::vector<std::string> Solver::integral_names() const {
-    std::vector<std::string> names = {"kinetic_energy", "enstrophy", "dilatation_squared", "pressure_dilatation",
-                                      "velocity_squared", "vorticity_squared", "density_squared", "temperature",
-                                      "temperature_squared"};
+Dimension Solver::measure_dimension() const { return dim::of(0, N_DIM + (axisymmetric ? 1 : 0), 0); }
+
+std::vector<std::pair<std::string, Dimension>> Solver::integral_columns() const {
+    const Dimension V = measure_dimension(), rate2 = dim::rate.times(dim::rate);
+    const Dimension energy = dim::pressure.times(V), power = energy.times(dim::time, -1);
+    std::vector<std::pair<std::string, Dimension>> columns = {
+        {"kinetic_energy", energy},
+        {"enstrophy", dim::density.times(rate2).times(V)},
+        {"dilatation_squared", rate2.times(V)},
+        {"pressure_dilatation", dim::pressure.times(dim::rate).times(V)},
+        {"velocity_squared", dim::velocity_squared.times(V)},
+        {"vorticity_squared", rate2.times(V)},
+        {"density_squared", dim::density.times(dim::density).times(V)},
+        {"temperature", dim::temperature.times(V)},
+        {"temperature_squared", dim::temperature.times(dim::temperature).times(V)}};
     if (integral_monitor.budget) {
-        names.insert(names.end(),
-                     {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"});
+        for (const char * name : {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"}) {
+            columns.emplace_back(name, power);
+        }
     }
-    if (les_on && les.dynamic) names.emplace_back("les_C");
-    if (dynamic_efficiency()) names.emplace_back("tf_beta");
-    return names;
+    if (les_on && les.dynamic) columns.emplace_back("les_C", dim::none);
+    if (dynamic_efficiency()) columns.emplace_back("tf_beta", dim::none);
+    return columns;
 }
 
 void Solver::allocate_memory() {
@@ -2582,9 +2608,9 @@ void Solver::write_integrals() {
     }
     if (les_on && les.dynamic) values.push_back(double(les.C));
     if (dynamic_efficiency()) values.push_back(double(thickened_flame.beta));
-    const std::vector<std::string> names = integral_names();
+    const auto columns = integral_columns();
     integral_monitor.last = {"integrals", step, double(t), {}};
-    for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(names[i], values[i]);
+    for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(columns[i].first, values[i]);
     if (!integral_monitor.out) return;
     *integral_monitor.out << step << "," << std::setprecision(12) << t;
     for (const double v : values) *integral_monitor.out << "," << v;
