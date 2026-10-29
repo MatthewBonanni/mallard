@@ -25,6 +25,7 @@
 
 #include "comm.h"
 #include "common_io.h"
+#include "field_units.h"
 #include "file_format.h"
 #include "input.h"
 #include "log.h"
@@ -51,12 +52,21 @@ void make_parent(const std::string & file) {
     if (!parent.empty()) std::filesystem::create_directories(parent);
 }
 
-std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume, const std::string & header) {
+/** @brief A CSV file with a header of columns and their units, or the end of an existing one (resume). */
+std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume,
+                                        const std::vector<std::pair<std::string, Dimension>> & columns) {
     if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     make_parent(file);
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
     if (!out->good()) throw std::runtime_error("Could not open " + file + ".");
-    if (!resume) *out << header << "\n";
+    if (!resume) {
+        std::vector<Dimension> units;
+        for (size_t i = 0; i < columns.size(); i++) {
+            *out << (i ? "," : "") << columns[i].first;
+            units.push_back(columns[i].second);
+        }
+        *out << "\n" << field_units::csv_line(units) << "\n";
+    }
     return out;
 }
 
@@ -87,6 +97,14 @@ const std::unordered_map<std::string, Reduction> REDUCTIONS = {
 const char * measure_name(uint8_t dim) {
     static const char * const NAMES[] = {"count", "length", "area", "volume"};
     return NAMES[dim];
+}
+
+/** @brief The description of a sample array: a geometry one (arc_length, normal, measure) or a variable's. */
+FieldDescription geometry_field(const std::string & name, uint8_t dim) {
+    if (name == "arc_length") return {dim::length, "arc length", "", ""};
+    if (name == "normal") return {dim::none, "unit normal", "", ""};
+    if (name == "measure") return {dim::none.times(dim::length, dim), measure_name(dim), "", ""};
+    return field_units::describe(name);
 }
 
 std::string reduction_name(Reduction r) {
@@ -256,14 +274,23 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
     const char * cells = polygons ? "Polys" : g.dim == 0 ? "Verts" : "Lines";
     const char * data = polygons ? "CellData" : "PointData";
     const size_t n_cells = offsets.size();
+    std::vector<std::string> sample_names;
+    std::vector<FieldDescription> descriptions;
+    for (size_t a = 3; a < arrays.size(); a++) {
+        sample_names.push_back(arrays[a].name);
+        descriptions.push_back(geometry_field(arrays[a].name, g.dim));
+    }
+    // Field data belongs to the data set, before the piece, for VTK to read it
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
-           "header_type=\"UInt64\">\n  <PolyData>\n    <Piece NumberOfPoints=\""
+           "header_type=\"UInt64\">\n  <PolyData>\n";
+    out << "    <FieldData>\n      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
+           "format=\"ascii\">"
+        << file_format::PROBE_OUTPUT.version << "</DataArray>\n"
+        << field_units::vtk_field_data(sample_names, descriptions, "      ") << "    </FieldData>\n";
+    out << "    <Piece NumberOfPoints=\""
         << points.size() << "\" NumberOfVerts=\"" << (!polygons && g.dim == 0 ? n_cells : 0) << "\" NumberOfLines=\""
         << (!polygons && g.dim > 0 ? n_cells : 0) << "\" NumberOfStrips=\"0\" NumberOfPolys=\""
         << (polygons ? n_cells : 0) << "\">\n";
-    out << "      <FieldData>\n        <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
-           "format=\"ascii\">"
-        << file_format::PROBE_OUTPUT.version << "</DataArray>\n      </FieldData>\n";
     out << "      <Points>\n";
     data_array(arrays[0]);
     out << "      </Points>\n      <" << cells << ">\n";
@@ -750,22 +777,30 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
 
         on_root(distributed, [&] {
             if (p.write_samples && p.format == Format::CSV) {
-                std::string header = boundary ? "step,t,face" : "step,t,point";
-                for (size_t d = 0; d < N_DIM; d++) header += std::string(",") + "xyz"[d];
+                std::vector<std::pair<std::string, Dimension>> columns = {
+                    {"step", dim::none}, {"t", dim::time}, {boundary ? "face" : "point", dim::none}};
+                for (size_t d = 0; d < N_DIM; d++) columns.emplace_back(std::string(1, "xyz"[d]), dim::length);
                 if (boundary) {
-                    if (N_DIM == 2) header += ",s";
-                    for (size_t d = 0; d < N_DIM; d++) header += std::string(",n") + "xyz"[d];
-                    header += ",area";
+                    if (N_DIM == 2) columns.emplace_back("s", dim::length);
+                    for (size_t d = 0; d < N_DIM; d++) columns.emplace_back(std::string("n") + "xyz"[d], dim::none);
+                    columns.emplace_back("area", geometry_field("measure", p.geometry.dim).dimension);
                 }
-                for (const auto & v : p.variables) header += "," + v;
-                p.out = open_csv(p.file, resume, header);
+                for (const auto & v : p.variables) columns.emplace_back(v, field_units::describe(v).dimension);
+                p.out = open_csv(p.file, resume, columns);
             }
             if (!p.reductions.empty()) {
-                std::string header = std::string("step,t,") + measure_name(p.geometry.dim);
+                const Dimension measure = geometry_field("measure", p.geometry.dim).dimension;
+                std::vector<std::pair<std::string, Dimension>> columns = {
+                    {"step", dim::none}, {"t", dim::time}, {measure_name(p.geometry.dim), measure}};
                 for (const Reduction r : p.reductions) {
-                    for (const auto & v : p.variables) header += "," + reduction_name(r) + "_" + v;
+                    for (const auto & v : p.variables) {
+                        const Dimension d = field_units::describe(v).dimension;
+                        // Integrals take the units of the measure (sums over point sets)
+                        columns.emplace_back(reduction_name(r) + "_" + v,
+                                             r == Reduction::INTEGRAL ? d.times(measure) : d);
+                    }
                 }
-                p.out_reductions = open_csv(p.reductions_file, resume, header);
+                p.out_reductions = open_csv(p.reductions_file, resume, columns);
             }
 #ifdef Mallard_HAS_HDF5
             if (p.write_samples && p.format == Format::HDF5 && output_files_enabled() &&
@@ -784,8 +819,10 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 std::vector<double> xyz;
                 for (const auto & x : p.geometry.nodes) xyz.insert(xyz.end(), x.begin(), x.end());
                 h5::write_rows(file, "coordinates", n, N_DIM, 0, n, xyz.data(), H5P_DEFAULT);
+                h5::annotate(file, "coordinates", FieldDescription{dim::length, "sample coordinates", "", ""});
                 if (!p.geometry.arc_length.empty()) {
                     h5::write_rows(file, "arc_length", n, 1, 0, n, p.geometry.arc_length.data(), H5P_DEFAULT);
+                    h5::annotate(file, "arc_length", FieldDescription{dim::length, "arc length", "", ""});
                     std::vector<uint64_t> nodes, offsets = {0};
                     for (const auto & line : p.geometry.polylines) {
                         nodes.insert(nodes.end(), line.begin(), line.end());
@@ -802,7 +839,9 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                     std::vector<double> normals;
                     for (const auto & x : p.geometry.normals) normals.insert(normals.end(), x.begin(), x.end());
                     h5::write_rows(file, "normals", n, N_DIM, 0, n, normals.data(), H5P_DEFAULT);
+                    h5::annotate(file, "normals", geometry_field("normal", p.geometry.dim));
                     h5::write_rows(file, "area", n, 1, 0, n, p.geometry.node_weights.data(), H5P_DEFAULT);
+                    h5::annotate(file, "area", geometry_field("measure", p.geometry.dim));
                 }
                 if (!p.geometry.polygon_offsets.empty()) {
                     const auto & g = p.geometry;
@@ -813,6 +852,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                                      "creating polygons");
                     h5::write_rows(file, "vertices", g.vertices.size(), N_DIM, 0, g.vertices.size(), xyz_v.data(),
                                    H5P_DEFAULT);
+                    h5::annotate(file, "vertices", FieldDescription{dim::length, "polygon vertex coordinates", "", ""});
                     h5::write_rows(file, "polygons/vertices", vertices.size(), 1, 0, vertices.size(), vertices.data(),
                                    H5P_DEFAULT);
                     h5::write_rows(file, "polygons/offsets", g.polygon_offsets.size(), 1, 0, g.polygon_offsets.size(),
@@ -832,7 +872,12 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 };
                 extensible("step", H5T_STD_U64LE, 0);
                 extensible("time", H5T_IEEE_F64LE, 0);
-                for (const auto & v : p.variables) extensible("fields/" + v, H5T_IEEE_F64LE, n);
+                h5::annotate(file, "step", FieldDescription{dim::none, "time step", "", ""});
+                h5::annotate(file, "time", FieldDescription{dim::time, "time", "", ""});
+                for (const auto & v : p.variables) {
+                    extensible("fields/" + v, H5T_IEEE_F64LE, n);
+                    h5::annotate(file, "fields/" + v, field_units::describe(v));
+                }
             }
 #endif
         });
@@ -972,7 +1017,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields) {
         const bool extrema = std::any_of(p.reductions.begin(), p.reductions.end(),
                                          [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
         std::vector<double> nodes, quad;
-        const bool own_quadrature = p.geometry.quad_points.empty();
+        const bool own_quadrature = p.quadrature.n_global == 0;
         if (p.write_samples || extrema || own_quadrature) {
             p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
             nodes = p.nodes.gather();
@@ -1058,7 +1103,8 @@ void Probes::Probe::write_vtp(uint64_t step, rtype t, const std::vector<double> 
 
 void Probes::Probe::write_reductions(uint64_t step, rtype t, const std::vector<double> & node_values,
                                      const std::vector<double> & quad) const {
-    const bool points = geometry.quad_points.empty();
+    // Point sets and boundaries reduce their samples; curves their quadrature points
+    const bool points = quadrature.n_global == 0;
     const std::vector<double> & q = points ? node_values : quad;
     const size_t n_cols = n_evaluated();
     const size_t n_q = points ? geometry.nodes.size() : geometry.quad_points.size();

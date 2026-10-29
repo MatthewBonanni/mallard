@@ -170,7 +170,7 @@ jobs:
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true},
             {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true},
             {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true},
-            {"name": "clang", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", "hdf5": true, "build_only": true},
+            {"name": "clang", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", "hdf5": true, "build_only": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true},
             {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true},
@@ -252,6 +252,11 @@ jobs:
         run: |
           git fetch --quiet --tags --depth=1 origin
           python3 tools/dev/check_upgrade_input.py build/src/mallard
+      - name: Output units through h5py and tools/mallard
+        if: matrix.backend.name == 'openmp'
+        run: |
+          python3 -c 'import h5py, numpy' 2>/dev/null || python3 -m pip install -q --break-system-packages h5py numpy
+          python3 tools/dev/check_output_units.py build/src/mallard
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent
