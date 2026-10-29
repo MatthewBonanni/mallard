@@ -326,7 +326,7 @@ jobs:
       - name: Install MPI, ccache and Gmsh's libraries
         run: >
           sudo apt-get update -qq && sudo apt-get install -y -qq
-          libopenmpi-dev openmpi-bin ccache libglu1-mesa libxcursor1 libxft2 libxinerama1
+          libopenmpi-dev openmpi-bin libhdf5-openmpi-dev ccache libglu1-mesa libxcursor1 libxft2 libxinerama1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -338,6 +338,7 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ccache-tutorials-${{ github.sha }}
           restore-keys: ccache-tutorials-
+      # With HDF5, so that the tutorials and templates write the default VTKHDF output
       - name: Build (2D and 3D)
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -347,7 +348,7 @@ jobs:
             cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
-              -DMallard_ENABLE_MPI=ON -DMallard_DIM=$dim
+              -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_DIM=$dim
             cmake --build build-$dim -j $(nproc) --target mallard
           done
       - name: Save compiler cache

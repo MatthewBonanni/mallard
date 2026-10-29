@@ -19,7 +19,6 @@ time. The MP4 is H.264 (CRF 18) and holds the last frame for 2 s.
 """
 import argparse
 import os
-import re
 import sys
 
 import cantera as ct
@@ -30,7 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from triple_flame_analysis import grid, leading_edge, run_info, stream_n2  # noqa: E402
+from triple_flame_analysis import grid, leading_edge, run_info, snapshots, stream_n2  # noqa: E402
 
 BG = "#0d0f14"
 FG = "#e8e8e8"
@@ -67,13 +66,11 @@ def main():
     for label, dirs in args.run:
         frames = []  # (path, time, inflow velocity, segment)
         for seg, d in enumerate(dirs.split(",")):
-            pvd = open(os.path.join(d, "solut", "flame.pvd")).read()
             u_in = run_info(d, args.mechanism, args.phase)["u_in"]
-            times = [float(s) for s in re.findall(r'timestep="([^"]+)"', pvd)]
-            files = re.findall(r'file="([^"]+)"', pvd)
+            listed = snapshots(os.path.join(d, "solut", "flame"))
             if frames:
-                frames = [f for f in frames if f[1] < times[0] - 1e-12]
-            frames += [(os.path.join(d, "solut", f), t, u_in, seg) for f, t in zip(files, times)]
+                frames = [f for f in frames if f[1] < listed[0][0] - 1e-12]
+            frames += [(f, t, u_in, seg) for t, f in listed]
         info = run_info(dirs.split(",")[0], args.mechanism, args.phase)
         runs.append(dict(label=label, info=info, frames=frames, t=[], x=[], U=[], seg=[], u_in=[]))
     n_frames = min(len(r["frames"]) for r in runs)

@@ -122,6 +122,19 @@ def snapshot(stem):
     raise FileNotFoundError(f"no snapshot {stem}.vtkhdf (or .pvtu, .vtu, .h5)")
 
 
+def read_index(series):
+    """(time, file) of every snapshot of a series: its index, PREFIX.vtkhdf.series
+    or PREFIX.pvd (VTU, builds without HDF5), or PREFIX for whichever exists."""
+    if not series.endswith((".series", ".pvd")):
+        series += ".vtkhdf.series" if os.path.exists(series + ".vtkhdf.series") else ".pvd"
+    if series.endswith(".series"):
+        from .vtkhdf import read_series
+        return read_series(series)
+    text = open(series).read()
+    return [(float(t), os.path.join(os.path.dirname(series), f))
+            for t, f in re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)]
+
+
 def _inflate_blocks(raw, off, hdr_dt):
     """An appended array of vtkZLibDataCompressor blocks (compression = "zlib"), decompressed."""
     import zlib

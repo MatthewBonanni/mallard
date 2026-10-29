@@ -4,7 +4,7 @@
         [--oxidizer O2:1,N2:3.76] [--mechanism mechanisms/h2o2.yaml --phase ohmech]
         [--fit T0 T1] [--plot OUT.png] [--csv OUT.csv]
 
-For each output of RUN_DIR/solut/flame.pvd:
+For each output of the series RUN_DIR/solut/flame:
   x_tip, y_tip  the leading edge: the most upstream point of the isotherm
                 T_u + (T_b - T_u) / 2 of the planar flame at Z_st, interpolated
                 along each row, refined by a parabola through the three rows
@@ -37,7 +37,7 @@ import cantera as ct
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import read_quads  # noqa: E402
+from mallard.vtu import read_quads, read_index  # noqa: E402
 
 # Ruetsch, Vervisch & Linan (1995), Table I (beta = 8, Le = 1, Pr = 0.75): alpha = 1 - rho_b / rho_u, D_TF,
 # U_F / S_L. At rho_u / rho_b = 4, U_F / S_L rises from 1.23 to 1.51 as D_TF goes from 8.3 to 34 (the ends of
@@ -99,12 +99,10 @@ def leading_edge(xs, ys, T, T_mid):
 
 
 def analyze(run_dir, info, Y_N2_F, Y_N2_O, Z_st):
-    pvd = os.path.join(run_dir, "solut", "flame.pvd")
-    files = re.findall(r'file="([^"]+)"', open(pvd).read())
     T_mid = info["T_u"] + 0.5 * (info["T_b"] - info["T_u"])
     rows = []
-    for f in files:
-        t, xs, ys, a = grid(os.path.join(run_dir, "solut", f), ["T", "HRR", "U", "Y_N2"])
+    for _, f in read_index(os.path.join(run_dir, "solut", "flame")):
+        t, xs, ys, a = grid(f, ["T", "HRR", "U", "Y_N2"])
         Z = (a["Y_N2"] - Y_N2_O) / (Y_N2_F - Y_N2_O)
         x_tip, y_tip, j = leading_edge(xs, ys, a["T"], T_mid)
         i_tip = int(np.searchsorted(xs, x_tip))

@@ -60,9 +60,8 @@ riemann_solver = "HLLC"
 type = "TENO"
 order = 5
 
-[[write_data]]                  # VTU snapshots for ParaView
+[[write_data]]                  # snapshots for ParaView (VTKHDF)
 prefix = "solut/sod"
-format = "vtu"
 time_interval = 0.02
 variables = ["RHO", "U_X", "P", "T"]
 ```

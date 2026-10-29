@@ -17,8 +17,8 @@
 # then run (1.2M cells, 18,900 steps: 39 minutes on two A100s, chemistry 71% of
 # the time) and analyze and animate it with
 #
-#   python soot_foil.py solut/cell.pvd 1616.93 --png foil.png
-#   python animate_detonation_2d.py solut/cell.pvd detonation_2d.mp4
+#   python soot_foil.py solut/cell.vtkhdf.series 1616.93 --png foil.png
+#   python animate_detonation_2d.py solut/cell.vtkhdf.series detonation_2d.mp4
 #
 # Results: the front runs 328 mm at a mean speed over the second half of
 # 1617.0 m/s (D_CJ to 0.01%). The pockets start eight strong triple points
@@ -87,7 +87,6 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/cell"
-format = "vtu"
 time_interval = 1.5e-6
 variables = ["P", "T", "P_MAX"]
 

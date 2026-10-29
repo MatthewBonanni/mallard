@@ -919,8 +919,11 @@ sample and step; a restarted run appends). `hdf5` holds `coordinates`
 `polylines/offsets`, and the extensible `step`, `time` and `fields/<variable>`
 (steps x samples); `vtp` writes one VTK PolyData file per output,
 `<stem>_<step>.vtp` (vertices for point sets, polylines with `arc_length`
-for curves), indexed by the `.pvd` series. A restarted run cuts the HDF5 rows
-and the `.pvd` entries after the restart back and continues them.
+for curves), indexed by the `.pvd` series; `vtkhdf` writes one VTKHDF PolyData
+file (the same vertices or polylines, `arc_length`, and each variable's point
+values at every output, with `Steps/Values` the times). A restarted run cuts the
+HDF5 rows, the VTKHDF outputs and the `.pvd` entries after the restart back and
+continues them.
 
 **Reductions.** Rows `step, t, length` (curves) or `count` (point sets), then
 `<reduction>_<variable>` for each reduction and variable: `integral` is

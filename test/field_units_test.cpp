@@ -299,12 +299,12 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
                             H5Dclose, "time");
             EXPECT_EQ(h5::read_string_attribute(time, "units"), "s") << k;
         }
-        for (const auto & [file, name] : std::map<std::string, std::string>{
+        for (const auto & [path, name] : std::vector<std::pair<std::string, std::string>>{
                  {"/kwall_000002.vtkhdf", "VTKHDF/CellData/P"}, {"/probe.vtkhdf", "VTKHDF/PointData/RHO"},
                  {"/probe.vtkhdf", "VTKHDF/PointData/U_Y"}}) {
-            h5::Handle f(H5Fopen((dir + file).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, file);
-            h5::Handle dset(H5Dopen2(f, name.c_str(), H5P_DEFAULT), H5Dclose, name);
-            EXPECT_EQ(h5::read_string_attribute(dset, "units"), units_of(name.substr(name.rfind('/') + 1))) << file;
+            h5::Handle h5file(H5Fopen((dir + path).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, path);
+            h5::Handle dset(H5Dopen2(h5file, name.c_str(), H5P_DEFAULT), H5Dclose, name);
+            EXPECT_EQ(h5::read_string_attribute(dset, "units"), units_of(name.substr(name.rfind('/') + 1))) << path;
         }
 
         h5::Handle probe(H5Fopen((dir + "/probe.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "probe");

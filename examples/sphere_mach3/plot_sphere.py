@@ -12,6 +12,7 @@ Delta / R = 0.143 exp(3.24 / M^2), and plots its history with the pressure
 along the stagnation line at the last snapshot.
 """
 import argparse
+import json
 import os
 import re
 
@@ -29,8 +30,12 @@ def normal_shock_pressure(mach, gamma):
 
 
 def series(slices, name="z0"):
-    text = open(os.path.join(slices, name + ".pvd")).read()
-    entries = re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)
+    index = os.path.join(slices, name + ".vtkhdf.series")
+    if os.path.exists(index):
+        entries = [(e["time"], e["name"]) for e in json.load(open(index))["files"]]
+    else:
+        text = open(os.path.join(slices, name + ".pvd")).read()
+        entries = re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)
     # A run still in progress may list a snapshot not yet copied
     return [(float(t), os.path.join(slices, f)) for t, f in entries if os.path.exists(os.path.join(slices, f))]
 

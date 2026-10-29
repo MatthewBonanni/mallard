@@ -32,7 +32,7 @@ from figstyle import bare, label
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "tools"), str(ROOT / "tools" / "mesh"), str(ROOT / "examples" / "sod"),
                 str(ROOT / "examples" / "rotational_sector")]
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_vtu_cells, snapshot  # noqa: E402
 from plot_mesh_quality import LABELS, draw_quality, read_quality  # noqa: E402
 from plot_sod import exact_sod  # noqa: E402
 
@@ -322,7 +322,7 @@ def rotational_data(args):
         text = (ROOT / "examples" / "rotational_sector" / f"{name}.toml").read_text()
         text = text.replace("t_stop = 0.5", "t_stop = 0.25").replace("time_interval = 0.5", "time_interval = 0.25")
         run(args.mallard, text, work, name=f"{name}.toml")
-    return compare(str(work / "solut" / "sector_000001.vtu"), str(work / "solut" / "annulus_000001.vtu"), 4)
+    return compare(snapshot(str(work / "solut" / "sector_000001")), snapshot(str(work / "solut" / "annulus_000001")), 4)
 
 
 def rotational_sector(P, args):

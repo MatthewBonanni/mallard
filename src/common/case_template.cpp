@@ -11,6 +11,7 @@
 
 #include "case_template.h"
 #include "input.h"
+#include "mesh_block.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -358,6 +359,8 @@ std::set<std::string> close_imports(const fs::path & tools, const std::vector<fs
                 }
                 for (const std::string & sub : {match[3].str(), match[4].str()}) {
                     if (sub.empty() || !fs::exists(tools / "mallard" / (sub + ".py"))) continue;
+                    // mallard.vtu reads this build's default snapshots (VTKHDF) with mallard.vtkhdf
+                    if (needed && (sub == "vtu" || sub == "vtkhdf") && have_hdf5()) packages.insert("h5py");
                     pending.emplace_back(tools / "mallard" / (sub + ".py"), top_level);
                 }
             } else if (script.parent_path().parent_path() == tools && fs::exists(sibling)) {
@@ -486,7 +489,8 @@ std::string readme(const Template & t, const Manifest & m, bool mesh, bool init,
     r += "- `run.sh`: runs Mallard.\n";
     if (!t.post.empty()) r += "- `post.sh`: post-processing.\n";
     r += "- `tools/`: the Python scripts these call, from Mallard's `tools/`.\n";
-    r += "\nSnapshots (`.vtu`, `.pvd`) open in ParaView. To change the case, edit `input.toml` and run again.\n";
+    r += "\nSnapshots open in ParaView: the series `PREFIX.vtkhdf.series` (`PREFIX.pvd` in builds without HDF5). "
+         "To change the case, edit `input.toml` and run again.\n";
     return r;
 }
 
@@ -613,9 +617,9 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     written.emplace_back("run.sh", "runs it: ./run.sh [-t threads] [-n MPI ranks]");
     if (!post.empty()) {
         const std::string last =
-            "# The newest snapshot PREFIX_N: .vtu, or .pvtu of an MPI run (not its pieces)\n"
+            "# The newest snapshot PREFIX_N: .vtkhdf, or without HDF5 .vtu (.pvtu of an MPI run, not its pieces)\n"
             "last() {\n"
-            "    newest=$(ls -t \"$1\"_[0-9]*.vtu \"$1\"_[0-9]*.pvtu 2>/dev/null | grep -v '_p[0-9]*\\.vtu$' | head -n 1)\n"
+            "    newest=$(ls -t \"$1\"_[0-9]*.vtkhdf \"$1\"_[0-9]*.vtu \"$1\"_[0-9]*.pvtu 2>/dev/null | grep -v '_p[0-9]*\\.vtu$' | head -n 1)\n"
             "    [ -n \"$newest\" ] || { echo \"post.sh: no snapshots $1_*: run ./run.sh first\" >&2; exit 1; }\n"
             "    ls \"$1\"_[0-9]*.\"${newest##*.}\" | grep -v '_p[0-9]*\\.vtu$' | tail -n 1\n"
             "}\n";

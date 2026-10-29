@@ -19,7 +19,7 @@ across, periodic in y, whose flame is displaced along x by a sum of
 random-phase modes 1..--modes of the width, scaled to a largest displacement
 of --perturb reference thicknesses. Writes RUN_DIR/input.toml and
 RUN_DIR/flame.restart (float64, double builds); the output series
-RUN_DIR/solut/flame.pvd is what tools/post/flame_speed.py reads.
+RUN_DIR/solut/flame is what tools/post/flame_speed.py reads.
 """
 import argparse
 import os
@@ -206,7 +206,6 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/flame"
-format = "vtu"
 time_interval = {t_stop / args.outputs:.17g}
 variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"{', "QRAD"' if args.radiation else ''}]
 """)
