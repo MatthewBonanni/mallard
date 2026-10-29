@@ -83,6 +83,17 @@ def read_points(path, step=-1):
     return pts, out
 
 
+def field_metadata(path):
+    """{field: (units, long_name)} of the cell and point arrays of a VTKHDF file."""
+    from .h5 import field_metadata as h5_metadata
+    out = {}
+    for name, value in h5_metadata(path).items():
+        for group in ("VTKHDF/CellData/", "VTKHDF/PointData/"):
+            if name.startswith(group):
+                out[name[len(group):]] = value
+    return out
+
+
 def read_series(path):
     """(time, file) of every snapshot of an index PREFIX.vtkhdf.series."""
     with open(path) as f:

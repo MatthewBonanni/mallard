@@ -779,7 +779,9 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] rtype t, [[maybe_unused]] cons
                               "PointData");
         if (curves) {
             h5::write_rows(point_data, "arc_length", n, 1, 0, n, geometry.arc_length.data(), H5P_DEFAULT);
+            h5::annotate(point_data, "arc_length", FieldDescription{dim::length, "arc length", "", ""});
         }
+        h5::annotate(top, "Points", FieldDescription{dim::length, "sample coordinates", "", ""});
         h5::Handle steps(H5Gcreate2(top, "Steps", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "Steps");
         for (const char * group_name : {"CellDataOffsets", "PointDataOffsets", "FieldDataOffsets"}) {
             h5::Handle group(H5Gcreate2(steps, group_name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, group_name);
@@ -791,6 +793,7 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] rtype t, [[maybe_unused]] cons
     for (size_t v = 0; v < variables.size(); v++) {
         for (uint64_t i = 0; i < n; i++) column[i] = values[i * n_cols + v];
         h5::put_rows(point_data, variables[v].c_str(), (k + 1) * n, 1, k * n, n, column.data(), H5P_DEFAULT);
+        if (k == 0) h5::annotate(point_data, variables[v], field_units::describe(variables[v]));
     }
     // The geometry is the same at every snapshot: its offsets all stay 0
     h5::Handle steps(H5Gopen2(h5file, "VTKHDF/Steps", H5P_DEFAULT), H5Gclose, "opening Steps");
@@ -798,6 +801,7 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] rtype t, [[maybe_unused]] cons
     const double time = static_cast<double>(t);
     const int64_t zeros[4] = {0, 0, 0, 0}, one = 1, offset = static_cast<int64_t>(k * n);
     h5::put_rows(steps, "Values", k + 1, 1, k, 1, &time, H5P_DEFAULT);
+    if (k == 0) h5::annotate(steps, "Values", FieldDescription{dim::time, "time", "time", ""});
     h5::put_rows(steps, "PartOffsets", k + 1, 1, k, 1, zeros, H5P_DEFAULT);
     h5::put_rows(steps, "NumberOfParts", k + 1, 1, k, 1, &one, H5P_DEFAULT);
     h5::put_rows(steps, "PointOffsets", k + 1, 1, k, 1, zeros, H5P_DEFAULT);

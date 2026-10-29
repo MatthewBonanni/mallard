@@ -113,6 +113,15 @@ def series(directory, pattern="*"):
             and not re.search(r"_p\d{4}\.vtu$", f)]
 
 
+def snapshot(stem):
+    """The snapshot file of a stem PREFIX_NNNNNN: its .vtkhdf (the default
+    format), else its .pvtu (an MPI run's VTU) or .vtu (builds without HDF5)."""
+    for ext in (".vtkhdf", ".pvtu", ".vtu", ".h5"):
+        if os.path.exists(stem + ext):
+            return stem + ext
+    raise FileNotFoundError(f"no snapshot {stem}.vtkhdf (or .pvtu, .vtu, .h5)")
+
+
 def _inflate_blocks(raw, off, hdr_dt):
     """An appended array of vtkZLibDataCompressor blocks (compression = "zlib"), decompressed."""
     import zlib
@@ -243,13 +252,16 @@ def _string_arrays(text):
 
 
 def field_metadata(path):
-    """{field: (units, long_name)} of any Mallard output file: VTU, PVTU (its
-    first piece), VTP, HDF5 (or its .xmf) and CSV (long names empty)."""
+    """{field: (units, long_name)} of any Mallard output file: VTKHDF, VTU,
+    PVTU (its first piece), VTP, HDF5 (or its .xmf) and CSV (long names empty)."""
     if path.endswith(".xmf"):
         path = path[:-4] + ".h5"
     if path.endswith(".h5"):
         from .h5 import field_metadata as h5_metadata
         return h5_metadata(path)
+    if path.endswith(".vtkhdf"):
+        from .vtkhdf import field_metadata as vtkhdf_metadata
+        return vtkhdf_metadata(path)
     if path.endswith(".csv"):
         from .tables import units as csv_units
         return {name: (u, "") for name, u in csv_units(path).items()}

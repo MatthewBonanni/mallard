@@ -438,6 +438,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, uint64_t step, rtype
         write_count(top, "NumberOfPoints", m.n_points, dxpl, distributed);
         write_dataset(top, "Points", m.n_points, 3, m.first_point, m.points.size() / 3, m.points.data(), dxpl, deflate,
                       serial, io_threads);
+        annotate(top, "Points", FieldDescription{dim::length, "point coordinates", "", ""});
         auto topology = [&](hid_t group, uint64_t n_cells, uint64_t n_ids, bool mine) {
             const std::vector<int64_t> none;
             const std::vector<int64_t> zero = {0};
@@ -466,6 +467,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, uint64_t step, rtype
             if (!one_file && std::string(name) == "FieldData") {
                 const double time = double(t);
                 write_rows<double>(group, "TIME", 1, 1, 0, first_rank(distributed) ? 1 : 0, &time, dxpl);
+                annotate(group, "TIME", FieldDescription{dim::time, "time", "time", ""});
             }
         }
     }
@@ -501,6 +503,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, uint64_t step, rtype
             write_dataset(cell_data, name, m.n_cells, int(n_comp), m.first_cell, n_block, block.data(), dxpl, deflate,
                           serial, io_threads);
         }
+        if (!append) annotate(cell_data, fields[f].name, fields[f].description);
     }
     if (!one_file) return;
 
@@ -512,6 +515,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, uint64_t step, rtype
     const std::array<int64_t, 4> zeros = {0, 0, 0, 0};
     const int64_t one = 1;
     put_rows(steps, "Values", k + 1, 1, k, mine, &time, dxpl);
+    if (!append) annotate(steps, "Values", FieldDescription{dim::time, "time", "time", ""});
     put_rows(steps, "PartOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
     put_rows(steps, "NumberOfParts", k + 1, 1, k, mine, &one, dxpl);
     put_rows(steps, "PointOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
