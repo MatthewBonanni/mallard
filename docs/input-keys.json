@@ -3747,24 +3747,6 @@
   ],
   "set_in": []
  },
- "probes.shape": {
-  "default": "\"\"",
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": [],
-  "type": "string",
-  "values": [
-   "arc",
-   "circle",
-   "curve",
-   "line",
-   "point",
-   "points",
-   "polyline"
-  ]
- },
  "probes.start": {
   "dims": [
    2,
@@ -3791,6 +3773,24 @@
    3
   ],
   "set_in": []
+ },
+ "probes.type": {
+  "default": "\"\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "arc",
+   "circle",
+   "curve",
+   "line",
+   "point",
+   "points",
+   "polyline"
+  ]
  },
  "probes.variables": {
   "dims": [
@@ -4304,8 +4304,8 @@
    "cylinder",
    "difference",
    "disk",
-   "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
    "intersection",
