@@ -116,14 +116,14 @@ Input parse_input_string(const std::string & text, const std::string & name = "i
  *        where the docs explain it.
  */
 struct Diagnostic {
-    std::string key;                  // e.g. "mesh.Nxx" or "boundaries[2].tpye"
+    std::string key{};                // e.g. "mesh.Nxx" or "boundaries[2].tpye"
     std::size_t line = 0;             // 0 if unknown
-    std::string message;              // what is wrong
-    std::vector<std::string> valid;   // accepted values, if a closed set
-    std::string suggestion;           // full path of the likely intended key (or value, or unit), or empty
-    std::string expected;             // what the key takes, e.g. "pressure (kg m^-1 s^-2): Pa, kPa, bar, atm, psi"
-    std::string fix;                  // what to do, as a sentence, or empty
-    std::string docs;                 // page and anchor of the docs; the key's section of docs/input.md if empty
+    std::string message{};            // what is wrong
+    std::vector<std::string> valid{}; // accepted values, if a closed set
+    std::string suggestion{};         // full path of the likely intended key (or value, or unit), or empty
+    std::string expected{};           // what the key takes, e.g. "pressure (kg m^-1 s^-2): Pa, kPa, bar, atm, psi"
+    std::string fix{};                // what to do, as a sentence, or empty
+    std::string docs{};               // page and anchor of the docs; the key's section of docs/input.md if empty
 };
 
 /**
