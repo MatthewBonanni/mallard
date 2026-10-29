@@ -69,6 +69,7 @@ inline constexpr Dimension density = of(1, -3, 0);
 inline constexpr Dimension dynamic_viscosity = of(1, -1, -1);
 inline constexpr Dimension heat_flux = of(1, 0, -3);
 inline constexpr Dimension mass_flux = of(1, -2, -1);          // kg/(m^2 s), e.g. rho u
+inline constexpr Dimension mass_flow = of(1, 0, -1);           // kg/s
 inline constexpr Dimension mass_source = of(1, -3, -1);        // kg/(m^3 s)
 inline constexpr Dimension momentum_source = of(1, -2, -2);    // N/m^3
 inline constexpr Dimension power_density = of(1, -1, -3);      // W/m^3

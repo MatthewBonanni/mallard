@@ -48,8 +48,10 @@ inside the repository and refer to the repository as `$MALLARD`:
 export MALLARD=$PWD
 ```
 
-`tutorials/ci.sh` runs the same steps at reduced size, as CI does:
+`tutorials/ci.sh` runs the same steps at reduced size, as CI does, through the
+`mallard` of an install with both dimensions:
 
 ```bash
-tutorials/ci.sh build/src/mallard build-3d/src/mallard /tmp/tutorials
+cmake --install build --prefix install && cmake --install build-3d --prefix install
+tutorials/ci.sh install/bin/mallard /tmp/tutorials
 ```

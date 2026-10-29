@@ -79,6 +79,7 @@ add_library(MallardCore STATIC
     io/file_format.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
+    parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
     parallel/distribution.cpp
@@ -139,7 +140,7 @@ endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)
 mallard_target_warnings(MallardCore)
 
-# mallard new and mallard-test find their data in the source tree when run from the build tree
+# mallard new and the test suite find their data in the source tree when run from the build tree
 set_source_files_properties(common/build_info.cpp PROPERTIES
     COMPILE_DEFINITIONS "MALLARD_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
 
@@ -190,8 +191,10 @@ if(Mallard_ENABLE_CGNS)
     target_link_libraries(MallardCore PRIVATE ${MALLARD_CGNS_LIBRARY})
 endif()
 
-add_executable(mallard main.cpp reactor_main.cpp mesh_convert.cpp)
+add_executable(mallard main.cpp front_end.cpp reactor_main.cpp mesh_convert.cpp)
 target_link_libraries(mallard PRIVATE MallardCore)
-target_compile_definitions(mallard PRIVATE MALLARD_EXECUTABLE_SUFFIX="${Mallard_EXECUTABLE_SUFFIX}")
-set_target_properties(mallard PROPERTIES OUTPUT_NAME mallard${Mallard_EXECUTABLE_SUFFIX})
+set_target_properties(mallard PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
 mallard_target_warnings(mallard)
+# Run as mallard, either solver runs the one of the case's dimension (front_end.h)
+add_custom_command(TARGET mallard POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E create_symlink mallard${Mallard_DIM}d $<TARGET_FILE_DIR:mallard>/mallard)

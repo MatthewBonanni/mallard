@@ -9,7 +9,8 @@ release, and `mallard upgrade-input old.toml > new.toml` rewrites old inputs
 ([deprecation policy and changed keys](guide/input_files.md#inputs-from-older-releases)).
 
 The spatial dimension is fixed at build time with the CMake option
-`-DMallard_DIM=2` (default) or `3`. Vectors in the input (`u`, `gravity`,
+`-DMallard_DIM=2` (default) or `3`, which builds `mallard2d` or `mallard3d`;
+`mallard` runs the one of the case's mesh ([Meshes](guide/meshes.md)). Vectors in the input (`u`, `gravity`,
 `rhou`) have that many components, and expressions are in `x`, `y`, `z`
 (`z` is 0 in 2D) and, where noted, `t`, in one language for every section:
 [Expressions](guide/input_files.md#expressions). Below, `[u_x, u_y]` reads
@@ -44,7 +45,8 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Rate (1/s) | `sponges.strength` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
 | Heat flux (W/m^2) | `boundaries.q` |
-| Mass flux (kg/(m^2 s)) | `source.mass_flow` |
+| Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
+| Mass flow (kg/s; per metre of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
 | Sources (per unit volume) | `source.rho` (kg/(m^3 s)), `rhou` (N/m^3), `rhoE` (W/m^3), and the same of `[[sources]]` with `rhoY` (kg/(m^3 s)); with `total = true` integrated rates (kg/s, N, W) |
 | Concentration (plain numbers in kmol/m^3) | `chemistry.C_reg` |
 
@@ -463,7 +465,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 
 | Key | Description |
 |---|---|
-| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh) |
+| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh). `Mallard -i input.toml --restart FILE` replaces the whole table by `type = "restart"`, `file = FILE`, so one input serves both the first run and its continuations |
 | `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
@@ -544,6 +546,7 @@ the zone's faces whose centers satisfy the expression.
 | `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures: numbers, or expressions in `x`, `y`, `z` evaluated at each face center for a composition that varies along the boundary, with an optional `balance` species as in `[initialize]`) |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
 | `stagnation_inlet` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [the guide](guide/boundary_conditions.md#stagnation-inlet) and [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `upt`) |
+| `mass_flow_inlet` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density. See [the guide](guide/boundary_conditions.md#mass-flow-inlet) | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)], a number or an expression of `x`, `y`, `z`) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]) with an optional `profile` (expression of `x`, `y`, `z`, default uniform) shaping it along the inlet; `direction` (default the inward normal of each face); `X` or `Y` for mixtures (as `upt`) |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
@@ -902,7 +905,8 @@ weights and the trigger state.
 
 ## `[[probes]]`
 
-Samples of the solution on a geometry (points or curves), every `interval`
+Samples of the solution on a geometry (points or curves;
+[geometry guide](guide/geometry.md#point-sets-and-curves)), every `interval`
 steps or `time_interval` of simulation time, written raw and/or reduced. Setup
 locates the samples in the cells of each rank; a write evaluates them on the
 device of the ranks that own them and gathers them on rank 0, which writes them
@@ -1044,7 +1048,8 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 
 ## Regions
 
-Regions select parts of space in `[[sources]]` and `[[initialize.regions]]`. A region is a table: a primitive shape, or a boolean of regions, each with
+Regions select parts of space in `[[sources]]` and `[[initialize.regions]]`
+(explained with figures in the [geometry guide](guide/geometry.md#regions)). A region is a table: a primitive shape, or a boolean of regions, each with
 optional transforms, nested to any depth. Every region has a signed distance
 (negative inside) that never exceeds the distance to its surface, which gives
 smooth edges their width and lets cell volume fractions skip cells away from

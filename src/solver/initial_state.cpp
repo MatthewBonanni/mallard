@@ -1378,12 +1378,15 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
                     const uint32_t id = mesh.h_node_of_cell(c, k);
                     return std::array<double, 3>{double(mesh.h_node_coords(id, 0)), double(mesh.h_node_coords(id, 1)), 0.0};
                 };
-                for (uint32_t k = 1; k + 1 < n_nodes; k++) {
-                    std::array<std::array<double, 3>, N_VERTICES> s;
-                    s[0] = node(0);
-                    s[1] = node(k);
-                    s[2] = node(k + 1);
-                    simplices.push_back(s);
+                if (n_nodes == 3) {
+                    simplices.push_back({node(0), node(1), node(2)});
+                } else {
+                    // A fan from the vertex average, so the rule does not depend on the node numbering
+                    std::array<double, 3> center = {0.0, 0.0, 0.0};
+                    for (uint32_t k = 0; k < n_nodes; k++) {
+                        for (size_t d = 0; d < 2; d++) center[d] += node(k)[d] / n_nodes;
+                    }
+                    for (uint32_t k = 0; k < n_nodes; k++) simplices.push_back({center, node(k), node((k + 1) % n_nodes)});
                 }
             } else {
                 mesh.h_cell_tetrahedra(c, tets);

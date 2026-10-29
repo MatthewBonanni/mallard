@@ -374,7 +374,9 @@ With TENO, `sampling = "point"` reads each cell's reconstruction polynomial at
 the sample, so a probe converges at the scheme's order (fifth order for
 `order = 5`) instead of the first order of cell averages at points off the
 centroids. The [Sod comparison](numerics.md#reconstruction) on the Numerics
-page was read from a line probe. The full key list is in the [input reference](../input.md#probes).
+page was read from a line probe. The full key list is in the [input reference](../input.md#probes);
+each shape, where its samples go and how to read the files, with figures:
+[Geometry](geometry.md#point-sets-and-curves).
 
 Pitfalls:
 
@@ -439,3 +441,4 @@ build reads. It is never misread.
 ## See also
 
 - [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals), [`[statistics]`](../input.md#statistics), [`[statistics.spectra]`](../input.md#statisticsspectra), [`[statistics.phase]`](../input.md#statisticsphase), [`[[probes]]`](../input.md#probes)
+- [Geometry](geometry.md): probe shapes, sample placement, reading probe files

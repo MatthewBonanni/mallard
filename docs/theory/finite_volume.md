@@ -164,7 +164,10 @@ The neighbors are the face neighbors. A boundary face contributes its ghost
 state ([chapter 9](boundaries_sources.md#weak-imposition)) at the mirror
 image of the cell centroid, $\Delta\mathbf{x} = 2 d\,\mathbf{n}_f$ with $d$
 the centroid's distance to the face; prescribed states (`dirichlet`, `upt`,
-`farfield`) sit at the face centroid instead. Tetrahedra, whose four face
+`farfield`) sit at the face centroid instead. Across `extrapolation` faces
+with an image face ([chapter 9](boundaries_sources.md#transmissive-boundaries))
+the neighbor is the image cell, moved outward by the translation that takes
+the image face onto the boundary face. Tetrahedra, whose four face
 neighbors make weakly limited MUSCL unstable, and cells on characteristic
 boundaries, whose zero-gradient ghosts would halve outgoing waves, use the
 linear fit over their vertex neighbors instead (the same fit as eq. $\eqref{eq:muscl-2}$
@@ -203,7 +206,10 @@ $$
 
 with $K$ = `venkatakrishnan_K` (default 5) and the scale $s$ of the
 variable: $\rho_i$ for density, $p_i$ for pressure, the sound speed $a_i$
-for the velocity components.
+for the velocity components. Limiting the velocity components one by one
+makes limited runs depend on the orientation of the axes
+([#459](https://github.com/MatthewBonanni/mallard/issues/459)); without a
+limiter, MUSCL does not.
 
 ### TENO-E
 
@@ -313,14 +319,16 @@ central polynomial $K$ and of the sector polynomials $k$,
 
 $$
 \begin{equation}
-\beta = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\int_{\Omega_i}\left(D^{\boldsymbol{\alpha}}u\right)^2\mathrm{d}\boldsymbol{\xi}
+\beta = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\frac{\lvert\boldsymbol{\alpha}\rvert!}{\boldsymbol{\alpha}!}\int_{\Omega_i}\left(D^{\boldsymbol{\alpha}}u\right)^2\mathrm{d}\boldsymbol{\xi}
 \quad\text{(in the scaled frame)}, \qquad
 \gamma_m = \left(\frac{\min_n(\beta_n + \epsilon)}{\beta_m + \epsilon}\right)^{6}, \quad \epsilon = 10^{-12},
 \label{eq:teno-e-5}
 \end{equation}
 $$
 
-decide: the central polynomial is used if
+decide (the multinomial weights make each degree's sum the squared norm of
+that derivative tensor, so the indicators do not depend on the orientation of
+the axes): the central polynomial is used if
 $\gamma_K/(\gamma_K + \sum_k\gamma_k) \ge C_T$; otherwise every sector
 stencil with $\gamma_k/\sum_{k'}\gamma_{k'} \ge C_T$ is kept, with equal
 weights (the renormalization over the sector stencils alone guarantees a
@@ -421,7 +429,16 @@ one-sided stencils of boundary cells and on triangles, where its errors
 cancel only in the interior of regular meshes; stencils that cannot
 determine the quadratic (fewer than $d + d(d+1)/2$ points, or a Cholesky
 pivot below $10^{-10}$ of its diagonal) use the linear fit. Ghosts sit at
-the mirror image of the centroid as for MUSCL; axisymmetric runs fit
+the mirror image of the centroid as for MUSCL. Across `extrapolation`
+boundaries with image faces the stencil continues instead, as across a
+periodic seam: each boundary node maps to the matching node of its image
+face, and the cells around that node, moved back by the same translation,
+that land outside the domain join the stencil of every cell sharing the
+node (chaining the maps of two or three boundaries at edges and corners).
+Boundary cells then have the stencil of an interior cell in a flow that does
+not vary normal to the boundary; one-sided stencils carry O(h) errors on
+tetrahedra that the interior's do not, which made a channel with
+extrapolation sides first order and drove a cross flow. Axisymmetric runs fit
 r-weighted averages through the cells' second moments. Single gases
 differentiate $\mathbf{W}$, with
 $\nabla T = (\nabla p - R T\nabla\rho)/(\rho R)$; mixtures differentiate
