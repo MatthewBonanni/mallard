@@ -23,8 +23,18 @@ MixtureModel MixtureModel::from_input(const Input & input) {
                           "ck2yaml)");
     }
     MixtureModel model;
-    model.mech = chemistry::read_mechanism(find_value<std::string>(physics, "mechanism"),
-                                           find_value_or<std::string>(physics, "phase", ""));
+    const std::string mechanism = find_value<std::string>(physics, "mechanism");
+    const std::string phase = find_value_or<std::string>(physics, "phase", "");
+    try {
+        model.mech = chemistry::read_mechanism(mechanism, phase);
+    } catch (const std::runtime_error & e) {
+        const bool no_phase = std::string(e.what()).find("has no phase") != std::string::npos;
+        throw InputError({.key = no_phase ? "physics.phase" : "physics.mechanism",
+                          .line = line_of(physics, no_phase ? "phase" : "mechanism"),
+                          .message = e.what(),
+                          .fix = no_phase ? "Set phase to one of the file's phases, or remove it to use the first" : "",
+                          .docs = "docs/guide/thermochemistry.md#gas-mixtures"});
+    }
     model.host_thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(model.mech);
     model.gas.thermo = chemistry::make_thermo_table(model.mech);
     model.gas.n_species = model.mech.n_species();

@@ -1,1 +1,2 @@
-- Error messages teach: input errors name the key, its line, what is wrong, the accepted values or the closest one, what to do and the docs section; mesh, boundary, output-path, divergence, NCCL and out-of-memory errors say where (file, zone, face or cell location) and what to check. `mallard check` reports input errors exactly as a run does.
+- Input and setup errors name the key and its line, say what is wrong, list the accepted values with the closest one, say what to do and link the docs page, in a run and in `mallard check` alike; this covers the parser, boundary conditions, mesh files, mechanisms and species, outputs and incompatible options.
+- `mallard` leaves an input or mesh file that is missing or invalid to the solver to report, instead of asking for `--dim`.

@@ -81,6 +81,9 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[[write_data]]`, `[output]`, `[[forces]]`, `[integrals]`, `[statistics]`, `[[probes]]` | no | [Output and diagnostics](output.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
+Shapes that several tables use (regions, probe points and curves) are on
+[Geometry](geometry.md).
+
 Double brackets (`[[boundaries]]`) are TOML arrays of tables: repeat them, one
 entry each. Every key, with its default, is in the
 [input reference](../input.md).
@@ -419,7 +422,7 @@ that the defaults this reference states match it.
 | `mallard upgrade-input old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
 | `mallard reactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallard-reactor) |
 | `mallard mesh convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
-| `mallard test` | The unit and regression tests: `mallard-test` (`build/test/mallard-test`), from a build or an install tree | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |
+| `mallard test` | The unit and regression tests: `mallard-test2d` and `mallard-test3d` (`build/test/mallard-test2d`), from a build or an install tree; `--dim 2\|3` runs one | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |
 
 The Python scripts in `tools/` prepare meshes and restart files and post-process
 output; [Tools](https://matthewbonanni.github.io/mallard/docs/tools/) lists them.

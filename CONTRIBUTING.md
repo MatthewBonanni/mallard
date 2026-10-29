@@ -42,17 +42,17 @@ cd mallard
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
     -DKokkos_ENABLE_THREADS=ON -DMallard_WARNINGS_AS_ERRORS=ON
 cmake --build build -j
-./build/test/mallard-test
+./build/src/mallard test
 ```
 
 - Build 3D in a separate directory with `-DMallard_DIM=3`; code that is not
   dimension specific must build and pass in both.
-- Run a subset while iterating: `./build/test/mallard-test --gtest_filter='TENO*'`.
-  `mallard test` runs the same binary from a build or an install tree
-  (`./build/src/mallard test --gtest_filter='TENO*'`).
+- Run a subset while iterating: `./build/src/mallard test --gtest_filter='TENO*'`.
+  `mallard test` runs the test suite of a build (`build/test/mallard-test2d`, or
+  `mallard-test3d` in 3D) or every one of an install tree (`--dim 2|3` picks one).
   Run the whole suite, 2D and 3D, before asking for review.
 - With MPI (`-DMallard_ENABLE_MPI=ON`), run the multi-rank tests on 2 to 4 ranks:
-  `mpirun -n 3 ./build/test/mallard-test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
+  `mpirun -n 3 ./build/src/mallard test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
@@ -74,6 +74,11 @@ cmake --build build -j
   `toml::value` or `toml::table` directly (configuration fails if you do). Every
   key setup reads is then validated automatically: misspelled or unused keys are
   errors, with suggestions.
+- **Error messages** teach: an invalid value throws an `InputError` built from a
+  `Diagnostic` (key, line from `line_of`, what is wrong, the accepted values, the
+  fix and the docs page); `missing_key`, `not_accepted` and `cannot_read` cover the
+  common cases. A run and `mallard check` report it the same way, and
+  `test/error_messages_test.cpp` holds an example of each kind.
 - **Kokkos device code** must run on CUDA and HIP, not only on the CPU backends:
   - Kernels (`KOKKOS_LAMBDA`, functors) capture by value; never capture `this` or
     references to host objects. Copy the members a kernel needs into locals first.

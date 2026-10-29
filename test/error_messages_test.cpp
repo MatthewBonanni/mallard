@@ -193,6 +193,33 @@ TEST(ErrorMessages, UnknownSpeciesSuggestTheMechanismsName) {
     }
 }
 
+TEST(ErrorMessages, MechanismProblemsNameTheKeyThatReadsTheFile) {
+    const std::string mechanism = source_dir() + "/mechanisms/h2o2.yaml";
+    try {
+        MixtureModel::from_input(parse_input_string("[physics]\ngas = \"mixture\"\nmechanism = \"" + mechanism +
+                                                    "\"\nphase = \"air\"\n"));
+        FAIL() << "no error";
+    } catch (const InputError & e) {
+        expect_parts(e.what(), {"line 4: physics.phase", "has no phase \"air\"", "Set phase to one of the file's phases",
+                                "docs/guide/thermochemistry.md#gas-mixtures"});
+    }
+    try {
+        MixtureModel::from_input(parse_input_string("[physics]\ngas = \"mixture\"\nmechanism = \"no_such.yaml\"\n"));
+        FAIL() << "no error";
+    } catch (const InputError & e) {
+        expect_parts(e.what(), {"line 3: physics.mechanism", "cannot open the mechanism file no_such.yaml"});
+    }
+}
+
+TEST(ErrorMessages, MassFlowInletTakesExactlyOneOfMdotAndMassFlux) {
+    const std::string inlet = "type = \"mass_flow_inlet\"\nT = 1.0\n";
+    expect_parts(run_error(replaced(box(), "type = \"symmetry\"", inlet)),
+                 {"boundaries[name = \"left\"].mass_flux: missing", "needs mass_flux or mdot", "Give exactly one",
+                  "docs/guide/boundary_conditions.md#mass-flow-inlet"});
+    const std::string both = replaced(box(), "type = \"symmetry\"", inlet + "mdot = 1.0\nmass_flux = 1.0\n");
+    expect_parts(run_error(both), {line_prefix(both, "mdot") + "boundaries[name = \"left\"].mdot", "given together"});
+}
+
 TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {
     EXPECT_EQ(std::string(InputError("mesh.transform must be a table.").what()),
               "mesh.transform must be a table. See docs/input.md#mesh.");

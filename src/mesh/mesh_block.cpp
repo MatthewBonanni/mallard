@@ -590,6 +590,29 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
     }
 }
 
+namespace {
+
+/** @brief The dimension of an open HDF5 mesh file, after checking its format and version. */
+int mesh_dimension(hid_t file, const std::string & filename) {
+    Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
+    const auto format = H5Aexists(root, "format") > 0 ? read_strings_attribute(root, "format")
+                                                       : std::vector<std::string>{};
+    if (format.size() != 1 || format[0] != FORMAT) {
+        throw std::runtime_error(filename + " is not a Mallard HDF5 mesh file.");
+    }
+    file_format::check_version(file_format::MESH, filename, read_int_attribute(root, "version"));
+    return read_int_attribute(root, "dimension");
+}
+
+} // namespace
+
+int mesh_h5_dimension(const std::string & filename) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    if (!std::filesystem::exists(filename)) throw std::runtime_error("Could not open mesh file: " + filename + ".");
+    Handle file(H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + filename);
+    return mesh_dimension(file, filename);
+}
+
 MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
     const std::lock_guard<std::mutex> lock(h5::mutex());
     const int p = whole ? 1 : comm::size(), r = whole ? 0 : comm::rank();
@@ -598,14 +621,7 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
     if (!std::filesystem::exists(filename)) throw cannot_read("the mesh file", filename);
     Handle file(H5Fopen(filename.c_str(), H5F_ACC_RDONLY, fapl), H5Fclose, "opening " + filename);
     {
-        Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-        const auto format = H5Aexists(root, "format") > 0 ? read_strings_attribute(root, "format")
-                                                           : std::vector<std::string>{};
-        if (format.size() != 1 || format[0] != FORMAT) {
-            throw std::runtime_error(filename + " is not a Mallard HDF5 mesh file.");
-        }
-        file_format::check_version(file_format::MESH, filename, read_int_attribute(root, "version"));
-        const int dim = read_int_attribute(root, "dimension");
+        const int dim = mesh_dimension(file, filename);
         if (dim != N_DIM) {
             throw std::runtime_error(filename + " is a " + std::to_string(dim) +
                                      "D mesh, but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) + ".");
@@ -680,6 +696,11 @@ bool have_parallel_hdf5() { return false; }
 
 void write_mesh_h5(const std::string &, const MeshBlock &) {
     throw std::runtime_error("This build has no HDF5 support (configure with Mallard_ENABLE_HDF5=ON).");
+}
+
+int mesh_h5_dimension(const std::string & filename) {
+    throw std::runtime_error("Cannot read " + filename +
+                             ": this build has no HDF5 support (configure with Mallard_ENABLE_HDF5=ON).");
 }
 
 MeshBlock read_mesh_h5(const std::string & filename, bool) {

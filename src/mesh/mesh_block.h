@@ -162,6 +162,9 @@ bool have_hdf5();
 /** @brief Whether several ranks can write one HDF5 mesh file together. */
 bool have_parallel_hdf5();
 
+/** @brief The dimension (2 or 3) of an HDF5 mesh file, read by this rank alone. */
+int mesh_h5_dimension(const std::string & filename);
+
 /**
  * @brief Read this rank's block of an HDF5 mesh file (collective): cells,
  *        nodes and boundary faces split evenly in global order. With whole,
