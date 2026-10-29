@@ -1,0 +1,1 @@
+- `mallard upgrade-input` still works, with a notice, and will be removed after at least one minor release: use `mallard input upgrade` (#503).

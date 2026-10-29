@@ -1,0 +1,2 @@
+- **`mallard upgrade-input` is now `mallard input upgrade`** (#503).
+- **Usage errors exit with status 2** and print one line pointing at the command's `--help`: an unknown option (previously ignored by `mallard -i`, `check` and `reactor`), an unknown command, a missing argument. `mallard check`, `reactor`, `mesh convert` and `upgrade-input` exited with 1 on these. Options take their value as `--opt VALUE` or `--opt=VALUE` (#503).
