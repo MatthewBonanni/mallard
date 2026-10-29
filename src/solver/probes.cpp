@@ -405,7 +405,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         }
 
         p.from_region = entry.contains("region");
-        for (const char * k : {"sampling", "format", "file", "samples"}) {
+        for (const char * k : {"shape", "sampling", "format", "file", "samples"}) {
             if (p.from_region && entry.contains(k)) {
                 throw InputError(key + "." + k + ": a region probe writes only its reductions, to reductions_file; " +
                                  k + " applies to points and curves.");
@@ -460,8 +460,9 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
 
         const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
         if (p.from_region) {
-            select_region(p, mesh, regions.get(entry.at("region"), key + ".region"),
-                          regions.fractions(entry.at("region"), key + ".region"), n_evaluated);
+            const region::Region & r = regions.get(entry.at("region"), key + ".region");
+            region::require_full_dimension(r, key + ".region");
+            select_region(p, mesh, r, regions.fractions(entry.at("region"), key + ".region"), n_evaluated);
             if (p.quadrature.n_global == 0) throw InputError(key + ".region contains no part of any cell.");
         } else {
             p.geometry = probe::make_geometry(entry, key);

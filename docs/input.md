@@ -892,7 +892,7 @@ ranks. A probe that is not due costs nothing.
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
 | `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
-| `region` | Instead of `shape`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below). Default none |
+| `region` | Instead of `shape`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`) or `vtp` |

@@ -158,8 +158,10 @@ and probes take regions too (#499), and initialization is to (#324).
 and shared by every key that names it (a source, the sponge and the probe of
 the same region read one array). It reads `[regions]` lazily, entry by entry,
 so a name no key uses stays an unused key, reported like any other. Each
-`Region` has a dimension fixed by its types (all of them fill space so far);
-consumers check it (`require_full_dimension` for sources and sponges), so that
+primitive type has one fixed dimension (`PRIMITIVES` in `region.cpp`; all of
+them fill space so far), a boolean requires its parts to share it, and
+consumers check it (`require_full_dimension` for sources, sponges and region
+probes), so that
 points, curves and surfaces can join the same table without any consumer
 inferring a dimension from where it is used.
 

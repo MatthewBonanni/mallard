@@ -61,6 +61,15 @@ std::string without_indices(const std::string & path) {
 
 std::string join(const std::string & table, const std::string & key) { return table.empty() ? key : table + "." + key; }
 
+/** @brief A key path as the catalog lists it: no array indices, and regions.<name> for every named region. */
+std::string catalog_path(const std::string & path) {
+    std::string out = without_indices(path);
+    const std::string prefix = "regions.";
+    if (out.compare(0, prefix.size(), prefix) != 0) return out;
+    const size_t end = out.find('.', prefix.size());
+    return prefix + "<name>" + (end == std::string::npos ? "" : out.substr(end));
+}
+
 using Lookups = std::multimap<std::string, std::string>;  // key -> path of the table it was looked up in
 
 void collect_lookups(const Input & v, const std::string & path, Lookups & out) {
@@ -156,7 +165,7 @@ void collect_catalog(const Input & v, const std::string & path, std::map<std::st
     if (v.is_table()) {
         const auto & table = v.as_table();
         for (const auto & key : table.lookups_made().keys) {
-            auto & entry = out[join(path, key)];
+            auto & entry = out[catalog_path(join(path, key))];
             const auto use = table.lookups_made().uses.find(key);
             if (use != table.lookups_made().uses.end() && !use->second.type.empty()) entry.use = use->second;
             if (table.entries().count(key)) entry.set = true;
@@ -173,13 +182,13 @@ void collect_catalog(const Input & v, const std::string & path, std::map<std::st
 static void record_dimension(const std::string & key, const Dimension & dimension) {
     if (dimension.same_as(dim::none)) return;
     std::lock_guard<std::mutex> lock(options_mutex());
-    recorded_dimensions()[without_indices(key)] = {dimension.describe(),
+    recorded_dimensions()[catalog_path(key)] = {dimension.describe(),
                                                   std::string(dimension.plain_unit) == "SI" ? "" : dimension.plain_unit};
 }
 
 void record_options(const std::string & key, std::vector<std::string> names) {
     std::lock_guard<std::mutex> lock(options_mutex());
-    recorded_options()[without_indices(key)] = std::move(names);
+    recorded_options()[catalog_path(key)] = std::move(names);
 }
 
 std::string key_catalog(const Input & input) {

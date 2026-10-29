@@ -37,6 +37,26 @@ Vec cross(const Vec & a, const Vec & b) {
 }
 double norm(const Vec & a) { return std::sqrt(dot(a, a)); }
 
+/** @brief The primitive types, each with its fixed dimension; every one so far fills space (a volume, an area in 2D). */
+const std::vector<std::pair<std::string, int>> PRIMITIVES = {
+    {"sphere", N_DIM}, {"ellipsoid", N_DIM}, {"cylinder", N_DIM}, {"cone", N_DIM},  {"box", N_DIM},
+    {"torus", N_DIM},  {"half_space", N_DIM}, {"implicit", N_DIM}, {"polygon", N_DIM}, {"disk", N_DIM},
+    {"annulus", N_DIM}, {"ellipse", N_DIM},  {"rectangle", N_DIM}};
+const std::vector<std::string> BOOLEANS = {"union", "intersection", "difference"};
+
+std::vector<std::string> type_names() {
+    std::vector<std::string> names;
+    for (const auto & [type, d] : PRIMITIVES) names.push_back(type);
+    names.insert(names.end(), BOOLEANS.begin(), BOOLEANS.end());
+    return names;
+}
+
+/** @brief A region of that dimension, in the words of the run (2D: point, curve, area). */
+std::string dimension_name(int d) {
+    const char * names[4] = {"a point", "a curve", N_DIM == 3 ? "a surface" : "an area", "a volume"};
+    return names[static_cast<size_t>(d)];
+}
+
 /** @brief The affine map local = M x + d from world to a region's coordinates, and its distance scale. */
 struct Frame {
     std::array<double, 9> M = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
@@ -81,7 +101,7 @@ class Parser {
         std::vector<double> vertices;
         std::vector<expr::Program> programs;
         bool bounded = true;
-        int dimension = -1;
+        int last_dimension = -1;  // of the region parsed last
         int depth = 0, max_depth = 0;
 
         std::string parse(const Input & value, const std::string & where, const Frame & parent) {
@@ -96,9 +116,7 @@ class Parser {
             }
             if (!t.contains("type")) throw InputError(where + " has no type.");
             const std::string type = find_value<std::string>(t, "type");
-            record_options(where + ".type", {"sphere", "ellipsoid", "cylinder", "cone", "box", "torus", "half_space",
-                                             "implicit", "polygon", "disk", "annulus", "ellipse", "rectangle",
-                                             "union", "intersection", "difference"});
+            record_options(where + ".type", type_names());
             const Frame frame = transformed(t, where, parent);
             if (type == "union" || type == "intersection" || type == "difference") {
                 return boolean(t, where, type, frame);
@@ -265,9 +283,16 @@ class Parser {
             std::string text = type + "(";
             Node op;
             op.kind = type == "union" ? Kind::UNION : (type == "intersection" ? Kind::INTERSECTION : Kind::DIFFERENCE);
+            int d = -1;
             for (size_t i = 0; i < parts.size(); i++) {
                 text += (i ? ", " : "") + parse(*parts[i].first, parts[i].second, frame);
                 if (i >= 1) push(op);
+                if (i >= 1 && last_dimension != d) {
+                    throw InputError(where + ": a " + type + " combines regions of one dimension, but " +
+                                     parts[0].second + " is " + dimension_name(d) + " and " + parts[i].second +
+                                     " is " + dimension_name(last_dimension) + ".");
+                }
+                d = last_dimension;
             }
             return text + ")";
         }
@@ -355,15 +380,14 @@ class Parser {
                                       std::vector<std::string>{"x", "y", "z"});
                 bounded = false;
             } else {
-                throw InputError(where + ".type = \"" + type + "\" is not one of: sphere, ellipsoid, cylinder, cone, "
-                                 "box, torus, half_space, implicit, polygon, disk, annulus, ellipse, rectangle, "
-                                 "union, intersection, difference.");
+                std::string known;
+                for (const auto & name : type_names()) known += (known.empty() ? "" : ", ") + name;
+                throw InputError(where + ".type = \"" + type + "\" is not one of: " + known + ".");
             }
-            // Every primitive so far is solid: a volume, or an area in 2D
-            if (dimension >= 0 && dimension != N_DIM) {
-                throw InputError(where + ": a boolean combines regions of one dimension.");
-            }
-            dimension = N_DIM;
+            const auto entry = std::find_if(PRIMITIVES.begin(), PRIMITIVES.end(), [&type](const auto & e) {
+                return e.first == (type == "circle" ? "disk" : type == "frustum" ? "cone" : type);
+            });
+            last_dimension = entry->second;
             std::copy(frame.M.begin(), frame.M.end(), n.m);
             std::copy(frame.d.begin(), frame.d.end(), n.d);
             n.scale = frame.k;
@@ -413,7 +437,7 @@ Region::Region(const Input & value, const std::string & where, const Input * nam
     m_vertices = std::move(parser.vertices);
     m_programs = std::move(parser.programs);
     m_bounded = parser.bounded;
-    m_dimension = parser.dimension;
+    m_dimension = parser.last_dimension;
     if (table.contains("edge")) {
         const std::string key = value.is_string() ? "regions." + value.as_string() : where;
         m_host.edge = as_double(table.at("edge"), key + ".edge", dim::length);
@@ -563,10 +587,9 @@ std::vector<double> volume_fractions(const Mesh & mesh, const Region & region) {
 
 void require_full_dimension(const Region & region, const std::string & where) {
     if (region.dimension() == N_DIM) return;
-    const char * kinds[4] = {"a point", "a curve", N_DIM == 3 ? "a surface" : "an area", "a volume"};
     const std::string what = region.name().empty() ? "this region" : "'" + region.name() + "'";
-    throw InputError(where + " needs " + kinds[N_DIM] + "; " + what + " is " +
-                     kinds[static_cast<size_t>(region.dimension())] + ".");
+    throw InputError(where + " needs " + dimension_name(N_DIM) + "; " + what + " is " +
+                     dimension_name(region.dimension()) + ".");
 }
 
 Regions::Regions(const Input & input, const Mesh & mesh) : m_names(named_regions(input)), m_mesh(mesh) {}
