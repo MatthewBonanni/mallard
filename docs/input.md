@@ -1126,11 +1126,13 @@ cell, or three for vectors) and `FieldData/TIME`. Cells touching a curved wall
 (`[[mesh.curved]]` or high-order elements of the mesh file) are quadratic
 Lagrange cells (VTK types 69 to 73, and 27 for pyramids), their extra nodes
 on the curved geometry, after the mesh's nodes. A boundary zone (`geometry`)
-is a `PolyData` of its faces (`Lines` in 2D, `Polygons` in 3D). The root group
-carries the `provenance`, `format = "mallard-vtkhdf"` and `version`
-attributes; snapshot files also `step` and `time`. With `series = true` the
-mesh is stored once and `Steps` holds every snapshot's time (`Steps/Values`)
-and where its cell values start (`Steps/CellDataOffsets/<name>`).
+is a `PolyData` of its faces (`Lines` in 2D, `Polygons` in 3D). With
+`series = true` the mesh is stored once and VTKHDF's `Steps` group holds every
+snapshot's time (`Steps/Values`) and where its cell values start
+(`Steps/CellDataOffsets/<name>`). Nothing else is added to the VTKHDF layout:
+the units and descriptions are HDF5 attributes of each dataset (`units`,
+`long_name`), and the root group carries the `provenance` and the format
+`version` as HDF5 attributes, which VTK ignores.
 `tools/mallard/vtkhdf.py` reads the files.
 
 `format = "hdf5"` (deprecated; builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need

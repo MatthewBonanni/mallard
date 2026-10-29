@@ -86,7 +86,6 @@ namespace {
 
 using curved::Vec3;
 
-constexpr const char * VTKHDF_FORMAT = "mallard-vtkhdf";
 // The VTKHDF version whose features the files use (temporal data): ParaView 5.12 reads it
 const std::vector<int64_t> VTKHDF_VERSION = {2, 0};
 
@@ -398,7 +397,7 @@ void DataWriter::build_vtkhdf_faces() {
     m.built = true;
 }
 
-void DataWriter::write_vtkhdf(const std::string & filename, uint64_t step, rtype t, const Values & values) {
+void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Values & values) {
     const std::lock_guard<std::mutex> lock(h5::mutex());
     const bool distributed = mesh->n_global_cells > 0;
     if (!vtkhdf.built) {
@@ -425,13 +424,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, uint64_t step, rtype
     if (!append) {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
         write_strings_attribute(root, "provenance", {provenance});
-        write_strings_attribute(root, "format", {VTKHDF_FORMAT});
         write_int_attribute(root, "version", static_cast<int>(file_format::VTKHDF_OUTPUT.version));
-        write_int_attribute(root, "dimension", N_DIM);
-        if (!one_file) {
-            write_attribute(root, "step", step);
-            write_attribute(root, "time", double(t));
-        }
         Handle top(H5Gcreate2(file, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating VTKHDF");
         write_array_attribute(top, "Version", VTKHDF_VERSION);
         write_string_scalar_attribute(top, "Type", surface ? "PolyData" : "UnstructuredGrid");
@@ -531,7 +524,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, uint64_t step, rtype
 
 #else
 
-void DataWriter::write_vtkhdf(const std::string &, uint64_t, rtype, const Values &) {
+void DataWriter::write_vtkhdf(const std::string &, rtype, const Values &) {
     throw std::logic_error("DataWriter: VTKHDF output without HDF5");
 }
 

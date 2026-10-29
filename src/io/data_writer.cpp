@@ -378,10 +378,10 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         history.emplace_back(t, filename);
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
-            auto job = [this, filename, step, t, root,
+            auto job = [this, filename, t, root,
                         values = surface ? capture_faces() : capture(mesh->n_owned()), list = history]() {
                 const uint64_t before = one_file ? file_bytes(filename) : 0;
-                write_vtkhdf(filename, step, t, values);
+                write_vtkhdf(filename, t, values);
                 if (root) {
                     n_bytes += file_bytes(filename) - std::min(before, file_bytes(filename));
                     if (!one_file) write_vtkhdf_series(list);

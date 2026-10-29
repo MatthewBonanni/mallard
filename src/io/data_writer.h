@@ -249,7 +249,7 @@ class DataWriter {
          *        boundary zone, written by every rank in global order; one
          *        file per snapshot, or with series, one file of every snapshot.
          */
-        void write_vtkhdf(const std::string & filename, uint64_t step, rtype t, const Values & values);
+        void write_vtkhdf(const std::string & filename, rtype t, const Values & values);
         void build_vtkhdf_cells();
         void build_vtkhdf_faces();
         void write_vtkhdf_series(const std::vector<std::pair<rtype, std::string>> & series) const;
