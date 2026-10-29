@@ -122,7 +122,7 @@ std::string channel(const std::string & dir) {
     std::ostringstream s;
     s << "[run]\nn_steps = 2\ncfl = 0.25\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n"
-      << (N_DIM == 3 ? "Nz = 2\nLz = 1.0\nperiodic = [\"x\", \"z\"]\n" : "periodic = [\"x\"]\n")
+      << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\nperiodic = [\"x\", \"z\"]\n" : "periodic = [\"x\"]\n")
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\np = \"1.0\"\nu = "
