@@ -185,7 +185,8 @@ or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
 
 ## Units
 
-Every value Mallard writes is in SI units, and every output file says which,
+Every value Mallard writes is in SI units (the mesh-quality angle of
+`mallard check` excepted, in degrees), and every output file says which,
 as metadata in the way its format's tools expect; field names never change.
 Restart files are the exception: they hold the conservative variables, in SI
 units by definition, for Mallard to read back.
@@ -225,6 +226,7 @@ those of `A` per second.
 | `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
 | `Q` | `s-2` | `CFL`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
+| `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` | `1` |
 
 CSV columns: `t` in `s`, coordinates and probe `length` in `m`, `step`,
 `point` and `count` `1`; forces in `N` (`kg m s-2`), per unit depth in 2D

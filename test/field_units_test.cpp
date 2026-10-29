@@ -178,6 +178,7 @@ TEST(FieldUnitsTest, UnitsFollowFromTheDimensions) {
     EXPECT_EQ(units_of("OMEGA_CH4"), "kg m-3 s-1");
     EXPECT_EQ(units_of("Y_O2"), "1");
     EXPECT_EQ(field_units::describe("X_N2").long_name, "mole fraction of N2");
+    EXPECT_EQ(units_of("NON_ORTHOGONALITY"), "degree") << "mallard check writes it in degrees";
     EXPECT_EQ(field_units::describe("U_Y").long_name, "y component of velocity");
 }
 
@@ -186,6 +187,8 @@ TEST(FieldUnitsTest, DerivedFieldsTakeTheirUnitsFromTheirFields) {
     EXPECT_EQ(units_of("SOURCE_RHOY_OH"), "kg m-3 s-1");
     EXPECT_EQ(units_of("MEAN_T"), "K");
     EXPECT_EQ(units_of("MEAN_Y_H2"), "1");
+    EXPECT_EQ(units_of("MEAN_U"), "m s-1") << "the vector of MEAN_U_X, MEAN_U_Y";
+    EXPECT_EQ(units_of("SOURCE_RHOU"), "kg m-2 s-2");
     // Covariances have the product of the units, also where names hold underscores
     EXPECT_EQ(units_of("COV_U_X_U_Y"), "m2 s-2");
     EXPECT_EQ(units_of("COV_RHO_RHO"), "kg2 m-6");

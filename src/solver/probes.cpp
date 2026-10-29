@@ -186,7 +186,7 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
     std::vector<FieldDescription> descriptions;
     for (size_t a = 3; a < arrays.size(); a++) {
         point_names.push_back(arrays[a].name);
-        descriptions.push_back(arrays[a].name == "arc_length" ? FieldDescription{dim::length, "arc length", ""}
+        descriptions.push_back(arrays[a].name == "arc_length" ? FieldDescription{dim::length, "arc length", "", ""}
                                                               : field_units::describe(arrays[a].name));
     }
     // Field data belongs to the data set, before the piece, for VTK to read it
@@ -473,10 +473,10 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 std::vector<double> xyz;
                 for (const auto & x : p.geometry.nodes) xyz.insert(xyz.end(), x.begin(), x.end());
                 h5::write_rows(file, "coordinates", n, N_DIM, 0, n, xyz.data(), H5P_DEFAULT);
-                h5::annotate(file, "coordinates", FieldDescription{dim::length, "sample coordinates", ""});
+                h5::annotate(file, "coordinates", FieldDescription{dim::length, "sample coordinates", "", ""});
                 if (!p.geometry.arc_length.empty()) {
                     h5::write_rows(file, "arc_length", n, 1, 0, n, p.geometry.arc_length.data(), H5P_DEFAULT);
-                    h5::annotate(file, "arc_length", FieldDescription{dim::length, "arc length", ""});
+                    h5::annotate(file, "arc_length", FieldDescription{dim::length, "arc length", "", ""});
                     std::vector<uint64_t> nodes, offsets = {0};
                     for (const auto & line : p.geometry.polylines) {
                         nodes.insert(nodes.end(), line.begin(), line.end());
@@ -503,8 +503,8 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 };
                 extensible("step", H5T_STD_U64LE, 0);
                 extensible("time", H5T_IEEE_F64LE, 0);
-                h5::annotate(file, "step", FieldDescription{dim::none, "time step", ""});
-                h5::annotate(file, "time", FieldDescription{dim::time, "time", ""});
+                h5::annotate(file, "step", FieldDescription{dim::none, "time step", "", ""});
+                h5::annotate(file, "time", FieldDescription{dim::time, "time", "", ""});
                 for (const auto & v : p.variables) {
                     extensible("fields/" + v, H5T_IEEE_F64LE, n);
                     h5::annotate(file, "fields/" + v, field_units::describe(v));

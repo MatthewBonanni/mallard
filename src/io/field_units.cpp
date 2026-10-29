@@ -19,6 +19,7 @@ struct Entry {
     const char * name;
     Dimension dimension;
     const char * long_name;
+    const char * non_si_units = "";
 };
 
 constexpr Dimension momentum_density = dim::mass_flux;
@@ -56,6 +57,11 @@ const Entry NAMED[] = {
     {"TF_OMEGA", dim::none, "flame sensor"},
     {"PASR_KAPPA", dim::none, "PaSR reacting fraction"},
     {"P_MAX", dim::pressure, "largest pressure seen"},
+    // Mesh quality (mallard check --quality)
+    {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", "degree"},
+    {"SKEWNESS", dim::none, "largest face skewness"},
+    {"ASPECT_RATIO", dim::none, "cell aspect ratio"},
+    {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor"},
 };
 
 // <prefix><species>
@@ -72,29 +78,29 @@ bool starts_with(const std::string & s, const std::string & prefix) { return s.r
 
 std::optional<FieldDescription> find_base(const std::string & name) {
     for (const auto & e : NAMED) {
-        if (name == e.name) return FieldDescription{e.dimension, e.long_name, ""};
+        if (name == e.name) return FieldDescription{e.dimension, e.long_name, "", e.non_si_units};
     }
     for (const auto & e : VECTORS) {
         const std::string stem = e.name;
-        if (name == stem) return FieldDescription{e.dimension, e.long_name, ""};
+        if (name == stem) return FieldDescription{e.dimension, e.long_name, "", ""};
         for (const char * axis : {"X", "Y", "Z"}) {
             if (name == stem + "_" + axis) {
                 const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(axis[0])));
-                return FieldDescription{e.dimension, std::string(1, lower) + " component of " + e.long_name, ""};
+                return FieldDescription{e.dimension, std::string(1, lower) + " component of " + e.long_name, "", ""};
             }
         }
     }
     for (const auto & e : SPECIES) {
         if (starts_with(name, e.name) && name.size() > std::string(e.name).size()) {
-            return FieldDescription{e.dimension, e.long_name + name.substr(std::string(e.name).size()), ""};
+            return FieldDescription{e.dimension, e.long_name + name.substr(std::string(e.name).size()), "", ""};
         }
     }
     return std::nullopt;
 }
 
-/** @brief A field that statistics and probes sample: RHO, a primitive or Y_<species>. */
+/** @brief A field that statistics and probes sample (RHO, a primitive or Y_<species>), or the vector U. */
 std::optional<FieldDescription> find_sampled(const std::string & name) {
-    bool sampled = name == "RHO" || (starts_with(name, "Y_") && name.size() > 2);
+    bool sampled = name == "RHO" || name == "U" || (starts_with(name, "Y_") && name.size() > 2);
     for (const auto & primitive : PRIMITIVE_NAMES) sampled = sampled || name == primitive;
     return sampled ? find_base(name) : std::nullopt;
 }
@@ -108,12 +114,12 @@ std::optional<FieldDescription> find(const std::string & name) {
     if (starts_with(name, "SOURCE_")) {
         auto of = find_base(name.substr(7));
         if (!of) return std::nullopt;
-        return FieldDescription{of->dimension.times(dim::time, -1), "source of " + of->long_name, ""};
+        return FieldDescription{of->dimension.times(dim::time, -1), "source of " + of->long_name, "", ""};
     }
     if (starts_with(name, "MEAN_")) {
         auto of = find_sampled(name.substr(5));
         if (!of) return std::nullopt;
-        return FieldDescription{of->dimension, "time average of " + of->long_name, ""};
+        return FieldDescription{of->dimension, "time average of " + of->long_name, "", ""};
     }
     if (starts_with(name, "COV_")) {
         // COV_<A>_<B>: the first split whose halves are both sampled fields (names hold underscores)
@@ -122,7 +128,7 @@ std::optional<FieldDescription> find(const std::string & name) {
             const auto a = find_sampled(pair.substr(0, at)), b = find_sampled(pair.substr(at + 1));
             if (a && b) {
                 return FieldDescription{a->dimension.times(b->dimension),
-                                        "covariance of " + a->long_name + " and " + b->long_name, ""};
+                                        "covariance of " + a->long_name + " and " + b->long_name, "", ""};
             }
         }
         return std::nullopt;
@@ -136,7 +142,7 @@ std::optional<FieldDescription> find(const std::string & name) {
         }
         auto of = find_sampled(name.substr(at + 1));
         if (!of) return std::nullopt;
-        return FieldDescription{of->dimension, "phase average of " + of->long_name + " in bin " + bin, ""};
+        return FieldDescription{of->dimension, "phase average of " + of->long_name + " in bin " + bin, "", ""};
     }
     return std::nullopt;
 }

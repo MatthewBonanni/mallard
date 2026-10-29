@@ -251,7 +251,7 @@ void DataWriter::write_hdf5_mesh() {
         Handle group(H5Gcreate2(file, "nodes", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
         write_dataset(group, "coordinates", n_nodes, N_DIM, node_order.first(), node_order.size(), block_coords.data(),
                       dxpl, deflate, !distributed, io_threads);
-        annotate(group, "coordinates", FieldDescription{dim::length, "node coordinates", ""});
+        annotate(group, "coordinates", FieldDescription{dim::length, "node coordinates", "", ""});
     }
     {
         Handle group(H5Gcreate2(file, "cells", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
