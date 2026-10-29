@@ -53,6 +53,8 @@ const Rules & rules() {
         },
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
+            {"write_data[].format", "hdf5", "vtkhdf", "0.9.0", "0.10.0",
+             "VTKHDF replaces the XDMF and HDF5 files; ParaView 5.12 and later read it", true},
         },
     };
     return table;
@@ -242,7 +244,7 @@ std::size_t line_of(const V & value) {
  *        if a key is set under both its old and its new name.
  */
 template <typename V>
-std::vector<Finding> transform(V & root, const Rules & table, const std::string & version) {
+std::vector<Finding> transform(V & root, const Rules & table, const std::string & version, bool setup = false) {
     std::vector<Finding> findings;
     for (const KeyRule & rule : table.keys) {
         for (const Concrete & key : matches(root, rule.from)) {
@@ -272,7 +274,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
             V & value = *at(root, key);
             if (!value.is_string() || value.as_string() != rule.from) continue;
             findings.push_back(option_finding(rule, key, line_of(value), version));
-            value = rule.to;
+            if (!(setup && rule.kept && !findings.back().removed)) value = rule.to;
         }
     }
     return findings;
@@ -476,7 +478,7 @@ std::string describe(const Finding & finding) {
 }
 
 std::vector<Finding> apply(Input & input, const std::string & version, const Rules & table) {
-    std::vector<Finding> findings = transform(input, table, version.empty() ? MALLARD_VERSION : version);
+    std::vector<Finding> findings = transform(input, table, version.empty() ? MALLARD_VERSION : version, true);
     std::string removed;
     for (const Finding & f : findings) {
         if (f.removed) removed += "\n  " + describe(f);

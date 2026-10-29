@@ -36,11 +36,16 @@ struct KeyRule {
     std::string (*convert)(const std::string & toml_text) = nullptr;
 };
 
-/** @brief A string option renamed: `key = "from"` becomes `key = "to"`. */
+/**
+ * @brief A string option renamed: `key = "from"` becomes `key = "to"`. A kept
+ *        option still does what it did while deprecated (the setup reads it
+ *        unchanged); only the rewritten file switches to `to`.
+ */
 struct OptionRule {
     std::string key;
     std::string from, to;
     std::string since, removed, note;
+    bool kept = false;
 };
 
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */
@@ -67,7 +72,7 @@ std::string advice(const Finding & finding);
 
 /**
  * @brief Rewrites the deprecated keys and options of `input` in place, as the
- *        setup reads them, and returns them. Throws an InputError listing the
+ *        setup reads them (kept options stay), and returns them. Throws an InputError listing the
  *        removed ones, with what to do (`mallard upgrade-input`). `version`
  *        is this release's (MALLARD_VERSION when empty).
  */

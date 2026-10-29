@@ -1,0 +1,1 @@
+- `[[write_data]] format` is optional and defaults to `"vtkhdf"`; builds without HDF5 (or without parallel HDF5, on several ranks) write VTU instead, with a warning.
