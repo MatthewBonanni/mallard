@@ -1,0 +1,96 @@
+# A Mach 1.22 shock in air on a light bubble and a heavy, tilted slab (2D),
+# set up without a script: the bubble from a tabulated radial profile, the
+# shocked gas and the slab as regions layered over it.
+#
+# - The bubble (density 0.138, as helium in air, at the ambient pressure) is
+#   the base state: [[initialize.data]] reads bubble.csv, its density against
+#   the distance from its center, and the analytical density reads it as the
+#   variable bubble_rho.
+# - The shocked gas is a region: the half-space x < 0.25 takes the
+#   Rankine-Hugoniot state behind the shock (rho, u, p).
+# - The slab is a rectangle rotated by 30 degrees, three times denser than the
+#   air at the same pressure (it sets rho alone; the pressure stays). Its
+#   edges cut the cells exactly: cut cells hold the volume-weighted average.
+#
+# Half the domain: the bubble's axis y = 0 is a symmetry plane. The run log
+# lists the layers and the data. The shock runs through the bubble faster
+# than in the air around it, the bubble rolls up into a vortex pair, and the
+# shock reflects off the slab and diffracts around its corner.
+#
+# Run:
+#   ../../build/src/mallard -i input.toml --kokkos-num-threads=8
+#   python ../../tools/post/animate.py solut shock_bubble
+
+[run]
+t_stop = 1.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 480
+Ny = 120
+Lx = 2.0
+Ly = 0.5
+
+[initialize]
+type = "analytical"
+rho = "bubble_rho"
+u = ["0", "0"]
+p = "1"
+
+[[initialize.data]]
+name = "bubble"
+file = "bubble.csv"
+interpolation = "cubic"
+at = ["hypot(x - 0.6, y)"]
+
+[[initialize.regions]]
+name = "shocked gas"
+region = {type = "half_space", point = [0.25, 0.0], normal = [1.0, 0.0]}
+rho = 1.3763639726280747
+u = [0.3947286019215646, 0.0]
+p = 1.5698
+
+[[initialize.regions]]
+name = "slab"
+region = {type = "rectangle", center = [1.45, 0.3], size = [0.12, 0.3], pivot = [1.45, 0.3], rotate = 30}
+rho = 3.0
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 200
+
+[[write_data]]
+prefix = "./solut/shock_bubble"
+format = "vtu"
+time_interval = 0.02
+variables = ["RHO", "U_X", "U_Y", "P"]

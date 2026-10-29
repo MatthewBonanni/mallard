@@ -202,6 +202,8 @@ struct Evaluator {
     Kokkos::View<const region::Node *> nodes;
     Kokkos::View<const double *> vertices;
     expr::ProgramTable<> programs;
+    Kokkos::View<const uint8_t *> constant;  // per program: a constant, read without the interpreter
+    Kokkos::View<const double *> constant_value;
     Kokkos::View<const uint32_t *[2]> fractions;
     tabulated::DataView<> data;
     Kokkos::View<const Variable *> variables;
@@ -255,7 +257,8 @@ struct Evaluator {
     }
 
     KOKKOS_INLINE_FUNCTION double value(const int32_t program, const double * x) const {
-        return programs(static_cast<uint32_t>(program), PointVariables{this, x});
+        const uint32_t p = static_cast<uint32_t>(program);
+        return constant(p) ? constant_value(p) : programs(p, PointVariables{this, x});
     }
 
     /** @brief Mass fractions of layer L at x into Y (normalized; mole fractions converted). */
@@ -264,7 +267,7 @@ struct Evaluator {
         double total = 0.0;
         for (uint32_t i = L.fractions; i < L.fractions + L.n_fractions; i++) {
             const uint32_t k = fractions(i, 0);
-            const double v = programs(fractions(i, 1), PointVariables{this, x});
+            const double v = value(static_cast<int32_t>(fractions(i, 1)), x);
             Y[k] = v > 0.0 ? v : 0.0;
             if (static_cast<int32_t>(k) != L.balance) total += Y[k];
         }
@@ -1267,6 +1270,16 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
     std::vector<const expr::Program *> pointers;
     for (const auto & p : impl->programs) pointers.push_back(&p);
     e.programs = expr::ProgramTable<>(pointers);
+    {
+        std::vector<uint8_t> constant;
+        std::vector<double> values;
+        for (const auto & p : impl->programs) {
+            constant.push_back(p.is_constant() ? 1 : 0);
+            values.push_back(p.is_constant() ? p.code()[0].value : 0.0);
+        }
+        e.constant = upload(constant, "init_constant");
+        e.constant_value = upload(values, "init_constant_value");
+    }
     {
         Kokkos::View<uint32_t *[2]> f("init_fractions", impl->fractions.size());
         auto h = Kokkos::create_mirror_view(f);
