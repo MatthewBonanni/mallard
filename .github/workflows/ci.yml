@@ -252,6 +252,11 @@ jobs:
         run: |
           git fetch --quiet --tags --depth=1 origin
           python3 tools/dev/check_upgrade_input.py build/src/mallard
+      - name: Output units through h5py and tools/mallard
+        if: matrix.backend.name == 'openmp'
+        run: |
+          python3 -c 'import h5py, numpy' 2>/dev/null || python3 -m pip install -q --break-system-packages h5py numpy
+          python3 tools/dev/check_output_units.py build/src/mallard
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent
