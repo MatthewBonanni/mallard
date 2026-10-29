@@ -940,7 +940,7 @@ TEST(MPITest, CurvedWallsMatchSerial) {
     // Walls from P3 lines of the file, or projected onto circles; the HDF5
     // copy of the file keeps the P3 lines
     const char * shapes = "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
-                          "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
+                          "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
     for (int order : {1, 3}) {
         const std::string file =
             write_temp_shared("mallard_mpi_annulus_" + std::to_string(order) + ".msh", annulus_gmsh(5, 60, order, order == 3));
