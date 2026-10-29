@@ -1,6 +1,7 @@
 """Minimal reader for Mallard's raw-appended VTU files, and (through
-mallard.h5, which needs h5py) its HDF5 snapshots: every function also takes a
-snapshot .h5 file. provenance() reads the provenance block of any output file."""
+mallard.vtkhdf and mallard.h5, which need h5py) its VTKHDF and HDF5 snapshots:
+every function also takes a snapshot .vtkhdf or .h5 file. provenance() reads the
+provenance block of any output file."""
 import json
 import os
 import re
@@ -30,8 +31,12 @@ def read_vtu_cells(path):
     Returns points (n, 3), connectivity, offsets (end of each cell), VTK cell
     types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". A PVTU
     (MPI runs) is read as the union of its pieces; an HDF5 snapshot (.h5) is
-    read with mallard.h5.
+    read with mallard.h5, a VTKHDF snapshot (.vtkhdf) with mallard.vtkhdf (the
+    last snapshot of a series file).
     """
+    if path.endswith(".vtkhdf"):
+        from .vtkhdf import read_cells
+        return read_cells(path)
     if path.endswith(".h5") or path.endswith(".xmf"):
         from .h5 import read_h5_cells
         return read_h5_cells(path)
@@ -92,10 +97,14 @@ def _read_pvtu(path):
 
 
 def series(directory, pattern="*"):
-    """The snapshots of a series in a directory, oldest first: the PVTU files
-    of an MPI run (not their pieces), else the VTU (or HDF5) files."""
+    """The snapshots of a series in a directory, oldest first: the VTKHDF
+    files, else the PVTU files of an MPI run (not their pieces), else the VTU
+    (or HDF5) files."""
     import glob
     files = sorted(glob.glob(os.path.join(directory, pattern)))
+    vtkhdf = [f for f in files if f.endswith(".vtkhdf")]
+    if vtkhdf:
+        return vtkhdf
     parallel = [f for f in files if f.endswith(".pvtu")]
     if parallel:
         return parallel
@@ -195,7 +204,7 @@ def provenance(path):
     """The provenance block (docs/guide/output.md) of any Mallard output file,
     as a dict: of the first run that wrote to it for CSV files and run logs,
     None if the file has none."""
-    if path.endswith(".h5"):
+    if path.endswith(".h5") or path.endswith(".vtkhdf"):
         from .h5 import provenance as h5_provenance
         return h5_provenance(path)
     if path.endswith(".jsonl"):
