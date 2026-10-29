@@ -982,9 +982,8 @@ Expressions ([syntax](#regions)) read the variables `x`, `y`, `z`, `t`,
 become `_`), and the domain averages (volume-weighted over the whole mesh)
 `mean_rho`, `mean_rhou_x`, `mean_rhou_y` (`mean_rhou_z`), `mean_rhoE` and
 `mean_ke` (of `rho |u|^2 / 2`). Values are taken at cell centroids, from the
-cell averages. Domain averages are sums over ranks and, unlike the rest of a
-run, can differ in the last bits between numbers of ranks; region integrals
-for totals are summed in global cell order and do not.
+cell averages. Domain averages and the region integrals for totals are the
+same bit for bit on any number of ranks or threads.
 
 Sources of the solution are explicit: a source that relaxes a quantity at rate
 `k` (`-k (q - q_ref)`, or linear forcing with rate `A`) needs `k dt` below
