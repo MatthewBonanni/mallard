@@ -148,10 +148,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   failure, and its *Details* link shows every job and its log. `main` requires a
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors and runs the full suite in 2D and 3D, with
-  OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a Clang build and
-  the tutorials and case templates. Each job also shows on the PR as its own status,
-  `CI / <job>`. Documentation-only changes skip the build jobs (the run takes about a
-  minute). `main` runs CI on every merge.
+  OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a single-precision
+  Clang build and the tutorials and case templates. Each job also shows on the PR as
+  its own status, `CI / <job>`. Documentation-only changes skip the build jobs (the
+  run takes about a minute). `main` runs CI on every merge.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only
   what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
   only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `fuzz`). The `CI` status
