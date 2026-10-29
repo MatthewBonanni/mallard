@@ -167,6 +167,8 @@ void write_rows(hid_t parent, const char * name, uint64_t n_rows, int cols, uint
     }
     Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, dcpl, H5P_DEFAULT), H5Dclose,
                 std::string("creating ") + name);
+    // An empty dataset has no storage, which collective writes of HDF5 1.10 reject
+    if (n_rows == 0) return;
     Handle memory(H5Screate_simple(rank, local, nullptr), H5Sclose, "H5Screate_simple");
     select_rows(space, first, n);
     select_rows(memory, 0, n);
