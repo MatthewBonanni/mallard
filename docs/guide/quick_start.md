@@ -23,6 +23,7 @@ The [tutorials](../tutorials/index.md) are an ordered path, each building on the
 4. [Supersonic flow over a cone](../tutorials/cone.md): 3D, tetrahedra, symmetry planes, MPI and GPUs
 5. Premixed flame against Cantera: mixtures and chemistry (in preparation)
 6. [Channel LES](../tutorials/channel_les.md): large-eddy simulation, statistics, multi-GPU runs
+7. [Running on a cluster](../tutorials/cluster.md): sizing a run, job scripts, `mallard ctl`, stopping and resuming
 
 The [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are 40 ready-to-run cases to
 browse, and the user guide covers each topic: [input files](input_files.md), [meshes](meshes.md),
