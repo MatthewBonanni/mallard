@@ -558,12 +558,15 @@ class Solver {
         void record_mesh_provenance() const;
         /** @brief Provenance lines of the CSV files and the run log's start record. */
         void write_provenance();
-        std::vector<std::string> integral_names() const;
         // Run health (solver_health.cpp)
         void init_health();
         /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
         void health_summary() const;
+        /** @brief The columns of the integrals file after step and t, and their dimensions. */
+        std::vector<std::pair<std::string, Dimension>> integral_columns() const;
+        /** @brief Dimension of the cell measure: m^N_DIM, per unit depth in 2D, per radian in axisymmetric runs. */
+        Dimension measure_dimension() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
         void write_data(bool force = false);
@@ -699,6 +702,7 @@ class Solver {
         std::vector<std::array<double, 2>> bc_surrogates;    // [gamma, e0] of prescribed states
         std::vector<double> bc_temperatures;                  // T of prescribed states
         BoundaryData boundary_data;
+        std::vector<uint8_t> image_reach;  // Halo depth each cell's image neighbors need (make_boundary_data)
         std::vector<DirichletBoundary> dirichlet_boundaries;
         struct AveragePressureOutlet {
             int32_t i_bc;

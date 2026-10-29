@@ -275,7 +275,7 @@ rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] i
 pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtu")  # 2D or 3D cells
 ```
 
-`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard.h5` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file.
+`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard.h5` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
 
 ### `plot_vtu.py`: one field of a snapshot
 
@@ -413,11 +413,13 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | Script | Purpose |
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
+| `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard` that every snapshot and monitor format carries the same units for each field; the `openmp` job of `ci.yml` runs it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
-| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/mallard`; `--mallard3d` for the 3D region figure) |
+| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/mallard`; `--mallard3d` for the 3D region and probe figures) |
 | `docs/regions.py` | The region figures alone: cell volume fractions of every primitive and boolean on coarse unstructured meshes, from one-step runs |
+| `docs/geometry.py` | The figures of the [geometry guide](../docs/guide/geometry.md): schematics of the region primitives, booleans, transforms and signed distance, and from one-step runs the volume fractions on a Cartesian and an O-grid, the probe samples, and the convergence of cell-average and point probe values |
 | `docs/tools.py` | The figures of this page (`docs/images/tools/`), from running each tool (`--mallard` for those from Mallard runs) |
-| `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D `mallard-test` builds (`--test build-2/test/mallard-test build-3/test/mallard-test`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
+| `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D test-suite builds (`--test build-2/test/mallard-test2d build-3/test/mallard-test3d`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
 | `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (VTU and PVTU series) |
 | `dev/make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |

@@ -4,7 +4,7 @@
   - `Mallard new`, `Mallard ctl`, `Mallard upgrade-input`, `Mallard --version` → `mallard new`, `mallard ctl`, `mallard upgrade-input`, `mallard --version`
   - `MallardReactor -i reactor.toml` → `mallard reactor -i reactor.toml`
   - `mallard-mesh-convert INPUT OUTPUT.h5` → `mallard mesh convert INPUT OUTPUT.h5`
-  - `MallardTest` → `mallard-test`, also run as `mallard test [GoogleTest options]`
-  - `-DMallard_EXECUTABLE_SUFFIX=3D` (`Mallard3D`, `mallard-mesh-convert3D`) → `-DMallard_EXECUTABLE_SUFFIX=3d` (`mallard3d`, `mallard-test3d`)
+  - `MallardTest` → `mallard-test2d` or `mallard-test3d`, also run as `mallard test [GoogleTest options]`
+  - `-DMallard_EXECUTABLE_SUFFIX=3D` (`Mallard3D`, `mallard-mesh-convert3D`) → none: `mallard2d` and `mallard3d` behind one `mallard`
   - CMake targets `Mallard`, `MallardReactor`, `mallard-mesh-convert`, `MallardTest` → `mallard`, `mallard-test`
-- `cmake --install` also installs `mallard-test` and its data, so `mallard test` checks an installed build; `-DMallard_INSTALL_TESTS=OFF` leaves them out (#414).
+- `cmake --install` also installs the test suite and its data, so `mallard test` checks an installed build; `-DMallard_INSTALL_TESTS=OFF` leaves them out (#414).

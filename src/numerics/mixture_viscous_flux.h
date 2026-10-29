@@ -126,6 +126,13 @@ struct MixtureGradientFunctor {
                     FOR_I_DIM g[v][i] += w[i] * dq;
                 }
             }
+            stencil.for_each_image(c, [&](const uint32_t j, const uint32_t k) {
+                for (uint32_t v = 0; v < CHUNK; v++) {
+                    if (v >= n) continue;
+                    const rtype dq = values(j, v0 + v) - q_c[v];
+                    FOR_I_DIM g[v][i] += stencil.weights.images(k, i) * dq;
+                }
+            });
             for (uint32_t v = 0; v < CHUNK; v++) {
                 if (v < n) FOR_I_DIM gradients(c, v0 + v, i) = g[v][i];
             }
@@ -134,7 +141,7 @@ struct MixtureGradientFunctor {
         FOR_I_CONSERVATIVE W_i[i] = f.W(c, i);
         for (uint32_t k = f.offsets_faces_of_cell(c); k < f.offsets_faces_of_cell(c + 1); k++) {
             const uint32_t i_face = f.faces_of_cell(k);
-            if (f.cells_of_face(i_face, 1) >= 0) continue;
+            if (!stencil.ghost_face(i_face)) continue;
             rtype dx[N_DIM], W_g[N_CONSERVATIVE];
             f.neighbor(c, i_face, W_i, dx, W_g);
             for (uint8_t v = 0; v < N_DIM; v++) {

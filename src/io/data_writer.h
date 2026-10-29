@@ -24,6 +24,7 @@
 #include "input.h"
 
 #include "data.h"
+#include "field_units.h"
 #include "global_order.h"
 #include "mesh.h"
 
@@ -244,6 +245,7 @@ class DataWriter {
         struct Field {
             std::string name;
             std::vector<const Data *> components;
+            FieldDescription description;  // units and long name; unset in restart files
             uint32_t n_vtk_components() const { return components.size() == 1 ? 1 : 3; }
             rtype value(uint32_t i_cell, uint32_t i_comp) const {
                 return i_comp < components.size() ? (*components[i_comp])[i_cell] : rtype(0);
@@ -265,6 +267,8 @@ class DataWriter {
         uint64_t n_files = 0;
         std::string last_file;
         void write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const;
+        /** @brief The VTU field data: TIME, MALLARD_FORMAT_VERSION and the fields' units record. */
+        std::string vtu_field_data(rtype t) const;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells
         // Compression
         Compression compression = Compression::NONE;

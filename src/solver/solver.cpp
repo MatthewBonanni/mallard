@@ -34,6 +34,7 @@
 #include "common_io.h"
 #include "device_comm.h"
 #include "common.h"
+#include "field_units.h"
 #include "log.h"
 #include "mesh_block.h"
 #include "partition.h"
@@ -450,6 +451,15 @@ void Solver::trim_halo() {
     std::vector<uint8_t> needed = teno->stencil_cells();
     const int base = base_halo_layers();
     for (uint32_t c = 0; c < mesh->n_cells; c++) needed[c] = needed[c] || distribution.layer[c] <= base;
+    // Image neighbors of the cells whose gradients are read
+    if (boundary_data.image_neighbors.extent(0) > 0) {
+        auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.image_neighbor_offsets);
+        auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.image_neighbors);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            if (distribution.layer[c] > 1) continue;
+            for (uint32_t k = offsets(c); k < offsets(c + 1); k++) needed[neighbors(k)] = 1;
+        }
+    }
     // Wall-model points: their cells and the vertex neighbors their gradients read
     for (const uint32_t c : wall_model_points.cells) {
         needed[c] = 1;
@@ -488,12 +498,18 @@ void Solver::describe_partition_surface() {
 bool Solver::halo_too_shallow() {
     if (!is_distributed()) return false;
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
-    if (teno == nullptr && !wall_model_on) return false;
+    // Every rank takes part in the reduction below, also those without image neighbors
+    const bool images = comm::allreduce(int(boundary_data.image_neighbors.extent(0) > 0), comm::Op::MAX) > 0;
+    if (teno == nullptr && !wall_model_on && !images) return false;
     // Owned and halo-layer-1 cells are reconstructed; their stencil searches must
     // see every layer they visited, so stencils match the serial ones exactly
     int needed = 0;
     for (uint32_t c = 0; teno && c < mesh->n_cells; c++) {
         if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + teno->gather_depth[c] + 1);
+    }
+    // The same for the gradient stencils that continue across extrapolation boundaries
+    for (uint32_t c = 0; !image_reach.empty() && c < mesh->n_cells; c++) {
+        if (distribution.layer[c] <= 1) needed = std::max(needed, distribution.layer[c] + image_reach[c]);
     }
     // The wall model's exchange and edge points must lie in cells with complete gradient stencils
     needed = std::max(needed, wall_model_points.needed_layers);
@@ -770,7 +786,7 @@ void Solver::init_boundaries() {
     t_characteristic = -1.0;
     characteristic_state_set = false;
     if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
-    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics);
+    boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics, &image_reach);
     boundary_data.mixture = is_mixture();
     init_wall_model(face_bc, bcs);
     if (is_mixture()) {
@@ -1217,12 +1233,21 @@ void Solver::init_output() {
                                     std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
                 monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
                 if (!resume) {
+                    // Over the zone's faces: per unit depth in 2D, per radian in axisymmetric runs
+                    const Dimension area = measure_dimension().times(dim::length, -1);
+                    std::vector<Dimension> units = {dim::none, dim::time};
                     *monitor.out << "step,t";
                     for (const char * kind : {"pressure", "viscous"}) {
-                        FOR_I_DIM *monitor.out << ",F" << "xyz"[i] << "_" << kind;
+                        FOR_I_DIM {
+                            *monitor.out << ",F" << "xyz"[i] << "_" << kind;
+                            units.push_back(dim::pressure.times(area));
+                        }
                     }
-                    if (monitor.modeled) *monitor.out << ",Q";
-                    *monitor.out << "\n";
+                    if (monitor.modeled) {
+                        *monitor.out << ",Q";
+                        units.push_back(dim::heat_flux.times(area));
+                    }
+                    *monitor.out << "\n" << field_units::csv_line(units) << "\n";
                 }
             }
             force_monitors.push_back(monitor);
@@ -1251,9 +1276,13 @@ void Solver::init_output() {
                                 std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
             integral_monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
             if (!resume) {
+                std::vector<Dimension> units = {dim::none, dim::time};
                 *integral_monitor.out << "step,t";
-                for (const auto & name : integral_names()) *integral_monitor.out << "," << name;
-                *integral_monitor.out << "\n";
+                for (const auto & [name, dimension] : integral_columns()) {
+                    *integral_monitor.out << "," << name;
+                    units.push_back(dimension);
+                }
+                *integral_monitor.out << "\n" << field_units::csv_line(units) << "\n";
             }
         }
     }
@@ -1286,17 +1315,29 @@ void Solver::init_output() {
     }
 }
 
-std::vector<std::string> Solver::integral_names() const {
-    std::vector<std::string> names = {"kinetic_energy", "enstrophy", "dilatation_squared", "pressure_dilatation",
-                                      "velocity_squared", "vorticity_squared", "density_squared", "temperature",
-                                      "temperature_squared"};
+Dimension Solver::measure_dimension() const { return dim::of(0, N_DIM + (axisymmetric ? 1 : 0), 0); }
+
+std::vector<std::pair<std::string, Dimension>> Solver::integral_columns() const {
+    const Dimension V = measure_dimension(), rate2 = dim::rate.times(dim::rate);
+    const Dimension energy = dim::pressure.times(V), power = energy.times(dim::time, -1);
+    std::vector<std::pair<std::string, Dimension>> columns = {
+        {"kinetic_energy", energy},
+        {"enstrophy", dim::density.times(rate2).times(V)},
+        {"dilatation_squared", rate2.times(V)},
+        {"pressure_dilatation", dim::pressure.times(dim::rate).times(V)},
+        {"velocity_squared", dim::velocity_squared.times(V)},
+        {"vorticity_squared", rate2.times(V)},
+        {"density_squared", dim::density.times(dim::density).times(V)},
+        {"temperature", dim::temperature.times(V)},
+        {"temperature_squared", dim::temperature.times(dim::temperature).times(V)}};
     if (integral_monitor.budget) {
-        names.insert(names.end(),
-                     {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"});
+        for (const char * name : {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"}) {
+            columns.emplace_back(name, power);
+        }
     }
-    if (les_on && les.dynamic) names.emplace_back("les_C");
-    if (dynamic_efficiency()) names.emplace_back("tf_beta");
-    return names;
+    if (les_on && les.dynamic) columns.emplace_back("les_C", dim::none);
+    if (dynamic_efficiency()) columns.emplace_back("tf_beta", dim::none);
+    return columns;
 }
 
 void Solver::allocate_memory() {
@@ -2590,9 +2631,9 @@ void Solver::write_integrals() {
     }
     if (les_on && les.dynamic) values.push_back(double(les.C));
     if (dynamic_efficiency()) values.push_back(double(thickened_flame.beta));
-    const std::vector<std::string> names = integral_names();
+    const auto columns = integral_columns();
     integral_monitor.last = {"integrals", step, double(t), {}};
-    for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(names[i], values[i]);
+    for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(columns[i].first, values[i]);
     if (!integral_monitor.out) return;
     *integral_monitor.out << step << "," << std::setprecision(12) << t;
     for (const double v : values) *integral_monitor.out << "," << v;

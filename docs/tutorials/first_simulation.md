@@ -2,7 +2,7 @@
 
 This walk-through takes about ten minutes: build Mallard on a CPU, run the Sod shock tube, check the result against the exact solution, and then change the case. It assumes a C++20 compiler, CMake 3.22 or newer, git, and Python 3.
 
-With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` and `mallard3d` where the commands below run `build/src/mallard` and `build3d/src/mallard` (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
+With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` where the commands below run `build/src/mallard` or `build3d/src/mallard`; it runs the 2D or 3D solver a case needs (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
 
 ## 1. Build
 
@@ -13,7 +13,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-This builds Kokkos from the bundled submodule with its `Threads` backend, which works on Linux and macOS. The solver is `build/src/mallard`; `build/test/mallard-test` runs the test suite. For OpenMP, use `-DKokkos_ENABLE_OPENMP=ON` instead (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)). For an NVIDIA GPU, enable CUDA with the architecture of your GPU (here an A100), compile through Kokkos' `nvcc_wrapper`, and enable OpenMP as the host backend so that the setup work done on the CPU (TENO's stencil precomputation, which takes minutes for a million cells on one thread) runs in parallel:
+This builds Kokkos from the bundled submodule with its `Threads` backend, which works on Linux and macOS. The solver is `build/src/mallard2d`, run as `build/src/mallard`; `build/src/mallard test` runs the test suite. For OpenMP, use `-DKokkos_ENABLE_OPENMP=ON` instead (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)). For an NVIDIA GPU, enable CUDA with the architecture of your GPU (here an A100), compile through Kokkos' `nvcc_wrapper`, and enable OpenMP as the host backend so that the setup work done on the CPU (TENO's stencil precomputation, which takes minutes for a million cells on one thread) runs in parallel:
 
 ```bash
 cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
@@ -126,6 +126,8 @@ cmake -S . -B build3d -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 cmake --build build3d -j
 ```
 
+This builds `build3d/src/mallard3d`, run as `build3d/src/mallard`. Installed to one prefix (`cmake --install build --prefix ~/mallard` and the same for `build3d`), the two solvers share one `mallard`, which runs the 2D or 3D solver by the case's mesh (a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`).
+
 3D inputs use the same keys as 2D, with three differences: vectors have three components (`u = [u_x, u_y, u_z]`, `gravity`, `rhou`); expressions are in `x`, `y` and `z`; and generated meshes are `Nx × Ny × Nz` boxes with two more boundary zones, `back` (z = 0) and `front` (z = Lz). Each block of the box holds:
 
 | `[mesh] type` | Cells per block |
@@ -149,7 +151,7 @@ The [validation page](https://matthewbonanni.github.io/mallard/validation/#spher
 
 ## 7. Templates
 
-`mallard new --list` shows every template, grouped as the examples are, with whether it needs a 2D or 3D build:
+`mallard new --list` shows every template, grouped as the examples are, with whether it is 2D or 3D:
 
 ```text
 Shocks and compressible flow

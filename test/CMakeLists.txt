@@ -1,4 +1,4 @@
-# CMakeLists.txt for mallard-test
+# CMakeLists.txt for mallard-test2d/3d
 # Tests shared by both dimensions, then those specific to one
 set(MALLARD_TEST_SOURCES
     test_main.cpp
@@ -8,6 +8,8 @@ set(MALLARD_TEST_SOURCES
     region_test.cpp
     source_terms_test.cpp
     case_template_test.cpp
+    front_end_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/front_end.cpp
     time_integrator_test.cpp
     binding_test.cpp
     comm_test.cpp
@@ -34,10 +36,12 @@ set(MALLARD_TEST_SOURCES
     provenance_test.cpp
     health_test.cpp
     input_upgrade_test.cpp
+    field_units_test.cpp
     format_compat_test.cpp
     wall_model_test.cpp
     units_test.cpp
     rotational_periodic_test.cpp
+    invariance_test.cpp
     inlet_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
@@ -79,7 +83,7 @@ else()
     )
 endif()
 add_executable(mallard-test ${MALLARD_TEST_SOURCES})
-set_target_properties(mallard-test PROPERTIES OUTPUT_NAME mallard-test${Mallard_EXECUTABLE_SUFFIX})
+set_target_properties(mallard-test PROPERTIES OUTPUT_NAME mallard-test${Mallard_DIM}d)
 
 # exprtk, the reference of the compiled expressions, rounds every operation on its own there
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
@@ -88,8 +92,7 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(compiled_expression_test.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
 target_include_directories(mallard-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(mallard-test PRIVATE MALLARD_EXECUTABLE="$<TARGET_FILE:mallard>"
-                                                MALLARD_EXECUTABLE_SUFFIX="${Mallard_EXECUTABLE_SUFFIX}")
+target_compile_definitions(mallard-test PRIVATE MALLARD_EXECUTABLE="$<TARGET_FILE:mallard>")
 add_dependencies(mallard-test mallard)
 # The run-control tests start runs on several ranks with the MPI launcher
 if(Mallard_ENABLE_MPI AND MPIEXEC_EXECUTABLE)
