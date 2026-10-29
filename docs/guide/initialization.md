@@ -92,8 +92,8 @@ X = { H2 = 1.0 }
 
 Each `[[initialize.regions]]` entry sets some of `u`, `rho`, `p`, `T` and the
 composition inside a region, and leaves the rest to the state below it. The
-shapes (primitives, booleans, transforms, smooth edges) are those of every
-region in Mallard: see [Geometry: regions](geometry.md#regions). Values are
+regions (primitives, booleans, transforms, smooth edges) are those used
+everywhere in Mallard: see [Geometry: regions](geometry.md#regions). Values are
 numbers, quantities with units, or expressions of `x`, `y`, `z` and
 [tabulated data](#tabulated-data-and-point-clouds).
 
@@ -111,9 +111,12 @@ numbers, quantities with units, or expressions of `x`, `y`, `z` and
 - **Cells.** With `cells = "volume_fraction"` (the default) a cell holds the
   average of the layered state over the cell: a cut cell mixes the states by
   the volume of each part, and the integrals of mass, momentum and energy are
-  those of the shapes. With `cells = "center"` a cell whose centroid is
+  those of the regions. With `cells = "center"` a cell whose centroid is
   inside takes the region's state whole: no mixed cells (e.g. compositions
   that must not mix), but staircase edges whose volume depends on the mesh.
+
+![Density of an initial state built in layers on a triangle mesh: a tabulated radial profile, a rotated rectangle over it, and a smooth-edged disk of higher priority on top](../images/guide/initial-layers-light.svg#gh-light-mode-only)
+![Density of an initial state built in layers on a triangle mesh: a tabulated radial profile, a rotated rectangle over it, and a smooth-edged disk of higher priority on top](../images/guide/initial-layers-dark.svg#gh-dark-mode-only)
 
 Cells entirely inside or outside every region take the state exactly. Cells
 that a sharp surface cuts are subdivided further (four levels in 2D, three in

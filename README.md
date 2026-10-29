@@ -66,6 +66,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Pre-flight check (`mallard check`): mesh quality, stable time step, memory per GPU and cost estimate before a run
 - Case templates (`mallard new <template>`): a ready-to-run case with mesh, run and post-processing scripts
 - Stable inputs and files across releases: renamed keys keep working with a warning for a release and `mallard upgrade-input` rewrites old inputs; restart, mesh and output files carry format versions, and files written since 0.6 are read by later releases
+- Initial states layered from regions (cut cells averaged exactly for flat surfaces), CSV tables and point clouds (e.g. a Cantera flame profile along a radius or the distance to a region), over expressions, a restart or a remap, integrated over each cell on the GPU ([guide](docs/guide/initialization.md#regions))
 - Conservative, high-order remap of a restart onto another mesh (any cell type, resolution or rank count): exact cell intersections, integrals kept to rounding
 - VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
 - Running means and covariances; probes on points and curves (cell averages or high-order point values, CSV, HDF5 or VTK, with integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces

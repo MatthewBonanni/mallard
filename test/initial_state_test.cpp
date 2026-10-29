@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "overlap.h"
 #include "scratch.h"
 #include "solver.h"
 #include "tabulated.h"
@@ -120,6 +121,66 @@ TEST(InitialStateTest, VolumeFractionsOfFlatRegionsAreExact) {
         const auto s = initialized(box(TRI, N_DIM == 2 ? 12 : 6, "[[initialize.regions]]\nrho = \"2\"\nregion = " + c.region + "\n"));
         EXPECT_NEAR(mass(*s), 1.0 + c.volume, roundoff(1e-13));
         EXPECT_GT(mixed_cells(*s), 0u);
+    }
+}
+
+TEST(InitialStateTest, PolynomialStatesInFlatRegionsHaveExactCellAverages) {
+    // A cubic density with a quadratic one layered inside a rotated box: each
+    // cell average equals the exact integral over the cell and its exact
+    // intersection with the box (overlap.h, an independent clipper)
+    SKIP_IN_SINGLE_PRECISION("compares with double-precision integrals");
+    const double h0 = 0.2, h1 = 0.15, h2 = 0.125, angle = 30.0 * PI / 180.0;
+    std::vector<overlap::Point> corners;
+    for (const double sz : N_DIM == 2 ? std::vector<double>{0.0} : std::vector<double>{-h2, h2}) {
+        for (const auto & [a, b] : {std::pair{-h0, -h1}, {h0, -h1}, {h0, h1}, {-h0, h1}}) {
+            overlap::Point p;
+            p[0] = 0.5 + a * std::cos(angle) - b * std::sin(angle);
+            p[1] = 0.5 + a * std::sin(angle) + b * std::cos(angle);
+            if constexpr (N_DIM == 3) p[2] = 0.5 + sz;
+            corners.push_back(p);
+        }
+    }
+    const overlap::Region box_region = overlap::region(corners);
+    const auto base = [](const overlap::Point & p) {
+        return 2.0 + p[0] * p[1] * p[1] - 0.5 * p[0] * p[0] * p[0] + (N_DIM == 3 ? p[2] * p[2] * p[0] : 0.0);
+    };
+    const auto inside = [](const overlap::Point & p) {
+        return 3.0 + p[0] * p[0] - p[0] * p[1] + (N_DIM == 3 ? p[1] * p[2] : 0.0);
+    };
+    const std::string base_state =
+        N_DIM == 2 ? "type = \"analytical\"\nrho = \"2 + x * y^2 - 0.5 * x^3\"\np = \"1\"\nu = [\"0\", \"0\"]\n"
+                   : "type = \"analytical\"\nrho = \"2 + x * y^2 - 0.5 * x^3 + z^2 * x\"\np = \"1\"\nu = [\"0\", \"0\", \"0\"]\n";
+    const std::string layer =
+        N_DIM == 2 ? "[[initialize.regions]]\nrho = \"3 + x^2 - x * y\"\n"
+                     "region = {type = \"rectangle\", center = [0.5, 0.5], size = [0.4, 0.3], pivot = [0.5, 0.5], rotate = 30}\n"
+                   : "[[initialize.regions]]\nrho = \"3 + x^2 - x * y + y * z\"\n"
+                     "region = {type = \"box\", center = [0.5, 0.5, 0.5], size = [0.4, 0.3, 0.25], pivot = [0.5, 0.5, 0.5], "
+                     "rotate = {axis = [0, 0, 1], angle = 30}}\n";
+    const overlap::Rule & rule = overlap::simplex_rule(3);
+    const auto integral = [&](const std::vector<overlap::Simplex> & simplices, const auto & f) {
+        double sum = 0.0;
+        for (const auto & t : simplices) {
+            for (size_t q = 0; q < rule.weights.size(); q++) sum += overlap::volume(t) * rule.weights[q] * f(overlap::map(t, rule.points[q]));
+        }
+        return sum;
+    };
+    for (const char * mesh_type : {"cartesian", TRI}) {
+        SCOPED_TRACE(mesh_type);
+        const auto s = initialized(box(mesh_type, N_DIM == 2 ? 9 : 5, layer, base_state));
+        const Mesh & mesh = *s->get_mesh();
+        uint32_t cut = 0;
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+            const overlap::Region cell = overlap::region(overlap::cell_nodes(mesh, c));
+            std::vector<overlap::Simplex> part;
+            overlap::intersect(cell.simplices, box_region, part);
+            double part_volume = 0.0;
+            for (const auto & t : part) part_volume += overlap::volume(t);
+            cut += part_volume > 1e-12 * cell.volume && part_volume < (1.0 - 1e-12) * cell.volume;
+            const double expected = (integral(cell.simplices, base) - integral(part, base) + integral(part, inside)) / cell.volume;
+            EXPECT_NEAR(double(s->h_conservatives(c, 0)), expected, 1e-13) << "cell " << c;
+            EXPECT_NEAR(double(s->h_conservatives(c, N_DIM + 1)), 2.5, 1e-13) << "cell " << c;
+        }
+        EXPECT_GT(cut, 0u);
     }
 }
 

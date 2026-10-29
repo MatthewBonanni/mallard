@@ -1208,7 +1208,7 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
             Entry entry;
             Layer & L = entry.layer;
             bool bounded = true;
-            const std::string shape = impl->add_region(e.at("region"), where + ".region", L.nodes, L.n_nodes, L.edge, bounded);
+            const std::string described = impl->add_region(e.at("region"), where + ".region", L.nodes, L.n_nodes, L.edge, bounded);
             L.bounded = bounded ? 1 : 0;
             const std::string cells = find_value_or<std::string>(e, "cells", "volume_fraction");
             record_options(where + ".cells", {"volume_fraction", "center"});
@@ -1224,7 +1224,7 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
                 if (e.contains(key)) fields += (fields.empty() ? "" : ", ") + std::string(key);
             }
             if (fields.empty()) throw InputError(where + " sets none of u, rho, p, T, X, Y.");
-            entry.text = name + ": " + fields + " in " + shape + (L.center ? ", whole cells by their centers" : "");
+            entry.text = name + ": " + fields + " in " + described + (L.center ? ", whole cells by their centers" : "");
             entries.push_back(std::move(entry));
         }
     }
