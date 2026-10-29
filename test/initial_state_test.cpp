@@ -212,8 +212,12 @@ TEST(InitialStateTest, VolumeFractionsOfCurvedRegionsConvergeAndUncutCellsArePur
             r_min = std::min(r_min, std::sqrt(d2));
             r_max = std::max(r_max, std::sqrt(d2));
         }
-        if (r_max < 0.31) EXPECT_EQ(s->h_conservatives(c, 0), 2.0_r);
-        if (r_min > 0.31 + 0.1) EXPECT_EQ(s->h_conservatives(c, 0), 1.0_r);
+        if (r_max < 0.31) {
+            EXPECT_EQ(s->h_conservatives(c, 0), 2.0_r);
+        }
+        if (r_min > 0.31 + 0.1) {
+            EXPECT_EQ(s->h_conservatives(c, 0), 1.0_r);
+        }
     }
 }
 
@@ -236,8 +240,12 @@ TEST(InitialStateTest, LayersStackByPriorityAndKeepThePressure) {
         EXPECT_NEAR(W[N_DIM + 1], 1.0, roundoff(1e-12));
         const double x = double(mesh.h_cell_coords(c, 0)), y = double(mesh.h_cell_coords(c, 1));
         if (std::abs(y - 0.5) < 0.2 && std::abs(N_DIM == 3 ? double(mesh.h_cell_coords(c, 2)) - 0.5 : 0.0) < 0.2) {
-            if (x > 0.45 && x < 0.55) EXPECT_EQ(s->h_conservatives(c, 0), 0.25_r) << "overlap";
-            if (x > 0.65 && x < 0.85) EXPECT_EQ(s->h_conservatives(c, 0), 2.0_r) << "b alone";
+            if (x > 0.45 && x < 0.55) {
+                EXPECT_EQ(s->h_conservatives(c, 0), 0.25_r) << "overlap";
+            }
+            if (x > 0.65 && x < 0.85) {
+                EXPECT_EQ(s->h_conservatives(c, 0), 2.0_r) << "b alone";
+            }
         }
     }
 }
