@@ -275,7 +275,7 @@ rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] i
 pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtu")  # 2D or 3D cells
 ```
 
-`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard.h5` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file.
+`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard.h5` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
 
 ### `plot_vtu.py`: one field of a snapshot
 
@@ -413,6 +413,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | Script | Purpose |
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
+| `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard` that every snapshot and monitor format carries the same units for each field; the `openmp` job of `ci.yml` runs it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
 | `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/mallard`; `--mallard3d` for the 3D region and probe figures) |
 | `docs/regions.py` | The region figures alone: cell volume fractions of every primitive and boolean on coarse unstructured meshes, from one-step runs |
