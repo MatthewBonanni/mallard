@@ -23,6 +23,8 @@
 #include "hdf5_output.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
+#include "partition.h"
+#include "renumbered_mesh.h"
 #include "scratch.h"
 
 namespace {
@@ -83,6 +85,22 @@ TEST(MPI3DTest, NavierStokesOnTetrahedraMatchesSerial) {
                                     "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n"));
 }
 
+TEST(MPI3DTest, RenumberedMeshesMatchSerialWithEveryPartitioner) {
+    // Global ids in random order carry no locality: partitions, halos and the
+    // global orders of faces and stencils must not lean on them
+    const RenumberedMesh mesh = renumbered_gmsh(jittered_box(MeshType::CARTESIAN_MIXED, {6, 4, 3}, {1.0, 0.8, 0.6}), 2026);
+    const std::string file = write_temp_shared("mallard_mpi3d_renumbered.msh", mesh.gmsh);
+    std::string input = box_input("cartesian_mixed", "type = \"TENO\"\norder = 3\n",
+                                  "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n");
+    const std::string generated = "type = \"cartesian_mixed\"\nNx = 6\nNy = 4\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
+        if (partitioner == "graph" && !have_graph_partitioner()) continue;
+        expect_matches_serial(input + "[parallel]\npartitioner = \"" + partitioner + "\"\n");
+    }
+    comm::barrier();
+}
+
 TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
     std::string input =
         box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n");
@@ -98,7 +116,8 @@ TEST(MPI3DTest, WallModelsMatchSerial) {
     // Exchange and edge points several cells off the walls, in cells that a
     // partition may leave beyond the default halo, which must then deepen.
     // Without LES or the hybrid flux, only the wall model reads the gradients
-    // of the deep halo cells holding its points
+    // of the deep halo cells holding its points. The mass flow forcing's
+    // domain sums are exact, so the same on any rank count
     for (const char * partitioner : {"multijagged", "hilbert"}) for (const bool les : {true, false}) {
         std::ostringstream s;
         s << "[run]\nn_steps = 6\ncfl = 0.4\n"
@@ -117,7 +136,8 @@ TEST(MPI3DTest, WallModelsMatchSerial) {
           << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
           << "mu = 1e-3\nPr = 0.72\n"
           << (les ? "[les]\nmodel = \"sigma\"\n" : "")
-          << "[output]\ncheck_interval = 1000000\n";
+          << "[output]\ncheck_interval = 1000000\n"
+          << "[source]\nmass_flow = [0.5, 0.0, 0.0]\n";
         expect_matches_serial(s.str());
     }
 }

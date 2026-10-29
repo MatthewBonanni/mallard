@@ -152,6 +152,7 @@ std::string Solver::describe_invalid_cells() {
 }
 
 void Solver::diverged() {
+    if (source_terms) source_terms->check_loops();
     if (stepped_past_divergence && last_good_set) {
         // A step graph went on from the invalid state: recompute it kernel by kernel
         stepped_past_divergence = false;

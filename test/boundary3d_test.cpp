@@ -253,6 +253,7 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
         auto mesh = make_mesh_3d(type, 3, 3, 3);
         BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
         auto h_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image);
+        auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
         uint32_t n_moved = 0;
         for (uint32_t f = 0; f < mesh->n_faces; f++) {
             if (mesh->h_cells_of_face(f, 1) >= 0) continue;
@@ -269,7 +270,20 @@ TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
             ASSERT_GE(img_index, 0) << type;
             const uint32_t img = static_cast<uint32_t>(img_index);
             if (img != c) n_moved++;
-            // The image point, 3/4 of the boundary cell's depth inward, is inside the image cell
+            // Every face of these meshes has an image face, the face translated along the normal
+            const int32_t g = h_image_face(f);
+            ASSERT_GE(g, 0) << type << " face " << f;
+            rtype L = 0.0;
+            for (int k = 0; k < 3; k++) L += (mesh->h_face_coords(static_cast<uint32_t>(g), k) - mesh->h_face_coords(f, k)) * n_in[k];
+            for (int k = 0; k < 3; k++) {
+                EXPECT_NEAR(mesh->h_face_coords(static_cast<uint32_t>(g), k), mesh->h_face_coords(f, k) + L * n_in[k], roundoff(1e-12))
+                    << type << " face " << f;
+            }
+            EXPECT_TRUE(mesh->h_cells_of_face(static_cast<uint32_t>(g), 0) == img_index ||
+                        mesh->h_cells_of_face(static_cast<uint32_t>(g), 1) == img_index) << type << " face " << f;
+            // The image point, 3/4 of the boundary cell's depth inward, is inside the image cell,
+            // unless the cell's far side is a point (a pyramid's apex): the image face is then a cell deeper
+            if (L > 1.5_r * depth) continue;
             for (int k = 0; k < 3; k++) {
                 const rtype p = mesh->h_face_coords(f, k) + 0.75_r * depth * n_in[k];
                 rtype lo = 1e30_r, hi = -1e30_r;

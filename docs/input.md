@@ -9,9 +9,11 @@ release, and `mallard upgrade-input old.toml > new.toml` rewrites old inputs
 ([deprecation policy and changed keys](guide/input_files.md#inputs-from-older-releases)).
 
 The spatial dimension is fixed at build time with the CMake option
-`-DMallard_DIM=2` (default) or `3`. Vectors in the input (`u`, `gravity`,
+`-DMallard_DIM=2` (default) or `3`, which builds `mallard2d` or `mallard3d`;
+`mallard` runs the one of the case's mesh ([Meshes](guide/meshes.md)). Vectors in the input (`u`, `gravity`,
 `rhou`) have that many components, and expressions are in `x`, `y`, `z`
-(`z` is 0 in 2D) and, where noted, `t`. Below, `[u_x, u_y]` reads
+(`z` is 0 in 2D) and, where noted, `t`, in one language for every section:
+[Expressions](guide/input_files.md#expressions). Below, `[u_x, u_y]` reads
 `[u_x, u_y, u_z]` in 3D.
 
 Every key in the file must be one the run reads: a key that is misspelled,
@@ -43,7 +45,8 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Rate (1/s) | `sponges.strength` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
 | Heat flux (W/m^2) | `boundaries.q` |
-| Mass flux (kg/(m^2 s)) | `source.mass_flow` |
+| Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
+| Mass flow (kg/s; per metre of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
 | Sources (per unit volume) | `source.rho` (kg/(m^3 s)), `rhou` (N/m^3), `rhoE` (W/m^3), and the same of `[[sources]]` with `rhoY` (kg/(m^3 s)); with `total = true` integrated rates (kg/s, N, W) |
 | Concentration (plain numbers in kmol/m^3) | `chemistry.C_reg` |
 
@@ -462,7 +465,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 
 | Key | Description |
 |---|---|
-| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh) |
+| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh). `Mallard -i input.toml --restart FILE` replaces the whole table by `type = "restart"`, `file = FILE`, so one input serves both the first run and its continuations |
 | `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
@@ -470,7 +473,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#file-formats-and-compatibility)) |
 
-Expressions use [exprtk](https://www.partow.net/programming/exprtk/) syntax, e.g. `"x < 0.5 ? 1.0 : 0.125"`.
+Expressions, e.g. `"x < 0.5 ? 1.0 : 0.125"`: [Expressions](guide/input_files.md#expressions).
 
 ### `type = "remap"`
 
@@ -505,6 +508,7 @@ the zone's faces whose centers satisfy the expression.
 | `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures: numbers, or expressions in `x`, `y`, `z` evaluated at each face center for a composition that varies along the boundary, with an optional `balance` species as in `[initialize]`) |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
 | `stagnation_inlet` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [the guide](guide/boundary_conditions.md#stagnation-inlet) and [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `upt`) |
+| `mass_flow_inlet` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density. See [the guide](guide/boundary_conditions.md#mass-flow-inlet) | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)], a number or an expression of `x`, `y`, `z`) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]) with an optional `profile` (expression of `x`, `y`, `z`, default uniform) shaping it along the inlet; `direction` (default the inward normal of each face); `X` or `Y` for mixtures (as `upt`) |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
@@ -566,7 +570,7 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence).
 | Key | Description |
 |---|---|
 | `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z`, positive semidefinite |
-| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
+| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/post/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
 | `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed) |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
@@ -785,7 +789,7 @@ to round-off when they are small), e.g. `MEAN_U` (a vector), `COV_U_X_U_Y`, or
 number of ranks; a restart file without them starts them afresh, and one with
 only some of them is an error unless `reset = true`. With
 `chemistry.fuse_half_steps`, sampling steps read the state like output does.
-`tools/plane_average.py` averages them further over homogeneous directions
+`tools/post/plane_average.py` averages them further over homogeneous directions
 (e.g. over x and z of a channel, as a function of y). `fields` and
 `products` may be left out when `[statistics.spectra]` or
 `[statistics.phase]` is given; both take `interval` and `t_start` from
@@ -835,7 +839,7 @@ The results are bitwise the same on any number of ranks
 ([design](design/insitu_statistics.md)). Restart files (format version 6)
 carry the averages as named arrays; a restart file holding spectra of other
 fields or directions is an error unless `reset = true`.
-`tools/insitu_statistics.py` recomputes the same quantities from restart
+`tools/post/insitu_statistics.py` recomputes the same quantities from restart
 files, compares two spectra files and plots them.
 
 ### `[statistics.phase]`
@@ -863,7 +867,8 @@ weights and the trigger state.
 
 ## `[[probes]]`
 
-Samples of the solution on a geometry (points, curves, surfaces, exact cut planes or boundary zones), every `interval`
+Samples of the solution on a geometry (points, curves, surfaces, exact cut planes or boundary zones;
+[geometry guide](guide/geometry.md#point-sets-and-curves)), every `interval`
 steps or `time_interval` of simulation time, written raw and/or reduced. Setup
 locates the samples in the cells of each rank; a write evaluates them on the
 device of the ranks that own them and gathers them on rank 0, which writes them
@@ -1052,7 +1057,7 @@ Optional source terms, added per unit volume.
 | `gravity` | `[g_x, g_y]` (`[g_x, g_y, g_z]` in 3D); adds `rho g` to the momentum and `rho u . g` to the energy equation |
 | `rho`, `rhou`, `rhoE` | Expressions (default none) for the mass, momentum and energy sources, as in `[[sources]]` without a region (they read the same variables) |
 | `time_dependent` | Ignored, with a warning: expressions of `t` are re-evaluated at every stage on the device, others once (Mallard 0.8 and earlier evaluated every expression once unless this was `true`) |
-| `mass_flow` | `[m_x, m_y]` (`[m_x, m_y, m_z]` in 3D): hold the volume average of `rho u` along this vector at its magnitude with a uniform body force `f` per unit volume along it (constant mass flow, e.g. a periodic channel). At every Runge-Kutta stage `f` cancels the rate of change of that average from all other terms (one global sum) and closes any remaining gap within the time step, so a flow started at the target stays there to rounding. The energy gains the force's work `f . u`. |
+| `mass_flow` | `[m_x, m_y]` (`[m_x, m_y, m_z]` in 3D): hold the volume average of `rho u` along this vector at its magnitude with a uniform body force `f` per unit volume along it (constant mass flow, e.g. a periodic channel). At every Runge-Kutta stage `f` cancels the rate of change of that average from all other terms (one global sum, exact, so the same on any number of ranks) and closes any remaining gap within the time step, so a flow started at the target stays there to rounding. The energy gains the force's work `f . u`. |
 
 The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities (about 1e-4 of the sound speed on a 32x32 mesh) that vanish at second order under refinement. Wall and symmetry ghost states continue the hydrostatic pressure gradient.
 
@@ -1106,7 +1111,8 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 
 ## Regions
 
-Regions select parts of space in `[[sources]]`. A region is a table: a primitive shape, or a boolean of regions, each with
+Regions select parts of space in `[[sources]]` (explained with figures in
+the [geometry guide](guide/geometry.md#regions)). A region is a table: a primitive shape, or a boolean of regions, each with
 optional transforms, nested to any depth. Every region has a signed distance
 (negative inside) that never exceeds the distance to its surface, which gives
 smooth edges their width and lets cell volume fractions skip cells away from
@@ -1158,13 +1164,8 @@ region = {type = "difference",
 region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 0, 0], rotate = {axis = [0, 0, 1], angle = 30}}
 ```
 
-Expressions in regions (and, compiled the same way, wherever Mallard
-evaluates them on the device) follow exprtk's syntax and precedences: `+ - * /
-% ^`, comparisons, `and`, `or`, `xor`, `not`, `c ? a : b`, `if(c, a, b)`,
-exprtk's scalar functions (`sin`, `exp`, `log`, `sqrt`, `abs`, `min`, `max`,
-`clamp`, `atan2`, `hypot`, `erf`, ...) and the constants `pi`, `epsilon`,
-`inf`; values are the same as exprtk's to the last bit on the host. Unlike
-exprtk, variable names are case sensitive.
+Expressions in regions are those of every section:
+[Expressions](guide/input_files.md#expressions).
 
 ## `[parallel]`
 
@@ -1234,7 +1235,7 @@ two files instead of one per rank. A shared file pays off on parallel file
 systems; on one node's local disk, which serializes writes to a file, VTU
 pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
 HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
-the simpler choice for small runs. `tools/mallard_h5.py` reads the files.
+the simpler choice for small runs. `tools/mallard/h5.py` reads the files.
 
 ## `mallard reactor`
 

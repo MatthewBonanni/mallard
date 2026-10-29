@@ -18,8 +18,7 @@
 #include <numbers>
 #include <sstream>
 
-#include <exprtk.hpp>
-
+#include "expression.h"
 #include "input.h"
 
 namespace probe {
@@ -180,37 +179,21 @@ std::pair<Vec3, Vec3> circle_frame(const Input & entry, const std::string & key,
 class ParameterExpression {
     public:
         ParameterExpression(const std::string & text, const std::string & what, bool surface = false)
-            : vars(std::make_unique<Vars>()) {
-            if (surface) {
-                vars->table.add_variable("u", vars->a);
-                vars->table.add_variable("v", vars->b);
-            } else {
-                vars->table.add_variable("s", vars->a);
-            }
-            vars->table.add_constants();
-            vars->expr.register_symbol_table(vars->table);
-            exprtk::parser<double> parser;
-            if (!parser.compile(text, vars->expr)) throw InputError(what + ": " + parser.error());
-        }
+            : e(what, text, surface ? std::vector<std::string>{"u", "v"} : std::vector<std::string>{"s"}),
+              surface(surface) {}
         double operator()(double a, double b = 0.0) const {
-            vars->a = a;
-            vars->b = b;
-            return vars->expr.value();
+            const double p[2] = {a, b};
+            return e.value({p, surface ? 2u : 1u});
         }
         /** @brief Derivative with respect to the first (k = 0) or second parameter. */
         double derivative(double a, double b = 0.0, int k = 0) const {
-            vars->a = a;
-            vars->b = b;
-            return exprtk::derivative(vars->expr, k == 0 ? vars->a : vars->b);
+            const double p[2] = {a, b};
+            return e.derivative(static_cast<size_t>(k), {p, surface ? 2u : 1u});
         }
 
     private:
-        struct Vars {
-            double a = 0.0, b = 0.0;
-            exprtk::symbol_table<double> table;
-            exprtk::expression<double> expr;
-        };
-        std::unique_ptr<Vars> vars;
+        Expression e;
+        bool surface;
 };
 
 /**

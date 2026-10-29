@@ -8,7 +8,11 @@ for large distributed runs. Each boundary face belongs to a named **zone**,
 which `[[boundaries]]` assigns a condition to.
 
 The spatial dimension is a build option (`-DMallard_DIM=2`, the default, or
-`3`): one executable per dimension, the same input keys for both.
+`3`): one solver per dimension, `mallard2d` and `mallard3d`, with the same input
+keys. `mallard` runs the one a case needs, by its mesh: a mesh file's own
+dimension, and for a generated mesh 3D when `[mesh]` sets `Nz` or `Lz` (or
+`periodic` has `z`, or the type has 3D cells). `mallard --dim 2|3 -i input.toml`
+states it.
 
 ## Generated meshes
 
@@ -21,7 +25,7 @@ Lx = 2.0              # the domain is [0, Lx] x [0, Ly]
 Ly = 1.0
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 28 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 31 more.
 
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-light.svg#gh-light-mode-only)
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-dark.svg#gh-dark-mode-only)
@@ -97,7 +101,7 @@ Ny = 64
 periodic = ["x"]     # left and right joined
 ```
 
-*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180) and 8 more.
+*Used in:* [`rotational_sector`](https://matthewbonanni.github.io/mallard/docs/examples/#rotational-sector), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180) and 10 more.
 
 Periodic boundaries join two zones into interior faces: every scheme sees the
 seam as the inside of the domain, and the zones disappear from
@@ -177,7 +181,7 @@ type = "file"
 filename = "cylinder.msh"
 ```
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300) and 2 more.
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder) and 3 more.
 
 Mallard reads ASCII Gmsh meshes, format 2.2 or 4.1, of linear triangles and
 quadrilaterals (2D) or tetrahedra, pyramids, prisms and hexahedra (3D).
@@ -245,8 +249,9 @@ Pitfalls:
   patches (OpenFOAM's 2D convention); compressed (`.gz`) and decomposed
   (`processor*`) meshes must be decompressed or reconstructed first. Cells
   must be of Mallard's types, as for Fluent.
-- A mesh of the other dimension is an error: build with the matching
-  `-DMallard_DIM`.
+- `mallard` runs the solver of the mesh's dimension, which must be installed
+  (built with the matching `-DMallard_DIM`); `mallard2d` and `mallard3d` run
+  directly reject a mesh of the other dimension.
 
 ## Transform on read
 
@@ -311,7 +316,7 @@ radius = 0.5
 # axis = [0.0, 0.0, 1.0]  for shape = "cylinder"
 ```
 
-*Used in:* the curved-boundary validation (`tools/curved_convergence.py`).
+*Used in:* the curved-boundary validation (`tools/dev/curved_convergence.py`).
 
 Boundary faces can follow the true geometry instead of straight edges or flat
 facets. Curved faces get quadrature points on the curve with their own normals,
@@ -337,6 +342,9 @@ The geometry comes from either
 | `center`, `radius` | required | The shape (for a cylinder, a point of its axis) |
 | `axis` | required for `cylinder` | Direction of the cylinder's axis |
 
+These shapes are curved boundaries' own; [#407](https://github.com/MatthewBonanni/mallard/issues/407)
+plans to take them from the [region engine](geometry.md#regions) instead.
+
 Pitfalls:
 
 - Zone nodes farther than 5% of an edge length from the shape are an error:
@@ -360,7 +368,7 @@ measures every cell of the mesh, taking for each the worst of its faces:
 
 It reports the largest and mean value of each and where the worst cells are;
 `--quality-vtu PREFIX` writes the four fields to `PREFIX_000000.vtu` for
-ParaView, and `tools/plot_mesh_quality.py PREFIX_000000.vtu out.png` draws a
+ParaView, and `tools/mesh/plot_mesh_quality.py PREFIX_000000.vtu out.png` draws a
 2D mesh's with the worst cells circled.
 
 ![Non-orthogonality and skewness of a coarse triangle mesh around the mallard (examples/mallard), the six worst cells of each circled](../images/guide/mesh_quality-light.svg#gh-light-mode-only)
@@ -371,5 +379,6 @@ ParaView, and `tools/plot_mesh_quality.py PREFIX_000000.vtu out.png` draws a
 - [Input reference: `[mesh]`](../input.md#mesh), [`[[periodic]]`](../input.md#periodic)
 - [Boundary conditions](boundary_conditions.md): what to put on each zone
 - [Running in parallel](parallel.md): partitions and halos
+- [Geometry](geometry.md): shapes shared by sources, probes and other features
 - Design notes: [periodic boundaries](../design/periodic.md),
   [curved boundaries](../design/curved_boundaries.md)

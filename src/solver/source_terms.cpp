@@ -290,6 +290,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
                              TermKernel<Accumulate>{{}, terms, table, weights, fields, means, {}, n_species,
                                                     Accumulate{static_field}});
     }
+    check_loops();
 }
 
 void SourceTerms::update_means(const State & solution) {
@@ -332,7 +333,14 @@ Kokkos::View<rtype **, Kokkos::LayoutRight> SourceTerms::evaluate(const State & 
     Kokkos::parallel_for("source_values", mesh->n_owned(),
                          TermKernel<Accumulate>{static_field, dynamic_terms, table, weights, fields, means, time,
                                                 n_species, Accumulate{out}});
+    check_loops();
     return out;
+}
+
+void SourceTerms::check_loops() const {
+    if (!table.loops) return;
+    const uint32_t stopped = comm::allreduce(table.stopped(), comm::Op::MAX);
+    if (stopped > 0) throw InputError(programs[stopped - 1].runaway_error());
 }
 
 } // namespace sources

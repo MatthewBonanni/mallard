@@ -42,17 +42,17 @@ cd mallard
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
     -DKokkos_ENABLE_THREADS=ON -DMallard_WARNINGS_AS_ERRORS=ON
 cmake --build build -j
-./build/test/mallard-test
+./build/src/mallard test
 ```
 
 - Build 3D in a separate directory with `-DMallard_DIM=3`; code that is not
   dimension specific must build and pass in both.
-- Run a subset while iterating: `./build/test/mallard-test --gtest_filter='TENO*'`.
-  `mallard test` runs the same binary from a build or an install tree
-  (`./build/src/mallard test --gtest_filter='TENO*'`).
+- Run a subset while iterating: `./build/src/mallard test --gtest_filter='TENO*'`.
+  `mallard test` runs the test suite of a build (`build/test/mallard-test2d`, or
+  `mallard-test3d` in 3D) or every one of an install tree (`--dim 2|3` picks one).
   Run the whole suite, 2D and 3D, before asking for review.
 - With MPI (`-DMallard_ENABLE_MPI=ON`), run the multi-rank tests on 2 to 4 ranks:
-  `mpirun -n 3 ./build/test/mallard-test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
+  `mpirun -n 3 ./build/src/mallard test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
@@ -153,7 +153,7 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   records the subset. A resolution in build files, shared headers or anything the
   whole suite exercises needs the full run.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
-  run when a branch's changes touch device code: `tools/device_changes.sh` decides (a
+  run when a branch's changes touch device code: `tools/dev/device_changes.sh` decides (a
   changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
   runs the CUDA builds on every push. `-f device=true` forces all three.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU

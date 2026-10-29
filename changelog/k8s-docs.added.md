@@ -1,0 +1,1 @@
+- Kubernetes manifests and guide (`docs/guide/k8s`, run control guide): a GPU `Job` that resumes from restart files after preemption, and a multi-node Kubeflow `MPIJob`; the container images include OpenSSH for its launcher and workers (#453).

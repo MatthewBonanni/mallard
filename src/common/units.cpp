@@ -46,6 +46,7 @@ const NamedDimension NAMED[] = {
     {"dynamic viscosity", dim::dynamic_viscosity, "Pa s, kg/(m s)"},
     {"heat flux", dim::heat_flux, "W/m^2, kW/m^2"},
     {"mass flux", dim::mass_flux, "kg/(m^2 s)"},
+    {"mass flow", dim::mass_flow, "kg/s, g/s"},
     {"mass source", dim::mass_source, "kg/(m^3 s)"},
     {"momentum source", dim::momentum_source, "N/m^3"},
     {"power density", dim::power_density, "W/m^3"},

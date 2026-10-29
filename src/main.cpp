@@ -7,24 +7,21 @@
  * @copyright Copyright (c) 2023 Matthew Bonanni
  */
 
-#include <cerrno>
 #include <chrono>
 #include <cstring>
-#include <filesystem>
 #include <iostream>
 #include <thread>
-#include <vector>
-
-#include <unistd.h>
 
 #include <Kokkos_Core.hpp>
 
 #include "build_info.h"
 #include "case_template.h"
 #include "commands.h"
+#include "front_end.h"
 #include "input_upgrade.h"
 #include "input.h"
 #include "log.h"
+#include "parallel/binding.h"
 #include "parallel/comm.h"
 #include "run_control.h"
 #include "solver/solver.h"
@@ -32,7 +29,7 @@
 namespace {
 
 void usage() {
-    std::cerr << "Usage: mallard -i input.toml [Kokkos options, e.g. --kokkos-num-threads=8]\n"
+    std::cerr << "Usage: mallard -i input.toml [--restart FILE] [Kokkos options, e.g. --kokkos-num-threads=8]\n"
               << "       mallard check input.toml [--ranks N] [--throughput CELLS_PER_S | --steps N]"
               << " [--quality-vtu PREFIX] [--catalog KEYS.json]\n"
               << "       mallard new <template> [directory]   (mallard new --list)\n"
@@ -40,32 +37,10 @@ void usage() {
               << "       mallard upgrade-input old.toml > new.toml\n"
               << "       mallard reactor -i input.toml\n"
               << "       mallard mesh convert INPUT OUTPUT.h5\n"
-              << "       mallard test [GoogleTest options, e.g. --gtest_filter='Sod*']\n"
-              << "       mallard --version\n";
-}
-
-/**
- * @brief `mallard test`: runs mallard-test from the same build or install tree.
- */
-int test_main(int argc, char ** argv) {
-    const std::string name = std::string("mallard-test") + MALLARD_EXECUTABLE_SUFFIX;
-    const std::filesystem::path bin = executable_path().parent_path();
-    const std::vector<std::filesystem::path> candidates = {bin / name, bin.parent_path() / "test" / name};
-    for (const auto & path : candidates) {
-        if (!std::filesystem::exists(path)) continue;
-        std::string program = path.string();
-        std::vector<char *> args = {program.data()};
-        for (int i = 0; i < argc; ++i) args.push_back(argv[i]);
-        args.push_back(nullptr);
-        execv(program.c_str(), args.data());
-        std::cerr << "mallard test: cannot run " << program << ": " << std::strerror(errno) << "\n";
-        return 1;
-    }
-    std::cerr << "mallard test: no " << name << " in";
-    for (const auto & path : candidates) std::cerr << "\n  " << path.parent_path().string();
-    std::cerr << "\nBuild it with -DMallard_ENABLE_TESTS=ON and install it with -DMallard_INSTALL_TESTS=ON"
-                 " (both the default).\n";
-    return 1;
+              << "       mallard test [--dim 2|3] [GoogleTest options, e.g. --gtest_filter='Sod*']\n"
+              << "       mallard --version\n"
+              << "mallard runs mallard2d or mallard3d, by the dimension of the case's mesh (a generated\n"
+              << "mesh is 3D when [mesh] sets Nz or Lz); --dim 2|3 states it.\n";
 }
 
 /**
@@ -82,7 +57,6 @@ constexpr Subcommand subcommands[] = {
     {"upgrade-input", input_upgrade::main},
     {"reactor", reactor_main},
     {"mesh", mesh_main},
-    {"test", test_main},
 };
 
 /**
@@ -115,12 +89,13 @@ std::string error_text(const std::exception & e) {
  * @return Exit status.
  */
 int main(int argc, char* argv[]) {
+    if (front_end::invoked(argv[0])) return front_end::main(argc, argv);
     if (argc > 1) {
         for (const auto & command : subcommands) {
             if (strcmp(argv[1], command.name) == 0) return command.run(argc - 2, argv + 2);
         }
     }
-    std::string input_file;
+    std::string input_file, restart_file;
     const bool check = argc > 1 && strcmp(argv[1], "check") == 0;
     CheckOptions options;
     try {
@@ -128,6 +103,8 @@ int main(int argc, char* argv[]) {
             const bool has_value = i + 1 < argc;
             if (strcmp(argv[i], "-i") == 0 && has_value) {
                 input_file = argv[++i];
+            } else if (strcmp(argv[i], "--restart") == 0 && has_value) {
+                restart_file = argv[++i];
             } else if (check && input_file.empty() && argv[i][0] != '-') {
                 input_file = argv[i];
             } else if (strcmp(argv[i], "--ranks") == 0 && has_value) {
@@ -163,6 +140,7 @@ int main(int argc, char* argv[]) {
     comm::Session session(argc, argv);
     if (!comm::is_root()) std::cout.rdbuf(nullptr);
 
+    binding::select_device(argc, argv);
     Kokkos::initialize(argc, argv);
     int status = 0;
     {
@@ -171,12 +149,15 @@ int main(int argc, char* argv[]) {
             print_header(input_file);
             Solver solver;
             if (check) {
-                const CheckReport report = solver.check(parse_input(input_file), options);
+                Input input = parse_input(input_file);
+                if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
+                const CheckReport report = solver.check(input, options);
                 print_check(report);
                 status = report.ok() ? 0 : 1;
             } else {
+                binding::report();
                 solver.enable_control(true);
-                solver.init(input_file);
+                solver.init(input_file, restart_file);
                 status = solver.run();
             }
         } catch (const InputError & e) {

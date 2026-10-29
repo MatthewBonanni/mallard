@@ -45,7 +45,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: fuzz-${{ matrix.dim }}d
-        run: sh tools/ci_status.sh running
+        run: sh tools/dev/ci_status.sh running
       - name: Skip if main is unchanged
         id: changed
         if: github.event_name == 'schedule'
@@ -115,4 +115,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: fuzz-${{ matrix.dim }}d
-        run: sh tools/ci_status.sh ${{ job.status }}
+        run: sh tools/dev/ci_status.sh ${{ job.status }}
