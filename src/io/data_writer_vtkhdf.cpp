@@ -117,7 +117,7 @@ const Quadratic & quadratic(uint32_t n_corners) {
                                  false};
     static const Quadratic hexahedron{
         VTK_LAGRANGE_HEXAHEDRON,
-        {{0, 1}, {1, 2}, {3, 2}, {0, 3}, {4, 5}, {5, 6}, {7, 6}, {4, 7}, {0, 4}, {1, 5}, {3, 7}, {2, 6}},
+        {{0, 1}, {1, 2}, {3, 2}, {0, 3}, {4, 5}, {5, 6}, {7, 6}, {4, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}},
         {{0, 3, 7, 4}, {1, 2, 6, 5}, {0, 1, 5, 4}, {3, 2, 6, 7}, {0, 1, 2, 3}, {4, 5, 6, 7}},
         true};
     if (N_DIM == 2) return n_corners == 3 ? triangle : quad;

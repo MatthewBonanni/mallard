@@ -490,7 +490,7 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
         };
         // Lagrange hexahedron (27 nodes) and wedge (18): edges, then quadrilateral faces
         const std::vector<std::vector<size_t>> hex_edges = {{0, 1}, {1, 2}, {3, 2}, {0, 3}, {4, 5}, {5, 6},
-                                                            {7, 6}, {4, 7}, {0, 4}, {1, 5}, {3, 7}, {2, 6}};
+                                                            {7, 6}, {4, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
         const std::vector<std::vector<size_t>> hex_faces = {{0, 3, 7, 4}, {1, 2, 6, 5}, {0, 1, 5, 4},
                                                             {3, 2, 6, 7}, {0, 1, 2, 3}, {4, 5, 6, 7}};
         const std::vector<std::vector<size_t>> wedge_edges = {{0, 1}, {1, 2}, {2, 0}, {3, 4}, {4, 5},
@@ -511,7 +511,21 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
             n_quadratic++;
             std::vector<std::vector<size_t>> groups = edges;
             groups.insert(groups.end(), faces.begin(), faces.end());
+            auto point = [&](int64_t p) {
+                const size_t i = 3 * static_cast<size_t>(p);
+                return std::array<double, 3>{points[i], points[i + 1], points[i + 2]};
+            };
             for (size_t g = 0; g < groups.size(); g++) {
+                // Each middle node is where VTK's node order puts it: near the middle of its corners
+                const auto x = point(nodes[(prisms ? 6 : 8) + g]);
+                std::array<double, 3> middle = {0.0, 0.0, 0.0};
+                for (size_t k : groups[g]) {
+                    for (size_t d = 0; d < 3; d++) middle[d] += point(nodes[k])[d] / double(groups[g].size());
+                }
+                const auto a = point(nodes[groups[g][0]]), b = point(nodes[groups[g][1]]);
+                EXPECT_LT(std::hypot(x[0] - middle[0], x[1] - middle[1], x[2] - middle[2]),
+                          0.25 * std::hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]))
+                    << c << " " << g;
                 for (double wall : {1.0, 1.5}) {
                     bool on_wall = true;
                     for (size_t k : groups[g]) on_wall = on_wall && std::abs(radius(nodes[k]) - wall) < tol;
