@@ -180,20 +180,20 @@ class ParameterExpression {
     public:
         ParameterExpression(const std::string & text, const std::string & what, bool surface = false)
             : e(what, text, surface ? std::vector<std::string>{"u", "v"} : std::vector<std::string>{"s"}),
-              surface(surface) {}
+              two_parameters(surface) {}
         double operator()(double a, double b = 0.0) const {
             const double p[2] = {a, b};
-            return e.value({p, surface ? 2u : 1u});
+            return e.value({p, two_parameters ? 2u : 1u});
         }
         /** @brief Derivative with respect to the first (k = 0) or second parameter. */
         double derivative(double a, double b = 0.0, int k = 0) const {
             const double p[2] = {a, b};
-            return e.derivative(static_cast<size_t>(k), {p, surface ? 2u : 1u});
+            return e.derivative(static_cast<size_t>(k), {p, two_parameters ? 2u : 1u});
         }
 
     private:
         Expression e;
-        bool surface;
+        bool two_parameters;
 };
 
 /**
