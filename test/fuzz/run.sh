@@ -12,7 +12,8 @@ if [ "${1:-}" = --one ]; then
     seeds=$work/seeds/$harness
     mkdir -p "$seeds" "$work/corpus/$harness" "$work/crashes"
     case $harness in
-        input) find "$root/examples" "$root/tutorials" -name '*.toml' -exec cp {} "$seeds" \; ;;
+        input) find "$root/examples" "$root/tutorials" -name '*.toml' -exec cp {} "$seeds" \;
+               cp "$root"/test/fuzz/corpus/input/* "$seeds" ;;
         expression) cp "$root"/test/fuzz/corpus/expression/* "$seeds" ;;
         gmsh) for f in "$root"/test/data/meshes/*.msh; do
                   case $f in *fluent*) ;; *) cp "$f" "$seeds" ;; esac
