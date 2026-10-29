@@ -148,7 +148,9 @@ TEST(CliTest, HelpOfEveryCommandCoversItsOptions) {
             EXPECT_TRUE(contains(r.out, cli::docs_url(c))) << r.out;
             for (const cli::Option & o : c.options) {
                 EXPECT_TRUE(contains(r.out, o.name)) << o.name;
-                if (!o.alias.empty()) EXPECT_TRUE(contains(r.out, o.alias)) << o.alias;
+                if (!o.alias.empty()) {
+                    EXPECT_TRUE(contains(r.out, o.alias)) << o.alias;
+                }
             }
         }
     }
@@ -169,7 +171,9 @@ TEST(CliTest, TopLevelPageListsEveryCommandAndFamily) {
     const Result r = run({"--help"});
     EXPECT_EQ(r.status, 0) << r.err;
     for (const cli::Command & c : cli::commands()) {
-        if (!c.name.empty()) EXPECT_TRUE(contains(r.out, cli::title(c) + " ")) << c.name;
+        if (!c.name.empty()) {
+            EXPECT_TRUE(contains(r.out, cli::title(c) + " ")) << c.name;
+        }
     }
     for (const cli::Option & o : cli::global_options()) EXPECT_TRUE(contains(r.out, o.name)) << o.name;
     for (const cli::Family & f : cli::families()) {
