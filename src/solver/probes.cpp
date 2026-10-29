@@ -449,7 +449,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 for (const Reduction r : p.reductions) {
                     for (const auto & v : p.variables) {
                         const Dimension d = field_units::describe(v).dimension;
-                        // Integrals along curves are per unit length; over point sets, sums
+                        // Integrals along curves are per unit length; over points, sums
                         columns.emplace_back(reduction_name(r) + "_" + v,
                                              r == Reduction::INTEGRAL && curve ? d.times(dim::length) : d);
                     }
