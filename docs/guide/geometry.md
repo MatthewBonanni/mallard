@@ -61,21 +61,24 @@ their width.
 | `ellipsoid` | `{type = "ellipsoid", center = [0, 0, 0], semi_axes = [1, 0.5, 0.4]}` |
 | `cylinder` | `{type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.5, length = 2}` (no `length`: infinite) |
 | `cylinder`, annular | the same with `inner_radius = 0.3`: a pipe wall |
-| `annulus` (2D) | `{type = "annulus", center = [0, 0], radius = 1, inner_radius = 0.6}` |
+| `annulus` (2D) | `{type = "annulus", center = [0, 0], radius = 1, inner_radius = 0.6}`: a ring |
 | `cone` (`frustum`) | `{type = "cone", base = [0, 0, 0], axis = [0, 0, 1], length = 1.5, base_radius = 0.8, top_radius = 0.3}` |
-| `box` (2D: also `rectangle`) | `{type = "box", center = [0, 0, 0], size = [2, 1, 0.5]}` |
+| `box` (3D) | `{type = "box", center = [0, 0, 0], size = [2, 1, 0.5]}` |
+| `rectangle` (2D) | `{type = "rectangle", center = [0, 0], size = [2, 1]}` |
 | `torus` | `{type = "torus", center = [0, 0, 0], axis = [0, 0, 1], major_radius = 1, minor_radius = 0.25}` |
 | `half_space` | `{type = "half_space", point = [1, 0, 0], normal = [1, 0, 0]}`: the side `x < 1` |
 | `polygon` (2D) | `{type = "polygon", vertices = [[0, 0], [1, 0], [0.5, 1]]}` |
 | `implicit` | `{type = "implicit", f = "x^4 + y^4 + z^4 - 0.41"}`: where `f < 0` |
 
 Each type has one dimension, the same in every run: `circle` and `ellipse`
-are curves, and `disk`, `rectangle` and `polygon` are flat (areas in 2D,
-surfaces in 3D). Sources need regions of the run's full dimension, so 3D
-runs use `sphere`, `ellipsoid` and `box`; in 2D the `z = 0` slice of an
-`ellipsoid` is the area inside an ellipse. Older inputs with the former
-aliases (`circle` and `ellipse` for the filled regions, `disk` and
-`rectangle` in 3D) are rewritten by [`mallard upgrade-input`](input_files.md#inputs-from-older-releases).
+are curves; `disk`, `annulus`, `rectangle` and `polygon` are flat (areas in 2D,
+surfaces in 3D); `box` is a solid, so 3D only. Sources need regions of the
+run's full dimension, so 3D runs use `sphere`, `ellipsoid`, `box` and
+`cylinder` (hollow with `inner_radius`), and 2D runs `rectangle` for a
+rectangle; in 2D the `z = 0` slice of an `ellipsoid` is the area inside an
+ellipse. Older inputs with the former names (`circle` and `ellipse` for the
+filled regions, `box` in 2D, `disk`, `annulus` and `rectangle` in 3D) are
+rewritten by [`mallard upgrade-input`](input_files.md#inputs-from-older-releases).
 
 In 2D, each region is the `z = 0` slice; Mallard computes the cell volume
 fractions below on a coarse triangle mesh, with the exact outline drawn over them:
@@ -86,9 +89,9 @@ fractions below on a coarse triangle mesh, with the exact outline drawn over the
 ### Booleans
 
 ```toml
-region = {type = "difference",
-          a = {type = "disk", center = [0.42, 0.5], radius = 0.27},
-          b = {type = "rectangle", center = [0.64, 0.5], size = [0.5, 0.26], rotate = 25, pivot = [0.64, 0.5]}}
+region.type = "difference"
+region.a = {type = "disk", center = [0.42, 0.5], radius = 0.27}
+region.b = {type = "rectangle", center = [0.64, 0.5], size = [0.5, 0.26], rotate = 25, pivot = [0.64, 0.5]}
 ```
 
 `union` and `intersection` take `regions = [...]`; `difference` takes `a` and
@@ -119,8 +122,8 @@ that order. `scale` and `rotate` act about `pivot` (default the origin).
 Pitfall: without `pivot`, `rotate` turns the region about the origin, which
 also moves it. To turn a region in place, give its center as `pivot`.
 
-**Boxes not aligned with the grid.** Rotate a box about its center: Mallard
-computes the fraction of each cell that the rotated box covers, so it needs no
+**Boxes not aligned with the grid.** Rotate a rectangle (3D: a box) about its center: Mallard
+computes the fraction of each cell that it covers, so it needs no
 grid lines along its sides. A test of cell centroids would make a staircase
 and miss part of the area:
 
@@ -134,17 +137,17 @@ region = {type = "rectangle", center = [0.5, 0.5], size = [0.66, 0.28], rotate =
 In 3D, rotate about an axis, or give the region's own axes:
 
 ```toml
-region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2],
-          rotate = {axis = [0, 0, 1], angle = 30}, pivot = [1, 0, 0]}
-region = {type = "box", center = [0, 0, 0], size = [1, 0.5, 0.2],
-          rotate = {axes = [[0.6, 0.8, 0], [-0.8, 0.6, 0], [0, 0, 1]]}}
+region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], rotate = {axis = [0, 0, 1], angle = 30}, pivot = [1, 0, 0]}
+```
+
+```toml
+region = {type = "box", center = [0, 0, 0], size = [1, 0.5, 0.2], rotate = {axes = [[0.6, 0.8, 0], [-0.8, 0.6, 0], [0, 0, 1]]}}
 ```
 
 **Annular cylinders** have an `inner_radius`; tilt them with `axis`:
 
 ```toml
-region = {type = "cylinder", center = [0.5, 0.5, 0.5], axis = [1, 1, 0.6],
-          radius = 0.33, inner_radius = 0.18, length = 0.5}
+region = {type = "cylinder", center = [0.5, 0.5, 0.5], axis = [1, 1, 0.6], radius = 0.33, inner_radius = 0.18, length = 0.5}
 ```
 
 ![Volume fractions in a tetrahedral mesh of a tilted annular cylinder, a rotated box and a drilled sphere, cut open](../images/guide/regions-3d-light.svg#gh-light-mode-only)

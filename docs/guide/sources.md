@@ -81,8 +81,8 @@ act.
 
 ### Regions
 
-A region is a primitive — sphere, cylinder (solid or annular), cone, box, torus,
-half-space, polygon (2D), any implicit `f(x, y, z) < 0` — or a union, intersection
+A region is a primitive — sphere, cylinder (solid or annular), cone, box (2D:
+rectangle), torus, half-space, polygon (2D), any implicit `f(x, y, z) < 0` — or a union, intersection
 or difference of regions, each scaled, rotated and translated. Regions need not
 follow the mesh: each cell gets its volume fraction, so a coarse mesh sees the
 right amount of the region instead of a staircase of whole cells. `edge` (on the
@@ -91,9 +91,9 @@ source switches on gradually and excites fewer grid-scale waves.
 
 ```toml
 # A disk with a rotated slot cut out of it
-region = {type = "difference",
-          a = {type = "disk", center = [0.5, 0.5], radius = 0.38},
-          b = {type = "rectangle", center = [0.5, 0.5], size = [0.5, 0.16], rotate = 45, pivot = [0.5, 0.5]}}
+region.type = "difference"
+region.a = {type = "disk", center = [0.5, 0.5], radius = 0.38}
+region.b = {type = "rectangle", center = [0.5, 0.5], size = [0.5, 0.16], rotate = 45, pivot = [0.5, 0.5]}
 ```
 
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-light.svg#gh-light-mode-only)

@@ -1019,9 +1019,10 @@ the surface. Volume fractions are cell averages of the region's indicator,
 sampled on each cell's triangles (2D) or tetrahedra (3D), subdivided where the
 surface or the smooth edge crosses them: cells entirely inside get exactly 1.
 In 2D, regions are the z = 0 slices of the 3D primitives (`z` components may be
-left out). `circle` and `ellipse` are curves, and `disk`, `rectangle` and
-`polygon` are flat (areas in 2D, surfaces in 3D), so sources in 3D use
-`sphere`, `ellipsoid` and `box`. Lengths take units (`radius = "5 mm"`) and angles are in degrees
+left out). `circle` and `ellipse` are curves, `disk`, `annulus`, `rectangle`
+and `polygon` are flat (areas in 2D, surfaces in 3D), and `box` is a 3D solid,
+so sources in 3D use `sphere`, `ellipsoid`, `box` and `cylinder`, and in 2D
+`rectangle` for a rectangle. Lengths take units (`radius = "5 mm"`) and angles are in degrees
 unless given a unit; `axis`, `normal`, `axes` and `scale` are plain numbers.
 
 | `type` | Keys | Region |
@@ -1029,9 +1030,9 @@ unless given a unit; `axis`, `normal`, `axes` and `scale` are plain numbers.
 | `sphere` (2D: also `disk`) | `center`, `radius` | |
 | `ellipsoid` | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`); in 2D its slice is the area inside an ellipse |
 | `cylinder` | `center`, `axis` (default z in 2D), `radius`, `inner_radius` (default 0: solid), `length` (default infinite) | annular with `inner_radius`; centered on `center` along `axis` |
-| `annulus` (2D) | `center`, `radius`, `inner_radius` | |
+| `annulus` (2D) | `center`, `radius`, `inner_radius` | a ring; in 3D a `cylinder` with `inner_radius` |
 | `cone` (`frustum`) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0) | |
-| `box` (2D: also `rectangle`) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
+| `box` (3D), `rectangle` (2D) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | |
 | `half_space` | `point` (default origin), `normal` | the side `(x - point) . normal < 0` |
 | `polygon` (2D) | `vertices` = `[[x, y], ...]` | simple polygon |
@@ -1056,11 +1057,13 @@ moment (e.g. `pi R edge^2 / 5` for a sphere).
 
 ```toml
 # A tilted pipe wall with a hole drilled through it
-region = {type = "difference",
-          a = {type = "cylinder", center = [0, 0, 0], axis = [1, 1, 0], radius = 0.3, inner_radius = 0.2, length = 1.0},
-          b = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.05},
-          edge = 0.01}
+region.type = "difference"
+region.a = {type = "cylinder", center = [0, 0, 0], axis = [1, 1, 0], radius = 0.3, inner_radius = 0.2, length = 1.0}
+region.b = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.05}
+region.edge = 0.01
+```
 
+```toml
 # A box rotated 30 degrees about z around its own center
 region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 0, 0], rotate = {axis = [0, 0, 1], angle = 30}}
 ```

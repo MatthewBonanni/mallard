@@ -37,12 +37,16 @@ struct KeyRule {
     std::string (*convert)(const std::string & toml_text) = nullptr;
 };
 
-/** @brief A string option renamed: `key = "from"` becomes `key = "to"`. */
+/**
+ * @brief A string option renamed: `key = "from"` becomes `key = "to"`, and
+ *        `add` (`name = value`), if given, is set beside it unless its table has it.
+ */
 struct OptionRule {
     std::string key;
     std::string from, to;
     std::string since, removed, note;
-    int dim = 0;  ///< The only dimension of runs it applies to; 0: every run
+    int dim = 0;           ///< The only dimension of runs it applies to; 0: every run
+    std::string add = {};  ///< E.g. "axis = [0, 0, 1]"
 };
 
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */

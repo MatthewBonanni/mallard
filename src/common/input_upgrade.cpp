@@ -62,6 +62,10 @@ const Rules & rules() {
             {"sources[].region.**.type", "disk", "sphere", "0.9.0", "0.10.0", "disk is a flat surface in 3D", 3},
             {"sources[].region.**.type", "rectangle", "box", "0.9.0", "0.10.0", "rectangle is a flat surface in 3D",
              3},
+            {"sources[].region.**.type", "box", "rectangle", "0.9.0", "0.10.0", "box is the 3D solid", 2},
+            {"sources[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0",
+             "annulus is a flat surface in 3D; the hollow solid is a cylinder along z with inner_radius, and "
+             "axis = [0, 0, 1] is added", 3, "axis = [0, 0, 1]"},
         },
     };
     return table;
@@ -320,6 +324,13 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
             if (!value.is_string() || value.as_string() != rule.from) continue;
             findings.push_back(option_finding(rule, key, line_of(value), version));
             value = rule.to;
+            if (!rule.add.empty()) {
+                const auto added = toml::parse_str<typename V::config_type>(rule.add);
+                auto & beside = entries_of(*at(root, parent(key)));
+                for (const auto & [name, v] : entries_of(added)) {
+                    if (!beside.contains(name)) beside[name] = v;
+                }
+            }
         }
     }
     return findings;
@@ -505,7 +516,17 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
             impossible = true;
             return false;
         }
-        lines[line].replace(v, old_text.size(), toml::format(OrderedValue(rule.to)));
+        const std::string new_text = toml::format(OrderedValue(rule.to));
+        lines[line].replace(v, old_text.size(), new_text);
+        if (!rule.add.empty() && !entries_of(*at(root, parent(key))).contains(rule.add.substr(0, rule.add.find(' ')))) {
+            const auto column = key_column(lines[line], key.back().first);
+            const size_t after = v + new_text.size(), rest = lines[line].find_first_not_of(" \t", after);
+            if (column && (rest == std::string::npos || lines[line][rest] == '#')) {
+                lines.insert(lines.begin() + static_cast<long>(line) + 1, lines[line].substr(0, *column) + rule.add);
+            } else {
+                lines[line].insert(after, ", " + rule.add);
+            }
+        }
         return true;
     }
     return false;

@@ -96,20 +96,30 @@ class Parser {
 
     private:
         static std::vector<std::string> types() {
-            std::vector<std::string> out = {"sphere", "ellipsoid", "cylinder", "annulus", "cone", "frustum", "box",
-                                            "torus", "half_space", "implicit", "union", "intersection", "difference"};
-            if (N_DIM == 2) out.insert(out.end(), {"disk", "rectangle", "polygon"});
+            std::vector<std::string> out = {"sphere", "ellipsoid", "cylinder", "cone", "frustum", "torus",
+                                            "half_space", "implicit", "union", "intersection", "difference"};
+            if (N_DIM == 2) {
+                out.insert(out.end(), {"disk", "annulus", "rectangle", "polygon"});
+            } else {
+                out.push_back("box");
+            }
             return out;
         }
 
-        /** @brief For a type of a lower dimension than the run's: what it is, and the type to use instead. */
-        static std::optional<std::pair<std::string, std::string>> lower_dimension(const std::string & type) {
+        /** @brief For a type of another dimension than the run's regions: what it is, and the type to use instead. */
+        static std::optional<std::pair<std::string, std::string>> other_dimension(const std::string & type) {
             if (type == "circle") return {{"a curve", N_DIM == 2 ? "\"disk\", the area inside a circle" : "\"sphere\""}};
             if (type == "ellipse") {
                 return {{"a curve", N_DIM == 2 ? "\"ellipsoid\", whose z = 0 slice is the area inside an ellipse"
                                                : "\"ellipsoid\""}};
             }
-            if (N_DIM == 2) return std::nullopt;
+            if (N_DIM == 2) {
+                if (type == "box") return {{"a 3D solid", "\"rectangle\""}};
+                return std::nullopt;
+            }
+            if (type == "annulus") {
+                return {{"a flat surface in 3D runs", "\"cylinder\" with inner_radius, a hollow cylinder along its axis"}};
+            }
             if (type == "disk") return {{"a flat surface in 3D runs", "\"sphere\", or a short \"cylinder\""}};
             if (type == "rectangle") return {{"a flat surface in 3D runs", "\"box\""}};
             if (type == "polygon") {
@@ -272,9 +282,9 @@ class Parser {
             const std::array<double, 9> I = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
             std::ostringstream text;
             text << type;
-            if (const auto lower = lower_dimension(type)) {
-                throw InputError(where + ".type = \"" + type + "\" is " + lower->first + ", and regions here are " +
-                                 (N_DIM == 2 ? "areas" : "volumes") + ": use " + lower->second + ".");
+            if (const auto other = other_dimension(type)) {
+                throw InputError(where + ".type = \"" + type + "\" is " + other->first + ", and regions here are " +
+                                 (N_DIM == 2 ? "areas" : "volumes") + ": use " + other->second + ".");
             }
             if (type == "sphere" || type == "disk") {
                 n.kind = Kind::SPHERE;

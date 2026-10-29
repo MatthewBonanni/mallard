@@ -348,13 +348,16 @@ TEST(RegionTest, RejectsInvalidRegions) {
     }
 }
 
-TEST(RegionTest, TypesOfLowerDimensionNameTheRegionToUse) {
+TEST(RegionTest, TypesOfAnotherDimensionNameTheRegionToUse) {
     const std::vector<std::pair<std::string, std::string>> cases =
-        N_DIM == 2 ? std::vector<std::pair<std::string, std::string>>{{"circle", "\"disk\""}, {"ellipse", "\"ellipsoid\""}}
+        N_DIM == 2 ? std::vector<std::pair<std::string, std::string>>{{"circle", "\"disk\""},
+                                                                     {"ellipse", "\"ellipsoid\""},
+                                                                     {"box", "\"rectangle\""}}
                    : std::vector<std::pair<std::string, std::string>>{{"circle", "\"sphere\""},
                                                                      {"ellipse", "\"ellipsoid\""},
                                                                      {"disk", "\"sphere\""},
                                                                      {"rectangle", "\"box\""},
+                                                                     {"annulus", "\"cylinder\" with inner_radius"},
                                                                      {"polygon", "\"implicit\""}};
     for (const auto & [type, use] : cases) {
         try {
@@ -370,9 +373,11 @@ TEST(RegionTest, TypesOfLowerDimensionNameTheRegionToUse) {
 }
 
 TEST(RegionTest, ReportsKeysTheRegionDoesNotRead) {
+    const std::string second = N_DIM == 2 ? "{type = \"annulus\", center = [0, 0], radius = 2, inner_radius = 1, "
+                                            "axis = [1, 0, 0]}"
+                                          : "{type = \"box\", center = [0, 0, 0], size = [1, 1, 1], axis = [1, 0, 0]}";
     const Input input = parse_toml("r = {type = \"union\", regions = [{type = \"sphere\", center = [0, 0, 0], "
-                                   "raduis = 1, radius = 1}, {type = \"annulus\", center = [0, 0, 0], radius = 2, "
-                                   "inner_radius = 1, axis = [1, 0, 0]}]}");
+                                   "raduis = 1, radius = 1}, " + second + "]}");
     const region::Region r(input.at("r"), "r");
     std::vector<std::string> unused;
     for (const Diagnostic & d : unused_keys(input)) unused.push_back(d.key);
@@ -381,7 +386,7 @@ TEST(RegionTest, ReportsKeysTheRegionDoesNotRead) {
 
 TEST(RegionTest, ReadsLengthsAndAnglesWithUnits) {
     const std::string rotate = N_DIM == 2 ? "\"90 deg\"" : "{axis = [0, 0, 1], angle = \"90 deg\"}";
-    const auto r = make_region("{type = \"box\", center = [\"50 cm\", 0, 0], size = [\"2 m\", \"100 mm\", 1], "
+    const auto r = make_region(std::string("{type = \"") + (N_DIM == 2 ? "rectangle" : "box") + "\", center = [\"50 cm\", 0, 0], size = [\"2 m\", \"100 mm\", 1], "
                                "rotate = " + rotate + ", edge = \"0 mm\"}");
     // Rotated by 90 degrees about z through the origin, the box spans |y - 0.5| < 1 and |x| < 0.05
     const double inside[3] = {0.04, 1.4, 0.0}, outside[3] = {0.06, 0.5, 0.0};

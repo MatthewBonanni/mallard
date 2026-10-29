@@ -4299,7 +4299,6 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
    "cone",
    "cylinder",
    "difference",
