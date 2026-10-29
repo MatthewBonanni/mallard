@@ -66,6 +66,10 @@ std::string DataWriter::xdmf_grid(const std::string & stem, double t, const std:
         const bool is_vector = field.n_vtk_components() > 1;
         out << indent << "  <Attribute Name=\"" << field.name << "\" AttributeType=\""
             << (is_vector ? "Vector" : "Scalar") << "\" Center=\"Cell\">\n"
+            << indent << "    <Information Name=\"units\" Value=\"" << field_units::xml_escape(field.description.units())
+            << "\"/>\n"
+            << indent << "    <Information Name=\"long_name\" Value=\""
+            << field_units::xml_escape(field.description.long_name) << "\"/>\n"
             << indent << "    <DataItem Dimensions=\"" << n_cells << (is_vector ? " 3" : "") << "\" " << real << ">"
             << data_h5 << ":/fields/" << field.name << "</DataItem>\n"
             << indent << "  </Attribute>\n";
@@ -247,6 +251,7 @@ void DataWriter::write_hdf5_mesh() {
         Handle group(H5Gcreate2(file, "nodes", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
         write_dataset(group, "coordinates", n_nodes, N_DIM, node_order.first(), node_order.size(), block_coords.data(),
                       dxpl, deflate, !distributed, io_threads);
+        annotate(group, "coordinates", FieldDescription{dim::length, "node coordinates", ""});
     }
     {
         Handle group(H5Gcreate2(file, "cells", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
@@ -303,6 +308,7 @@ void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t, co
         }
         write_dataset(group, field.name.c_str(), cell_order.n_global(), int(n_comp), cell_order.first(), n,
                       column.data(), dxpl, deflate, !distributed, io_threads);
+        annotate(group, field.name, field.description);
         c0 += n_comp;
     }
 }

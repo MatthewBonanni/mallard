@@ -74,6 +74,7 @@ add_library(MallardCore STATIC
     solver/spectra.cpp
     solver/statistics.cpp
     io/compression.cpp
+    io/field_units.cpp
     io/file_format.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp

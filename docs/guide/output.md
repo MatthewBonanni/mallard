@@ -158,9 +158,9 @@ JSON object, is written into restart files (a trailer after the data, also of
 compressed files, which older readers skip), VTU, `.pvtu`, `.pvd`, XDMF and probe `.vtp` files (an XML comment
 `<!-- provenance {...} -->` after the XML declaration), HDF5 files, probe files included (the
 string attribute `provenance` of the root group; a continued run's probe file holds the latest run's), CSV files of forces,
-integrals and probes (a line `# provenance {...}` after the header, and
-another where a continued run starts appending), and the run log's `start`
-record.
+integrals and probes (a line `# provenance {...}` after the header and its
+[units line](#units), and another where a continued run starts appending), and
+the run log's `start` record.
 
 | Field | Contents |
 |---|---|
@@ -182,6 +182,57 @@ json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
 ```
 
 or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
+
+## Units
+
+Every value Mallard writes is in SI units, and every output file says which,
+as metadata in the way its format's tools expect; field names never change.
+Restart files are the exception: they hold the conservative variables, in SI
+units by definition, for Mallard to read back.
+
+| File | Where the units are |
+|---|---|
+| HDF5 (snapshots, their mesh file, probes) | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres) |
+| XDMF (`.xmf`) | `<Information Name="units" Value="..."/>` and `<Information Name="long_name" .../>` in each `<Attribute>` |
+| VTU, VTP (each piece of a PVTU) | Field data: the string arrays `MALLARD_FIELD_NAMES`, `MALLARD_FIELD_UNITS` and `MALLARD_FIELD_LONG_NAMES`, entry *i* of each for the same array (VTK has no units attribute) |
+| CSV (forces, integrals, probes) | A line `# units: ...` after the header, one entry per column |
+
+```python
+import h5py
+f = h5py.File("solut/flow_000100.h5")
+f["fields/P"].attrs["units"], f["fields/P"].attrs["long_name"]   # ('kg m-1 s-2', 'pressure')
+
+import sys; sys.path.insert(0, "tools")
+from mallard.vtu import units, long_names        # any output file: .vtu, .pvtu, .vtp, .h5, .xmf, .csv
+units("solut/flow_000100.vtu")["U"]                # 'm s-1'
+from mallard.tables import read_csv               # CSV columns and their units
+columns, column_units = read_csv("forces_cylinder.csv")
+```
+
+These are the attributes xarray and netCDF tools look for, readable as
+they are. Units are written in SI base units (`kg m-1 s-2`, not `Pa`), so that
+derived fields compose: `MEAN_<A>` and `PHASE_<bin>_<A>` have the units of
+`A`, `COV_<A>_<B>` their product (`COV_U_X_U_Y`: `m2 s-2`), and `SOURCE_<A>`
+those of `A` per second.
+
+| Field | Units | Field | Units |
+|---|---|---|---|
+| `RHO`, `RHOY_<s>` | `kg m-3` | `MU`, `MU_T` | `kg m-1 s-1` |
+| `RHOU` | `kg m-2 s-1` | `LAMBDA` | `kg m s-3 K-1` |
+| `RHOE`, `P`, `P_MAX` | `kg m-1 s-2` | `D_<s>` | `m2 s-1` |
+| `U` | `m s-1` | `DT_<s>` | `kg m-1 s-1` |
+| `T`, `T_SEED` | `K` | `HRR`, `QRAD` | `kg m-1 s-3` (W/m³) |
+| `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
+| `VORTICITY` | `s-1` | `CHEM_H` | `s` |
+| `Q` | `s-2` | `CFL`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
+
+CSV columns: `t` in `s`, coordinates and probe `length` in `m`, `step`,
+`point` and `count` `1`; forces in `N` (`kg m s-2`), per unit depth in 2D
+(`kg s-2`), and the wall model's `Q` in `W`; domain integrals carry the
+volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
+variable's units, `integral` along a curve times `m`. Axisymmetric runs are
+per radian throughout (a radian is dimensionless, so the units do not show it).
+Files written before Mallard 0.9 have no units; the readers return them empty.
 
 ## Wall forces: `[[forces]]`
 
@@ -397,7 +448,7 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 
 | Script | Use |
 |---|---|
-| `mallard/vtu.py`, `mallard/h5.py` | Readers for VTU and HDF5 output, for your own scripts (`from mallard.vtu import read_vtu_cells` with `tools/` on `sys.path`) |
+| `mallard/vtu.py`, `mallard/h5.py`, `mallard/tables.py` | Readers for VTU, HDF5 and CSV output and the [units](#units) of each file, for your own scripts (`from mallard.vtu import read_vtu_cells` with `tools/` on `sys.path`) |
 | `post/plot_vtu.py`, `post/compare_png.py` | A field of one or several snapshots |
 | `post/animate.py` | MP4/GIF animation of a 2D series with numerical schlieren |
 | `post/plane_average.py` | Averages over homogeneous directions |
