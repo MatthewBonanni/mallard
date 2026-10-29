@@ -1,0 +1,1 @@
+- A malformed input with an unclosed nested array before a key (as in `s=["",["",""[` then a line `[=`) no longer hangs the input reader; it reports the TOML syntax error.

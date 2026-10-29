@@ -1,6 +1,7 @@
 """Minimal reader for Mallard's raw-appended VTU files, and (through
 mallard.h5, which needs h5py) its HDF5 snapshots: every function also takes a
-snapshot .h5 file. provenance() reads the provenance block of any output file."""
+snapshot .h5 file. provenance() reads the provenance block of any output file,
+units() and long_names() the units and descriptions of its fields."""
 import json
 import os
 import re
@@ -214,3 +215,51 @@ def provenance(path):
         return json.loads(m.group(1))
     m = re.search(r"^# provenance (.*)$", head, re.M)
     return json.loads(m.group(1)) if m else None
+
+
+def _string_arrays(text):
+    """The VTK XML String arrays of a file's header, as {name: [strings]}."""
+    out = {}
+    for m in re.finditer(r'<Array type="String" Name="([^"]+)"[^>]*>([^<]*)</Array>', text):
+        codes = [int(v) for v in m.group(2).split()]
+        strings, current = [], []
+        for c in codes:
+            if c == 0:
+                strings.append(bytes(current).decode("utf-8"))
+                current = []
+            else:
+                current.append(c)
+        out[m.group(1)] = strings
+    return out
+
+
+def field_metadata(path):
+    """{field: (units, long_name)} of any Mallard output file: VTU, PVTU (its
+    first piece), VTP, HDF5 (or its .xmf) and CSV (long names empty)."""
+    if path.endswith(".xmf"):
+        path = path[:-4] + ".h5"
+    if path.endswith(".h5"):
+        from .h5 import field_metadata as h5_metadata
+        return h5_metadata(path)
+    if path.endswith(".csv"):
+        from .tables import units as csv_units
+        return {name: (u, "") for name, u in csv_units(path).items()}
+    if path.endswith(".pvtu"):
+        piece = re.search(r'Source="([^"]+)"', open(path).read()).group(1)
+        return field_metadata(os.path.join(os.path.dirname(path), piece))
+    raw = open(path, "rb").read()
+    end = raw.find(b"<AppendedData")
+    arrays = _string_arrays(raw[:end if end >= 0 else len(raw)].decode("latin-1"))
+    names = arrays.get("MALLARD_FIELD_NAMES", [])
+    return dict(zip(names, zip(arrays.get("MALLARD_FIELD_UNITS", []), arrays.get("MALLARD_FIELD_LONG_NAMES", []))))
+
+
+def units(path):
+    """{field: units} (UDUNITS syntax, "1" for dimensionless) of any Mallard
+    output file; empty for files written before Mallard recorded units."""
+    return {name: u for name, (u, _) in field_metadata(path).items()}
+
+
+def long_names(path):
+    """{field: description} of any Mallard output file (empty for CSV files)."""
+    return {name: d for name, (_, d) in field_metadata(path).items()}
