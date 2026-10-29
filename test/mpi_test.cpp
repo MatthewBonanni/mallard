@@ -33,6 +33,7 @@
 #include "partition.h"
 #include "json_reader.h"
 #include "provenance.h"
+#include "renumbered_mesh.h"
 #include "test_fixtures.h"
 #include "solver.h"
 #include "scratch.h"
@@ -296,6 +297,23 @@ TEST(MPITest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     comm::barrier();
 }
 
+TEST(MPITest, RenumberedMeshesMatchSerialWithEveryPartitioner) {
+    // Global ids in random order carry no locality: partitions, halos and the
+    // global orders of faces and stencils must not lean on them
+    const RenumberedMesh mesh = renumbered_gmsh(jittered_box(MeshType::CARTESIAN_TRI, {24, 18}, {1.0, 0.8}), 2026);
+    const std::string file = write_temp_shared("mallard_mpi_renumbered.msh", mesh.gmsh);
+    std::string input = box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 10);
+    const std::string generated = "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
+        if (partitioner == "graph" && !have_graph_partitioner()) continue;
+        expect_matches_serial(input + "[parallel]\npartitioner = \"" + partitioner + "\"\n");
+    }
+    comm::barrier();
+}
+
 TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
     expect_matches_serial(box_input(
         "cartesian", "type = \"MUSCL\"\n", NS,
@@ -309,6 +327,12 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
 TEST(MPITest, InletsMatchSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
                                     bcs("type = \"stagnation_inlet\"\np0 = 1.5\nT0 = 1.1\ndirection = [1.0, 0.3]\n",
+                                        "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n"),
+                                    25));
+    // The total mass flow is divided among the faces by an area integral over all ranks
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"mass_flow_inlet\"\nmdot = 0.5\nprofile = \"1 + y\"\nT = 1.0\n",
                                         "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n"),
                                     25));

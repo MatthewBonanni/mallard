@@ -1,0 +1,24 @@
+# A pod that mounts the volume of pvc.yaml, to copy cases in and results out:
+#
+#   kubectl apply -f files.yaml
+#   kubectl cp my_case mallard-files:/data/my_case
+#   kubectl cp mallard-files:/data/examples/riemann_2d/solut solut
+#   kubectl delete pod mallard-files
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mallard-files
+spec:
+  # imagePullSecrets: [{name: ghcr}]   # while the images are private
+  containers:
+    - name: files
+      image: ghcr.io/matthewbonanni/mallard
+      command: [sleep, infinity]
+      workingDir: /data
+      resources:
+        requests: {cpu: 100m, memory: 256Mi}
+      volumeMounts:
+        - {name: data, mountPath: /data}
+  volumes:
+    - name: data
+      persistentVolumeClaim: {claimName: mallard-data}

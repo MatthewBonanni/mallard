@@ -3,39 +3,30 @@
 # would: mesh.sh, init.sh, run.sh on two MPI ranks, post.sh. Checks that each
 # step works, not the accuracy.
 #
-#   templates/ci.sh MALLARD_2D MALLARD_3D [WORK_DIR] [TEMPLATE ...]
+#   templates/ci.sh MALLARD [WORK_DIR] [TEMPLATE ...]
 #
-# MALLARD_2D and MALLARD_3D are 2D and 3D builds with MPI (from a build or an
-# install tree); python3 must have the packages the scripts list.
+# MALLARD is the mallard of an install with both dimensions (mallard2d and
+# mallard3d), built with MPI; python3 must have the packages the scripts list.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-m2d="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
-m3d="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
-work="${3:-$(mktemp -d)}"
-shift $(( $# < 3 ? $# : 3 ))
+mallard="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+work="${2:-$(mktemp -d)}"
+shift $(( $# < 2 ? $# : 2 ))
 mkdir -p "$work"
 work="$(cd "$work" && pwd)"
 export OMP_NUM_THREADS=1 MPLBACKEND=Agg
 
-field() {
-    python3 - "$here/manifest.toml" "$1" "${2:-}" <<'EOF'
-import sys, tomllib
-templates = tomllib.load(open(sys.argv[1], "rb"))["templates"]
-if sys.argv[2] == "names":
-    print(" ".join(t["name"] for t in templates))
-else:
-    print(next(t for t in templates if t["name"] == sys.argv[2]).get(sys.argv[3], 2))
-EOF
+names() {
+    python3 -c 'import sys, tomllib; print(" ".join(t["name"] for t in tomllib.load(open(sys.argv[1], "rb"))["templates"]))' \
+        "$here/manifest.toml"
 }
 
 templates=("$@")
-[ ${#templates[@]} -gt 0 ] || read -r -a templates <<< "$(field names)"
+[ ${#templates[@]} -gt 0 ] || read -r -a templates <<< "$(names)"
 failed=()
 for t in "${templates[@]}"; do
     echo "== $t"
     start=$SECONDS
-    mallard="$m2d"
-    [ "$(field "$t" dim)" = 3 ] && mallard="$m3d"
     dir="$work/$t"
     rm -rf "$dir"
     if (

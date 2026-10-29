@@ -65,13 +65,17 @@ outflow.
 `extrapolation` faces, and characteristic faces before their
 characteristic treatment, take the state of an *image face*: the interior
 face reached by translating the boundary face inward by the depth of the
-boundary cell, with its reconstructed state on the far side at the
+boundary cell (or, where no face lies there, as for pyramids, whose apex is
+halfway, by the smallest distance at which a neighboring cell has one), with
+its reconstructed state on the far side at the
 matching quadrature point; without one, the state of the image cell, else
 the interior state. This is exactly what an interior face sees for a
 solution that does not vary normal to the boundary, at any order. A
 zero-gradient copy of the boundary cell would feed the cell back to itself
 at inflow boundaries, and on triangles, whose centroids are offset from the
-face, create an O(1) mass imbalance at moving shocks.
+face, create an O(1) mass imbalance at moving shocks. The gradient stencils
+of `extrapolation` boundaries continue across them the same way, through the
+image cells ([chapter 6](finite_volume.md#gradients-for-the-viscous-terms)).
 
 ### Periodic boundaries
 

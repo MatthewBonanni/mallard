@@ -291,15 +291,20 @@ form in them,
 
 $$
 \begin{equation}
-\beta = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\int_{\Omega_i}\left(D^{\boldsymbol{\alpha}}u\right)^2\mathrm{d}\boldsymbol{\xi}
+\beta = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\frac{\lvert\boldsymbol{\alpha}\rvert!}{\boldsymbol{\alpha}!}\int_{\Omega_i}\left(D^{\boldsymbol{\alpha}}u\right)^2\mathrm{d}\boldsymbol{\xi}
 = \mathbf{a}^T\mathbf{S}\,\mathbf{a}, \qquad
-S_{lm} = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\int_{\Omega_i} D^{\boldsymbol{\alpha}}\phi_l\,D^{\boldsymbol{\alpha}}\phi_m\,\mathrm{d}\boldsymbol{\xi},
+S_{lm} = \sum_{1\le\lvert\boldsymbol{\alpha}\rvert\le r}\frac{\lvert\boldsymbol{\alpha}\rvert!}{\boldsymbol{\alpha}!}\int_{\Omega_i} D^{\boldsymbol{\alpha}}\phi_l\,D^{\boldsymbol{\alpha}}\phi_m\,\mathrm{d}\boldsymbol{\xi},
 \label{eq:si}
 \end{equation}
 $$
 
 with derivatives and the integral over the target cell in the scaled frame,
-so that $\beta$ does not depend on the cell size. The sector polynomials use
+so that $\beta$ does not depend on the cell size. The multinomial weight
+$\lvert\boldsymbol{\alpha}\rvert!/\boldsymbol{\alpha}!$ counts every ordering
+of the derivatives, so each degree's sum is the squared Frobenius norm of
+that derivative tensor and $\beta$ does not depend on the orientation of the
+axes (the unweighted sum of Jiang & Shu's indicators does: a rotation by 30
+degrees changed the solution at $10^{-3}$ after one step, #436). The sector polynomials use
 the leading $N_2\times N_2$ block of the same $\mathbf{S}$. 2D stores the
 upper triangle of $\mathbf{S}$ per cell, integrated with the rule of the cell
 averages. 3D stores the cell's central moments $\eqref{eq:moments}$ instead
@@ -360,7 +365,14 @@ conservative-variable eigenvectors with the gas's $\gamma$; mixtures the
 primitive-variable ones, valid for any equation of state, with the mean of
 the two cells' $\gamma$ in the sound speed. The variables are ordered
 $u_n - a$, $u_n$ (entropy), $u_n + a$, then one shear wave per tangent.
-`characteristic = false` uses the identity instead.
+In 3D the two shear waves select together, on the sum of their indicators
+($\beta_m$ below), since the tangents are an arbitrary basis of the face's
+plane (`tangent_basis` projects out the coordinate axis least aligned with
+the normal); selecting them one by one made the solution depend on the
+orientation of the axes and on the cell numbering, which flips normals (#436).
+`characteristic = false` uses the identity instead; its momentum
+components then select their stencils separately, so that, unlike the
+characteristic default, the solution depends on the orientation of the axes.
 
 For each characteristic variable $v$, with the central coefficients
 $\mathbf{c}_K = \mathbf{L}_v\mathbf{a}_K$ and the sector ones

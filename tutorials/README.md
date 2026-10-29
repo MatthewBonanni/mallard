@@ -13,10 +13,11 @@ input file and the Python scripts that set it up and draw its figures, and
 | `channel_les/` | [Channel LES](../docs/tutorials/channel_les.md): turbulent channel at Re_τ = 180 against DNS |
 
 `ci.sh` runs every tutorial at reduced size on two MPI ranks, as CI does, with the steps in each
-tutorial's own `ci.sh`:
+tutorial's own `ci.sh`, through the `mallard` of an install with both dimensions:
 
 ```sh
-tutorials/ci.sh build/src/mallard build-3d/src/mallard /tmp/tutorials
+cmake --install build --prefix install && cmake --install build-3d --prefix install
+tutorials/ci.sh install/bin/mallard /tmp/tutorials
 ```
 
 Python packages: `pip install -r tutorials/requirements.txt` (which also

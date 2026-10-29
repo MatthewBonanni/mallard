@@ -38,6 +38,7 @@ enum class BoundaryType {
     NSCBC_OUTLET,
     NSCBC_INLET,
     STAGNATION_INLET,
+    MASS_FLOW_INLET,
     PARTITION,
 };
 
@@ -54,7 +55,8 @@ static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
     {"farfield", BoundaryType::FARFIELD},
     {"nscbc_outlet", BoundaryType::NSCBC_OUTLET},
     {"nscbc_inlet", BoundaryType::NSCBC_INLET},
-    {"stagnation_inlet", BoundaryType::STAGNATION_INLET}
+    {"stagnation_inlet", BoundaryType::STAGNATION_INLET},
+    {"mass_flow_inlet", BoundaryType::MASS_FLOW_INLET}
 };
 
 static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
@@ -71,6 +73,7 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
     {BoundaryType::NSCBC_OUTLET, "nscbc_outlet"},
     {BoundaryType::NSCBC_INLET, "nscbc_inlet"},
     {BoundaryType::STAGNATION_INLET, "stagnation_inlet"},
+    {BoundaryType::MASS_FLOW_INLET, "mass_flow_inlet"},
     {BoundaryType::PARTITION, "partition"}
 };
 
@@ -97,6 +100,8 @@ static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
  *   is per face (BoundaryData::char_target)
  * - STAGNATION_INLET: data = [T0, flow direction (zero: along the inward
  *   normal), p0]
+ * - MASS_FLOW_INLET: data = [T, flow direction (as STAGNATION_INLET), mass
+ *   flux rho u . -n]; its faces' flux is the physical flux of the ghost state
  *
  * Characteristic conditions (NSCBC_*) also use relax, indexed by Relax. Their
  * exterior state for the Riemann solver is BoundaryData::characteristic_W;
@@ -132,14 +137,23 @@ struct BoundaryCondition {
     /** @brief Whether inflow through the boundary carries the condition's own composition (bc_Y). */
     KOKKOS_INLINE_FUNCTION
     bool prescribes_composition() const {
-        return type == BoundaryType::UPT || type == BoundaryType::NSCBC_INLET || type == BoundaryType::STAGNATION_INLET;
+        return type == BoundaryType::UPT || type == BoundaryType::NSCBC_INLET || type == BoundaryType::STAGNATION_INLET ||
+               type == BoundaryType::MASS_FLOW_INLET;
     }
+
+    /**
+     * @brief Whether the face flux is the physical flux of the ghost state
+     *        alone (not a Riemann flux with the interior state), so that the
+     *        ghost's mass flux is the face's exactly.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool flux_of_ghost() const { return type == BoundaryType::MASS_FLOW_INLET; }
 
     /** @brief Whether the ghost state is a value at the face (not a mirror of the cell) for gradients. */
     KOKKOS_INLINE_FUNCTION
     bool ghost_at_face() const {
         return type == BoundaryType::DIRICHLET || type == BoundaryType::UPT || type == BoundaryType::FARFIELD ||
-               type == BoundaryType::STAGNATION_INLET;
+               type == BoundaryType::STAGNATION_INLET || type == BoundaryType::MASS_FLOW_INLET;
     }
 
     /** @brief Whether the exterior state is transmissive away from the Riemann solver (image faces). */
@@ -199,6 +213,10 @@ struct BoundaryCondition {
             case BoundaryType::STAGNATION_INLET:
                 inflow::perfect_stagnation_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1,
                                                  W_i, n, W_g);
+                break;
+            case BoundaryType::MASS_FLOW_INLET:
+                inflow::mass_flow_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1, W_i, n,
+                                        W_g);
                 break;
             case BoundaryType::DIRICHLET:
                 // Handled per face by BoundaryData
@@ -269,6 +287,13 @@ struct BoundaryData {
     Kokkos::View<uint8_t *> face_image_side;  // Side of face_image_face belonging to the image cell
     Kokkos::View<uint8_t *> face_image_flip;  // 2D: whether the image face runs opposite to the boundary face
     Kokkos::View<uint8_t **> face_image_quad; // 3D: quadrature point of the image face matching each point
+    Kokkos::View<rtype *[N_DIM]> face_image_offset;  // Image faces: offset moving the image face onto the boundary face
+    // Vertex neighbors of each cell beyond extrapolation boundaries with image
+    // faces: cells translated outward by their image offsets, as the cell would
+    // see them in a flow continued unchanged across the boundary (empty without)
+    Kokkos::View<uint32_t *> image_neighbor_offsets;   // CSR over cells of image_neighbors
+    Kokkos::View<uint32_t *> image_neighbors;
+    Kokkos::View<rtype *[N_DIM]> image_neighbor_shift;  // Offset from each one's centroid to its position
     Kokkos::View<int32_t *> face_state_index; // Dirichlet faces: index into face_state, else -1
     Kokkos::View<rtype *[N_DIM + 2]> face_state; // Exterior W of Dirichlet faces
     Kokkos::View<int32_t *> face_char;           // Characteristic faces: index into char_*, else -1
@@ -312,7 +337,7 @@ struct BoundaryData {
             value = bc_Y(i_bc, j);
             return true;
         }
-        if (bc.type != BoundaryType::UPT) return false;
+        if (bc.type != BoundaryType::UPT && bc.type != BoundaryType::MASS_FLOW_INLET) return false;
         value = bc_thermo(i_bc, j - n_species);
         return true;
     }
@@ -320,14 +345,15 @@ struct BoundaryData {
     /** @brief Whether condition i_bc is a mixture inlet whose state follows from the interior's. */
     KOKKOS_INLINE_FUNCTION
     bool mixture_inflow(const int32_t i_bc) const {
-        return mixture && bcs(i_bc).type == BoundaryType::STAGNATION_INLET;
+        return mixture && (bcs(i_bc).type == BoundaryType::STAGNATION_INLET ||
+                           bcs(i_bc).type == BoundaryType::MASS_FLOW_INLET);
     }
 
     /**
      * @brief Ghost W_g and its [gamma, e0] th_g of a mixture inlet (see
      *        mixture_inflow) at its composition, the thermally perfect
      *        counterpart of BoundaryCondition::ghost_W; bc_thermo holds the
-     *        surrogates at the stagnation temperature.
+     *        surrogates at the stagnation (or the mass-flow inlet's) temperature.
      */
     KOKKOS_INLINE_FUNCTION
     void mixture_inflow_W(const int32_t i_bc, const rtype * W_i, const rtype * n, rtype * W_g, rtype * th_g) const {
@@ -335,6 +361,13 @@ struct BoundaryData {
         const BoundaryCondition & bc = bcs(i_bc);
         const BoundaryComposition y{bc_Y, i_bc};
         const double R_b = thermo.gas_constant(y);
+        if (bc.type == BoundaryType::MASS_FLOW_INLET) {
+            inflow::mass_flow_state(double(bc_thermo(i_bc, 0)), R_b, double(bc.data[0]), double(bc.data[E]), bc.data + 1,
+                                    W_i, n, W_g);
+            th_g[0] = bc_thermo(i_bc, 0);
+            th_g[1] = bc_thermo(i_bc, 1);
+            return;
+        }
         double T_b;
         const inflow::ThermallyPerfectGas<chemistry::ThermoTable<>, BoundaryComposition> isentrope{thermo, y, R_b};
         inflow::stagnation_state(isentrope, double(bc_thermo(i_bc, 0)), double(bc.data[0]), double(bc.data[E]),
@@ -432,6 +465,16 @@ struct BoundaryData {
             return;
         }
         transmissive_W(i_face, i_quad, n_quad, W_i, n, W_cells, face_solution, W_g);
+    }
+
+    /**
+     * @brief Whether gradient stencils continue across boundary face i_face
+     *        through image_neighbors rather than through a ghost state.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool image_stencil(const uint32_t i_face) const {
+        return image_neighbor_offsets.extent(0) > 0 && face_image_face(i_face) >= 0 &&
+               bcs(face_bc(i_face)).type == BoundaryType::EXTRAPOLATION;
     }
 
     /** @brief Exterior state of exterior_W before the characteristic treatment. */
@@ -557,8 +600,8 @@ struct BoundaryData {
     /**
      * @brief Ghost state for boundary face i_face.
      * @param flux Whether the ghost is the exterior state of the flux. Away
-     *        from the flux (gradients, TENO's mirror cells) stagnation inlets
-     *        take the cell's state: their solve stays out of the kernels of
+     *        from the flux (gradients, TENO's mirror cells) stagnation and
+     *        mass-flow inlets take the cell's state: their solve stays out of the kernels of
      *        every run, gas mixtures need no thermodynamics there, and a
      *        uniform flow that is the inlet's own state stays exact.
      */
@@ -571,7 +614,7 @@ struct BoundaryData {
             return;
         }
         const BoundaryCondition & bc = bcs(face_bc(i_face));
-        if (!flux && bc.type == BoundaryType::STAGNATION_INLET) {
+        if (!flux && (bc.type == BoundaryType::STAGNATION_INLET || bc.type == BoundaryType::MASS_FLOW_INLET)) {
             for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
             return;
         }
@@ -620,11 +663,13 @@ class Mesh;
  * @param R Gas constant.
  * @param viscous Whether walls enforce no-slip.
  * @param gas Gas model (transport properties for heat-flux walls).
+ * @param image_reach If given, receives for every cell the halo depth that
+ *        its image neighbors need (0 without), to compare with its halo layer.
  */
 BoundaryData make_boundary_data(const Mesh & mesh,
                                 const std::vector<int32_t> & h_face_bc,
                                 const std::vector<BoundaryCondition> & h_bcs,
                                 rtype gamma, rtype R = 1.0, bool viscous = false,
-                                const Euler & gas = Euler());
+                                const Euler & gas = Euler(), std::vector<uint8_t> * image_reach = nullptr);
 
 #endif // BOUNDARY_H

@@ -8,6 +8,7 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 | Step | General tools (in `tools/`) |
 |---|---|
 | [Commands](#commands): the solver, a 0D reactor, HDF5 meshes | `mallard -i`, `mallard reactor`, `mallard mesh convert` |
+| [Job scripts](../docs/guide/parallel.md#running-on-clusters): Slurm (one node, several nodes), PBS, Kubernetes, plain `mpirun` | `jobs/` |
 | [Meshes](#meshes): Gmsh meshes from the command line | `mesh/make_cylinder_mesh.py`, `mesh/make_annulus_mesh.py`, `mesh/plot_mesh_quality.py` |
 | [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `setup/flame_reference.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
@@ -378,6 +379,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`sod`](../examples/sod) | | `plot_sod.py`: density profiles against the exact solution | |
 | [`viscous_shock_tube`](../examples/viscous_shock_tube) | | `plot_viscous_shock_tube.py`: wall density and lambda-shock triple point against Zhou et al. | |
 | [`nozzle`](../examples/nozzle) | `make_nozzle_mesh.py` | `plot_nozzle.py`: mass flow, shock position and stagnation pressure against the quasi-one-dimensional solution; `--figure` draws the guide's figure | |
+| [`heated_duct`](../examples/heated_duct) | | `plot_heated_duct.py`: the steady run against Rayleigh flow, and the closed duct's mass against `mdot t` for `mass_flow_inlet` and `upt`; `--figure` draws the guide's figures | |
 | [`poiseuille_pipe`](../examples/poiseuille_pipe) | | `plot_poiseuille.py`: axial velocity against the exact cell averages | |
 | [`noh_axisymmetric`](../examples/noh_axisymmetric) | | `plot_noh.py`: density and shock radius by direction against the exact solution | |
 | [`sphere_axisymmetric`](../examples/sphere_axisymmetric) | `make_cylinder_mesh.py --half` | `plot_sphere_axisymmetric.py`: drag, separation angle and wake length | |
@@ -412,10 +414,11 @@ These set up or analyze one example each, and live in its directory (`examples/<
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
-| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/mallard`; `--mallard3d` for the 3D region figure) |
+| `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/mallard`; `--mallard3d` for the 3D region and probe figures) |
 | `docs/regions.py` | The region figures alone: cell volume fractions of every primitive and boolean on coarse unstructured meshes, from one-step runs |
+| `docs/geometry.py` | The figures of the [geometry guide](../docs/guide/geometry.md): schematics of the region primitives, booleans, transforms and signed distance, and from one-step runs the volume fractions on a Cartesian and an O-grid, the probe samples, and the convergence of cell-average and point probe values |
 | `docs/tools.py` | The figures of this page (`docs/images/tools/`), from running each tool (`--mallard` for those from Mallard runs) |
-| `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D `mallard-test` builds (`--test build-2/test/mallard-test build-3/test/mallard-test`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
+| `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D test-suite builds (`--test build-2/test/mallard-test2d build-3/test/mallard-test3d`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
 | `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (VTU and PVTU series) |
 | `dev/make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
