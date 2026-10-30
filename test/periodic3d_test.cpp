@@ -71,6 +71,7 @@ using PrimitiveField = std::function<void(double, double, double, double *)>;  /
 
 std::unique_ptr<Solver> start(const Case & c, const PrimitiveField & W) {
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(make_input(c)));
     set_cell_averages(*solver, [&](double x, double y, double z, double * U) {
         double w[5];

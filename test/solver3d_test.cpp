@@ -68,6 +68,7 @@ std::unique_ptr<Solver> init_case(const Case3D & c) {
       << "[physics]\n" << c.physics
       << "[output]\ncheck_interval = 1000000\n" << c.extra;
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(s.str()));
     return solver;
 }

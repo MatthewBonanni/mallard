@@ -289,14 +289,17 @@ TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     // The generator has no state; the characteristic faces' state goes into the restart file
     const std::string dir = (scratch_dir() / "mallard_inflow_restart_test").string();
     Solver straight;
+    straight.set_distributed(false);
     straight.init(parse_toml(duct_input(dir + "/a", duct_constant(), 40)));
     straight.run();
     straight.copy_device_to_host();
 
     Solver first;
+    first.set_distributed(false);
     first.init(parse_toml(duct_input(dir + "/b", duct_constant(), 20)));
     first.run();
     Solver second;
+    second.set_distributed(false);
     second.init(parse_toml(
         duct_input(dir + "/b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000020.restart\"\n", 40)));
     second.run();

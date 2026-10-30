@@ -1,0 +1,1 @@
+- On several ranks, an input error found in one part of the mesh (a negative mass flux, an inlet `direction` pointing out of the domain, a boundary face assigned twice, a synthetic-turbulence inlet that is not planar or a Reynolds stress that is not positive semidefinite) is reported by every rank, instead of ending the run in an MPI error or a hang.

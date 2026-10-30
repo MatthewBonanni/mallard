@@ -166,7 +166,7 @@ TEST(FormatCompatTest, RestartFilesOfANewerFormatAreRejectedClearly) {
     if constexpr (N_DIM != 2) {
         GTEST_SKIP() << "2D fixtures";
     } else {
-        const fs::path file = scratch_dir() / "mallard_newer.restart";
+        const fs::path file = rank_scratch_dir() / "mallard_newer.restart";
         fs::copy_file(FORMATS / "v0.8.0" / "gas_000000.restart", file, fs::copy_options::overwrite_existing);
         {
             std::fstream out(file, std::ios::in | std::ios::out | std::ios::binary);
@@ -231,7 +231,7 @@ TEST(FormatCompatTest, MeshFilesOfANewerFormatAreRejectedClearly) {
     if constexpr (N_DIM != 2) {
         GTEST_SKIP() << "2D fixtures";
     } else {
-        const fs::path file = scratch_dir() / "mallard_newer_mesh.h5";
+        const fs::path file = rank_scratch_dir() / "mallard_newer_mesh.h5";
         fs::copy_file(FORMATS / "v0.8.0" / "mesh.h5", file, fs::copy_options::overwrite_existing);
         {
             h5::Handle h(H5Fopen(file.string().c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "H5Fopen");

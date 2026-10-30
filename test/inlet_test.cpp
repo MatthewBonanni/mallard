@@ -265,12 +265,14 @@ TEST(StagnationInletTest, OneSpeciesMixtureMatchesThePerfectGas) {
                duct_boundaries(inlet + composition, "type = \"p_out\"\np = 8.0e4\n");
     };
     Solver perfect;
+    perfect.set_distributed(false);
     perfect.init(parse_toml(common + rest("") +
                             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 101325.0\nT_ref = 300.0\n"
                             "rho_ref = 1.1768292682926829\n"));
     perfect.run();
     perfect.copy_device_to_host();
     Solver mixed;
+    mixed.set_distributed(false);
     mixed.init(parse_toml(common + "Y = { AIR = 1.0 }\n" + rest("Y = { AIR = 1.0 }\n") + "[physics]\ntype = \"euler\"\ngas = \"mixture\"\n"
                           "mechanism = \"" + PERFECT_AIR + "\"\nphase = \"air\"\n"));
     mixed.run();

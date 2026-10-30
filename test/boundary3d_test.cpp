@@ -325,6 +325,7 @@ double reflection_3d(const std::string & mesh, const std::string & right) {
              "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = " + p0 + "\nT_ref = " + p0 +
              "\nrho_ref = 1.0\n[output]\ncheck_interval = 1000000\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.update_primitives();

@@ -516,7 +516,7 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
         return;
     }
     const std::string exe = ::testing::internal::GetArgvs()[0];
-    const auto dir = scratch_dir();
+    const auto dir = rank_scratch_dir();
     auto run = [&](int threads) {
         const std::string out = (dir / ("mallard_threads_" + std::to_string(threads) + ".bin")).string();
         std::filesystem::remove(out);

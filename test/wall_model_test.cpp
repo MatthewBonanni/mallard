@@ -386,6 +386,7 @@ namespace {
 std::unique_ptr<Solver> modeled_couette(const std::string & mesh, const std::string & bottom) {
     const uint32_t n[3] = {3, 8u, 3};
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(channel_input(
         mesh, n, bottom, "type = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0, 0.0]\n",
         "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.1 * y + 0.02 * sin(3.14159265 * y)\", \"0.0\", \"0.0\"]\np = \"1.0\"\n", "t_stop = 4.0\ncfl = 0.4\n")));

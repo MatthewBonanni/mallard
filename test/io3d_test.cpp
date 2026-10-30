@@ -307,6 +307,7 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
     writer.init(parse_toml("prefix = \"" + dir + "/flow\"\nformat = \"vtu\"\ninterval = 1\n"
                            "variables = [\"RHO\", \"U\"]\n"), fields.data, mesh);
     writer.write(0, 0.0);
+    comm::barrier();  // Rank 0 writes the files
 
     auto arrays = read_appended_arrays(dir + "/flow_000000.vtu");
     const auto points = as_vector<rtype>(arrays["Points"]);
@@ -379,6 +380,7 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
                     fields.data, mesh);
         writer.write(0, 0.0);
     }
+    comm::barrier();  // Rank 0 writes the files
     auto vtu = read_appended_arrays(dir + "/vtu_000000.vtu");
     const auto mesh_h5 = h5_datasets(dir + "/hdf5_mesh.h5");
     const auto fields_h5 = h5_datasets(dir + "/hdf5_000000.h5");
@@ -420,6 +422,7 @@ TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
     writer.init(parse_toml("prefix = \"" + dir + "/sides\"\nformat = \"vtu\"\ninterval = 1\n"
                            "geometry = \"sides\"\nvariables = [\"RHO\"]\n"), fields.data, mesh);
     writer.write(0, 0.0);
+    comm::barrier();  // Rank 0 writes the files
 
     std::ifstream in(dir + "/sides_000000.vtu");
     std::stringstream buffer;
@@ -452,6 +455,7 @@ TEST(IO3DTest, RestartRoundTripCarriesAllConservatives) {
     DataWriter writer;
     writer.init(parse_toml("prefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 7\n"), fields.data, mesh);
     writer.write(7, 0.25);
+    comm::barrier();  // Rank 0 writes the files
 
     RestartData restart = read_restart(dir + "/r_000007.restart");
     EXPECT_EQ(restart.step, 7u);
@@ -470,6 +474,7 @@ TEST(IO3DTest, RestartRoundTripCarriesAllConservatives) {
     writer_2d.init(parse_toml("prefix = \"" + dir + "/r2d\"\nformat = \"restart\"\ninterval = 7\n"), fields_2d.data,
                    mesh, names_2d);
     writer_2d.write(7, 0.25);
+    comm::barrier();  // Rank 0 writes the files
     try {
         read_restart(dir + "/r2d_000007.restart");
         ADD_FAILURE() << "a 2D restart file was accepted";

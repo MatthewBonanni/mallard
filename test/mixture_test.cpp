@@ -732,11 +732,11 @@ TEST(MixtureTest, BudgetWithDoubleFluxLeavesTheSolutionUnchanged) {
     budgeted.run();
     plain.copy_device_to_host();
     budgeted.copy_device_to_host();
+    comm::barrier();  // Rank 0 writes the file
     std::ifstream rows(file);
     std::string line;
     int n_rows = 0;
     while (std::getline(rows, line)) n_rows++;
-    std::filesystem::remove(file);
     EXPECT_GT(n_rows, 12);
     for (uint32_t c = 0; c < plain.get_mesh()->n_owned(); c++) {
         FOR_I_CONSERVATIVE ASSERT_EQ(budgeted.h_conservatives(c, i), plain.h_conservatives(c, i)) << "cell " << c;
