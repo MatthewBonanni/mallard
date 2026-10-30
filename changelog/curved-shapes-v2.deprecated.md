@@ -1,0 +1,1 @@
+- `[[mesh.curved]]` `shape` is `type`, as in every region; `shape` is read with a warning until 0.10.0 and `mallard input upgrade` renames it (#407).

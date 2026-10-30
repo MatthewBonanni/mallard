@@ -1,6 +1,6 @@
 """Numerical soot foil and cell size of a 2D cellular detonation run (examples/detonation_2d).
 
-    python examples/detonation_2d/soot_foil.py SERIES.pvd D_CJ [--every 10] [--png FOIL.png]
+    python examples/detonation_2d/soot_foil.py SERIES D_CJ [--every 10] [--png FOIL.png]
 
 Reads the outputs of a run on a generated "cartesian" mesh (P, and P_MAX: the
 largest pressure of each cell so far). Reports:
@@ -26,7 +26,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import grid_fields  # noqa: E402
+from mallard.vtu import grid_fields, read_index  # noqa: E402
 
 
 def front_position(x, p, p0):
@@ -49,17 +49,16 @@ def triple_points(x, y, p, p0, x_front, depth=0.003, prominence=0.15):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("pvd")
+    ap.add_argument("series", help="PREFIX.vtkhdf.series, or PREFIX.pvd (VTU)")
     ap.add_argument("D_cj", type=float)
     ap.add_argument("--every", type=int, default=10)
     ap.add_argument("--prominence", type=float, default=0.15)
     ap.add_argument("--png")
     args = ap.parse_args()
-    base = os.path.dirname(args.pvd)
-    files = re.findall(r'file="([^"]+)"', open(args.pvd).read())
+    files = [f for _, f in read_index(args.series)]
     rows, p0 = [], None
     for f in files:
-        t, x, y, fields = grid_fields(os.path.join(base, f), ["P"])
+        t, x, y, fields = grid_fields(f, ["P"])
         p0 = fields["P"].min() if p0 is None else p0
         rows.append((t, front_position(x, fields["P"], p0)))
     rows = np.array(rows)
@@ -71,11 +70,11 @@ def main():
     W = None
     print(f"{'t [us]':>7} {'x_f [mm]':>8} {'n_tp':>5} {'lambda [mm]':>11}")
     for (t, xf), f in list(zip(rows, files))[::args.every]:
-        t, x, y, fields = grid_fields(os.path.join(base, f), ["P"])
+        t, x, y, fields = grid_fields(f, ["P"])
         W = y[-1] + 0.5 * (y[1] - y[0])
         n = triple_points(x, y, fields["P"], p0, xf, prominence=args.prominence)
         print(f"{t * 1e6:7.1f} {xf * 1e3:8.1f} {n:5d} {2 * W / n * 1e3 if n else float('nan'):11.1f}")
-    t, x, y, fields = grid_fields(os.path.join(base, files[-1]), ["P_MAX"])
+    t, x, y, fields = grid_fields(files[-1], ["P_MAX"])
     foil = fields["P_MAX"]
     x_front = rows[-1, 1]
     if args.png:

@@ -11,7 +11,9 @@ exact steady solution of the Euler equations with slip walls (Aftosmis et al.
 1994, here around the full circle). Each run starts from the exact cell
 averages and marches to t_stop; the error is that of the final density
 averages against the initial ones. Geometries: "straight" (polygonal walls),
-"curved" (walls projected onto the circles), "curved_mirrors" (the same, with
+"curved" (walls projected onto the circles, in closed form), "curved_general"
+(the same circles as an implicit function and an ellipse of equal semi-axes,
+projected by closest-point iterations), "curved_mirrors" (closed form, with
 TENO mirror images across the curved walls), "p2" / "p3" (walls from
 high-order Gmsh lines). Results go to RUN_DIR/results.json and a table.
 """
@@ -82,15 +84,28 @@ variables = ["RHO", "P"]
 SHAPES = """
 [[mesh.curved]]
 zone = "inner"
-shape = "circle"
+type = "circle"
 center = [0.0, 0.0]
 radius = {r_in}
 
 [[mesh.curved]]
 zone = "outer"
-shape = "circle"
+type = "circle"
 center = [0.0, 0.0]
 radius = {r_out}
+"""
+
+GENERAL_SHAPES = """
+[[mesh.curved]]
+zone = "inner"
+type = "implicit"
+f = "x^2 + y^2 - {r_in}^2"
+
+[[mesh.curved]]
+zone = "outer"
+type = "ellipse"
+center = [0.0, 0.0]
+semi_axes = [{r_out}, {r_out}]
 """
 
 
@@ -120,7 +135,8 @@ def run_case(case_dir, args, order, level, geometry):
     scheme = "MUSCL" if order == 2 else "TENO"
     text = INPUT.format(
         t_stop=args.t_stop, cfl=args.cfl, curved="false" if geometry == "straight" else "true",
-        shapes=SHAPES.format(r_in=R_IN, r_out=R_OUT) if geometry.startswith("curved") else "",
+        shapes=(GENERAL_SHAPES if geometry == "curved_general" else SHAPES).format(r_in=R_IN, r_out=R_OUT)
+        if geometry.startswith("curved") else "",
         M=args.mach, M2=args.mach * args.mach, scheme=scheme, order="" if order == 2 else f"order = {order}",
         extra=args.extra.replace("\\n", "\n") + ("\ncurved_mirrors = true" if geometry == "curved_mirrors" else ""),
         t_out=args.t_stop / 4)
@@ -177,7 +193,7 @@ def main():
                 results.append(r)
                 json.dump(results, open(results_file, "w"), indent=1)
                 print(json.dumps(r), flush=True)
-    print(f"{'geometry':>9} {'order':>5} {'n_r':>4} {'cells':>7} {'L1':>10} {'rate':>5} {'Linf':>10} {'rate':>5}")
+    print(f"{'geometry':>14} {'order':>5} {'n_r':>4} {'cells':>7} {'L1':>10} {'rate':>5} {'Linf':>10} {'rate':>5}")
     for geometry in args.geometry:
         for order in args.orders:
             rows = sorted((r for r in results if r["geometry"] == geometry and r["order"] == order
@@ -185,7 +201,7 @@ def main():
             prev = None
             for r in rows:
                 if r.get("failed"):
-                    print(f"{geometry:>9} {order:>5} {r['level']:>4} failed")
+                    print(f"{geometry:>14} {order:>5} {r['level']:>4} failed")
                     prev = None
                     continue
                 rate1 = rate2 = ""
@@ -193,7 +209,7 @@ def main():
                     f = np.log(r["level"] / prev["level"])
                     rate1 = f"{np.log(prev['L1'] / r['L1']) / f:5.2f}"
                     rate2 = f"{np.log(prev['Linf'] / r['Linf']) / f:5.2f}"
-                print(f"{geometry:>9} {order:>5} {r['level']:>4} {r['n_cells']:>7} {r['L1']:10.3e} {rate1:>5} "
+                print(f"{geometry:>14} {order:>5} {r['level']:>4} {r['n_cells']:>7} {r['L1']:10.3e} {rate1:>5} "
                       f"{r['Linf']:10.3e} {rate2:>5}")
                 prev = r
 

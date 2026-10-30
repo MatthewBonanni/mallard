@@ -32,6 +32,8 @@ struct Dimension {
 
     /** @brief "pressure (kg m^-1 s^-2)", or the SI base units alone if the dimension has no name. */
     std::string describe() const;
+    /** @brief The SI base units in UDUNITS syntax, as CF metadata wants them: "kg m-3", or "1" if dimensionless. */
+    std::string udunits() const;
     /** @brief Units of this dimension to suggest, e.g. "Pa, kPa, bar, atm, psi", or empty. */
     std::string examples() const;
 };
@@ -69,6 +71,7 @@ inline constexpr Dimension density = of(1, -3, 0);
 inline constexpr Dimension dynamic_viscosity = of(1, -1, -1);
 inline constexpr Dimension heat_flux = of(1, 0, -3);
 inline constexpr Dimension mass_flux = of(1, -2, -1);          // kg/(m^2 s), e.g. rho u
+inline constexpr Dimension mass_flow = of(1, 0, -1);           // kg/s
 inline constexpr Dimension mass_source = of(1, -3, -1);        // kg/(m^3 s)
 inline constexpr Dimension momentum_source = of(1, -2, -2);    // N/m^3
 inline constexpr Dimension power_density = of(1, -1, -3);      // W/m^3

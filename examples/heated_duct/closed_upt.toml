@@ -1,0 +1,63 @@
+# closed.toml with upt at the same initial mass flux in place of the
+# mass-flow inlet: the velocity and the pressure are held, and the mass flow
+# drifts as the pressure in the duct rises.
+
+[run]
+t_stop = 0.01
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 200
+Ny = 1
+Lx = 1.0
+Ly = 0.1
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0e5
+T = 300.0
+
+[source]
+rhoE = "x > 0.4 and x < 0.6 ? 3.0e7 : 0.0"
+
+[[boundaries]]
+name = "left"
+type = "upt"
+u = [17.22, 0.0]     # 20 kg/(m^2 s) at the initial density
+p = 1.0e5
+T = 300.0
+
+[[boundaries]]
+name = "right"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0e5
+T_ref = 300.0
+rho_ref = 1.1614401858304297
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/closed_upt"
+time_interval = 2.0e-4
+variables = ["RHO", "U_X", "P", "T"]

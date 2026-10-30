@@ -109,6 +109,11 @@ struct MixtureFluxFunctor {
             } else {
                 boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_l, n_point, W_cells, face_solution,
                                             face_thermo, cell_thermo, W_r, th_r);
+                if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) {
+                    FOR_I_CONSERVATIVE W_l[i] = W_r[i];
+                    th_l[0] = th_r[0];
+                    th_l[1] = th_r[1];
+                }
             }
             const riemann::SideThermo side_l{th_l[0], th_l[1]}, side_r{th_r[0], th_r[1]};
             rtype central[N_CONSERVATIVE] = {};
@@ -209,6 +214,7 @@ struct MixtureDoubleFluxFunctor {
                 rtype th_g[2];
                 boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_point, W_cells, face_solution,
                                             face_thermo, cell_thermo, W_r, th_g);
+                if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) FOR_I_CONSERVATIVE W_l[i] = W_r[i];
             }
             // Each side's central flux with its own frozen thermodynamics on both sides
             rtype K_0[N_CONSERVATIVE] = {}, K_1[N_CONSERVATIVE] = {};

@@ -4,7 +4,7 @@ t = 1 with the grid-converged reference of Zhou et al. (arXiv:1705.09062):
 density contours near the floor with the reference triple point and vortex
 height, and the wall density against their Table 1.
 
-    plot_viscous_shock_tube.py SNAPSHOT.vtu OUTPUT.png
+    plot_viscous_shock_tube.py SNAPSHOT OUTPUT.png
 
 The wall density is that of the first row of cells. Needs a Cartesian quad
 mesh (cells are binned into rows and columns).

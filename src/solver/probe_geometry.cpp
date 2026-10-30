@@ -1,7 +1,7 @@
 /**
  * @file probe_geometry.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Geometry of [[probes]]: point sets and curves, with transforms.
+ * @brief Geometry of [[probes]]: points and curves, with transforms.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -257,17 +257,17 @@ std::vector<Point> read_points(const std::string & file, const std::string & key
 }
 
 Geometry make_geometry(const Input & entry, const std::string & key) {
-    std::string shape = find_value_or<std::string>(entry, "shape", "");
-    record_options(key + ".shape", {"point", "points", "line", "polyline", "circle", "arc", "curve"});
-    if (shape.empty()) {
+    std::string type = find_value_or<std::string>(entry, "type", "");
+    record_options(key + ".type", {"point", "points", "line", "polyline", "circle", "arc", "curve"});
+    if (type.empty()) {
         const bool point = entry.contains("point");
         const bool line = entry.contains("start") || entry.contains("end");
-        if (point == line) throw InputError(key + ": give a shape, or either point or start, end and n_points.");
-        shape = point ? "point" : "line";
+        if (point == line) throw InputError(key + ": give a type, or either point or start, end and n_points.");
+        type = point ? "point" : "line";
     }
     const Transform T = Transform::read(entry, key);
     Geometry g;
-    g.shape = shape;
+    g.type = type;
     auto add_points = [&](const std::vector<Vec3> & points) {
         g.dim = 0;
         for (const auto & x : points) {
@@ -276,9 +276,9 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
             g.quad_weights.push_back(1.0);
         }
     };
-    if (shape == "point") {
+    if (type == "point") {
         add_points({read_vector(entry, "point", key)});
-    } else if (shape == "points") {
+    } else if (type == "points") {
         std::vector<Vec3> points;
         const bool listed = entry.contains("points"), from_file = entry.contains("points_file");
         if (listed == from_file) throw InputError(key + ": give either points or points_file.");
@@ -296,12 +296,12 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
             }
         }
         add_points(points);
-    } else if (shape == "line") {
+    } else if (type == "line") {
         g.dim = 1;
         add_curve(g, {segment(read_vector(entry, "start", key), read_vector(entry, "end", key),
                               read_count(entry, "n_points", key, 2))},
                   T);
-    } else if (shape == "polyline") {
+    } else if (type == "polyline") {
         g.dim = 1;
         if (!entry.contains("vertices") || !entry.at("vertices").is_array() ||
             entry.at("vertices").as_array().size() < 2) {
@@ -316,7 +316,7 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
         std::vector<Piece> pieces;
         for (size_t i = 0; i + 1 < v.size(); i++) pieces.push_back(segment(v[i], v[i + 1], n));
         add_curve(g, pieces, T);
-    } else if (shape == "circle" || shape == "arc") {
+    } else if (type == "circle" || type == "arc") {
         g.dim = 1;
         const Vec3 c = read_vector(entry, "center", key);
         const double r = read_number(entry, "radius", key, dim::length);
@@ -325,7 +325,7 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
         Piece piece{[c, r, e1, e2](double a) { return add(c, add(mul(r * std::cos(a), e1), mul(r * std::sin(a), e2))); },
                     [r, e1, e2](double a) { return add(mul(-r * std::sin(a), e1), mul(r * std::cos(a), e2)); },
                     {}};
-        if (shape == "circle") {
+        if (type == "circle") {
             const uint64_t n = read_count(entry, "n_points", key, 3);
             piece.s = linspace(0.0, 2.0 * std::numbers::pi, n + 1);
             piece.closed = true;
@@ -340,7 +340,7 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
             piece.s = linspace(a0, a1, read_count(entry, "n_points", key, 2));
         }
         add_curve(g, {piece}, T);
-    } else if (shape == "curve") {
+    } else if (type == "curve") {
         g.dim = 1;
         std::vector<std::shared_ptr<ParameterExpression>> f;
         for (size_t d = 0; d < N_DIM; d++) {
@@ -369,7 +369,7 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
                     linspace(s0, s1, read_count(entry, "n_points", key, 2))};
         add_curve(g, {piece}, T);
     } else {
-        throw InputError(key + ".shape = \"" + shape +
+        throw InputError(key + ".type = \"" + type +
                          "\" is not one of: point, points, line, polyline, circle, arc, curve.");
     }
     return g;

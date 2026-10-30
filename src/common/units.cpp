@@ -46,6 +46,7 @@ const NamedDimension NAMED[] = {
     {"dynamic viscosity", dim::dynamic_viscosity, "Pa s, kg/(m s)"},
     {"heat flux", dim::heat_flux, "W/m^2, kW/m^2"},
     {"mass flux", dim::mass_flux, "kg/(m^2 s)"},
+    {"mass flow", dim::mass_flow, "kg/s, g/s"},
     {"mass source", dim::mass_source, "kg/(m^3 s)"},
     {"momentum source", dim::momentum_source, "N/m^3"},
     {"power density", dim::power_density, "W/m^3"},
@@ -67,13 +68,13 @@ const NamedDimension * named(const Dimension & d) {
     return nullptr;
 }
 
-std::string base_units(const Dimension & d) {
+std::string base_units(const Dimension & d, const char * power = "^") {
     static const char * symbols[Dimension::N_BASE] = {"kg", "m", "s", "K", "mol", "rad"};
     std::string text;
     for (size_t i = 0; i < Dimension::N_BASE; i++) {
         if (d.exponent[i] == 0) continue;
         text += (text.empty() ? "" : " ") + std::string(symbols[i]);
-        if (d.exponent[i] != 1) text += "^" + std::to_string(d.exponent[i]);
+        if (d.exponent[i] != 1) text += power + std::to_string(d.exponent[i]);
     }
     return text.empty() ? "1" : text;
 }
@@ -404,6 +405,8 @@ std::string Dimension::describe() const {
     if (n) return std::string(n->name) + " (" + base_units(*this) + ")";
     return base_units(*this);
 }
+
+std::string Dimension::udunits() const { return base_units(*this, ""); }
 
 std::string Dimension::examples() const {
     const NamedDimension * n = named(*this);

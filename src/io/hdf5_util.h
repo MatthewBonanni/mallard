@@ -26,6 +26,8 @@
 #include <hdf5.h>
 
 #include "comm.h"
+#include "compression.h"
+#include "field_units.h"
 
 namespace h5 {
 
@@ -71,6 +73,7 @@ hid_t memory_type() {
     else if constexpr (std::is_same_v<T, int64_t>) return H5T_NATIVE_INT64;
     else if constexpr (std::is_same_v<T, uint64_t>) return H5T_NATIVE_UINT64;
     else if constexpr (std::is_same_v<T, uint32_t>) return H5T_NATIVE_UINT32;
+    else if constexpr (std::is_same_v<T, uint8_t>) return H5T_NATIVE_UINT8;
     else static_assert(sizeof(T) == 0, "HDF5: unsupported type");
 }
 
@@ -80,6 +83,7 @@ hid_t file_type() {
     else if constexpr (std::is_same_v<T, float>) return H5T_IEEE_F32LE;
     else if constexpr (std::is_same_v<T, int64_t>) return H5T_STD_I64LE;
     else if constexpr (std::is_same_v<T, uint64_t>) return H5T_STD_U64LE;
+    else if constexpr (std::is_same_v<T, uint8_t>) return H5T_STD_U8LE;
     else return H5T_STD_U32LE;
 }
 
@@ -163,10 +167,85 @@ void write_rows(hid_t parent, const char * name, uint64_t n_rows, int cols, uint
     }
     Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, dcpl, H5P_DEFAULT), H5Dclose,
                 std::string("creating ") + name);
+    // An empty dataset has no storage, which collective writes of HDF5 1.10 reject
+    if (n_rows == 0) return;
     Handle memory(H5Screate_simple(rank, local, nullptr), H5Sclose, "H5Screate_simple");
     select_rows(space, first, n);
     select_rows(memory, 0, n);
     // HDF5 rejects null buffers even for empty selections
+    const T dummy{};
+    check(H5Dwrite(dset, memory_type<T>(), memory, space, dxpl, n ? data : &dummy), std::string("writing ") + name);
+}
+
+/**
+ * @brief write_rows: compressed with HDF5's shuffle and deflate filters, which
+ *        compress on one thread, or, in a file of this rank alone (serial),
+ *        with the same chunks compressed on n_threads threads and written
+ *        directly.
+ */
+template <typename T>
+void write_dataset(hid_t parent, const char * name, uint64_t n_rows, int cols, uint64_t first, uint64_t n,
+                   const T * data, hid_t dxpl, bool deflate, bool serial, unsigned n_threads) {
+    if (!(deflate && serial && compression::have_zlib() && n_rows > 0 && first == 0 && n == n_rows)) {
+        write_rows(parent, name, n_rows, cols, first, n, data, dxpl, deflate);
+        return;
+    }
+    const int rank = cols > 1 ? 2 : 1;
+    const hsize_t dims[2] = {n_rows, hsize_t(cols)};
+    const hsize_t chunk_rows = std::min<hsize_t>(n_rows, CHUNK_ROWS);
+    const hsize_t chunk[2] = {chunk_rows, hsize_t(cols)};
+    Handle space(H5Screate_simple(rank, dims, nullptr), H5Sclose, "H5Screate_simple");
+    Handle dcpl(H5Pcreate(H5P_DATASET_CREATE), H5Pclose, "H5Pcreate");
+    check(H5Pset_chunk(dcpl, rank, chunk), "H5Pset_chunk");
+    check(H5Pset_shuffle(dcpl), "H5Pset_shuffle");
+    check(H5Pset_deflate(dcpl, 1), "H5Pset_deflate");
+    Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, dcpl, H5P_DEFAULT), H5Dclose,
+                std::string("creating ") + name);
+    // Chunks are stored whole: the last one is padded with zeros (HDF5's fill value)
+    const size_t chunk_values = size_t(chunk_rows) * size_t(cols);
+    std::vector<std::vector<char>> chunks((n_rows + chunk_rows - 1) / chunk_rows);
+    compression::parallel_for(chunks.size(), n_threads, [&](size_t c) {
+        std::vector<T> values(chunk_values, T(0));
+        const size_t at = c * chunk_values;
+        std::copy(data + at, data + std::min(at + chunk_values, size_t(n_rows) * size_t(cols)), values.begin());
+        chunks[c] = compression::deflate(values.data(), values.size() * sizeof(T), sizeof(T));
+    });
+    for (size_t c = 0; c < chunks.size(); c++) {
+        const hsize_t offset[2] = {c * chunk_rows, 0};
+        check(H5Dwrite_chunk(dset, dxpl, 0, offset, chunks[c].size(), chunks[c].data()), std::string("writing ") + name);
+    }
+}
+
+/**
+ * @brief Resize a dataset of rows of cols values (one dimension if cols is 1)
+ *        to n_rows, creating it extendable (chunked, unlimited rows; with
+ *        deflate, byte-shuffled and deflated) if missing, and write this
+ *        rank's rows [first, first + n) from data, with dxpl.
+ */
+template <typename T>
+void put_rows(hid_t parent, const char * name, uint64_t n_rows, int cols, uint64_t first, uint64_t n, const T * data,
+              hid_t dxpl, bool deflate = false) {
+    const int rank = cols > 1 ? 2 : 1;
+    const hsize_t dims[2] = {n_rows, hsize_t(cols)}, local[2] = {n, hsize_t(cols)};
+    if (H5Lexists(parent, name, H5P_DEFAULT) <= 0) {
+        const hsize_t max[2] = {H5S_UNLIMITED, hsize_t(cols)};
+        const hsize_t chunk[2] = {std::clamp<hsize_t>(n_rows, 1024, CHUNK_ROWS), hsize_t(cols)};
+        Handle space(H5Screate_simple(rank, dims, max), H5Sclose, "H5Screate_simple");
+        Handle dcpl(H5Pcreate(H5P_DATASET_CREATE), H5Pclose, "H5Pcreate");
+        check(H5Pset_chunk(dcpl, rank, chunk), "H5Pset_chunk");
+        if (deflate) {
+            check(H5Pset_shuffle(dcpl), "H5Pset_shuffle");
+            check(H5Pset_deflate(dcpl, 1), "H5Pset_deflate");
+        }
+        Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, dcpl, H5P_DEFAULT), H5Dclose,
+                    std::string("creating ") + name);
+    }
+    Handle dset(H5Dopen2(parent, name, H5P_DEFAULT), H5Dclose, std::string("opening ") + name);
+    check(H5Dset_extent(dset, dims), std::string("resizing ") + name);
+    Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
+    Handle memory(H5Screate_simple(rank, local, nullptr), H5Sclose, "H5Screate_simple");
+    select_rows(space, first, n);
+    select_rows(memory, 0, n);
     const T dummy{};
     check(H5Dwrite(dset, memory_type<T>(), memory, space, dxpl, n ? data : &dummy), std::string("writing ") + name);
 }
@@ -207,6 +286,34 @@ void write_attribute(hid_t object, const char * name, T value) {
     Handle space(H5Screate(H5S_SCALAR), H5Sclose, "H5Screate");
     Handle attr(H5Acreate2(object, name, file_type<T>(), space, H5P_DEFAULT, H5P_DEFAULT), H5Aclose, name);
     check(H5Awrite(attr, memory_type<T>(), &value), name);
+}
+
+/** @brief Scalar attribute, replacing any of that name. */
+template <typename T>
+void set_attribute(hid_t object, const char * name, T value) {
+    if (H5Aexists(object, name) > 0) check(H5Adelete(object, name), name);
+    write_attribute(object, name, value);
+}
+
+/** @brief Attribute of the values, an array of one dimension. */
+template <typename T>
+void write_array_attribute(hid_t object, const char * name, const std::vector<T> & values) {
+    const hsize_t n = values.size();
+    Handle space(H5Screate_simple(1, &n, nullptr), H5Sclose, "H5Screate_simple");
+    Handle attr(H5Acreate2(object, name, file_type<T>(), space, H5P_DEFAULT, H5P_DEFAULT), H5Aclose, name);
+    check(H5Awrite(attr, memory_type<T>(), values.data()), name);
+}
+
+/** @brief Scalar fixed-length string attribute. */
+inline void write_string_scalar_attribute(hid_t object, const char * name, const std::string & value) {
+    Handle type(H5Tcopy(H5T_C_S1), H5Tclose, "H5Tcopy");
+    check(H5Tset_size(type, std::max<size_t>(value.size(), 1)), "H5Tset_size");
+    check(H5Tset_strpad(type, H5T_STR_NULLPAD), "H5Tset_strpad");
+    Handle space(H5Screate(H5S_SCALAR), H5Sclose, "H5Screate");
+    Handle attr(H5Acreate2(object, name, type, space, H5P_DEFAULT, H5P_DEFAULT), H5Aclose, name);
+    std::string padded = value;
+    padded.resize(std::max<size_t>(value.size(), 1), '\0');
+    check(H5Awrite(attr, type, padded.data()), name);
 }
 
 inline void write_int_attribute(hid_t object, const char * name, int value) {
@@ -255,6 +362,44 @@ inline std::vector<std::string> read_strings_attribute(hid_t object, const char 
         strings.emplace_back(s, std::find(s, s + width, '\0'));
     }
     return strings;
+}
+
+/** @brief Scalar variable-length UTF-8 string attribute (as netCDF-4 writes text attributes). */
+inline void write_string_attribute(hid_t object, const char * name, const std::string & value) {
+    Handle type(H5Tcopy(H5T_C_S1), H5Tclose, "H5Tcopy");
+    check(H5Tset_size(type, H5T_VARIABLE), "H5Tset_size");
+    check(H5Tset_cset(type, H5T_CSET_UTF8), "H5Tset_cset");
+    Handle space(H5Screate(H5S_SCALAR), H5Sclose, "H5Screate");
+    Handle attr(H5Acreate2(object, name, type, space, H5P_DEFAULT, H5P_DEFAULT), H5Aclose, name);
+    const char * text = value.c_str();
+    check(H5Awrite(attr, type, &text), name);
+}
+
+/** @brief A scalar string attribute, fixed or variable length. */
+inline std::string read_string_attribute(hid_t object, const char * name) {
+    Handle attr(H5Aopen(object, name, H5P_DEFAULT), H5Aclose, name);
+    Handle type(H5Aget_type(attr), H5Tclose, "H5Aget_type");
+    if (H5Tis_variable_str(type) > 0) {
+        Handle memory_type(H5Tcopy(type), H5Tclose, "H5Tcopy");
+        char * text = nullptr;
+        check(H5Aread(attr, memory_type, &text), name);
+        std::string value = text ? text : "";
+        H5free_memory(text);
+        return value;
+    }
+    return read_strings_attribute(object, name).at(0);
+}
+
+/**
+ * @brief The CF attributes of the dataset at path (from parent) holding an
+ *        output field: units (UDUNITS), long_name, and standard_name where
+ *        the field has one. Collective where the file is.
+ */
+inline void annotate(hid_t parent, const std::string & path, const FieldDescription & field) {
+    Handle dataset(H5Dopen2(parent, path.c_str(), H5P_DEFAULT), H5Dclose, "opening " + path);
+    write_string_attribute(dataset, "units", field.units());
+    write_string_attribute(dataset, "long_name", field.long_name);
+    if (!field.standard_name.empty()) write_string_attribute(dataset, "standard_name", field.standard_name);
 }
 
 } // namespace h5

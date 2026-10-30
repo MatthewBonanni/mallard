@@ -33,6 +33,7 @@
 #include "partition.h"
 #include "json_reader.h"
 #include "provenance.h"
+#include "renumbered_mesh.h"
 #include "test_fixtures.h"
 #include "solver.h"
 #include "scratch.h"
@@ -296,6 +297,23 @@ TEST(MPITest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     comm::barrier();
 }
 
+TEST(MPITest, RenumberedMeshesMatchSerialWithEveryPartitioner) {
+    // Global ids in random order carry no locality: partitions, halos and the
+    // global orders of faces and stencils must not lean on them
+    const RenumberedMesh mesh = renumbered_gmsh(jittered_box(MeshType::CARTESIAN_TRI, {24, 18}, {1.0, 0.8}), 2026);
+    const std::string file = write_temp_shared("mallard_mpi_renumbered.msh", mesh.gmsh);
+    std::string input = box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 10);
+    const std::string generated = "type = \"cartesian_tri\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
+        if (partitioner == "graph" && !have_graph_partitioner()) continue;
+        expect_matches_serial(input + "[parallel]\npartitioner = \"" + partitioner + "\"\n");
+    }
+    comm::barrier();
+}
+
 TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
     expect_matches_serial(box_input(
         "cartesian", "type = \"MUSCL\"\n", NS,
@@ -309,6 +327,12 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
 TEST(MPITest, InletsMatchSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
                                     bcs("type = \"stagnation_inlet\"\np0 = 1.5\nT0 = 1.1\ndirection = [1.0, 0.3]\n",
+                                        "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n"),
+                                    25));
+    // The total mass flow is divided among the faces by an area integral over all ranks
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"mass_flow_inlet\"\nmdot = 0.5\nprofile = \"1 + y\"\nT = 1.0\n",
                                         "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n"),
                                     25));
@@ -705,7 +729,7 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
     auto probes = [&](const std::string & sub) {
         const std::string at = "file = \"" + dir + "/" + sub;
         return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nvariables = [\"RHO\", \"U\", \"T\", \"H\"]\n"
-               "sampling = \"point\"\nshape = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
+               "sampling = \"point\"\ntype = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
                "interval = 5\nreductions = [\"integral\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_" + at +
                "/circle_red.csv\"\n"
                "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nvariables = [\"P\"]\n"
@@ -797,6 +821,41 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 4");
     expect_hdf5_output_matches_serial(mixture, "interval = 4\nvariables = [\"T\", \"Y_*\"]\n",
                                       io_dir() + "_hdf5_species", {0, 4});
+#endif
+}
+
+TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
+    // Every rank writes its cells and zone faces at their global places:
+    // triangles and quads, a boundary zone, a series of one file,
+    // compression, and curved cells with their quadratic nodes
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string file = write_temp_shared("mallard_mpi_vtkhdf.msh", jittered_mixed_mesh(16));
+    std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    const std::string zlib = have_hdf5_deflate() ? "compression = \"zlib\"\n" : "";
+    expect_vtkhdf_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
+                                        "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
+                                        io_dir() + "_vtkhdf", {"_000000", "_000003", "_000006"});
+    expect_vtkhdf_output_matches_serial(input, "interval = 3\nseries = true\nvariables = [\"RHO\", \"U\"]\n",
+                                        io_dir() + "_vtkhdf_series", {""});
+    expect_vtkhdf_output_matches_serial(input, "interval = 3\ngeometry = \"bottom\"\nvariables = [\"P\", \"U\"]\n" + zlib,
+                                        io_dir() + "_vtkhdf_zone", {"_000000", "_000006"});
+    const std::string annulus = write_temp_shared("mallard_mpi_vtkhdf_annulus.msh", annulus_gmsh(3, 40, 1, true));
+    expect_vtkhdf_output_matches_serial(
+        "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + annulus + "\"\n"
+        "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"
+        "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n[[boundaries]]\nname = \"outer\"\n"
+        "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
+        "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n",
+        "interval = 2\nvariables = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
 #endif
 }
 
@@ -913,18 +972,22 @@ TEST(MPITest, RunFromHDF5MeshFileMatchesSerial) {
 }
 
 TEST(MPITest, CurvedWallsMatchSerial) {
-    // Walls from P3 lines of the file, or projected onto circles; the HDF5
-    // copy of the file keeps the P3 lines
-    const char * shapes = "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
-                          "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
-    for (int order : {1, 3}) {
+    // Walls from P3 lines of the file, or projected onto circles (in closed
+    // form, and by closest points on an implicit circle and an ellipse of
+    // equal axes); the HDF5 copy of the file keeps the P3 lines
+    const std::string closed = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                               "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
+    const std::string general = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"implicit\"\nf = \"x^2 + y^2 - 1\"\n"
+                                "[[mesh.curved]]\nzone = \"outer\"\n"
+                                "type = \"ellipse\"\ncenter = [0.0, 0.0]\nsemi_axes = [1.384, 1.384]\n";
+    for (const auto & [order, shapes] : {std::pair{1, closed}, std::pair{1, general}, std::pair{3, std::string()}}) {
         const std::string file =
             write_temp_shared("mallard_mpi_annulus_" + std::to_string(order) + ".msh", annulus_gmsh(5, 60, order, order == 3));
         std::string input = box_input("cartesian", "type = \"TENO\"\norder = 5\ncurved_mirrors = false\n", EULER,
                                       "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
                                       "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n", 10);
         const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
-        input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + (order == 1 ? shapes : ""));
+        input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + shapes);
         expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
         if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
             const std::string h5 = (scratch_dir() / "mallard_mpi_annulus_3.h5").string();

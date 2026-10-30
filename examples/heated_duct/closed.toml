@@ -1,0 +1,64 @@
+# The duct of input.toml closed at the far end (an adiabatic wall) and fed
+# through the mass-flow inlet at 20 kg/(m^2 s): the heating and the mass
+# piling up raise the pressure, and the inlet density with it, yet the mass
+# in the duct grows by exactly mdot t. closed_upt.toml feeds it through upt at
+# the same initial mass flux instead, whose mass flow drifts.
+
+[run]
+t_stop = 0.01
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 200
+Ny = 1
+Lx = 1.0
+Ly = 0.1
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0e5
+T = 300.0
+
+[source]
+rhoE = "x > 0.4 and x < 0.6 ? 3.0e7 : 0.0"
+
+[[boundaries]]
+name = "left"
+type = "mass_flow_inlet"
+mdot = 2.0           # kg/s per unit depth through the 0.1 m inlet: 20 kg/(m^2 s)
+T = 300.0
+
+[[boundaries]]
+name = "right"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0e5
+T_ref = 300.0
+rho_ref = 1.1614401858304297
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/closed"
+time_interval = 2.0e-4
+variables = ["RHO", "U_X", "P", "T"]

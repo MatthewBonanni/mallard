@@ -13,12 +13,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <stdexcept>
 
 #include "comm.h"
 #include "input.h"
-#include "log.h"
 #include "mesh.h"
 #include "mesh_block.h"
 #include "region.h"
@@ -246,18 +246,18 @@ void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, dou
         }
         return g;
     };
-    // Steps of 1e-2 length, divided by 4 until two agree, so that stencils do not straddle
-    // the creases of booleans and polygons
+    // Steps of 1e-2 length, divided by 4 until two agree, so that the stencils (and the
+    // Hessian's, of the coarser step h) do not straddle the creases of booleans and polygons
     double h = 1e-2 * length;
     auto gradient = [&](const Vec3 & y) {
         h = 1e-2 * length;
         Vec3 g = central(y, h);
         for (int k = 0; k < 4; k++) {
             const Vec3 finer = central(y, 0.25 * h);
-            h *= 0.25;
             const Vec3 d = sub(finer, g);
             g = finer;
             if (dot(d, d) <= 1e-16 * dot(g, g)) break;
+            h *= 0.25;
         }
         return g;
     };
@@ -266,9 +266,11 @@ void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, dou
                          std::to_string(x[1]) + ", " + std::to_string(x[2]) + ") " + why +
                          ": the zone must lie on the shape's surface, where it is smooth with a nonzero gradient.");
     };
-    // Onto the surface along the gradient, then along the surface toward x
-    const double tol = 1e-13 * length + 1e-14 * std::sqrt(dot(x, x));
+    // Onto the surface along the gradient, then along the surface toward x, until the steps
+    // reach round-off or stop shrinking at it (the round-off of the normal over the distance
+    // to x), so that p is a smooth function of x to round-off
     p = x;
+    double last = std::numeric_limits<double>::infinity();
     for (int it = 0;; it++) {
         const Vec3 g = gradient(p);
         const double g2 = dot(g, g);
@@ -277,12 +279,22 @@ void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, dou
         const Vec3 d = sub(x, add(p, step));
         step = add(step, sub(d, scale(dot(d, g) / g2, g)));
         p = add(p, step);
-        if (std::sqrt(dot(step, step)) <= tol) break;
+        const double size = std::sqrt(dot(step, step));
+        if (size <= 4.0 * std::numeric_limits<double>::epsilon() * (std::sqrt(dot(x, x)) + length)) break;
+        if (size <= 1e-10 * length && (size > 0.5 * last || it == 100)) break;
+        last = size;
         if (it == 100 || std::sqrt(dot(sub(p, x), sub(p, x))) > length) fail("does not converge onto its shape");
     }
     // dp/dx from the gradient and Hessian at p, with the gradient's step
     const Vec3 g = gradient(p);
     const double f0 = phi(p);
+    const double gn = std::sqrt(dot(g, g));
+    if (!(gn > 0.0)) fail("has a zero gradient");
+    const Vec3 n = scale(1.0 / gn, g);
+    // A simple root: phi changes by about |grad phi| h across p
+    if (!(std::abs(phi(add(p, scale(h, n)))) + std::abs(phi(sub(p, scale(h, n)))) < 4.0 * gn * h)) {
+        fail("has a zero gradient");
+    }
     double H[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     for (size_t i = 0; i < N_DIM; i++) {
         for (size_t j = i; j < N_DIM; j++) {
@@ -302,8 +314,6 @@ void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, dou
             H[3 * i + j] = H[3 * j + i] = v / (h * h);
         }
     }
-    const double gn = std::sqrt(dot(g, g));
-    const Vec3 n = scale(1.0 / gn, g);
     const double lambda = dot(sub(x, p), n);
     double T[9], TH[9], A[9], Ai[9];
     for (size_t a = 0; a < 3; a++) {
@@ -360,42 +370,47 @@ void Shape::project(const Vec3 & x, double length, Vec3 & p, double * J) const {
     }
 }
 
-Shape shape_of(std::shared_ptr<const region::Region> surface, const std::string & zone) {
+Shape shape_of(const Input & entry, const std::string & where) {
+    if (!entry.contains("type")) {
+        throw InputError(where + " needs type, the region whose surface the zone lies on, e.g. type = \"" +
+                         (N_DIM == 2 ? "circle" : "sphere") + "\" with center and radius.");
+    }
+    const std::string type = find_value<std::string>(entry, "type");
+    const bool curve = type == "circle" || type == "ellipse";
+    if (curve && N_DIM == 3) {
+        throw InputError(where + ".type = \"" + type + "\" is a curve, and curved zones of 3D runs lie on surfaces: use " +
+                         (type == "circle" ? "the surface of a \"sphere\" or \"cylinder\"" : "that of an \"ellipsoid\"") +
+                         ".");
+    }
+    if (entry.contains("edge")) throw InputError(where + ".edge: curved zones lie on sharp surfaces; remove edge.");
+    // A curve of a 2D run is the boundary of the area inside it
+    Input table = entry;
+    if (curve) table.as_table()["type"] = Input(type == "circle" ? "disk" : "ellipsoid");
+    auto region = std::make_shared<const region::Region>(table, where);
+    std::vector<std::string> options = region::types();
+    if (N_DIM == 2) options.insert(options.end(), {"circle", "ellipse"});
+    record_options(where + ".type", options);
+
     Shape s;
-    s.zone = zone;
     s.kind = Shape::Kind::SURFACE;
-    const auto & nodes = surface->host().nodes;
-    if (nodes.extent(0) == 1) {
-        // A sphere or an infinite solid cylinder seen through a rotation and a uniform scale, M = sigma Q
-        const region::Node & n = nodes(0);
-        double MMt[9];
-        for (size_t a = 0; a < 3; a++) {
-            for (size_t b = 0; b < 3; b++) {
-                MMt[3 * a + b] = n.m[3 * a] * n.m[3 * b] + n.m[3 * a + 1] * n.m[3 * b + 1] + n.m[3 * a + 2] * n.m[3 * b + 2];
+    const bool transformed = entry.contains("translate") || entry.contains("rotate") || entry.contains("scale");
+    const bool round = N_DIM == 2 ? type == "circle" || type == "disk" : type == "sphere" || type == "cylinder";
+    if (round && !transformed && !entry.contains("length") && !entry.contains("inner_radius")) {
+        const auto center = find_value<std::vector<Input>>(entry, "center");
+        for (size_t i = 0; i < center.size(); i++) s.center[i] = double(as_real(center[i], where + ".center", dim::length));
+        if (N_DIM == 3 || s.center[2] == 0.0) {
+            s.kind = N_DIM == 2 ? Shape::Kind::CIRCLE : (type == "sphere" ? Shape::Kind::SPHERE : Shape::Kind::CYLINDER);
+            s.radius = double(as_real(entry.at("radius"), where + ".radius", dim::length));
+            if (s.kind == Shape::Kind::CYLINDER) {
+                const auto axis = find_value<std::vector<Input>>(entry, "axis");
+                for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], where + ".axis", dim::none));
+                s.axis = scale(1.0 / std::sqrt(dot(s.axis, s.axis)), s.axis);
             }
-        }
-        const double s2 = MMt[0];
-        bool conformal = s2 > 0.0;
-        for (size_t a = 0; a < 3; a++) {
-            for (size_t b = 0; b < 3; b++) conformal &= std::abs(MMt[3 * a + b] - (a == b ? s2 : 0.0)) <= 1e-14 * s2;
-        }
-        const double sigma = std::sqrt(s2);
-        Vec3 center;
-        for (size_t j = 0; j < 3; j++) center[j] = -(n.m[j] * n.d[0] + n.m[3 + j] * n.d[1] + n.m[6 + j] * n.d[2]) / s2;
-        const Vec3 axis = {n.m[6] / sigma, n.m[7] / sigma, n.m[8] / sigma};
-        const bool sphere = n.kind == region::Kind::SPHERE;
-        const bool cylinder = n.kind == region::Kind::CYLINDER && n.p[1] == 0.0 && std::isinf(n.p[2]);
-        // In 2D, the z = 0 slice must be a circle about a center in the plane
-        const bool planar = N_DIM == 3 || (center[2] == 0.0 && (sphere || (axis[0] == 0.0 && axis[1] == 0.0)));
-        if (conformal && planar && (sphere || cylinder)) {
-            s.kind = N_DIM == 2 ? Shape::Kind::CIRCLE : (sphere ? Shape::Kind::SPHERE : Shape::Kind::CYLINDER);
-            s.center = center;
-            s.radius = n.p[0] / sigma;
-            if (s.kind == Shape::Kind::CYLINDER) s.axis = axis;
             return s;
         }
+        s.center = {0.0, 0.0, 0.0};
     }
-    s.surface = std::move(surface);
+    s.surface = std::move(region);
     return s;
 }
 
@@ -422,27 +437,11 @@ std::vector<Shape> read_shapes(const Input & input) {
     if (!enabled(input) || !input.contains("mesh") || !input.at("mesh").contains("curved")) return shapes;
     const auto entries = find_value<std::vector<Input>>(input, "mesh", "curved");
     for (size_t i = 0; i < entries.size(); i++) {
-        const Input & entry = entries[i];
         const std::string where = "mesh.curved[" + std::to_string(i) + "]";
-        const std::string zone = find_value<std::string>(entry, "zone");
-        if (!entry.contains("shape")) throw InputError(where + " needs shape = {type = \"...\", ...} (a region).");
-        Input table = entry.at("shape");
-        if (table.is_string()) {
-            // Before 0.9: shape = "circle" | "sphere" | "cylinder" with center, radius and axis beside it
-            Input::table_type t;
-            t.entries()["type"] = Input(table.as_string());
-            for (const char * key : {"center", "radius", "axis"}) {
-                if (entry.contains(key)) t.entries()[key] = entry.at(key);
-            }
-            table = Input(std::move(t));
-            logging::warning(where + ": shape = \"" + table.at("type").as_string() + "\" with center and radius "
-                             "beside it is deprecated; write shape = {type = \"" + table.at("type").as_string() +
-                             "\", center = [...], radius = ...} (the shape is a region: docs/input.md#regions).");
-        }
-        if (table.is_table() && table.contains("edge")) throw InputError(where + ".shape takes no edge.");
-        auto surface = std::make_shared<const region::Region>(table, where + ".shape");
+        const std::string zone = find_value<std::string>(entries[i], "zone");
         if (shape_of_zone(shapes, zone) >= 0) throw InputError("mesh.curved: zone " + zone + " is listed twice.");
-        shapes.push_back(shape_of(std::move(surface), zone));
+        shapes.push_back(shape_of(entries[i], where));
+        shapes.back().zone = zone;
     }
     return shapes;
 }

@@ -1,7 +1,7 @@
 /**
  * @file input_upgrade.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Renamed, moved and removed input keys and options, and `mallard upgrade-input`.
+ * @brief Renamed, moved and removed input keys and options, and `mallard input upgrade`.
  * @version 0.9
  * @date 2026-10-16
  *
@@ -12,7 +12,6 @@
 #include "input_upgrade.h"
 
 #include <array>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -50,9 +49,26 @@ const Rules & rules() {
             {"numerics.face_reconstruction.quadrature_order", "", "0.2.0", "0.2.0", "never read"},
             {"physics.p_min", "", "0.2.0", "0.2.0", "pressures are not clipped"},
             {"physics.p_max", "", "0.2.0", "0.2.0", "pressures are not clipped"},
+            {"probes[].shape", "probes[].type", "0.9.0", "0.10.0", "type selects the kind of every region"},
+            {"mesh.curved[].shape", "mesh.curved[].type", "0.9.0", "0.10.0",
+             "type selects the kind of every region; a curved zone lies on its region's surface"},
         },
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
+            {"write_data[].format", "hdf5", "vtkhdf", "0.9.0", "0.10.0",
+             "VTKHDF replaces the XDMF and HDF5 files; ParaView 5.12 and later read it", true},
+            {"sources[].region.**.type", "circle", "disk", "0.9.0", "0.10.0",
+             "circle is the closed curve, disk the area inside it", false, 2},
+            {"sources[].region.**.type", "circle", "sphere", "0.9.0", "0.10.0", "circle is a curve", false, 3},
+            {"sources[].region.**.type", "ellipse", "ellipsoid", "0.9.0", "0.10.0",
+             "ellipse is a curve; the z = 0 slice of an ellipsoid is the area inside it"},
+            {"sources[].region.**.type", "disk", "sphere", "0.9.0", "0.10.0", "disk is a flat surface in 3D", false, 3},
+            {"sources[].region.**.type", "rectangle", "box", "0.9.0", "0.10.0", "rectangle is a flat surface in 3D",
+             false, 3},
+            {"sources[].region.**.type", "box", "rectangle", "0.9.0", "0.10.0", "box is the 3D solid", false, 2},
+            {"sources[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0",
+             "annulus is a flat surface in 3D; the hollow solid is a cylinder along z with inner_radius, and "
+             "axis = [0, 0, 1] is added", false, 3, "axis = [0, 0, 1]"},
         },
     };
     return table;
@@ -110,6 +126,25 @@ auto & entries_of(V & node) {
 
 template <typename V>
 void find_keys(V & node, const Path & path, size_t k, Concrete & at, std::vector<Concrete> & out) {
+    if (path[k].key == "**") {
+        find_keys(node, path, k + 1, at, out);
+        if (!node.is_table()) return;
+        for (auto & [name, child] : entries_of(node)) {
+            if (child.is_table()) {
+                at.emplace_back(name, -1);
+                find_keys(child, path, k, at, out);
+                at.pop_back();
+            } else if (child.is_array()) {
+                for (size_t i = 0; i < child.size(); i++) {
+                    if (!child.at(i).is_table()) continue;
+                    at.emplace_back(name, static_cast<long>(i));
+                    find_keys(child.at(i), path, k, at, out);
+                    at.pop_back();
+                }
+            }
+        }
+        return;
+    }
     if (!node.is_table() || !entries_of(node).contains(path[k].key)) return;
     if (k + 1 == path.size()) {
         at.emplace_back(path[k].key, -1);
@@ -238,11 +273,31 @@ std::size_t line_of(const V & value) {
 // ---------------------------------------------------------------- the rewrite of a parsed input
 
 /**
- * @brief Applies every rule to the parsed input; returns what changed. Throws
- *        if a key is set under both its old and its new name.
+ * @brief Whether the rule applies to a run of dimension dim (0: unknown). Throws
+ *        if it depends on the dimension, which is unknown, and the input has its option.
  */
 template <typename V>
-std::vector<Finding> transform(V & root, const Rules & table, const std::string & version) {
+bool applies(V & root, const OptionRule & rule, const int dim) {
+    if (rule.dim == 0 || rule.dim == dim) return true;
+    if (dim != 0) return false;
+    for (const Concrete & key : matches(root, rule.key)) {
+        const V & value = *at(root, key);
+        if (value.is_string() && value.as_string() == rule.from) {
+            throw InputError(to_string(key) + " = \"" + rule.from + "\" is renamed differently in 2D and 3D runs, and "
+                             "the dimension of this case is unknown: state it with --dim 2 or --dim 3.");
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief Applies every rule to the parsed input; returns what changed. Throws
+ *        if a key is set under both its old and its new name.
+ *        `setup`: as the run reads it (kept options keep their value).
+ */
+template <typename V>
+std::vector<Finding> transform(V & root, const Rules & table, const std::string & version, const int dim,
+                               bool setup = false) {
     std::vector<Finding> findings;
     for (const KeyRule & rule : table.keys) {
         for (const Concrete & key : matches(root, rule.from)) {
@@ -268,11 +323,19 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
         }
     }
     for (const OptionRule & rule : table.options) {
+        if (!applies(root, rule, dim)) continue;
         for (const Concrete & key : matches(root, rule.key)) {
             V & value = *at(root, key);
             if (!value.is_string() || value.as_string() != rule.from) continue;
             findings.push_back(option_finding(rule, key, line_of(value), version));
-            value = rule.to;
+            if (!(setup && rule.kept && !findings.back().removed)) value = rule.to;
+            if (!rule.add.empty()) {
+                const auto added = toml::parse_str<typename V::config_type>(rule.add);
+                auto & beside = entries_of(*at(root, parent(key)));
+                for (const auto & [name, v] : entries_of(added)) {
+                    if (!beside.contains(name)) beside[name] = v;
+                }
+            }
         }
     }
     return findings;
@@ -452,14 +515,23 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
         const OrderedValue & value = *at(root, key);
         if (!value.is_string() || value.as_string() != rule.from) continue;
         const size_t line = value.location().first_line_number() - 1;
-        const auto column = key_column(lines[line], key.back().first);
+        const size_t v = value.location().first_column_number() - 1;
         const std::string old_text = bare_text(value);
-        const size_t v = column ? lines[line].find(old_text, *column) : std::string::npos;
-        if (v == std::string::npos) {
+        if (lines[line].compare(v, old_text.size(), old_text) != 0) {
             impossible = true;
             return false;
         }
-        lines[line].replace(v, old_text.size(), toml::format(OrderedValue(rule.to)));
+        const std::string new_text = toml::format(OrderedValue(rule.to));
+        lines[line].replace(v, old_text.size(), new_text);
+        if (!rule.add.empty() && !entries_of(*at(root, parent(key))).contains(rule.add.substr(0, rule.add.find(' ')))) {
+            const auto column = key_column(lines[line], key.back().first);
+            const size_t after = v + new_text.size(), rest = lines[line].find_first_not_of(" \t", after);
+            if (column && (rest == std::string::npos || lines[line][rest] == '#')) {
+                lines.insert(lines.begin() + static_cast<long>(line) + 1, lines[line].substr(0, *column) + rule.add);
+            } else {
+                lines[line].insert(after, ", " + rule.add);
+            }
+        }
         return true;
     }
     return false;
@@ -468,7 +540,7 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
 } // namespace
 
 std::string advice(const Finding & finding) {
-    return describe(finding) + "; `mallard upgrade-input FILE > NEW_FILE` rewrites the file";
+    return describe(finding) + "; `mallard input upgrade FILE > NEW_FILE` rewrites the file";
 }
 
 std::string describe(const Finding & finding) {
@@ -476,23 +548,23 @@ std::string describe(const Finding & finding) {
 }
 
 std::vector<Finding> apply(Input & input, const std::string & version, const Rules & table) {
-    std::vector<Finding> findings = transform(input, table, version.empty() ? MALLARD_VERSION : version);
+    std::vector<Finding> findings = transform(input, table, version.empty() ? MALLARD_VERSION : version, N_DIM, true);
     std::string removed;
     for (const Finding & f : findings) {
         if (f.removed) removed += "\n  " + describe(f);
     }
     if (!removed.empty()) {
         throw InputError("the input uses keys or options that this release no longer reads:" + removed +
-                         "\n`mallard upgrade-input FILE > NEW_FILE` rewrites them.");
+                         "\n`mallard input upgrade FILE > NEW_FILE` rewrites them.");
     }
     return findings;
 }
 
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
-                         bool & reformatted, const Rules & table) {
+                         bool & reformatted, const Rules & table, const int dim) {
     reformatted = false;
     Input expected = parse_input_string(text);
-    findings = transform(expected, table, MALLARD_VERSION);
+    findings = transform(expected, table, MALLARD_VERSION, dim);
     if (findings.empty()) return text;
 
     std::vector<std::string> lines = split_lines(text);
@@ -501,6 +573,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
         for (int guard = 0; guard < 100000 && !impossible && rewrite_one_key(lines, rule, impossible); guard++) {}
     }
     for (const OptionRule & rule : table.options) {
+        if (rule.dim != 0 && rule.dim != dim) continue;
         for (int guard = 0; guard < 100000 && !impossible && rewrite_one_option(lines, rule, impossible); guard++) {}
     }
     if (!impossible) {
@@ -511,33 +584,14 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     }
     reformatted = true;
     OrderedValue ordered = toml::parse_str<toml::ordered_type_config>(text);
-    transform(ordered, table, MALLARD_VERSION);
+    transform(ordered, table, MALLARD_VERSION, dim);
     return toml::format(ordered);
 }
 
-int main(int argc, char ** argv) {
-    bool check = false;
-    std::string file;
-    for (int i = 0; i < argc; i++) {
-        if (std::strcmp(argv[i], "--check") == 0) {
-            check = true;
-        } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0 || !file.empty()) {
-            file.clear();
-            break;
-        } else {
-            file = argv[i];
-        }
-    }
-    if (file.empty()) {
-        std::cerr << "Usage: mallard upgrade-input old.toml > new.toml\n"
-                  << "       mallard upgrade-input --check old.toml   (exit status 1 if anything is out of date)\n"
-                  << "Rewrites renamed, moved and removed input keys and options for Mallard " MALLARD_VERSION
-                     ", keeping comments and layout.\n";
-        return 1;
-    }
+int upgrade_file(const std::string & file, bool check, int dim) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {
-        std::cerr << "mallard upgrade-input: cannot open " << file << "\n";
+        std::cerr << "mallard input upgrade: cannot open " << file << "\n";
         return 1;
     }
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -545,7 +599,7 @@ int main(int argc, char ** argv) {
         parse_input(file);  // syntax errors with the file's name
         std::vector<Finding> findings;
         bool reformatted = false;
-        const std::string upgraded = upgrade_text(text, findings, reformatted);
+        const std::string upgraded = upgrade_text(text, findings, reformatted, rules(), dim);
         for (const Finding & f : findings) std::cerr << file << ": " << describe(f) << "\n";
         if (reformatted) {
             std::cerr << file << ": a changed key is a dotted key or in an inline table, so the whole file was "
@@ -554,7 +608,7 @@ int main(int argc, char ** argv) {
         if (check) return findings.empty() ? 0 : 1;
         std::cout << upgraded;
     } catch (const std::exception & e) {
-        std::cerr << "mallard upgrade-input: " << file << ": " << e.what() << "\n";
+        std::cerr << "mallard input upgrade: " << file << ": " << e.what() << "\n";
         return 1;
     }
     return 0;

@@ -2,7 +2,7 @@
  * @file region_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Regions: membership and distances of primitives, transforms and
- *        booleans; device against host; volume fractions on unstructured meshes.
+ *        booleans; device against host; cell fractions on unstructured meshes.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -92,7 +92,7 @@ std::vector<Case> cases() {
         c.push_back({"{type = \"rectangle\", center = [0, 0], size = [0.5, 0.3], rotate = " + deg +
                          ", translate = [0.5, 0.5]}",
                      in_box, 0.15});
-        c.push_back({"{type = \"ellipse\", center = [0.5, 0.5], semi_axes = [0.4, 0.2]}",
+        c.push_back({"{type = \"ellipsoid\", center = [0.5, 0.5], semi_axes = [0.4, 0.2]}",
                      [rel](const Point & x) {
                          const Point q = rel(x);
                          return q[0] * q[0] / 0.16 + q[1] * q[1] / 0.04 < 1.0;
@@ -271,7 +271,7 @@ TEST(RegionTest, VolumeFractionsIntegrateToTheVolumeOnCoarseUnstructuredMeshes) 
     const auto mesh = coarse_unstructured_mesh();
     for (const Case & c : cases()) {
         const region::Region r = make_region(c.table);
-        const std::vector<double> f = region::volume_fractions(*mesh, r);
+        const std::vector<double> f = region::cell_fractions(*mesh, r);
         double volume = 0.0;
         for (uint32_t i = 0; i < mesh->n_cells; i++) {
             ASSERT_GE(f[i], 0.0);
@@ -286,7 +286,7 @@ TEST(RegionTest, FractionsAreExactlyOneInsideAndZeroOutside) {
     const auto mesh = coarse_unstructured_mesh();
     const region::Region r = make_region(N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.4}"
                                                     : "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.45}");
-    const std::vector<double> f = region::volume_fractions(*mesh, r);
+    const std::vector<double> f = region::cell_fractions(*mesh, r);
     int n_one = 0, n_zero = 0, n_cut = 0;
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         bool all_in = true, all_out = true;
@@ -325,7 +325,7 @@ TEST(RegionTest, SmoothEdgesFollowTheSmoothstepAndKeepTheVolume) {
     }
     // The odd smoothstep moves as much volume out as in, up to the curvature of the surface
     const auto mesh = coarse_unstructured_mesh();
-    const std::vector<double> f = region::volume_fractions(*mesh, r);
+    const std::vector<double> f = region::cell_fractions(*mesh, r);
     double volume = 0.0;
     for (uint32_t i = 0; i < mesh->n_cells; i++) volume += f[i] * double(mesh->h_cell_volume(i));
     // Disk: pi (R^2 + e^2 / 20); sphere: 4/3 pi R^3 + pi R e^2 / 5 (from the smoothstep's second moment)
@@ -348,10 +348,36 @@ TEST(RegionTest, RejectsInvalidRegions) {
     }
 }
 
+TEST(RegionTest, TypesOfAnotherDimensionNameTheRegionToUse) {
+    const std::vector<std::pair<std::string, std::string>> cases =
+        N_DIM == 2 ? std::vector<std::pair<std::string, std::string>>{{"circle", "\"disk\""},
+                                                                     {"ellipse", "\"ellipsoid\""},
+                                                                     {"box", "\"rectangle\""}}
+                   : std::vector<std::pair<std::string, std::string>>{{"circle", "\"sphere\""},
+                                                                     {"ellipse", "\"ellipsoid\""},
+                                                                     {"disk", "\"sphere\""},
+                                                                     {"rectangle", "\"box\""},
+                                                                     {"annulus", "\"cylinder\" with inner_radius"},
+                                                                     {"polygon", "\"implicit\""}};
+    for (const auto & [type, use] : cases) {
+        try {
+            make_region("{type = \"" + type + "\", center = [0, 0, 0], radius = 1, size = [1, 1, 1]}");
+            ADD_FAILURE() << type << " was accepted";
+        } catch (const InputError & e) {
+            const std::string what = e.what();
+            EXPECT_NE(what.find(std::string("regions here are ") + (N_DIM == 2 ? "areas" : "volumes") + ": use " + use),
+                      std::string::npos)
+                << what;
+        }
+    }
+}
+
 TEST(RegionTest, ReportsKeysTheRegionDoesNotRead) {
+    const std::string second = N_DIM == 2 ? "{type = \"annulus\", center = [0, 0], radius = 2, inner_radius = 1, "
+                                            "axis = [1, 0, 0]}"
+                                          : "{type = \"box\", center = [0, 0, 0], size = [1, 1, 1], axis = [1, 0, 0]}";
     const Input input = parse_toml("r = {type = \"union\", regions = [{type = \"sphere\", center = [0, 0, 0], "
-                                   "raduis = 1, radius = 1}, {type = \"annulus\", center = [0, 0, 0], radius = 2, "
-                                   "inner_radius = 1, axis = [1, 0, 0]}]}");
+                                   "raduis = 1, radius = 1}, " + second + "]}");
     const region::Region r(input.at("r"), "r");
     std::vector<std::string> unused;
     for (const Diagnostic & d : unused_keys(input)) unused.push_back(d.key);
@@ -360,7 +386,7 @@ TEST(RegionTest, ReportsKeysTheRegionDoesNotRead) {
 
 TEST(RegionTest, ReadsLengthsAndAnglesWithUnits) {
     const std::string rotate = N_DIM == 2 ? "\"90 deg\"" : "{axis = [0, 0, 1], angle = \"90 deg\"}";
-    const auto r = make_region("{type = \"box\", center = [\"50 cm\", 0, 0], size = [\"2 m\", \"100 mm\", 1], "
+    const auto r = make_region(std::string("{type = \"") + (N_DIM == 2 ? "rectangle" : "box") + "\", center = [\"50 cm\", 0, 0], size = [\"2 m\", \"100 mm\", 1], "
                                "rotate = " + rotate + ", edge = \"0 mm\"}");
     // Rotated by 90 degrees about z through the origin, the box spans |y - 0.5| < 1 and |x| < 0.05
     const double inside[3] = {0.04, 1.4, 0.0}, outside[3] = {0.06, 0.5, 0.0};

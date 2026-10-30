@@ -224,22 +224,26 @@ def spectra_from_restarts(cfg, files):
 
 
 def read_spectra(path):
-    """Rows of a spectra CSV as a dict (quantity, a, b, direction) -> (positions, index, abscissa, value) arrays."""
+    """Rows of a spectra CSV as a dict (quantity, a, b, direction) -> (positions, index, abscissa, value) arrays,
+    and "units", the value's units (files of Mallard 0.9 on; empty for older files and recomputed ones)."""
     with open(path) as f:
         lines = [line for line in f if not line.startswith("#")]
     reader = csv.reader(lines)
     header = next(reader)
-    out = {}
+    col = {name: i for i, name in enumerate(header)}
+    i_index, i_abscissa, i_value = col["index"], col["abscissa"], col["value"]
+    out, units = {}, {}
     for row in reader:
         key = (row[0], row[1], row[2], row[3])
-        out.setdefault(key, []).append((int(row[4]), int(row[-3]) if row[-3] else -1,
-                                        float(row[-2]) if row[-2] else np.nan, float(row[-1]),
-                                        [float(v) for v in row[5:-3]]))
+        out.setdefault(key, []).append((int(row[4]), int(row[i_index]) if row[i_index] else -1,
+                                        float(row[i_abscissa]) if row[i_abscissa] else np.nan, float(row[i_value]),
+                                        [float(v) for v in row[5:i_index]]))
+        units[key] = row[col["units"]] if "units" in col else ""
     result = {}
     for key, values in out.items():
         result[key] = {"position": np.array([v[0] for v in values]), "index": np.array([v[1] for v in values]),
                        "abscissa": np.array([v[2] for v in values]), "value": np.array([v[3] for v in values]),
-                       "coordinates": np.array([v[4] for v in values])}
+                       "coordinates": np.array([v[4] for v in values]), "units": units[key]}
     return header, result
 
 

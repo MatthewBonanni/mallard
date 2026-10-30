@@ -42,17 +42,17 @@ cd mallard
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
     -DKokkos_ENABLE_THREADS=ON -DMallard_WARNINGS_AS_ERRORS=ON
 cmake --build build -j
-./build/test/mallard-test
+./build/src/mallard test
 ```
 
 - Build 3D in a separate directory with `-DMallard_DIM=3`; code that is not
   dimension specific must build and pass in both.
-- Run a subset while iterating: `./build/test/mallard-test --gtest_filter='TENO*'`.
-  `mallard test` runs the same binary from a build or an install tree
-  (`./build/src/mallard test --gtest_filter='TENO*'`).
+- Run a subset while iterating: `./build/src/mallard test --gtest_filter='TENO*'`.
+  `mallard test` runs the test suite of a build (`build/test/mallard-test2d`, or
+  `mallard-test3d` in 3D) or every one of an install tree (`--dim 2|3` picks one).
   Run the whole suite, 2D and 3D, before asking for review.
 - With MPI (`-DMallard_ENABLE_MPI=ON`), run the multi-rank tests on 2 to 4 ranks:
-  `mpirun -n 3 ./build/test/mallard-test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
+  `mpirun -n 3 ./build/src/mallard test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
@@ -143,10 +143,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   failure, and its *Details* link shows every job and its log. `main` requires a
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors and runs the full suite in 2D and 3D, with
-  OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a Clang build and
-  the tutorials and case templates. Each job also shows on the PR as its own status,
-  `CI / <job>`. Documentation-only changes skip the build jobs (the run takes about a
-  minute). `main` runs CI on every merge.
+  OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a single-precision
+  Clang build and the tutorials and case templates. Each job also shows on the PR as
+  its own status, `CI / <job>`. Documentation-only changes skip the build jobs (the
+  run takes about a minute). `main` runs CI on every merge.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only
   what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
   only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `fuzz`). The `CI` status

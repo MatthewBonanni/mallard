@@ -66,6 +66,8 @@ jobs:
           python3 tools/dev/check_workflow_triggers.py
       - name: Check the documented input defaults against the key catalog
         run: python3 tools/dev/input_catalog.py docs
+      - name: Check that the TOML snippets of the docs parse
+        run: python3 tools/dev/check_doc_toml.py
       - name: Check for a changelog fragment
         env:
           GH_TOKEN: ${{ github.token }}
@@ -170,7 +172,7 @@ jobs:
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true},
             {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true},
             {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true},
-            {"name": "clang", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", "hdf5": true, "build_only": true},
+            {"name": "clang", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", "hdf5": true, "build_only": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true},
             {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true},
@@ -252,14 +254,19 @@ jobs:
         run: |
           git fetch --quiet --tags --depth=1 origin
           python3 tools/dev/check_upgrade_input.py build/src/mallard
+      - name: Output units through h5py and tools/mallard
+        if: matrix.backend.name == 'openmp'
+        run: |
+          python3 -c 'import h5py, numpy' 2>/dev/null || python3 -m pip install -q --break-system-packages h5py numpy
+          python3 tools/dev/check_output_units.py build/src/mallard
       # Two copies of the suite at once, so tests that share a file path collide
       - name: Test (two at once)
         if: matrix.backend.concurrent
         env:
           OMP_NUM_THREADS: 2
         run: |
-          ./build/test/mallard-test & first=$!
-          ./build/test/mallard-test --gtest_brief=1 & second=$!
+          ./build/src/mallard test & first=$!
+          ./build/src/mallard test --gtest_brief=1 & second=$!
           ok=true; wait $first || ok=false; wait $second || ok=false; $ok
       - name: Test (MPI)
         if: matrix.backend.mpi
@@ -268,15 +275,32 @@ jobs:
         run: |
           mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
           if [ "$FULL" = true ]; then
-            mpirun -n 1 ./build/test/mallard-test
+            mpirun -n 1 ./build/src/mallard test
           else
-            mpirun -n 1 ./build/test/mallard-test --gtest_filter="$mpi_tests"
+            mpirun -n 1 ./build/src/mallard test --gtest_filter="$mpi_tests"
           fi
           # Two rank counts at once, so tests that share a file path collide
-          mpirun -n 2 --oversubscribe ./build/test/mallard-test --gtest_filter="$mpi_tests" & two=$!
-          mpirun -n 3 --oversubscribe ./build/test/mallard-test --gtest_filter="$mpi_tests" --gtest_brief=1 & three=$!
+          mpirun -n 2 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests" & two=$!
+          mpirun -n 3 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests" --gtest_brief=1 & three=$!
           ok=true; wait $two || ok=false; wait $three || ok=false; $ok
-          mpirun -n 4 --oversubscribe ./build/test/mallard-test --gtest_filter="$mpi_tests"
+          mpirun -n 4 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests"
+      # Every rank in the report, and no warning about a sensible placement
+      - name: Rank report (MPI)
+        if: matrix.backend.name == 'mpi'
+        run: |
+          dir=$(mktemp -d)
+          sed -e 's/^t_stop = .*/n_steps = 2/' -e '/^\[\[write_data\]\]/,$d' examples/sod/input.toml > "$dir/input.toml"
+          for n in 2 3; do
+            # 3 ranks exceed the runner's 2 cores: unbound, sharing them
+            status=0
+            (cd "$dir" && mpirun -n $n --oversubscribe "$GITHUB_WORKSPACE/build/src/mallard" -i input.toml) \
+              > "$dir/out.txt" 2>&1 || status=$?
+            cat "$dir/out.txt"
+            [ "$status" -eq 0 ] || exit "$status"
+            rows=$(sed -n '/^== Ranks/,/^$/p' "$dir/out.txt" | grep -cE '^  [0-9]+ ')
+            [ "$rows" -eq "$n" ] || { echo "expected $n rows in the rank report, found $rows"; exit 1; }
+            if grep -q 'warning:' "$dir/out.txt"; then echo "unexpected warning"; exit 1; fi
+          done
       - name: Report the job's result
         if: always()
         env:
@@ -304,7 +328,7 @@ jobs:
       - name: Install MPI, ccache and Gmsh's libraries
         run: >
           sudo apt-get update -qq && sudo apt-get install -y -qq
-          libopenmpi-dev openmpi-bin ccache libglu1-mesa libxcursor1 libxft2 libxinerama1
+          libopenmpi-dev openmpi-bin libhdf5-openmpi-dev ccache libglu1-mesa libxcursor1 libxft2 libxinerama1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -316,6 +340,7 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ccache-tutorials-${{ github.sha }}
           restore-keys: ccache-tutorials-
+      # With HDF5, so that the tutorials and templates write the default VTKHDF output
       - name: Build (2D and 3D)
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -325,7 +350,7 @@ jobs:
             cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
-              -DMallard_ENABLE_MPI=ON -DMallard_DIM=$dim
+              -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_DIM=$dim
             cmake --build build-$dim -j $(nproc) --target mallard
           done
       - name: Save compiler cache
@@ -334,16 +359,17 @@ jobs:
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-tutorials-${{ github.sha }}
+      # Both dimensions in one install, run through the mallard front end
+      - name: Install (2D and 3D)
+        run: for dim in 2 3; do cmake --install build-$dim --prefix ${{ runner.temp }}/mallard > /dev/null; done
       - name: Run the tutorials
-        run: tutorials/ci.sh build-2/src/mallard build-3/src/mallard ${{ runner.temp }}/tutorials
+        run: tutorials/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/tutorials
       # docs/input-keys.json is what setup reads from the examples and tutorials
       - name: Check the key catalog
         run: python3 tools/dev/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
-      # Every case template (mallard new --quick): 2D from an install tree, 3D from the build tree
+      # Every case template (mallard new --quick)
       - name: Run the case templates
-        run: |
-          cmake --install build-2 --prefix ${{ runner.temp }}/mallard-2d > /dev/null
-          templates/ci.sh ${{ runner.temp }}/mallard-2d/bin/mallard build-3/src/mallard ${{ runner.temp }}/templates
+        run: templates/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/templates
       - name: Report the job's result
         if: always()
         env:

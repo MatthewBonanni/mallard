@@ -39,8 +39,9 @@ using Vec3 = std::array<double, 3>;
 /**
  * @brief The surface of a region (docs/input.md#regions) onto which the faces
  *        of a boundary zone are projected. Circles, spheres and infinite
- *        circular cylinders are projected in closed form; every other surface
- *        by closest-point iterations on the region's level-set function.
+ *        circular cylinders without transforms are projected in closed form;
+ *        every other surface by closest-point iterations on the region's
+ *        level-set function.
  */
 struct Shape {
     enum class Kind : uint8_t { CIRCLE, SPHERE, CYLINDER, SURFACE };
@@ -59,8 +60,12 @@ struct Shape {
     void project(const Vec3 & x, double length, Vec3 & p, double * J) const;
 };
 
-/** @brief The shape of a region's surface: closed form where it is a circle, sphere or infinite cylinder. */
-Shape shape_of(std::shared_ptr<const region::Region> surface, const std::string & zone);
+/**
+ * @brief The shape of a [[mesh.curved]] entry (where: its place in the input):
+ *        the surface of its region (type and the region's keys), the boundary
+ *        of an area or volume, or in 2D the curve of a circle or ellipse.
+ */
+Shape shape_of(const Input & entry, const std::string & where);
 
 /**
  * @brief A curved boundary face of the whole mesh: its corners (global node

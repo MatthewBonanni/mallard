@@ -24,6 +24,7 @@
 #include "input.h"
 
 #include "data.h"
+#include "field_units.h"
 #include "global_order.h"
 #include "mesh.h"
 
@@ -31,18 +32,21 @@ enum class DataFormat {
     VTU,
     RESTART,
     HDF5,
+    VTKHDF,
 };
 
 static const std::unordered_map<std::string, DataFormat> FORMAT_TYPES = {
     {"vtu", DataFormat::VTU},
     {"restart", DataFormat::RESTART},
     {"hdf5", DataFormat::HDF5},
+    {"vtkhdf", DataFormat::VTKHDF},
 };
 
 static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
     {DataFormat::VTU, "vtu"},
     {DataFormat::RESTART, "restart"},
     {DataFormat::HDF5, "hdf5"},
+    {DataFormat::VTKHDF, "vtkhdf"},
 };
 
 /** @brief Named scalars of a restart file (version 3), e.g. the statistics' weight. */
@@ -192,6 +196,8 @@ class DataWriter {
         DataFormat get_format() const { return format; }
         const std::string & get_prefix() const { return prefix; }
         uint64_t files_written() const { return n_files; }
+        /** @brief The file ParaView opens for the whole series: .pvd, .vtkhdf.series, .vtkhdf or .xmf. */
+        std::string index_file() const;
         /** @brief The file written last, or empty. */
         const std::string & last_written() const { return last_file; }
         /** @brief Changes the step interval of a writer that has one; an error message, or empty. */
@@ -238,12 +244,25 @@ class DataWriter {
         void resume_xdmf(rtype t);
 
         /**
+         * @brief VTKHDF output: an UnstructuredGrid of the owned cells (curved
+         *        cells as quadratic ones), or a PolyData of the faces of a
+         *        boundary zone, written by every rank in global order; one
+         *        file per snapshot, or with series, one file of every snapshot.
+         */
+        void write_vtkhdf(const std::string & filename, rtype t, const Values & values);
+        void build_vtkhdf_cells();
+        void build_vtkhdf_faces();
+        void write_vtkhdf_series(const std::vector<std::pair<rtype, std::string>> & series) const;
+        void resume_vtkhdf(rtype t);
+
+        /**
          * @brief An output array: one scalar, or the N_DIM components of a
          *        vector (written as 3 components, zero-padded in 2D).
          */
         struct Field {
             std::string name;
             std::vector<const Data *> components;
+            FieldDescription description;  // units and long name; unset in restart files
             uint32_t n_vtk_components() const { return components.size() == 1 ? 1 : 3; }
             rtype value(uint32_t i_cell, uint32_t i_comp) const {
                 return i_comp < components.size() ? (*components[i_comp])[i_cell] : rtype(0);
@@ -265,6 +284,8 @@ class DataWriter {
         uint64_t n_files = 0;
         std::string last_file;
         void write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const;
+        /** @brief The VTU field data: TIME, MALLARD_FORMAT_VERSION and the fields' units record. */
+        std::string vtu_field_data(rtype t) const;
         std::vector<uint32_t> geometry_faces;  // Empty: write all cells
         // Compression
         Compression compression = Compression::NONE;
@@ -285,6 +306,19 @@ class DataWriter {
         GlobalOrder cell_order;
         bool hdf5_mesh_written = false;
         uint64_t hdf5_n_nodes = 0, hdf5_topology_size = 0;
+        // VTKHDF output: this rank's block of the topology, in global order, built by the first snapshot
+        struct VtkhdfMesh {
+            bool built = false;
+            uint64_t n_points = 0, n_cells = 0, n_ids = 0;  // in the file
+            uint64_t first_point = 0, first_cell = 0, first_id = 0;
+            std::vector<rtype> points;                       // 3 per point
+            std::vector<int64_t> connectivity, offsets;      // offsets: one more on the last rank
+            std::vector<uint8_t> types;                      // cells only
+            GlobalOrder order;                               // of the cells, or of the zone's faces
+        } vtkhdf;
+        bool one_file = false;  // series = true: every snapshot in one file
+        uint64_t vtkhdf_steps = 0;  // snapshots in the series file
+        bool vtkhdf_resumed = false;
 };
 
 #endif // DATA_WRITER_H

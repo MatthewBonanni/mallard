@@ -5,11 +5,12 @@ This page lists every key; the [user guide](guide/input_files.md) explains
 by topic when to use them, with examples and figures.
 Kokkos options such as `--kokkos-num-threads=N` or `--kokkos-device-id=N` can be appended.
 A renamed or removed key is still read, with a warning, for at least one minor
-release, and `mallard upgrade-input old.toml > new.toml` rewrites old inputs
+release, and `mallard input upgrade old.toml > new.toml` rewrites old inputs
 ([deprecation policy and changed keys](guide/input_files.md#inputs-from-older-releases)).
 
 The spatial dimension is fixed at build time with the CMake option
-`-DMallard_DIM=2` (default) or `3`. Vectors in the input (`u`, `gravity`,
+`-DMallard_DIM=2` (default) or `3`, which builds `mallard2d` or `mallard3d`;
+`mallard` runs the one of the case's mesh ([Meshes](guide/meshes.md)). Vectors in the input (`u`, `gravity`,
 `rhou`) have that many components, and expressions are in `x`, `y`, `z`
 (`z` is 0 in 2D) and, where noted, `t`, in one language for every section:
 [Expressions](guide/input_files.md#expressions). Below, `[u_x, u_y]` reads
@@ -32,7 +33,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
@@ -44,7 +45,8 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Rate (1/s) | `sponges.strength` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
 | Heat flux (W/m^2) | `boundaries.q` |
-| Mass flux (kg/(m^2 s)) | `source.mass_flow` |
+| Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
+| Mass flow (kg/s; per metre of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
 | Sources (per unit volume) | `source.rho` (kg/(m^3 s)), `rhou` (N/m^3), `rhoE` (W/m^3), and the same of `[[sources]]` with `rhoY` (kg/(m^3 s)); with `total = true` integrated rates (kg/s, N, W) |
 | Concentration (plain numbers in kmol/m^3) | `chemistry.C_reg` |
 
@@ -59,14 +61,7 @@ boundaries, numerics, initial solution) without time stepping and without
 writing any file, and reports on the run. It exits with status 1 if there is
 an error. Under `mpirun -n N` it checks the run on N ranks.
 
-| Option | Description |
-|---|---|
-| `--ranks N` | Memory and cost per rank for a run on N ranks (from a serial check, or one on N ranks) |
-| `--throughput R` | Cost at R cells/s per rank (cell updates per wall second, the `Throughput` of a run's summary) |
-| `--steps N` | Measure the throughput over N steps instead (after one untimed step) |
-| `--quality-vtu PREFIX` | Write the mesh-quality fields to `PREFIX_000000.vtu` (a `.pvtu` and one piece per rank under MPI) |
-
-The report, with an example: [Checking an input](guide/input_files.md#checking-an-input).
+Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an example: [Checking an input](guide/input_files.md#checking-an-input).
 
 ## `[run]`
 
@@ -156,7 +151,7 @@ Every format and the transform below are illustrated in the user guide
 `x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
 Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
 (negative factors) are allowed. `[[periodic]]` translations, `[[mesh.curved]]`
-shapes, probes and every other coordinate in the input refer to the
+surfaces, regions, probes and every other coordinate in the input refer to the
 transformed mesh. `mallard mesh convert input.toml mesh.h5` writes the
 transformed mesh.
 
@@ -236,7 +231,8 @@ first in Gmsh order; none for linear faces).
 
 Boundary faces follow the true curved geometry where the mesh file has
 high-order boundary elements, or where `[[mesh.curved]]` projects a zone onto
-an analytic shape (any mesh: generated, linear Gmsh, HDF5). Curved faces get
+the surface of a [region](#regions) (any mesh: generated, linear Gmsh, HDF5).
+Curved faces get
 quadrature points on the curve or surface with their own normals and
 Jacobians, and the cells touching them their exact volumes, centroids and
 TENO moments; in 3D the faces sharing an edge with a curved face (side faces
@@ -248,23 +244,25 @@ edges. This brings orders 3 to 6 to their design accuracy at curved walls
 |---|---|
 | `curved_geometry` | (`[mesh]`) `false` ignores high-order nodes and `[[mesh.curved]]`: straight-sided faces everywhere. Default `true` |
 | `zone` | (`[[mesh.curved]]`) Boundary zone to curve |
-| `shape` | `circle` (2D), `sphere` or `cylinder` (3D) |
-| `center` | A point of the shape's center (cylinders: of their axis) |
-| `radius` | Radius |
-| `axis` | (`cylinder`) Direction of the axis |
+| `type` | The region whose surface the zone lies on: any [region](#regions) type, the boundary of its area (2D) or volume (3D); in 2D also the curves `circle` and `ellipse` (the keys of `disk` and `ellipsoid`). Before 0.9.0: `shape`, read with a warning until 0.10.0 |
+| `center`, `radius`, ... | The region's own keys and transforms beside `zone` (no `edge`) |
 
 ```toml
 [[mesh.curved]]
 zone = "cylinder"
-shape = "circle"
+type = "circle"
 center = [0.0, 0.0]
 radius = 0.5
 ```
 
-Points of a straight face are projected radially onto the shape, minus the
+`circle` and `disk` (2D), and `sphere` and `cylinder` without `length` or
+`inner_radius` (3D), without transforms, are projected radially, in closed
+form; every other surface by closest-point iterations on the region's
+function. A point of a straight face is projected onto the surface, minus the
 linear interpolant of its corners' own offsets, so faces still meet at the
-mesh nodes; zone nodes farther than 5% of an edge length from the shape are
-an error. Curved boundaries are not yet supported with `physics.axisymmetric`.
+mesh nodes; zone nodes farther than 5% of an edge length from the surface,
+or where it has no gradient, are an error. Curved boundaries are not yet
+supported with `physics.axisymmetric`.
 
 ## `[[periodic]]`
 
@@ -463,7 +461,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 
 | Key | Description |
 |---|---|
-| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh) |
+| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh). `Mallard -i input.toml --restart FILE` replaces the whole table by `type = "restart"`, `file = FILE`, so one input serves both the first run and its continuations |
 | `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
@@ -506,6 +504,7 @@ the zone's faces whose centers satisfy the expression.
 | `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures: numbers, or expressions in `x`, `y`, `z` evaluated at each face center for a composition that varies along the boundary, with an optional `balance` species as in `[initialize]`) |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
 | `stagnation_inlet` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [the guide](guide/boundary_conditions.md#stagnation-inlet) and [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `upt`) |
+| `mass_flow_inlet` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density. See [the guide](guide/boundary_conditions.md#mass-flow-inlet) | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)], a number or an expression of `x`, `y`, `z`) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]) with an optional `profile` (expression of `x`, `y`, `z`, default uniform) shaping it along the inlet; `direction` (default the inward normal of each face); `X` or `Y` for mixtures (as `upt`) |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
@@ -864,7 +863,8 @@ weights and the trigger state.
 
 ## `[[probes]]`
 
-Samples of the solution on a geometry (points or curves), every `interval`
+Samples of the solution on a geometry (points or curves;
+[geometry guide](guide/geometry.md#points-and-curves)), every `interval`
 steps or `time_interval` of simulation time, written raw and/or reduced. Setup
 locates the samples in the cells of each rank; a write evaluates them on the
 device of the ranks that own them and gathers them on rank 0, which writes them
@@ -875,19 +875,19 @@ ranks. A probe that is not due costs nothing.
 |---|---|
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
-| `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
+| `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
-| `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`) or `vtp` |
-| `file` | Output file, default `probe_<name>.csv`, `.h5` or `.pvd` |
+| `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
+| `file` | Output file, default `probe_<name>.csv`, `.h5`, `.vtkhdf` or `.pvd` |
 | `samples` | `false` writes only the reductions (default `true`) |
 | `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below) |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
 | `translate`, `rotate`, `scale` | Transform of the geometry: scaled (a factor, or one per axis) about the origin, then rotated about it (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}`), then translated |
 
-Shapes (`[x, y(, z)]` points):
+Types (`[x, y(, z)]` points):
 
-| `shape` | Keys |
+| `type` | Keys |
 |---|---|
 | `point` | `point` |
 | `points` | `points = [[...], ...]`, or `points_file`: a text file of one point per row (numbers split by commas or blanks; `#` starts a comment, a header row is skipped) |
@@ -914,17 +914,20 @@ sample and step; a restarted run appends). `hdf5` holds `coordinates`
 (samples x dimension), for curves `arc_length` and `polylines/nodes` with
 `polylines/offsets`, and the extensible `step`, `time` and `fields/<variable>`
 (steps x samples); `vtp` writes one VTK PolyData file per output,
-`<stem>_<step>.vtp` (vertices for point sets, polylines with `arc_length`
-for curves), indexed by the `.pvd` series. A restarted run cuts the HDF5 rows
-and the `.pvd` entries after the restart back and continues them.
+`<stem>_<step>.vtp` (vertices for points, polylines with `arc_length`
+for curves), indexed by the `.pvd` series; `vtkhdf` writes one VTKHDF PolyData
+file (the same vertices or polylines, `arc_length`, and each variable's point
+values at every output, with `Steps/Values` the times). A restarted run cuts the
+HDF5 rows, the VTKHDF outputs and the `.pvd` entries after the restart back and
+continues them.
 
-**Reductions.** Rows `step, t, length` (curves) or `count` (point sets), then
+**Reductions.** Rows `step, t, length` (curves) or `count` (points), then
 `<reduction>_<variable>` for each reduction and variable: `integral` is
 `int q ds`, `mean` `int q ds / int ds`, `favre` the density-weighted mean
 `int rho q ds / int rho ds`, `rms` `sqrt(int q^2 ds / int ds)`, and `min`, `max`
 the extrema over the samples and the integration points. Curves integrate
 with three Gauss points on each element between consecutive samples (exact for
-polynomials of degree 5 along straight elements), point sets with unit weights
+polynomials of degree 5 along straight elements), points with unit weights
 (`integral` is the sum, `mean` the arithmetic mean). Rank 0 sums them in a
 fixed order, so they too are the same bit for bit on any number of ranks.
 
@@ -933,7 +936,7 @@ fixed order, so they too are the same bit for bit on any number of ranks.
 name = "wake"
 variables = ["U", "P"]
 sampling = "point"
-shape = "arc"
+type = "arc"
 center = [0.0, 0.0]
 radius = 2.0
 angles = [-60.0, 60.0]
@@ -1006,25 +1009,30 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 
 ## Regions
 
-Regions select parts of space in `[[sources]]`. A region is a table: a primitive shape, or a boolean of regions, each with
+Regions select parts of space in `[[sources]]`, and their surfaces are the
+curved walls of [`[[mesh.curved]]`](#curved-boundaries) (explained with figures in
+the [geometry guide](guide/geometry.md#regions)). A region is a table: a primitive, or a boolean of regions, each with
 optional transforms, nested to any depth. Every region has a signed distance
 (negative inside) that never exceeds the distance to its surface, which gives
 smooth edges their width and lets cell volume fractions skip cells away from
 the surface. Volume fractions are cell averages of the region's indicator,
 sampled on each cell's triangles (2D) or tetrahedra (3D), subdivided where the
 surface or the smooth edge crosses them: cells entirely inside get exactly 1.
-In 2D, regions are the z = 0 slices of the 3D shapes (`z` components may be
-left out). Lengths take units (`radius = "5 mm"`) and angles are in degrees
+In 2D, regions are the z = 0 slices of the 3D primitives (`z` components may be
+left out). `circle` and `ellipse` are curves, `disk`, `annulus`, `rectangle`
+and `polygon` are flat (areas in 2D, surfaces in 3D), and `box` is a 3D solid,
+so sources in 3D use `sphere`, `ellipsoid`, `box` and `cylinder`, and in 2D
+`rectangle` for a rectangle. Lengths take units (`radius = "5 mm"`) and angles are in degrees
 unless given a unit; `axis`, `normal`, `axes` and `scale` are plain numbers.
 
-| `type` | Keys | Shape |
+| `type` | Keys | Region |
 |---|---|---|
-| `sphere` (2D: also `disk`, `circle`) | `center`, `radius` | |
-| `ellipsoid` (`ellipse`) | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`) |
+| `sphere` (2D: also `disk`) | `center`, `radius` | |
+| `ellipsoid` | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`); in 2D its slice is the area inside an ellipse |
 | `cylinder` | `center`, `axis` (default z in 2D), `radius`, `inner_radius` (default 0: solid), `length` (default infinite) | annular with `inner_radius`; centered on `center` along `axis` |
-| `annulus` (2D) | `center`, `radius`, `inner_radius` | |
+| `annulus` (2D) | `center`, `radius`, `inner_radius` | a ring; in 3D a `cylinder` with `inner_radius` |
 | `cone` (`frustum`) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0) | |
-| `box` (`rectangle`) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
+| `box` (3D), `rectangle` (2D) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | |
 | `half_space` | `point` (default origin), `normal` | the side `(x - point) . normal < 0` |
 | `polygon` (2D) | `vertices` = `[[x, y], ...]` | simple polygon |
@@ -1049,11 +1057,13 @@ moment (e.g. `pi R edge^2 / 5` for a sphere).
 
 ```toml
 # A tilted pipe wall with a hole drilled through it
-region = {type = "difference",
-          a = {type = "cylinder", center = [0, 0, 0], axis = [1, 1, 0], radius = 0.3, inner_radius = 0.2, length = 1.0},
-          b = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.05},
-          edge = 0.01}
+region.type = "difference"
+region.a = {type = "cylinder", center = [0, 0, 0], axis = [1, 1, 0], radius = 0.3, inner_radius = 0.2, length = 1.0}
+region.b = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.05}
+region.edge = 0.01
+```
 
+```toml
 # A box rotated 30 degrees about z around its own center
 region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 0, 0], rotate = {axis = [0, 0, 1], angle = 30}}
 ```
@@ -1077,7 +1087,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | `check_interval` | Print a progress row every this many steps (default 1) |
 | `run_log` | Machine-readable run log, one JSON record per line: a start record with the provenance, a progress record per progress row, file writes, warnings and errors, and an end record ([format](guide/output.md#the-run-log)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the provenance; `false` skips reading it again for very large meshes. Default `true` |
-| `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
+| `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
 
 The run's summary reports the size of the files written and the time spent writing them (in the background with `async`); `output` in its wall time is what the run waited for.
@@ -1098,15 +1108,36 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | Key | Description |
 |---|---|
 | `prefix` | Output path prefix; directories are created as needed |
-| `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
+| `format` | `vtkhdf` (default: VTK's HDF5 format, see below), `vtu` (with a `.pvd` series next to it), `restart`, or the deprecated `hdf5` (XDMF indexes over HDF5 files; removed in 0.10.0, `mallard input upgrade` rewrites it to `vtkhdf`). Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
+| `series` | (`vtkhdf`) `false` (default): one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`; `true`: every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
-| `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
-| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone output (`geometry`) |
-| `relative_error` | (`vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
+| `variables` | (`vtkhdf`, `vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `geometry` | (`vtkhdf`, `vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
+| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone VTU output (`geometry`), which is ASCII |
+| `relative_error` | (`vtkhdf`, `vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
 | `chunk_cells` | (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank reading some cells decompresses only the chunks that hold them |
 
-`format = "hdf5"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
+`format = "vtkhdf"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
+parallel HDF5) writes [VTKHDF](https://docs.vtk.org/en/latest/vtk_file_formats/vtkhdf_file_format/index.html)
+files, which ParaView 5.12 and later open directly. Every rank writes its part
+of one file with collective I/O, each array in global order (cell i is global
+cell i, the order of the mesh and restart files), so the files do not depend on
+the number of ranks. The volume is an `UnstructuredGrid`: `Points`, `Connectivity`,
+`Offsets` and `Types` (VTK cell types), then `CellData/<name>` (one value per
+cell, or three for vectors) and `FieldData/TIME`. Cells touching a curved wall
+(`[[mesh.curved]]` or high-order elements of the mesh file) are quadratic
+Lagrange cells (VTK types 69 to 73, and 27 for pyramids), their extra nodes
+on the curved geometry, after the mesh's nodes. A boundary zone (`geometry`)
+is a `PolyData` of its faces (`Lines` in 2D, `Polygons` in 3D). With
+`series = true` the mesh is stored once and VTKHDF's `Steps` group holds every
+snapshot's time (`Steps/Values`) and where its cell values start
+(`Steps/CellDataOffsets/<name>`). Nothing else is added to the VTKHDF layout:
+the units and descriptions are HDF5 attributes of each dataset (`units`,
+`long_name`), and the root group carries the `provenance` and the format
+`version` as HDF5 attributes, which VTK ignores.
+`tools/mallard/vtkhdf.py` reads the files.
+
+`format = "hdf5"` (deprecated; builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
 parallel HDF5) scales to large runs: every rank writes its part of one file per
 snapshot with collective I/O instead of a VTU piece of its own. It writes
 

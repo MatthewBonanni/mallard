@@ -18,7 +18,7 @@
 #                         X.py alone, a script of the example listed in files
 #   post, results         commands of post.sh, and what they produce;
 #                         $(last PREFIX) is the newest snapshot PREFIX_N
-#                         (.vtu, or .pvtu of an MPI run)
+#                         (.vtkhdf; .vtu, or .pvtu of an MPI run, without HDF5)
 #   packages              Python packages of scripts outside tools/
 #   quick, quick_mesh,    the --quick version: "table.key = value" edits of
 #   quick_init,           the input, and commands replacing the full ones.
@@ -74,7 +74,7 @@ table = "output"
 about = "how often the log prints a progress line"
 [[tables]]
 table = "write_data"
-about = "snapshots (VTU for ParaView and tools/, HDF5, restart files)"
+about = "snapshots (VTKHDF for ParaView and tools/, VTU, restart files)"
 [[tables]]
 table = "forces"
 about = "forces on a boundary zone, as CSV"

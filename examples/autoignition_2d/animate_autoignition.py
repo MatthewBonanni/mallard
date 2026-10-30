@@ -3,7 +3,7 @@
     python examples/autoignition_2d/animate_autoignition.py OUT.mp4 REFERENCE_DIR --run LABEL RUN_DIR [--run ...]
         [--t-start 1.4e-3] [--fps 15] [--gif OUT.gif] [--png OUT.png] [--png-time T]
 
-Each run (examples/autoignition_2d/autoignition_restart.py, output series solut/autoignition.pvd
+Each run (examples/autoignition_2d/autoignition_restart.py, output series solut/autoignition
 with T and HRR) gets a column: its temperature above, its heat release rate
 (log scale) below, at the same physical time in every column (a finished run
 holds its last output). The strip at the bottom traces each run's mean heat
@@ -27,7 +27,7 @@ import numpy as np  # noqa: E402
 from matplotlib.colors import LogNorm  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import grid_fields  # noqa: E402
+from mallard.vtu import grid_fields, read_index  # noqa: E402
 
 BG = "#0d0f14"
 FG = "#e8e8e8"
@@ -58,9 +58,7 @@ def main():
     h_ref = hom["HRR"].max()
     runs = []
     for label, run_dir in args.run:
-        pvd = open(os.path.join(run_dir, "solut", "autoignition.pvd")).read()
-        files = re.findall(r'file="([^"]+)"', pvd)
-        times = np.array([float(t) for t in re.findall(r'timestep="([^"]+)"', pvd)])
+        times, files = (np.array(v) for v in zip(*read_index(os.path.join(run_dir, "solut", "autoignition"))))
         run = os.path.basename(os.path.normpath(run_dir))
         mz = np.loadtxt(os.path.join(args.reference, f"multizone_{run}.csv"), delimiter=",", skiprows=1)
         runs.append(dict(label=label, dir=run_dir, files=files, times=times, mz=mz, t=[], hrr=[], last=None))
@@ -72,7 +70,7 @@ def main():
     peak = 0.0
     for r in runs:
         for f in r["files"]:
-            t, _, _, fld = grid_fields(os.path.join(r["dir"], "solut", f), ["HRR"])
+            t, _, _, fld = grid_fields(f, ["HRR"])
             r["t"].append(t)
             r["hrr"].append(fld["HRR"].mean())
         r["t"], r["hrr"] = np.array(r["t"]), np.array(r["hrr"])
@@ -94,7 +92,7 @@ def main():
         fig.patch.set_facecolor(BG)
         for i, r in enumerate(runs):
             j = int(np.argmin(np.abs(r["times"] - tf)))  # a finished run holds its last output
-            t, x, y, fld = grid_fields(os.path.join(r["dir"], "solut", r["files"][j]), ["T", "HRR"])
+            t, x, y, fld = grid_fields(r["files"][j], ["T", "HRR"])
             ext = [0, (x[-1] + x[0]) * 1e3, 0, (y[-1] + y[0]) * 1e3]
             for row, (name, kw) in enumerate([("T", dict(cmap="RdYlBu_r", vmin=args.T_range[0], vmax=args.T_range[1])),
                                               ("HRR", dict(cmap="inferno", norm=norm_h))]):

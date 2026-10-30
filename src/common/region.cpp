@@ -1,7 +1,7 @@
 /**
  * @file region.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Regions from their input tables, and their cell volume fractions.
+ * @brief Regions from their input tables, and the fraction of each cell inside them.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -17,6 +17,7 @@
 #include <limits>
 #include <optional>
 #include <sstream>
+#include <utility>
 
 #include "comm.h"
 #include "input.h"
@@ -24,6 +25,17 @@
 #include "mesh.h"
 
 namespace region {
+
+std::vector<std::string> types() {
+    std::vector<std::string> out = {"sphere", "ellipsoid", "cylinder", "cone", "frustum", "torus",
+                                    "half_space", "implicit", "union", "intersection", "difference"};
+    if (N_DIM == 2) {
+        out.insert(out.end(), {"disk", "annulus", "rectangle", "polygon"});
+    } else {
+        out.push_back("box");
+    }
+    return out;
+}
 
 namespace {
 
@@ -85,9 +97,7 @@ class Parser {
             if (!t.is_table()) throw InputError(where + " must be a table, e.g. {type = \"sphere\", ...}.");
             if (!t.contains("type")) throw InputError(where + " has no type.");
             const std::string type = find_value<std::string>(t, "type");
-            record_options(where + ".type", {"sphere", "ellipsoid", "cylinder", "cone", "box", "torus", "half_space",
-                                             "implicit", "polygon", "disk", "annulus", "ellipse", "rectangle",
-                                             "union", "intersection", "difference"});
+            record_options(where + ".type", types());
             const Frame frame = transformed(t, where, parent);
             if (type == "union" || type == "intersection" || type == "difference") {
                 return boolean(t, where, type, frame);
@@ -96,6 +106,28 @@ class Parser {
         }
 
     private:
+        /** @brief For a type of another dimension than the run's regions: what it is, and the type to use instead. */
+        static std::optional<std::pair<std::string, std::string>> other_dimension(const std::string & type) {
+            if (type == "circle") return {{"a curve", N_DIM == 2 ? "\"disk\", the area inside a circle" : "\"sphere\""}};
+            if (type == "ellipse") {
+                return {{"a curve", N_DIM == 2 ? "\"ellipsoid\", whose z = 0 slice is the area inside an ellipse"
+                                               : "\"ellipsoid\""}};
+            }
+            if (N_DIM == 2) {
+                if (type == "box") return {{"a 3D solid", "\"rectangle\""}};
+                return std::nullopt;
+            }
+            if (type == "annulus") {
+                return {{"a flat surface in 3D runs", "\"cylinder\" with inner_radius, a hollow cylinder along its axis"}};
+            }
+            if (type == "disk") return {{"a flat surface in 3D runs", "\"sphere\", or a short \"cylinder\""}};
+            if (type == "rectangle") return {{"a flat surface in 3D runs", "\"box\""}};
+            if (type == "polygon") {
+                return {{"a flat surface in 3D runs", "\"implicit\", or an \"intersection\" of half spaces"}};
+            }
+            return std::nullopt;
+        }
+
         static double number(const Input & t, const std::string & key, const std::string & where,
                              const Dimension & dimension = dim::length) {
             if (!t.contains(key)) throw InputError(where + " needs " + key + ".");
@@ -250,11 +282,15 @@ class Parser {
             const std::array<double, 9> I = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
             std::ostringstream text;
             text << type;
-            if (type == "sphere" || type == "disk" || type == "circle") {
+            if (const auto other = other_dimension(type)) {
+                throw InputError(where + ".type = \"" + type + "\" is " + other->first + ", and regions here are " +
+                                 (N_DIM == 2 ? "areas" : "volumes") + ": use " + other->second + ".");
+            }
+            if (type == "sphere" || type == "disk") {
                 n.kind = Kind::SPHERE;
                 frame = frame.then(I, vec(t, "center", where));
                 n.p[0] = positive(t, "radius", where);
-            } else if (type == "ellipsoid" || type == "ellipse") {
+            } else if (type == "ellipsoid") {
                 n.kind = Kind::ELLIPSOID;
                 frame = frame.then(I, vec(t, "center", where));
                 const Vec a = vec(t, "semi_axes", where);
@@ -306,7 +342,6 @@ class Parser {
                 n.kind = Kind::HALF_SPACE;
                 frame = frame.then(basis_along(direction(t, "normal", where)), vec(t, "point", where, zero));
             } else if (type == "polygon") {
-                if (N_DIM != 2) throw InputError(where + ": polygons are 2D regions.");
                 n.kind = Kind::POLYGON;
                 if (!t.contains("vertices") || !t.at("vertices").is_array() || t.at("vertices").as_array().size() < 3) {
                     throw InputError(where + " needs vertices = [[x, y], ...] (at least 3).");
@@ -326,9 +361,9 @@ class Parser {
                                       std::vector<std::string>{"x", "y", "z"});
                 bounded = false;
             } else {
-                throw InputError(where + ".type = \"" + type + "\" is not one of: sphere, ellipsoid, cylinder, cone, "
-                                 "box, torus, half_space, implicit, polygon, disk, annulus, ellipse, rectangle, "
-                                 "union, intersection, difference.");
+                std::string list;
+                for (const std::string & name : types()) list += (list.empty() ? "" : ", ") + name;
+                throw InputError(where + ".type = \"" + type + "\" is not one of: " + list + ".");
             }
             std::copy(frame.M.begin(), frame.M.end(), n.m);
             std::copy(frame.d.begin(), frame.d.end(), n.d);
@@ -455,11 +490,11 @@ struct Sampler {
 
 } // namespace
 
-std::vector<double> volume_fractions(const Mesh & mesh, const Region & region) {
+std::vector<double> cell_fractions(const Mesh & mesh, const Region & region) {
     const Sampler sampler{region, mesh.axisymmetric, N_DIM == 2 ? 8 : 5};
     std::vector<double> fractions(mesh.n_cells, 0.0);
     using HostSpace = Kokkos::DefaultHostExecutionSpace;
-    Kokkos::parallel_for("region_volume_fractions",
+    Kokkos::parallel_for("region_cell_fractions",
                          Kokkos::RangePolicy<HostSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, mesh.n_cells),
                          [&](const uint32_t i_cell) {
         double inside = 0.0, total = 0.0;

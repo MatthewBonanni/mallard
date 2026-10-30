@@ -185,7 +185,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         std::string region_text = "everywhere";
         if (!legacy && entry->contains("region")) {
             const region::Region r(entry->at("region"), where + ".region");
-            std::vector<double> fractions = region::volume_fractions(*mesh, r);
+            std::vector<double> fractions = region::cell_fractions(*mesh, r);
             std::vector<double> weighted(n_owned);
             for (uint32_t c = 0; c < n_owned; c++) weighted[c] = fractions[c] * measure[c];
             integral = ordered_sum(*mesh, weighted);

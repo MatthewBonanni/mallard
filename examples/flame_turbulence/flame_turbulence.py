@@ -33,7 +33,7 @@ flame's thickness); the turbulence is unchanged. Every DNS cell is the
 average of the profile over 4 points along x; with --ratio R the cells are
 averaged in R^3 blocks.
 
-analyze: per snapshot of RUN_DIR/solut (VTU pieces, read by cell centroid,
+analyze: per snapshot of RUN_DIR/solut (VTKHDF, or VTU pieces; read by cell centroid,
 so any rank count), the consumption speed S_c / S_L = int HRR dV / (Q_L L^2)
 (Q_L = int HRR dx of the laminar flame of FULL.csv, so a planar laminar flame
 gives 1; TFLES writes its modeled rate), the resolved flame surface
@@ -219,7 +219,7 @@ def init(args):
 # ---------------------------------------------------------------- analysis
 
 def read_snapshot(paths, h):
-    """Cell fields of the VTU pieces of one snapshot on the (i, j, k) lattice of spacing h."""
+    """Cell fields of one snapshot (its VTKHDF file, or VTU pieces) on the (i, j, k) lattice of spacing h."""
     from mallard.vtu import read_vtu_cells
     parts = [read_vtu_cells(p) for p in paths]
     t = parts[0][4]["TIME"] if "TIME" in parts[0][4] else np.nan
@@ -309,10 +309,11 @@ def read_npz(path):
 
 
 def snapshots(run):
-    """Snapshot groups of RUN/solut: {index: [piece paths]}."""
+    """Snapshot groups of RUN/solut: {index: [VTKHDF file, or VTU piece paths]}."""
     groups = {}
-    for p in sorted(glob.glob(os.path.join(run, "solut", "*.vtu"))):
-        m = re.search(r"_(\d+)(?:_p\d+)?\.vtu$", os.path.basename(p))
+    solut = os.path.join(run, "solut")
+    for p in sorted(glob.glob(os.path.join(solut, "*.vtkhdf"))) or sorted(glob.glob(os.path.join(solut, "*.vtu"))):
+        m = re.search(r"_(\d+)(?:_p\d+)?\.(?:vtu|vtkhdf)$", os.path.basename(p))
         if m:
             groups.setdefault(int(m.group(1)), []).append(p)
     return groups

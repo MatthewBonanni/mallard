@@ -59,6 +59,5 @@ check_interval = 1000
 
 [[write_data]]
 prefix = "./solut/shu_osher"
-format = "vtu"
 time_interval = 1.8
 variables = ["RHO", "U_X", "P"]
