@@ -49,6 +49,7 @@ filename = "ellipsoid.msh"
 [[mesh.curved]]
 zone = "ellipsoid"
 type = "ellipsoid"
+filled = false
 center = [0.0, 0.0, 0.0]
 semi_axes = [1.0, 0.5, 0.5]
 
