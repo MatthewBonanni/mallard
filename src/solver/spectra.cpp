@@ -22,6 +22,7 @@
 #include <sstream>
 
 #include "comm.h"
+#include "field_units.h"
 #include "input.h"
 #include "log.h"
 #include "mesh_block.h"
@@ -741,7 +742,15 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
     }
     out << "quantity,a,b,direction,position";
     for (size_t d : inhomogeneous) out << "," << AXES[d];
-    out << ",index,abscissa,value\n";
+    out << ",index,abscissa,value,units\n";
+    // The value's units: a mean's are its field's; spectra (sums, not densities) and correlations, the product's
+    std::vector<std::string> units(fields.size()), pair_units(pairs.size());
+    for (size_t f = 0; f < fields.size(); f++) units[f] = field_units::describe(fields[f]).units();
+    for (size_t p = 0; p < pairs.size(); p++) {
+        pair_units[p] = field_units::describe(fields[pairs[p].first])
+                            .dimension.times(field_units::describe(fields[pairs[p].second]).dimension)
+                            .udunits();
+    }
     auto position = [&](uint32_t pos) {
         std::ostringstream s;
         s << std::setprecision(std::numeric_limits<double>::max_digits10) << pos;
@@ -757,7 +766,7 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
     for (uint32_t pos = 0; pos < n_pos; pos++) {
         const std::string where = position(pos);
         for (uint32_t f = 0; f < fields.size(); f++) {
-            out << "mean," << fields[f] << ",,," << where << ",,," << mean(pos, f) << "\n";
+            out << "mean," << fields[f] << ",,," << where << ",,," << mean(pos, f) << "," << units[f] << "\n";
         }
         for (uint32_t p = 0; p < pairs.size(); p++) {
             const std::string ab = fields[pairs[p].first] + "," + fields[pairs[p].second];
@@ -766,12 +775,12 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
                 const std::vector<double> E = spectrum(pos, p, h);
                 for (uint32_t k = 0; k < E.size(); k++) {
                     out << "spectrum," << ab << "," << AXES[d] << "," << where << "," << k << ","
-                        << 2.0 * M_PI * k / L[d] << "," << E[k] << "\n";
+                        << 2.0 * M_PI * k / L[d] << "," << E[k] << "," << pair_units[p] << "\n";
                 }
                 const std::vector<double> R = correlation(pos, p, h);
                 for (uint32_t m = 0; m < R.size(); m++) {
                     out << "correlation," << ab << "," << AXES[d] << "," << where << "," << m << ","
-                        << L[d] * m / N[d] << "," << R[m] << "\n";
+                        << L[d] * m / N[d] << "," << R[m] << "," << pair_units[p] << "\n";
                 }
             }
         }
@@ -780,7 +789,8 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
         const std::string ab = fields[pairs[p].first] + "," + fields[pairs[p].second];
         const std::vector<double> E = shell(p);
         for (uint32_t s = 0; s < n_shells; s++) {
-            out << "shell," << ab << ",k," << position(0) << "," << s << "," << s * dk << "," << E[s] << "\n";
+            out << "shell," << ab << ",k," << position(0) << "," << s << "," << s * dk << "," << E[s] << ","
+                << pair_units[p] << "\n";
         }
     }
 }

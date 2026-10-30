@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Run `mallard upgrade-input` on every input file of every release.
+"""Run `mallard input upgrade` on every input file of every release.
 
     check_upgrade_input.py build/src/mallard [--tags v0.1.0,v0.8.0]
 
 For each tag v* (git show TAG:path) and each .toml under examples/,
-tutorials/ and benchmarks/, checks that upgrade-input succeeds, that its
+tutorials/ and benchmarks/, checks that `mallard input upgrade` succeeds, that its
 output is valid TOML with nothing left to upgrade (`--check` passes on it),
 and that a file with nothing to upgrade comes back byte for byte. Needs the
 tags (git fetch --tags). Standard library only (Python 3.11+).
@@ -47,7 +47,7 @@ def main():
                 files += 1
                 old, new = Path(tmp) / "old.toml", Path(tmp) / "new.toml"
                 old.write_text(text)
-                run = subprocess.run([args.mallard, "upgrade-input", str(old)], capture_output=True, text=True)
+                run = subprocess.run([args.mallard, "input", "upgrade", str(old)], capture_output=True, text=True)
                 name = f"{tag}:{path}"
                 if run.returncode != 0:
                     failures.append(f"{name}: exit {run.returncode}: {run.stderr.strip()}")
@@ -58,7 +58,7 @@ def main():
                 except tomllib.TOMLDecodeError as e:
                     failures.append(f"{name}: the output is not TOML: {e}")
                     continue
-                again = subprocess.run([args.mallard, "upgrade-input", "--check", str(new)],
+                again = subprocess.run([args.mallard, "input", "upgrade", "--check", str(new)],
                                        capture_output=True, text=True)
                 if again.returncode != 0:
                     failures.append(f"{name}: the output still has something to upgrade: {again.stderr.strip()}")

@@ -197,6 +197,7 @@ units by definition, for Mallard to read back.
 | XDMF (`.xmf`) | `<Information Name="units" Value="..."/>` and `<Information Name="long_name" .../>` in each `<Attribute>` |
 | VTU, VTP (each piece of a PVTU) | Field data: the string arrays `MALLARD_FIELD_NAMES`, `MALLARD_FIELD_UNITS` and `MALLARD_FIELD_LONG_NAMES`, entry *i* of each for the same array (VTK has no units attribute) |
 | CSV (forces, integrals, probes) | A line `# units: ...` after the header, one entry per column |
+| Spectra CSV (`[statistics.spectra]`) | A last column `units`: the units of each row's `value` |
 
 ```python
 import h5py
@@ -239,8 +240,12 @@ CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
 (`kg s-2`), and the wall model's `Q` in `W`; domain integrals carry the
 volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
 variable's units, `integral` times those of the measure (`m` along a curve,
-`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`). Axisymmetric runs are
-per radian throughout (a radian is dimensionless, so the units do not show it).
+`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`). In axisymmetric runs,
+forces and integrals are per radian of the revolved domain, and their units
+say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`. Spectra rows: a `mean` has its
+field's units, `spectrum`, `correlation` and `shell` (sums, not densities)
+the product of their pair's (`U_X*U_Y`: `m2 s-2`); the `abscissa` is a
+wavenumber in `m-1` (spectra, shells) or a separation in `m` (correlations).
 Files written before Mallard 0.9 have no units; the readers return them empty.
 
 ## Wall forces: `[[forces]]`
@@ -336,7 +341,7 @@ FFTs on the device, bitwise the same on any number of ranks.
 | `fields`, `products` | none | Variables (as `[statistics]`) and pairs `"A*B"` |
 | `directions` | periodic directions | Homogeneous directions |
 | `average` | `true` | Time averages, written to `file` with every snapshot and carried by restart files; `false`: one `<file stem>_<step>.csv` per sample |
-| `file` | `spectra.csv` | Output CSV (`quantity, a, b, direction, position, <coordinates>, index, abscissa, value`) |
+| `file` | `spectra.csv` | Output CSV (`quantity, a, b, direction, position, <coordinates>, index, abscissa, value, units`) |
 | `interval`, `t_start` | `[statistics]`'s | Sampling |
 
 The file holds plane means, one-sided spectra (sums, not densities: they
