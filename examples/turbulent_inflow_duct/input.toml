@@ -45,10 +45,12 @@ T = 1.0
 
 [[boundaries]]
 name = "left"
-type = "nscbc_inlet"
+type = "inlet_state"
 u = [1.0, 0.0, 0.0]
 p = 17.857142857142858
 T = 1.0
+
+[boundaries.nscbc]
 L = 6.0
 
 [boundaries.turbulence]
@@ -58,8 +60,10 @@ zero_net_flux = true
 
 [[boundaries]]
 name = "right"
-type = "nscbc_outlet"
+type = "outlet_pressure"
 p = 17.857142857142858
+
+[boundaries.nscbc]
 L = 6.0
 
 [numerics]

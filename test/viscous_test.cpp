@@ -42,8 +42,8 @@ std::unique_ptr<Solver> run_viscous(const ViscousCase & c) {
     s << "[run]\n" << c.run
       << "[mesh]\ntype = \"" << c.mesh << "\"\nNx = " << c.nx << "\nNy = " << c.ny << "\nLx = " << c.lx << "\nLy = 1.0\n"
       << "[initialize]\n" << c.init
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"bottom\"\n" << c.bottom
       << "[[boundaries]]\nname = \"top\"\n" << c.top
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
@@ -178,8 +178,8 @@ TEST_P(ViscousMesh, UniformFlowIsPreservedWithViscosity) {
     c.nx = 8;
     c.ny = 8;
     c.init = "type = \"analytical\"\nrho = \"1.1\"\nu = [\"0.3\", \"-0.2\"]\np = \"0.9\"\n";
-    c.bottom = "type = \"extrapolation\"\n";
-    c.top = "type = \"extrapolation\"\n";
+    c.bottom = "type = \"outlet_extrapolation\"\n";
+    c.top = "type = \"outlet_extrapolation\"\n";
     c.run = "n_steps = 50\ncfl = 0.4\n";
     auto solver = run_viscous(c);
     for (uint32_t i = 0; i < solver->get_mesh()->n_cells; i++) {

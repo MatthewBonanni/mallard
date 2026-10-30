@@ -79,11 +79,11 @@ file = "window.restart"
 
 [[boundaries]]
 name = "left"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "right"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"

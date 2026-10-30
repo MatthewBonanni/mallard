@@ -35,17 +35,21 @@ balance = "N2"
 
 [[boundaries]]
 name = "left"
-type = "nscbc_inlet"
+type = "inlet_state"
 u = [10.0, 0.0]
 p = 101325.0
 T = 300.0
-L = 2.4e-3
 X = { H2 = 0.29586, O2 = 0.14793, N2 = 0.55621 }
+
+[boundaries.nscbc]
+L = 2.4e-3
 
 [[boundaries]]
 name = "right"
-type = "nscbc_outlet"
+type = "outlet_pressure"
 p = 101325.0
+
+[boundaries.nscbc]
 L = 2.4e-3
 # type = "p_out"
 # p = 101325.0

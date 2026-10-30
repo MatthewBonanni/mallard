@@ -24,7 +24,7 @@ rhoE = "x > 0.4 and x < 0.6 ? 3.0e7 : 0.0"
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [17.22, 0.0]     # 20 kg/(m^2 s) at the initial density
 p = 1.0e5
 T = 300.0

@@ -29,19 +29,19 @@ Ly = 1.0
 
 [[boundaries]]
 name = "left"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "right"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "bottom"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [numerics]
 riemann_solver = "HLLC"

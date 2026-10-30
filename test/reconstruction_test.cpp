@@ -56,7 +56,7 @@ class MeshTypes : public ::testing::TestWithParam<std::string> {};
 
 TEST_P(MeshTypes, LSQGradientExactForLinearFieldInInterior) {
     auto mesh = make_mesh(GetParam(), 8, 7);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
     auto W = linear_cell_field(*mesh);
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> grad("grad", mesh->n_cells);
     LSQGradientFunctor functor = make_gradient(*mesh, bd, W, grad);
@@ -140,7 +140,7 @@ TEST_P(MeshTypes, VertexLSQGradientExactForQuadraticFieldWithDirichletBoundaries
 
 TEST_P(MeshTypes, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
     auto mesh = make_mesh(GetParam(), 8, 7);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
     auto W = linear_cell_field(*mesh);
     auto muscl = make_muscl(mesh, bd, "none");
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
@@ -161,7 +161,7 @@ TEST_P(MeshTypes, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
 
 TEST_P(MeshTypes, BarthJespersenFaceValuesStayWithinNeighborBounds) {
     auto mesh = make_mesh(GetParam(), 10, 10);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
     // Discontinuous field: a step in x plus a smooth bump
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
     auto h_W = Kokkos::create_mirror_view(W);
@@ -199,7 +199,7 @@ TEST_P(MeshTypes, BarthJespersenFaceValuesStayWithinNeighborBounds) {
 
 TEST_P(MeshTypes, FirstOrderCopiesCellValuesAndSkipsGhostSide) {
     auto mesh = make_mesh(GetParam(), 4, 3);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
     auto W = linear_cell_field(*mesh);
     FirstOrder fo;
     fo.set_mesh(mesh);

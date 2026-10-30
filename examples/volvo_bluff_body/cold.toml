@@ -61,10 +61,12 @@ T = 288.0
 
 [[boundaries]]
 name = "inlet"
-type = "nscbc_inlet"
+type = "inlet_state"
 u = [16.6, 0.0, 0.0]
 p = 101325.0
 T = 288.0
+
+[boundaries.nscbc]
 L = 0.88
 
 [boundaries.turbulence]
@@ -73,8 +75,10 @@ length_scale = 0.01
 
 [[boundaries]]
 name = "outlet"
-type = "nscbc_outlet"
+type = "outlet_pressure"
 p = 101325.0
+
+[boundaries.nscbc]
 L = 0.88
 
 [[boundaries]]

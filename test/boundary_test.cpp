@@ -29,7 +29,7 @@ std::string strip_input(const std::string & left, const std::string & bottom, co
       << "[mesh]\ntype = \"cartesian\"\nNx = " << nx << "\nNy = 4\nLx = 1.0\nLy = 0.04\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"1.0\", \"0.0\"]\np = \"1.0\"\n"
       << "[[boundaries]]\nname = \"left\"\n" << left
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << bottom
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -71,7 +71,7 @@ TEST(BoundaryTest, WhereSplitsAZoneBetweenConditions) {
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\nwhere = \"x < 0.5\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\nwhere = \"x >= 0.5\"\n";
     Solver solver;
-    EXPECT_NO_THROW(solver.init(parse_toml(strip_input("type = \"extrapolation\"\n", bottom, "n_steps = 1\ncfl = 0.2\n", 20))));
+    EXPECT_NO_THROW(solver.init(parse_toml(strip_input("type = \"outlet_extrapolation\"\n", bottom, "n_steps = 1\ncfl = 0.2\n", 20))));
 }
 
 TEST(BoundaryTest, OverlappingOrMissingAssignmentsAreRejected) {
@@ -82,9 +82,9 @@ TEST(BoundaryTest, OverlappingOrMissingAssignmentsAreRejected) {
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\nwhere = \"x < 0.3\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\nwhere = \"x >= 0.5\"\n";
     Solver a, b;
-    EXPECT_THROW(a.init(parse_toml(strip_input("type = \"extrapolation\"\n", overlap, "n_steps = 1\ncfl = 0.2\n", 20))),
+    EXPECT_THROW(a.init(parse_toml(strip_input("type = \"outlet_extrapolation\"\n", overlap, "n_steps = 1\ncfl = 0.2\n", 20))),
                  std::runtime_error);
-    EXPECT_THROW(b.init(parse_toml(strip_input("type = \"extrapolation\"\n", gap, "n_steps = 1\ncfl = 0.2\n", 20))),
+    EXPECT_THROW(b.init(parse_toml(strip_input("type = \"outlet_extrapolation\"\n", gap, "n_steps = 1\ncfl = 0.2\n", 20))),
                  std::runtime_error);
 }
 
@@ -128,8 +128,8 @@ TEST(BoundaryTest, AveragePressureOutletKeepsTransversePressureProfile) {
     // The mean of exp(-y) over [0, 1] is 1 - 1/e. A uniform back pressure
     // fights the hydrostatic profile; imposing only its average does not.
     const std::string target = "p = 0.6321205588285577\n";
-    const double uniform = outlet_profile_error("type = \"p_out\"\n" + target);
-    const double average = outlet_profile_error("type = \"p_out_average\"\n" + target);
+    const double uniform = outlet_profile_error("type = \"outlet_pressure\"\n" + target);
+    const double average = outlet_profile_error("type = \"outlet_pressure\"\naverage = true\n" + target);
     EXPECT_GT(uniform, 0.1);
     EXPECT_LT(average, 0.03);
 }
@@ -150,7 +150,7 @@ JetStart jet_into_rest(const std::string & left, const std::string & gas) {
           << "[mesh]\ntype = \"cartesian\"\nNx = 40\nNy = 4\nLx = 1.0\nLy = 0.1\n"
           << "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0]\np = 1.0e5\nT = 300.0\n" << (gas.empty() ? "" : "Y = { AIR = 1.0 }\n")
           << "[[boundaries]]\nname = \"left\"\n" << left << (gas.empty() ? "" : "Y = { AIR = 1.0 }\n")
-          << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+          << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
           << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
           << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
           << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
@@ -188,9 +188,9 @@ TEST(BoundaryTest, FastInflowIntoGasAtRestStartsAtTheTargetCFL) {
     const std::string perfect_air =
         "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
 "/test/data/chemistry/perfect_air.yaml\"\nphase = \"air\"\n";
-    for (const auto & [left, gas] : {std::pair<std::string, std::string>{"type = \"upt\"\n" + jet, ""},
-                                     {"type = \"nscbc_inlet\"\nL = 1.0\n" + jet, ""},
-                                     {"type = \"upt\"\n" + jet, perfect_air}}) {
+    for (const auto & [left, gas] : {std::pair<std::string, std::string>{"type = \"inlet_state\"\n" + jet, ""},
+                                     {"type = \"inlet_state\"\nnscbc.L = 1.0\n" + jet, ""},
+                                     {"type = \"inlet_state\"\n" + jet, perfect_air}}) {
         const JetStart r = jet_into_rest(left, gas);
         EXPECT_NEAR(r.dt_first, dt_expected, 1e-4 * dt_expected) << left << gas;
         EXPECT_GT(r.min_p, 0.5e5) << left << gas;

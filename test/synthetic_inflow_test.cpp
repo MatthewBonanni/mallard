@@ -107,8 +107,8 @@ TEST(SyntheticInflowTest, InletPlaneReproducesTargetStressesAndScales) {
     const double R_xx = 0.04, R_yy = 0.01, R_zz = 0.02, R_xy = -0.012;
     std::ostringstream b;
     b.precision(17);
-    b << "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [" << U0 << ", 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
-      << "p = 1.0\nT = 1.0\nL = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(R_xx, R_yy, R_zz, R_xy)
+    b << "name = \"left\"\ntype = \"inlet_state\"\nu = [" << U0 << ", 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
+      << "p = 1.0\nT = 1.0\nnscbc.L = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(R_xx, R_yy, R_zz, R_xy)
       // The plane mode removed by zero_net_flux carries about 4 L_y L_z / A of R_xx (2 L_y / W in 2D)
       << "\nzero_net_flux = false\n";
     if constexpr (N_DIM == 3) {
@@ -190,8 +190,8 @@ namespace {
 
 std::string isotropic_inlet(bool zero_net_flux) {
     std::ostringstream b;
-    b << "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [1.0, 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
-      << "p = 1.0\nT = 1.0\nL = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(0.01, 0.01, 0.01, 0.0) << "\n"
+    b << "name = \"left\"\ntype = \"inlet_state\"\nu = [1.0, 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
+      << "p = 1.0\nT = 1.0\nnscbc.L = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(0.01, 0.01, 0.01, 0.0) << "\n"
       << "length_scale = 0.3\nzero_net_flux = " << (zero_net_flux ? "true" : "false") << "\n";
     return b.str();
 }
@@ -220,11 +220,11 @@ std::string duct_input(const std::string & dir, const std::string & init, uint32
       << "[mesh]\ntype = \"cartesian\"\nNx = 10\nNy = 6\nLx = 1.0\nLy = 0.6\n"
       << (N_DIM == 3 ? "Nz = 6\nLz = 0.6\nperiodic = [\"y\", \"z\"]\n" : "periodic = [\"y\"]\n")
       << "[initialize]\n" << init
-      << "[[boundaries]]\nname = \"left\"\ntype = \"nscbc_inlet\"\nu = [\"1.0 + 0.1 * y\", 0.0"
-      << (N_DIM == 3 ? ", 0.0" : "") << "]\np = " << P_DUCT << "\nT = 1.0\nL = 1.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [\"1.0 + 0.1 * y\", 0.0"
+      << (N_DIM == 3 ? ", 0.0" : "") << "]\np = " << P_DUCT << "\nT = 1.0\nnscbc.L = 1.0\n"
       << "[boundaries.turbulence]\nreynolds_stress = " << stress_list(0.01, 0.005, 0.005, -0.002)
       << "\nlength_scale = 0.2\nseed = 7\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"nscbc_outlet\"\np = " << P_DUCT << "\nL = 1.0\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = " << P_DUCT << "\nnscbc.L = 1.0\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
       << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
       << "[physics]\ntype = \"navier_stokes\"\nmu = 0.002\nPr = 0.72\ngamma = 1.4\np_ref = " << P_DUCT

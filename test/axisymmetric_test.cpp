@@ -347,7 +347,7 @@ double mms_residual_error(const std::string & mesh, uint32_t n, const std::strin
              "rho = \"1 + 0.2 * sin(2 * pi * x) * cos(pi * y)\"\n"
              "u = [\"0.3 + 0.1 * cos(2 * pi * x) * cos(pi * y)\", \"0.1 * sin(pi * y) * (1 + 0.5 * sin(2 * pi * x))\"]\n"
              "p = \"1 + 0.2 * cos(2 * pi * x) * cos(pi * y)\"\n";
-    c.top = "type = \"extrapolation\"";
+    c.top = "type = \"outlet_extrapolation\"";
     Solver solver;
     solver.init(parse_toml(input(c)));
     const auto rhs = host_rhs(solver);

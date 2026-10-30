@@ -24,16 +24,20 @@ T = "288.0 + 1478.0 * (0.5 * (1 + tanh((x - 0.06) / 0.008)))"
 
 [[boundaries]]
 name = "left"
-type = "nscbc_inlet"
+type = "inlet_state"
 u = [17.3, 0.0, 0.0]
 p = 101325.0
 T = 288.0
+
+[boundaries.nscbc]
 L = 0.88
 
 [[boundaries]]
 name = "right"
-type = "nscbc_outlet"
+type = "outlet_pressure"
 p = 101325.0
+
+[boundaries.nscbc]
 L = 0.88
 
 [[boundaries]]

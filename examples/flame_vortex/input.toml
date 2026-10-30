@@ -118,7 +118,7 @@ file = "flame.restart"
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [1.5271245092529449, 0.0]
 p = 101325.0
 T = 300
@@ -126,7 +126,7 @@ X = { "H2" = 0.626959247648878, "O2" = 0.078369905956099162, "N2" = 0.2946708463
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 
 [[boundaries]]

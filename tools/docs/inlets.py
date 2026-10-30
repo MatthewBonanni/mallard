@@ -9,7 +9,7 @@ from figstyle import bare, label
 
 INLETS = {
     "inlet_stagnation": dict(
-        title="stagnation_inlet",
+        title="inlet_stagnation",
         imposed=[r"$p_0$, $T_0$", "flow direction", "composition (mixtures)"],
         interior=["outgoing Riemann invariant", r"$u - 2c / (\gamma_c - 1)$"],
         state=[r"speed $|u|$ from the invariant",
@@ -18,7 +18,7 @@ INLETS = {
         waves={"u": "imposed", "u+c": "imposed", "u-c": "interior"},
     ),
     "inlet_mass_flow": dict(
-        title="mass_flow_inlet",
+        title="inlet_mass_flow",
         imposed=[r"mass flux $\rho u$ ($\dot m$ / area)", r"$T$, flow direction", "composition (mixtures)"],
         interior=["outgoing acoustic wave", r"$p - \rho c\, u$"],
         state=[r"$p$ from the wave with $u = \rho u / \rho$",
