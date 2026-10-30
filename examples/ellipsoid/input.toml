@@ -28,7 +28,9 @@ filename = "ellipsoid.msh"
 
 [[mesh.curved]]
 zone = "ellipsoid"
-shape = {type = "ellipsoid", center = [0.0, 0.0, 0.0], semi_axes = [1.0, 0.5, 0.5]}
+type = "ellipsoid"
+center = [0.0, 0.0, 0.0]
+semi_axes = [1.0, 0.5, 0.5]
 
 [initialize]
 type = "constant"
@@ -99,16 +101,17 @@ format = "vtu"
 time_interval = 10.0
 variables = ["RHO", "U", "P"]
 
+# The wall and the meridian plane y = 0, often enough for an animation
 [[write_data]]
 prefix = "./solut/wall"
 format = "vtu"
 geometry = "ellipsoid"
-time_interval = 10.0
+time_interval = 0.25
 variables = ["P"]
 
 [[write_data]]
 prefix = "./solut/y0"
 format = "vtu"
 geometry = "symmetry_y"
-time_interval = 10.0
+time_interval = 0.25
 variables = ["RHO", "U", "P"]

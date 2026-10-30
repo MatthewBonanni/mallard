@@ -140,6 +140,7 @@ The figure is in [Meshes](../docs/guide/meshes.md#mesh-quality).
 | Script | Mesh | Example |
 |---|---|---|
 | `make_sphere_mesh.py` | Tetrahedra of the quarter domain around a sphere (symmetry planes `symmetry_y`, `symmetry_z`), refined on the sphere and through the bow-shock layer; `--order 2`/`3` curves the sphere | [`sphere_mach3`](../examples/sphere_mach3) |
+| `make_ellipsoid_mesh.py` | Tetrahedra of the quarter domain around a prolate spheroid (symmetry planes `symmetry_y`, `symmetry_z`), flat on the spheroid for `[[mesh.curved]]` to curve; `--scale` refines everything for mesh studies | [`ellipsoid`](../examples/ellipsoid) |
 | `make_sphere_re300_mesh.py` | The full domain around a sphere: a prism boundary layer, tetrahedra refined through the near wake; `--scale` refines everything for mesh studies | [`sphere_re300`](../examples/sphere_re300) |
 | `make_volvo_mesh.py` | Hexahedra of the Volvo bluff-body combustor: four blocks around the triangular flameholder, mesh lines normal to its faces, periodic in span | [`volvo_bluff_body`](../examples/volvo_bluff_body) |
 | `make_nozzle_mesh.py` | Quadrilaterals of the upper half of a planar converging-diverging nozzle | [`nozzle`](../examples/nozzle) |
@@ -385,6 +386,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`sphere_axisymmetric`](../examples/sphere_axisymmetric) | `make_cylinder_mesh.py --half` | `plot_sphere_axisymmetric.py`: drag, separation angle and wake length | |
 | [`sedov_3d`](../examples/sedov_3d) | | `sedov.py` | `animate_sedov.py` |
 | [`sphere_mach3`](../examples/sphere_mach3) | `make_sphere_mesh.py` | `plot_sphere.py`: bow-shock standoff against Billig | `animate_sphere.py` |
+| [`ellipsoid`](../examples/ellipsoid) | `make_ellipsoid_mesh.py` | `compare_ellipsoid.py`: flat against curved wall faces, drag and entropy error (exact: 0) and wall pressure against potential flow, over mesh scales | |
 | [`sphere_re300`](../examples/sphere_re300) | `make_sphere_re300_mesh.py` | `plot_sphere_re300.py`: Strouhal number, drag and lift | `animate_sphere_re300.py` |
 | [`taylor_green_3d`](../examples/taylor_green_3d) | | `plot_taylor_green.py`: kinetic energy and dissipation rate against the spectral DNS | `animate_taylor_green.py` |
 | [`isotropic_turbulence`](../examples/isotropic_turbulence) | `isotropic_turbulence_restart.py` | `isotropic_turbulence_stats.py`, `plot_isotropic_turbulence.py`: filtered statistics and spectra against Johnsen et al. | `animate_isotropic_turbulence.py` |

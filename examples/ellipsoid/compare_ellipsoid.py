@@ -6,18 +6,17 @@
         [--launcher 'mpirun -n 2'] [-o ellipsoid.png]
 
 For each mesh scale (make_ellipsoid_mesh.py --scale) and geometry, runs
-examples/ellipsoid/input.toml as it is (curved) or without its [[mesh.curved]] entry
-(flat faces) and
-reports the drag coefficient (exact: 0), averaged over the last quarter of the
-run and based on the frontal area pi b^2, the entropy error
-s / s_inf - 1 (s = p / rho^gamma; exact: 0), its volume-weighted RMS over
-|x| < 3 and its maximum, and the RMS difference of the wall pressure
-coefficient from incompressible potential flow (Lamb, Hydrodynamics, ch. V). Results go
-to RUN_DIR/results.json, a table, and with -o a figure of the wall pressure
-and of the errors against the mesh size.
+examples/ellipsoid/input.toml as it is (curved) or without its [[mesh.curved]]
+entry (flat faces), in RUN_DIR/<geometry>_s<scale> unless that run finished,
+and reports the drag coefficient (exact: 0), averaged over the last quarter of
+the run and based on the frontal area pi b^2; the entropy error s / s_inf - 1
+(s = p / rho^gamma; exact: 0) at the end, its volume-weighted RMS and maximum
+within the spheroid scaled by 3; and the RMS difference of the wall pressure
+coefficient from incompressible potential flow (Lamb, Hydrodynamics, ch. V).
+Prints a table, and with -o draws the wall pressure and the errors against
+the mesh size.
 """
 import argparse
-import json
 import os
 import re
 import subprocess
@@ -68,11 +67,13 @@ def last_file(directory, prefix):
 
 def run_case(case_dir, args, scale, geometry):
     os.makedirs(case_dir, exist_ok=True)
-    mesh = os.path.join(case_dir, "ellipsoid.msh")
+    # One mesh per scale for both geometries (Gmsh's parallel 3D mesher is not deterministic)
+    mesh = os.path.join(args.run_dir, f"ellipsoid_s{scale:g}.msh")
     if not os.path.exists(mesh):
         subprocess.run([sys.executable, os.path.join(HERE, "make_ellipsoid_mesh.py"), mesh, "--scale", str(scale)],
                        check=True, stdout=subprocess.DEVNULL)
     text = open(os.path.join(HERE, "input.toml")).read()
+    text = re.sub(r'(?m)^filename = "ellipsoid.msh"$', f'filename = "{os.path.abspath(mesh)}"', text)
     if geometry == "straight":
         text = re.sub(r"\[\[mesh\.curved\]\]\n(.+\n)+", "", text)
     text = re.sub(r"(?m)^t_stop = .*$", f"t_stop = {args.t_stop}", text)
@@ -82,8 +83,16 @@ def run_case(case_dir, args, scale, geometry):
         f.write(text)
     cmd = args.launcher.split() + [args.mallard, "-i", "input.toml", f"--kokkos-num-threads={args.threads}"]
     with open(os.path.join(case_dir, "log.txt"), "w") as log:
-        rc = subprocess.run(cmd, cwd=case_dir, stdout=log, stderr=subprocess.STDOUT).returncode
-    if rc != 0:
+        subprocess.run(cmd, cwd=case_dir, stdout=log, stderr=subprocess.STDOUT)
+
+
+def finished(case_dir):
+    log = os.path.join(case_dir, "log.txt")
+    return os.path.exists(log) and "t_stop = " in open(log).read().split("== Summary")[-1]
+
+
+def analyze(case_dir, scale, geometry):
+    if not finished(case_dir):
         return {"scale": scale, "geometry": geometry, "failed": True}
     solut = os.path.join(case_dir, "solut")
 
@@ -95,7 +104,7 @@ def run_case(case_dir, args, scale, geometry):
     volume = tet_volumes(points, conn, offsets)
     centroid = cell_centroids(points, conn, offsets)
     ds = fields["P"] / fields["RHO"] ** GAMMA / P_INF - 1.0
-    near = np.abs(centroid[:, 0]) < 3.0
+    near = np.sum((centroid / np.array([A, B, B])) ** 2, axis=1) < 9.0
     s_rms = np.sqrt(np.sum(volume[near] * ds[near] ** 2) / np.sum(volume[near]))
 
     wpoints, wconn, woffsets, _, wfields = read_vtu_cells(last_file(solut, "wall"))
@@ -104,7 +113,7 @@ def run_case(case_dir, args, scale, geometry):
     cp_rms = np.sqrt(np.mean((cp - cp_potential(*wc.T)) ** 2))
     order = np.argsort(wc[:, 0])
     return {"scale": scale, "geometry": geometry, "n_cells": int(len(volume)), "Cd": float(cd),
-            "entropy_rms": float(s_rms), "entropy_max": float(np.abs(ds).max()), "cp_rms": float(cp_rms),
+            "entropy_rms": float(s_rms), "entropy_max": float(np.abs(ds[near]).max()), "cp_rms": float(cp_rms),
             "wall_x": wc[order, 0].tolist(), "wall_cp": cp[order].tolist(), "failed": False}
 
 
@@ -151,17 +160,13 @@ def main():
     args = ap.parse_args()
     args.mallard = os.path.abspath(args.mallard)
     os.makedirs(args.run_dir, exist_ok=True)
-    results_file = os.path.join(args.run_dir, "results.json")
-    results = json.load(open(results_file)) if os.path.exists(results_file) else []
-    done = {(r["scale"], r["geometry"]) for r in results}
+    results = []
     for scale in args.scales:
         for geometry in args.geometry:
-            if (scale, geometry) in done:
-                continue
-            r = run_case(os.path.join(args.run_dir, f"{geometry}_s{scale:g}"), args, scale, geometry)
-            results.append(r)
-            json.dump(results, open(results_file, "w"))
-            print(f"scale {scale:g} {geometry}: " + ("failed" if r["failed"] else "done"), flush=True)
+            case_dir = os.path.join(args.run_dir, f"{geometry}_s{scale:g}")
+            if not finished(case_dir):
+                run_case(case_dir, args, scale, geometry)
+            results.append(analyze(case_dir, scale, geometry))
     print(f"{'scale':>5} {'geometry':>9} {'cells':>7} {'Cd':>10} {'s_rms':>10} {'s_max':>10} {'Cp_rms':>8}")
     for r in sorted(results, key=lambda r: (r["scale"], r["geometry"])):
         if r["failed"]:

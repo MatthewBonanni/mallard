@@ -315,8 +315,7 @@ center = [0.0, 0.0]
 radius = 0.5
 ```
 
-*Used in:* `examples/ellipse` (an elliptic cylinder) and the curved-boundary
-validation (`tools/dev/curved_convergence.py`).
+*Used in:* [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid).
 
 Boundary faces can follow the true geometry instead of straight edges or flat
 facets. Curved faces get quadrature points on the curve with their own normals,
