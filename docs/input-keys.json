@@ -56,6 +56,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "array"
@@ -320,6 +321,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "string"
@@ -419,6 +421,7 @@
    "examples/triple_flame/thick/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
@@ -447,7 +450,8 @@
   "set_in": [
    "examples/double_mach/input.toml",
    "examples/noh_axisymmetric/input.toml",
-   "examples/shu_osher/input.toml"
+   "examples/shu_osher/input.toml",
+   "tutorials/cluster/input.toml"
   ]
  },
  "boundaries.turbulence": {
@@ -574,6 +578,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "string",
@@ -617,6 +622,7 @@
    "examples/triple_flame/thick/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ]
  },
@@ -722,7 +728,8 @@
   ],
   "required": true,
   "set_in": [
-   "examples/double_mach/input.toml"
+   "examples/double_mach/input.toml",
+   "tutorials/cluster/input.toml"
   ],
   "type": "string"
  },
@@ -1772,6 +1779,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ]
  },
@@ -1839,6 +1847,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
@@ -1907,6 +1916,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
@@ -2028,6 +2038,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "integer"
@@ -2094,6 +2105,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "integer"
@@ -2309,6 +2321,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "string",
@@ -2390,6 +2403,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ]
  },
@@ -3228,6 +3242,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ]
  },
@@ -3319,6 +3334,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
@@ -3382,6 +3398,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
@@ -3529,6 +3546,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
@@ -3602,6 +3620,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
@@ -3702,6 +3721,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "string",
@@ -4092,6 +4112,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ]
  },
@@ -4162,6 +4183,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
@@ -4286,6 +4308,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
