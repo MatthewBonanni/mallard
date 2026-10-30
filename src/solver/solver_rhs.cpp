@@ -217,7 +217,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     // The first stage reuses the halo that calc_dt filled
     const bool exchange = halo.active() && !(halo_current && solution.data() == conservatives.data());
     halo_current = false;
-    update_boundary_states(t_stage);
+    update_boundary_states(t_stage, c);
     if (!average_pressure_outlets.empty()) {
         update_average_pressure_outlets(solution);
     }
@@ -362,14 +362,7 @@ void Solver::add_sources(const State & solution, const State & rhs_state, const 
         });
     }
     if (!source_terms) return;
-    if (source_terms->time_dependent()) {
-        if (recording_step) {
-            record_stage_time(c);
-        } else {
-            const Kokkos::View<rtype> st = stage_time;
-            Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = t_stage; });
-        }
-    }
+    if (source_terms->time_dependent()) set_stage_time(t_stage, c);
     source_terms->add(solution, rhs_state, stage_time);
 }
 

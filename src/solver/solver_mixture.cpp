@@ -314,13 +314,27 @@ class CompositionExpressions {
                 const int32_t k = mixture.mechanism().species_index(species);
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
-                values.emplace_back(where + "." + key + "." + species, quantity_or_expression(value, species, dim::none));
+                texts.push_back(quantity_or_expression(value, species, dim::none));
+                values.emplace_back(where + "." + key + "." + species, texts.back());
             }
             if (table.contains("balance")) {
                 const std::string species = find_value<std::string>(table, "balance");
                 balance = mixture.mechanism().species_index(species);
                 if (balance < 0) throw InputError(where + ".balance: no species " + species + " in the mechanism.");
             }
+        }
+
+        /** @brief The fractions compiled as expressions of x, y, z, t, for the device. */
+        std::shared_ptr<CompositionPrograms> compiled() const {
+            auto c = std::make_shared<CompositionPrograms>();
+            for (size_t i = 0; i < listed.size(); i++) {
+                c->species.push_back(static_cast<uint32_t>(listed[i]));
+                c->fractions.push_back(std::make_shared<expr::Program>(where + ".composition", texts[i],
+                                                                       BoundaryValue::variables()));
+            }
+            c->balance = balance;
+            c->mole = mole;
+            return c;
         }
 
         /** @brief Mass fractions at the point with coordinates x[0..N_DIM). */
@@ -347,6 +361,7 @@ class CompositionExpressions {
         bool mole = false;
         int32_t balance = -1;
         std::vector<int32_t> listed;
+        std::vector<std::string> texts;
         std::vector<Expression> values;
 };
 
@@ -433,7 +448,7 @@ void Solver::init_temperature_seed() {
 void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype c) {
     const bool exchange = halo.active() && !(halo_current && state.flow.data() == conservatives.data());
     halo_current = false;
-    update_boundary_states(t_stage);
+    update_boundary_states(t_stage, c);
     if (exchange) halo.exchange(state);
     update_cell_states(state, !budget_pass);
     face_reconstruction->calc_face_values(W_cells, face_solution);
@@ -696,22 +711,27 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
             case BoundaryType::STAGNATION_INLET:
             case BoundaryType::MASS_FLOW_INLET: {
                 const char * T_key = bcs[i_bc].type == BoundaryType::STAGNATION_INLET ? "T0" : "T";
-                const double T = static_cast<double>(find_real(bound, T_key, dim::temperature));
-                if (!MixtureModel::composition_varies(bound)) {
-                    const std::vector<double> Y = mixture_model->mass_fractions(bound, where);
-                    prescribe(i_bc, Y, T);
-                    // Faces with a condition of their own for their mass flux
-                    for (size_t k = 0; k < profiled_faces.size(); k++) {
-                        if (profiled_faces[k][0] == i_bc) prescribe(input_boundaries.size() + k, Y, T);
-                    }
-                    break;
+                // The temperature and composition of the condition, or of each face where they are expressions
+                const bool T_varies = BoundaryValue::is_expression(bound.at(T_key));
+                const BoundaryFields * fields = boundary_fields[i_bc].get();
+                const double T_uniform = T_varies ? 0.0 : static_cast<double>(find_real(bound, T_key, dim::temperature));
+                std::shared_ptr<CompositionExpressions> composition;
+                std::vector<double> Y_uniform;
+                if (MixtureModel::composition_varies(bound)) {
+                    composition = std::make_shared<CompositionExpressions>(*mixture_model, bound, where);
+                    const auto programs = composition->compiled();
+                    if (programs->depends_on_time()) boundary_composition[i_bc] = programs;
+                } else {
+                    Y_uniform = mixture_model->mass_fractions(bound, where);
+                    if (!T_varies) prescribe(i_bc, Y_uniform, T_uniform);
                 }
-                // Each face's own copy of the condition, at the composition of its center
-                const CompositionExpressions composition(*mixture_model, bound, where);
                 for (size_t k = 0; k < profiled_faces.size(); k++) {
                     if (profiled_faces[k][0] != i_bc) continue;
                     const auto center = Kokkos::subview(mesh->h_face_coords, profiled_faces[k][1], Kokkos::ALL());
-                    prescribe(input_boundaries.size() + k, composition.mass_fractions(center), T);
+                    Point x{};
+                    FOR_I_DIM x[i] = static_cast<double>(center(i));
+                    const double T = T_varies ? fields->temperature(x, 0.0) : T_uniform;
+                    prescribe(input_boundaries.size() + k, composition ? composition->mass_fractions(center) : Y_uniform, T);
                 }
                 break;
             }

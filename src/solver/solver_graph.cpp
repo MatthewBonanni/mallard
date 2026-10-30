@@ -76,9 +76,13 @@ void Solver::record_step() {
     // The run-control requests ride along the time-step reduction
     Kokkos::deep_copy(exec, Kokkos::subview(step_reduce, Kokkos::make_pair(1, N_REDUCE)),
                       Kokkos::subview(step_io, Kokkos::make_pair(IO_REQUESTS, IO_DT)));
-    // calc_dt
+    // calc_dt, with the boundary conditions of t at the step's start as calc_dt has them
     halo.exchange(state());
     halo_current = true;
+    if (!timed_fields.empty()) {
+        record_stage_time(0.0_r);
+        apply_boundary_fields();
+    }
     calc_dt_cfl1(Kokkos::View<rtype>(step_reduce.data()));
 #ifdef Mallard_HAS_NCCL
     if (is_distributed()) {
@@ -134,6 +138,15 @@ void Solver::record_step() {
 #endif
         step_controller.update(dt, step_scalars.data() + STEP_DT, state(), solution_vec.back());
         Kokkos::deep_copy(exec, Kokkos::subview(step_io, IO_ACCEPTED), Kokkos::subview(control, int(StepController::ACCEPTED)));
+    }
+}
+
+void Solver::set_stage_time(const rtype t_stage, const rtype c) {
+    const Kokkos::View<rtype> st = stage_time;
+    if (recording_step) {
+        record_stage_time(c);
+    } else {
+        Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = t_stage; });
     }
 }
 
@@ -197,6 +210,7 @@ void Solver::graph_step() {
         }
         if (step_graph_exec) {
             cuda_check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec), stream), "cudaGraphLaunch");
+            graph_steps++;
         } else {
             record_step();
         }

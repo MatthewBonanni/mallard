@@ -24,6 +24,7 @@
 
 #include "mesh.h"
 #include "boundary.h"
+#include "boundary_fields.h"
 #include "face_reconstruction.h"
 #include "riemann_solver.h"
 #include "time_integrator.h"
@@ -249,6 +250,8 @@ class Solver {
         /** @brief Inside a captured step: the step's dt on the device. */
         const rtype * step_dt_device() const;
         void update_average_pressure_outlets(StateView solution);
+        /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
+        void set_stage_time(rtype t_stage, rtype c);
         /**
          * @brief Add the uniform body force along the mass flow direction that
          *        holds the volume average of rho u at its target: it cancels the
@@ -466,6 +469,8 @@ class Solver {
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
         uint64_t get_step() const { return step; }
+        /** @brief Steps launched as a captured CUDA graph so far. */
+        uint64_t get_graph_steps() const { return graph_steps; }
         /** @brief Steps rejected by the error controller in this run. */
         uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
@@ -528,10 +533,14 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
-        void update_boundary_states(rtype t_eval);
+        void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
+        /** @brief The faces' own conditions whose numbers depend on t, on the device at the stage time. */
+        void update_boundary_fields(rtype t_eval, rtype c);
+        /** @brief The faces' own conditions that depend on t, at the time in stage_time. */
+        void apply_boundary_fields();
         /**
          * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
          *        face for a mass_flux expression or an mdot with a profile,
@@ -581,6 +590,7 @@ class Solver {
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
+        uint64_t graph_steps = 0;
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
         Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, requests, dt, reduced]
@@ -647,6 +657,8 @@ class Solver {
         void init_mixture_boundaries(const std::vector<Input> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
+        /** @brief Write the conditions' bc_Y, bc_thermo and bc_transport_values to the device. */
+        void copy_boundary_gas();
 
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
         uint32_t n_early_cells = 0;
@@ -714,6 +726,12 @@ class Solver {
         Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
         rtype t_boundary_states;
         bool boundary_states_steady = false;  // evaluated, and no expression depends on t
+        // The numbers of each input boundary, per face where they vary; for mixtures, the composition per input
+        // boundary where it depends on t; the faces' own conditions that depend on t, evaluated on the device
+        std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
+        std::vector<std::shared_ptr<CompositionPrograms>> boundary_composition;
+        std::vector<std::array<uint32_t, 3>> field_faces;  // (input boundary, face, its own condition)
+        TimedBoundaryFields timed_fields;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1_r;
@@ -864,6 +882,8 @@ class Solver {
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
         // Synthetic turbulence of inlets, and the time of the targets in char_target
         std::vector<std::unique_ptr<SyntheticInflow>> inflows;
+        // nscbc_inlet velocities depending on t
+        TimedInletTargets timed_inlets;
         rtype t_inflow = -1.0;
 
         // Checks
