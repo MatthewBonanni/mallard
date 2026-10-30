@@ -46,10 +46,13 @@ size_t matches(std::string_view name, const std::vector<std::string> & args) {
 
 bool is_prefix(const Option & o) { return o.name.ends_with('*'); }
 
+/** @brief The option of arg; a prefix option first, which passes through the options it documents too. */
 const Option * find_option(const Command & command, std::string_view arg) {
     for (const Option & o : command.options) {
-        if (arg == o.name || (!o.alias.empty() && arg == o.alias)) return &o;
         if (is_prefix(o) && arg.starts_with(o.name.substr(0, o.name.size() - 1))) return &o;
+    }
+    for (const Option & o : command.options) {
+        if (arg == o.name || (!o.alias.empty() && arg == o.alias)) return &o;
     }
     return nullptr;
 }
@@ -104,7 +107,7 @@ std::string wrap(std::string_view text, size_t indent, size_t first_column = 0) 
 
 std::string label(const Option & o) {
     std::string text = o.alias.empty() ? std::string(o.name) : std::string(o.alias) + ", " + std::string(o.name);
-    if (!o.value.empty()) text += " " + std::string(o.value);
+    if (!o.value.empty()) text += (o.value.starts_with('=') ? "" : " ") + std::string(o.value);
     return text;
 }
 
@@ -322,8 +325,7 @@ int main(int argc, char ** argv) {
     }
     if (parsed.help) {
         print_help(std::cout, *command);
-        if (!command->run_after_help) return 0;
-        std::cout << std::flush;
+        return 0;
     } else if (command->name.empty() && args.empty()) {
         print_help(std::cerr, *command);
         return 2;

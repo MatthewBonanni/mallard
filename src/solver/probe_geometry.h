@@ -27,9 +27,10 @@ using Vec3 = std::array<double, 3>;
 using Point = std::array<double, N_DIM>;
 
 /**
- * @brief Affine map x -> A x + t with A = R S: scale (a number or one
- *        factor per axis), then rotate (2D: an angle in degrees; 3D:
- *        {axis, angle}), then translate.
+ * @brief Affine map x -> A x + t with A = R S, as the regions of #317 take
+ *        it: scale (a number or one factor per axis), then rotate (2D: an
+ *        angle in degrees; 3D: {axis, angle} or {axes}), both about `pivot`,
+ *        then translate.
  */
 struct Transform {
     std::array<Vec3, 3> A = {Vec3{1.0, 0.0, 0.0}, Vec3{0.0, 1.0, 0.0}, Vec3{0.0, 0.0, 1.0}};
@@ -48,13 +49,25 @@ struct Transform {
  *        are those the reductions sum over.
  */
 struct Geometry {
-    uint8_t dim = 0;  // 0: point set, 1: curves
+    uint8_t dim = 0;  // 0: point set, 1: curves, 2: surfaces
     std::string shape;
     std::vector<Point> nodes;
     std::vector<double> arc_length;                // curves: per node, from the start of its curve
     std::vector<std::vector<uint32_t>> polylines;  // curves: node indices in order, closed ones end at their start
     std::vector<Point> quad_points;
     std::vector<double> quad_weights;
+    std::vector<Point> quad_normals;  // surfaces and 2D curves: unit normals of the quadrature points
+    // Samples that are their own quadrature points (no quad_points): the
+    // measure of each one's element (empty: unit weights); unit normals of
+    // the samples of surfaces and 2D curves
+    std::vector<double> node_weights;
+    std::vector<Point> normals;
+    bool revolved = false;  // axisymmetric runs: node_weights per radian of the revolved surface
+    // Surfaces: polygons over the vertices, each a sample (cell data), or
+    // without vertices over the nodes (point data)
+    std::vector<Point> vertices;
+    std::vector<uint64_t> polygon_offsets;  // polygons + 1
+    std::vector<uint32_t> polygon_vertices;
 };
 
 /** @brief The geometry of a [[probes]] entry (key names it in errors). */

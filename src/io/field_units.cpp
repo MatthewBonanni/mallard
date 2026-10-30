@@ -33,6 +33,11 @@ const Entry VECTORS[] = {
     {"RHOU", momentum_density, "momentum density"},
     {"U", dim::velocity, "velocity"},
     {"VORTICITY", dim::rate, "vorticity"},
+    // Probes: fluxes through surfaces, wall quantities
+    {"MOMENTUM_FLUX", dim::pressure, "normal momentum flux"},
+    {"TRACTION_PRESSURE", dim::pressure, "pressure traction on the boundary"},
+    {"TRACTION_VISCOUS", dim::pressure, "viscous traction on the boundary"},
+    {"TAU_W", dim::pressure, "wall shear stress"},
 };
 
 const Entry NAMED[] = {
@@ -57,6 +62,15 @@ const Entry NAMED[] = {
     {"TF_OMEGA", dim::none, "flame sensor"},
     {"PASR_KAPPA", dim::none, "PaSR reacting fraction"},
     {"P_MAX", dim::pressure, "largest pressure seen"},
+    // Probes: fluxes through surfaces, wall quantities
+    {"MASS_FLUX", dim::mass_flux, "normal mass flux"},
+    {"ENTHALPY_FLUX", dim::heat_flux, "normal total enthalpy flux"},
+    {"TAU_W", dim::pressure, "wall shear stress magnitude"},
+    {"CF", dim::none, "skin friction coefficient"},
+    {"CP", dim::none, "pressure coefficient"},
+    {"Q_W", dim::heat_flux, "wall heat flux into the fluid"},
+    {"U_TAU", dim::velocity, "friction velocity"},
+    {"Y_PLUS", dim::none, "first-cell y+"},
     // Mesh quality (mallard check --quality)
     {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", "degree"},
     {"SKEWNESS", dim::none, "largest face skewness"},
@@ -72,6 +86,7 @@ const Entry SPECIES[] = {
     {"D_", diffusivity, "diffusion coefficient of "},
     {"DT_", thermal_diffusion, "thermal diffusion coefficient of "},
     {"OMEGA_", dim::mass_source, "net production rate of "},
+    {"SPECIES_FLUX_", dim::mass_flux, "normal mass flux of "},
 };
 
 bool starts_with(const std::string & s, const std::string & prefix) { return s.rfind(prefix, 0) == 0; }
