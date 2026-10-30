@@ -415,9 +415,9 @@ TEST(ProbesTest, RegionsOfTheMeshAreTheSameOnAnyNumberOfRanks) {
     }
     const auto & mesh_s = *serial.get_mesh();
     double left = 0.0;
-    for (uint32_t c = 0; c < mesh_s.n_cells; c++) left += mesh_s.h_cell_coords(c, 0) < 0.5 ? double(mesh_s.h_cell_volume(c)) : 0.0;
-    EXPECT_NEAR(read_csv(dir + "/half_serial.csv")[0].at("area"), left, 1e-14);
-    EXPECT_NEAR(read_csv(dir + "/inside_serial.csv")[0].at("area"), 1.0, 1e-14);
+    for (uint32_t c = 0; c < mesh_s.n_cells; c++) left += mesh_s.h_cell_coords(c, 0) < 0.5_r ? double(mesh_s.h_cell_volume(c)) : 0.0;
+    EXPECT_NEAR(read_csv(dir + "/half_serial.csv")[0].at("area"), left, precision_tol<double>(1e-14, 1e-5));
+    EXPECT_NEAR(read_csv(dir + "/inside_serial.csv")[0].at("area"), 1.0, precision_tol<double>(1e-14, 1e-5));
 }
 #endif
 
