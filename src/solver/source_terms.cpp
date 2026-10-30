@@ -135,7 +135,8 @@ struct Accumulate {
 } // namespace
 
 SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh_,
-                         const std::vector<std::string> & species, const CellFields & fields_) :
+                         const std::vector<std::string> & species, const CellFields & fields_,
+                         region::Regions & regions) :
     mesh(mesh_), fields(fields_), n_species(static_cast<uint32_t>(species.size())) {
     std::vector<std::string> names(FIXED_NAMES.begin(), FIXED_NAMES.end());
     if constexpr (N_DIM == 2) names[U_Z] = names[MEAN_RHOU_Z] = "";
@@ -184,8 +185,9 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         double integral = volume;
         std::string region_text = "everywhere";
         if (!legacy && entry->contains("region")) {
-            const region::Region r(entry->at("region"), where + ".region");
-            std::vector<double> fractions = region::cell_fractions(*mesh, r);
+            const region::Region & r = regions.get(entry->at("region"), where + ".region");
+            region::require_full_dimension(r, where + ".region");
+            std::vector<double> fractions = regions.fractions(entry->at("region"), where + ".region");
             std::vector<double> weighted(n_owned);
             for (uint32_t c = 0; c < n_owned; c++) weighted[c] = fractions[c] * measure[c];
             integral = ordered_sum(*mesh, weighted);

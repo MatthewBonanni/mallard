@@ -31,9 +31,10 @@ DG).
    (Gmsh writes planes at the mesh's order too). `mallard mesh convert` keeps
    the high-order boundary faces in the HDF5 file (`boundary/high_order`).
 2. **Projection onto a region's surface** for meshes without high-order nodes
-   (generated, P1 Gmsh, HDF5): `[[mesh.curved]]` names a zone and a
-   [region](../guide/geometry.md#regions) (#407), whose surface (in 2D: the
-   boundary curve of its area, or a `circle` or `ellipse`) the zone lies on.
+   (generated, P1 Gmsh, HDF5): `[[mesh.curved]]` names a zone and a surface
+   [region](../guide/geometry.md#regions) (#407; 2D: a curve), the boundary
+   of a filled region of primitives, booleans or implicit functions
+   (`filled = false`), or in 2D a `circle` or `ellipse`.
    A point of the straight face is projected onto the surface, minus the
    linear interpolant of the corners' own projection offsets, so faces still
    meet at the mesh nodes.
@@ -43,13 +44,15 @@ comparisons on the same file.
 
 ## Projection onto region surfaces
 
-A region is known by its signed distance, or for `implicit` regions by any
-function `phi` negative inside (`src/common/region.h`), on the host. The
+The filled region that the surface bounds is known by its signed distance,
+or for `implicit` regions by any function `phi` negative inside
+(`src/common/region.h`), on the host; the zone lies on `phi = 0`. The
 projection of a point `x` is its closest point `p` on `phi = 0`, with the
 Jacobian `dp/dx` that the face map's derivatives need:
 
 - **Closed forms.** `circle` and `disk` (2D), `sphere` and `cylinder`
-  without `length` or `inner_radius` (3D), with no transforms, are projected
+  without `length` or `inner_radius` (3D), with `filled = false` where they
+  are filled and no transforms, are projected
   radially as before regions existed: the same operations on the same
   numbers, so these walls are bitwise unchanged. Everything else, including
   a transformed sphere, takes the general path.

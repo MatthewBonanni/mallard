@@ -86,6 +86,7 @@ rotate = 30
 [[mesh.curved]]
 zone = "outer"
 type = "implicit"
+filled = false
 f = "(x / 1.384)^2 + (y / 1.038)^2 - 1"
 rotate = 30
 )"};
@@ -420,7 +421,9 @@ TEST(CurvedGeometry, MeshesWithoutCurvedDataAreUnchanged) {
     EXPECT_THROW(curve("inner", "{type = \"circle\", center = [0.3, 0.0], radius = 1.0}"), InputError);
     EXPECT_THROW(curve("inner", "{type = \"ellipse\", center = [0.0, 0.0], semi_axes = [1.0, 1.2]}"), InputError);
     // and functions without a gradient on their zero set
-    EXPECT_THROW(curve("inner", "{type = \"implicit\", f = \"(x^2 + y^2 - 1)^2\"}"), InputError);
+    EXPECT_THROW(curve("inner", "{type = \"implicit\", f = \"(x^2 + y^2 - 1)^2\", filled = false}"), InputError);
+    // Zones lie on curves: an area needs filled = false
+    EXPECT_THROW(curve("inner", "{type = \"disk\", center = [0.0, 0.0], radius = 1.0}"), InputError);
     // Shapes are sharp surfaces
     EXPECT_THROW(curve("inner", "{type = \"circle\", center = [0.0, 0.0], radius = 1.0, edge = 0.1}"), InputError);
     EXPECT_FALSE(bad->curved_geometry);
@@ -576,12 +579,12 @@ TEST(CurvedShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
          }, 0.0, 2.0 * M_PI},
         {"scaled circle", "{type = \"circle\", center = [0.0, 0.0], radius = 1.0, scale = [2.0, 1.0]}",
          [](double x, double y) { return std::array<double, 3>{0.25 * x * x + y * y - 1.0, 0.5 * x, 2.0 * y}; }, 0.0, 2.0 * M_PI},
-        {"implicit", "{type = \"implicit\", f = \"x^4 + 2 * y^4 - 1\"}",
+        {"implicit", "{type = \"implicit\", f = \"x^4 + 2 * y^4 - 1\", filled = false}",
          [](double x, double y) {
              return std::array<double, 3>{std::pow(x, 4) + 2.0 * std::pow(y, 4) - 1.0, 4.0 * std::pow(x, 3), 8.0 * std::pow(y, 3)};
          }, 0.0, 2.0 * M_PI},
         {"union", "{type = \"union\", regions = [{type = \"disk\", center = [0.0, 0.0], radius = 1.0}, "
-                  "{type = \"disk\", center = [1.5, 0.0], radius = 1.0}]}",
+                  "{type = \"disk\", center = [1.5, 0.0], radius = 1.0}], filled = false}",
          [](double x, double y) { return std::array<double, 3>{x * x + y * y - 1.0, 2.0 * x, 2.0 * y}; }, 1.0, 2.0 * M_PI - 1.0},
     };
     std::mt19937 rng(7);
@@ -619,7 +622,7 @@ TEST(CurvedShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
     // An implicit circle goes where the closed form does, with its Jacobian
     {
         const curved::Shape exact = shape_of("{type = \"circle\", center = [0.3, 0.1], radius = 0.8}");
-        const curved::Shape implicit = shape_of("{type = \"implicit\", f = \"(x - 0.3)^2 + (y - 0.1)^2 - 0.64\"}");
+        const curved::Shape implicit = shape_of("{type = \"implicit\", f = \"(x - 0.3)^2 + (y - 0.1)^2 - 0.64\", filled = false}");
         ASSERT_EQ(exact.kind, curved::Shape::Kind::CIRCLE);
         double worst_p = 0.0, worst_J = 0.0;
         for (int k = 0; k < 40; k++) {
@@ -637,7 +640,7 @@ TEST(CurvedShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
     }
     // Circles and disks without transforms keep the closed form
     EXPECT_EQ(shape_of("{type = \"circle\", center = [0.5, 0.0], radius = 1.0}").kind, curved::Shape::Kind::CIRCLE);
-    EXPECT_EQ(shape_of("{type = \"disk\", center = [0.5, 0.0], radius = 1.0}").kind, curved::Shape::Kind::CIRCLE);
+    EXPECT_EQ(shape_of("{type = \"disk\", center = [0.5, 0.0], radius = 1.0, filled = false}").kind, curved::Shape::Kind::CIRCLE);
     EXPECT_EQ(shape_of("{type = \"circle\", center = [0.5, 0.0], radius = 1.0, rotate = 40}").kind,
               curved::Shape::Kind::SURFACE);
 }

@@ -42,6 +42,8 @@ struct MeshBlock {
     std::vector<uint64_t> face_nodes;
     std::vector<uint32_t> face_zone;        // index into zone_names
     std::vector<std::string> zone_names;    // every zone, on every rank
+    std::vector<uint32_t> cell_zone;          // per cell, index into cell_zone_names; empty without cell zones
+    std::vector<std::string> cell_zone_names; // every rank
     // High-order boundary faces: CSR per boundary face (empty if none at all)
     // into the coordinates of all its nodes, corners first in Gmsh order;
     // linear faces have none
@@ -143,6 +145,15 @@ MeshBlock read_mesh_block(const Input & input);
  *        read_mesh_file); every rank reads the whole file.
  */
 MeshBlock read_file_block(const std::string & filename);
+
+/**
+ * @brief mesh.filename (default mesh.msh), or an error naming the key, its line
+ *        and the directory relative paths start from if no such file exists.
+ */
+std::string mesh_filename(const Input & input);
+
+/** @brief The error of a generated mesh.type that this dimension's solver does not make. */
+InputError mesh_type_dimension_error(const Input & input, const std::string & type);
 
 /** @brief Whether a mesh file name denotes an HDF5 mesh file (.h5 or .hdf5). */
 bool is_hdf5_mesh(const std::string & filename);

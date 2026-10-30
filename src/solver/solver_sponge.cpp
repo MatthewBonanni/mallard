@@ -15,6 +15,7 @@
 
 #include "characteristic.h"
 #include "input.h"
+#include "region.h"
 
 namespace {
 
@@ -25,7 +26,7 @@ Expression number_or_expression(const Input & value, const std::string & name, c
 
 } // namespace
 
-void Solver::init_sponges() {
+void Solver::init_sponges(region::Regions & regions) {
     sponge_cells = Kokkos::View<uint32_t *>();
     sponge_dt_max = std::numeric_limits<rtype>::infinity();
     if (!input.contains("sponges")) return;
@@ -49,11 +50,19 @@ void Solver::init_sponges() {
         const Expression p = number_or_expression(sponge.at("p"), where + ".p", dim::pressure);
         const Expression T = number_or_expression(sponge.at("T"), where + ".T", dim::temperature);
 
+        const std::vector<double> * fractions = nullptr;
+        if (sponge.contains("region")) {
+            region::require_full_dimension(regions.get(sponge.at("region"), where + ".region"), where + ".region");
+            fractions = &regions.fractions(sponge.at("region"), where + ".region");
+        }
+
         std::vector<uint32_t> cells;
         std::vector<double> sigma_cells;
         for (uint32_t c = 0; c < n_owned; c++) {
-            const double s = sigma.at(Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL()), N_DIM);
+            if (fractions && (*fractions)[c] == 0.0) continue;
+            double s = sigma.at(Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL()), N_DIM);
             if (!(s >= 0.0)) throw InputError(where + ".strength must be non-negative.");
+            if (fractions) s *= (*fractions)[c];
             if (s == 0.0) continue;
             cells.push_back(c);
             sigma_cells.push_back(s);

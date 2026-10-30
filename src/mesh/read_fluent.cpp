@@ -10,6 +10,7 @@
  */
 
 #include "mesh_file.h"
+#include "common_io.h"
 
 #include <algorithm>
 #include <cstring>
@@ -133,7 +134,7 @@ struct FluentZone {
 
 MeshFileData read_fluent(const std::string & filename) {
     std::ifstream in(filename, std::ios::binary);
-    if (!in.good()) throw std::runtime_error("Could not open mesh file: " + filename + ".");
+    if (!in.good()) throw cannot_read("the mesh file", filename);
     std::ostringstream buffer;
     buffer << in.rdbuf();
     Reader r(buffer.str(), filename);
@@ -144,6 +145,7 @@ MeshFileData read_fluent(const std::string & filename) {
     std::vector<std::array<int64_t, 2>> face_cells;
     std::map<uint64_t, FluentZone> face_zones;
     std::map<uint64_t, std::string> zone_names;
+    std::vector<std::array<uint64_t, 3>> cell_sections;  // zone, first and last cell id
     uint64_t n_cells = 0;
 
     while (!r.done()) {
@@ -183,6 +185,7 @@ MeshFileData read_fluent(const std::string & filename) {
             if (h.size() < 3) r.fail("short cell section header.");
             r.check_ids(std::max<uint64_t>(h[1], 1), h[2], "cell");
             if (h[2] > n_cells) n_cells = h[2];
+            if (h[0] != 0) cell_sections.push_back({h[0], h[1], h[2]});
             if (h.size() > 4 && h[0] != 0 && h[4] == 7) r.fail("polyhedral cell zone " + std::to_string(h[0]) + "; Mallard reads tetrahedra, pyramids, prisms and hexahedra (triangles and quadrilaterals in 2D).");
             r.skip_to_close();
         } else if (kind == 13 && (index == 13 || index == 2013 || index == 3013)) {
@@ -265,6 +268,12 @@ MeshFileData read_fluent(const std::string & filename) {
             if (face_cells[f][0] >= 0 && face_cells[f][1] >= 0) continue;  // internal walls, fans: interior here
             data.boundary_faces.push_back({faces[f], zone_name});
             data.boundary_high_order.emplace_back();
+        }
+    }
+    for (const auto & [zone, first, last] : cell_sections) {
+        const auto it = zone_names.find(zone);
+        for (uint64_t c = first; c <= last; c++) {
+            data.set_cell_zone(c - 1, it != zone_names.end() ? it->second : "zone_" + std::to_string(zone));
         }
     }
     drop_unused_nodes(data);

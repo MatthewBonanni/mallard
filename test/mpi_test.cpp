@@ -977,7 +977,7 @@ TEST(MPITest, CurvedWallsMatchSerial) {
     // equal axes); the HDF5 copy of the file keeps the P3 lines
     const std::string closed = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
                                "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
-    const std::string general = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"implicit\"\nf = \"x^2 + y^2 - 1\"\n"
+    const std::string general = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"implicit\"\nfilled = false\nf = \"x^2 + y^2 - 1\"\n"
                                 "[[mesh.curved]]\nzone = \"outer\"\n"
                                 "type = \"ellipse\"\ncenter = [0.0, 0.0]\nsemi_axes = [1.384, 1.384]\n";
     for (const auto & [order, shapes] : {std::pair{1, closed}, std::pair{1, general}, std::pair{3, std::string()}}) {

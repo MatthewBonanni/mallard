@@ -82,7 +82,10 @@ void expect_keys_near(const std::vector<Key> & a, const std::vector<Key> & b, do
     }
 }
 
-/** @brief The same cells (by centroid and volume, any order), face count and boundary zones (by name and faces). */
+/**
+ * @brief The same cells (by centroid and volume, any order), face count,
+ *        boundary zones (by name and faces) and cell zones.
+ */
 void expect_same_mesh(const std::string & reference, const std::string & other, double tol = 1e-12) {
     Mesh a, b;
     a.init_file(fixture(reference));
@@ -98,6 +101,11 @@ void expect_same_mesh(const std::string & reference, const std::string & other, 
     std::sort(names_b.begin(), names_b.end());
     EXPECT_EQ(names_b, names_a);
     for (const std::string & name : names_a) expect_keys_near(zone_keys(a, name), zone_keys(b, name), tol, name);
+    // Every fixture's cells are one cell zone ("fluid"; Fluent's 3D export calls it "fluid-1")
+    EXPECT_EQ(a.cell_zone_names, std::vector<std::string>{"fluid"});
+    ASSERT_EQ(b.cell_zone_names.size(), 1u);
+    EXPECT_EQ(b.cell_zone_names[0].substr(0, 5), "fluid");
+    EXPECT_EQ(b.h_cell_zone, std::vector<uint32_t>(b.n_cells, 0));
 }
 
 const double TOL = precision_tol<double>(1e-12, 1e-5);

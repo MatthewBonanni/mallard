@@ -68,4 +68,11 @@ TEST(FrontEndTest, MeshFileGivesTheInputItsDimension) {
     const front_end::Dimension d = front_end::input_dimension("input.toml");
     EXPECT_EQ(d.dim, 0);
     EXPECT_NE(d.why.find("missing.msh"), std::string::npos) << d.why;
+    EXPECT_TRUE(d.unreadable);
+}
+
+TEST(FrontEndTest, InvalidInputIsLeftToTheSolverToReport) {
+    std::ofstream("input.toml") << "[mesh]\ntype = cartesian\n";
+    EXPECT_TRUE(front_end::input_dimension("input.toml").unreadable);
+    EXPECT_TRUE(front_end::input_dimension("no_such_input.toml").unreadable);
 }
