@@ -6,12 +6,13 @@
         [--launcher 'mpirun -n 2'] [-o ellipsoid.png]
 
 For each mesh scale (make_ellipsoid_mesh.py --scale) and geometry, runs
-examples/ellipsoid/input.toml with [mesh] curved_geometry = true or false and
+examples/ellipsoid/input.toml as it is (curved) or without its [[mesh.curved]] entry
+(flat faces) and
 reports the drag coefficient (exact: 0), averaged over the last quarter of the
 run and based on the frontal area pi b^2, the entropy error
 s / s_inf - 1 (s = p / rho^gamma; exact: 0), its volume-weighted RMS over
 |x| < 3 and its maximum, and the RMS difference of the wall pressure
-coefficient from incompressible potential flow (Lamb, art. 105). Results go
+coefficient from incompressible potential flow (Lamb, Hydrodynamics, ch. V). Results go
 to RUN_DIR/results.json, a table, and with -o a figure of the wall pressure
 and of the errors against the mesh size.
 """
@@ -72,8 +73,8 @@ def run_case(case_dir, args, scale, geometry):
         subprocess.run([sys.executable, os.path.join(HERE, "make_ellipsoid_mesh.py"), mesh, "--scale", str(scale)],
                        check=True, stdout=subprocess.DEVNULL)
     text = open(os.path.join(HERE, "input.toml")).read()
-    text = re.sub(r"(?m)^curved_geometry = .*$", f"curved_geometry = {'true' if geometry == 'curved' else 'false'}",
-                  text)
+    if geometry == "straight":
+        text = re.sub(r"\[\[mesh\.curved\]\]\n(.+\n)+", "", text)
     text = re.sub(r"(?m)^t_stop = .*$", f"t_stop = {args.t_stop}", text)
     text = re.sub(r"(?m)^order = .*$", f"order = {args.order}", text)
     text = re.sub(r"(?m)^time_interval = .*$", f"time_interval = {args.t_stop / 4}", text)

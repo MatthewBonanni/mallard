@@ -1,9 +1,9 @@
 # Inviscid flow past a prolate spheroid at Mach 0.3 (3D build), with the wall
 # faces curved onto the analytic ellipsoid, against the same mesh with flat
-# faces ([mesh] curved_geometry = false). The exact steady solution has no
+# faces (without the [[mesh.curved]] entry). The exact steady solution has no
 # drag (d'Alembert) and uniform entropy, and its surface pressure is close to
 # incompressible potential flow, Cp = 1 - (1 + k)^2 (1 - n_x^2) with
-# k = 0.2100 for a 2:1 spheroid (Lamb, Hydrodynamics, art. 105; n is the wall
+# k = 0.2100 for a 2:1 spheroid (Lamb, Hydrodynamics, ch. V; n is the wall
 # normal): any drag and entropy rise are numerical errors, which flat facets
 # make at the wall and the curved faces remove.
 #
@@ -25,7 +25,6 @@ cfl = 0.4
 [mesh]
 type = "file"
 filename = "ellipsoid.msh"
-curved_geometry = true
 
 [[mesh.curved]]
 zone = "ellipsoid"
