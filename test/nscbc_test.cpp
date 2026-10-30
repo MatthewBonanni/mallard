@@ -393,10 +393,7 @@ TEST(NSCBCTest, MixtureFrontLeavesThroughTheOutlet) {
     // pressure stays within a few percent of the dynamic pressure of it
     Solver solver;
     solver.set_distributed(false);
-    solver.init(parse_toml(front_input("type = \"outlet_pressure\"
-p = 101325.0
-nscbc.L = 1.0
-", 0.016)));
+    solver.init(parse_toml(front_input("type = \"outlet_pressure\"\np = 101325.0\nnscbc.L = 1.0\n", 0.016)));
     double spread = 0.0;
     while (double(solver.get_time()) < 0.016 * (1 - 1e-6)) {
         solver.calc_dt();
