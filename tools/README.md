@@ -275,7 +275,7 @@ rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] i
 pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtu")  # 2D or 3D cells
 ```
 
-`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard.h5` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file.
+`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard.h5` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
 
 ### `plot_vtu.py`: one field of a snapshot
 
@@ -413,11 +413,13 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | Script | Purpose |
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
+| `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard` that every snapshot and monitor format carries the same units for each field; the `openmp` job of `ci.yml` runs it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
 | `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/mallard`; `--mallard3d` for the 3D region and probe figures) |
 | `docs/regions.py` | The region figures alone: cell volume fractions of every primitive and boolean on coarse unstructured meshes, from one-step runs |
 | `docs/geometry.py` | The figures of the [geometry guide](../docs/guide/geometry.md): schematics of the region primitives, booleans, transforms and signed distance, and from one-step runs the volume fractions on a Cartesian and an O-grid, the probe samples, and the convergence of cell-average and point probe values |
 | `docs/tools.py` | The figures of this page (`docs/images/tools/`), from running each tool (`--mallard` for those from Mallard runs) |
+| `docs/cli.py --mallard build/src/mallard [--check]` | The help pages of the [command line](../docs/guide/cli.md) page, from running `mallard <command> --help` for every command `mallard --help` lists; `CliTest.UserDocsShowEveryHelpPage` fails when they are out of date; standard library only |
 | `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D test-suite builds (`--test build-2/test/mallard-test2d build-3/test/mallard-test3d`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
 | `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (VTU and PVTU series) |
@@ -425,6 +427,6 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `dev/chemistry_reference.py`, `dev/transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |
 | `dev/v3_reference.py`, `dev/v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `mallard reactor` against them |
 | `dev/input_catalog.py` | The key catalog `docs/input-keys.json` (every input key with its type, default or requiredness and accepted values, as setup records them): `build` runs `mallard check --catalog` on every example and tutorial in 2D and 3D and merges them (`--check` compares with the committed file); `docs` checks the defaults `docs/input.md` states against it. Both run in `ci.yml`; standard library only |
-| `dev/check_upgrade_input.py` | Runs `mallard upgrade-input` on every input file of every release tag: it must succeed, leave nothing to upgrade, and return up-to-date files byte for byte (CI, openmp job); standard library only |
+| `dev/check_upgrade_input.py` | Runs `mallard input upgrade` on every input file of every release tag: it must succeed, leave nothing to upgrade, and return up-to-date files byte for byte (CI, openmp job); standard library only |
 | `dev/changelog.py` | Changelog fragments (`changelog/`): `check` fails when a branch changes `src/` without adding one (first job of `ci.yml`); `notes X.Y.Z` / `notes Unreleased` prints a release's section or previews the next; `release X.Y.Z` folds the fragments into `CHANGELOG.md`; standard library only |
 | `post/hero_grid.json` | The configuration of the README animation (`post/animate_grid.py`) |

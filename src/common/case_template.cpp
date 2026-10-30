@@ -250,20 +250,6 @@ size_t edit_distance(const std::string & a, const std::string & b) {
     return row[b.size()];
 }
 
-void print_usage(std::ostream & out) {
-    out << "Usage: mallard new <template> [directory] [--quick] [--force]\n"
-           "       mallard new --list\n"
-           "\n"
-           "Creates a ready-to-run case from one of Mallard's examples or tutorials:\n"
-           "input.toml, run.sh, the mesh or initial-state script it needs, post.sh and\n"
-           "a README. The directory defaults to the template's name.\n"
-           "\n"
-           "  --list, -l   the templates, with what each shows and what it costs\n"
-           "  --quick      a coarse, short version that runs in seconds to a minute:\n"
-           "               for trying the steps, not for the physical result\n"
-           "  --force      write into a directory that is not empty\n";
-}
-
 bool solver_installed(int dim) {
     return fs::exists(executable_path().parent_path() / ("mallard" + std::to_string(dim) + "d"));
 }
@@ -701,41 +687,13 @@ std::string relocate(const std::string & text) {
     return out;
 }
 
-int new_main(int argc, char ** argv) {
-    std::vector<std::string> positional;
-    bool list = false;
-    bool quick = false;
-    bool force = false;
-    for (int i = 0; i < argc; ++i) {
-        const std::string arg = argv[i];
-        if (arg == "--list" || arg == "-l") {
-            list = true;
-        } else if (arg == "--quick") {
-            quick = true;
-        } else if (arg == "--force") {
-            force = true;
-        } else if (arg == "--help" || arg == "-h") {
-            print_usage(std::cout);
-            return 0;
-        } else if (arg.rfind('-', 0) == 0) {
-            std::cerr << "mallard new: unknown option " << arg << "\n\n";
-            print_usage(std::cerr);
-            return 2;
-        } else {
-            positional.push_back(arg);
-        }
-    }
+int new_case(const std::vector<std::string> & positional, bool list, bool quick, bool force) {
     try {
         if (list || positional.empty()) {
             const Manifest m = load_manifest();
             print_list(m);
             if (!list) std::cout << "\nCreate one with: mallard new <template> [directory]\n";
             return list ? 0 : 2;
-        }
-        if (positional.size() > 2) {
-            std::cerr << "mallard new: too many arguments\n\n";
-            print_usage(std::cerr);
-            return 2;
         }
         const Manifest m = load_manifest();
         const std::string & name = positional[0];

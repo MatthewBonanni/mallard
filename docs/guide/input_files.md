@@ -298,8 +298,8 @@ ones as errors.
 In both steps, one command brings a file up to date:
 
 ```sh
-mallard upgrade-input old.toml > new.toml     # changes listed on stderr
-mallard upgrade-input --check old.toml        # exit status 1 if anything is out of date
+mallard input upgrade old.toml > new.toml     # changes listed on stderr
+mallard input upgrade --check old.toml        # exit status 1 if anything is out of date
 ```
 
 It changes only the lines of those keys. A renamed key keeps its value and its
@@ -403,9 +403,11 @@ that the defaults this reference states match it.
 
 ## The other commands
 
+Every command's options, examples and exit status: [Command line](cli.md).
+
 | Command | Purpose | Guide |
 |---|---|---|
-| `mallard upgrade-input old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
+| `mallard input upgrade old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
 | `mallard reactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallard-reactor) |
 | `mallard mesh convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
 | `mallard test` | The unit and regression tests: `mallard-test2d` and `mallard-test3d` (`build/test/mallard-test2d`), from a build or an install tree; `--dim 2\|3` runs one | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |

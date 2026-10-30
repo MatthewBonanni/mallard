@@ -13,6 +13,46 @@
 #include <mutex>
 #include <sstream>
 
+// toml11 4.4's skip_array_like (error recovery in a malformed array) with one fix: a nested
+// array that stops at a `=` rewinds to the start of that line, which can be the nested array's
+// own `[` (as in `s=["",["",""[\n[=`), and the loop then skipped that array forever. A nested
+// array that made no progress now ends the skip. Drop this once toml11 has the fix.
+template <>
+void toml::detail::skip_array_like<InputConfig>(location & loc, const context<InputConfig> & ctx) {
+    const auto & spec = ctx.toml_spec();
+    loc.advance();
+    while (!loc.eof()) {
+        if (loc.current() == '\"' || loc.current() == '\'') {
+            skip_string_like(loc, ctx);
+        } else if (loc.current() == '#') {
+            skip_comment_block(loc, ctx);
+        } else if (loc.current() == '{') {
+            skip_inline_table_like(loc, ctx);
+        } else if (loc.current() == '[') {
+            const auto checkpoint = loc;
+            if (syntax::std_table(spec).scan(loc).is_ok() || syntax::array_table(spec).scan(loc).is_ok()) {
+                loc = checkpoint;
+                break;
+            }
+            skip_array_like(loc, ctx);
+            if (loc.get_location() <= checkpoint.get_location()) break;
+        } else if (loc.current() == '=') {
+            while (loc.get_location() != 0) {
+                loc.retrace();
+                if (loc.current() == '\n') {
+                    loc.advance();
+                    break;
+                }
+            }
+            break;
+        } else if (loc.current() == ']') {
+            break;
+        } else {
+            loc.advance();
+        }
+    }
+}
+
 namespace {
 
 void forget_lookups(Input & v) {

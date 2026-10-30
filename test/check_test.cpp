@@ -85,13 +85,18 @@ TEST(CheckKeys, MisspelledKeysAreReportedWithLineAndSuggestion) {
     EXPECT_FALSE(r.ok());
 }
 
+TEST(CheckKeys, UnclosedNestedArrayBeforeAKeyIsASyntaxError) {
+    // Once an endless loop in toml11's error recovery (test/fuzz/corpus/input/unclosed_nested_array)
+    EXPECT_THROW(parse_input_string("s=[\"\",[\"\",\"\"[\n[="), toml::syntax_error);
+}
+
 TEST(CheckKeys, RemovedKeysNameWhatReplacedThem) {
     std::string input = box();
     input.replace(input.find("rho_ref = 1.0\n"), 14, "rho_ref = 1.0\np_min = 0.0\n");
     const CheckReport r = check(input);
     EXPECT_FALSE(r.ok());
     EXPECT_TRUE(mentions(r.errors, "physics.p_min was removed in 0.2.0")) << r.errors.front();
-    EXPECT_TRUE(mentions(r.errors, "mallard upgrade-input"));
+    EXPECT_TRUE(mentions(r.errors, "mallard input upgrade"));
 }
 
 TEST(CheckKeys, KeyInTheWrongTableSuggestsWhereItIsRead) {
