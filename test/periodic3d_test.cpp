@@ -34,12 +34,6 @@ namespace {
 
 constexpr double GAMMA = 1.4;
 
-std::string periodic_list(const std::string & dirs) {
-    std::string s = "[";
-    for (size_t k = 0; k < dirs.size(); k++) s += std::string(k ? ", " : "") + "\"" + dirs[k] + "\"";
-    return s + "]";
-}
-
 struct Case {
     std::string mesh = "cartesian";
     std::array<uint32_t, 3> n = {4, 4, 4};
@@ -57,7 +51,7 @@ std::string make_input(const Case & c) {
     std::ostringstream s;
     s << "[run]\n" << c.run << "[mesh]\ntype = \"" << c.mesh << "\"\n";
     for (size_t d = 0; d < 3; d++) s << "N" << "xyz"[d] << " = " << c.n[d] << "\nL" << "xyz"[d] << " = " << c.L[d] << "\n";
-    s << "periodic = " << periodic_list(c.dirs) << "\n"
+    s << periodic_sides(c.dirs)
       << "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0, 0.0]\np = 1.0\nT = 1.0\n"
       << c.boundaries
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"" << c.integrator << "\"\n"

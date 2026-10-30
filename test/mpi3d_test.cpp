@@ -122,7 +122,7 @@ TEST(MPI3DTest, WallModelsMatchSerial) {
         std::ostringstream s;
         s << "[run]\nn_steps = 6\ncfl = 0.4\n"
           << "[mesh]\ntype = \"cartesian_tet\"\nNx = 6\nNy = 8\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = 0.6\n"
-          << "periodic = [\"x\", \"z\"]\n"
+          << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
           << "[parallel]\npartitioner = \"" << partitioner << "\"\n"
           << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283 * x)\"\n"
           << "u = [\"0.5 + 0.1 * sin(6.283 * z)\", \"0.05 * sin(6.283 * x)\", \"0.02\"]\np = \"1.0\"\n"

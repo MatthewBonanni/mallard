@@ -48,10 +48,28 @@ struct OptionRule {
     bool kept = false;
 };
 
+/**
+ * @brief A key holding an array of strings replaced by elements of an array of
+ *        tables, one per string: `from = ["a", "b"]` becomes `[[to]] key =
+ *        convert("a")`, `[[to]] key = convert("b")`, after the elements
+ *        already there. `to` is dotted, without `[]` steps.
+ */
+struct ArrayRule {
+    std::string from;
+    std::string to;
+    std::string key;      ///< The key each new element sets
+    std::string context;  ///< A string key of from's table the conversion depends on, or empty
+    std::string since, removed, note;
+    /// The value of `key` for one string, given the context's value (empty if
+    /// absent); throws std::invalid_argument, saying why, for strings it does not take
+    std::vector<std::string> (*convert)(const std::string & item, const std::string & context) = nullptr;
+};
+
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */
 struct Rules {
     std::vector<KeyRule> keys;
     std::vector<OptionRule> options;
+    std::vector<ArrayRule> arrays;
 };
 const Rules & rules();
 

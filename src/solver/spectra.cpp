@@ -26,6 +26,7 @@
 #include "field_units.h"
 #include "input.h"
 #include "log.h"
+#include "mesh.h"
 #include "mesh_block.h"
 #include "provenance.h"
 #include "statistics.h"
@@ -153,7 +154,11 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     }
     const Stretching stretching = mesh_stretching(input);
     std::vector<std::string> periodic;
-    if (input.at("mesh").contains("periodic")) periodic = find_value<std::vector<std::string>>(input, "mesh", "periodic");
+    for (const Mesh::PeriodicPair & pair : Mesh::periodic_pairs(input)) {
+        for (size_t d = 0; d < N_DIM; d++) {
+            if (pair.translation[d] != 0.0_r) periodic.push_back(std::string(1, static_cast<char>('x' + d)));
+        }
+    }
     std::vector<std::string> names =
         find_value_or<std::vector<std::string>>(table, "directions", periodic);
     for (const auto & name : names) {

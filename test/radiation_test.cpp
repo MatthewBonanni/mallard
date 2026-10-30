@@ -54,7 +54,7 @@ std::string box(const std::string & radiation, uint32_t n_steps, double dt) {
     std::ostringstream s;
     s << std::setprecision(17) << "[run]\nn_steps = " << n_steps << "\ndt = " << dt << "\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 3\nLx = 1.0\nLy = 1.0\n"
-      << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n" : "") << "periodic = " << periodic << "\n"
+      << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n" : "") << periodic_sides(periodic)
       << "[initialize]\ntype = \"constant\"\np = 101325.0\nT = 2000.0\nu = "
       << (N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]")
       << "\nX = { H2O = 0.2, CO2 = 0.1, CO = 0.05, CH4 = 0.02, N2 = 0.63 }\n"

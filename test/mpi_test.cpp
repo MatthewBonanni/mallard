@@ -262,7 +262,7 @@ std::string periodic_box(const std::string & mesh, const std::string & recon, co
     std::string input = box_input(mesh, recon, physics, boundaries, n_steps);
     // A Hilbert partition always cuts the seams; a graph partition of a torus need not
     const std::string anchor = "Ly = 0.8\n";
-    return input.replace(input.find(anchor), anchor.size(), anchor + "periodic = " + dirs + "\n") +
+    return input.replace(input.find(anchor), anchor.size(), anchor + periodic_sides(dirs)) +
            "[parallel]\npartitioner = \"hilbert\"\n";
 }
 

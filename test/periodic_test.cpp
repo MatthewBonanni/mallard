@@ -29,16 +29,10 @@ namespace {
 
 constexpr double GAMMA = 1.4;
 
-std::string periodic_list(const std::string & dirs) {
-    std::string s = "[";
-    for (size_t k = 0; k < dirs.size(); k++) s += std::string(k ? ", " : "") + "\"" + dirs[k] + "\"";
-    return s + "]";
-}
-
 std::shared_ptr<Mesh> periodic_mesh(const std::string & type, uint32_t n, const std::string & dirs, double L = 1.0) {
     std::ostringstream s;
     s << "[mesh]\ntype = \"" << type << "\"\nNx = " << n << "\nNy = " << n << "\nLx = " << L << "\nLy = " << L
-      << "\nperiodic = " << periodic_list(dirs) << "\n";
+      << "\n" << periodic_sides(dirs);
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml(s.str()));
     mesh->copy_host_to_device();
@@ -62,7 +56,7 @@ std::string make_input(const Case & c) {
     std::ostringstream s;
     s << "[run]\n" << c.run
       << "[mesh]\ntype = \"" << c.mesh << "\"\nNx = " << c.n << "\nNy = " << c.n << "\nLx = " << c.L
-      << "\nLy = " << c.L << "\nperiodic = " << periodic_list(c.dirs) << "\n"
+      << "\nLy = " << c.L << "\n" << periodic_sides(c.dirs)
       << "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0]\np = 1.0\nT = 1.0\n"
       << c.boundaries
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"" << c.integrator << "\"\n"

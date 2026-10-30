@@ -171,7 +171,7 @@ double relaxation_error(const uint32_t n, const bool with_source) {
     std::ostringstream s;
     s << "[run]\nt_stop = 0.5\ncfl = 0.5\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = 4\nLx = 1.0\nLy = " << 4.0 / n
-      << "\nperiodic = [\"x\", \"y\"]\n"
+      << "\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1 + 0.2 * cos(2 * pi * x)\"\nu = [\"0.5\", \"0\"]\np = \"1\"\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -218,7 +218,7 @@ double forced_kinetic_energy(const bool forced) {
     std::ostringstream s;
     s << "[run]\nt_stop = 2.0\ncfl = 0.8\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 16\nNz = 16\nLx = 6.283185307179586\nLy = 6.283185307179586\n"
-      << "Lz = 6.283185307179586\nperiodic = [\"x\", \"y\", \"z\"]\n"
+      << "Lz = 6.283185307179586\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1\"\np = \"71.42857142857143\"\n"
       << "u = [\"sin(x) * cos(y) * cos(z)\", \"-cos(x) * sin(y) * cos(z)\", \"0\"]\n"
       << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 71.42857142857143\nT_ref = 1.0\nrho_ref = 1.0\n"
