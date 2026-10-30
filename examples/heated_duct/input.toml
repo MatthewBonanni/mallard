@@ -7,7 +7,7 @@
 #   ../../build/src/mallard -i input.toml
 #   ../../build/src/mallard -i closed.toml
 #   ../../build/src/mallard -i closed_upt.toml
-#   python plot_heated_duct.py solut/duct_000001.vtu solut/closed solut/closed_upt
+#   python plot_heated_duct.py solut/duct_000001.vtkhdf solut/closed solut/closed_upt
 
 [run]
 t_stop = 0.08
@@ -66,6 +66,5 @@ check_interval = 1000
 
 [[write_data]]
 prefix = "./solut/duct"
-format = "vtu"
 time_interval = 0.08
 variables = ["RHO", "U_X", "P", "T"]

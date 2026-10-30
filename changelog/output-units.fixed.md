@@ -1,0 +1,1 @@
+- Probe VTP files hold their field data (`MALLARD_FORMAT_VERSION`, the units record) at the data-set level, where VTK and ParaView read it, instead of inside the piece (#518).

@@ -107,13 +107,11 @@ file = "./solut/forces_sphere.csv"
 
 [[write_data]]
 prefix = "./solut/sphere"
-format = "vtu"
 time_interval = 100.0
 variables = ["RHO", "U", "P", "Q"]
 
 [[write_data]]
 prefix = "./solut/wall"
-format = "vtu"
 geometry = "sphere"
 time_interval = 5.0
 variables = ["P"]

@@ -12,7 +12,7 @@ figure width in proportion to their aspect ratios:
      "rows": [[{"series": "runs/dmr/solut", "title": "Double Mach reflection",
                 "xlim": [0, 3]}],
               [{"series": "runs/riemann/solut", "title": "2D Riemann problem"},
-               {"type": "wall", "series": "runs/vst/solut", "glob": "vst_*.vtu",
+               {"type": "wall", "series": "runs/vst/solut", "glob": "vst_*",
                 "xlim": [0.45, 1], "ylim": [0, 130], "title": "Wall density",
                 "reference": {"label": "Zhou et al.", "points": [[0.3, 39.8], ...]}}]]}
 
@@ -26,7 +26,7 @@ vertical line, over reference curves ("reference": {"label", "file": a CSV
 of t and y, optional "color", "alpha", "lw", "ls"}, or a list of them);
 "t_end" maps the normalized time to t. Detonation panels show a 2D detonation run's pressure
 over the channel and, below it, the numerical soot foil (P_MAX) behind the
-front ("series": the run's .pvd; "xlim" in mesh units). "gif_width" and
+front ("series": the run's .vtkhdf.series or .pvd; "xlim" in mesh units). "gif_width" and
 "gif_colors" shrink the GIF, "gif_dither" sets its dither (ffmpeg paletteuse),
 "mp4_width" scales the MP4, and "background" sets the figure color (to match
 pre-rendered frames). Field, frames and detonation panels show their time in
@@ -60,7 +60,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from animate import Rasterizer, pixel_to_cell, schlieren, write_gif, write_mp4  # noqa: E402
 from animate_detonation_2d import soot  # noqa: E402
-from mallard.vtu import grid_fields, read_vtu  # noqa: E402
+from mallard.vtu import grid_fields, read_vtu, series  # noqa: E402
 from soot_foil import front_position  # noqa: E402
 
 BG = "#101014"
@@ -70,10 +70,15 @@ DIM = "#9a9a9a"
 
 def snapshot_files(panel):
     if panel.get("type") == "detonation":
+        if panel["series"].endswith(".series"):
+            from mallard.vtkhdf import read_series
+            return [f for _, f in read_series(panel["series"])]
         base = os.path.dirname(panel["series"])
         return [os.path.join(base, f) for f in re.findall(r'file="([^"]+)"', open(panel["series"]).read())]
-    pattern = "*.png" if panel.get("type") == "frames" else panel.get("glob", "*.vtu")
-    files = sorted(glob.glob(os.path.join(panel["series"], pattern)))
+    if panel.get("type") == "frames":
+        files = sorted(glob.glob(os.path.join(panel["series"], "*.png")))
+    else:
+        files = series(panel["series"], panel.get("glob", "*"))
     if not files:
         raise SystemExit(f"no snapshots in {panel['series']}")
     return files

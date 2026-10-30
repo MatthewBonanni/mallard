@@ -2,7 +2,7 @@
 
 This walk-through takes about ten minutes: build Mallard on a CPU, run the Sod shock tube, check the result against the exact solution, and then change the case. It assumes a C++20 compiler, CMake 3.22 or newer, git, and Python 3.
 
-With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` and `mallard3d` where the commands below run `build/src/mallard` and `build3d/src/mallard` (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
+With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` where the commands below run `build/src/mallard` or `build3d/src/mallard`; it runs the 2D or 3D solver a case needs (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
 
 ## 1. Build
 
@@ -13,7 +13,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-This builds Kokkos from the bundled submodule with its `Threads` backend, which works on Linux and macOS. The solver is `build/src/mallard`; `build/test/mallard-test` runs the test suite. For OpenMP, use `-DKokkos_ENABLE_OPENMP=ON` instead (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)). For an NVIDIA GPU, enable CUDA with the architecture of your GPU (here an A100), compile through Kokkos' `nvcc_wrapper`, and enable OpenMP as the host backend so that the setup work done on the CPU (TENO's stencil precomputation, which takes minutes for a million cells on one thread) runs in parallel:
+This builds Kokkos from the bundled submodule with its `Threads` backend, which works on Linux and macOS. The solver is `build/src/mallard2d`, run as `build/src/mallard`; `build/src/mallard test` runs the test suite. For OpenMP, use `-DKokkos_ENABLE_OPENMP=ON` instead (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)). For an NVIDIA GPU, enable CUDA with the architecture of your GPU (here an A100), compile through Kokkos' `nvcc_wrapper`, and enable OpenMP as the host backend so that the setup work done on the CPU (TENO's stencil precomputation, which takes minutes for a million cells on one thread) runs in parallel:
 
 ```bash
 cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
@@ -28,7 +28,7 @@ The post-processing scripts in `tools/` need a few Python packages:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg
+.venv/bin/pip install numpy scipy matplotlib h5py imageio imageio-ffmpeg
 ```
 
 ## 2. Create and run the Sod shock tube
@@ -46,7 +46,7 @@ Created runs/sod/ from the sod template (examples/sod):
   run.sh      runs it: ./run.sh [-t threads] [-n MPI ranks]
   post.sh     sod.png, the density against the exact solution
   README.md   what the case shows, how to run it
-  tools/      mallard/__init__.py mallard/h5.py mallard/vtu.py
+  tools/      mallard/__init__.py mallard/h5.py mallard/tables.py mallard/vtkhdf.py mallard/vtu.py
 ```
 
 Run it:
@@ -56,7 +56,7 @@ cd runs/sod
 ./run.sh
 ```
 
-`run.sh` runs this build of Mallard on 4 CPU threads (`./run.sh -t 8` for 8; `./run.sh -n 4` for 4 MPI ranks, or 4 GPUs on a GPU build with MPI). The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [the log](../guide/output.md#the-log)), and writes eleven snapshots, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` (t = 0 to 0.2), plus `solut/sod.pvd`, which ParaView opens as a time series.
+`run.sh` runs this build of Mallard on 4 CPU threads (`./run.sh -t 8` for 8; `./run.sh -n 4` for 4 MPI ranks, or 4 GPUs on a GPU build with MPI). The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [the log](../guide/output.md#the-log)), and writes eleven snapshots (t = 0 to 0.2) and their series, which ParaView opens as a time series: `solut/sod_000000.vtkhdf` to `solut/sod_000010.vtkhdf` and `solut/sod.vtkhdf.series` in builds with HDF5 (`-DMallard_ENABLE_HDF5=ON`), or VTU files, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` and `solut/sod.pvd`, in builds without it such as this one.
 
 The input file, `input.toml`, has one table per part of the problem; the comment above each table says what it sets and links to its keys in the [input reference](../input.md):
 
@@ -68,7 +68,7 @@ The input file, `input.toml`, has one table per part of the problem; the comment
 | `[[boundaries]]` | Symmetry (slip walls) on all four sides, which makes the strip one-dimensional |
 | `[numerics]` | HLLC flux, SSPRK3 time integration, fifth-order TENO-E reconstruction: the `accurate` preset, spelled out |
 | `[physics]` | Euler equations, γ = 1.4 |
-| `[[write_data]]` | VTU output of density, velocity, pressure and temperature every 0.02 |
+| `[[write_data]]` | Snapshots of density, velocity, pressure and temperature every 0.02 |
 
 ## 3. Compare with the exact solution
 
@@ -114,7 +114,7 @@ cd runs/riemann_2d
 PYTHON=../../.venv/bin/python ./post.sh
 ```
 
-`post.sh` plots the final density (`riemann.png`) and runs `animate.py`, which writes `riemann.mp4`, `riemann.gif` and the last frame as `riemann_final.png`: density with contours beside a numerical schlieren image, one frame per snapshot. Open `solut/riemann.pvd` in ParaView for anything else.
+`post.sh` plots the final density (`riemann.png`) and runs `animate.py`, which writes `riemann.mp4`, `riemann.gif` and the last frame as `riemann_final.png`: density with contours beside a numerical schlieren image, one frame per snapshot. Open `solut/riemann.vtkhdf.series` (`solut/riemann.pvd` without HDF5) in ParaView for anything else.
 
 ## 6. A 3D case {#6-a-3d-case}
 
@@ -126,6 +126,8 @@ cmake -S . -B build3d -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 cmake --build build3d -j
 ```
 
+This builds `build3d/src/mallard3d`, run as `build3d/src/mallard`. Installed to one prefix (`cmake --install build --prefix ~/mallard` and the same for `build3d`), the two solvers share one `mallard`, which runs the 2D or 3D solver by the case's mesh (a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`).
+
 3D inputs use the same keys as 2D, with three differences: vectors have three components (`u = [u_x, u_y, u_z]`, `gravity`, `rhou`); expressions are in `x`, `y` and `z`; and generated meshes are `Nx × Ny × Nz` boxes with two more boundary zones, `back` (z = 0) and `front` (z = Lz). Each block of the box holds:
 
 | `[mesh] type` | Cells per block |
@@ -136,7 +138,7 @@ cmake --build build3d -j
 | `cartesian_pyramid` | six pyramids |
 | `cartesian_mixed` | hexahedra, pyramids and prisms in successive thirds of x |
 
-Gmsh meshes (format 2.2 or 4.1) work as in 2D, each physical surface becoming a boundary zone. The output is VTU with 3D cells and the velocity as a 3-vector `U`.
+Gmsh meshes (format 2.2 or 4.1) work as in 2D, each physical surface becoming a boundary zone. The output has 3D cells and the velocity as a 3-vector `U`.
 
 The `explosion_3d` template, a spherical explosion on 64³ hexahedra, takes about 11 minutes on 6 threads:
 
@@ -149,7 +151,7 @@ The [validation page](https://matthewbonanni.github.io/mallard/validation/#spher
 
 ## 7. Templates
 
-`mallard new --list` shows every template, grouped as the examples are, with whether it needs a 2D or 3D build:
+`mallard new --list` shows every template, grouped as the examples are, with whether it is 2D or 3D:
 
 ```text
 Shocks and compressible flow

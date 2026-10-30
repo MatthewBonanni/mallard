@@ -90,7 +90,6 @@ budget = true
 
 [[write_data]]
 prefix = "./solut/flame"
-format = "vtu"
 time_interval = 2.5e-5
 variables = ["T", "HRR", "Q", "Y_H2", "OMEGA_H2"]
 

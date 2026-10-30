@@ -6,12 +6,13 @@ numerical schlieren, beside the schlieren itself, rendered pixel-exact.
     animate_cartesian.py render GRID_DIR OUTPUT_STEM [--width 3840 --height 2160] [--layout side]
     animate_cartesian.py still GRID_DIR/NAME.npy OUTPUT_STEM
 
-extract turns each snapshot of SERIES_DIR (VTU or the PVTU of a distributed
-run) into GRID_DIR/NAME.npy, the cell values on the (ny, nx) grid in float32,
-and appends its time to GRID_DIR/times.txt. Only snapshots listed in the .pvd
-series are read, so files still being written are skipped; --delete removes
-the VTU pieces afterwards and --follow keeps polling until the run's log says
-it finished, which keeps the disk use of long runs bounded.
+extract turns each snapshot of SERIES_DIR (VTKHDF, or VTU or the PVTU of a
+distributed run) into GRID_DIR/NAME.npy, the cell values on the (ny, nx) grid
+in float32, and appends its time to GRID_DIR/times.txt. Only snapshots listed
+in the series index (.vtkhdf.series or .pvd) are read, so files still being
+written are skipped; --delete removes the snapshots afterwards and --follow
+keeps polling until the run's log says it finished, which keeps the disk use
+of long runs bounded.
 
 render computes every frame at the grid's resolution and area-averages it to
 the panel size, so meshes far finer than the screen show no aliasing; text is
@@ -46,8 +47,11 @@ FG = "#e8e8e8"
 
 
 def listed_snapshots(series_dir):
-    """Snapshots of the .pvd series (written after each snapshot is complete)."""
+    """Snapshots of the series indexes (written after each snapshot is complete)."""
     out = []
+    for index in glob.glob(os.path.join(series_dir, "*.vtkhdf.series")):
+        from mallard.vtkhdf import read_series
+        out += [path for _, path in read_series(index)]
     for pvd in glob.glob(os.path.join(series_dir, "*.pvd")):
         for name in re.findall(r'file="([^"]+)"', open(pvd).read()):
             out.append(os.path.join(series_dir, name))

@@ -8,7 +8,11 @@ for large distributed runs. Each boundary face belongs to a named **zone**,
 which `[[boundaries]]` assigns a condition to.
 
 The spatial dimension is a build option (`-DMallard_DIM=2`, the default, or
-`3`): one executable per dimension, the same input keys for both.
+`3`): one solver per dimension, `mallard2d` and `mallard3d`, with the same input
+keys. `mallard` runs the one a case needs, by its mesh: a mesh file's own
+dimension, and for a generated mesh 3D when `[mesh]` sets `Nz` or `Lz` (or
+`periodic` has `z`, or the type has 3D cells). `mallard --dim 2|3 -i input.toml`
+states it.
 
 ## Generated meshes
 
@@ -245,8 +249,9 @@ Pitfalls:
   patches (OpenFOAM's 2D convention); compressed (`.gz`) and decomposed
   (`processor*`) meshes must be decompressed or reconstructed first. Cells
   must be of Mallard's types, as for Fluent.
-- A mesh of the other dimension is an error: build with the matching
-  `-DMallard_DIM`.
+- `mallard` runs the solver of the mesh's dimension, which must be installed
+  (built with the matching `-DMallard_DIM`); `mallard2d` and `mallard3d` run
+  directly reject a mesh of the other dimension.
 
 ## Transform on read
 
@@ -337,6 +342,9 @@ The geometry comes from either
 | `center`, `radius` | required | The shape (for a cylinder, a point of its axis) |
 | `axis` | required for `cylinder` | Direction of the cylinder's axis |
 
+These shapes are curved boundaries' own; [#407](https://github.com/MatthewBonanni/mallard/issues/407)
+plans to take them from the [region engine](geometry.md#regions) instead.
+
 Pitfalls:
 
 - Zone nodes farther than 5% of an edge length from the shape are an error:
@@ -359,8 +367,9 @@ measures every cell of the mesh, taking for each the worst of its faces:
 | Aspect ratio | Largest over smallest distance from the cell centroid to its face centroids | 1000 |
 
 It reports the largest and mean value of each and where the worst cells are;
-`--quality-vtu PREFIX` writes the four fields to `PREFIX_000000.vtu` for
-ParaView, and `tools/mesh/plot_mesh_quality.py PREFIX_000000.vtu out.png` draws a
+`--quality PREFIX` writes the four fields to `PREFIX_000000.vtkhdf`
+(`PREFIX_000000.vtu` in builds without HDF5) for ParaView, and
+`tools/mesh/plot_mesh_quality.py PREFIX_000000.vtkhdf out.png` draws a
 2D mesh's with the worst cells circled.
 
 ![Non-orthogonality and skewness of a coarse triangle mesh around the mallard (examples/mallard), the six worst cells of each circled](../images/guide/mesh_quality-light.svg#gh-light-mode-only)
@@ -371,5 +380,6 @@ ParaView, and `tools/mesh/plot_mesh_quality.py PREFIX_000000.vtu out.png` draws 
 - [Input reference: `[mesh]`](../input.md#mesh), [`[[periodic]]`](../input.md#periodic)
 - [Boundary conditions](boundary_conditions.md): what to put on each zone
 - [Running in parallel](parallel.md): partitions and halos
+- [Geometry](geometry.md): shapes shared by sources, probes and other features
 - Design notes: [periodic boundaries](../design/periodic.md),
   [curved boundaries](../design/curved_boundaries.md)

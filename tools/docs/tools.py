@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS = ROOT / "tools"
 OUT = ROOT / "docs" / "images" / "tools"
 sys.path[:0] = [str(TOOLS), str(TOOLS / "setup")]
-from mallard.vtu import read_vtu  # noqa: E402
+from mallard.vtu import read_vtu, series  # noqa: E402
 
 WORK = None
 MALLARD = None
@@ -450,7 +450,7 @@ RIEMANN = (ROOT / "examples" / "riemann_2d_quads" / "input.toml").read_text()
 
 
 def riemann(order):
-    """A 200 x 200 run of the 2D Riemann problem, first order or TENO5; returns its last VTU."""
+    """A 200 x 200 run of the 2D Riemann problem, first order or TENO5; returns its last snapshot."""
     def make(p):
         text = RIEMANN.replace("Nx = 400", "Nx = 200").replace("Ny = 400", "Ny = 200")
         if order == "FO":
@@ -462,7 +462,7 @@ def riemann(order):
         subprocess.run([str(MALLARD), "-i", "input.toml", "--kokkos-num-threads=4"], cwd=p, check=True,
                        stdout=subprocess.DEVNULL)
     d = once(f"riemann_{order}", make)
-    return d, sorted((d / "solut").glob("riemann_*.vtu"))[-1]
+    return d, series(str(d / "solut"), "riemann_[0-9]*")[-1]
 
 
 def tripanel(ax, vtu, P, contours=0):

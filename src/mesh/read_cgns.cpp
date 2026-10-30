@@ -129,6 +129,17 @@ uint64_t find_root(std::vector<uint64_t> & parent, uint64_t n) {
 
 bool have_cgns() { return true; }
 
+int cgns_dimension(const std::string & filename) {
+    CgnsFile file(filename);
+    int n_bases = 0;
+    file.check(cg_nbases(file.fn, &n_bases), "reading bases");
+    if (n_bases < 1) file.fail("no CGNSBase_t node.");
+    char base_name[33] = {};
+    int cell_dim = 0, phys_dim = 0;
+    file.check(cg_base_read(file.fn, 1, base_name, &cell_dim, &phys_dim), "reading the base");
+    return cell_dim;
+}
+
 MeshFileData read_cgns(const std::string & filename) {
     CgnsFile file(filename);
     const int fn = file.fn;
@@ -410,6 +421,10 @@ MeshFileData read_cgns(const std::string & filename) {
 #else
 
 bool have_cgns() { return false; }
+
+int cgns_dimension(const std::string & filename) {
+    throw std::runtime_error("Cannot read " + filename + ": Mallard was built without CGNS (-DMallard_ENABLE_CGNS=ON).");
+}
 
 MeshFileData read_cgns(const std::string & filename) {
     throw std::runtime_error("Cannot read " + filename + ": Mallard was built without CGNS (-DMallard_ENABLE_CGNS=ON).");

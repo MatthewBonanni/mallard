@@ -32,6 +32,8 @@ struct Dimension {
 
     /** @brief "pressure (kg m^-1 s^-2)", or the SI base units alone if the dimension has no name. */
     std::string describe() const;
+    /** @brief The SI base units in UDUNITS syntax, as CF metadata wants them: "kg m-3", or "1" if dimensionless. */
+    std::string udunits() const;
     /** @brief Units of this dimension to suggest, e.g. "Pa, kPa, bar, atm, psi", or empty. */
     std::string examples() const;
 };

@@ -23,6 +23,8 @@
 #include "hdf5_output.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
+#include "partition.h"
+#include "renumbered_mesh.h"
 #include "scratch.h"
 
 namespace {
@@ -81,6 +83,22 @@ TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {
 TEST(MPI3DTest, NavierStokesOnTetrahedraMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tet", "type = \"MUSCL\"\n",
                                     "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n"));
+}
+
+TEST(MPI3DTest, RenumberedMeshesMatchSerialWithEveryPartitioner) {
+    // Global ids in random order carry no locality: partitions, halos and the
+    // global orders of faces and stencils must not lean on them
+    const RenumberedMesh mesh = renumbered_gmsh(jittered_box(MeshType::CARTESIAN_MIXED, {6, 4, 3}, {1.0, 0.8, 0.6}), 2026);
+    const std::string file = write_temp_shared("mallard_mpi3d_renumbered.msh", mesh.gmsh);
+    std::string input = box_input("cartesian_mixed", "type = \"TENO\"\norder = 3\n",
+                                  "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n");
+    const std::string generated = "type = \"cartesian_mixed\"\nNx = 6\nNy = 4\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
+        if (partitioner == "graph" && !have_graph_partitioner()) continue;
+        expect_matches_serial(input + "[parallel]\npartitioner = \"" + partitioner + "\"\n");
+    }
+    comm::barrier();
 }
 
 TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
@@ -220,6 +238,30 @@ TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
     const std::string dir = (scratch_dir() / "mallard_mpi3d_hdf5").string();
     expect_hdf5_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
                                       "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
+#endif
+}
+
+TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
+    // Tetrahedra, pyramids, prisms and hexahedra, and the quadratic cells of
+    // a curved shell, at their global places
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_vtkhdf").string();
+    expect_vtkhdf_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
+                                        "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir,
+                                        {"_000000", "_000004", "_000008"});
+    const std::string file = write_temp_shared("mallard_mpi_vtkhdf_shell.msh", shell_gmsh(4, 3, true, false));
+    expect_vtkhdf_output_matches_serial(
+        "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+        "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n"
+        "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n[[boundaries]]\nname = \"outer\"\n"
+        "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
+        "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n",
+        "interval = 2\nseries = true\nvariables = [\"RHO\", \"U\"]\n", dir + "_curved", {""});
 #endif
 }
 
