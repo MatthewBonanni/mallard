@@ -194,7 +194,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         std::string key;
         while (std::getline(ss, key, '|')) alternatives.push_back(key);
         size_t given = 0;
-        for (const auto & k : alternatives) given += present(k) ? 1 : 0;
+        for (const auto & k : alternatives) given += present(k) ? 1u : 0u;
         if (given == 0) {
             fail(input, where, alternatives[0],
                  "missing; `" + type_str + "` needs " + (alternatives.size() > 1 ? "one of " : "") + quoted(alternatives),
@@ -208,9 +208,9 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
     }
 
     // Options
-    if (present("nscbc")) bc.options |= NSCBC;
+    if (present("nscbc")) bc.options = static_cast<uint8_t>(bc.options | NSCBC);
     if (present("average")) {
-        if (find_value<bool>(input, "average")) bc.options |= AVERAGE;
+        if (find_value<bool>(input, "average")) bc.options = static_cast<uint8_t>(bc.options | AVERAGE);
     }
     if (bc.has(NSCBC) && bc.has(AVERAGE)) {
         fail(input, where, "average", "`average` and `nscbc` don't combine on `outlet_pressure` (" + PLANNED + ")",
