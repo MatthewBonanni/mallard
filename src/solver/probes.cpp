@@ -833,15 +833,15 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 }
             }
             if (entry.contains("boundary_type")) {
-                const std::string type = find_value<std::string>(entry, "boundary_type");
-                if (type != "wall" && BOUNDARY_TYPES.find(type) == BOUNDARY_TYPES.end()) {
-                    throw InputError(key + ".boundary_type = \"" + type + "\" is not wall or a boundary type.");
+                const std::string zone_type = find_value<std::string>(entry, "boundary_type");
+                if (zone_type != "wall" && BOUNDARY_TYPES.find(zone_type) == BOUNDARY_TYPES.end()) {
+                    throw InputError(key + ".boundary_type = \"" + zone_type + "\" is not wall or a boundary type.");
                 }
                 for (const auto & b : find_value_or<std::vector<Input>>(input, "boundaries", {})) {
                     const std::string t = find_value_or<std::string>(b, "type", "");
                     const auto it = BOUNDARY_TYPES.find(t);
                     const bool wall = it != BOUNDARY_TYPES.end() && BoundaryCondition{it->second}.is_wall();
-                    if (t == type || (type == "wall" && wall)) zones.push_back(find_value<std::string>(b, "name"));
+                    if (t == zone_type || (zone_type == "wall" && wall)) zones.push_back(find_value<std::string>(b, "name"));
                 }
             }
             if (zones.empty()) throw InputError(key + ": no boundary zone selected.");
