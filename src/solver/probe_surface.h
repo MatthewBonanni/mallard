@@ -42,6 +42,32 @@ struct FaceSet {
  */
 FaceSet boundary_faces(const Mesh & mesh, const std::vector<std::string> & zones, bool distributed);
 
+/** @brief Samples at points of known owned cells (this rank's), and rank 0's row of each global sample. */
+struct CellPoints {
+    std::vector<uint32_t> cells;
+    std::vector<Point> points;
+    uint64_t n_global = 0;
+    std::vector<uint64_t> gathered_row;  // rank 0 (every rank if not distributed)
+};
+
+/**
+ * @brief The exact intersection of a plane (3D) or line (2D) with the mesh:
+ *        one sample per cut cell, at the centroid of its cut, weighing its
+ *        area (length), and quadrature points over each cut (seven-point
+ *        degree-5 rules on the triangles where the plane cuts the cell's
+ *        tetrahedra; three Gauss points on 2D segments), ordered by the
+ *        cells' global ids. A plane through mesh faces takes the faces once,
+ *        from the cells on the side the normal points away from. With
+ *        bounds = {lo, hi}, only the part inside that box.
+ */
+struct CutSet {
+    CellPoints nodes, quadrature;
+    Geometry geometry;  // rank 0: polygons (segments in 2D) with node and quadrature weights and normals
+};
+
+CutSet cut_plane(const Mesh & mesh, const Vec3 & point, const Vec3 & normal, bool distributed,
+                 const std::array<Vec3, 2> * bounds = nullptr);
+
 } // namespace probe
 
 #endif // PROBE_SURFACE_H

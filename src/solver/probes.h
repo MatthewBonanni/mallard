@@ -121,10 +121,11 @@ class Probes {
             std::vector<uint64_t> ids;              // global index of each local sample
             std::vector<uint64_t> gathered_row;     // rank 0: row in the gathered values of each global sample
             Kokkos::View<uint32_t *> cells;
-            // Samples on mesh faces: the face, its unit normal and the normal
-            // distance from the cell centroid (empty for located points)
-            Kokkos::View<uint32_t *> faces;
+            // Samples of surfaces (and 2D curves): their unit normals; samples
+            // on boundary faces: the face and its normal distance from the
+            // cell centroid (empty otherwise)
             Kokkos::View<rtype *[N_DIM]> normals;
+            Kokkos::View<uint32_t *> faces;
             Kokkos::View<rtype *> distance;
             Kokkos::View<uint32_t *> inside;        // local samples inside their cell (point values)
             Kokkos::View<uint32_t *> inside_cells;
@@ -135,7 +136,12 @@ class Probes {
             Kokkos::View<rtype **, Kokkos::LayoutRight> values;  // (local sample, variable)
 
             /** @brief Locate points (the same on every rank) in the owned cells. */
-            void locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables);
+            void locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables,
+                        const std::vector<probe::Point> & point_normals = {});
+            /** @brief Points of known cells, all with the normal n (if given). */
+            void in_cells(const Mesh & mesh, const probe::CellPoints & set, const std::vector<probe::Point> & n,
+                          uint32_t n_variables);
+            void set_normals(const std::vector<probe::Point> & n);
             /** @brief Owned cells as samples, numbered in global cell order. */
             void select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables);
             /** @brief The faces of a face set, sampled on their cell side. */
