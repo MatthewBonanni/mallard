@@ -39,7 +39,7 @@
 # Run:
 #   python make_volvo_mesh.py volvo.msh --ds 2e-3 --nz 40
 #   mpirun -n 4 ../../build3d/src/mallard -i reacting.toml --kokkos-map-device-id-by=mpi_rank
-#   python volvo.py profiles stats/reacting_<last>.pvtu --u-bulk 17.3 --temperature --out reacting.npz
+#   python volvo.py profiles stats/reacting_<last>.vtkhdf --u-bulk 17.3 --temperature --out reacting.npz
 #   python volvo.py plot reacting.npz --kind reacting --exp reference --out reacting.png
 
 [run]
@@ -147,12 +147,10 @@ time_interval = 0.01
 
 [[write_data]]
 prefix = "stats/reacting"
-format = "vtu"
 time_interval = 0.05
 variables = ["MEAN_*", "COV_*"]
 
 [[write_data]]
 prefix = "snap/reacting"
-format = "vtu"
 time_interval = 0.125
 variables = ["U", "T", "HRR", "Q", "TF_F", "TF_E", "MU_T"]

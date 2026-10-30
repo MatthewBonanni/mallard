@@ -3,7 +3,7 @@
     python examples/flame_vortex/flame_vortex_analysis.py RUN_DIR [RUN_DIR ...] [--mechanism mechanisms/h2o2.yaml]
         [--phase ohmech] [--control RUN_DIR ...] [--plot OUT.png] [--csv OUT.csv] [--progress SPECIES]
 
-For each output of RUN_DIR/solut/flame.pvd (the half channel y > 0):
+For each output of the series RUN_DIR/solut/flame (the half channel y > 0):
   Q      the heat release over that of the planar flame, int HRR dA / (L_y int
          HRR_planar dx) (Cantera's planar flame, RUN_DIR/planar_full.csv);
   L      the length of the flame, the isotherm T_u + (T_b - T_u) / 2, over the
@@ -44,7 +44,7 @@ import numpy as np
 from scipy import ndimage
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../triple_flame"))
-from triple_flame_analysis import grid  # noqa: E402
+from triple_flame_analysis import grid, snapshots  # noqa: E402
 
 OUTCOMES = ["no effect", "wrinkled", "pocket", "quenched"]
 MARKERS = {"no effect": ("o", "#9aa0a6"), "wrinkled": ("s", "#4fc3f7"), "pocket": ("D", "#ffb74d"),
@@ -151,9 +151,7 @@ def classify(rows, control=None):
 
 
 def analyze(run_dir, p):
-    pvd = os.path.join(run_dir, "solut", "flame.pvd")
-    files = re.findall(r'file="([^"]+)"', open(pvd).read())
-    return np.array([frame_metrics(os.path.join(run_dir, "solut", f), p) for f in files])
+    return np.array([frame_metrics(f, p) for _, f in snapshots(os.path.join(run_dir, "solut", "flame"))])
 
 
 def main():

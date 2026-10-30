@@ -116,7 +116,7 @@ jobs:
       - name: Install MPI and Python packages
         run: >
           sudo apt-get update -qq && sudo apt-get install -y -qq
-          libopenmpi-dev openmpi-bin python3-numpy python3-scipy python3-matplotlib
+          libopenmpi-dev openmpi-bin python3-numpy python3-scipy python3-matplotlib python3-h5py
       - uses: spack/setup-spack@v3
         with:
           spack_ref: releases/v1.2

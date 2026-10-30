@@ -18,7 +18,7 @@ chemistry in cells below Tu + --frozen K
 can only propagate by conduction and diffusion.
 
 `make` writes RUN_DIR/input.toml. `measure` reads each run's series
-(solut/defl.pvd) and prints the consumption speed
+(solut/defl_*) and prints the consumption speed
 
     S_c = -int omega_H2 dx / (rho_u Y_H2,u)
 
@@ -27,14 +27,13 @@ thickness delta = (T_b - T_u) / max dT/dx of the front; --csv collects them.
 """
 import argparse
 import os
-import re
 import sys
 
 import cantera as ct
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import read_quads  # noqa: E402
+from mallard.vtu import read_quads, series  # noqa: E402
 
 
 def make(args):
@@ -114,18 +113,15 @@ check_interval = 20000
 
 [[write_data]]
 prefix = "./solut/defl"
-format = "vtu"
 time_interval = {args.t_stop / 30:.17g}
 variables = ["RHO", "U", "P", "T", "HRR", "Y_H2", "OMEGA_H2"]
 """)
 
 
 def measure_run(run_dir):
-    pvd = os.path.join(run_dir, "solut", "defl.pvd")
-    files = re.findall(r'file="([^"]+)"', open(pvd).read())
     rows = []
-    for name in files:
-        t, c, f = read_quads(os.path.join(run_dir, "solut", name), ["RHO", "P", "T", "Y_H2", "OMEGA_H2"])
+    for path in series(os.path.join(run_dir, "solut"), "defl_[0-9]*"):
+        t, c, f = read_quads(path, ["RHO", "P", "T", "Y_H2", "OMEGA_H2"])
         order = np.argsort(c[:, 0])
         xs = c[order, 0]
         rho, P, T, Y, w = (f[k][order] for k in ["RHO", "P", "T", "Y_H2", "OMEGA_H2"])

@@ -6,7 +6,7 @@
         [--hold 2] [--gif-width 640] [--gif-every 2] [--t-start 600] [--prefix sphere]
     animate_sphere_re300.py --extract SOLUT_DIR SURFACE_DIR [--q 0.02] [--u 0.2]
 
-SOLUT_DIR holds the volume VTU (or PVTU) series of examples/sphere_re300 with
+SOLUT_DIR holds the volume series (VTKHDF, or VTU) of examples/sphere_re300 with
 U and Q, the Q-criterion from the solver's velocity gradients. Each snapshot
 is resampled near the wake onto a uniform grid of the given spacing (in D),
 smoothed by a Gaussian of sigma grid spacings, and Q is contoured there at
@@ -26,6 +26,7 @@ solution is, then animate SURFACE_DIR with --prefix q.
 """
 import argparse
 import glob
+import json
 import os
 import re
 import sys
@@ -53,8 +54,12 @@ R_SHEATH = 0.6
 
 
 def snapshot_files(solut, prefix):
-    text = open(os.path.join(solut, prefix + ".pvd")).read()
-    entries = re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)
+    index = os.path.join(solut, prefix + ".vtkhdf.series")
+    if os.path.exists(index):
+        entries = [(e["time"], e["name"]) for e in json.load(open(index))["files"]]
+    else:
+        text = open(os.path.join(solut, prefix + ".pvd")).read()
+        entries = re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)
     return [(float(t), os.path.join(solut, f)) for t, f in entries if os.path.exists(os.path.join(solut, f))]
 
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Checks the smoke-test runs against reference solutions.
 
-    check.py TOOLS sod SNAPSHOT [SNAPSHOT...]   L1 density error against the exact Sod solution at t = 0.2
+    check.py TOOLS sod STEM [STEM...]           L1 density error against the exact Sod solution at t = 0.2
     check.py TOOLS reactor LOG                   `mallard reactor`'s ignition delay against Cantera's
 
-TOOLS is the directory of Mallard's Python tools (share/mallard/tools). A SNAPSHOT is a
-2D or 3D .vtu file, or the .pvtu index of a distributed run.
+TOOLS is the directory of Mallard's Python tools (share/mallard/tools). A STEM
+PREFIX_NNNNNN names a 2D or 3D snapshot: its .vtkhdf file, or without HDF5 its
+.vtu file (the .pvtu index of a distributed run).
 """
 import os
 import re
@@ -18,24 +19,21 @@ IGNITION_DELAY_REF = 44.2e-6  # Cantera IdealGasReactor (examples/h2_ignition)
 IGNITION_DELAY_RTOL = 0.02
 
 
-def cells(path):
-    """Cell-center x and density of a snapshot, or of all pieces of a PVTU."""
-    from mallard.vtu import read_vtu_cells
-    if path.endswith(".pvtu"):
-        pieces = re.findall(r'Source="([^"]+)"', open(path).read())
-        parts = [cells(os.path.join(os.path.dirname(path), p)) for p in pieces]
-        return np.concatenate([p[0] for p in parts]), np.concatenate([p[1] for p in parts])
+def cells(stem):
+    """Snapshot file, cell-center x and density of a snapshot."""
+    from mallard.vtu import read_vtu_cells, snapshot
+    path = snapshot(stem)
     pts, conn, offs, _, arrays = read_vtu_cells(path)
     starts = np.concatenate([[0], offs[:-1]])
     x = np.array([pts[conn[a:b], 0].mean() for a, b in zip(starts, offs)])
-    return x, arrays["RHO"]
+    return path, x, arrays["RHO"]
 
 
 def check_sod(paths):
     from plot_sod import exact_sod
     ok = True
-    for path in paths:
-        x, rho = cells(path)
+    for stem in paths:
+        path, x, rho = cells(stem)
         err = np.mean(np.abs(rho - exact_sod(x, 0.2)))
         ok &= bool(err < SOD_L1_MAX)
         print(f"{path}: {x.size} cells, L1 density error {err:.2e} (limit {SOD_L1_MAX:.0e})")
