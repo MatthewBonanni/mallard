@@ -29,9 +29,9 @@ struct ExampleCase {
     std::string file;    ///< Under examples/
     std::string preset;  ///< Its closest numerics preset
     int dim;             ///< Spatial dimension of the build it needs
-    /// Replaces an [initialize] that restarts or remaps from a generated file; empty:
-    /// the state of the first boundary with p and T (mixtures) or the
-    /// reference state (perfect gas), at rest
+    /// Replaces an [initialize] that reads a generated file (restart, remap or
+    /// data); empty, for a restart or remap: the state of the first boundary
+    /// with p and T (mixtures) or the reference state (perfect gas), at rest
     std::string init;
     /// File meshes: (zone of the replacement mesh, example boundary it takes)
     std::vector<std::array<std::string, 2>> zones;
@@ -110,11 +110,11 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
         }
     }
 
-    if (const auto type = find_value_or<std::string>(input, "initialize", "type", "constant");
-        type == "restart" || type == "remap") {
-        if (!c.init.empty()) {
-            table["initialize"] = parse_toml(c.init);
-        } else if (physics.count("mechanism")) {
+    if (!c.init.empty()) {
+        table["initialize"] = parse_toml(c.init);
+    } else if (const auto type = find_value_or<std::string>(input, "initialize", "type", "constant");
+               type == "restart" || type == "remap") {
+        if (physics.count("mechanism")) {
             for (const auto & b : input.at("boundaries").as_array()) {
                 if (!b.contains("p") || !b.contains("T") || !(b.contains("X") || b.contains("Y"))) continue;
                 auto expression = [](const Input & v) {
