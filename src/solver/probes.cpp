@@ -269,7 +269,7 @@ std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
  *        vertices (point sets), polyline points (curves) or polygons (3D
  *        surfaces of mesh faces), with one array per variable.
  */
-void write_vtp_file(const std::string & file, const probe::Geometry & g, const std::vector<std::string> & names,
+void write_vtp_file(const std::string & file, double t, const probe::Geometry & g, const std::vector<std::string> & names,
                     const std::vector<double> & values, size_t n_columns) {
     struct Array {
         std::string name, type;
@@ -321,7 +321,8 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
     // Field data belongs to the data set, before the piece, for VTK to read it
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
            "header_type=\"UInt64\">\n  <PolyData>\n";
-    out << "    <FieldData>\n      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
+    out << "    <FieldData>\n      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
+        << std::setprecision(17) << t << "</DataArray>\n      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
            "format=\"ascii\">"
         << file_format::PROBE_OUTPUT.version << "</DataArray>\n"
         << field_units::vtk_field_data(sample_names, descriptions, "      ") << "    </FieldData>\n";
@@ -1538,7 +1539,8 @@ void Probes::Probe::write_vtp(uint64_t step, rtype t, const std::vector<double> 
     const std::filesystem::path pvd(file);
     std::ostringstream piece;
     piece << pvd.stem().string() << "_" << std::setw(6) << std::setfill('0') << step << ".vtp";
-    write_vtp_file((pvd.parent_path() / piece.str()).string(), geometry, variables, values, n_evaluated());
+    write_vtp_file((pvd.parent_path() / piece.str()).string(), static_cast<double>(t), geometry, variables, values,
+                   n_evaluated());
     series.emplace_back(static_cast<double>(t), piece.str());
     write_pvd_file(file, series);
 }

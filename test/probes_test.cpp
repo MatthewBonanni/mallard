@@ -801,7 +801,7 @@ TEST(ProbesTest, CutPlaneIntegralsAreExactForPolynomialFields) {
     const std::string plane = N_DIM == 2 ? "point = [0.5, 0.47]\nnormal = [0.3, 1.0]\nbounds = [[0.3, 0.3], [0.7, 0.7]]\n"
                                          : "point = [0.5, 0.5, 0.47]\nnormal = [0.0, 0.0, 1.0]\n"
                                            "bounds = [[0.3, 0.32, 0.3], [0.7, 0.68, 0.7]]\n";
-    const std::string probe = "[[probes]]\nname = \"cut\"\nshape = \"cut_plane\"\n" + plane +
+    const std::string probe = "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\n" + plane +
                               "variables = [\"RHO\", \"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
                               "reductions = [\"integral\", \"favre\"]\nreductions_file = \"" + dir + "/cut.csv\"\n";
     Solver solver;
@@ -843,8 +843,8 @@ TEST(ProbesTest, AxisymmetricRunsKeepPerRadianIntegralsOnBoundaries) {
                PERFECT_GAS + "axisymmetric = true\n[output]\ncheck_interval = 1000000\n[[probes]]\nname = \"p\"\n" +
                "file = \"" + fresh_dir("axisymmetric") + "/p.csv\"\n" + probe;
     };
-    const std::string cut = "shape = \"cut_plane\"\npoint = [0.5, 0.5]\nnormal = [1.0, 0.0]\n";
-    const std::string circle = "shape = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n";
+    const std::string cut = "type = \"cut_plane\"\npoint = [0.5, 0.5]\nnormal = [1.0, 0.0]\n";
+    const std::string circle = "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n";
     for (const std::string & rejected : {cut + "variables = [\"MASS_FLUX\"]\n", circle + "variables = [\"MASS_FLUX\"]\n",
                                          cut + "variables = [\"P\"]\nreductions = [\"integral\"]\n"}) {
         Solver solver;
@@ -857,7 +857,7 @@ TEST(ProbesTest, AxisymmetricRunsKeepPerRadianIntegralsOnBoundaries) {
 TEST(ProbesTest, CutPlanesTakeFacesOnTheirPlaneOnce) {
     // A plane through mesh faces cuts each column of cells once: the plane's whole area
     const std::string dir = fresh_dir("cut_faces");
-    const std::string probe = "[[probes]]\nname = \"cut\"\nshape = \"cut_plane\"\npoint = " + numbers3("0.5", "0", "0") +
+    const std::string probe = "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\npoint = " + numbers3("0.5", "0", "0") +
                               "\nnormal = " + numbers3("1", "0", "0") + "\nvariables = [\"P\"]\nfile = \"" + dir +
                               "/cut.csv\"\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/red.csv\"\n";
     Solver solver;
@@ -873,8 +873,8 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     // The outward flux of a linear velocity through a circle (sphere) is the
     // integral of its divergence over the disk (ball)
     const std::string dir = fresh_dir("divergence");
-    const std::string shape = N_DIM == 2 ? "shape = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 64\n"
-                                         : "shape = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [24, 48]\n";
+    const std::string shape = N_DIM == 2 ? "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 64\n"
+                                         : "type = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [24, 48]\n";
     const std::string probe = "[[probes]]\nname = \"closed\"\n" + shape +
                               "variables = [\"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
                               "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/closed.csv\"\n";
@@ -905,16 +905,16 @@ TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
         int radial;   // else: away from the origin in the first `radial` coordinates
     };
     const std::vector<Case> cases = {
-        {"shape = \"rectangle\"\ncenter = [0.1, 0.2, 0.3]\nnormal = [0.0, 0.0, 1.0]\nsize = [0.4, 0.3]\nn_points = [5, 4]\n",
+        {"type = \"rectangle\"\ncenter = [0.1, 0.2, 0.3]\nnormal = [0.0, 0.0, 1.0]\nsize = [0.4, 0.3]\nn_points = [5, 4]\n",
          0.12, true, 0},
-        {"shape = \"disk\"\ncenter = [0.0, 0.0, 0.0]\nnormal = [0.0, 0.0, 1.0]\nradius = 0.5\ninner_radius = 0.2\n"
+        {"type = \"disk\"\ncenter = [0.0, 0.0, 0.0]\nnormal = [0.0, 0.0, 1.0]\nradius = 0.5\ninner_radius = 0.2\n"
          "n_points = [6, 32]\n",
          pi * (0.25 - 0.04), true, 0},
-        {"shape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 0.5\nn_points = [16, 32]\n", pi, false, 3},
-        {"shape = \"cylinder\"\ncenter = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nradius = 0.3\nlength = 2.0\n"
+        {"type = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 0.5\nn_points = [16, 32]\n", pi, false, 3},
+        {"type = \"cylinder\"\ncenter = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nradius = 0.3\nlength = 2.0\n"
          "n_points = [5, 32]\n",
          2.0 * pi * 0.3 * 2.0, false, 2},
-        {"shape = \"cone\"\nbase = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nlength = 1.0\nbase_radius = 0.5\n"
+        {"type = \"cone\"\nbase = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nlength = 1.0\nbase_radius = 0.5\n"
          "top_radius = 0.2\nn_points = [5, 32]\n",
          pi * 0.7 * std::hypot(1.0, 0.3), false, 2},
     };

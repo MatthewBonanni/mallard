@@ -980,7 +980,6 @@
    "examples/heated_duct/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/reactive_shock_tube/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -1233,7 +1232,6 @@
    "examples/sedov_axisymmetric/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -1272,6 +1270,9 @@
  },
  "initialize.type": {
   "default": "\"constant\"",
+  "defaults_by_dim": {
+   "2": "\"\""
+  },
   "dims": [
    2,
    3
@@ -1363,7 +1364,6 @@
    "examples/sedov_axisymmetric/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -3762,170 +3762,6 @@
    "examples/source_regions/input.toml"
   ]
  },
- "probes.region.a": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.b": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.edge": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.filled": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.pivot": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.regions": {
-  "dims": [
-   2
-  ],
-  "set_in": [
-   "examples/source_regions/input.toml"
-  ]
- },
- "probes.region.regions.center": {
-  "dims": [
-   2
-  ],
-  "set_in": [
-   "examples/source_regions/input.toml"
-  ]
- },
- "probes.region.regions.filled": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.regions.pivot": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.regions.radius": {
-  "dims": [
-   2
-  ],
-  "set_in": [
-   "examples/source_regions/input.toml"
-  ]
- },
- "probes.region.regions.rotate": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.regions.scale": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.regions.translate": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.regions.type": {
-  "dims": [
-   2
-  ],
-  "required": true,
-  "set_in": [
-   "examples/source_regions/input.toml"
-  ],
-  "type": "string",
-  "values": [
-   "annulus",
-   "boundary",
-   "circle",
-   "cone",
-   "cylinder",
-   "difference",
-   "disk",
-   "ellipse",
-   "ellipsoid",
-   "frustum",
-   "half_space",
-   "implicit",
-   "interior",
-   "intersection",
-   "polygon",
-   "rectangle",
-   "sphere",
-   "torus",
-   "union"
-  ]
- },
- "probes.region.rotate": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.scale": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.translate": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
- "probes.region.type": {
-  "dims": [
-   2
-  ],
-  "required": true,
-  "set_in": [
-   "examples/source_regions/input.toml"
-  ],
-  "type": "string",
-  "values": [
-   "annulus",
-   "boundary",
-   "circle",
-   "cone",
-   "cylinder",
-   "difference",
-   "disk",
-   "ellipse",
-   "ellipsoid",
-   "frustum",
-   "half_space",
-   "implicit",
-   "interior",
-   "intersection",
-   "polygon",
-   "rectangle",
-   "sphere",
-   "torus",
-   "union"
-  ]
- },
  "probes.rotate": {
   "dims": [
    2,
@@ -4892,6 +4728,18 @@
   ],
   "type": "array"
  },
+ "write_data.boundary": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "write_data.boundary_type": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
  "write_data.chunk_cells": {
   "dims": [
    2,
@@ -4912,7 +4760,14 @@
    "zlib"
   ]
  },
+ "write_data.end": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
  "write_data.format": {
+  "default": "\"vtkhdf\"",
   "dims": [
    2,
    3
@@ -4976,6 +4831,12 @@
   ],
   "type": "integer"
  },
+ "write_data.point": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
  "write_data.prefix": {
   "dims": [
    2,
@@ -5025,7 +4886,6 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -5037,6 +4897,12 @@
    "tutorials/wedge/input.toml"
   ],
   "type": "string"
+ },
+ "write_data.reference": {
+  "dims": [
+   3
+  ],
+  "set_in": []
  },
  "write_data.region": {
   "dims": [
@@ -5065,6 +4931,12 @@
  "write_data.series": {
   "dims": [
    2,
+   3
+  ],
+  "set_in": []
+ },
+ "write_data.start": {
+  "dims": [
    3
   ],
   "set_in": []
@@ -5119,7 +4991,6 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
@@ -5129,6 +5000,14 @@
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
+ },
+ "write_data.type": {
+  "default": "\"\"",
+  "dims": [
+   3
+  ],
+  "set_in": [],
+  "type": "string"
  },
  "write_data.variables": {
   "dims": [

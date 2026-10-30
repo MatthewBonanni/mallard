@@ -1,1 +1,2 @@
 - `[[write_data]]` `geometry` is deprecated for `region` (removed in 0.10.0; `mallard input upgrade` rewrites it, `"all"` as `"domain"`). A boundary zone's snapshot now holds the point values a `sampling = "point"` boundary probe writes, at the face centroids (cell fields such as `P_MAX` still from each face's cell), as VTK PolyData: one `PREFIX.vtkhdf` of every snapshot, or `PREFIX_<step>.vtp` files and `PREFIX.pvd` (#542).
+- Probe VTP files carry the snapshot's `TIME` in their field data, as VTU snapshots do (#542).

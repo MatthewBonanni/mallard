@@ -157,6 +157,9 @@ Pitfalls:
   such as `P_MAX` are still the cell's.
 - Regions are written as `vtkhdf` or `vtu` only, not as the deprecated `hdf5`
   (XDMF) format.
+- The surfaces and curves of `[regions]` (a sphere's surface with
+  `filled = false`, `{type = "boundary", of = ...}`, flat disks and circles) are
+  not sampled yet: write a probe type, a cut plane or a boundary zone instead.
 - `compression` on a region of lower dimension, alone in its entry, is an
   unused key: those files are small and written uncompressed.
 
