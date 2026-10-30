@@ -399,13 +399,13 @@ Shape shape_of(const Input & entry, const std::string & where, const Input * nam
                                   : type == "sphere" || type == "cylinder";
     if (round && !transformed && !entry.contains("length") && !entry.contains("inner_radius")) {
         const auto center = find_value<std::vector<Input>>(entry, "center");
-        for (size_t i = 0; i < center.size(); i++) s.center[i] = double(as_real(center[i], where + ".center", dim::length));
+        for (size_t i = 0; i < center.size(); i++) s.center[i] = as_double(center[i], where + ".center", dim::length);
         if (N_DIM == 3 || s.center[2] == 0.0) {
             s.kind = N_DIM == 2 ? Shape::Kind::CIRCLE : (type == "sphere" ? Shape::Kind::SPHERE : Shape::Kind::CYLINDER);
-            s.radius = double(as_real(entry.at("radius"), where + ".radius", dim::length));
+            s.radius = as_double(entry.at("radius"), where + ".radius", dim::length);
             if (s.kind == Shape::Kind::CYLINDER) {
                 const auto axis = find_value<std::vector<Input>>(entry, "axis");
-                for (size_t i = 0; i < 3; i++) s.axis[i] = double(as_real(axis[i], where + ".axis", dim::none));
+                for (size_t i = 0; i < 3; i++) s.axis[i] = as_double(axis[i], where + ".axis", dim::none);
                 s.axis = scale(1.0 / std::sqrt(dot(s.axis, s.axis)), s.axis);
             }
             return s;
