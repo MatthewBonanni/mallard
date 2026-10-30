@@ -26,6 +26,7 @@ set(MALLARD_TEST_SOURCES
     distributed_mesh_test.cpp
     statistics_test.cpp
     probes_test.cpp
+    probe_reference_test.cpp
     insitu_statistics_test.cpp
     remap_test.cpp
     les_test.cpp

@@ -486,6 +486,16 @@ A probe samples the solution on a geometry every `interval` steps (or
 `time_interval` of simulation time) and writes the samples, reductions over
 them, or both. The files are the same bit for bit on any number of ranks.
 
+On a GPU the files have the CPU's rows, in the same order, with the same steps,
+times, coordinates, normals and areas: the geometry is set up on the host, and
+rank 0 reduces the gathered samples on the host in sample order. The values agree
+with a CPU run to rounding, not bit for bit, since the device rounds the solution
+and its point values differently (fused multiply-adds, its own math functions).
+The test suite checks every backend against a CPU reference (`test/data/probes`):
+indices, steps and times exactly, geometry to 1e-14 and values to 1e-10 of each
+column's largest magnitude. The geometry tolerance covers other CPUs and
+compilers only; on one host the geometry of every backend is the same bit for bit.
+
 ```toml
 [[probes]]
 name = "centerline"
