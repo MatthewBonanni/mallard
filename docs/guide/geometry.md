@@ -16,11 +16,14 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
+| `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
+| `[[initialize.data]]` `region` | a [region](#regions) or its [name](#named-regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
 | `[[mesh.curved]]` | `circle`, `sphere` or `cylinder` of its own keys (to move onto regions: [#407](https://github.com/MatthewBonanni/mallard/issues/407)) | [Curved boundaries](meshes.md#curved-boundaries) |
 
-Initial states take expressions rather than regions; a comparison such as
+Analytical initial states take expressions; a comparison such as
 `"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp region there, which the initial
-state averages over each cell.
+state averages over each cell. `[[initialize.regions]]` takes the region itself,
+and also layers it over a restart.
 
 ## Coordinates and units
 
