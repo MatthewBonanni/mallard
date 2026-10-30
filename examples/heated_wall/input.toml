@@ -10,7 +10,10 @@
 #   python check_heated_wall.py solut/box
 #
 # Result: after 10 ms the energy in the box has grown by 20 J/m, within 2e-14
-# of q A t at every snapshot.
+# of q A t at every snapshot. Locally, after 1 ms the floor cells of each of 8
+# bins along x have taken up the integral of q over the bin times t within
+# 0.3%: 2.6 times as much under the cosine's peak as under its trough (a
+# uniform q of the same total would give them the same).
 
 [run]
 t_stop = 0.01

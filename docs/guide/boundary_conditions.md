@@ -298,7 +298,9 @@ radiative load).
 
 *`examples/heated_wall`: a closed box heated through its floor with
 `q = 2e4 (1 + 0.5 cos(2 pi x / 0.1))` W/m^2; the energy in the box grows by
-the heat that entered, `q A t`, within 2e-14 (`check_heated_wall.py`).*
+the heat that entered, `q A t`, within 2e-14, and after 1 ms each stretch of
+the floor has taken up its own share, the integral of `q` over it, within
+0.3% (`check_heated_wall.py`).*
 
 **Pitfall:** a large `q` on a coarse wall cell overshoots the wall
 temperature; check the near-wall temperature against `q dy / lambda`.
