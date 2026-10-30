@@ -189,6 +189,200 @@ struct Patch {
 const double GAUSS_X[3] = {-0.7745966692414834, 0.0, 0.7745966692414834};
 const double GAUSS_W[3] = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
 
+/** @brief A quadrature point: its position, weight (its share of the measure) and unit normal (tangent of 3D curves). */
+struct Quadrature {
+    Vec x;
+    double w = 0.0;
+    Vec n = {0.0, 0.0, 0.0};
+};
+
+/**
+ * @brief The quadrature of a primitive's patch clipped to where the clipping
+ *        functions are negative. Along lines of one parameter at the Gauss
+ *        points of the other, the kept intervals end at the functions' roots,
+ *        found to round-off, so the quadrature converges at the Gauss rule's
+ *        order where the clipping boundary is a graph over the other
+ *        parameter; patches where it is not, or that several functions cross,
+ *        are subdivided.
+ */
+struct Clipper {
+    using Clip = std::function<double(const Vec &)>;
+    const Local & map;
+    const Patch & patch;
+    const std::vector<Clip> & clips;
+    bool bounded;
+    bool curve;
+    static constexpr int MAX_DEPTH = 6;  // subdivisions of patches a clip crosses
+
+    Vec world(const double u, const double v) const {
+        Vec q, qu, qv;
+        patch.at(u, v, q, qu, qv);
+        return map.point(q);
+    }
+
+    /** @brief The point at (u, v), weighing w_param in the parameters. */
+    Quadrature point(const double u, const double v, const double w_param) const {
+        Vec q, qu, qv;
+        patch.at(u, v, q, qu, qv);
+        const Vec xu = map.vector(qu), xv = map.vector(qv);
+        Quadrature out;
+        out.x = map.point(q);
+        if (curve) {
+            const Vec t = unit(xu);
+            out.w = w_param * norm(xu);
+            out.n = N_DIM == 2 ? Vec{t[1], -t[0], 0.0} : t;
+        } else {
+            const Vec n = cross(xu, xv);
+            out.w = w_param * norm(n);
+            out.n = unit(n);
+        }
+        return out;
+    }
+
+    /** @brief The ends a, b and the roots of the active clips on the line t in [a, b] through f(t), sorted. */
+    std::vector<double> roots(const double a, const double b, const std::function<Vec(double)> & f,
+                              const std::vector<size_t> & active) const {
+        std::vector<double> cuts = {a, b};
+        constexpr int N = 8;
+        for (const size_t k : active) {
+            double t0 = a, g0 = clips[k](f(a));
+            for (int i = 1; i <= N; i++) {
+                const double t1 = a + (b - a) * i / N, g1 = clips[k](f(t1));
+                if ((g0 < 0.0) != (g1 < 0.0)) {
+                    double lo = t0, hi = t1, glo = g0;
+                    for (int it = 0; it < 64 && hi - lo > 1e-15 * (b - a); it++) {
+                        const double mid = 0.5 * (lo + hi), gm = clips[k](f(mid));
+                        if ((gm < 0.0) == (glo < 0.0)) {
+                            lo = mid;
+                            glo = gm;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    cuts.push_back(0.5 * (lo + hi));
+                }
+                t0 = t1;
+                g0 = g1;
+            }
+        }
+        std::sort(cuts.begin(), cuts.end());
+        return cuts;
+    }
+
+    /** @brief The kept intervals of the line t in [a, b] through f(t): between the roots of the active clips. */
+    std::vector<std::pair<double, double>> kept(const double a, const double b, const std::function<Vec(double)> & f,
+                                                const std::vector<size_t> & active) const {
+        const std::vector<double> cuts = roots(a, b, f, active);
+        std::vector<std::pair<double, double>> out;
+        for (size_t i = 0; i + 1 < cuts.size(); i++) {
+            if (!(cuts[i + 1] > cuts[i])) continue;
+            const Vec mid = f(0.5 * (cuts[i] + cuts[i + 1]));
+            bool in = true;
+            for (const size_t k : active) in = in && clips[k](mid) < 0.0;
+            if (in) out.emplace_back(cuts[i], cuts[i + 1]);
+        }
+        return out;
+    }
+
+    /** @brief Whether clip k is monotone along v (or u) on the patch: its boundary a graph over the other parameter. */
+    bool graph(const size_t k, const double u0, const double u1, const double v0, const double v1, const bool along_v) const {
+        int sign = 0;
+        constexpr int LINES = 4, SAMPLES = 8;
+        for (int i = 0; i <= LINES; i++) {
+            double prev = 0.0;
+            for (int j = 0; j <= SAMPLES; j++) {
+                const double a = along_v ? u0 + (u1 - u0) * i / LINES : u0 + (u1 - u0) * j / SAMPLES;
+                const double b = along_v ? v0 + (v1 - v0) * j / SAMPLES : v0 + (v1 - v0) * i / LINES;
+                const double g = clips[k](world(a, b));
+                if (j > 0) {
+                    const int s = g > prev ? 1 : g < prev ? -1 : 0;
+                    if (s == 0 || (sign != 0 && s != sign)) return false;
+                    sign = s;
+                }
+                prev = g;
+            }
+        }
+        return true;
+    }
+
+    void run(const double u0, const double u1, const double v0, const double v1, const int depth,
+             std::vector<Quadrature> & out) const {
+        // The clips that may cross the patch (bounded distances: those nearer than its extent)
+        const Vec c = world(0.5 * (u0 + u1), 0.5 * (v0 + v1));
+        double radius = 0.0;
+        for (int i = 0; i <= 2; i++) {
+            for (int j = 0; j <= (curve ? 0 : 2); j++) {
+                radius = std::max(radius, norm(sub(world(u0 + (u1 - u0) * i / 2.0, v0 + (v1 - v0) * j / 2.0), c)));
+            }
+        }
+        std::vector<size_t> active;
+        for (size_t k = 0; k < clips.size(); k++) {
+            const double g = clips[k](c);
+            if (bounded && std::abs(g) > 1.5 * radius) {
+                if (g > 0.0) return;
+                continue;
+            }
+            active.push_back(k);
+        }
+        if (curve) {
+            for (const auto & [a, b] : kept(u0, u1, [&](double t) { return world(t, 0.0); }, active)) {
+                for (int g = 0; g < 3; g++) out.push_back(point(a + 0.5 * (1.0 + GAUSS_X[g]) * (b - a), 0.0, GAUSS_W[g] * 0.5 * (b - a)));
+            }
+            return;
+        }
+        // Lines along the direction in which every active clip is monotone, the steeper one first (the
+        // clip boundary then a graph of bounded slope over the other parameter)
+        int along = -1;
+        int first_dir = 1;
+        if (!active.empty()) {
+            const double gu = std::abs(clips[active[0]](world(u1, 0.5 * (v0 + v1))) - clips[active[0]](world(u0, 0.5 * (v0 + v1))));
+            const double gv = std::abs(clips[active[0]](world(0.5 * (u0 + u1), v1)) - clips[active[0]](world(0.5 * (u0 + u1), v0)));
+            first_dir = gv >= gu ? 1 : 0;
+        }
+        for (const int dir : {first_dir, 1 - first_dir}) {
+            bool all = true;
+            for (const size_t k : active) all = all && graph(k, u0, u1, v0, v1, dir == 1);
+            if (all) {
+                along = dir;
+                break;
+            }
+        }
+        if ((along < 0 || active.size() > 1) && depth < MAX_DEPTH) {
+            const double um = 0.5 * (u0 + u1), vm = 0.5 * (v0 + v1);
+            run(u0, um, v0, vm, depth + 1, out);
+            run(um, u1, v0, vm, depth + 1, out);
+            run(u0, um, vm, v1, depth + 1, out);
+            run(um, u1, vm, v1, depth + 1, out);
+            return;
+        }
+        const bool along_v = along != 0;
+        const double a0 = along_v ? u0 : v0, a1 = along_v ? u1 : v1, b0 = along_v ? v0 : u0, b1 = along_v ? v1 : u1;
+        auto at = [&](const double s, const double t) { return along_v ? world(s, t) : world(t, s); };
+        // The kept length is smooth in s between where the clips cross the lines' ends: Gauss points on each piece
+        std::vector<double> pieces = roots(a0, a1, [&](double s) { return at(s, b0); }, active);
+        const std::vector<double> other = roots(a0, a1, [&](double s) { return at(s, b1); }, active);
+        pieces.insert(pieces.end(), other.begin(), other.end());
+        std::sort(pieces.begin(), pieces.end());
+        for (size_t p = 0; p + 1 < pieces.size(); p++) {
+            const double s0 = pieces[p], s1 = pieces[p + 1];
+            if (!(s1 > s0)) continue;
+            for (int i = 0; i < 3; i++) {
+                const double s = s0 + 0.5 * (1.0 + GAUSS_X[i]) * (s1 - s0), ws = GAUSS_W[i] * 0.5 * (s1 - s0);
+                for (const auto & [a, b] : kept(b0, b1, [&](double t) { return at(s, t); }, active)) {
+                    for (int j = 0; j < 3; j++) {
+                        const double t = a + 0.5 * (1.0 + GAUSS_X[j]) * (b - a), w = ws * GAUSS_W[j] * 0.5 * (b - a);
+                        out.push_back(along_v ? point(s, t, w) : point(t, s, w));
+                    }
+                }
+            }
+        }
+    }
+
+    void patch_quadrature(const double u0, const double u1, const double v0, const double v1, std::vector<Quadrature> & out) const {
+        run(u0, u1, v0, v1, 0, out);
+    }
+};
+
 class Builder {
     public:
         Builder(const Mesh & mesh, const Region & region) : m_mesh(mesh), m_region(region) {
@@ -299,20 +493,56 @@ class Builder {
         }
 
         void emit(const uint32_t c, std::vector<Vec> v, Vec direction, const bool flip, double measure = -1.0,
-                  const Vec * center = nullptr) {
+                  const Vec * center = nullptr, const std::vector<Quadrature> * quadrature = nullptr) {
             const auto [m, centroid] = measure_of(v);
+            if (measure < 0.0) measure = m;
+            if (!(measure > 0.0)) return;
+            std::vector<Quadrature> q = quadrature ? *quadrature : default_quadrature(v, direction);
             if (flip) {
                 direction = mul(-1.0, direction);
                 std::reverse(v.begin(), v.end());
+                for (Quadrature & point : q) point.n = mul(-1.0, point.n);
             }
-            if (measure < 0.0) measure = m;
-            if (!(measure > 0.0)) return;
             m_out.cell.push_back(c);
             m_out.center.push_back(center ? *center : centroid);
             m_out.direction.push_back(direction);
             m_out.measure.push_back(measure);
             m_out.vertices.insert(m_out.vertices.end(), v.begin(), v.end());
             m_out.offsets.push_back(static_cast<uint32_t>(m_out.vertices.size()));
+            for (const Quadrature & point : q) {
+                m_out.quad_points.push_back(point.x);
+                m_out.quad_weights.push_back(point.w);
+                m_out.quad_normals.push_back(point.n);
+            }
+            m_out.quad_offsets.push_back(static_cast<uint32_t>(m_out.quad_points.size()));
+        }
+
+        /** @brief Flat elements: 3 Gauss points on a segment, the degree-5 rule of 7 points on each triangle of a fan. */
+        static std::vector<Quadrature> default_quadrature(const std::vector<Vec> & v, const Vec & n) {
+            std::vector<Quadrature> out;
+            if (v.size() == 1) return {{v[0], 1.0, n}};
+            if (v.size() == 2) {
+                const double length = norm(sub(v[1], v[0]));
+                for (int g = 0; g < 3; g++) out.push_back({lerp(v[0], v[1], 0.5 * (1.0 + GAUSS_X[g])), 0.5 * GAUSS_W[g] * length, n});
+                return out;
+            }
+            const double r = std::sqrt(15.0);
+            const double a1 = (6.0 - r) / 21.0, a2 = (6.0 + r) / 21.0;
+            const double w0 = 9.0 / 40.0, w1 = (155.0 - r) / 1200.0, w2 = (155.0 + r) / 1200.0;
+            const std::array<std::array<double, 4>, 7> rule = {{{1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, w0},
+                                                                {a1, a1, 1.0 - 2.0 * a1, w1},
+                                                                {a1, 1.0 - 2.0 * a1, a1, w1},
+                                                                {1.0 - 2.0 * a1, a1, a1, w1},
+                                                                {a2, a2, 1.0 - 2.0 * a2, w2},
+                                                                {a2, 1.0 - 2.0 * a2, a2, w2},
+                                                                {1.0 - 2.0 * a2, a2, a2, w2}}};
+            for (size_t i = 1; i + 1 < v.size(); i++) {
+                const double area = 0.5 * norm(cross(sub(v[i], v[0]), sub(v[i + 1], v[0])));
+                for (const auto & b : rule) {
+                    out.push_back({add(add(mul(b[0], v[0]), mul(b[1], v[i])), mul(b[2], v[i + 1])), b[3] * area, n});
+                }
+            }
+            return out;
         }
 
         Vec node(const uint32_t n) const {
@@ -850,50 +1080,55 @@ class Builder {
                     }
                 }
             }
-            // Gauss points of every patch (then its center), located on the mesh
-            const int n_gauss = curve ? 3 : 9;
-            std::vector<std::array<double, N_DIM>> points;
-            std::vector<double> weights;
-            std::vector<Vec> world, normals;
-            for (const Cell & c : cells) {
-                for (int g = 0; g <= n_gauss; g++) {
-                    const bool center = g == n_gauss;
-                    const double xu = center ? 0.0 : GAUSS_X[curve ? g : g / 3], xv = center || curve ? 0.0 : GAUSS_X[g % 3];
-                    const double u = c.u0 + 0.5 * (1.0 + xu) * (c.u1 - c.u0), v = c.v0 + 0.5 * (1.0 + xv) * (c.v1 - c.v0);
-                    Vec q, qu, qv;
-                    c.patch->at(u, v, q, qu, qv);
-                    const Vec x = map.point(q), xu_w = map.vector(qu), xv_w = map.vector(qv);
-                    Vec n = curve ? unit(xu_w) : cross(xu_w, xv_w);
-                    double w = center ? 0.0 : (curve ? GAUSS_W[g] * 0.5 * (c.u1 - c.u0) * norm(xu_w)
-                                                     : GAUSS_W[g / 3] * GAUSS_W[g % 3] * 0.25 * (c.u1 - c.u0) * (c.v1 - c.v0) * norm(n));
-                    if (!curve) n = unit(n);
-                    if (curve && N_DIM == 2) n = {n[1], -n[0], 0.0};
-                    std::array<double, N_DIM> point;
-                    for (size_t i = 0; i < N_DIM; i++) point[i] = x[i];
-                    points.push_back(point);
-                    weights.push_back(w);
-                    world.push_back(x);
-                    normals.push_back(n);
+            // Each patch's quadrature, clipped by the regions of primitives along their exact surfaces
+            std::vector<std::function<double(const Vec &)>> clips;
+            Piece rest = p;
+            rest.inside.clear();
+            rest.outside.clear();
+            for (const bool in : {true, false}) {
+                for (const uint32_t i : in ? p.inside : p.outside) {
+                    if (m_region.filled()[i].kind == Filled::Kind::SHAPES) {
+                        clips.push_back([this, i, in](const Vec & x) { return (in ? 1.0 : -1.0) * m_views[i].distance(x.data()); });
+                    } else {
+                        (in ? rest.inside : rest.outside).push_back(i);
+                    }
                 }
+            }
+            std::vector<std::array<double, N_DIM>> points;
+            std::vector<Quadrature> quad;
+            std::vector<size_t> first{0};
+            for (const Cell & c : cells) {
+                const Clipper clipper{map, *c.patch, clips, m_region.bounded(), curve};
+                clipper.patch_quadrature(c.u0, c.u1, c.v0, c.v1, quad);
+                // Then the patch's center, which places it when kept
+                quad.push_back(clipper.point(0.5 * (c.u0 + c.u1), 0.5 * (c.v0 + c.v1), 0.0));
+                first.push_back(quad.size());
+            }
+            for (const Quadrature & q : quad) {
+                std::array<double, N_DIM> point;
+                for (size_t i = 0; i < N_DIM; i++) point[i] = q.x[i];
+                points.push_back(point);
             }
             std::vector<uint8_t> contained;
             const std::vector<int32_t> located = locate_points(m_mesh, points, &contained);
             std::vector<uint32_t> keep(points.size(), 0);
             for (size_t k = 0; k < points.size(); k++) {
-                keep[k] = located[k] >= 0 && contained[k] && kept(p, world[k], located[k]) ? 1 : 0;
+                keep[k] = located[k] >= 0 && contained[k] && kept(rest, quad[k].x, located[k]) ? 1 : 0;
             }
             if (!m_mesh.h_global_cell_id.empty()) comm::allreduce(std::span<uint32_t>(keep), comm::Op::MAX);
-            const size_t stride = static_cast<size_t>(n_gauss) + 1;
             for (size_t c = 0; c < cells.size(); c++) {
-                const size_t first = c * stride, center = first + static_cast<size_t>(n_gauss);
-                double measure = 0.0;
-                size_t owner = keep[center] ? center : first + stride;
-                for (size_t k = first; k < center; k++) {
+                const size_t center = first[c + 1] - 1;
+                std::vector<Quadrature> kept_points;
+                size_t owner = keep[center] && inside_clips(clips, quad[center].x) ? center : first[c + 1];
+                for (size_t k = first[c]; k < center; k++) {
                     if (!keep[k]) continue;
-                    measure += weights[k];
-                    if (owner == first + stride) owner = k;
+                    kept_points.push_back(quad[k]);
+                    if (owner == first[c + 1]) owner = k;
                 }
-                if (!(measure > 0.0) || located[owner] < 0) continue;  // another rank's
+                if (kept_points.empty() || located[owner] < 0) continue;  // none, or another rank's
+                double measure = 0.0;
+                for (const Quadrature & q : kept_points) measure += q.w;
+                if (!(measure > 0.0)) continue;
                 // Vertices: the patch's corners in order (a segment's ends)
                 std::vector<Vec> corners;
                 const auto & cell = cells[c];
@@ -907,13 +1142,20 @@ class Builder {
                     if (corners.empty() || norm(sub(x, corners.back())) > 1e-14 * m_h) corners.push_back(x);
                 }
                 if (corners.size() > 2 && norm(sub(corners.front(), corners.back())) <= 1e-14 * m_h) corners.pop_back();
-                Vec n = normals[center];
+                Vec n = quad[center].n;
                 if (norm(n) == 0.0) {
-                    for (size_t k = first; k < center; k++) n = add(n, mul(weights[k], normals[k]));
+                    for (const Quadrature & q : kept_points) n = add(n, mul(q.w, q.n));
                     n = unit(n);
                 }
-                emit(static_cast<uint32_t>(located[owner]), corners, n, p.flip, measure, &world[owner]);
+                emit(static_cast<uint32_t>(located[owner]), corners, n, p.flip, measure, &quad[owner].x, &kept_points);
             }
+        }
+
+        static bool inside_clips(const std::vector<std::function<double(const Vec &)>> & clips, const Vec & x) {
+            for (const auto & g : clips) {
+                if (!(g(x) < 0.0)) return false;
+            }
+            return true;
         }
 };
 

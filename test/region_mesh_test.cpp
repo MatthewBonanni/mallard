@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <tuple>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -322,3 +323,64 @@ TEST(RegionMeshTest, RejectsMixedDimensionsThatAreNotClipping) {
               std::string::npos);
     EXPECT_EQ(error("{type = \"intersection\", regions = [" + ball + ", " + circle + "]}"), "accepted");
 }
+
+TEST(RegionMeshTest, ClippedPrimitiveSurfacesConvergeAtHighOrder) {
+    // A sphere's surface (2D: circle) of radius R at c, clipped by a plane at height a above c, or by a ball
+    // around c + (0, d) of radius R2: the kept area (length) and the flux of F = x - c + b, against closed forms
+    const double R = 0.3, a = 0.1, d = 0.25, R2 = 0.25, x0 = (d * d + R * R - R2 * R2) / (2.0 * d);
+    const Vec b = {0.2, -0.1, N_DIM == 3 ? 0.3 : 0.0};
+    const std::string c = N_DIM == 2 ? "[0.5, 0.5]" : "[0.5, 0.5, 0.5]";
+    const std::string shell = std::string("{type = \"") + (N_DIM == 2 ? "circle" : "sphere") + "\", center = " + c +
+                              ", radius = 0.3" + (N_DIM == 3 ? ", filled = false}" : "}");
+    const std::string plane = "{type = \"half_space\", point = [0.5, 0.6, 0.5], normal = [0, 1, 0]}";
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.75], radius = 0.25}"
+                                        : "{type = \"sphere\", center = [0.5, 0.75, 0.5], radius = 0.25}";
+    // Kept measure and integral of n (along y): below the plane, and the cap inside the ball
+    double below, cap, n_below, n_cap;
+    if constexpr (N_DIM == 2) {
+        below = R * (PI + 2.0 * std::asin(a / R));
+        n_below = -2.0 * R * std::cos(std::asin(a / R));
+        cap = R * (PI - 2.0 * std::asin(x0 / R));
+        n_cap = 2.0 * R * std::cos(std::asin(x0 / R));
+    } else {
+        below = 2.0 * PI * R * (R + a);
+        n_below = -PI * (R * R - a * a);
+        cap = 2.0 * PI * R * (R - x0);
+        n_cap = PI * (R * R - x0 * x0);
+    }
+    const std::vector<std::tuple<std::string, double, double>> cases = {{plane, below, n_below}, {ball, cap, n_cap}};
+    for (const auto & [clip, measure, n_y] : cases) {
+        const double flux = R * measure + b[1] * n_y;
+        std::vector<double> errors;
+        for (const uint32_t n : {4u, 8u, 16u}) {
+            auto mesh = std::make_shared<Mesh>();
+#if N_DIM == 2
+            mesh->init_cart(n, n, 1.0, 1.0);
+#else
+            mesh->init_cart_3d(n, n, n, 1.0, 1.0, 1.0, MeshType::CARTESIAN_TET);
+#endif
+            const region::MeshRegions automatic(*mesh);
+            const region::Region r(parse_toml("r = {type = \"intersection\", regions = [" + shell + ", " + clip + "]}").at("r"),
+                                   "r", nullptr, &automatic);
+            const region::Elements e = region::elements(*mesh, r);
+            double m = 0.0, f = 0.0;
+            for (size_t k = 0; k < e.quad_points.size(); k++) {
+                m += e.quad_weights[k];
+                for (size_t i = 0; i < 3; i++) {
+                    const double center = i == 2 && N_DIM == 2 ? 0.0 : 0.5;
+                    f += e.quad_weights[k] * (e.quad_points[k][i] - center + b[i]) * e.quad_normals[k][i];
+                }
+            }
+            EXPECT_NEAR(total(e), m, 1e-13 * m);
+            errors.push_back(std::max(std::abs(m - measure) / measure, std::abs(f - flux) / std::abs(flux)));
+        }
+        // Gauss points of degree 5 along the parameters, cut at the exact roots: errors fall by far more than the
+        // 2^1 to 2^2 per halving of masking the Gauss points
+        EXPECT_LT(errors[0], 1e-5) << clip;
+        EXPECT_LT(errors[2], 1e-9) << clip;
+        for (size_t k = 1; k < errors.size(); k++) {
+            if (errors[k - 1] > 1e-12) EXPECT_LT(errors[k], errors[k - 1] / 8.0) << clip << " " << k;
+        }
+    }
+}
+
