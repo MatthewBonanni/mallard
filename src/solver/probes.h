@@ -192,11 +192,12 @@ class Probes {
                                   const std::vector<double> & quad) const;
         };
         /**
-         * @brief A region probe's samples: the owned cells with a weight (f V, or
-         *        the measure of a surface, curve or points in the cell).
+         * @brief A filled region probe's samples: the owned cells with their weight f V.
          */
         static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
                                   const std::vector<double> & cell_weights, uint32_t n_variables);
+        /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
+        static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables);
 
         std::vector<std::unique_ptr<Probe>> probes;
         bool resumed = false;

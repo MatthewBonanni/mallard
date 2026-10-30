@@ -567,8 +567,12 @@ the totals of the whole domain (the mass, for `RHO`), a cell zone those of its
 cells ([regions of the mesh](geometry.md#regions-of-the-mesh)). A surface,
 curve or set of points weighs each cell by its area, length or count in the
 cell instead of `f V` ([on a mesh](geometry.md#surfaces-and-curves-on-a-mesh)):
-`integral` is then the surface integral of the cell averages, `mean` their
-area-weighted mean, and the third column is `area`, `length` or `count`. Each output
+`integral` is then the surface integral, `mean` the area-weighted mean,
+evaluated at the elements' quadrature points (cell averages, or point values
+with `sampling = "point"`), and the third column is `area`, `length` or
+`count`. Surfaces (2D: curves) have normals, so their fluxes (`MASS_FLUX`, ...)
+are variables too: a closed surface's `integral` of `MASS_FLUX` is the net
+outflow. Each output
 appends a row to `reductions_file` (default `probe_<name>_reductions.csv`):
 
 ```
