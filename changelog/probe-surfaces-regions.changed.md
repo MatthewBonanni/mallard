@@ -1,0 +1,1 @@
+- Cut-plane probes come from the shared region code (`region_mesh`): the plane's exact cut of each cell's simplices, clipped to `bounds` by six half spaces, with the same degree-5 quadrature; results equal to round-off. The performance set gains `probes_3d`, the `teno5_3d` case with probes every step, measured over time stepping and output (#499).
