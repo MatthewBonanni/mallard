@@ -78,14 +78,6 @@ samples = false
 reductions = ["integral"]
 interval = 20
 
-# The wall pressure coefficient around the cylinder, for its mean
-[[probes]]
-name = "wall_cp"
-boundary = "cylinder"
-variables = ["CP"]
-reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
-time_interval = 2.0
-
 # Mass, momentum (favre U times mass) and enthalpy in the box
 [[probes]]
 name = "box"
