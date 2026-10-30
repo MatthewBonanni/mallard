@@ -1269,17 +1269,6 @@
   ],
   "type": "integer"
  },
- "initialize.mesh.periodic": {
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/taylor_green_3d/remap.toml"
-  ],
-  "type": "array"
- },
  "initialize.mesh.stretching": {
   "dims": [
    2,
@@ -2164,7 +2153,6 @@
    "examples/flame_turbulence/hit.toml",
    "examples/flame_turbulence/input.toml",
    "examples/flame_turbulence/les.toml",
-   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/sedov_3d/input.toml",
    "examples/shock_bubble_3d/input.toml",
@@ -2390,41 +2378,6 @@
   ],
   "set_in": [],
   "type": "bool"
- },
- "mesh.periodic": {
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/autoignition_2d/input.toml",
-   "examples/cbc_les/input.toml",
-   "examples/channel_inflow_retau180/input.toml",
-   "examples/channel_les/input.toml",
-   "examples/channel_les/input_590.toml",
-   "examples/channel_retau180/input.toml",
-   "examples/channel_wmles/lm2000.toml",
-   "examples/channel_wmles/lm5200.toml",
-   "examples/channel_wmles/tl_m1.7.toml",
-   "examples/channel_wmles/tl_m3.0.toml",
-   "examples/flame_2d/input.toml",
-   "examples/flame_2d/unity/input.toml",
-   "examples/flame_turbulence/hit.toml",
-   "examples/flame_turbulence/input.toml",
-   "examples/flame_turbulence/les.toml",
-   "examples/forced_isotropic_turbulence/input.toml",
-   "examples/isotropic_turbulence/input.toml",
-   "examples/poiseuille_pipe/input.toml",
-   "examples/rotational_sector/annulus_3d.toml",
-   "examples/rotational_sector/sector.toml",
-   "examples/rotational_sector/sector_3d.toml",
-   "examples/taylor_green_3d/coarse.toml",
-   "examples/taylor_green_3d/input.toml",
-   "examples/taylor_green_3d/remap.toml",
-   "examples/turbulent_inflow_duct/input.toml"
-  ],
-  "type": "array"
  },
  "mesh.r_inner": {
   "default": "1.0",
@@ -3381,7 +3334,84 @@
    2,
    3
   ],
+  "required": true,
+  "set_in": [
+   "examples/autoignition_2d/input.toml",
+   "examples/cbc_les/input.toml",
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/channel_les/input.toml",
+   "examples/channel_les/input_590.toml",
+   "examples/channel_retau180/input.toml",
+   "examples/channel_wmles/lm2000.toml",
+   "examples/channel_wmles/lm5200.toml",
+   "examples/channel_wmles/tl_m1.7.toml",
+   "examples/channel_wmles/tl_m3.0.toml",
+   "examples/flame_2d/input.toml",
+   "examples/flame_2d/unity/input.toml",
+   "examples/flame_turbulence/hit.toml",
+   "examples/flame_turbulence/input.toml",
+   "examples/flame_turbulence/les.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
+   "examples/isotropic_turbulence/input.toml",
+   "examples/poiseuille_pipe/input.toml",
+   "examples/rotational_sector/annulus_3d.toml",
+   "examples/rotational_sector/sector.toml",
+   "examples/rotational_sector/sector_3d.toml",
+   "examples/taylor_green_3d/coarse.toml",
+   "examples/taylor_green_3d/input.toml",
+   "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ],
+  "type": "array"
+ },
+ "periodic.angle": {
+  "dims": [
+   2,
+   3
+  ],
   "set_in": []
+ },
+ "periodic.translation": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "periodic.zones": {
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/autoignition_2d/input.toml",
+   "examples/cbc_les/input.toml",
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/channel_les/input.toml",
+   "examples/channel_les/input_590.toml",
+   "examples/channel_retau180/input.toml",
+   "examples/channel_wmles/lm2000.toml",
+   "examples/channel_wmles/lm5200.toml",
+   "examples/channel_wmles/tl_m1.7.toml",
+   "examples/channel_wmles/tl_m3.0.toml",
+   "examples/flame_2d/input.toml",
+   "examples/flame_2d/unity/input.toml",
+   "examples/flame_turbulence/hit.toml",
+   "examples/flame_turbulence/input.toml",
+   "examples/flame_turbulence/les.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
+   "examples/isotropic_turbulence/input.toml",
+   "examples/poiseuille_pipe/input.toml",
+   "examples/rotational_sector/annulus_3d.toml",
+   "examples/rotational_sector/sector.toml",
+   "examples/rotational_sector/sector_3d.toml",
+   "examples/taylor_green_3d/coarse.toml",
+   "examples/taylor_green_3d/input.toml",
+   "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ],
+  "type": "array"
  },
  "physics": {
   "dims": [
@@ -3960,6 +3990,7 @@
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
+   "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
   ],
@@ -4030,6 +4061,7 @@
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
+   "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
   ],
@@ -4060,6 +4092,7 @@
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
+   "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
   ],
@@ -4085,8 +4118,18 @@
    2,
    3
   ],
-  "set_in": [],
-  "type": "array"
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "array",
+  "values": [
+   "favre",
+   "integral",
+   "max",
+   "mean",
+   "min",
+   "rms"
+  ]
  },
  "probes.reductions_file": {
   "default": "\"probe_inlet_p_reductions.csv\"",
@@ -4107,6 +4150,15 @@
    3
   ],
   "set_in": []
+ },
+ "probes.region": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
  },
  "probes.rotate": {
   "dims": [
@@ -4199,6 +4251,7 @@
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
+   "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
   ],
@@ -4235,6 +4288,113 @@
    2
   ],
   "set_in": []
+ },
+ "regions": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.center": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.edge": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.inner_radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.length": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.rotate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.scale": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.translate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.type": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "annulus",
+   "box",
+   "cone",
+   "cylinder",
+   "difference",
+   "disk",
+   "ellipse",
+   "ellipsoid",
+   "half_space",
+   "implicit",
+   "intersection",
+   "polygon",
+   "rectangle",
+   "sphere",
+   "torus",
+   "union"
+  ]
  },
  "run": {
   "dims": [
@@ -4636,33 +4796,11 @@
    "examples/source_regions/input.toml"
   ]
  },
- "sources.region.inner_radius": {
-  "dims": [
-   2
-  ],
-  "set_in": [
-   "examples/source_regions/input.toml"
-  ]
- },
- "sources.region.length": {
-  "dims": [
-   2
-  ],
-  "set_in": []
- },
  "sources.region.pivot": {
   "dims": [
    2
   ],
   "set_in": []
- },
- "sources.region.radius": {
-  "dims": [
-   2
-  ],
-  "set_in": [
-   "examples/source_regions/input.toml"
-  ]
  },
  "sources.region.rotate": {
   "dims": [
@@ -4786,6 +4924,12 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml"
   ]
+ },
+ "sponges.region": {
+  "dims": [
+   3
+  ],
+  "set_in": []
  },
  "sponges.strength": {
   "dims": [

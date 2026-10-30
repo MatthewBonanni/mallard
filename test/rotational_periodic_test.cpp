@@ -64,10 +64,8 @@ std::string annulus_input(const Annulus & a) {
     s << "[run]\nn_steps = " << a.n_steps << "\ndt = 0.004\n"
       << "[mesh]\ntype = \"annulus\"\nNtheta = " << n_theta << "\nNr = " << a.n_r << "\nNz = " << a.n_z
       << "\nr_inner = 1.0\nr_outer = 2.0\nLz = 0.6\nangle = " << (a.full ? 360.0 : 360.0 / a.sectors) << "\n";
-    std::string periodic;
-    if (!a.full) periodic = "\"theta\"";
-    if (N_DIM == 3) periodic += std::string(periodic.empty() ? "" : ", ") + "\"z\"";
-    if (!periodic.empty()) s << "periodic = [" << periodic << "]\n";
+    if (!a.full) s << "[[periodic]]\nzones = [\"start\", \"end\"]\n";
+    if (N_DIM == 3) s << "[[periodic]]\nzones = [\"back\", \"front\"]\n";
     s << "[initialize]\ntype = \"constant\"\nu = [" << (N_DIM == 2 ? "0.0, 0.0" : "0.0, 0.0, 0.0") << "]\np = 1.0\nT = 1.0\n"
       << "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"outer\"\ntype = \"" << (a.physics.find("navier") != std::string::npos ? "wall_adiabatic" : "symmetry")
@@ -120,6 +118,7 @@ void conservatives(const double * W, double * U) {
 
 std::unique_ptr<Solver> start(const Annulus & a) {
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(annulus_input(a)));
     set_cell_averages(*solver, [&](double x, double y, double z, double * U) {
         double W[N_CONSERVATIVE];
@@ -307,7 +306,7 @@ TEST(RotationalPeriodicSetup, InvalidPairsAreRejected) {
                  std::exception);
     // Fewer than 3 cells around
     EXPECT_THROW(Mesh().init(parse_toml("[mesh]\ntype = \"annulus\"\nNtheta = 2\nNr = 3\nNz = 3\nangle = 60.0\n"
-                                        "periodic = [\"theta\"]\n")),
+                                        "[[periodic]]\nzones = [\"start\", \"end\"]\n")),
                  std::runtime_error);
 }
 

@@ -521,7 +521,7 @@ class Solver {
         void check_cost(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker);
         void check_settings(CheckReport & report) const;
         void init_run_parameters();
-        void init_output();
+        void init_output(region::Regions & regions);
         void init_solution();
         void init_solution_constant();
         void init_solution_restart();
@@ -547,8 +547,8 @@ class Solver {
          */
         std::vector<double> mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
                                                    BoundaryCondition & bc) const;
-        void init_sources();
-        void init_sponges();
+        void init_sources(region::Regions & regions);
+        void init_sponges(region::Regions & regions);
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const;
@@ -585,6 +585,24 @@ class Solver {
         ProbeFields probe_fields();
 
     private:
+        /**
+         * @brief Runs f, a check of this rank's faces or cells; if it throws on
+         *        any rank, every rank throws the error of the first one
+         *        (collective), so that none waits in a later collective.
+         */
+        template <typename F>
+        static void on_every_rank(F && f) {
+            std::string error;
+            try {
+                f();
+            } catch (const std::exception & e) {
+                error = e.what();
+            }
+            if (const std::string first = comm::first_error(error); !first.empty()) throw InputError(first);
+        }
+        /** @brief Throws, on every rank, the error of a time-dependent boundary value that went out of range on any. */
+        void check_timed_boundaries() const;
+
         // Step graph (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;
