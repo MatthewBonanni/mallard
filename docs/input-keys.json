@@ -27,6 +27,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -66,6 +67,7 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ],
   "type": "number"
@@ -91,6 +93,7 @@
    "examples/flame_outflow/input.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -297,6 +300,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -343,6 +347,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -380,7 +385,11 @@
    2,
    3
   ],
-  "set_in": []
+  "required": true,
+  "set_in": [
+   "examples/forced_inlet/input.toml"
+  ],
+  "type": "number"
  },
  "boundaries.sigma_T": {
   "dims": [
@@ -491,6 +500,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -537,12 +547,10 @@
   ]
  },
  "boundaries.u": {
-  "dimension": "velocity (m s^-1)",
   "dims": [
    2,
    3
   ],
-  "required": true,
   "set_in": [
    "examples/double_mach/input.toml",
    "examples/flame_2d/input.toml",
@@ -550,6 +558,7 @@
    "examples/flame_outflow/input.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/premixed_flame/ch4/input.toml",
@@ -562,8 +571,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/wedge/input.toml",
    "tutorials/wedge/input.toml"
-  ],
-  "type": "array"
+  ]
  },
  "boundaries.wall_model": {
   "dims": [
@@ -934,6 +942,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -975,6 +984,7 @@
   "required": true,
   "set_in": [
    "examples/flame_outflow/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -1218,6 +1228,7 @@
   "set_in": [
    "examples/explosion_3d/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -1299,6 +1310,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -1348,6 +1360,7 @@
   "set_in": [
    "examples/explosion_3d/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -1661,6 +1674,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/forced_isotropic_turbulence/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
@@ -1728,6 +1742,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/forced_isotropic_turbulence/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
@@ -1792,6 +1807,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/forced_isotropic_turbulence/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
@@ -1910,6 +1926,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -1972,6 +1989,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -2178,6 +2196,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/forced_isotropic_turbulence/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
@@ -2255,6 +2274,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/forced_isotropic_turbulence/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
@@ -2400,6 +2420,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -2655,6 +2676,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -2763,6 +2785,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -2898,6 +2921,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -2968,6 +2992,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -3000,6 +3025,15 @@
    "tutorials/wedge/input.toml"
   ],
   "type": "integer"
+ },
+ "output.health": {
+  "default": "true",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "bool"
  },
  "output.io_threads": {
   "default": "1",
@@ -3063,6 +3097,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -3155,6 +3190,7 @@
    "examples/double_mach/input.toml",
    "examples/explosion_3d/input.toml",
    "examples/flame_turbulence/hit.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -3214,6 +3250,7 @@
    "examples/double_mach/input.toml",
    "examples/explosion_3d/input.toml",
    "examples/flame_turbulence/hit.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -3356,6 +3393,7 @@
    "examples/double_mach/input.toml",
    "examples/explosion_3d/input.toml",
    "examples/flame_turbulence/hit.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -3425,6 +3463,7 @@
    "examples/double_mach/input.toml",
    "examples/explosion_3d/input.toml",
    "examples/flame_turbulence/hit.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -3515,6 +3554,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -3898,6 +3938,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/forced_isotropic_turbulence/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
@@ -3964,6 +4005,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/forced_isotropic_turbulence/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
@@ -4084,6 +4126,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/forced_isotropic_turbulence/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
@@ -4563,6 +4606,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -4638,6 +4682,7 @@
    "examples/flame_turbulence/hit.toml",
    "examples/flame_turbulence/input.toml",
    "examples/flame_turbulence/les.toml",
+   "examples/forced_inlet/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
    "examples/sedov_3d/input.toml",
@@ -4721,6 +4766,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -4798,6 +4844,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
@@ -4856,6 +4903,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",

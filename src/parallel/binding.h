@@ -80,6 +80,9 @@ struct Placement {
     std::vector<std::string> gpus_visible;  ///< Ids of every GPU the rank could have used
 };
 
+/// Where this rank runs (after Kokkos is initialized; its CPUs as select_device found them).
+Placement this_placement();
+
 /// One line of text per placement, and back.
 std::string serialize(const Placement & p);
 Placement deserialize(std::string_view line);
