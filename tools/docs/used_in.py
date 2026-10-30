@@ -45,6 +45,8 @@ RULES = {
         (lambda t: any("turbulence" in b for b in boundaries(t)), None),
     ("initialization.md", "## Uniform state"): (lambda t: t.get("initialize", {}).get("type") == "constant", None),
     ("initialization.md", "## Expressions"): (lambda t: t.get("initialize", {}).get("type") == "analytical", None),
+    ("initialization.md", "## Regions"): (lambda t: "regions" in t.get("initialize", {}), None),
+    ("initialization.md", "## Tabulated data and point clouds"): (lambda t: "data" in t.get("initialize", {}), None),
     ("initialization.md", "## Restarts"): (lambda t: t.get("initialize", {}).get("type") == "restart", None),
     ("initialization.md", "## Remap from another mesh"):
         (lambda t: t.get("initialize", {}).get("type") == "remap", None),

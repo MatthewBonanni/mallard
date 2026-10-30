@@ -120,6 +120,14 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 | `Q_W` | Heat flux into the fluid |
 | `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
 
+Around a cylinder at Re = 40: the wall probe's `CP`, `CF` and `Y_PLUS`, the
+`mean` and `max` of `Y_PLUS`, the `integral` of the tractions (the drag) and
+the `MASS_FLUX` through a closed circle and a cut, whose net outflow settles
+to zero:
+
+![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-light.svg#gh-light-mode-only)
+![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-dark.svg#gh-dark-mode-only)
+
 ### Accuracy and pitfalls
 
 With TENO, `sampling = "point"` reads each cell's reconstruction polynomial at

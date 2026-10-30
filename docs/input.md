@@ -463,10 +463,48 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
-| `n_subdivisions` | (`analytical`) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
+| `n_subdivisions` | (`analytical`, and any state with regions) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#formats-and-compatibility)) |
 
 Expressions, e.g. `"x < 0.5 ? 1.0 : 0.125"`: [Expressions](guide/input_files.md#expressions).
+They read `x`, `y`, `z` and the variables of `[[initialize.data]]`, and are
+integrated over each cell on the device.
+
+### `[[initialize.regions]]`
+
+States layered over the base state of any `type` inside regions, by
+priority: see [Initialization: regions](guide/initialization.md#regions).
+
+| Key | Description |
+|---|---|
+| `region` | The [region](#regions) (required), with an optional smooth `edge` |
+| `u`, `rho`, `p`, `T` | Values inside: numbers, quantities with units, or expressions. At most two of `rho`, `p`, `T`; one alone keeps the pressure below (else its temperature). Unset keys keep the state below |
+| `X` or `Y`, `balance` | (mixtures) The composition inside, as in `[initialize]`; unset keeps the composition below |
+| `priority` | Integer: higher priorities go on top, equal ones in the order listed (default 0) |
+| `cells` | `volume_fraction` (default): cell averages, cut cells mixing by volume; `center`: cells whose centroid is inside take the region's state whole |
+| `name` | Name in the run log; without it, the entry's place, e.g. `initialize.regions[0]` |
+
+Cut cells are subdivided and their finest pieces cut along the surface:
+exact for flat surfaces, second order for curved ones. Cells no region
+reaches keep a restart's or remap's values bit for bit.
+
+### `[[initialize.data]]`
+
+Tables and point clouds from CSV files, read by the expressions of
+`[initialize]` and its regions as the variables `<name>_<column>`: see
+[Initialization: tabulated data](guide/initialization.md#tabulated-data-and-point-clouds).
+
+| Key | Description |
+|---|---|
+| `name` | Prefix of the variables (required) |
+| `file` | CSV file: a header of column names, rows of numbers, `#` comments (required) |
+| `type` | `table` (default): on a grid of 1-3 coordinates, interpolated, end values outside; `points`: scattered, by nearest points |
+| `coordinates` | Names of the coordinate columns (default: the first column for tables, `x`, `y` (`z`) for points) |
+| `at` | One expression of `x`, `y`, `z` per coordinate, where a point reads the data (default: the coordinates, if named `x`, `y`, `z`) |
+| `region` | Instead of `at`, one coordinate: the signed distance to this [region](#regions) |
+| `interpolation` | (tables) `linear` (default) or `cubic` (4-point Lagrange per axis) |
+| `neighbors` | (points) Nearest points weighted by inverse distance squared, 1 to 16 (default 1: the nearest) |
+| `units` | Units of columns, e.g. `{x = "mm"}` (default SI) |
 
 ### `type = "remap"`
 
@@ -1127,8 +1165,8 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 
 ## Regions
 
-Regions select parts of space in `[[sources]]` (explained with figures in
-the [geometry guide](guide/geometry.md#regions)). A region is a table: a primitive shape, or a boolean of regions, each with
+Regions select parts of space in `[[sources]]` and `[[initialize.regions]]`
+(explained with figures in the [geometry guide](guide/geometry.md#regions)). A region is a table: a primitive shape, or a boolean of regions, each with
 optional transforms, nested to any depth. Every region has a signed distance
 (negative inside) that never exceeds the distance to its surface, which gives
 smooth edges their width and lets cell volume fractions skip cells away from
