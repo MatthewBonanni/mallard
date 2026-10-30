@@ -16,6 +16,7 @@
 #include <sstream>
 
 #include "comm.h"
+#include "exact_sums.h"
 #include "input.h"
 #include "region.h"
 
@@ -275,6 +276,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
     }
     Kokkos::deep_copy(weights, h_weights);
     means = Kokkos::View<double *>("source_means", N_MEANS);
+    if (m_means) mean_terms = Kokkos::View<double *[N_MEANS + 1]>("source_mean_terms", mesh->n_owned());
     auto upload = [](const std::vector<Term> & terms, const std::string & label) {
         Kokkos::View<Term *> v(label, terms.size());
         Kokkos::deep_copy(v, Kokkos::View<const Term *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(terms.data(),
@@ -296,22 +298,18 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
 void SourceTerms::update_means(const State & solution) {
     const StateView U = solution.flow;
     const Kokkos::View<rtype *> V = mesh->cell_measure;
-    std::array<double, N_MEANS + 1> sums{};
-    Kokkos::parallel_reduce("source_means", mesh->n_owned(),
-                            KOKKOS_LAMBDA(const uint32_t c, double & v_sum, double & rho_sum, double & mx, double & my,
-                                          double & mz, double & e_sum, double & k_sum) {
+    const Kokkos::View<double *[N_MEANS + 1]> terms = mean_terms;
+    Kokkos::parallel_for("source_mean_terms", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
         const double v = double(V(c)), rho = double(U(c, 0));
         double m[3] = {0.0, 0.0, 0.0};
         FOR_I_DIM m[i] = double(U(c, 1 + i));
-        v_sum += v;
-        rho_sum += rho * v;
-        mx += m[0] * v;
-        my += m[1] * v;
-        mz += m[2] * v;
-        e_sum += double(U(c, N_DIM + 1)) * v;
-        k_sum += 0.5 * (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]) / rho * v;
-    }, sums[0], sums[1], sums[2], sums[3], sums[4], sums[5], sums[6]);
-    if (!mesh->h_global_cell_id.empty()) sums = comm::allreduce(sums, comm::Op::SUM);
+        terms(c, 0) = v;
+        terms(c, 1) = rho * v;
+        for (int i = 0; i < 3; i++) terms(c, 2 + i) = m[i] * v;
+        terms(c, 5) = double(U(c, N_DIM + 1)) * v;
+        terms(c, 6) = 0.5 * (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]) / rho * v;
+    });
+    const auto sums = exact_sums(terms, mesh->n_owned(), !mesh->h_global_cell_id.empty());
     auto h_means = Kokkos::create_mirror_view(means);
     for (int i = 0; i < N_MEANS; i++) h_means(i) = sums[size_t(i) + 1] / sums[0];
     Kokkos::deep_copy(means, h_means);
