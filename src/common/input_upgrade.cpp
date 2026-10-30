@@ -275,14 +275,16 @@ std::size_t line_of(const V & value) {
  *        if it depends on the dimension, which is unknown, and the input has its option.
  */
 template <typename V>
-bool applies(V & root, const OptionRule & rule, const int dim) {
+bool applies(V & root, const OptionRule & rule, const int dim, const std::string & unknown_dimension) {
     if (rule.dim == 0 || rule.dim == dim) return true;
     if (dim != 0) return false;
     for (const Concrete & key : matches(root, rule.key)) {
         const V & value = *at(root, key);
         if (value.is_string() && value.as_string() == rule.from) {
             throw InputError(to_string(key) + " = \"" + rule.from + "\" is renamed differently in 2D and 3D runs, and "
-                             "the dimension of this case is unknown: state it with --dim 2 or --dim 3.");
+                             "Mallard can't tell 2D or 3D" +
+                             (unknown_dimension.empty() ? std::string() : ": " + unknown_dimension) +
+                             "; run from the directory you run the case in, or pass --dim 2|3.");
         }
     }
     return false;
@@ -295,7 +297,7 @@ bool applies(V & root, const OptionRule & rule, const int dim) {
  */
 template <typename V>
 std::vector<Finding> transform(V & root, const Rules & table, const std::string & version, const int dim,
-                               bool setup = false) {
+                               bool setup = false, const std::string & unknown_dimension = "") {
     std::vector<Finding> findings;
     for (const KeyRule & rule : table.keys) {
         for (const Concrete & key : matches(root, rule.from)) {
@@ -321,7 +323,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
         }
     }
     for (const OptionRule & rule : table.options) {
-        if (!applies(root, rule, dim)) continue;
+        if (!applies(root, rule, dim, unknown_dimension)) continue;
         for (const Concrete & key : matches(root, rule.key)) {
             V & value = *at(root, key);
             if (!value.is_string() || value.as_string() != rule.from) continue;
@@ -559,10 +561,11 @@ std::vector<Finding> apply(Input & input, const std::string & version, const Rul
 }
 
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
-                         bool & reformatted, const Rules & table, const int dim) {
+                         bool & reformatted, const Rules & table, const int dim,
+                         const std::string & unknown_dimension) {
     reformatted = false;
     Input expected = parse_input_string(text);
-    findings = transform(expected, table, MALLARD_VERSION, dim);
+    findings = transform(expected, table, MALLARD_VERSION, dim, false, unknown_dimension);
     if (findings.empty()) return text;
 
     std::vector<std::string> lines = split_lines(text);
@@ -586,7 +589,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     return toml::format(ordered);
 }
 
-int upgrade_file(const std::string & file, bool check, int dim) {
+int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {
         std::cerr << "mallard input upgrade: cannot open " << file << "\n";
@@ -597,7 +600,7 @@ int upgrade_file(const std::string & file, bool check, int dim) {
         parse_input(file);  // syntax errors with the file's name
         std::vector<Finding> findings;
         bool reformatted = false;
-        const std::string upgraded = upgrade_text(text, findings, reformatted, rules(), dim);
+        const std::string upgraded = upgrade_text(text, findings, reformatted, rules(), dim, unknown_dimension);
         for (const Finding & f : findings) std::cerr << file << ": " << describe(f) << "\n";
         if (reformatted) {
             std::cerr << file << ": a changed key is a dotted key or in an inline table, so the whole file was "

@@ -257,4 +257,23 @@ TEST(CliTest, TestHelpIsMallardsPageAlone) {
     std::ostringstream page;
     cli::print_help(page, *cli::command("test"));
     EXPECT_EQ(r.out, page.str());
+
+TEST(CliTest, InputUpgradeSaysWhereItLookedForTheMesh) {
+    SKIP_UNDER_MPI();
+    // The mesh sits next to the input, but relative paths start from the working directory, as in a run
+    const fs::path dir = "upgrade_case";
+    fs::create_directories(dir);
+    fs::copy_file(source_dir() + "/test/data/meshes/cyl3d.msh", dir / "mesh.msh", fs::copy_options::overwrite_existing);
+    std::ofstream(dir / "input.toml") << "[mesh]\nfilename = \"mesh.msh\"\n[[sources]]\nrhoE = 1\n"
+                                         "region = {type = \"circle\", center = [0, 0, 0], radius = 1}\n";
+    const std::string input = (dir / "input.toml").string();
+    const Result r = run({"input", "upgrade", input});
+    EXPECT_EQ(r.status, 1);
+    EXPECT_TRUE(contains(r.err, "can't tell 2D or 3D: mesh file 'mesh.msh' not found relative to the working "
+                                "directory (" + fs::current_path().string() + "); run from the directory you run "
+                                "the case in, or pass --dim 2|3"))
+        << r.err;
+    const Result stated = run({"input", "upgrade", "--dim", "3", input});
+    EXPECT_EQ(stated.status, 0) << stated.err;
+    EXPECT_TRUE(contains(stated.out, "type = \"sphere\"")) << stated.out;
 }
