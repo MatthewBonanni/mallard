@@ -228,7 +228,7 @@ TEST(ThickenedFlame, DynamicEfficiencyFollowsTheResolvedWrinkling) {
                 << "cell " << c;
             flame += F > 4.9;
         }
-        EXPECT_GT(flame, 0u);
+        EXPECT_GT(comm::allreduce(flame, comm::Op::SUM), 0u);
     }
     // Only ratios of lengths enter
     auto large = corrugated_flames(2.0, 10.0);

@@ -71,6 +71,7 @@ struct Fixture {
 /** @brief Each conserved variable and species density of every cell, after init (and the run's steps if run). */
 [[maybe_unused]] std::vector<std::vector<double>> solver_state(const Input & input, bool run) {
     Solver solver;
+    solver.set_distributed(false);
     solver.init(input);
     if (run) {
         solver.run();

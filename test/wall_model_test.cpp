@@ -425,7 +425,6 @@ TEST(WallModel3D, LaminarCouetteFlowOverAModeledWall) {
 // on anything but the state (e.g. a filtered input without restart data).
 TEST(WallModel3D, RestartIsExact) {
     const std::string dir = (scratch_dir() / "mallard_wall_model_restart").string();
-    std::filesystem::remove_all(dir);
     const uint32_t n[3] = {4, 6, 3};
     const std::string init = "type = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283 * x)\"\n"
                              "u = [\"0.5 + 0.1 * sin(6.283 * z)\", \"0.05 * sin(6.283 * x)\", \"0.0\"]\np = \"1.0\"\n";
@@ -452,7 +451,6 @@ TEST(WallModel3D, RestartIsExact) {
             ASSERT_EQ(second.h_conservatives(i, v), straight.h_conservatives(i, v)) << "cell " << i;
         }
     }
-    std::filesystem::remove_all(dir);
 }
 
 #endif

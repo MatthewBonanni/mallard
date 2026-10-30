@@ -70,10 +70,12 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     if (!bound.contains("mdot") && !shape) return {};
     if (shape && shape->depends_on_time()) throw InputError(where + ": mass fluxes cannot depend on t.");
     std::vector<double> value(faces.size(), 1.0);
+    std::string error;
     for (size_t k = 0; shape && k < faces.size(); k++) {
         value[k] = shape->at(Kokkos::subview(mesh->h_face_coords, faces[k], Kokkos::ALL()), N_DIM);
-        if (!(value[k] >= 0.0)) throw InputError(where + ": the mass flux must be non-negative at every face.");
+        if (!(value[k] >= 0.0)) error = where + ": the mass flux must be non-negative at every face.";
     }
+    if (const std::string first = comm::first_error(error); !first.empty()) throw InputError(first);
     double scale = 1.0;
     if (bound.contains("mdot")) {
         // The faces' measures as the flux integral weighs them, owned faces only so that none counts twice,

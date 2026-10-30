@@ -32,6 +32,7 @@ namespace {
 
 std::unique_ptr<Solver> run_input(const Input & input) {
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(input);
     solver->run();
     solver->update_primitives();
@@ -193,6 +194,7 @@ TEST(PresetValidation, ReactingPropagatesAPremixedFlameAtCanterasSpeed) {
        << "[chemistry]\nrtol = 1.0e-6\natol = 1.0e-10\n"
        << "[output]\ncheck_interval = 1000000\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(in.str()));
     auto flame_position = [&]() {
         solver.update_primitives();

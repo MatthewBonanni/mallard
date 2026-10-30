@@ -95,6 +95,18 @@ std::string broadcast(const std::string & value) {
     return out;
 }
 
+std::string first_error(const std::string & error) {
+    const int n_ranks = size();
+    int from = error.empty() ? n_ranks : rank();
+    check(MPI_Allreduce(MPI_IN_PLACE, &from, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD), "MPI_Allreduce");
+    if (from == n_ranks) return "";
+    uint64_t n = error.size();
+    check(MPI_Bcast(&n, 1, MPI_UINT64_T, from, MPI_COMM_WORLD), "MPI_Bcast");
+    std::string out = rank() == from ? error : std::string(n, '\0');
+    check(MPI_Bcast(out.data(), static_cast<int>(n), MPI_CHAR, from, MPI_COMM_WORLD), "MPI_Bcast");
+    return out;
+}
+
 void abort(int code) {
     int initialized = 0, finalized = 0;
     MPI_Initialized(&initialized);
@@ -204,6 +216,7 @@ int rank() { return 0; }
 int size() { return 1; }
 void barrier() {}
 std::string broadcast(const std::string & value) { return value; }
+std::string first_error(const std::string & error) { return error; }
 
 void abort(int code) { std::exit(code); }
 

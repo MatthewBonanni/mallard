@@ -65,6 +65,7 @@ std::string make_input(const CaseConfig & c) {
 
 std::unique_ptr<Solver> run_case(const CaseConfig & c) {
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(make_input(c)));
     solver->run();
     solver->update_primitives();
@@ -248,6 +249,7 @@ TEST(SolverRegression, TENOSodOnAFineStripBetweenSymmetryPlanesStaysOneDimension
     SKIP_IN_SINGLE_PRECISION("round-off flips TENO stencil selections at the discontinuity");
     const uint32_t nx = 800, ny = 4;
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(
         "[run]\nn_steps = 3\ncfl = 0.25\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 800\nNy = 4\nLx = 1.0\nLy = 0.005\n"
@@ -409,6 +411,7 @@ TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 101325.0\nT_ref = 298.15\nrho_ref = 1.225\n"
       << "[output]\ncheck_interval = 1000000\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(s.str()));
     solver.run();
     solver.update_primitives();

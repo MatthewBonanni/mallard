@@ -669,21 +669,20 @@ void Solver::init_boundaries() {
                               dot<N_DIM>(direction, direction) > 0.0_r;
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
+        std::string twice, outward;
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
             if (where && where->at(Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL()), N_DIM) == 0.0) {
                 continue;
             }
-            if (face_bc[i_face] != -1) {
-                throw std::runtime_error("Boundary " + name + " assigned more than once.");
-            }
+            if (face_bc[i_face] != -1) twice = "Boundary " + name + " assigned more than once.";
             face_bc[i_face] = static_cast<int>(i_bc);
             if (directed) {
                 rtype inward = 0.0_r;
                 for (uint8_t k = 0; k < N_DIM; k++) inward -= direction[k] * mesh->h_face_normals(i_face, k);
                 if (!(inward > 0.0_r)) {
-                    throw InputError("boundaries[name = \"" + name + "\"].direction must point into the domain at "
-                                     "every face of the boundary.");
+                    outward = "boundaries[name = \"" + name + "\"].direction must point into the domain at every "
+                              "face of the boundary.";
                 }
             }
 
@@ -691,6 +690,8 @@ void Solver::init_boundaries() {
             n_selected++;
             n_owned_selected += static_cast<uint32_t>(mesh->h_cells_of_face(i_face, 0)) < mesh->n_owned();
         }
+        if (const std::string first = comm::first_error(twice); !first.empty()) throw std::runtime_error(first);
+        if (const std::string first = comm::first_error(outward); !first.empty()) throw InputError(first);
         if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
             throw std::runtime_error("Boundary " + name + " selects no faces.");
         }
@@ -2438,7 +2439,7 @@ std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t 
     Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
     std::array<rtype, 2 * N_DIM + 1> F;
     for (size_t i = 0; i < 2 * N_DIM + 1; i++) F[i] = result.v[i];
-    return comm::allreduce(F, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(F, comm::Op::SUM) : F;
 }
 
 void Solver::write_forces() {
@@ -2471,7 +2472,7 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
         }, sum);
         total[i_var] = sum;
     }
-    return comm::allreduce(total, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(total, comm::Op::SUM) : total;
 }
 
 /**
@@ -2565,7 +2566,7 @@ std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
     Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);
     std::array<rtype, N_FLOW_STATISTICS> sums;
     for (size_t i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = result.v[i];
-    return comm::allreduce(sums, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(sums, comm::Op::SUM) : sums;
 }
 
 void Solver::update_vortex_fields() {

@@ -63,7 +63,6 @@ TEST(IOTest, ProvenanceHashesTheMeshFile) {
 
 TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
     const std::string dir = (scratch_dir() / "mallard_surface_test").string();
-    std::filesystem::remove_all(dir);
     std::ostringstream s;
     s << "[run]\nn_steps = 4\ncfl = 0.25\n"
       << "[mesh]\ntype = \"wedge\"\nNx = 12\nNy = 6\nLx = 2.0\nLy = 1.5\n"
@@ -79,6 +78,7 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
       << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtu\"\ngeometry = \"bottom\"\n"
       << "interval = 4\nvariables = [\"P\", \"U\"]\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(s.str()));
     solver.run();
     solver.update_primitives();
@@ -116,7 +116,6 @@ TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
         EXPECT_RTYPE_EQ(static_cast<rtype>(u[1]), solver.h_primitives(c, 1));
         EXPECT_EQ(u[2], 0.0);
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
@@ -132,6 +131,7 @@ TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
         "[numerics.face_reconstruction]\ntype = \"FO\"\n"
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1\nT_ref = 1\nrho_ref = 1\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     rtype x_max = 0.0;
     for (uint32_t i = 0; i < solver.get_mesh()->n_nodes; i++) x_max = std::max(x_max, solver.get_mesh()->h_node_coords(i, 0));
@@ -158,17 +158,16 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
         "[output]\ncheck_interval = 1000000\n"
         "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\ntime_interval = 0.015\nvariables = [\"RHO\"]\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     EXPECT_NEAR(solver.get_time(), 0.075, roundoff(1e-12));
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
     // Uniform flow u = 0.1, a = sqrt(1.4) on 0.25 x 0.5 cells: the CFL = 1 time
     // step is 2 V / sum_f (|u_n| + a) A_f = 0.25 / (0.1 + 1.5 a)
     const std::string dir = (scratch_dir() / "mallard_cfl_output").string();
-    std::filesystem::remove_all(dir);
     const std::string input =
         "[run]\nn_steps = 1\ndt = 0.01\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
@@ -182,6 +181,7 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
         "[[write_data]]\nprefix = \"" + dir + "/wall\"\nformat = \"vtu\"\ngeometry = \"bottom\"\n"
         "interval = 1\nvariables = [\"CFL\"]\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     const double expected = 0.01 * (0.1 + 1.5 * std::sqrt(1.4)) / 0.25;
@@ -201,7 +201,6 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
         }
         EXPECT_EQ(n, 4) << file;
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, ZeroCheckIntervalIsRejected) {
@@ -223,7 +222,6 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     // series lists each time once, and numbering continues from the restart
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     const std::string dir = (scratch_dir() / "mallard_h5_resume").string();
-    std::filesystem::remove_all(dir);
     auto mesh = make_mesh("cartesian_tri", 3, 2);
     Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
     std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
@@ -254,7 +252,6 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     }
     EXPECT_EQ(times, (std::vector<double>{0.0, double(rtype(0.1)), double(rtype(0.2))}));
     EXPECT_TRUE(std::filesystem::exists(dir + "/f_mesh.h5"));
-    std::filesystem::remove_all(dir);
 }
 
 namespace {
@@ -312,6 +309,7 @@ std::string output_case(const std::string & dir, const std::string & output_keys
 
 void run_case(const std::string & input) {
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
 }
@@ -376,15 +374,15 @@ void expect_within_relative_error(const std::vector<rtype> & rounded, const std:
 TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
     // The snapshot taken when a file is due is what lands in it, although the
     // run has moved on while it is written
-    const std::string dir = (scratch_dir() / "mallard_async_output").string();
     std::vector<std::pair<std::string, std::string>> variants = {{"", ""}};
     if (compression::have_zlib()) {
         variants.emplace_back("compression = \"zlib\"\n", "compression = \"zlib\"\n");
         variants.emplace_back("compression = \"zlib\"\nrelative_error = 1e-4\n",
                               "compression = \"zlib\"\nchunk_cells = 100\n");
     }
+    int variant = 0;
     for (const auto & [snapshot_keys, restart_keys] : variants) {
-        std::filesystem::remove_all(dir);
+        const std::string dir = (scratch_dir() / ("mallard_async_output_" + std::to_string(variant++))).string();
         run_case(output_case(dir + "/sync", "async = false\n", snapshot_keys, restart_keys));
         run_case(output_case(dir + "/async", "io_threads = 3\n", snapshot_keys, restart_keys));
         const auto sync = files_under(dir + "/sync"), async = files_under(dir + "/async");
@@ -401,14 +399,12 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
             EXPECT_TRUE(without_provenance(async.at(name)) == without_provenance(bytes)) << name << " " << snapshot_keys;
         }
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
     // A run that stops on an error destroys its writers without finish():
     // the file being written in the background is still written whole
     const std::string dir = (scratch_dir() / "mallard_async_unwind").string();
-    std::filesystem::remove_all(dir);
     auto mesh = make_mesh("cartesian_tri", 300, 200);
     Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
     for (uint32_t i = 0; i < mesh->n_cells; i++) values(i, 0) = rtype(i) / rtype(7);
@@ -421,16 +417,15 @@ TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
         writer.set_async(async);
         writer.write(0, 0.0_r);
     }
+    comm::barrier();  // Rank 0 writes the files
     const std::string sync = file_contents(dir + "/s_000000.vtu");
     EXPECT_GT(sync.size(), 120000u * sizeof(rtype));
     EXPECT_TRUE(file_contents(dir + "/a_000000.vtu") == sync);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
     if (!compression::have_zlib()) GTEST_SKIP() << "built without zlib";
     const std::string dir = (scratch_dir() / "mallard_compressed_output").string();
-    std::filesystem::remove_all(dir);
     run_case(output_case(dir + "/raw", "", "", ""));
     run_case(output_case(dir + "/zlib", "", "compression = \"zlib\"\n", "compression = \"zlib\"\nchunk_cells = 100\n"));
     run_case(output_case(dir + "/lossy", "", "compression = \"zlib\"\nrelative_error = 1e-3\n", ""));
@@ -476,7 +471,6 @@ TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
                                      as_reals(std::string(bytes.begin(), bytes.end())), 1e-3, name);
     }
 #endif
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, RoundingKeepsEveryValueWithinTheRelativeError) {

@@ -299,6 +299,7 @@ TEST(MixtureTest, IdenticalSpeciesAdvectWithoutDisturbingTheFlow) {
         "\nY = { AIR2 = \"(x - 0.5)^2 + (y - 0.5)^2 < 0.06 ? 1.0 : 0.0\" }\nbalance = \"AIR\"\n" +
         numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs");
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     const std::vector<rtype> before = solver.integrate_species();
     auto centroid = [&](Solver & s) {
@@ -409,6 +410,7 @@ std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruc
                    "type = \"symmetry\"\n") +
         numerics(reconstruction, riemann) + mixture(H2O2);
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.update_primitives();
@@ -509,10 +511,12 @@ std::array<double, 2> advection_errors(const std::string & mesh, uint32_t n, con
                mixture(H2O2);
     };
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(n, 0.0, 0.0)));
     solver.run();
     solver.copy_device_to_host();
     Solver exact;
+    exact.set_distributed(false);
     exact.init(parse_toml(input(1, u * t_end, v * t_end)));
     const auto & names = solver.get_species_names();
     const size_t k = static_cast<size_t>(std::find(names.begin(), names.end(), "H2") - names.begin());
@@ -666,11 +670,11 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
     // double flux, whose frozen thermodynamics come from the seed); with
     // chemistry so is each cell's last sub-step, which seeds the integrator
     // (with Strang or SIMPLER splitting)
+    int run = 0;
     for (const auto & [double_flux, reacting, viscous, coupling] :
          {std::tuple{false, false, false, "strang"}, {true, false, false, "strang"}, {false, true, false, "strang"},
           {false, true, true, "strang"}, {false, true, true, "simpler"}}) {
-        const std::string dir = (scratch_dir() / "mallard_mixture_restart").string();
-        std::filesystem::remove_all(dir);
+        const std::string dir = (scratch_dir() / ("mallard_mixture_restart_" + std::to_string(run++))).string();
         auto input = [&](const std::string & init, uint32_t n_steps, const std::string & prefix) {
             return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.25\n" +
                    mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
@@ -703,7 +707,6 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
                 ASSERT_EQ(second.h_species(c, k), straight.h_species(c, k)) << "cell " << c;
             }
         }
-        std::filesystem::remove_all(dir);
     }
 }
 
@@ -735,7 +738,7 @@ TEST(MixtureTest, BudgetWithDoubleFluxLeavesTheSolutionUnchanged) {
     while (std::getline(rows, line)) n_rows++;
     std::filesystem::remove(file);
     EXPECT_GT(n_rows, 12);
-    for (uint32_t c = 0; c < plain.get_mesh()->n_cells; c++) {
+    for (uint32_t c = 0; c < plain.get_mesh()->n_owned(); c++) {
         FOR_I_CONSERVATIVE ASSERT_EQ(budgeted.h_conservatives(c, i), plain.h_conservatives(c, i)) << "cell " << c;
         for (uint32_t k = 0; k < plain.get_species_names().size(); k++) {
             ASSERT_EQ(budgeted.h_species(c, k), plain.h_species(c, k)) << "cell " << c;
@@ -774,11 +777,11 @@ std::array<double, 2> contact_errors(const std::string & reconstruction, bool do
     solver.update_primitives();
     solver.copy_device_to_host();
     std::array<double, 2> err = {0.0, 0.0};
-    for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
         err[0] = std::max(err[0], std::abs(double(solver.h_primitives(c, N_DIM)) / 1.0e5 - 1.0));
         err[1] = std::max(err[1], std::abs(double(solver.h_primitives(c, 0)) / 1000.0 - 1.0));
     }
-    return err;
+    return comm::allreduce(err, comm::Op::MAX);
 }
 
 } // namespace
@@ -816,6 +819,7 @@ TEST(MixtureTest, DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError) {
                        "type = \"symmetry\"\n") +
             numerics("type = \"MUSCL\"\n", "HLLC", double_flux) + mixture(H2O2);
         Solver solver;
+        solver.set_distributed(false);
         solver.init(parse_toml(input));
         const double E0 = double(solver.integrate_conservatives()[N_DIM + 1]);
         solver.run();
@@ -1000,7 +1004,6 @@ TEST(ReactingTest, SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves) {
     // time step; Strang splitting has a steady state of its own at each step
     SKIP_IN_SINGLE_PRECISION("the steady state holds to the round-off of the state");
     const std::string dir = (scratch_dir() / "mallard_simpler_steady").string();
-    std::filesystem::remove_all(dir);
     const double dt = 5e-4;
     Solver steady;
     steady.init(parse_toml(stirred_reactor(uniform_state("2400.0", "{ H2O = 2.0, N2 = 3.76 }"), 400, dt, "simpler",
@@ -1049,7 +1052,6 @@ TEST(ReactingTest, SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves) {
               << "; residual " << residual / chemistry_rate << "\n";
     EXPECT_LT(simpler_drift, 1e-12);
     EXPECT_GT(strang_drift, 1e-4);
-    std::filesystem::remove_all(dir);
 }
 
 namespace {

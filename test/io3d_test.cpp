@@ -301,7 +301,6 @@ TEST(IO3DTest, HigherOrderCellsKeepTheirCornersAndUnsupportedOrdersAreRejected) 
 
 TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
     const std::string dir = (scratch_dir() / "mallard_vtu3d").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
     DataWriter writer;
@@ -365,14 +364,12 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         for (uint32_t k = 0; k < 3; k++) EXPECT_EQ(u[3 * c + k], fields.values(c, 1 + k));
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
 #ifdef Mallard_HAS_HDF5
     const std::string dir = (scratch_dir() / "mallard_h5_3d").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
     for (const char * format : {"vtu", "hdf5"}) {
@@ -412,13 +409,11 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     EXPECT_EQ(coords, points);
     EXPECT_EQ(fields_h5.at("fields/U"), std::vector<char>(vtu["U"].begin(), vtu["U"].end()));
     EXPECT_EQ(fields_h5.at("fields/RHO"), std::vector<char>(vtu["RHO"].begin(), vtu["RHO"].end()));
-    std::filesystem::remove_all(dir);
 #endif
 }
 
 TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
     const std::string dir = (scratch_dir() / "mallard_vtu3d_faces").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO"});
     DataWriter writer;
@@ -447,12 +442,10 @@ TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
     double x, y, z, z_max = 0.0;
     while (coords >> x >> y >> z) z_max = std::max(z_max, z);
     EXPECT_EQ(z_max, 1.0);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IO3DTest, RestartRoundTripCarriesAllConservatives) {
     const std::string dir = (scratch_dir() / "mallard_restart3d").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     CellFields fields(mesh->n_cells, names);
@@ -483,5 +476,4 @@ TEST(IO3DTest, RestartRoundTripCarriesAllConservatives) {
     } catch (const std::runtime_error & e) {
         EXPECT_NE(std::string(e.what()).find("Mallard_DIM"), std::string::npos) << e.what();
     }
-    std::filesystem::remove_all(dir);
 }

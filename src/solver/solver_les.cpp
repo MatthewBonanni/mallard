@@ -1045,6 +1045,6 @@ KineticEnergyBudget Solver::kinetic_energy_budget() {
         Kokkos::deep_copy(T_seed, seeds);
     }
     const std::array<rtype, 4> local = {budget.convective, budget.viscous, budget.sgs, budget.pressure_work};
-    const std::array<rtype, 4> total = comm::allreduce(local, comm::Op::SUM);
+    const std::array<rtype, 4> total = is_distributed() ? comm::allreduce(local, comm::Op::SUM) : local;
     return KineticEnergyBudget{total[0], total[1], total[2], total[3]};
 }

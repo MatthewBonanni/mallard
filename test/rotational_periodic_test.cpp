@@ -120,6 +120,7 @@ void conservatives(const double * W, double * U) {
 
 std::unique_ptr<Solver> start(const Annulus & a) {
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(annulus_input(a)));
     set_cell_averages(*solver, [&](double x, double y, double z, double * U) {
         double W[N_CONSERVATIVE];

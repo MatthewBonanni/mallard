@@ -614,7 +614,7 @@ std::vector<rtype> Solver::integrate_species() {
                                 SpeciesIntegralFunctor{species, mesh->cell_measure, k}, sum);
         total[k] = sum;
     }
-    if (total.empty()) return total;
+    if (total.empty() || !is_distributed()) return total;
     comm::allreduce(std::span<rtype>(total), comm::Op::SUM);
     return total;
 }

@@ -288,7 +288,6 @@ TEST(SyntheticInflowTest, FieldDependsOnlyOnTimeAndSeed) {
 TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     // The generator has no state; the characteristic faces' state goes into the restart file
     const std::string dir = (scratch_dir() / "mallard_inflow_restart_test").string();
-    std::filesystem::remove_all(dir);
     Solver straight;
     straight.init(parse_toml(duct_input(dir + "/a", duct_constant(), 40)));
     straight.run();
@@ -312,7 +311,6 @@ TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     }
     // The turbulence has entered the domain
     EXPECT_GT(v_max, 0.01);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(SyntheticInflowTest, InvalidInputIsRejected) {
