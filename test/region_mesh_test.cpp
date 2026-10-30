@@ -237,15 +237,16 @@ TEST(RegionMeshTest, OpenSurfacesAndCurvesFollowTheirRules) {
 
 TEST(RegionMeshTest, BoundaryZonesAreTheirFaces) {
     const Fixture f;
+    const double tol = precision_tol<double>(1e-12, 1e-6);  // the mesh's face areas
     const region::Elements left = f.elements("\"left\"");
     EXPECT_TRUE(left.exact);
-    EXPECT_NEAR(total(left), 1.0, 1e-12);
-    for (const Vec & d : left.direction) EXPECT_NEAR(d[0], -1.0, 1e-12);
-    EXPECT_NEAR(total(f.elements("{type = \"boundary\", of = \"domain\"}")), 2.0 * N_DIM, 1e-12);
+    EXPECT_NEAR(total(left), 1.0, tol);
+    for (const Vec & d : left.direction) EXPECT_NEAR(d[0], -1.0, tol);
+    EXPECT_NEAR(total(f.elements("{type = \"boundary\", of = \"domain\"}")), 2.0 * N_DIM, tol);
     // The edges of a side: its two end points (2D), or the square around it (3D)
     const region::Elements edges = f.elements("{type = \"boundary\", of = \"left\"}");
     EXPECT_EQ(edges.dimension, N_DIM - 2);
-    EXPECT_NEAR(total(edges), N_DIM == 2 ? 2.0 : 4.0, 1e-12);
+    EXPECT_NEAR(total(edges), N_DIM == 2 ? 2.0 : 4.0, tol);
     // The faces around a filled region of whole cells face out of it: the domain minus a ball's cells
     const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.3}"
                                         : "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.3}";
