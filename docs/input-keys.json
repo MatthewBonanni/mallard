@@ -1458,6 +1458,18 @@
   ],
   "set_in": []
  },
+ "initialize.regions.region.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.regions.region.flip": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "initialize.regions.region.normal": {
   "dims": [
    2
@@ -1481,6 +1493,12 @@
   "set_in": [
    "examples/shock_bubble_2d/input.toml"
   ]
+ },
+ "initialize.regions.region.resolution": {
+  "dims": [
+   2
+  ],
+  "set_in": []
  },
  "initialize.regions.region.rotate": {
   "dims": [
@@ -1521,15 +1539,18 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
+   "boundary",
+   "circle",
    "cone",
    "cylinder",
    "difference",
    "disk",
    "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
+   "interior",
    "intersection",
    "polygon",
    "rectangle",
@@ -4113,6 +4134,13 @@
   ],
   "set_in": [],
   "type": "string"
+ },
+ "probes.reference": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
  },
  "probes.region": {
   "dims": [
