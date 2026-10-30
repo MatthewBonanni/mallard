@@ -94,16 +94,20 @@ const std::unordered_map<std::string, Reduction> REDUCTIONS = {
     {"integral", Reduction::INTEGRAL}, {"mean", Reduction::MEAN}, {"favre", Reduction::FAVRE},
     {"min", Reduction::MIN},           {"max", Reduction::MAX},   {"rms", Reduction::RMS}};
 
-const char * measure_name(uint8_t dim) {
+/** @brief The name of the measure of g's elements: a revolved boundary's per radian is an area. */
+const char * measure_name(const probe::Geometry & g) {
     static const char * const NAMES[] = {"count", "length", "area", "volume"};
-    return NAMES[dim];
+    return NAMES[g.dim + (g.revolved ? 1 : 0)];
 }
 
 /** @brief The description of a sample array: a geometry one (arc_length, normal, measure) or a variable's. */
-FieldDescription geometry_field(const std::string & name, uint8_t dim) {
+FieldDescription geometry_field(const std::string & name, const probe::Geometry & g) {
     if (name == "arc_length") return {dim::length, "arc length", "", ""};
     if (name == "normal") return {dim::none, "unit normal", "", ""};
-    if (name == "measure") return {dim::none.times(dim::length, dim), measure_name(dim), "", ""};
+    if (name == "measure") {
+        const Dimension measure = g.revolved ? dim::of(0, g.dim + 1, 0, 0, 0, -1) : dim::none.times(dim::length, g.dim);
+        return {measure, measure_name(g), "", ""};
+    }
     return field_units::describe(name);
 }
 
@@ -278,7 +282,7 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
     std::vector<FieldDescription> descriptions;
     for (size_t a = 3; a < arrays.size(); a++) {
         sample_names.push_back(arrays[a].name);
-        descriptions.push_back(geometry_field(arrays[a].name, g.dim));
+        descriptions.push_back(geometry_field(arrays[a].name, g));
     }
     // Field data belongs to the data set, before the piece, for VTK to read it
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
@@ -783,15 +787,15 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                 if (boundary) {
                     if (N_DIM == 2) columns.emplace_back("s", dim::length);
                     for (size_t d = 0; d < N_DIM; d++) columns.emplace_back(std::string("n") + "xyz"[d], dim::none);
-                    columns.emplace_back("area", geometry_field("measure", p.geometry.dim).dimension);
+                    columns.emplace_back("area", geometry_field("measure", p.geometry).dimension);
                 }
                 for (const auto & v : p.variables) columns.emplace_back(v, field_units::describe(v).dimension);
                 p.out = open_csv(p.file, resume, columns);
             }
             if (!p.reductions.empty()) {
-                const Dimension measure = geometry_field("measure", p.geometry.dim).dimension;
+                const Dimension measure = geometry_field("measure", p.geometry).dimension;
                 std::vector<std::pair<std::string, Dimension>> columns = {
-                    {"step", dim::none}, {"t", dim::time}, {measure_name(p.geometry.dim), measure}};
+                    {"step", dim::none}, {"t", dim::time}, {measure_name(p.geometry), measure}};
                 for (const Reduction r : p.reductions) {
                     for (const auto & v : p.variables) {
                         const Dimension d = field_units::describe(v).dimension;
@@ -839,9 +843,9 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                     std::vector<double> normals;
                     for (const auto & x : p.geometry.normals) normals.insert(normals.end(), x.begin(), x.end());
                     h5::write_rows(file, "normals", n, N_DIM, 0, n, normals.data(), H5P_DEFAULT);
-                    h5::annotate(file, "normals", geometry_field("normal", p.geometry.dim));
+                    h5::annotate(file, "normals", geometry_field("normal", p.geometry));
                     h5::write_rows(file, "area", n, 1, 0, n, p.geometry.node_weights.data(), H5P_DEFAULT);
-                    h5::annotate(file, "area", geometry_field("measure", p.geometry.dim));
+                    h5::annotate(file, "area", geometry_field("measure", p.geometry));
                 }
                 if (!p.geometry.polygon_offsets.empty()) {
                     const auto & g = p.geometry;

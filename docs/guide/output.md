@@ -241,7 +241,8 @@ volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
 variable's units, `integral` times those of the measure (`m` along a curve,
 `m2` over a 3D boundary: `integral_MASS_FLUX` in `kg s-1`). In axisymmetric runs,
 forces and integrals are per radian of the revolved domain, and their units
-say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`. Spectra rows: a `mean` has its
+say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
+(`m2 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
 field's units, `spectrum`, `correlation` and `shell` (sums, not densities)
 the product of their pair's (`U_X*U_Y`: `m2 s-2`); the `abscissa` is a
 wavenumber in `m-1` (spectra, shells) or a separation in `m` (correlations).
@@ -471,7 +472,7 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 | Variable | Meaning |
 |---|---|
 | `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*` | Convective fluxes through the face, positive out of the domain |
-| `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force |
+| `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force (per radian in axisymmetric runs, as `area`) |
 | `TAU_W`, `TAU_W_X`, ... | Wall shear stress (magnitude, components) |
 | `CF`, `CP` | Skin friction and pressure coefficients of `reference` |
 | `Q_W` | Heat flux into the fluid |

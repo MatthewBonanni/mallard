@@ -944,7 +944,10 @@ The gradients are the least-squares ones of the viscous flux, with its wall
 treatment (normal derivatives from the wall velocity and temperature), and
 the viscosity and conductivity those of the face (mixtures: of the cell), so
 that `integral` of `TRACTION_PRESSURE` and `TRACTION_VISCOUS` with
-`sampling = "cell"` gives the forces of `[[forces]]`. `TAU_W`, `Q_W` and the
+`sampling = "cell"` gives the forces of `[[forces]]`. In axisymmetric runs a
+face's `area` and the `integral` reductions are per radian of the revolved
+wall (`area` is `r` times the face length, the reductions' column `area`), as
+`[[forces]]` is. `TAU_W`, `Q_W` and the
 wall-friction quantities need `navier_stokes`. CSV rows of boundary probes are
 `step, t, face, x, y(, z), s (2D), nx, ny(, nz), area, <variables>`; HDF5
 files add `normals` and `area` (and in 3D `vertices` and `polygons/vertices`,

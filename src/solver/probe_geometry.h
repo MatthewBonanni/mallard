@@ -60,6 +60,7 @@ struct Geometry {
     // measure of each one's element (empty: unit weights), and their unit normals
     std::vector<double> node_weights;
     std::vector<Point> normals;
+    bool revolved = false;  // axisymmetric runs: node_weights per radian of the revolved surface
     // Surfaces of mesh faces (3D): each sample a polygon over these vertices
     std::vector<Point> vertices;
     std::vector<uint64_t> polygon_offsets;  // polygons + 1

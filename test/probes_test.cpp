@@ -473,29 +473,44 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
 }
 
 TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
-    // Cell sampling takes the forces monitor's wall pressure and gradients
-    const std::string dir = fresh_dir("forces");
-    const std::string extra = "[[forces]]\nzone = \"top\"\nfile = \"" + dir + "/forces.csv\"\n"
-                              "[[probes]]\nname = \"top\"\nboundary = \"top\"\nsamples = false\n"
-                              "variables = [\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\nreductions = [\"integral\"]\n"
-                              "reductions_file = \"" + dir + "/top.csv\"\n";
-    Solver solver;
-    solver.init(parse_toml(couette_case(8, extra, "n_steps = 4\ncfl = 0.5\n")));
-    run(solver);
-    const auto forces = read_csv(dir + "/forces.csv");
-    std::map<double, std::map<std::string, double>> probe;
-    for (const auto & row : read_csv(dir + "/top.csv")) probe[row.at("step")] = row;
-    ASSERT_EQ(forces.size(), 4u);
-    const char * const axes[3] = {"x", "y", "z"};
-    // [[forces]] writes 12 significant digits
-    const double tol = precision_tol<double>(1e-10, 1e-5);
-    for (size_t r = 0; r < forces.size(); r++) {
-        const auto & row = probe.at(forces[r].at("step"));
-        for (size_t d = 0; d < N_DIM; d++) {
-            const double Fp = forces[r].at(std::string("F") + axes[d] + "_pressure");
-            const double Fv = forces[r].at(std::string("F") + axes[d] + "_viscous");
-            EXPECT_NEAR(row.at(std::string("integral_TRACTION_PRESSURE_") + "XYZ"[d]), Fp, tol * (1.0 + std::fabs(Fp)));
-            EXPECT_NEAR(row.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), Fv, tol * 1e-2);
+    // Cell sampling takes the forces monitor's wall pressure and gradients;
+    // axisymmetric runs integrate over a radian of the revolved wall, as [[forces]]
+    for (const bool axisymmetric : N_DIM == 2 ? std::vector<bool>{false, true} : std::vector<bool>{false}) {
+        SCOPED_TRACE(axisymmetric ? "axisymmetric" : "planar");
+        const std::string dir = fresh_dir(axisymmetric ? "forces_axisymmetric" : "forces");
+        const std::string extra = "[[forces]]\nzone = \"top\"\nfile = \"" + dir + "/forces.csv\"\n"
+                                  "[[probes]]\nname = \"top\"\nboundary = \"top\"\nsamples = false\n"
+                                  "variables = [\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\nreductions = [\"integral\"]\n"
+                                  "reductions_file = \"" + dir + "/top.csv\"\n";
+        std::string input = couette_case(8, extra, "n_steps = 4\ncfl = 0.5\n");
+        if (axisymmetric) {
+            // The bottom is the axis
+            const std::string bottom = "name = \"bottom\"\ntype = \"wall_isothermal\"\nT = ";
+            const size_t at = input.find(bottom);
+            input.replace(at, input.find('\n', at + bottom.size()) - at, "name = \"bottom\"\ntype = \"symmetry\"");
+            const std::string physics = "[physics]\n";
+            input.replace(input.find(physics), physics.size(), physics + "axisymmetric = true\n");
+        }
+        Solver solver;
+        solver.init(parse_toml(input));
+        run(solver);
+        const auto forces = read_csv(dir + "/forces.csv");
+        std::map<double, std::map<std::string, double>> probe;
+        for (const auto & row : read_csv(dir + "/top.csv")) probe[row.at("step")] = row;
+        ASSERT_EQ(forces.size(), 4u);
+        const char * const axes[3] = {"x", "y", "z"};
+        // [[forces]] writes 12 significant digits
+        const double tol = precision_tol<double>(1e-10, 1e-5);
+        for (size_t r = 0; r < forces.size(); r++) {
+            const auto & row = probe.at(forces[r].at("step"));
+            // A radian of the wall at r = 1 has the area of a unit length
+            EXPECT_NEAR(row.at(axisymmetric ? "area" : MEASURE), 1.0, tol);
+            for (size_t d = 0; d < N_DIM; d++) {
+                const double Fp = forces[r].at(std::string("F") + axes[d] + "_pressure");
+                const double Fv = forces[r].at(std::string("F") + axes[d] + "_viscous");
+                EXPECT_NEAR(row.at(std::string("integral_TRACTION_PRESSURE_") + "XYZ"[d]), Fp, tol * (1.0 + std::fabs(Fp)));
+                EXPECT_NEAR(row.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), Fv, tol * 1e-2);
+            }
         }
     }
 }
