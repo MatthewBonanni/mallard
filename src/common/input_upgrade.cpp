@@ -53,18 +53,20 @@ const Rules & rules() {
         },
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
+            {"write_data[].format", "hdf5", "vtkhdf", "0.9.0", "0.10.0",
+             "VTKHDF replaces the XDMF and HDF5 files; ParaView 5.12 and later read it", true},
             {"sources[].region.**.type", "circle", "disk", "0.9.0", "0.10.0",
-             "circle is the closed curve, disk the area inside it", 2},
-            {"sources[].region.**.type", "circle", "sphere", "0.9.0", "0.10.0", "circle is a curve", 3},
+             "circle is the closed curve, disk the area inside it", false, 2},
+            {"sources[].region.**.type", "circle", "sphere", "0.9.0", "0.10.0", "circle is a curve", false, 3},
             {"sources[].region.**.type", "ellipse", "ellipsoid", "0.9.0", "0.10.0",
              "ellipse is a curve; the z = 0 slice of an ellipsoid is the area inside it"},
-            {"sources[].region.**.type", "disk", "sphere", "0.9.0", "0.10.0", "disk is a flat surface in 3D", 3},
+            {"sources[].region.**.type", "disk", "sphere", "0.9.0", "0.10.0", "disk is a flat surface in 3D", false, 3},
             {"sources[].region.**.type", "rectangle", "box", "0.9.0", "0.10.0", "rectangle is a flat surface in 3D",
-             3},
-            {"sources[].region.**.type", "box", "rectangle", "0.9.0", "0.10.0", "box is the 3D solid", 2},
+             false, 3},
+            {"sources[].region.**.type", "box", "rectangle", "0.9.0", "0.10.0", "box is the 3D solid", false, 2},
             {"sources[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0",
              "annulus is a flat surface in 3D; the hollow solid is a cylinder along z with inner_radius, and "
-             "axis = [0, 0, 1] is added", 3, "axis = [0, 0, 1]"},
+             "axis = [0, 0, 1] is added", false, 3, "axis = [0, 0, 1]"},
         },
     };
     return table;
@@ -269,10 +271,6 @@ std::size_t line_of(const V & value) {
 // ---------------------------------------------------------------- the rewrite of a parsed input
 
 /**
- * @brief Applies every rule to the parsed input; returns what changed. Throws
- *        if a key is set under both its old and its new name.
- */
-/**
  * @brief Whether the rule applies to a run of dimension dim (0: unknown). Throws
  *        if it depends on the dimension, which is unknown, and the input has its option.
  */
@@ -290,8 +288,14 @@ bool applies(V & root, const OptionRule & rule, const int dim) {
     return false;
 }
 
+/**
+ * @brief Applies every rule to the parsed input; returns what changed. Throws
+ *        if a key is set under both its old and its new name.
+ *        `setup`: as the run reads it (kept options keep their value).
+ */
 template <typename V>
-std::vector<Finding> transform(V & root, const Rules & table, const std::string & version, const int dim) {
+std::vector<Finding> transform(V & root, const Rules & table, const std::string & version, const int dim,
+                               bool setup = false) {
     std::vector<Finding> findings;
     for (const KeyRule & rule : table.keys) {
         for (const Concrete & key : matches(root, rule.from)) {
@@ -322,7 +326,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
             V & value = *at(root, key);
             if (!value.is_string() || value.as_string() != rule.from) continue;
             findings.push_back(option_finding(rule, key, line_of(value), version));
-            value = rule.to;
+            if (!(setup && rule.kept && !findings.back().removed)) value = rule.to;
             if (!rule.add.empty()) {
                 const auto added = toml::parse_str<typename V::config_type>(rule.add);
                 auto & beside = entries_of(*at(root, parent(key)));
@@ -542,7 +546,7 @@ std::string describe(const Finding & finding) {
 }
 
 std::vector<Finding> apply(Input & input, const std::string & version, const Rules & table) {
-    std::vector<Finding> findings = transform(input, table, version.empty() ? MALLARD_VERSION : version, N_DIM);
+    std::vector<Finding> findings = transform(input, table, version.empty() ? MALLARD_VERSION : version, N_DIM, true);
     std::string removed;
     for (const Finding & f : findings) {
         if (f.removed) removed += "\n  " + describe(f);

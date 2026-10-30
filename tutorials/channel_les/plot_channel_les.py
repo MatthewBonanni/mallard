@@ -7,7 +7,7 @@
 mesh: the box with its boundary zones and the cells of a cross-section
 (channel_geometry, channel_mesh).
 results: RUN_DIR holds a run of input.toml. Averages the last statistics
-snapshot (stats/channel.pvd) over x and z, folds the two halves, takes the
+snapshot (series stats/channel) over x and z, folds the two halves, takes the
 wall shear from the viscous x-forces on both walls averaged from --t-start
 on, and compares with the DNS of Moser, Kim & Mansour (1999), downloaded on
 first use: prints Re_tau, Cf and the profile peaks and draws
@@ -96,7 +96,7 @@ def mesh(args):
 def results(args):
     run = args.path
     ref = mkm(os.path.expanduser("~/.cache/mallard/mkm"), args.retau)
-    stats = snapshots.last(os.path.join(run, "stats", "channel.pvd"))
+    stats = snapshots.last(os.path.join(run, "stats", "channel"))
     centers, volumes, fields = read_cells(stats)
     kept, coords, counts, columns = plane_average(centers, volumes, fields, "xz")
     profile = os.path.join(run, "profile.csv")
@@ -159,7 +159,7 @@ def results(args):
         fig.tight_layout()
         return fig
 
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(run, "solut", "flow.pvd")))
+    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(run, "solut", "flow")))
     polys, c = snapshots.cells(pts, conn, offs)
     ux = a["U"][:, 0]
     y_cells = np.unique(np.round(c[:, 1], 10))

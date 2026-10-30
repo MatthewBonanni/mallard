@@ -3634,6 +3634,7 @@
   "values": [
    "csv",
    "hdf5",
+   "vtkhdf",
    "vtp"
   ]
  },
@@ -4603,53 +4604,27 @@
    "examples/channel_wmles/lm5200.toml",
    "examples/channel_wmles/tl_m1.7.toml",
    "examples/channel_wmles/tl_m3.0.toml",
-   "examples/detonation_1d/input.toml",
    "examples/detonation_2d/input.toml",
    "examples/detonation_3d/input.toml",
-   "examples/explosion_3d/input.toml",
-   "examples/flame_2d/input.toml",
-   "examples/flame_2d/unity/input.toml",
-   "examples/flame_outflow/input.toml",
    "examples/flame_turbulence/hit.toml",
    "examples/flame_turbulence/input.toml",
    "examples/flame_turbulence/les.toml",
-   "examples/flame_vortex/input.toml",
-   "examples/flame_vortex_quenching/input.toml",
-   "examples/heated_duct/closed.toml",
-   "examples/heated_duct/closed_upt.toml",
-   "examples/heated_duct/input.toml",
    "examples/isotropic_turbulence/input.toml",
-   "examples/noh_axisymmetric/input.toml",
-   "examples/poiseuille_pipe/input.toml",
-   "examples/premixed_flame/ch4/input.toml",
-   "examples/premixed_flame/input.toml",
-   "examples/reactive_shock_tube/input.toml",
-   "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
-   "examples/riemann_2d_quads/input.toml",
-   "examples/riemann_2d_quads/remap.toml",
-   "examples/rotational_sector/annulus.toml",
-   "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
-   "examples/sedov_axisymmetric/input.toml",
    "examples/shock_bubble_3d/input.toml",
-   "examples/shu_osher/input.toml",
-   "examples/sod/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
-   "examples/turbulent_inflow_duct/input.toml",
-   "examples/viscous_shock_tube/input.toml",
-   "examples/wedge/input.toml",
-   "tutorials/wedge/input.toml"
+   "examples/turbulent_inflow_duct/input.toml"
   ],
   "type": "string",
   "values": [
    "hdf5",
    "restart",
+   "vtkhdf",
    "vtu"
   ]
  },
@@ -4751,6 +4726,13 @@
   "type": "string"
  },
  "write_data.relative_error": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "write_data.series": {
   "dims": [
    2,
    3

@@ -313,8 +313,9 @@ with h5py.File("probe_wake.h5") as f:
     p = f["fields/P"][...]        # (outputs, samples); U expands to fields/U_X, U_Y (, U_Z)
 ```
 
-`format = "vtp"` writes one PolyData file per output and a `.pvd` series:
-open the `.pvd` in ParaView, then plot along the curve with *Plot Data* (by
+`format = "vtkhdf"` writes one VTKHDF PolyData file holding every output, and
+`format = "vtp"` one PolyData file per output and a `.pvd` series: open the
+`.vtkhdf` (or `.pvd`) in ParaView, then plot along the curve with *Plot Data* (by
 `arc_length`) or over time with *Plot Data Over Time*. Reductions go to
 `probe_<name>_reductions.csv`. Format details: [`[[probes]]`](../input.md#probes).
 

@@ -12,9 +12,7 @@ sign; the wake length L is the distance from the rear of the sphere to where
 the axial velocity next to the axis turns positive again.
 """
 import argparse
-import glob
 import os
-import re
 import sys
 
 import numpy as np
@@ -23,7 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_vtu_cells, series  # noqa: E402
 
 
 def clift(re):
@@ -48,9 +46,7 @@ def main():
     cd = 2.0 * np.pi * (forces[:, 2] + forces[:, 4]) / (0.5 * U ** 2 * np.pi * D ** 2 / 4)
     cd_p = 2.0 * np.pi * forces[:, 2] / (0.5 * U ** 2 * np.pi * D ** 2 / 4)
 
-    pvd = glob.glob(os.path.join(args.solut, "sphere*.pvd"))[0]
-    last = re.findall(r'file="([^"]+)"', open(pvd).read())[-1]
-    pts, conn, offs, _, data = read_vtu_cells(os.path.join(args.solut, last))
+    pts, conn, offs, _, data = read_vtu_cells(series(args.solut, "sphere_[0-9]*")[-1])
     starts = np.concatenate([[0], offs[:-1]])
     cells = [pts[conn[s:e], :2] for s, e in zip(starts, offs)]
     center = np.array([c.mean(axis=0) for c in cells])

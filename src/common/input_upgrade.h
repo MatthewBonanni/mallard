@@ -39,12 +39,15 @@ struct KeyRule {
 
 /**
  * @brief A string option renamed: `key = "from"` becomes `key = "to"`, and
- *        `add` (`name = value`), if given, is set beside it unless its table has it.
+ *        `add` (`name = value`), if given, is set beside it unless its table
+ *        has it. A kept option still does what it did while deprecated (the
+ *        setup reads it unchanged); only the rewritten file switches to `to`.
  */
 struct OptionRule {
     std::string key;
     std::string from, to;
     std::string since, removed, note;
+    bool kept = false;
     int dim = 0;           ///< The only dimension of runs it applies to; 0: every run
     std::string add = {};  ///< E.g. "axis = [0, 0, 1]"
 };
@@ -73,7 +76,7 @@ std::string advice(const Finding & finding);
 
 /**
  * @brief Rewrites the deprecated keys and options of `input` in place, as the
- *        setup reads them, and returns them. Throws an InputError listing the
+ *        setup reads them (kept options stay), and returns them. Throws an InputError listing the
  *        removed ones, with what to do (`mallard input upgrade`). `version`
  *        is this release's (MALLARD_VERSION when empty).
  */

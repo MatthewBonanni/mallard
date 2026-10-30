@@ -35,6 +35,9 @@ std::string vtk_float_type();
  */
 uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k);
 
+/** @brief VTK cell type of a linear cell or boundary face, by dimension and node count. */
+uint8_t vtk_cell_type(uint32_t dim, uint32_t n_nodes);
+
 /** @brief Whether setup creates output files and directories (not in a pre-flight check). */
 bool output_files_enabled();
 void set_output_files_enabled(bool on);

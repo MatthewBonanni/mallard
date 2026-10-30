@@ -42,7 +42,7 @@
 # Run:
 #   python ../../tools/setup/channel_init.py input.toml init.restart
 #   ../../build3d/src/mallard -i input.toml
-#   python ../../tools/post/plane_average.py stats/channel_<last>.vtu --average x z --out profile.csv
+#   python ../../tools/post/plane_average.py stats/channel_<last>.vtkhdf --average x z --out profile.csv
 #   python ../../tools/post/plot_channel.py input.toml profile.csv forces_bottom.csv forces_top.csv \
 #       --t-start 100 --retau 395
 #
@@ -128,7 +128,6 @@ file = "forces_top.csv"
 
 [[write_data]]
 prefix = "./stats/channel"
-format = "vtu"
 time_interval = 50.0
 variables = ["MEAN_*", "COV_*"]
 

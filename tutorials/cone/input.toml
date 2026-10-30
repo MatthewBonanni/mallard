@@ -85,20 +85,17 @@ interval = 20
 
 [[write_data]]
 prefix = "./solut/flow"
-format = "vtu"
 time_interval = 0.5
 variables = ["RHO", "U", "P"]
 
 [[write_data]]
 prefix = "./solut/cone"
-format = "vtu"
 geometry = "cone"
 time_interval = 0.5
 variables = ["P"]
 
 [[write_data]]
 prefix = "./solut/plane"
-format = "vtu"
 geometry = "symmetry_z"
 time_interval = 0.5
 variables = ["RHO", "U", "P"]

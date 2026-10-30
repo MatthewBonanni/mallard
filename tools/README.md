@@ -123,14 +123,14 @@ Triangles around a duck silhouette (a periodic spline), refined linearly from `-
 
 ### `plot_mesh_quality.py`: mesh quality
 
-The quality fields that `mallard check --quality-vtu PREFIX` writes for a 2D
+The quality fields that `mallard check --quality PREFIX` writes for a 2D
 mesh (non-orthogonality, skewness, aspect ratio, volume ratio), with the worst
 cells circled; readable on light and dark backgrounds. Use it before a long run
 to find the cells that limit the time step or the accuracy.
 
 ```bash
-mallard check input.toml --quality-vtu quality
-python tools/mesh/plot_mesh_quality.py quality.vtu quality.png --fields NON_ORTHOGONALITY SKEWNESS --worst 10
+mallard check input.toml --quality quality
+python tools/mesh/plot_mesh_quality.py quality_000000.vtkhdf quality.png --fields NON_ORTHOGONALITY SKEWNESS --worst 10
 ```
 
 The figure is in [Meshes](../docs/guide/meshes.md#mesh-quality).
@@ -260,7 +260,7 @@ The similarity solution behind a strong spherical shock, from its ODEs: the refe
 
 ## Post-processing
 
-Mallard writes VTU files that ParaView opens (the `.pvd` file is the series), or HDF5 files with XDMF indexes; these scripts read either.
+Mallard writes VTKHDF files that ParaView opens (the `.vtkhdf.series` file is the series), VTU files in builds without HDF5 (the `.pvd` file is the series), or HDF5 files with XDMF indexes; these scripts read each of them.
 
 ### `mallard`: readers
 
@@ -270,17 +270,17 @@ A small Python package over Mallard's output, used by every script below:
 import sys; sys.path.insert(0, "tools")
 from mallard.vtu import read_vtu, read_vtu_cells
 
-pts, tris, tri_cell, arrays = read_vtu("solut/riemann_000080.vtu")   # 2D: triangles of every cell
+pts, tris, tri_cell, arrays = read_vtu("solut/riemann_000080.vtkhdf")   # 2D: triangles of every cell
 rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] is the time
-pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtu")  # 2D or 3D cells
+pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtkhdf")  # 2D or 3D cells
 ```
 
-`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.h5` snapshots as well; `mallard.h5` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
+`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
 
 ### `plot_vtu.py`: one field of a snapshot
 
 ```sh
-python tools/post/plot_vtu.py solut/riemann_000080.vtu rho.png [--var RHO] [--contours 24]
+python tools/post/plot_vtu.py solut/riemann_000080.vtkhdf rho.png [--var RHO] [--contours 24]
 ```
 
 A quick look at a 2D snapshot without ParaView: one cell field (any array of the file) with its range and optional contours.
@@ -291,7 +291,7 @@ A quick look at a 2D snapshot without ParaView: one cell field (any array of the
 ### `compare_png.py`: runs side by side
 
 ```sh
-python tools/post/compare_png.py compare.png RHO fo/solut/riemann_000080.vtu teno5/solut/riemann_000080.vtu
+python tools/post/compare_png.py compare.png RHO fo/solut/riemann_000080.vtkhdf teno5/solut/riemann_000080.vtkhdf
 ```
 
 The same field of several snapshots side by side, each titled with its run directory and range: compare schemes, meshes or settings at a glance.
@@ -318,7 +318,7 @@ python tools/post/animate_cartesian.py render grid movie [--width 3840 --height 
 python tools/post/animate_cartesian.py still grid/NAME.npy still                  # one pixel per cell
 ```
 
-For millions of cells: `extract` turns each (P)VTU snapshot into a float32 grid, optionally deleting the snapshot and following a running case (`--follow`) so disk use stays bounded; `render` makes pixel-exact 4K frames (density shaded by the schlieren, area-averaged from the full grid so nothing aliases) and the MP4; `still` writes the density and the schlieren at one pixel per cell, like the [gallery](https://matthewbonanni.github.io/mallard/gallery/)'s 4096² still.
+For millions of cells: `extract` turns each snapshot (VTKHDF, or (P)VTU) into a float32 grid, optionally deleting the snapshot and following a running case (`--follow`) so disk use stays bounded; `render` makes pixel-exact 4K frames (density shaded by the schlieren, area-averaged from the full grid so nothing aliases) and the MP4; `still` writes the density and the schlieren at one pixel per cell, like the [gallery](https://matthewbonanni.github.io/mallard/gallery/)'s 4096² still.
 
 ![still_density.png and still_schlieren.png of the 200 x 200 run](../docs/images/tools/animate_cartesian-light.svg#gh-light-mode-only)
 ![still_density.png and still_schlieren.png of the 200 x 200 run](../docs/images/tools/animate_cartesian-dark.svg#gh-dark-mode-only)
@@ -336,10 +336,10 @@ Several cases side by side, synchronized in normalized time t / t_end, from a JS
 ### `plane_average.py`: profiles from running statistics
 
 ```sh
-python tools/post/plane_average.py solut/flow_000100.pvtu --average x z --out profile.csv
+python tools/post/plane_average.py solut/flow_000100.vtkhdf --average x z --out profile.csv
 ```
 
-Averages the `[statistics]` output (`MEAN_<field>`, `COV_<a>_<b>`) of an axis-aligned quad or hex mesh over homogeneous directions as a function of the others, e.g. a channel's profiles in y (stretched meshes too), adding the dispersive part to the covariances. Reads VTU or PVTU, writes a CSV; in Python, `plane_average(centers, volumes, fields, "xz")` does the same on arrays. The [channel LES tutorial](../docs/tutorials/channel_les.md) draws these profiles from it:
+Averages the `[statistics]` output (`MEAN_<field>`, `COV_<a>_<b>`) of an axis-aligned quad or hex mesh over homogeneous directions as a function of the others, e.g. a channel's profiles in y (stretched meshes too), adding the dispersive part to the covariances. Reads VTKHDF, VTU or PVTU, writes a CSV; in Python, `plane_average(centers, volumes, fields, "xz")` does the same on arrays. The [channel LES tutorial](../docs/tutorials/channel_les.md) draws these profiles from it:
 
 ![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-light.svg#gh-light-mode-only)
 ![Mean velocity and resolved Reynolds stresses in wall units against the DNS](../docs/images/tutorials/channel_profiles-dark.svg#gh-dark-mode-only)
@@ -422,7 +422,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `docs/cli.py --mallard build/src/mallard [--check]` | The help pages of the [command line](../docs/guide/cli.md) page, from running `mallard <command> --help` for every command `mallard --help` lists; `CliTest.UserDocsShowEveryHelpPage` fails when they are out of date; standard library only |
 | `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D test-suite builds (`--test build-2/test/mallard-test2d build-3/test/mallard-test3d`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
-| `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (VTU and PVTU series) |
+| `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (series of VTKHDF or VTU snapshots) |
 | `dev/make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
 | `dev/chemistry_reference.py`, `dev/transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |
 | `dev/v3_reference.py`, `dev/v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `mallard reactor` against them |

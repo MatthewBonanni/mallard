@@ -44,9 +44,9 @@ constexpr Option CHECK_OPTIONS[] = {
      "many cell updates per second per rank: the Throughput of a run's summary over its ranks. "
      "Default: no cost."},
     {"--steps", "", "N", "Cost at the throughput measured over N steps, after one untimed step. Default: no cost."},
-    {"--quality-vtu", "", "PREFIX",
-     "Write the mesh-quality fields to PREFIX_000000.vtu (a .pvtu and one piece per rank under MPI). "
-     "Default: none."},
+    {"--quality", "", "PREFIX",
+     "Write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without HDF5), "
+     "the default snapshot format. Default: none."},
     {"--catalog", "", "KEYS.json",
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
      "Default: none."},
@@ -269,7 +269,7 @@ constexpr Command COMMANDS[] = {
         .arguments = CHECK_ARGUMENTS,
         .examples = "$ mallard check input.toml\n"
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
-                    "$ mpirun -n 4 mallard check input.toml --quality-vtu quality",
+                    "$ mpirun -n 4 mallard check input.toml --quality quality",
         .exit_status = "0  no errors (there may be warnings)\n"
                        "1  errors: in the input, the mesh or the setup\n"
                        "2  usage error",

@@ -200,8 +200,8 @@ TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
 }
 
 TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
-    const Rules rules = {{}, {{"s[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0", "hollow", 0,
-                               "axis = [0, 0, 1]"}}};
+    const Rules rules = {{}, {{"s[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0", "hollow", false,
+                               0, "axis = [0, 0, 1]"}}};
     const std::string text = "[[s]]\n"
                              "region = {type = \"union\", regions = [{type = \"annulus\", radius = 2}]}\n"
                              "[[s]]\n"
@@ -228,4 +228,23 @@ TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
     input_upgrade::apply(input, "0.9.0", rules);
     EXPECT_EQ(input.at("s").at(1).at("region").at("axis").as_array().size(), 3u);
     EXPECT_EQ(input.at("s").at(2).at("region").at("axis").at(0).as_integer(), 1);
+}
+
+TEST(InputUpgradeTest, KeptOptionsWorkAsBeforeButAreRewritten) {
+    // format = "hdf5" still writes XDMF and HDF5 while deprecated; the
+    // upgraded file asks for VTKHDF
+    const std::string text = "[[write_data]]\nprefix = 'f'\nformat = \"hdf5\"  # ParaView\n";
+    Input input = parse_input_string(text);
+    const std::vector<Finding> findings = input_upgrade::apply(input, "0.9.0");
+    ASSERT_EQ(findings.size(), 1u);
+    EXPECT_FALSE(findings[0].removed);
+    EXPECT_NE(findings[0].message.find("use \"vtkhdf\""), std::string::npos) << findings[0].message;
+    EXPECT_EQ(input.at("write_data").at(0).at("format").as_string(), "hdf5");
+    bool reformatted = true;
+    std::vector<Finding> rewritten;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, rewritten, reformatted),
+              "[[write_data]]\nprefix = 'f'\nformat = \"vtkhdf\"  # ParaView\n");
+    EXPECT_FALSE(reformatted);
+    Input later = parse_input_string(text);
+    EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
 }
