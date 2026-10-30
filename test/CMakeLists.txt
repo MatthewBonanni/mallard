@@ -6,6 +6,7 @@ set(MALLARD_TEST_SOURCES
     common_math_test.cpp
     compiled_expression_test.cpp
     region_test.cpp
+    initial_state_test.cpp
     source_terms_test.cpp
     case_template_test.cpp
     front_end_test.cpp

@@ -19,7 +19,7 @@ geometry = "cylinder"         # the faces of one boundary zone
 variables = ["P", "T"]
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 39 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -93,7 +93,7 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 check_interval = 100   # a progress row every 100 steps
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 39 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, summaries of mesh, physics, numerics, boundaries and output, then one
@@ -593,6 +593,14 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 | `CF`, `CP` | Skin friction and pressure coefficients of `reference` |
 | `Q_W` | Heat flux into the fluid |
 | `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
+
+Around a cylinder at Re = 40: the wall probe's `CP`, `CF` and `Y_PLUS`, the
+`mean` and `max` of `Y_PLUS`, the `integral` of the tractions (the drag) and
+the `MASS_FLUX` through a closed circle and a cut, whose net outflow settles
+to zero:
+
+![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-light.svg#gh-light-mode-only)
+![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-dark.svg#gh-dark-mode-only)
 
 With TENO, `sampling = "point"` reads each cell's reconstruction polynomial at
 the sample, so a probe converges at the scheme's order (fifth order for
