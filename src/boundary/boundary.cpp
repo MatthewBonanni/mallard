@@ -198,7 +198,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         if (given == 0) {
             fail(input, where, alternatives[0],
                  "missing; `" + type_str + "` needs " + (alternatives.size() > 1 ? "one of " : "") + quoted(alternatives),
-                 "", anchor);
+                 alternatives.size() > 1 ? "Give exactly one" : "", anchor);
         }
         if (given > 1) {
             fail(input, where, alternatives[1], "given together with " + quoted({alternatives[0]}) +

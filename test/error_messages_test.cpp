@@ -212,10 +212,10 @@ TEST(ErrorMessages, MechanismProblemsNameTheKeyThatReadsTheFile) {
 }
 
 TEST(ErrorMessages, MassFlowInletTakesExactlyOneOfMdotAndMassFlux) {
-    const std::string inlet = "type = \"mass_flow_inlet\"\nT = 1.0\n";
+    const std::string inlet = "type = \"inlet_mass_flow\"\nT = 1.0\n";
     expect_parts(run_error(replaced(box(), "type = \"symmetry\"", inlet)),
-                 {"boundaries[name = \"left\"].mass_flux: missing", "needs mass_flux or mdot", "Give exactly one",
-                  "docs/guide/boundary_conditions.md#mass-flow-inlet"});
+                 {"boundaries[name = \"left\"].mass_flux: missing", "needs one of `mass_flux` or `mdot`",
+                  "Give exactly one", "docs/guide/boundary_conditions.md#inlet_mass_flow"});
     const std::string both = replaced(box(), "type = \"symmetry\"", inlet + "mdot = 1.0\nmass_flux = 1.0\n");
     expect_parts(run_error(both), {line_prefix(both, "mdot") + "boundaries[name = \"left\"].mdot", "given together"});
 }

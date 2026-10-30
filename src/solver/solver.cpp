@@ -655,7 +655,7 @@ void Solver::init_boundaries() {
             Diagnostic d = missing_key(bound, where_name + ".type").diagnostic;
             d.valid = types;
             d.fix = "Add type = \"...\"";
-            d.docs = "docs/guide/boundary_conditions.md#choosing-a-condition";
+            d.docs = "docs/guide/boundary_conditions.md#available-boundary-conditions";
             throw InputError(d);
         }
         const auto & periodic = mesh->periodic_zones;
@@ -766,7 +766,7 @@ void Solver::init_boundaries() {
                                       .message = "points out of the domain at the face at " + at + ")",
                                       .fix = "Give a direction into the domain at every face of the zone, or "
                                              "remove it to use each face's inward normal",
-                                      .docs = "docs/guide/boundary_conditions.md#stagnation-inlet"});
+                                      .docs = "docs/guide/boundary_conditions.md#" + BOUNDARY_NAMES.at(bcs.back().type)});
                 }
             }
 
@@ -855,8 +855,8 @@ void Solver::init_boundaries() {
         throw InputError({.key = "boundaries",
                           .message = "no condition for " + uncovered + "; every boundary face needs one",
                           .fix = "Add a [[boundaries]] entry with this name and a type (e.g. \"wall_adiabatic\", "
-                                 "\"symmetry\" or \"p_out\") for each zone",
-                          .docs = "docs/guide/boundary_conditions.md#choosing-a-condition"});
+                                 "\"symmetry\" or \"outlet_pressure\") for each zone",
+                          .docs = "docs/guide/boundary_conditions.md#available-boundary-conditions"});
     }
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
         // Faces on the axis carry no flux (zero revolved area); their ghost

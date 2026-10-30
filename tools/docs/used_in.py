@@ -33,15 +33,30 @@ def boundaries(t):
     return t.get("boundaries", [])
 
 
+def bc_type(name):
+    return lambda t: any(b.get("type") == name for b in boundaries(t))
+
+
 def recon(t):
     return num(t).get("face_reconstruction", {})
 
 
 RULES = {
-    ("boundary_conditions.md", "## Choosing a condition"): (lambda t: bool(boundaries(t)), None),
-    ("boundary_conditions.md", "## Characteristic boundaries"):
-        (lambda t: any(b.get("type", "").startswith("nscbc") for b in boundaries(t)), None),
-    ("boundary_conditions.md", "## Synthetic turbulence"):
+    ("boundary_conditions.md", "# Boundary conditions"): (lambda t: bool(boundaries(t)), None),
+    **{("boundary_conditions.md", f"### `{name}`"): (bc_type(name), fallback) for name, fallback in [
+        ("wall_adiabatic", None), ("wall_isothermal", None),
+        ("wall_heat_flux", "no example yet; see `test/viscous_test.cpp` and `test/mixture_transport_test.cpp`"),
+        ("inlet_state", None), ("inlet_stagnation", None), ("inlet_mass_flow", None), ("outlet_pressure", None),
+        ("outlet_extrapolation", None), ("farfield", None), ("symmetry", None), ("dirichlet", None)]},
+    ("boundary_conditions.md", "### Wall models (`wall_model`)"):
+        (lambda t: any("wall_model" in b for b in boundaries(t)), None),
+    ("boundary_conditions.md", "#### `average`: area-averaged pressure"):
+        (lambda t: any(b.get("average") for b in boundaries(t)),
+         "no example yet; see `test/boundary_test.cpp` and `test/mpi_test.cpp`"),
+    ("boundary_conditions.md", "### Periodic"): (lambda t: "periodic" in t, None),
+    ("boundary_conditions.md", "### `nscbc`: characteristic boundaries"):
+        (lambda t: any("nscbc" in b for b in boundaries(t)), None),
+    ("boundary_conditions.md", "### Synthetic turbulence (`turbulence`)"):
         (lambda t: any("turbulence" in b for b in boundaries(t)), None),
     ("initialization.md", "## Uniform state"): (lambda t: t.get("initialize", {}).get("type") == "constant", None),
     ("initialization.md", "## Expressions"): (lambda t: t.get("initialize", {}).get("type") == "analytical", None),

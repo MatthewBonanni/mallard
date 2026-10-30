@@ -485,7 +485,7 @@ TEST(NSCBCTest, InvalidCharacteristicInputIsRejected) {
     std::ostringstream base;
     base.precision(17);
     base << "type = \"outlet_pressure\"\np = " << P0 << "\n";
-    for (const std::string & extra : {std::string(""), std::string("nscbc.L = 0.0\n"), std::string("nscbc.L = 1.0\nnscbc.sigma = -1.0\n"),
+    for (const std::string & extra : {std::string("nscbc = {}\n"), std::string("nscbc.L = 0.0\n"), std::string("nscbc.L = 1.0\nnscbc.sigma = -1.0\n"),
                                       std::string("nscbc.L = 1.0\nnscbc.beta = 1.5\n")}) {
         Solver solver;
         EXPECT_THROW(solver.init(parse_toml(pulse_input(base.str() + extra, mesh, "type = \"FO\"\n"))),
