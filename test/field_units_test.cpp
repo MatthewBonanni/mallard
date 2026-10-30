@@ -272,7 +272,9 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
     auto wall = csv_units(dir + "/wall.csv");
     EXPECT_EQ(wall["face"], "1");
     EXPECT_EQ(wall["x"], "m");
-    if (N_DIM == 2) EXPECT_EQ(wall["s"], "m");
+    if (N_DIM == 2) {
+        EXPECT_EQ(wall["s"], "m");
+    }
     EXPECT_EQ(wall["ny"], "1");
     EXPECT_EQ(wall["area"], area) << "a segment's length in 2D";
     for (const char * v : {"P", "CP", "MASS_FLUX", "MOMENTUM_FLUX_X", "ENTHALPY_FLUX", "TRACTION_PRESSURE_Y"}) {
