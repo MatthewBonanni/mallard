@@ -2,12 +2,9 @@
 """Write a Gmsh 2.2 O-grid of quadrilaterals around a circular cylinder.
 
     make_cylinder_mesh.py OUTPUT.msh [--n-theta 256] [--n-r 128] [--r-far 20] [--dr0 0.004] [--half]
-        [--order 1|2|3] [--aspect 1]
+        [--order 1|2|3]
 
-The cylinder has diameter 1 and is centered at the origin. With --aspect
-b/a < 1 it is an elliptic cylinder of semi-axes 0.5 along x and 0.5 b/a
-along y, in confocal elliptic coordinates (an orthogonal grid whose rings
-x^2 / r^2 + y^2 / (r^2 - c^2) = 1 become circles far away). Radial spacing
+The cylinder has diameter 1 and is centered at the origin. Radial spacing
 grows geometrically from dr0 at the wall to the far-field radius. Physical
 curves: "cylinder" (the wall) and "farfield" (the outer circle). With --half,
 only the upper half (y >= 0, n-theta cells over 180 degrees) with the two
@@ -30,18 +27,13 @@ def main():
     ap.add_argument("--dr0", type=float, default=0.004)
     ap.add_argument("--half", action="store_true")
     ap.add_argument("--order", type=int, default=1, choices=[1, 2, 3])
-    ap.add_argument("--aspect", type=float, default=1.0)
     args = ap.parse_args()
-    if not 0.0 < args.aspect <= 1.0:
-        ap.error("--aspect must be in (0, 1]")
 
     r0, n_r, n_t = 0.5, args.n_r, args.n_theta
     # Geometric growth ratio q with dr0 * (q^n_r - 1) / (q - 1) = r_far - r0
     span = args.r_far - r0
     q = brentq(lambda q: args.dr0 * (q ** n_r - 1) / (q - 1) - span, 1.0 + 1e-9, 2.0)
     r = r0 + args.dr0 * (q ** np.arange(n_r + 1) - 1) / (q - 1)
-    c2 = r0 * r0 * (1.0 - args.aspect ** 2)
-    b = np.sqrt(r * r - c2)  # semi-axes along y of the rings
     if args.half:
         n_nodes_t = n_t + 1
         theta = np.linspace(0.0, np.pi, n_nodes_t)
@@ -58,7 +50,7 @@ def main():
              "$Nodes", str((n_r + 1) * n_nodes_t)]
     for j in range(n_r + 1):
         for i in range(n_nodes_t):
-            y = 0.0 if args.half and i in (0, n_t) else b[j] * np.sin(theta[i])
+            y = 0.0 if args.half and i in (0, n_t) else r[j] * np.sin(theta[i])
             lines.append(f"{node(i, j)} {r[j] * np.cos(theta[i]):.15g} {y:.15g} 0")
     lines.append("$EndNodes")
 
@@ -74,7 +66,7 @@ def main():
             ids = []
             for k in range(1, args.order):
                 t = theta[i] + d_theta * k / args.order
-                extra_nodes.append(f"{n_nodes + len(extra_nodes) + 1} {r[j] * np.cos(t):.15g} {b[j] * np.sin(t):.15g} 0")
+                extra_nodes.append(f"{n_nodes + len(extra_nodes) + 1} {r[j] * np.cos(t):.15g} {r[j] * np.sin(t):.15g} 0")
                 ids.append(str(n_nodes + len(extra_nodes)))
             etype = 8 if args.order == 2 else 26
             elements.append(f"{etype} 2 {tag} {tag} {node(i, j)} {node(i + 1, j)} " + " ".join(ids))

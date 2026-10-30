@@ -14,7 +14,6 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
-#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -30,7 +29,6 @@
 #include "input.h"
 #include "mesh.h"
 #include "physics.h"
-#include "region.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "test_utils.h"
@@ -403,6 +401,13 @@ TEST(CurvedGeometry, MeshesWithoutCurvedDataAreUnchanged) {
         EXPECT_EQ(plain->h_cell_volume(c), off->h_cell_volume(c));
         EXPECT_EQ(plain->h_cell_coords(c, 0), off->h_cell_coords(c, 0));
     }
+    // curved_geometry = false leaves [[mesh.curved]] out, without making its keys unused
+    auto disabled = std::make_shared<Mesh>();
+    disabled->init_from_connectivity(a.nodes, a.cells, a.faces);
+    const Input input = parse_toml("[mesh]\ncurved_geometry = false\n" + std::string(SHAPES));
+    disabled->apply_curved(curved::surfaces_of_mesh(*disabled, input));
+    EXPECT_FALSE(disabled->curved_geometry);
+    EXPECT_TRUE(unused_keys(input).empty());
     // A zone without a matching shape is an input error
     auto bad = std::make_shared<Mesh>();
     bad->init_from_connectivity(a.nodes, a.cells, a.faces);
@@ -754,17 +759,5 @@ TEST(CurvedTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {
     verification::expect_order({"curved", "TENO5, curved walls, wall degree 4", "quadrilaterals",
                                 "max wall-value error", {4, 8}, {f1, f2}, 5.0, 4.5});
     EXPECT_THROW(curved_reconstruction_error(4, "curved", 5, false, "curved_wall_degree = 1\n"), std::runtime_error);
-}
-
-TEST(ZZBitwise, Dump) {
-    uint64_t h = 1469598103934665603ull;
-    auto mix = [&](double v) { uint64_t b; std::memcpy(&b, &v, 8); h = (h ^ b) * 1099511628211ull; };
-    for (bool tri : {false, true}) {
-        auto mesh = annulus_mesh(3, 24, "curved", tri);
-        for (uint32_t c = 0; c < mesh->n_cells; c++) { mix(double(mesh->h_cell_volume(c))); mix(double(mesh->h_cell_coords(c, 0))); }
-        std::vector<curved::Vec3> x; std::vector<double> w;
-        for (uint32_t c = 0; c < mesh->n_cells; c++) { mesh->curved_geometry->cell_rule(c, 6, x, w); for (size_t q = 0; q < w.size(); q++) { mix(w[q]); mix(x[q][0]); mix(x[q][1]); } }
-    }
-    printf("BITWISE %016llx\n", static_cast<unsigned long long>(h));
 }
 
