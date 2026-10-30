@@ -254,13 +254,16 @@
   "set_in": []
  },
  "boundaries.mass_flux": {
+  "dimension": "mass flux (kg m^-2 s^-1)",
   "dims": [
    2
   ],
+  "required": true,
   "set_in": [
    "examples/heated_duct/input.toml",
    "examples/pulsed_jet/input.toml"
-  ]
+  ],
+  "type": "number"
  },
  "boundaries.mdot": {
   "dimension": "mass flow (kg s^-1)",
@@ -551,10 +554,12 @@
   ]
  },
  "boundaries.u": {
+  "dimension": "velocity (m s^-1)",
   "dims": [
    2,
    3
   ],
+  "required": true,
   "set_in": [
    "examples/double_mach/input.toml",
    "examples/flame_2d/input.toml",
@@ -576,7 +581,8 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/wedge/input.toml",
    "tutorials/wedge/input.toml"
-  ]
+  ],
+  "type": "array"
  },
  "boundaries.wall_model": {
   "dims": [
@@ -3050,15 +3056,6 @@
   ],
   "type": "integer"
  },
- "output.health": {
-  "default": "true",
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": [],
-  "type": "bool"
- },
  "output.io_threads": {
   "default": "1",
   "dims": [
@@ -3671,20 +3668,6 @@
   ],
   "type": "array"
  },
- "probes.boundary": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
- },
- "probes.boundary_type": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
- },
  "probes.end": {
   "dims": [
    2,
@@ -3775,13 +3758,6 @@
   ],
   "type": "string"
  },
- "probes.pivot": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
- },
  "probes.point": {
   "dims": [
    2,
@@ -3812,13 +3788,6 @@
   ],
   "set_in": [],
   "type": "string"
- },
- "probes.reference": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
  },
  "probes.rotate": {
   "dims": [
