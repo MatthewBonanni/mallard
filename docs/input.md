@@ -929,7 +929,10 @@ area exact); a plane through mesh faces takes each face once. Its normal is
 the direction of travel (outward for a counterclockwise `circle`). Surfaces,
 cut planes and 2D curves have the flux variables of boundary probes
 (`MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*`) along their
-normal; the wall variables are for boundaries only. CSV rows of cut planes are
+normal; the wall variables are for boundaries only. With
+`physics.axisymmetric`, where only boundary probes integrate over the
+revolved surface (per radian), cut planes and curves take no flux variables
+and cut planes no `reductions`. CSV rows of cut planes are
 `step, t, cell, x, y(, z), nx, ny(, nz), area, <variables>`; VTP files are
 their polygons (segments in 2D) with cell data, and grids of resampled
 surfaces with point data.
@@ -982,7 +985,10 @@ The gradients are the least-squares ones of the viscous flux, with its wall
 treatment (normal derivatives from the wall velocity and temperature), and
 the viscosity and conductivity those of the face (mixtures: of the cell), so
 that `integral` of `TRACTION_PRESSURE` and `TRACTION_VISCOUS` with
-`sampling = "cell"` gives the forces of `[[forces]]`. `TAU_W`, `Q_W` and the
+`sampling = "cell"` gives the forces of `[[forces]]`. In axisymmetric runs a
+face's `area` and the `integral` reductions are per radian of the revolved
+wall (`area` is `r` times the face length, the reductions' column `area`), as
+`[[forces]]` is. `TAU_W`, `Q_W` and the
 wall-friction quantities need `navier_stokes`. CSV rows of boundary probes are
 `step, t, face, x, y(, z), s (2D), nx, ny(, nz), area, <variables>`; HDF5
 files add `normals` and `area` (and in 3D `vertices` and `polygons/vertices`,

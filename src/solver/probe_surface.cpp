@@ -142,6 +142,7 @@ FaceSet boundary_faces(const Mesh & mesh, const std::vector<std::string> & zones
     Geometry & g = set.geometry;
     g.dim = N_DIM - 1;
     g.shape = "boundary";
+    g.revolved = mesh.axisymmetric;
     std::vector<uint64_t> order;  // record of each global sample
     if constexpr (N_DIM == 2) {
         // Each face from node 0 to node 1 with the fluid on its left: along t = (-n_y, n_x)

@@ -473,29 +473,44 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
 }
 
 TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
-    // Cell sampling takes the forces monitor's wall pressure and gradients
-    const std::string dir = fresh_dir("forces");
-    const std::string extra = "[[forces]]\nzone = \"top\"\nfile = \"" + dir + "/forces.csv\"\n"
-                              "[[probes]]\nname = \"top\"\nboundary = \"top\"\nsamples = false\n"
-                              "variables = [\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\nreductions = [\"integral\"]\n"
-                              "reductions_file = \"" + dir + "/top.csv\"\n";
-    Solver solver;
-    solver.init(parse_toml(couette_case(8, extra, "n_steps = 4\ncfl = 0.5\n")));
-    run(solver);
-    const auto forces = read_csv(dir + "/forces.csv");
-    std::map<double, std::map<std::string, double>> probe;
-    for (const auto & row : read_csv(dir + "/top.csv")) probe[row.at("step")] = row;
-    ASSERT_EQ(forces.size(), 4u);
-    const char * const axes[3] = {"x", "y", "z"};
-    // [[forces]] writes 12 significant digits
-    const double tol = precision_tol<double>(1e-10, 1e-5);
-    for (size_t r = 0; r < forces.size(); r++) {
-        const auto & row = probe.at(forces[r].at("step"));
-        for (size_t d = 0; d < N_DIM; d++) {
-            const double Fp = forces[r].at(std::string("F") + axes[d] + "_pressure");
-            const double Fv = forces[r].at(std::string("F") + axes[d] + "_viscous");
-            EXPECT_NEAR(row.at(std::string("integral_TRACTION_PRESSURE_") + "XYZ"[d]), Fp, tol * (1.0 + std::fabs(Fp)));
-            EXPECT_NEAR(row.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), Fv, tol * 1e-2);
+    // Cell sampling takes the forces monitor's wall pressure and gradients;
+    // axisymmetric runs integrate over a radian of the revolved wall, as [[forces]]
+    for (const bool axisymmetric : N_DIM == 2 ? std::vector<bool>{false, true} : std::vector<bool>{false}) {
+        SCOPED_TRACE(axisymmetric ? "axisymmetric" : "planar");
+        const std::string dir = fresh_dir(axisymmetric ? "forces_axisymmetric" : "forces");
+        const std::string extra = "[[forces]]\nzone = \"top\"\nfile = \"" + dir + "/forces.csv\"\n"
+                                  "[[probes]]\nname = \"top\"\nboundary = \"top\"\nsamples = false\n"
+                                  "variables = [\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\nreductions = [\"integral\"]\n"
+                                  "reductions_file = \"" + dir + "/top.csv\"\n";
+        std::string input = couette_case(8, extra, "n_steps = 4\ncfl = 0.5\n");
+        if (axisymmetric) {
+            // The bottom is the axis
+            const std::string bottom = "name = \"bottom\"\ntype = \"wall_isothermal\"\nT = ";
+            const size_t at = input.find(bottom);
+            input.replace(at, input.find('\n', at + bottom.size()) - at, "name = \"bottom\"\ntype = \"symmetry\"");
+            const std::string physics = "[physics]\n";
+            input.replace(input.find(physics), physics.size(), physics + "axisymmetric = true\n");
+        }
+        Solver solver;
+        solver.init(parse_toml(input));
+        run(solver);
+        const auto forces = read_csv(dir + "/forces.csv");
+        std::map<double, std::map<std::string, double>> probe;
+        for (const auto & row : read_csv(dir + "/top.csv")) probe[row.at("step")] = row;
+        ASSERT_EQ(forces.size(), 4u);
+        const char * const axes[3] = {"x", "y", "z"};
+        // [[forces]] writes 12 significant digits
+        const double tol = precision_tol<double>(1e-10, 1e-5);
+        for (size_t r = 0; r < forces.size(); r++) {
+            const auto & row = probe.at(forces[r].at("step"));
+            // A radian of the wall at r = 1 has the area of a unit length
+            EXPECT_NEAR(row.at(axisymmetric ? "area" : MEASURE), 1.0, tol);
+            for (size_t d = 0; d < N_DIM; d++) {
+                const double Fp = forces[r].at(std::string("F") + axes[d] + "_pressure");
+                const double Fv = forces[r].at(std::string("F") + axes[d] + "_viscous");
+                EXPECT_NEAR(row.at(std::string("integral_TRACTION_PRESSURE_") + "XYZ"[d]), Fp, tol * (1.0 + std::fabs(Fp)));
+                EXPECT_NEAR(row.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), Fv, tol * 1e-2);
+            }
         }
     }
 }
@@ -663,6 +678,29 @@ TEST(ProbesTest, CutPlaneIntegralsAreExactForPolynomialFields) {
     EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
     EXPECT_NEAR(r.at("favre_RHO"), square / integral, tol * square / integral);
     EXPECT_NEAR(r.at("integral_MASS_FLUX"), flux, tol * std::fabs(integral));
+}
+
+TEST(ProbesTest, AxisymmetricRunsKeepPerRadianIntegralsOnBoundaries) {
+    if (N_DIM != 2) GTEST_SKIP() << "axisymmetric runs are 2D";
+    // Only boundary probes integrate over the revolved surface: cut planes and
+    // curves sample, but take no fluxes and (cut planes) no reductions
+    auto input = [](const std::string & probe) {
+        return "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n"
+               "periodic = [\"x\"]\n[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\n"
+               "type = \"wall_adiabatic\"\n[initialize]\ntype = \"constant\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\n"
+               "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n" +
+               PERFECT_GAS + "axisymmetric = true\n[output]\ncheck_interval = 1000000\n[[probes]]\nname = \"p\"\n" +
+               "file = \"" + fresh_dir("axisymmetric") + "/p.csv\"\n" + probe;
+    };
+    const std::string cut = "shape = \"cut_plane\"\npoint = [0.5, 0.5]\nnormal = [1.0, 0.0]\n";
+    const std::string circle = "shape = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n";
+    for (const std::string & rejected : {cut + "variables = [\"MASS_FLUX\"]\n", circle + "variables = [\"MASS_FLUX\"]\n",
+                                         cut + "variables = [\"P\"]\nreductions = [\"integral\"]\n"}) {
+        Solver solver;
+        EXPECT_THROW(solver.init(parse_toml(input(rejected))), InputError) << rejected;
+    }
+    Solver solver;
+    EXPECT_NO_THROW(solver.init(parse_toml(input(cut + "variables = [\"P\"]\n"))));
 }
 
 TEST(ProbesTest, CutPlanesTakeFacesOnTheirPlaneOnce) {

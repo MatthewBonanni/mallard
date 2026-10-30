@@ -62,6 +62,7 @@ struct Geometry {
     // the samples of surfaces and 2D curves
     std::vector<double> node_weights;
     std::vector<Point> normals;
+    bool revolved = false;  // axisymmetric runs: node_weights per radian of the revolved surface
     // Surfaces: polygons over the vertices, each a sample (cell data), or
     // without vertices over the nodes (point data)
     std::vector<Point> vertices;

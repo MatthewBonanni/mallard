@@ -431,7 +431,10 @@ TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
       << "[physics]\naxisymmetric = true\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\nrun_log = \"\"\n"
       << "[integrals]\nfile = \"" << dir << "/integrals.csv\"\n"
-      << "[[forces]]\nzone = \"top\"\nfile = \"" << dir << "/forces.csv\"\n";
+      << "[[forces]]\nzone = \"top\"\nfile = \"" << dir << "/forces.csv\"\n"
+      << "[[probes]]\nname = \"top\"\nboundary = \"top\"\nfile = \"" << dir << "/top.csv\"\n"
+      << "variables = [\"P\", \"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"mean\"]\n"
+      << "reductions_file = \"" << dir << "/top_reductions.csv\"\n";
     {
         Solver solver;
         solver.init(parse_toml(s.str()));
@@ -440,7 +443,14 @@ TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
     comm::barrier();
     if (!comm::is_root()) return;
     // Forces and volume integrals over a radian of the revolved domain
-    EXPECT_EQ(csv_units(dir + "/forces.csv")["Fx_pressure"], "kg m s-2 rad-1");
+    const std::string force = csv_units(dir + "/forces.csv")["Fx_pressure"];
+    EXPECT_EQ(force, "kg m s-2 rad-1");
+    // Boundary probes: faces of the revolved wall, per radian
+    EXPECT_EQ(csv_units(dir + "/top.csv")["area"], "m2 rad-1");
+    auto top = csv_units(dir + "/top_reductions.csv");
+    EXPECT_EQ(top["area"], "m2 rad-1");
+    EXPECT_EQ(top["integral_TRACTION_PRESSURE_Y"], force);
+    EXPECT_EQ(top["mean_P"], units_of("P"));
     auto integrals = csv_units(dir + "/integrals.csv");
     EXPECT_EQ(integrals["kinetic_energy"], "kg m2 s-2 rad-1");
     EXPECT_EQ(integrals["temperature"], "m3 K rad-1");
