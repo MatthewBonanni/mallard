@@ -142,7 +142,8 @@ def spectra_from_restarts(cfg, files):
     box = Box(cfg)
     dim = box.dim
     fields, pairs = parse_pairs(table)
-    periodic = cfg["mesh"].get("periodic", [])
+    sides = {"left": "x", "right": "x", "bottom": "y", "top": "y", "back": "z", "front": "z"}
+    periodic = [sides[p["zones"][0]] for p in cfg.get("periodic", []) if p["zones"][0] in sides]
     H = sorted(AXES.index(a) for a in table.get("directions", periodic))
     I = [d for d in range(dim) if d not in H]
     t_start = si(table.get("t_start", stats.get("t_start", 0.0)), "statistics.t_start")

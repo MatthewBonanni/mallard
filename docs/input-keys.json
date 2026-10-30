@@ -1269,17 +1269,6 @@
   ],
   "type": "integer"
  },
- "initialize.mesh.periodic": {
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/taylor_green_3d/remap.toml"
-  ],
-  "type": "array"
- },
  "initialize.mesh.stretching": {
   "dims": [
    2,
@@ -2163,7 +2152,6 @@
    "examples/flame_turbulence/hit.toml",
    "examples/flame_turbulence/input.toml",
    "examples/flame_turbulence/les.toml",
-   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/sedov_3d/input.toml",
    "examples/shock_bubble_3d/input.toml",
@@ -2389,41 +2377,6 @@
   ],
   "set_in": [],
   "type": "bool"
- },
- "mesh.periodic": {
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/autoignition_2d/input.toml",
-   "examples/cbc_les/input.toml",
-   "examples/channel_inflow_retau180/input.toml",
-   "examples/channel_les/input.toml",
-   "examples/channel_les/input_590.toml",
-   "examples/channel_retau180/input.toml",
-   "examples/channel_wmles/lm2000.toml",
-   "examples/channel_wmles/lm5200.toml",
-   "examples/channel_wmles/tl_m1.7.toml",
-   "examples/channel_wmles/tl_m3.0.toml",
-   "examples/flame_2d/input.toml",
-   "examples/flame_2d/unity/input.toml",
-   "examples/flame_turbulence/hit.toml",
-   "examples/flame_turbulence/input.toml",
-   "examples/flame_turbulence/les.toml",
-   "examples/forced_isotropic_turbulence/input.toml",
-   "examples/isotropic_turbulence/input.toml",
-   "examples/poiseuille_pipe/input.toml",
-   "examples/rotational_sector/annulus_3d.toml",
-   "examples/rotational_sector/sector.toml",
-   "examples/rotational_sector/sector_3d.toml",
-   "examples/taylor_green_3d/coarse.toml",
-   "examples/taylor_green_3d/input.toml",
-   "examples/taylor_green_3d/remap.toml",
-   "examples/turbulent_inflow_duct/input.toml"
-  ],
-  "type": "array"
  },
  "mesh.r_inner": {
   "default": "1.0",
@@ -3380,7 +3333,84 @@
    2,
    3
   ],
+  "required": true,
+  "set_in": [
+   "examples/autoignition_2d/input.toml",
+   "examples/cbc_les/input.toml",
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/channel_les/input.toml",
+   "examples/channel_les/input_590.toml",
+   "examples/channel_retau180/input.toml",
+   "examples/channel_wmles/lm2000.toml",
+   "examples/channel_wmles/lm5200.toml",
+   "examples/channel_wmles/tl_m1.7.toml",
+   "examples/channel_wmles/tl_m3.0.toml",
+   "examples/flame_2d/input.toml",
+   "examples/flame_2d/unity/input.toml",
+   "examples/flame_turbulence/hit.toml",
+   "examples/flame_turbulence/input.toml",
+   "examples/flame_turbulence/les.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
+   "examples/isotropic_turbulence/input.toml",
+   "examples/poiseuille_pipe/input.toml",
+   "examples/rotational_sector/annulus_3d.toml",
+   "examples/rotational_sector/sector.toml",
+   "examples/rotational_sector/sector_3d.toml",
+   "examples/taylor_green_3d/coarse.toml",
+   "examples/taylor_green_3d/input.toml",
+   "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ],
+  "type": "array"
+ },
+ "periodic.angle": {
+  "dims": [
+   2,
+   3
+  ],
   "set_in": []
+ },
+ "periodic.translation": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "periodic.zones": {
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/autoignition_2d/input.toml",
+   "examples/cbc_les/input.toml",
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/channel_les/input.toml",
+   "examples/channel_les/input_590.toml",
+   "examples/channel_retau180/input.toml",
+   "examples/channel_wmles/lm2000.toml",
+   "examples/channel_wmles/lm5200.toml",
+   "examples/channel_wmles/tl_m1.7.toml",
+   "examples/channel_wmles/tl_m3.0.toml",
+   "examples/flame_2d/input.toml",
+   "examples/flame_2d/unity/input.toml",
+   "examples/flame_turbulence/hit.toml",
+   "examples/flame_turbulence/input.toml",
+   "examples/flame_turbulence/les.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
+   "examples/isotropic_turbulence/input.toml",
+   "examples/poiseuille_pipe/input.toml",
+   "examples/rotational_sector/annulus_3d.toml",
+   "examples/rotational_sector/sector.toml",
+   "examples/rotational_sector/sector_3d.toml",
+   "examples/taylor_green_3d/coarse.toml",
+   "examples/taylor_green_3d/input.toml",
+   "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ],
+  "type": "array"
  },
  "physics": {
   "dims": [

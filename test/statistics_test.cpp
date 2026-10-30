@@ -34,7 +34,7 @@ std::string box(uint32_t n, bool periodic) {
     std::ostringstream s;
     s << "[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n << "\nLx = 1.0\nLy = 1.0\n";
     if (N_DIM == 3) s << "Nz = " << std::max(n / 2, 3u) << "\nLz = 1.0\n";
-    if (periodic) s << (N_DIM == 2 ? "periodic = [\"x\", \"y\"]\n" : "periodic = [\"x\", \"y\", \"z\"]\n");
+    if (periodic) s << (N_DIM == 2 ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n");
     return s.str();
 }
 
@@ -103,6 +103,7 @@ TEST(StatisticsTest, AveragesOfAnOscillatingFlowMatchTheAnalyticalOnes) {
         "[output]\ncheck_interval = 1000000\n"
         "[statistics]\nt_start = 0.25\ninterval = 2\nfields = [\"RHO\", \"P\"]\nproducts = [\"U_X*U_X\", \"P*U_X\"]\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.copy_device_to_host();
@@ -127,7 +128,6 @@ TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
     // continued averages (their weights and the last sample's time carry over)
     // and the appended probe series equal those of an uninterrupted run
     const std::string dir = (scratch_dir() / "mallard_statistics_test").string();
-    std::filesystem::remove_all(dir);
     auto extra = [&](const std::string & sub) {
         return "[statistics]\nt_start = 0.01\ninterval = 3\nfields = [\"T\"]\n"
                "products = [\"U_X*U_X\", \"U_X*U_Y\", \"RHO*T\"]\n"
@@ -139,25 +139,30 @@ TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
     auto from = [&](const std::string & file) { return "type = \"restart\"\nfile = \"" + file + "\"\n"; };
 
     Solver straight;
+    straight.set_distributed(false);
     straight.init(parse_toml(blob_input(40, BLOB, extra("a"))));
     straight.run();
     straight.copy_device_to_host();
 
     Solver plain;
+    plain.set_distributed(false);
     plain.init(parse_toml(blob_input(40, BLOB, "")));
     plain.run();
     plain.copy_device_to_host();
 
     Solver first;
+    first.set_distributed(false);
     first.init(parse_toml(blob_input(20, BLOB, extra("b"))));
     first.run();
     Solver second;
+    second.set_distributed(false);
     second.init(parse_toml(blob_input(40, from(dir + "/b/r_000020.restart"), extra("b"))));
     second.run();
     second.copy_device_to_host();
 
     // A run without statistics reads a restart file holding them
     Solver without;
+    without.set_distributed(false);
     without.init(parse_toml(blob_input(40, from(dir + "/b/r_000020.restart"), "")));
     without.run();
     without.copy_device_to_host();
@@ -179,20 +184,19 @@ TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
         }
     }
     EXPECT_EQ(without_comment_lines(read_all(dir + "/b/probe.csv")), without_comment_lines(read_all(dir + "/a/probe.csv")));
-    std::filesystem::remove_all(dir);
 }
 
 TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
     // Points on faces between cells take the cell with the lowest id, points
     // outside the domain the nearest centroid; the values are the cell's, bitwise
     const std::string dir = (scratch_dir() / "mallard_probe_test").string();
-    std::filesystem::remove_all(dir);
     const std::string probes =
         "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/line.csv\"\nvariables = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
         "start = " + numbers3("0", "0.5", "0.5") + "\nend = " + numbers3("1", "0.5", "0.5") + "\nn_points = 11\n"
         "[[probes]]\nname = \"out\"\nfile = \"" + dir + "/out.csv\"\nvariables = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
         "point = " + numbers3("1.3", "0.27", "0.62") + "\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(blob_input(6, BLOB, probes)));
     solver.run();
     solver.copy_device_to_host();
@@ -241,5 +245,4 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
         }
     }
     EXPECT_EQ(n_checked, 12u);
-    std::filesystem::remove_all(dir);
 }

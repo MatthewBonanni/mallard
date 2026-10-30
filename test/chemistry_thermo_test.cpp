@@ -220,8 +220,7 @@ TEST(ChemistryThermoTest, MixturePropertiesMatchCanteraAndTemperatureInvertsEner
 }
 
 TEST(ChemistryThermoTest, UnsupportedOrMalformedInputNamesTheEntry) {
-    const std::string dir = (scratch_dir() / "mallard_mechanism_errors").string();
-    std::filesystem::create_directories(dir);
+    const std::string dir = rank_scratch_dir().string();
     auto expect_error = [&](const std::string & yaml, const std::string & phase, const std::string & needle) {
         const std::string file = dir + "/mech.yaml";
         std::ofstream(file) << yaml;
@@ -240,5 +239,4 @@ TEST(ChemistryThermoTest, UnsupportedOrMalformedInputNamesTheEntry) {
     expect_error(phases + h2 + "    model: constant-cp\n", "liquid", "liquid");
     expect_error("phases:\n- name: gas\n  thermo: ideal-gas\n  elements: [O]\n  species: [H2]\n" + h2 +
                      "    model: constant-cp\n", "", "element H");
-    std::filesystem::remove_all(dir);
 }
