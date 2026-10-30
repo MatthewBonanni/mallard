@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare a sector run with the full annulus (examples/rotational_sector).
 
-    rotational_sector.py SECTOR.vtu ANNULUS.vtu --sectors N
+    rotational_sector.py SECTOR ANNULUS --sectors N
 
 Each cell of the annulus is matched with the sector cell it is a turned copy
 of, and its density, momentum (turned by k 360/N degrees in copy k) and energy

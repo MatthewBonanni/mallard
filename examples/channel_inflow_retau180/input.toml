@@ -25,7 +25,7 @@
 #   (the periodic channel example, to its restart files and inflow_profile.csv)
 #   python ../../tools/setup/tile_restart.py ../channel_retau180/restart/channel_<last>.restart 192 2 init.restart
 #   mpirun -n 4 ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/post/plane_average.py stats/channel_000002.pvtu --average z --out profile_xy.csv
+#   python ../../tools/post/plane_average.py stats/channel_000002.vtkhdf --average z --out profile_xy.csv
 #
 # Cost: 337,000 steps of 3.27e-4 h/U_b, 27 ms each on four A100s (2.5 hours).
 
@@ -117,7 +117,6 @@ interval = 20000
 
 [[write_data]]
 prefix = "stats/channel"
-format = "vtu"
 time_interval = 35.0
 variables = ["MEAN_*", "COV_*"]
 

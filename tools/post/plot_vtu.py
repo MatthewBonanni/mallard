@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Render a cell field from a Mallard VTU file to PNG.
-    plot_vtu.py SNAPSHOT.vtu OUTPUT.png [--var RHO] [--contours N] [--line]
+"""Render a cell field from a Mallard snapshot (VTKHDF or VTU) to PNG.
+    plot_vtu.py SNAPSHOT OUTPUT.png [--var RHO] [--contours N] [--line]
         [--slice z] [--at VALUE]
 2D meshes are drawn cell by cell; --line plots the field against x instead
 (1D cases on a strip, averaging the cells at equal x). 3D meshes are drawn on

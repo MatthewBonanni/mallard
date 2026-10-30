@@ -83,6 +83,5 @@ check_interval = 200
 
 [[write_data]]
 prefix = "./solut/dmr"
-format = "vtu"
 time_interval = 0.002
 variables = ["RHO", "U_X", "U_Y", "P"]

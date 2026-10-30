@@ -77,6 +77,5 @@ check_interval = 100
 
 [[write_data]]
 prefix = "solut/sources"
-format = "vtu"
 time_interval = 0.05
 variables = ["RHO", "U", "P", "SOURCE_RHOE", "SOURCE_RHOU_X", "SOURCE_RHOU_Y"]

@@ -4,7 +4,7 @@
         [--reference examples/counterflow_diffusion/reference] [--history] [--still RADIUS]
 
 Each RUN_DIR holds a run of examples/counterflow_diffusion/counterflow_setup.py; its symmetry-plane
-output (solut/plane_*.vtu) gives the stagnation line: the cells next to the
+output (solut/plane_*) gives the stagnation line: the cells next to the
 axis, extrapolated to r = 0 with the cells one further out (f = f0 + b r^2).
 On it: the peak temperature (parabola through the hottest cell and its
 neighbors) and the local strain rates K_ox and K_f (the first maximum of
@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_vtu_cells, series  # noqa: E402
 
 SPECIES = ["H2", "O2", "H2O", "OH"]
 
@@ -63,7 +63,7 @@ def local_strains(z, u):
 
 
 def stagnation_line(path):
-    """x and the fields on the axis from a z = 0 symmetry-plane VTU."""
+    """x and the fields on the axis from a z = 0 symmetry-plane snapshot."""
     pts, conn, offs, _, arrays = read_vtu_cells(path)
     c = pts[conn.reshape(-1, 4)].mean(axis=1)
     x, y = np.round(c[:, 0], 12), np.round(c[:, 1], 12)
@@ -90,9 +90,9 @@ def stagnation_line(path):
 
 
 def run_series(run_dir):
-    files = sorted(glob.glob(os.path.join(run_dir, "solut", "plane_*.vtu")))
+    files = series(os.path.join(run_dir, "solut"), "plane_[0-9]*")
     if not files:
-        raise SystemExit(f"{run_dir}: no solut/plane_*.vtu")
+        raise SystemExit(f"{run_dir}: no solut/plane_*")
     return files
 
 

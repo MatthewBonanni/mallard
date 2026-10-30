@@ -2,7 +2,7 @@
 
     python tools/post/flame_speed.py RUN_DIR [S_REF]
 
-For each output of RUN_DIR/solut/flame.pvd:
+For each output of the series RUN_DIR/solut/flame:
   S_c  consumption speed -int W_k omega_k dx / (rho_u (Y_k,u - Y_k,b)) of the
        deficient reactant (H2 or CH4 when lean, O2 when rich), with the fresh
        state at the inlet and the burnt one at the outlet: in a steady flame it
@@ -12,13 +12,12 @@ Reports S_c averaged over the last third of the outputs, the displacement
 speed u_u - dx_f/dt fitted over the last half, and with S_REF their errors.
 """
 import os
-import re
 import sys
 
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_vtu_cells, series  # noqa: E402
 
 
 def profile(path):
@@ -38,11 +37,9 @@ def deficient(a):
 
 
 def analyze(run_dir):
-    pvd = os.path.join(run_dir, "solut", "flame.pvd")
-    files = re.findall(r'file="([^"]+)"', open(pvd).read())
     rows = []
-    for f in files:
-        t, x, a = profile(os.path.join(os.path.dirname(pvd), f))
+    for f in series(os.path.join(run_dir, "solut"), "flame_[0-9]*"):
+        t, x, a = profile(f)
         k = deficient(a)
         dx = np.diff(np.concatenate([[0.0], 0.5 * (x[1:] + x[:-1]), [x[-1] + 0.5 * (x[-1] - x[-2])]]))
         consumed = -(a["OMEGA_" + k] * dx).sum()

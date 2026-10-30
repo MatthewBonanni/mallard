@@ -3,7 +3,7 @@
 
     volvo.py probes [--x0 -0.04 --x1 0.36 --dx 2e-3 --dy 2e-3 --z 0.04 --interval 1800 --vars U_X,U_Y]
         print [[probes]] lines spanning a mid-span plane (append them to the input)
-    volvo.py profiles STATS.(p)vtu --u-bulk U [--d 0.04] --out profiles.npz
+    volvo.py profiles STATS.vtkhdf --u-bulk U [--d 0.04] --out profiles.npz
         time and span averages of [statistics] at the stations, the centerline, the recirculation length
     volvo.py plot --exp DIR --out PNG [--kind cold|reacting] RUN.npz[:label] ...
         mean and RMS axial velocity at the stations and on the centerline against the experiment
@@ -12,9 +12,9 @@
     volvo.py slice RUN_DIR --out slice.npz
         frames of the mid-span probe plane from probe_slice_*.csv
     volvo.py animate slice.npz --out MP4 [--field vorticity|T]
-    volvo.py meanfield STATS.(p)vtu --u-bulk U --out PNG [--temperature]
+    volvo.py meanfield STATS.vtkhdf --u-bulk U --out PNG [--temperature]
         span-averaged mean velocity (recirculation contour), fluctuation level (and temperature)
-    volvo.py grid "snap/PREFIX_*.pvtu" --out-dir FRAMES [--fields Q,U_X,T --follow --delete]
+    volvo.py grid "snap/PREFIX_*.vtkhdf" --out-dir FRAMES [--fields Q,U_X,T --follow --delete]
         snapshots resampled onto a uniform grid (float32 npz), e.g. in the pod while a run writes them
     volvo.py render FRAMES --out-dir PNGS [--q 3e6 --flame 1200 --section T]
         3D frames: Q vortices, flame surface, a section on the far spanwise plane, body, duct (needs pyvista)
@@ -47,7 +47,7 @@ def cmd_probes(a):
 
 
 def read_cells(path, names):
-    """Cell centroids and fields of a 3D VTU, or of all pieces of a PVTU."""
+    """Cell centroids and fields of a 3D snapshot (VTKHDF, VTU, or all pieces of a PVTU)."""
     from mallard.vtu import read_vtu_cells
     if path.endswith(".pvtu"):
         pieces = re.findall(r'Source="([^"]+)"', open(path).read())
@@ -355,7 +355,7 @@ def inside_body(x, y):
 
 
 def cmd_grid(a):
-    """Resample (P)VTU snapshots onto a uniform grid (nearest cell), one compressed npz per snapshot."""
+    """Resample snapshots (VTKHDF, or (P)VTU) onto a uniform grid (nearest cell), one compressed npz per snapshot."""
     import time
     from scipy.spatial import cKDTree
     os.makedirs(a.out_dir, exist_ok=True)
@@ -501,7 +501,7 @@ def main():
     p.add_argument("--title", default="")
     p.add_argument("--out", required=True)
     p = sub.add_parser("grid")
-    p.add_argument("pattern", help="glob of the snapshots, e.g. 'snap/media_*.pvtu'")
+    p.add_argument("pattern", help="glob of the snapshots, e.g. 'snap/media_*.vtkhdf' (or *.pvtu)")
     p.add_argument("--out-dir", required=True)
     p.add_argument("--fields", default="Q,U")
     p.add_argument("--dx", type=float, default=1.25e-3)

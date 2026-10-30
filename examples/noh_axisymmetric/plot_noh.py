@@ -4,7 +4,7 @@ exact solution: density against the spherical radius, the shock radius in
 angular sectors of the meridian plane, the post-shock plateau and the
 pre-shock compression.
 
-    plot_noh.py OUTPUT.png RUN.vtu
+    plot_noh.py OUTPUT.png SNAPSHOT
 """
 import os
 import sys

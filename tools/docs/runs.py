@@ -32,7 +32,7 @@ from figstyle import bare, label
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "tools"), str(ROOT / "tools" / "mesh"), str(ROOT / "examples" / "sod"),
                 str(ROOT / "examples" / "rotational_sector")]
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_vtu_cells, snapshot  # noqa: E402
 from plot_mesh_quality import LABELS, draw_quality, read_quality  # noqa: E402
 from plot_sod import exact_sod  # noqa: E402
 
@@ -322,7 +322,7 @@ def rotational_data(args):
         text = (ROOT / "examples" / "rotational_sector" / f"{name}.toml").read_text()
         text = text.replace("t_stop = 0.5", "t_stop = 0.25").replace("time_interval = 0.5", "time_interval = 0.25")
         run(args.mallard, text, work, name=f"{name}.toml")
-    return compare(str(work / "solut" / "sector_000001.vtu"), str(work / "solut" / "annulus_000001.vtu"), 4)
+    return compare(snapshot(str(work / "solut" / "sector_000001")), snapshot(str(work / "solut" / "annulus_000001")), 4)
 
 
 def rotational_sector(P, args):
@@ -359,9 +359,9 @@ def mesh_quality_data(args):
     subprocess.run([sys.executable, str(ROOT / "examples" / "mallard" / "make_mallard_mesh.py"), str(work / "mallard.msh"),
                     "--h-wall", "0.02", "--h-far", "0.1"], check=True, stdout=subprocess.DEVNULL)
     (work / "input.toml").write_text((ROOT / "examples" / "mallard" / "input.toml").read_text())
-    subprocess.run([str(args.mallard), "check", "input.toml", "--quality-vtu", "quality",
+    subprocess.run([str(args.mallard), "check", "input.toml", "--quality", "quality",
                     "--kokkos-num-threads=2"], cwd=work, check=True, stdout=subprocess.DEVNULL)
-    return read_quality(str(work / "quality_000000.vtu"))
+    return read_quality(snapshot(str(work / "quality_000000")))
 
 
 def mesh_quality(P, args):

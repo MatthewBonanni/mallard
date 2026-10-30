@@ -8,7 +8,7 @@ ignition_delay.csv and multizone_<run>.csv, <run> the basename of RUN_DIR);
 DEFLAGRATION.csv the deflagration speeds S_L(T_u, p) (columns T_u, p_atm,
 S_L, delta) from examples/autoignition_2d/autoignition_deflagration.py. Each RUN_DIR has the
 initial state autoignition.restart and the output series
-solut/autoignition.pvd (with RHO, P, T, HRR, Y_H2O, OMEGA_H2O, X_H2O, D_H2O).
+solut/autoignition (with RHO, P, T, HRR, Y_H2O, OMEGA_H2O, X_H2O, D_H2O).
 
 For every output the domain-mean heat release rate and pressure are taken,
 and each cell is classified by the ignition-front diagnostic of Chen et al.
@@ -54,7 +54,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import grid_fields  # noqa: E402
+from mallard.vtu import grid_fields, series as snapshot_files  # noqa: E402
 
 FIELDS = ["RHO", "P", "T", "HRR", "Y_H2O", "OMEGA_H2O", "X_H2O", "D_H2O"]
 W_H2O = 18.01528e-3
@@ -95,8 +95,7 @@ class DeflagrationSpeed:
 
 
 def series(run_dir):
-    pvd = open(os.path.join(run_dir, "solut", "autoignition.pvd")).read()
-    return [os.path.join(run_dir, "solut", f) for f in re.findall(r'file="([^"]+)"', pvd)]
+    return snapshot_files(os.path.join(run_dir, "solut"), "autoignition_[0-9]*")
 
 
 def ddx(f, h, axis):

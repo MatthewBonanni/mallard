@@ -9,19 +9,16 @@ temperature difference over the reference window and the peak heat release
 rates, and with PNG plots both profiles.
 """
 import os
-import re
 import sys
 
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/post"))
-from flame_speed import profile  # noqa: E402
+from flame_speed import profile, series  # noqa: E402
 
 
 def last_profile(run_dir):
-    pvd = os.path.join(run_dir, "solut", "flame.pvd")
-    last = re.findall(r'file="([^"]+)"', open(pvd).read())[-1]
-    t, x, a = profile(os.path.join(os.path.dirname(pvd), last))
+    t, x, a = profile(series(os.path.join(run_dir, "solut"), "flame_[0-9]*")[-1])
     T = a["T"]
     # Maximum of dT/dx, refined by a parabola through its neighbors
     g = np.gradient(T, x)
