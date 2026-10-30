@@ -205,7 +205,7 @@ class ParameterExpression {
  * @brief Add a resampled surface (3D): its grid's nodes with unit normals, its
  *        quadrilaterals over them, and their Gauss points (region_mesh's).
  */
-void add_grid(Geometry & g, const region::Grid & grid) {
+void add_grid_nodes(Geometry & g, const region::Grid & grid) {
     g.dim = 2;
     const uint32_t first = static_cast<uint32_t>(g.nodes.size());
     for (size_t i = 0; i < grid.nodes.size(); i++) {
@@ -239,53 +239,40 @@ std::pair<uint64_t, uint64_t> read_counts(const Input & entry, const std::string
     return {nu, nv};
 }
 
-/**
- * @brief A 3D surface entry on its grid: a primitive's surface from region_mesh (the entry is its region
- *        table; a cylinder or cone without its ends), or a parametric surface x(u, v) under the transform.
- */
-region::Grid surface_grid(const Input & entry, const std::string & key, const std::string & type, const Transform & T) {
-    std::vector<region::SurfacePatch> patches;
-    std::pair<uint64_t, uint64_t> counts;
-    if (type == "surface") {
-        std::vector<std::shared_ptr<ParameterExpression>> f;
-        for (size_t d = 0; d < 3; d++) {
-            const std::string name(1, "xyz"[d]);
-            if (!entry.contains(name)) throw InputError(key + ": " + name + " (an expression of u and v) not specified.");
-            f.push_back(std::make_shared<ParameterExpression>(find_value<std::string>(entry, name), key + "." + name, true));
-        }
-        auto range = [&](const char * name) {
-            if (!entry.contains(name)) return std::pair{0.0, 1.0};
-            const Input & r = entry.at(name);
-            if (!r.is_array() || r.as_array().size() != 2) throw InputError(key + "." + name + " must be [a, b].");
-            return std::pair{as_double(r.as_array()[0], key + "." + name, dim::none),
-                             as_double(r.as_array()[1], key + "." + name, dim::none)};
-        };
-        region::SurfacePatch patch;
-        std::tie(patch.u0, patch.u1) = range("u_range");
-        std::tie(patch.v0, patch.v1) = range("v_range");
-        patch.at = [f, T](double u, double v, Vec3 & x, Vec3 & xu, Vec3 & xv) {
-            x = T.point(Vec3{(*f[0])(u, v), (*f[1])(u, v), (*f[2])(u, v)});
-            xu = T.vector(Vec3{f[0]->derivative(u, v, 0), f[1]->derivative(u, v, 0), f[2]->derivative(u, v, 0)});
-            xv = T.vector(Vec3{f[0]->derivative(u, v, 1), f[1]->derivative(u, v, 1), f[2]->derivative(u, v, 1)});
-        };
-        patches = {patch};
-        counts = read_counts(entry, key, 2, 2);
-    } else {
-        if ((type == "cylinder" || type == "cone") && !entry.contains("length")) throw InputError(key + " needs length.");
-        const region::Region r(entry, key);
-        for (const auto & patch : region::surface_patches(r, key)) {
-            if (!patch.cap) patches.push_back(patch);
-        }
-        // [around, along] (cylinder, cone), [polar, around] (sphere), [radial, around] (disk), [a, b] (rectangle)
-        const bool around_first = type == "cylinder" || type == "cone";
-        const bool around_second = type == "sphere" || type == "disk";
-        counts = read_counts(entry, key, around_first ? 3 : around_second && type == "sphere" ? 3 : 2,
-                             around_second ? 3 : 2);
+/** @brief A parametric surface entry x(u, v) under the transform, on its grid. */
+region::Grid parametric_grid(const Input & entry, const std::string & key, const Transform & T) {
+    std::vector<std::shared_ptr<ParameterExpression>> f;
+    for (size_t d = 0; d < 3; d++) {
+        const std::string name(1, "xyz"[d]);
+        if (!entry.contains(name)) throw InputError(key + ": " + name + " (an expression of u and v) not specified.");
+        f.push_back(std::make_shared<ParameterExpression>(find_value<std::string>(entry, name), key + "." + name, true));
     }
-    return region::sample_grid(patches, static_cast<uint32_t>(counts.first), static_cast<uint32_t>(counts.second));
+    auto range = [&](const char * name) {
+        if (!entry.contains(name)) return std::pair{0.0, 1.0};
+        const Input & r = entry.at(name);
+        if (!r.is_array() || r.as_array().size() != 2) throw InputError(key + "." + name + " must be [a, b].");
+        return std::pair{as_double(r.as_array()[0], key + "." + name, dim::none),
+                         as_double(r.as_array()[1], key + "." + name, dim::none)};
+    };
+    region::SurfacePatch patch;
+    std::tie(patch.u0, patch.u1) = range("u_range");
+    std::tie(patch.v0, patch.v1) = range("v_range");
+    patch.at = [f, T](double u, double v, Vec3 & x, Vec3 & xu, Vec3 & xv) {
+        x = T.point(Vec3{(*f[0])(u, v), (*f[1])(u, v), (*f[2])(u, v)});
+        xu = T.vector(Vec3{f[0]->derivative(u, v, 0), f[1]->derivative(u, v, 0), f[2]->derivative(u, v, 0)});
+        xv = T.vector(Vec3{f[0]->derivative(u, v, 1), f[1]->derivative(u, v, 1), f[2]->derivative(u, v, 1)});
+    };
+    const auto [nu, nv] = read_counts(entry, key, 2, 2);
+    return region::sample_grid({patch}, static_cast<uint32_t>(nu), static_cast<uint32_t>(nv));
 }
 
 } // namespace
+
+Geometry grid_geometry(const region::Grid & grid) {
+    Geometry g;
+    add_grid_nodes(g, grid);
+    return g;
+}
 
 Vec3 Transform::point(const Vec3 & x) const { return add(vector(x), t); }
 
@@ -512,13 +499,15 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
                     },
                     linspace(s0, s1, read_count(entry, "n_points", key, 2))};
         add_curve(g, {piece}, T);
-    } else if (N_DIM == 3 && (type == "rectangle" || type == "disk" || type == "sphere" ||
-                              type == "cylinder" || type == "cone" || type == "surface")) {
-        add_grid(g, surface_grid(entry, key, type, T));
+    } else if (N_DIM == 3 && type == "surface") {
+        add_grid_nodes(g, parametric_grid(entry, key, T));
+    } else if (type == "sphere" || type == "cylinder" || type == "cone" || type == "rectangle" || type == "disk") {
+        throw InputError(key + ".type = \"" + type + "\": surfaces are regions; give region = {type = \"" + type +
+                         "\", ...}" + (type == "rectangle" || type == "disk" ? "" : " with filled = false") +
+                         " (n_points samples it on a grid). See docs/guide/output.md#region-probes.");
     } else {
         throw InputError(key + ".type = \"" + type + "\" is not one of: point, points, line, polyline, circle, " +
-                         "arc, curve" + (N_DIM == 3 ? ", rectangle, disk, sphere, cylinder, cone, surface" : "") +
-                         ", cut_plane.");
+                         "arc, curve" + (N_DIM == 3 ? ", surface" : "") + ", cut_plane.");
     }
     return g;
 }

@@ -80,9 +80,7 @@ reductions = ["integral", "mean"]
 
 [[probes]]
 name = "sphere"
-type = "sphere"
-center = [1.57, 1.57, 1.57]
-radius = 0.8
+region = {type = "sphere", center = [1.57, 1.57, 1.57], radius = 0.8, filled = false}
 n_points = [48, 96]
 variables = ["P", "MASS_FLUX"]
 sampling = "point"

@@ -886,8 +886,8 @@ ranks. A probe that is not due costs nothing.
 |---|---|
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
-| `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (below); without it, `point` or `start`/`end` select a point or a line |
-| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves). Default none |
+| `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `surface` (below); without it, `point` or `start`/`end` select a point or a line |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples (below). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
 | `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
@@ -912,11 +912,6 @@ Types (`[x, y(, z)]` points):
 | `arc` | as `circle`, with `angles = [start, end]` in degrees from the x axis (3D: from `reference`) and `n_points` from start to end, ends included |
 | `curve` | `x`, `y`(, `z`): expressions of the parameter `s` over `s_range = [s0, s1]` (default `[0, 1]`), `n_points` evenly spaced in `s` |
 | `cut_plane` | `point`, `normal`: the exact intersection of the plane (a line in 2D) with the mesh, one sample per cut cell; optional `bounds = [[lo...], [hi...]]` keeps the part inside that box |
-| `rectangle` (3D) | `center`, `normal`, `size = [a, b]` (along `reference` and normal x `reference`), `n_points = [n_a, n_b]` |
-| `disk` (3D) | `center`, `normal`, `radius`, `inner_radius` (default 0: an annulus otherwise), `n_points = [n_radial, n_around]` |
-| `sphere` (3D) | `center`, `radius`, `n_points = [n_polar, n_around]` |
-| `cylinder` (3D) | `center` (of the axis), `axis`, `radius`, `length`, `n_points = [n_around, n_axial]`: its side, without the ends |
-| `cone` (3D) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0), `n_points = [n_around, n_axial]`: its side, without the ends |
 | `surface` (3D) | `x`, `y`, `z`: expressions of `u` and `v` over `u_range`, `v_range` (default `[0, 1]`), `n_points = [n_u, n_v]` |
 
 **Point values.** With TENO, `sampling = "point"` evaluates each cell's
@@ -931,10 +926,17 @@ cell averages. A sample on a face between cells belongs to the cell with the low
 id, so any number of ranks pick the same cell; samples outside the domain take
 the nearest cell's average in both modes.
 
-**Surfaces.** Resampled surfaces (3D) sample a grid of points (`n_points`)
-joined into quadrilaterals, and integrate with 3 x 3 Gauss points per
-quadrilateral of the parameters; spheres, cylinders and cones have outward
-normals, flat shapes `normal`, parametric surfaces `x_u x x_v`. A cut plane
+**Surfaces.** A surface region (3D) with `n_points = [n_u, n_v]`, e.g.
+`region = {type = "sphere", center = [0, 0, 0], radius = 1, filled = false}`
+or `region = {type = "disk", center = [0, 0, 0], normal = [1, 0, 0], radius = 0.5}`,
+is resampled: a grid of points along each patch's parameters (the
+[geometry guide](guide/geometry.md#surfaces-and-curves-on-a-mesh) lists them per
+type; a cylinder's or cone's ends are patches too) joined into quadrilaterals,
+written like a curve's samples, and integrated with 3 x 3 Gauss points per
+quadrilateral; closed surfaces face out, flat ones along `normal`. The
+parametric `type = "surface"` does the same on `x_u x x_v`. Without
+`n_points`, a surface region writes only its reductions, at the quadrature
+points of its elements. A cut plane
 samples one point per cut cell, at the centroid of its cut, weighing the cut's
 area, and integrates with a degree-5 rule on the triangles where the plane cuts
 the cell's tetrahedra (three Gauss points per cut segment in 2D), so its

@@ -27,6 +27,8 @@
 #include "file_format.h"
 #include "input.h"
 #include "probe_geometry.h"
+#include "region.h"
+#include "region_mesh.h"
 #include "scratch.h"
 #include "gmsh_fixtures.h"
 #include "solver.h"
@@ -911,7 +913,8 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     // integral of its divergence over the disk (ball)
     const std::string dir = fresh_dir("divergence");
     const std::string shape = N_DIM == 2 ? "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 64\n"
-                                         : "type = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [24, 48]\n";
+                                         : "region = {type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}\n"
+                                           "n_points = [24, 48]\n";
     // The same through the region of that surface, sampled at its elements' quadrature points
     const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [0.5, 0.5], radius = 0.2}"
                                            : "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}";
@@ -952,22 +955,22 @@ TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
         bool flat;    // normals along +z
         int radial;   // else: away from the origin in the first `radial` coordinates
     };
+    // Surface regions resampled on an n_points grid (cylinders and cones with their ends)
     const std::vector<Case> cases = {
-        {"type = \"rectangle\"\ncenter = [0.1, 0.2, 0.3]\nnormal = [0.0, 0.0, 1.0]\nsize = [0.4, 0.3]\nn_points = [5, 4]\n",
-         0.12, true, 0},
-        {"type = \"disk\"\ncenter = [0.0, 0.0, 0.0]\nnormal = [0.0, 0.0, 1.0]\nradius = 0.5\ninner_radius = 0.2\n"
-         "n_points = [6, 32]\n",
+        {"{type = \"rectangle\", center = [0.1, 0.2, 0.3], normal = [0.0, 0.0, 1.0], size = [0.4, 0.3]}", 0.12, true, 0},
+        {"{type = \"disk\", center = [0.0, 0.0, 0.0], normal = [0.0, 0.0, 1.0], radius = 0.5, inner_radius = 0.2}",
          pi * (0.25 - 0.04), true, 0},
-        {"type = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 0.5\nn_points = [16, 32]\n", pi, false, 3},
-        {"type = \"cylinder\"\ncenter = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nradius = 0.3\nlength = 2.0\n"
-         "n_points = [32, 5]\n",
-         2.0 * pi * 0.3 * 2.0, false, 2},
-        {"type = \"cone\"\nbase = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nlength = 1.0\nbase_radius = 0.5\n"
-         "top_radius = 0.2\nn_points = [32, 5]\n",
-         pi * 0.7 * std::hypot(1.0, 0.3), false, 2},
+        {"{type = \"sphere\", center = [0.0, 0.0, 0.0], radius = 0.5, filled = false}", pi, false, 3},
+        {"{type = \"cylinder\", center = [0.0, 0.0, 0.0], axis = [0.0, 0.0, 1.0], radius = 0.3, length = 2.0, "
+         "filled = false}",
+         2.0 * pi * 0.3 * 2.0 + 2.0 * pi * 0.09, false, 2},
+        {"{type = \"cone\", base = [0.0, 0.0, 0.0], axis = [0.0, 0.0, 1.0], length = 1.0, base_radius = 0.5, "
+         "top_radius = 0.2, filled = false}",
+         pi * 0.7 * std::hypot(1.0, 0.3) + pi * (0.25 + 0.04), false, 2},
     };
     for (const auto & c : cases) {
-        const probe::Geometry g = probe::make_geometry(parse_toml(c.toml), "surface");
+        const region::Region r(parse_toml("r = " + c.toml).at("r"), "r");
+        const probe::Geometry g = probe::grid_geometry(region::sample_grid(region::surface_patches(r, "r"), 16, 32));
         EXPECT_EQ(g.dim, 2);
         EXPECT_NEAR(area(g), c.area, 1e-7 * c.area) << c.toml;
         ASSERT_EQ(g.normals.size(), g.nodes.size());
@@ -980,6 +983,14 @@ TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
             for (size_t d = 0; d < size_t(c.radial); d++) radial += g.normals[i][d] * g.nodes[i][d];
             EXPECT_GE(radial, -1e-12) << c.toml << " node " << i;
         }
+    }
+    // The old probe surface types point to the region
+    try {
+        probe::make_geometry(parse_toml("type = \"sphere\"\ncenter = [0, 0, 0]\nradius = 1\n"), "p");
+        ADD_FAILURE() << "a probe sphere was accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("region = {type = \"sphere\", ...} with filled = false"), std::string::npos)
+            << e.what();
     }
 }
 #endif

@@ -316,8 +316,8 @@ or 1 for a point) and orientation. They are made in one of two ways, and
   subdivided size.
 
 Exact surfaces follow these parameters `(u, v)`, with `x_u x x_v` facing
-out; resampled probe surfaces (`[[probes]]` `type = "sphere"`, ...) take
-`n_points = [n_u, n_v]` nodes along them, and a parameter that closes a turn
+out; a probe resampling a surface region (`[[probes]]` with `region` and
+`n_points`) takes `n_points = [n_u, n_v]` nodes along each patch, and a parameter that closes a turn
 does not repeat its first node:
 
 | Surface | `u` | `v` |
