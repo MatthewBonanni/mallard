@@ -369,13 +369,19 @@ build tree. Multi-rank tests run under MPI: mpirun -n 3 mallard test
 --gtest_filter='MPITest.*'.
 
 Options:
-  --dim 2|3   Run only the 2D or the 3D suite. Default: every suite there is.
-  --gtest_*   GoogleTest options, e.g. --gtest_filter='Sod*' (tests by name) or
-              --gtest_list_tests; mallard test --help lists them all after this
-              page.
-  --kokkos-*  Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank) or
-              --kokkos-device-id=1 (the GPU; by default each rank gets its own).
-  -h, --help  Show this page.
+  --dim 2|3                Run only the 2D or the 3D suite. Default: every suite
+                           there is.
+  --gtest_filter=PATTERN   Tests by name: --gtest_filter='Sod*:MPI*-*Slow*'.
+  --gtest_list_tests       List the tests, run none: --gtest_list_tests.
+  --gtest_repeat=N         Run N times: --gtest_repeat=50.
+  --gtest_fail_fast        Stop at the first failure: --gtest_fail_fast.
+  --gtest_brief            Print only failures and the summary: --gtest_brief=1.
+  --gtest_output=xml:FILE  A JUnit report too: --gtest_output=xml:tests.xml.
+  --gtest_*                Other --gtest_* options are passed to GoogleTest.
+  --kokkos-*               Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                           per rank) or --kokkos-device-id=1 (the GPU; by
+                           default each rank gets its own).
+  -h, --help               Show this page.
 
 Examples:
   $ mallard test
