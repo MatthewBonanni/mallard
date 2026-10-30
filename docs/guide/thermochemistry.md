@@ -43,8 +43,8 @@ constant-cp; reactions may be elementary, three-body, falloff (Lindemann,
 Troe, SRI), pressure-dependent Arrhenius (PLOG) and Chebyshev, with
 non-integer reactant orders.
 
-**Compositions.** Everywhere a state is given (`[initialize]`, `inlet_state`, `inlet_stagnation`, `inlet_mass_flow` and
-`inlet_state` with `nscbc` boundaries, sponges, `mallard reactor`), give exactly one of `X`
+**Compositions.** Everywhere a state is given (`[initialize]`, `inlet_state` (also with `nscbc`), `inlet_stagnation` and
+`inlet_mass_flow` boundaries, sponges, `mallard reactor`), give exactly one of `X`
 (mole fractions) or `Y` (mass fractions), as a table by species; listed values
 are normalized and unlisted species are zero. Analytical initial conditions
 and inflows take expressions per species, and `balance = "N2"` gives one

@@ -57,21 +57,6 @@
   ],
   "type": "array"
  },
- "boundaries.L": {
-  "dimension": "length (m)",
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/channel_inflow_retau180/input.toml",
-   "examples/flame_outflow/input.toml",
-   "examples/forced_inlet/input.toml",
-   "examples/turbulent_inflow_duct/input.toml"
-  ],
-  "type": "number"
- },
  "boundaries.T": {
   "dimension": "temperature (K)",
   "dims": [
@@ -233,30 +218,23 @@
   ],
   "set_in": []
  },
- "boundaries.beta": {
+ "boundaries.direction": {
   "dims": [
    2,
    3
   ],
-  "required": true,
-  "set_in": [
-   "examples/channel_inflow_retau180/input.toml"
-  ],
-  "type": "number"
- },
- "boundaries.direction": {
-  "dims": [
-   2
-  ],
   "set_in": []
  },
  "boundaries.mass_flux": {
+  "dimension": "mass flux (kg m^-2 s^-1)",
   "dims": [
    2
   ],
+  "required": true,
   "set_in": [
    "examples/heated_duct/input.toml"
-  ]
+  ],
+  "type": "number"
  },
  "boundaries.mdot": {
   "dimension": "mass flow (kg s^-1)",
@@ -327,6 +305,69 @@
   ],
   "type": "string"
  },
+ "boundaries.nscbc": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/flame_outflow/input.toml",
+   "examples/forced_inlet/input.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ]
+ },
+ "boundaries.nscbc.L": {
+  "dimension": "length (m)",
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/flame_outflow/input.toml",
+   "examples/forced_inlet/input.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ],
+  "type": "number"
+ },
+ "boundaries.nscbc.beta": {
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/channel_inflow_retau180/input.toml"
+  ],
+  "type": "number"
+ },
+ "boundaries.nscbc.sigma": {
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/forced_inlet/input.toml"
+  ],
+  "type": "number"
+ },
+ "boundaries.nscbc.sigma_T": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "boundaries.nscbc.sigma_t": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "boundaries.p": {
   "dimension": "pressure (kg m^-1 s^-2)",
   "dims": [
@@ -376,31 +417,6 @@
    "examples/noh_axisymmetric/input.toml",
    "examples/shu_osher/input.toml"
   ]
- },
- "boundaries.sigma": {
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/forced_inlet/input.toml"
-  ],
-  "type": "number"
- },
- "boundaries.sigma_T": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
- },
- "boundaries.sigma_t": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
  },
  "boundaries.turbulence": {
   "dims": [
@@ -528,16 +544,13 @@
   "type": "string",
   "values": [
    "dirichlet",
-   "extrapolation",
    "farfield",
-   "mass_flow_inlet",
-   "nscbc_inlet",
-   "nscbc_outlet",
-   "p_out",
-   "p_out_average",
-   "stagnation_inlet",
+   "inlet_mass_flow",
+   "inlet_stagnation",
+   "inlet_state",
+   "outlet_extrapolation",
+   "outlet_pressure",
    "symmetry",
-   "upt",
    "wall_adiabatic",
    "wall_heat_flux",
    "wall_isothermal"

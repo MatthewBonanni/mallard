@@ -87,6 +87,9 @@ BoundaryFields::BoundaryFields(const Input & input, const BoundaryCondition & bc
     : type(bc.type), where(where_) {
     auto read = [&](const char * key, const Dimension & dimension, BoundaryValue & v, bool & has, std::string & name) {
         name = key;
+        if (const auto * t = input_detail::table_of(input)) {
+            t->record_use(key, input_detail::real_use("number", dimension, "", true));
+        }
         if (!input.contains(key)) return;
         v = BoundaryValue(input.at(key), where + "." + key, dimension);
         has = true;
