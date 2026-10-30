@@ -182,6 +182,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"rotational_sector/annulus.toml", "accurate", 2, "", {}, ""},
     {"rotational_sector/sector.toml", "accurate", 2, "", {}, ""},
     {"sedov_axisymmetric/input.toml", "robust", 2, "", {}, ""},
+    {"shock_bubble_2d/input.toml", "robust", 2, "", {}, ""},
     {"shu_osher/input.toml", "accurate", 2, "", {}, ""},
     {"sod/input.toml", "accurate", 2, "", {}, ""},
     {"source_regions/input.toml", "robust", 2, "", {}, ""},
