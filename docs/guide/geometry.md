@@ -315,6 +315,22 @@ or 1 for a point) and orientation. They are made in one of two ways, and
   cross them (default 3 in 2D, 2 in 3D): second-order accurate in the
   subdivided size.
 
+Exact surfaces follow these parameters `(u, v)`, with `x_u x x_v` facing
+out; resampled probe surfaces (`[[probes]]` `type = "sphere"`, ...) take
+`n_points = [n_u, n_v]` nodes along them, and a parameter that closes a turn
+does not repeat its first node:
+
+| Surface | `u` | `v` |
+|---|---|---|
+| `sphere`, `ellipsoid` | polar angle, from the local +z pole | angle around local z, from +x |
+| `cylinder`, `cone` (side) | angle around the axis | along the axis, from the base |
+| their ends | radius (top), angle (bottom) | angle (top), radius (bottom) |
+| `box` faces | the face's next axis | the one after (cyclic x, y, z) |
+| `torus` | angle around the axis | angle around the tube |
+| `disk`, `annulus` (3D) | radius, from `inner_radius` | angle from `reference` |
+| `rectangle` (3D) | along `reference` | along `normal x reference` |
+| `polygon` (3D) | each triangle of its ear clipping | |
+
 Clipping regions cut exact surfaces where their own surface crosses them:
 along lines of the surface's parameters, the Gauss points fill the kept
 intervals between the clipping region's roots, found to round-off, so a clipped
