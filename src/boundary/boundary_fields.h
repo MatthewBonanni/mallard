@@ -120,7 +120,10 @@ class BoundaryFields {
         Vector get_vector() const { return vector; }
         const std::string & get_where() const { return where; }
 
-        /** @brief The fixed unit direction of a speed, or zero for the inward normal. */
+        /** @brief Whether a speed has a direction of its own (else it is along the inward normal). */
+        bool is_directed() const { return directed; }
+
+        /** @brief The fixed unit direction of a speed (with is_directed). */
         const Point & get_direction() const { return direction; }
 
         /** @brief The value in slot s, null if the condition has none there. */

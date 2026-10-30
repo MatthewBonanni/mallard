@@ -294,8 +294,7 @@ void TimedBoundaryFields::finish() {
         h_set(k) = faces_host[k].set;
         for (size_t d = 0; d < 3; d++) h_x(k, d) = d < N_DIM ? faces_host[k].x[d] : 0.0;
         const BoundaryFields & fields = *sets[faces_host[k].set];
-        const bool normal = fields.get_type() == BoundaryType::INLET_MASS_FLOW ||
-                            dot<N_DIM>(fields.get_direction().data(), fields.get_direction().data()) == 0.0;
+        const bool normal = fields.get_type() == BoundaryType::INLET_MASS_FLOW || !fields.is_directed();
         FOR_I_DIM h_direction(k, i) = normal ? faces_host[k].n_in[i] : fields.get_direction()[i];
     }
     std::vector<const expr::Program *> all;
