@@ -635,8 +635,8 @@ TEST(CurvedShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
             for (size_t i = 0; i < 3; i++) worst_p = std::max(worst_p, std::abs(p[i] - q[i]));
             for (size_t i = 0; i < 9; i++) worst_J = std::max(worst_J, std::abs(J[i] - K[i]));
         }
-        EXPECT_LT(worst_p, roundoff(1e-14));
-        EXPECT_LT(worst_J, roundoff(1e-11));
+        EXPECT_LT(worst_p, 1e-14);
+        EXPECT_LT(worst_J, 1e-11);
     }
     // Circles and disks without transforms keep the closed form
     EXPECT_EQ(shape_of("{type = \"circle\", center = [0.5, 0.0], radius = 1.0}").kind, curved::Shape::Kind::CIRCLE);
