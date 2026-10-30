@@ -426,6 +426,15 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
     }
     allocate_samples(*this, h_cells, h_inside, h_offsets, n_variables);
 
+    distributed = mesh.n_global_cells > 0;
+    const std::vector<uint64_t> all = distributed ? comm::gatherv(ids) : ids;
+    if (comm::is_root() || !distributed) {
+        if (all.size() != n_global) throw std::logic_error("probe samples held by no rank or by several");
+        gathered_row.assign(n_global, 0);
+        for (uint64_t r = 0; r < all.size(); r++) gathered_row[all[r]] = r;
+    }
+}
+
 void Probes::Samples::select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables) {
     distributed = mesh.n_global_cells > 0;
     std::vector<uint64_t> global(owned_cells.size());

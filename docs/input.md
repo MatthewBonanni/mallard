@@ -1015,8 +1015,8 @@ fraction `f`: `integral` is `sum f V q`, `mean` `sum f V q / sum f V`, `favre`
 rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
 radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
 in global cell order, so they are the same bit for bit on any number of ranks.
-A region probe has no samples: `shape`, `sampling`, `format`, `file` and
-`samples` do not apply. The region must cover part of some cell.
+A region probe has no samples: `shape`, `boundary`, `boundary_type`,
+`sampling`, `format`, `file` and `samples` do not apply. The region must cover part of some cell.
 
 ```toml
 # Fuel mass and the extreme temperatures in the combustor

@@ -564,8 +564,8 @@ Pitfalls:
 
 - Values are cell averages, so `min` and `max` are those of the cells, not of
   the field inside them, and include cells the region only touches.
-- A region probe has no samples: `shape`, `sampling`, `format`, `file` and
-  `samples` do not apply to it.
+- A region probe has no samples: `shape`, `boundary`, `boundary_type`,
+  `sampling`, `format`, `file` and `samples` do not apply to it.
 
 ## Post-processing
 
