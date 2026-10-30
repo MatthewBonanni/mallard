@@ -231,6 +231,7 @@ double forced_kinetic_energy(const bool forced) {
           << "rhoE = \"" << c << " * rho * (u_x^2 + u_y^2 + u_z^2)\"\n";
     }
     Solver solver;
+    solver.set_distributed(false);  // the sums below are over this rank's cells
     solver.init(parse_toml(s.str()));
     solver.run();
     solver.copy_device_to_host();

@@ -25,9 +25,9 @@ namespace cli {
  * @brief An option a command accepts.
  */
 struct Option {
-    std::string_view name;   ///< "--ranks"; a name ending in '*' accepts every option with that prefix
+    std::string_view name;   ///< "--ranks"; a name ending in '*' passes through every option with that prefix
     std::string_view alias;  ///< short form ("-l"), or empty
-    std::string_view value;  ///< what the value is ("N"), or empty for a flag
+    std::string_view value;  ///< what the value is ("N", "=N" when it must be attached), or empty for a flag
     std::string_view help;   ///< what it does and its default
 };
 
@@ -74,7 +74,6 @@ struct Command {
     std::string_view exit_status;  ///< lines
     Case dim = Case::none;
     int (*run)(const Args &) = nullptr;
-    bool run_after_help = false;   ///< --help prints the page, then runs (`mallard test`: GoogleTest's page)
 };
 
 /**

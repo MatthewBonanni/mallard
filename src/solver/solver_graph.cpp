@@ -229,6 +229,7 @@ void Solver::graph_step() {
     }
     if (last_good.flow.is_allocated()) note_last_good();
     dt = step_io(IO_DT);
+    run_health.ledger.end_step(static_cast<double>(dt));
     if (!(dt > 0.0_r)) {
         throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");
     }

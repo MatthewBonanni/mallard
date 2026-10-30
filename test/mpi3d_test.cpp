@@ -230,6 +230,47 @@ TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
     EXPECT_EQ(total, 12u * 12u);
 }
 
+TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
+    // Faces in the order of their cells' global ids, polygons over shared vertices
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_probes").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto input = [&](const std::string & sub) {
+        return box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n") +
+               "[[probes]]\nname = \"walls\"\nboundary = [\"bottom\", \"left\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
+               sub + "/walls.pvd\"\nvariables = [\"P\", \"TAU_W\", \"Q_W\", \"MASS_FLUX\"]\ninterval = 4\n"
+               "reductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub + "/walls.csv\"\n"
+               "[[probes]]\nname = \"cut\"\nshape = \"cut_plane\"\npoint = [0.5, 0.4, 0.3]\nnormal = [1.0, 0.6, 0.3]\n"
+               "variables = [\"P\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub + "/cut.pvd\"\n"
+               "interval = 8\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/cut.csv\"\n";
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(input("serial")));
+    reference.run();
+    Solver distributed;
+    distributed.init(parse_toml(input("ranks")));
+    distributed.run();
+    comm::barrier();
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        for (const char * file : {"walls.csv", "walls.pvd", "walls_000008.vtp", "cut.csv", "cut_000008.vtp"}) {
+            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            EXPECT_FALSE(a.empty()) << file;
+            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+        }
+        // Each hexahedral block's face splits into two triangles: 6 x 3 at the bottom, 4 x 3 on the left
+        EXPECT_NE(read(dir + "/serial/walls_000008.vtp").find("NumberOfPolys=\"" + std::to_string(2 * (18 + 12)) + "\""),
+                  std::string::npos);
+    }
+    comm::barrier();
+}
+
 TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
     // Tetrahedra, pyramids, prisms and hexahedra at their global ids
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";

@@ -212,7 +212,7 @@ std::vector<double> net_flux(const Sampled & s, const Mesh & mesh) {
 
 constexpr double P_DUCT = 1.0 / 1.4 / 0.09;  // Mach 0.3 at u = 1, rho = 1
 
-/** @brief Box with a turbulent nscbc_inlet at x = 0 and an nscbc_outlet at x = Lx, periodic across. */
+/** @brief Box with a turbulent inlet_state with nscbc at x = 0 and an outlet_pressure with nscbc at x = Lx, periodic across. */
 std::string duct_input(const std::string & dir, const std::string & init, uint32_t n_steps) {
     std::ostringstream s;
     s.precision(17);

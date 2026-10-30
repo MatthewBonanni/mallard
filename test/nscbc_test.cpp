@@ -98,7 +98,7 @@ std::string mesh_input(const std::string & type, uint32_t nx, uint32_t ny, doubl
     s.precision(17);
     if (type == "jittered") {
         const std::string name = "mallard_nscbc_" + std::to_string(nx) + "x" + std::to_string(ny) + ".msh";
-        s << "[mesh]\ntype = \"file\"\nfilename = \"" << write_temp(name, jittered_channel(nx, ny, Lx / nx, period))
+        s << "[mesh]\ntype = \"file\"\nfilename = \"" << write_temp_shared(name, jittered_channel(nx, ny, Lx / nx, period))
           << "\"\n";
     } else {
         s << "[mesh]\ntype = \"" << type << "\"\nNx = " << nx << "\nNy = " << ny << "\nLx = " << Lx << "\nLy = " << Ly
@@ -113,7 +113,9 @@ struct Result {
 };
 
 Result run(const std::string & input) {
+    // The measurements are over this rank's cells; MPITest checks distributed runs
     Result r{std::make_shared<Solver>(), nullptr};
+    r.solver->set_distributed(false);
     r.solver->init(parse_toml(input));
     r.solver->run();
     r.solver->update_primitives();
@@ -390,7 +392,11 @@ TEST(NSCBCTest, MixtureFrontLeavesThroughTheOutlet) {
     // A contact between air and hot H2/N2 leaves through the outlet; the
     // pressure stays within a few percent of the dynamic pressure of it
     Solver solver;
-    solver.init(parse_toml(front_input("type = \"outlet_pressure\"\np = 101325.0\nnscbc.L = 1.0\n", 0.016)));
+    solver.set_distributed(false);
+    solver.init(parse_toml(front_input("type = \"outlet_pressure\"
+p = 101325.0
+nscbc.L = 1.0
+", 0.016)));
     double spread = 0.0;
     while (double(solver.get_time()) < 0.016 * (1 - 1e-6)) {
         solver.calc_dt();

@@ -40,6 +40,7 @@
 #include "data_writer.h"
 #include "probes.h"
 #include "statistics.h"
+#include "health_state.h"
 #include "synthetic_inflow.h"
 #include "source_terms.h"
 #include "wall_exchange.h"
@@ -103,6 +104,10 @@ struct DivergedError : std::exception {
 
 /** @brief Exit status of a run stopped on request (signal, `mallard ctl stop`, STOP file) after writing a restart. */
 constexpr int EXIT_STOPPED = 3;
+
+struct ViscousFluxFunctor;
+template <typename T_riemann_solver>
+struct ConvectiveFluxFunctor;
 
 class Solver {
     public:
@@ -475,6 +480,13 @@ class Solver {
         /** @brief The numerics preset and the value and origin of each of its keys. */
         const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
 
+        /** @brief Test-only: errors injected into the update, for the conservation ledger's tests. */
+        void set_ledger_mutation(const LedgerMutation & m) { run_health.mutation = m; }
+        /** @brief The run health of the latest report (empty without [output] health). */
+        const health::Report & get_health() const { return run_health.last; }
+        /** @brief Collects the health report now, as a progress row does (collective). */
+        void report_health();
+
         /** @brief The solution: flow block and species partial densities. */
         State state() const { return State(conservatives, species); }
 
@@ -555,6 +567,11 @@ class Solver {
         void record_mesh_provenance() const;
         /** @brief Provenance lines of the CSV files and the run log's start record. */
         void write_provenance();
+        // Run health (solver_health.cpp)
+        void init_health();
+        /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
+        void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
+        void health_summary() const;
         /** @brief The columns of the integrals file after step and t, and their dimensions. */
         std::vector<std::pair<std::string, Dimension>> integral_columns() const;
         /** @brief Dimension of the cell measure: m^N_DIM (per unit depth in 2D); m^3 rad^-1 in axisymmetric runs. */
@@ -629,6 +646,8 @@ class Solver {
          */
         rtype pressure_work_rate() const;
 
+        template <typename T_riemann_solver>
+        ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
         template <typename T_riemann_solver>
         void launch_flux_functor();
         template <typename T_riemann_solver>
@@ -879,6 +898,7 @@ class Solver {
         IntegralMonitor integral_monitor;
         Statistics statistics;
         Probes probes;
+        HealthState run_health;
 };
 
 #endif // SOLVER_H
