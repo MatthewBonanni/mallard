@@ -200,7 +200,11 @@ TEST(CliTest, UnknownOptionIsOneLinePointingAtHelp) {
     }
     const Result r = run({"no-such-command"});
     EXPECT_EQ(r.status, 2);
-    EXPECT_EQ(r.err, "mallard: unknown command no-such-command (see mallard --help)\n");
+    EXPECT_EQ(r.err, "mallard: unknown command no-such-command; to run an input file, give it with -i: "
+                     "mallard -i no-such-command (see mallard --help)\n");
+    const Result typo = run({"chek", "input.toml"});
+    EXPECT_EQ(typo.status, 2);
+    EXPECT_EQ(typo.err, "mallard: unknown command chek (did you mean \"check\"?)\n");
 }
 
 TEST(CliTest, UserDocsShowEveryHelpPage) {

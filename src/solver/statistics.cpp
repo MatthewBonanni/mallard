@@ -32,10 +32,11 @@ int32_t CellSampler::code(const std::string & name, const std::vector<std::strin
     for (size_t k = 0; k < species_names.size(); k++) {
         if ("Y_" + species_names[k] == name) return FIRST_SPECIES + static_cast<int32_t>(k);
     }
-    std::string known = "RHO";
-    for (const auto & p : PRIMITIVE_NAMES) known += ", " + p;
-    if (!species_names.empty()) known += ", Y_<species>";
-    throw InputError(key + ": unknown variable \"" + name + "\" (one of: " + known + ").");
+    std::vector<std::string> known = {"RHO"};
+    for (const auto & p : PRIMITIVE_NAMES) known.push_back(p);
+    const std::string suggestion = suggest_value(name, known);
+    if (!species_names.empty()) known.push_back("Y_<species>");
+    throw InputError({.key = key, .message = "unknown variable \"" + name + "\"", .valid = known, .suggestion = suggestion});
 }
 
 namespace {
