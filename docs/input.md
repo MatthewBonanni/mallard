@@ -33,13 +33,13 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `translate`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
-| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.p0`; `physics.p_ref` |
-| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`) and `dirichlet` boundaries |
-| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`; `boundaries.p0`; `physics.p_ref` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries and `probes.reference` |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`; `turbulence.convection_velocity`; `les.combustion.s_L` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
 | Acceleration (m/s^2) | `source.gravity` |
 | Rate (1/s) | `sponges.strength` |
@@ -860,7 +860,7 @@ weights and the trigger state.
 
 ## `[[probes]]`
 
-Samples of the solution on a geometry (points or curves;
+Samples of the solution on a geometry (points, curves or boundary zones;
 [geometry guide](guide/geometry.md#point-sets-and-curves)), every `interval`
 steps or `time_interval` of simulation time, written raw and/or reduced. Setup
 locates the samples in the cells of each rank; a write evaluates them on the
@@ -873,6 +873,9 @@ ranks. A probe that is not due costs nothing.
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
 | `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
+| `boundary` | Instead of a shape: a boundary zone name, or a list of them; each face is a sample (below) |
+| `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
+| `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
@@ -880,7 +883,7 @@ ranks. A probe that is not due costs nothing.
 | `samples` | `false` writes only the reductions (default `true`) |
 | `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below) |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
-| `translate`, `rotate`, `scale` | Transform of the geometry: scaled (a factor, or one per axis) about the origin, then rotated about it (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}`), then translated |
+| `scale`, `rotate`, `pivot`, `translate` | Transform of the geometry, as for [regions](#regions): scaled (a factor, or one per axis), then rotated (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`), both about `pivot` (default the origin), then translated |
 
 Shapes (`[x, y(, z)]` points):
 
@@ -906,6 +909,68 @@ cell averages. A sample on a face between cells belongs to the cell with the low
 id, so any number of ranks pick the same cell; samples outside the domain take
 the nearest cell's average in both modes.
 
+**Boundary probes.** `boundary = "wall"` samples the zone's faces of every
+rank: one sample per face, at its centroid, with the face measure as its weight
+(per radian in axisymmetric runs). The values are those of the state the
+boundary condition sets on the face, from the interior trace (the cell average,
+or with `sampling = "point"` the reconstruction at the face centroid): walls
+take their velocity (no slip; slip walls and symmetry planes drop the normal
+component) and isothermal walls their temperature at the trace's pressure;
+`upt`, `farfield`, `p_out` and `p_out_average` faces the exterior state of their
+condition; `dirichlet` faces their prescribed state; transmissive and
+characteristic faces the trace. Normals point out of the fluid, so fluxes are
+positive out of the domain. In 2D the faces are chained through shared nodes
+into polylines, each traversed with the fluid on its left (counterclockwise
+around a domain's outer boundary, clockwise around a body), with the arc
+length `s` of each face center; in 3D the faces are polygons, ordered by
+their cells' global ids. Besides the `[statistics]` fields, boundary probes
+have:
+
+| Variable | Meaning |
+|---|---|
+| `MASS_FLUX` | `rho u . n` |
+| `MOMENTUM_FLUX_<X,Y,Z>` (`MOMENTUM_FLUX`) | `rho u u . n + p n` |
+| `ENTHALPY_FLUX` | `rho u . n (h + |u|^2 / 2)` |
+| `SPECIES_FLUX_<species>` (`SPECIES_FLUX_*`) | `rho Y_k u . n` (convective; `upt` faces with their prescribed composition) |
+| `TRACTION_PRESSURE_<X,Y,Z>` (`TRACTION_PRESSURE`) | `p n`, the pressure force of the fluid on the boundary per unit area |
+| `TRACTION_VISCOUS_<X,Y,Z>` (`TRACTION_VISCOUS`) | `-tau . n`, its viscous part (molecular) |
+| `TAU_W_<X,Y,Z>`, `TAU_W` | Wall shear stress: the tangential part of `-tau . n`, along the flow on a wall at rest; and its magnitude |
+| `CF` | `TAU_W_<axes> . u_ref / |u_ref| / q_ref`, with `q_ref = rho_ref |u_ref|^2 / 2` |
+| `CP` | `(p - p_ref) / q_ref` |
+| `Q_W` | Heat flux into the fluid, `kappa dT/dn` (the convention of `wall_heat_flux`): zero on adiabatic walls, `q` on heat-flux walls |
+| `U_TAU`, `Y_PLUS` | `sqrt(TAU_W / rho_w)` and `rho_w U_TAU d / mu_w`, `d` the distance from the face to its cell's centroid |
+
+The gradients are the least-squares ones of the viscous flux, with its wall
+treatment (normal derivatives from the wall velocity and temperature), and
+the viscosity and conductivity those of the face (mixtures: of the cell), so
+that `integral` of `TRACTION_PRESSURE` and `TRACTION_VISCOUS` with
+`sampling = "cell"` gives the forces of `[[forces]]`. In axisymmetric runs a
+face's `area` and the `integral` reductions are per radian of the revolved
+wall (`area` is `r` times the face length, the reductions' column `area`), as
+`[[forces]]` is. `TAU_W`, `Q_W` and the
+wall-friction quantities need `navier_stokes`. CSV rows of boundary probes are
+`step, t, face, x, y(, z), s (2D), nx, ny(, nz), area, <variables>`; HDF5
+files add `normals` and `area` (and in 3D `vertices` and `polygons/vertices`,
+`polygons/offsets`); VTP and VTKHDF files are polylines of the face centers (2D) or the
+faces as polygons with cell data (3D).
+
+```toml
+[[probes]]
+name = "wall"
+boundary_type = "wall"
+variables = ["P", "CP", "CF", "Q_W", "Y_PLUS"]
+reference = {rho = 1.2, u = [30.0, 0.0], p = 101325.0}
+format = "vtp"
+interval = 100
+
+[[probes]]
+name = "outlet"
+boundary = "outlet"
+samples = false
+variables = ["MASS_FLUX", "ENTHALPY_FLUX"]
+reductions = ["integral"]
+```
+
 **Output.** `csv` appends rows `step, t, point, x, y(, z), <variables>` (one per
 sample and step; a restarted run appends). `hdf5` holds `coordinates`
 (samples x dimension), for curves `arc_length` and `polylines/nodes` with
@@ -918,13 +983,14 @@ values at every output, with `Steps/Values` the times). A restarted run cuts the
 HDF5 rows, the VTKHDF outputs and the `.pvd` entries after the restart back and
 continues them.
 
-**Reductions.** Rows `step, t, length` (curves) or `count` (point sets), then
+**Reductions.** Rows `step, t, length` (curves, 2D boundaries), `area` (3D boundaries) or `count` (point sets), then
 `<reduction>_<variable>` for each reduction and variable: `integral` is
 `int q ds`, `mean` `int q ds / int ds`, `favre` the density-weighted mean
 `int rho q ds / int rho ds`, `rms` `sqrt(int q^2 ds / int ds)`, and `min`, `max`
 the extrema over the samples and the integration points. Curves integrate
 with three Gauss points on each element between consecutive samples (exact for
-polynomials of degree 5 along straight elements), point sets with unit weights
+polynomials of degree 5 along straight elements), boundaries with one point
+per face (the face measure), point sets with unit weights
 (`integral` is the sum, `mean` the arithmetic mean). Rank 0 sums them in a
 fixed order, so they too are the same bit for bit on any number of ranks.
 

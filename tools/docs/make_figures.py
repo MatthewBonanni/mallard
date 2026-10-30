@@ -14,6 +14,7 @@ import sys
 import domains
 import geometry
 import inlets
+import probes
 import regions
 import runs
 import schematics
@@ -36,6 +37,8 @@ def main():
     if args.mallard:
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]
         runs.main()
+        sys.argv = [sys.argv[0], "--mallard", args.mallard] + (["--mallard3d", args.mallard3d] if args.mallard3d else [])
+        probes.main()
         regions.figures(args.mallard, args.mallard3d)
 
 
