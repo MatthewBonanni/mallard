@@ -28,7 +28,9 @@ Euler Euler::from_reference(rtype gamma, rtype p_ref, rtype T_ref, rtype rho_ref
 Euler Euler::from_input(const Input & input) {
     for (const char * key : {"gamma", "p_ref", "T_ref", "rho_ref"}) {
         if (!input.at("physics").contains(key)) {
-            throw std::runtime_error(std::string("Missing ") + key + " for physics: euler.");
+            throw missing_key(input.at("physics"), std::string("physics.") + key,
+                              "A perfect gas needs gamma, p_ref, T_ref and rho_ref (e.g. air: gamma = 1.4, "
+                              "p_ref = \"1 atm\", T_ref = \"288.15 K\", rho_ref = 1.225)");
         }
     }
     Euler euler = from_reference(find_real(input, "physics", "gamma", dim::none),
@@ -36,7 +38,7 @@ Euler Euler::from_input(const Input & input) {
                                  find_real(input, "physics", "T_ref", dim::temperature),
                                  find_real(input, "physics", "rho_ref", dim::density));
     const std::string type = find_value_or<std::string>(input, "physics", "type", "euler");
-    find_option(PHYSICS_TYPES, "physics.type", type);
+    find_option(PHYSICS_TYPES, "physics.type", type, line_of(input.at("physics"), "type"));
     if (type == "navier_stokes") {
         if (!input.at("physics").contains("mu")) {
             throw std::runtime_error("Missing mu for physics: navier_stokes.");

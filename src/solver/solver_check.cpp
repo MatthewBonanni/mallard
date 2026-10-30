@@ -70,6 +70,8 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     try {
         init(input_in);
         r.setup_done = true;
+    } catch (const InputError & e) {
+        r.errors.push_back((options.input_file.empty() ? "" : options.input_file + ": ") + error_text(e));
     } catch (const std::exception & e) {
         r.errors.push_back(error_text(e));
     }
@@ -80,7 +82,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     if (!options.catalog_file.empty() && comm::is_root()) {
         std::ofstream file(options.catalog_file);
         file << key_catalog(input);
-        if (!file) r.errors.push_back("cannot write " + options.catalog_file);
+        if (!file) r.errors.push_back(cannot_write("the key catalog", options.catalog_file).what());
     }
     if (!r.setup_done || !mesh) return r;
 
@@ -102,7 +104,9 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) c
         r.warnings.push_back(logging::count(r.quality[m].n_over_limit) + " cells with " + MeshQuality::NAMES[m] +
                              " above " + logging::real(MeshQuality::LIMITS[m]) + " (worst " +
                              logging::format("%.3g", r.quality[m].max) + " at " +
-                             point(r.quality[m].worst.front().x) + ")");
+                             point(r.quality[m].worst.front().x) +
+                             "); such cells limit the time step and accuracy and can make a run diverge: improve "
+                             "the mesh there (--quality shows where). See docs/guide/meshes.md#mesh-quality");
     }
     if (options.quality_file.empty()) return;
 
@@ -227,7 +231,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
     if (r.device_capacity > 0 && r.target_bytes_peak > r.device_capacity) {
         r.errors.push_back("estimated " + bytes(double(r.target_bytes_peak)) + " per rank on " +
                            std::to_string(r.target_ranks) + " ranks exceeds the device's " +
-                           bytes(double(r.device_capacity)));
+                           bytes(double(r.device_capacity)) + ": run on more ranks or GPUs, or on a coarser mesh");
     }
 }
 
@@ -290,7 +294,7 @@ void Solver::check_settings(CheckReport & r) const {
     const double limit = cfl_limit(time_integrator->get_type());
     if (r.cfl > limit) {
         r.warnings.push_back(logging::format("CFL %.3g at the initial state is above %.3g, the stability limit of %s "
-                                             "for smooth flow",
+                                             "for smooth flow: lower run.cfl (or run.dt)",
                                              r.cfl, limit,
                                              TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()).c_str()));
     }

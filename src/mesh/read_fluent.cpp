@@ -10,6 +10,7 @@
  */
 
 #include "mesh_file.h"
+#include "common_io.h"
 
 #include <algorithm>
 #include <cstring>
@@ -133,7 +134,7 @@ struct FluentZone {
 
 MeshFileData read_fluent(const std::string & filename) {
     std::ifstream in(filename, std::ios::binary);
-    if (!in.good()) throw std::runtime_error("Could not open mesh file: " + filename + ".");
+    if (!in.good()) throw cannot_read("the mesh file", filename);
     std::ostringstream buffer;
     buffer << in.rdbuf();
     Reader r(buffer.str(), filename);

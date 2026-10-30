@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -109,15 +110,20 @@ Input parse_input(const std::string & filename);
 /** @brief Parse TOML text, with no key counted as read. */
 Input parse_input_string(const std::string & text, const std::string & name = "input");
 
-/** @brief A problem with one key of the input, as normal runs and --check report it. */
+/**
+ * @brief A problem with one key of the input, as normal runs and --check report
+ *        it: what is wrong, where, what the key takes, what to do about it, and
+ *        where the docs explain it.
+ */
 struct Diagnostic {
-    std::string key;                  // e.g. "mesh.Nxx" or "boundaries[2].tpye"
+    std::string key{};                // e.g. "mesh.Nxx" or "boundaries[2].tpye"
     std::size_t line = 0;             // 0 if unknown
-    std::string message;              // what is wrong
-    std::vector<std::string> valid;   // accepted values, if a closed set
-    std::string suggestion;           // full path of the likely intended key (or the unit), or empty
-    std::string expected;             // what the key takes, e.g. "pressure (kg m^-1 s^-2): Pa, kPa, bar, atm, psi"
-    std::string docs;                 // page and anchor of the input reference
+    std::string message{};            // what is wrong
+    std::vector<std::string> valid{}; // accepted values, if a closed set
+    std::string suggestion{};         // full path of the likely intended key (or value, or unit), or empty
+    std::string expected{};           // what the key takes, e.g. "pressure (kg m^-1 s^-2): Pa, kPa, bar, atm, psi"
+    std::string fix{};                // what to do, as a sentence, or empty
+    std::string docs{};               // page and anchor of the docs; the key's section of docs/input.md if empty
 };
 
 /**
@@ -131,20 +137,53 @@ std::vector<Diagnostic> unused_keys(const Input & input);
 std::string describe(const Diagnostic & key);
 
 /**
- * @brief The message of an invalid value: "line 12: boundaries[0].p = \"300 K\":
- *        a temperature where a pressure is expected (expected: ...; see ...)".
+ * @brief The message of an invalid value: "line 12: boundaries[0].p: \"300 K\"
+ *        has the dimension of temperature (K). Expected ... Fix. See ...".
  */
 std::string explain(const Diagnostic & d);
+
+/** @brief The section of docs/input.md that documents a key path: "docs/input.md#mesh" for "mesh.Nx". */
+std::string docs_of(const std::string & key);
+
+/**
+ * @brief The text of an error that starts with a key ("mesh.Nx must ...",
+ *        "[mesh] periodic ..."), followed by the docs of the key's table.
+ */
+std::string with_docs(const std::string & text);
+
+/** @brief The line of a value in its input file, or 0 if the program set it. */
+std::size_t line_of(const Input & v);
+/** @brief The line of table.key, or of the table itself if the key is absent (0 if unknown). */
+std::size_t line_of(const Input & table, const std::string & key);
+
+/**
+ * @brief The names a mistyped value most likely meant, quoted: the closest by
+ *        edit distance (ignoring case), else up to three that contain it
+ *        ("\"wall_adiabatic\" or \"wall_isothermal\""), else empty.
+ */
+std::string suggest_value(const std::string & value, const std::vector<std::string> & names);
 
 /**
  * @brief An invalid or missing input value. The message names the key and the
  *        offending value; the caller adds the input file name.
  */
 struct InputError : std::runtime_error {
-    using std::runtime_error::runtime_error;
-    explicit InputError(const Diagnostic & d) : std::runtime_error(explain(d)), diagnostic(d) {}
+    /** @brief An error given as text, with the docs of the key it starts with ("mesh.Nx must ..."). */
+    explicit InputError(const std::string & text) : std::runtime_error(with_docs(text)) {}
+    explicit InputError(const char * text) : InputError(std::string(text)) {}
+    explicit InputError(Diagnostic d) : std::runtime_error(explain(d)), diagnostic(std::move(d)) {}
     Diagnostic diagnostic;  // empty key for errors given as text only
 };
+
+/** @brief A required key that is absent: names it, the line of its table, and its docs. */
+InputError missing_key(const Input & table, const std::string & key, const std::string & fix = "");
+
+/**
+ * @brief A value outside a closed set: names the key (a full path, whose last
+ *        part is read from table for the line), the accepted values and the closest one.
+ */
+InputError not_accepted(const Input & table, const std::string & key, const std::string & value,
+                        std::vector<std::string> valid);
 
 /** @brief Record the values a key accepts, by its path ("numerics.riemann_solver"; indices are dropped). */
 void record_options(const std::string & key, std::vector<std::string> names);
@@ -162,16 +201,20 @@ std::string key_catalog(const Input & input);
  */
 template <typename T>
 auto find_option(const std::unordered_map<std::string, T> & options, const std::string & key,
-                 const std::string & value) {
+                 const std::string & value, const std::size_t line = 0) {
     std::vector<std::string> names;
     for (const auto & entry : options) names.push_back(entry.first);
     std::sort(names.begin(), names.end());
     record_options(key, names);
     const auto it = options.find(value);
     if (it == options.end()) {
-        std::string list;
-        for (const auto & name : names) list += (list.empty() ? "" : ", ") + name;
-        throw InputError(key + " = \"" + value + "\" is not one of: " + list + ".");
+        Diagnostic d;
+        d.key = key;
+        d.line = line;
+        d.message = "\"" + value + "\" is not accepted";
+        d.valid = names;
+        d.suggestion = suggest_value(value, names);
+        throw InputError(d);
     }
     return it;
 }
@@ -228,37 +271,104 @@ inline KeyUse real_use(const std::string & type, const Dimension & dimension, st
     return use;
 }
 
+/** @brief What a value of type T is called in messages: "an integer", "an array of strings". */
+template <typename T> std::string wanted() {
+    if constexpr (std::is_same_v<T, bool>) return "true or false";
+    else if constexpr (std::is_integral_v<T> && std::is_unsigned_v<T>) return "a non-negative integer";
+    else if constexpr (std::is_integral_v<T>) return "an integer";
+    else if constexpr (std::is_floating_point_v<T>) return "a number";
+    else if constexpr (std::is_convertible_v<T, std::string>) return "a string (in quotes)";
+    else if constexpr (is_vector<T>::value) {
+        using E = typename T::value_type;
+        if constexpr (std::is_same_v<E, Input>) return "an array";
+        else if constexpr (std::is_convertible_v<E, std::string>) return "an array of strings";
+        else if constexpr (std::is_integral_v<E>) return "an array of integers";
+        else return "an array of numbers";
+    } else {
+        return "a table";
+    }
+}
+
+/** @brief An InputError for a value of the wrong type or out of range. */
+InputError wrong_type(const Input & v, const std::string & key, const std::string & wanted, int64_t lo, int64_t hi);
+
+/** @brief The value as T, or an InputError naming the key, its line and the type it takes. */
+template <typename T> T get(const Input & v, const std::string & key) {
+    if constexpr (std::is_same_v<T, bool>) {
+        if (!v.is_boolean()) throw wrong_type(v, key, wanted<T>(), 0, 0);
+        return v.as_boolean();
+    } else if constexpr (std::is_integral_v<T>) {
+        constexpr int64_t lo = std::is_unsigned_v<T> ? 0 : static_cast<int64_t>(std::numeric_limits<T>::min());
+        constexpr int64_t hi = sizeof(T) >= sizeof(int64_t) ? std::numeric_limits<int64_t>::max()
+                                                            : static_cast<int64_t>(std::numeric_limits<T>::max());
+        if (!v.is_integer() || v.as_integer() < lo || v.as_integer() > hi) throw wrong_type(v, key, wanted<T>(), lo, hi);
+        return static_cast<T>(v.as_integer());
+    } else if constexpr (std::is_floating_point_v<T>) {
+        if (v.is_integer()) return static_cast<T>(v.as_integer());
+        if (!v.is_floating()) throw wrong_type(v, key, wanted<T>(), 0, 0);
+        return static_cast<T>(v.as_floating());
+    } else if constexpr (std::is_convertible_v<T, std::string>) {
+        if (!v.is_string()) throw wrong_type(v, key, wanted<T>(), 0, 0);
+        return v.as_string();
+    } else if constexpr (is_vector<T>::value) {
+        if (!v.is_array()) throw wrong_type(v, key, wanted<T>(), 0, 0);
+        T out;
+        const auto & array = v.as_array();
+        for (std::size_t i = 0; i < array.size(); i++) {
+            using E = typename T::value_type;
+            if constexpr (std::is_same_v<E, Input>) {
+                out.push_back(array[i]);
+            } else {
+                out.push_back(get<E>(array[i], key + "[" + std::to_string(i) + "]"));
+            }
+        }
+        return out;
+    } else {
+        return toml::get<T>(v);
+    }
+}
+
 } // namespace input_detail
 
 /**
  * Lookups of typed values, the way setup reads every key that is not a real
- * number: like toml::find and toml::find_or (whose semantics they keep), and
- * recording the type and the fallback (or that the key is required) for the
- * key catalog. src/CMakeLists.txt rejects toml::find and toml::find_or.
+ * number: like toml::find and toml::find_or, but a value of the wrong type is
+ * an error naming the key and its line rather than toml::find_or's silent
+ * fallback, and an integer is accepted for a float. They record the type and
+ * the fallback (or that the key is required) for the key catalog.
+ * src/CMakeLists.txt rejects toml::find and toml::find_or.
  */
 template <typename T, typename... Tables>
 T find_value(const Input & v, const Tables &... keys) {
     static_assert(sizeof...(Tables) == 1 || sizeof...(Tables) == 2, "find_value(v, [table,] key)");
     const std::string path[] = {keys...};
     const auto * table = sizeof...(Tables) == 1 ? input_detail::table_of(v) : input_detail::table_of(v, path[0]);
-    if (table) table->record_use(path[sizeof...(Tables) - 1], {input_detail::type_name<T>(), "", "", "", true});
-    return toml::find<T>(v, keys...);
+    const std::string & key = path[sizeof...(Tables) - 1];
+    if (table) table->record_use(key, {input_detail::type_name<T>(), "", "", "", true});
+    if constexpr (sizeof...(Tables) == 2) {
+        if (!table) throw missing_key(v, path[0] + "." + key);
+        if (!table->contains(key)) throw missing_key(v.at(path[0]), path[0] + "." + key);
+        return input_detail::get<T>(table->at(key), path[0] + "." + key);
+    } else {
+        if (!table || !table->contains(key)) throw missing_key(v, key);
+        return input_detail::get<T>(table->at(key), key);
+    }
 }
 
 template <typename T>
 T find_value_or(const Input & v, const std::string & key, const T & fallback) {
-    if (const auto * table = input_detail::table_of(v)) {
-        table->record_use(key, {input_detail::type_name<T>(), "", "", input_detail::toml_text(fallback), false});
-    }
-    return toml::find_or<T>(v, key, fallback);
+    const auto * table = input_detail::table_of(v);
+    if (!table) return fallback;
+    table->record_use(key, {input_detail::type_name<T>(), "", "", input_detail::toml_text(fallback), false});
+    return table->contains(key) ? input_detail::get<T>(table->at(key), key) : fallback;
 }
 
 template <typename T>
 T find_value_or(const Input & v, const std::string & table_name, const std::string & key, const T & fallback) {
-    if (const auto * table = input_detail::table_of(v, table_name)) {
-        table->record_use(key, {input_detail::type_name<T>(), "", "", input_detail::toml_text(fallback), false});
-    }
-    return toml::find_or<T>(v, table_name, key, fallback);
+    const auto * table = input_detail::table_of(v, table_name);
+    if (!table) return fallback;
+    table->record_use(key, {input_detail::type_name<T>(), "", "", input_detail::toml_text(fallback), false});
+    return table->contains(key) ? input_detail::get<T>(table->at(key), table_name + "." + key) : fallback;
 }
 
 /**
@@ -295,7 +405,7 @@ inline double find_double(const Input & v, const std::string & key, const Dimens
     if (const auto * t = input_detail::table_of(v)) {
         t->record_use(key, input_detail::real_use("number", dimension, "", true));
     }
-    if (!v.contains(key)) throw InputError("missing " + key + ".");
+    if (!v.contains(key)) throw missing_key(v, key);
     return as_double(v.at(key), key, dimension);
 }
 
@@ -311,7 +421,7 @@ inline rtype find_real(const Input & v, const std::string & key, const Dimension
     if (const auto * t = input_detail::table_of(v)) {
         t->record_use(key, input_detail::real_use("number", dimension, "", true));
     }
-    if (!v.contains(key)) throw InputError("missing " + key + ".");
+    if (!v.contains(key)) throw missing_key(v, key);
     return as_real(v.at(key), key, dimension);
 }
 
@@ -320,8 +430,8 @@ inline rtype find_real(const Input & v, const std::string & table, const std::st
     if (const auto * t = input_detail::table_of(v, table)) {
         t->record_use(key, input_detail::real_use("number", dimension, "", true));
     }
-    if (!v.contains(table)) throw InputError("missing [" + table + "].");
-    if (!v.at(table).contains(key)) throw InputError("missing " + table + "." + key + ".");
+    if (!v.contains(table)) throw missing_key(v, table + "." + key);
+    if (!v.at(table).contains(key)) throw missing_key(v.at(table), table + "." + key);
     return as_real(v.at(table).at(key), table + "." + key, dimension);
 }
 
@@ -352,7 +462,7 @@ inline std::vector<rtype> find_real_vector(const Input & v, const std::string & 
     if (const auto * t = input_detail::table_of(v)) {
         t->record_use(key, input_detail::real_use("array", dimension, "", true));
     }
-    if (!v.contains(key)) throw InputError("missing " + key + ".");
+    if (!v.contains(key)) throw missing_key(v, key);
     return as_real_vector(v.at(key), key, dimension);
 }
 
@@ -361,8 +471,8 @@ inline std::vector<rtype> find_real_vector(const Input & v, const std::string & 
     if (const auto * t = input_detail::table_of(v, table)) {
         t->record_use(key, input_detail::real_use("array", dimension, "", true));
     }
-    if (!v.contains(table)) throw InputError("missing [" + table + "].");
-    if (!v.at(table).contains(key)) throw InputError("missing " + table + "." + key + ".");
+    if (!v.contains(table)) throw missing_key(v, table + "." + key);
+    if (!v.at(table).contains(key)) throw missing_key(v.at(table), table + "." + key);
     return as_real_vector(v.at(table).at(key), table + "." + key, dimension);
 }
 

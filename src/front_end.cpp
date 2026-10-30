@@ -34,6 +34,7 @@ namespace front_end {
 namespace {
 
 Dimension unknown(const std::string & why) { return {0, why}; }
+Dimension unreadable(const std::string & why) { return {0, why, true}; }
 
 Dimension openfoam_dimension(const fs::path & path) {
     for (const fs::path & dir : {path, path / "polyMesh", path / "constant" / "polyMesh"}) {
@@ -228,7 +229,7 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
 Dimension mesh_file_dimension(const std::string & path) {
     try {
         if (fs::is_directory(path)) return openfoam_dimension(path);
-        if (!fs::exists(path)) return unknown("Could not open mesh file: " + path + ".");
+        if (!fs::exists(path)) return unreadable("Could not open mesh file: " + path + ".");
         if (is_hdf5_mesh(path)) return {mesh_h5_dimension(path), ""};
         const std::string ext = fs::path(path).extension().string();
         if (ext == ".cgns") return {cgns_dimension(path), ""};
@@ -238,7 +239,7 @@ Dimension mesh_file_dimension(const std::string & path) {
         in >> first;
         return first == '(' ? fluent_dimension(path) : gmsh_dimension(path);
     } catch (const std::exception & e) {
-        return unknown(e.what());
+        return unreadable(e.what());
     }
 }
 
@@ -259,7 +260,7 @@ Dimension input_dimension(const std::string & input_file) {
         }
         return {2, ""};
     } catch (const std::exception & e) {
-        return unknown(e.what());
+        return unreadable(e.what());
     }
 }
 
@@ -325,7 +326,7 @@ int main(int argc, char ** argv) {
                              : command_need(command, {args.begin() + std::ptrdiff_t(words), args.end()});
     dim = need.dimension.dim;
     if (dim == 0) {
-        if (!need.dimension_free && installed.size() > 1) {
+        if (!need.dimension_free && !need.dimension.unreadable && installed.size() > 1) {
             std::cerr << "mallard: cannot tell whether " << need.what << " is 2D or 3D: " << need.dimension.why
                       << "\nState it with --dim 2 or --dim 3, e.g. mallard --dim 3 -i input.toml.\n";
             return 1;
