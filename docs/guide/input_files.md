@@ -86,6 +86,8 @@ Shapes that several tables use (regions, probe points and curves) are on
 Double brackets (`[[boundaries]]`) are TOML arrays of tables: repeat them, one
 entry each. Every key, with its default, is in the
 [input reference](../input.md).
+Tables, arrays and inline tables nest at most 64 levels deep (a key of a
+top-level table is at level 2); deeper input is an error, not a crash.
 
 ## Numbers, vectors and expressions
 

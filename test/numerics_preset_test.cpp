@@ -162,6 +162,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"flame_outflow/input.toml", "reacting", 2, "", {}, ""},
     {"flame_vortex/input.toml", "reacting", 2, "", {}, ""},
     {"flame_vortex_quenching/input.toml", "reacting", 2, "", {}, ""},
+    {"forced_inlet/input.toml", "robust", 2, "", {}, ""},
     {"heated_duct/closed.toml", "robust", 2, "", {}, ""},
     {"heated_duct/closed_upt.toml", "robust", 2, "", {}, ""},
     {"heated_duct/input.toml", "robust", 2, "", {}, ""},

@@ -337,6 +337,36 @@ TEST(MixtureTest, IdenticalSpeciesAdvectWithoutDisturbingTheFlow) {
     }
 }
 
+TEST(MixtureTest, TimeDependentUptCompositionIsAdvected) {
+    // The composition of the inlet as an expression of t: with two
+    // species of identical thermodynamics the flow stays uniform, and each
+    // cell carries the composition that entered at t - x / u
+    const uint32_t nx = 80, n = N_DIM == 2 ? 2 : 1;
+    const double u = 50.0, t_stop = 0.015;
+    const std::string velocity_vec = N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]";
+    const std::string input =
+        "[run]\nt_stop = 0.015\ncfl = 0.4\n" + mesh_block("cartesian", nx, n, 1.0, 0.05) +
+        "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " + velocity_vec + "\nY = { AIR = 0.5, AIR2 = 0.5 }\n" +
+        numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs") +
+        boundaries("type = \"upt\"\nu = " + velocity_vec + "\np = 1.0e5\nT = 300.0\n"
+                   "Y = { AIR2 = \"0.5 + 0.4 * sin(2 * pi * 100 * t)\" }\nbalance = \"AIR\"\n",
+                   "type = \"p_out\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.copy_device_to_host();
+    double worst = 0.0;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+        const double x = double(solver.get_mesh()->h_cell_coords(c, 0));
+        if (x > 0.6) continue;
+        const double exact = 0.5 + 0.4 * std::sin(2.0 * M_PI * 100.0 * (t_stop - x / u));
+        worst = std::max(worst, std::abs(double(solver.h_species(c, 1) / solver.h_conservatives(c, 0)) - exact));
+        EXPECT_NEAR(double(solver.h_primitives(c, N_DIM)), 1.0e5, tol(1e-6, 1e-2));
+    }
+    RecordProperty("worst", std::to_string(worst));
+    EXPECT_LT(worst, 0.015);
+}
+
 TEST(MixtureTest, UptCompositionExpressionsGiveAStratifiedInflow) {
     // An inlet whose composition varies along it (an expression and a balance
     // species): with two species of identical thermodynamics the flow stays
