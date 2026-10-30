@@ -87,6 +87,8 @@ probe points and curves, are on [Geometry](geometry.md).
 Double brackets (`[[boundaries]]`) are TOML arrays of tables: repeat them, one
 entry each. Every key, with its default, is in the
 [input reference](../input.md).
+Tables, arrays and inline tables nest at most 64 levels deep (a key of a
+top-level table is at level 2); deeper input is an error, not a crash.
 
 ## Numbers, vectors and expressions
 
@@ -217,8 +219,9 @@ on GPUs up to the last bits of library functions such as `sin` and `exp`.
 
 **Variables.** `x`, `y`, `z` in meters (`z` is 0 in 2D) and, where the key
 says so, the time `t` in seconds; sources also read the local and
-domain-averaged state ([Sources](sources.md)) and probe curves their
-parameter `s`. Names are case sensitive: `T` is not `t`.
+domain-averaged state ([Sources](sources.md)), initial states the columns of
+tabulated data ([Initialization](initialization.md#tabulated-data-and-point-clouds))
+and probe curves their parameter `s`. Names are case sensitive: `T` is not `t`.
 
 **Operators and functions.**
 

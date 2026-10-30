@@ -19,7 +19,7 @@ geometry = "cylinder"         # the faces of one boundary zone
 variables = ["P", "T"]
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 41 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 43 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -93,7 +93,7 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 check_interval = 100   # a progress row every 100 steps
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 41 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 43 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, summaries of mesh, physics, numerics, boundaries and output, then one
@@ -133,7 +133,7 @@ Each record has a `type`:
 
 | `type` | When | Fields |
 |---|---|---|
-| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below) |
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks) |
 | `progress` | Every progress row | as below |
 | `event` | A file written, or a request acted on (the rows between progress rows) | `step`, `t`, `kind` (`vtkhdf`, `surface`, `vtu`, `hdf5`, `restart`, ...; `checkpoint`, `stop`, `set` and `diverged` from [run control](running.md)), `text` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |
@@ -155,6 +155,7 @@ Progress records:
 | `monitors` | The progress row's diagnostics: `min_rho`, `min_p`, `max_mach`; TENO: `troubled_cells` (fraction); mixtures: `min_T`, `max_T`, `max_sum_Y_error`; chemistry: `reacting_cells` (fraction), `max_chemistry_cost` |
 | `integrals` | The latest `[integrals]` (`step`, `t` and the columns of `integrals.csv`) |
 | `forces_<zone>` | The latest `[[forces]]` of each zone (`step`, `t` and the columns of its file) |
+| `health` | The [run health](#run-health) at this row (`[output] health`) |
 
 Numbers are in SI units (seconds, bytes) and read back exactly; unknown
 values are `null`. Within a `version`, records only gain fields; renaming,
@@ -175,8 +176,9 @@ the run log's `start` record.
 |---|---|
 | `schema`, `version` | `"mallard-provenance"`, 1 |
 | `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
+| `dependencies` | Versions of `compiler`, `kokkos`, `mpi` (the library's own string and the standard), `hdf5`, `cgns`, `zlib`, `nccl`, `gpu_runtime` and `gpu_driver` (CUDA or HIP); `null` for those not built in |
 | `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
-| `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory` |
+| `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run log's `placement`) |
 | `input` | `file`, `sha256` of its bytes, and its `text` |
 | `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
 | `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, resolved `value` and `from_preset` (`false` where the input overrides it) |
@@ -191,6 +193,86 @@ json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
 ```
 
 or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
+
+## Run health
+
+At every progress row Mallard also checks that the run is healthy, and
+writes what it finds into the progress record's `health` (and a short
+**Health** section at the end of the human log). Everything is computed at
+progress rows only, from the state of that step. Between rows the ledger
+adds a reduction over the boundary faces (and one over the cells where
+there are volume sources) per stage, chemistry two reductions of the
+element totals per call and a sub-step count per integrated cell; none of
+these waits for the device. `[output] health = false` turns
+it all off.
+
+| Field | Contents |
+|---|---|
+| `margins` | The smallest `rho`, `p`, `T` and, for mixtures, mass fraction (`Y_<species>`) over the domain: `value`, cell centroid `x` and `step` |
+| `margins_run` | The smallest of each at any progress row so far |
+| `activity` | Fractions of cells, over the domain (`all`) and the least and most active rank (`rank_min`, `rank_max`): `troubled_cells` (TENO's troubled-cell indicator), `limited_cells` (MUSCL cells whose limiter is below one in some variable), `upwind_fraction` (the hybrid flux's mean upwind fraction) |
+| `chemistry` | Since the previous row: `substeps` and `rejected_substeps` of the Rosenbrock integration, `failures`, `reacting_cells` (fraction of the last call), `wall` (seconds of the slowest rank) and `imbalance` (the slowest rank's chemistry time over the ranks' mean) |
+| `timing` | Per step since the previous row, `all` (mean), `rank_min`, `rank_max` over ranks: `output_sync` (the run's own output time) and `output_async` (time of the background writers). The step's own wall time and throughput are the row's `wall_per_step` and `cells_per_second` |
+| `repairs`, `repairs_run` | Each [numerical repair](#numerical-repairs), since the previous row and since the start: `activations`, `cells` (distinct owned cells) and `change`, the integrated change of each quantity it changes |
+| `balance`, `balance_run` | The [conservation ledger](#conservation-ledger), since the previous row and since the first row |
+| `element_drift` | Mixtures with chemistry: the largest change of a rank's element mass over one chemistry call, beyond the recorded repairs, relative to the rank's mass (round-off) |
+
+A breakdown of the step by phase is a profiling question, not a health check:
+timing phases needs a fence after each one, which a CUDA-graph step does not
+have; use a profiler (Nsight Systems, Kokkos Tools) for it.
+
+Mallard warns once per kind when the density or pressure falls below
+10<sup>-3</sup> of its domain mean, when a mass fraction is below
+-10<sup>-6</sup>, and when a checked balance has an unexplained relative
+change above 10<sup>5</sup> machine epsilons.
+
+### Conservation ledger
+
+The ledger is an independent account of the domain totals of mass,
+momentum, total energy and, for mixtures, each element's mass. It does not
+read the solver's face fluxes or residual: at each progress row it
+integrates the totals from the conservative variables, and compares their
+change with
+
+- `boundary`: the transfers through the boundary faces, which it evaluates
+  itself at every stage from the faces' states (the interior reconstruction
+  and the boundary condition's exterior state), normals and areas, with the
+  convective and viscous point fluxes of the scheme (wall models included),
+- `sources`: gravity, `[source]` fields, the mass flow forcing and the
+  sponges, re-evaluated from each stage's state,
+- `repairs`: the recorded changes of the [numerical repairs](#numerical-repairs),
+
+each stage weighted by the time integrator's weights b<sub>i</sub> and
+committed with its time step once the step is accepted. The fields of each
+quantity are `total`, `change`, `boundary`, `sources`, `repairs`,
+`residual` (the change none of these explain), `relative` (residual over
+the larger of the totals and their absolute integral; for momentum,
+sum |&rho;u| + (2 &rho; &rho;E)<sup>1/2</sup>), `checked` and, where the
+ledger cannot close a quantity, a `note` saying why. A conservative setup
+closes at round-off, in a periodic box as with inflow, outflow and walls;
+a missing factor or a wrong sign in the update shows as a residual many
+orders larger.
+
+Not closed (`checked = false`): boundary transfers of gas mixtures (their
+mass and element balances close where the boundaries are walls, symmetry
+planes or periodic), the energy with double flux (not conservative) or
+radiation, the radial momentum of axisymmetric runs, element masses with
+sponges, and every quantity with `coupling = "simpler"`.
+
+### Numerical repairs
+
+Every place that changes the state outside the discretized equations is
+audited:
+
+| Site | What it does | Recorded change |
+|---|---|---|
+| `composition_clip` | Chemistry: negative mass fractions are clipped to zero and the composition renormalized, before and after a cell's integration (the energy stays exact) | `species_<name>` and `element_<symbol>` masses |
+| `energy_reset` | Double flux: after each step, &rho;E is reset to the true equation of state at the pressure of the frozen one | `energy` |
+
+The temperature inversion (Newton from the cell's previous temperature,
+safeguarded by bisection within the thermodynamic fits' range) never
+changes the state, and a failed chemistry integration ends the run with an
+error, so neither is a repair.
 
 ## Units
 
@@ -237,15 +319,23 @@ those of `A` per second.
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
 | `Q` | `s-2` | `CFL`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
 | `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` | `1` |
+| `MASS_FLUX`, `SPECIES_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `Q_W` | `kg s-3` (W/m²) |
+| `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
+| `CF`, `CP`, `Y_PLUS` | `1` | | |
 
-CSV columns: `t` in `s`, coordinates and probe `length` in `m`, `step`,
-`point` and `count` `1`; forces in `N` (`kg m s-2`), per unit depth in 2D
+CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
+`point`, `face`, `cell`, `count` and the normal `nx`, `ny`, `nz` `1`; the
+`area` of a sample of a boundary, cut plane or surface, and its reductions'
+`area`, in `m2` (in 2D, where these are curves, `m`, the reductions' column
+`length`); forces in `N` (`kg m s-2`), per unit depth in 2D
 (`kg s-2`), and the wall model's `Q` in `W`; domain integrals carry the
 volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
-variable's units, `integral` along a curve times `m` and over a region times
-its `volume` (`m3`; `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
+variable's units, `integral` times those of the measure (`m` along a curve,
+`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`; over a region its
+`volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
 forces, integrals and region probes are per radian of the revolved domain, and their units
-say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`. Spectra rows: a `mean` has its
+say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
+(`m2 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
 field's units, `spectrum`, `correlation` and `shell` (sums, not densities)
 the product of their pair's (`U_X*U_Y`: `m2 s-2`); the `abscissa` is a
 wavenumber in `m-1` (spectra, shells) or a separation in `m` (correlations).
@@ -427,18 +517,93 @@ format = "vtp"
 reductions = ["mean", "rms"]
 ```
 
+![Probes of every type over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-light.svg#gh-light-mode-only)
+![Probes of every type over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-dark.svg#gh-dark-mode-only)
+
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | required | Names the files |
 | `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
-| `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`) |
+| `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D surfaces `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (`x`, `y`, `z` of `u`, `v`) |
 | `region` | none | Instead of `type`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
 | `format` | `csv` | `csv`, `hdf5` (one extensible file), `vtkhdf` (one VTKHDF file of every output, which ParaView opens as a time series) or `vtp` (one file per output and a `.pvd` series) |
 | `reductions` | none (`region`: `integral`, `mean`, `min`, `max`) | `integral`, `mean`, `favre`, `min`, `max`, `rms` over the geometry |
 | `samples` | `true` | `false` writes only the reductions |
-| `translate`, `rotate`, `scale` | none | Move the geometry (scale, then rotate about the origin, then translate) |
+| `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
+
+### Cut planes and surfaces
+
+`type = "cut_plane"` intersects the mesh exactly with a plane: one sample per
+cut cell, and integrals exact for the reconstruction polynomials. Surfaces
+(`sphere`, `cylinder`, ...) are resampled on a grid instead. Both have normals,
+so fluxes through them are variables: a closed sphere's `integral` of
+`MASS_FLUX` is the net outflow.
+
+![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-light.svg#gh-light-mode-only)
+![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-dark.svg#gh-dark-mode-only)
+
+```toml
+[[probes]]
+name = "midplane"
+type = "cut_plane"
+point = [0.0, 0.0, 0.5]
+normal = [0.0, 0.0, 1.0]
+variables = ["U", "P", "MASS_FLUX"]
+sampling = "point"
+format = "vtp"
+time_interval = 0.01
+reductions = ["integral"]
+```
+
+### Boundary data
+
+`boundary = "<zone>"` (a name or a list) or `boundary_type = "wall"` (every
+wall) turns each face of the zones into a sample: the state the boundary
+condition sets on the face, wall quantities and fluxes. In 2D the faces form
+ordered polylines with their arc length `s`; in 3D, polygons for ParaView.
+
+```toml
+[[probes]]
+name = "cylinder"
+boundary = "cylinder"
+variables = ["P", "CP", "CF", "Q_W", "Y_PLUS"]
+reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
+time_interval = 1.0
+
+[[probes]]
+name = "inflow"
+boundary = ["inlet", "outlet"]
+samples = false
+variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+reductions = ["integral"]
+```
+
+![Boundary probes on the curved walls of an annulus: each wall a closed polyline traversed with the fluid on its left, and the inner wall's pressure against arc length, point values against cell averages and the exact value](../images/guide/probe_walls-light.svg#gh-light-mode-only)
+![Boundary probes on the curved walls of an annulus: each wall a closed polyline traversed with the fluid on its left, and the inner wall's pressure against arc length, point values against cell averages and the exact value](../images/guide/probe_walls-dark.svg#gh-dark-mode-only)
+
+In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
+
+![Heat flux into an isothermal wall under a sheared warm blob, from a 3D boundary probe](../images/guide/probe_wall_3d-light.svg#gh-light-mode-only)
+![Heat flux into an isothermal wall under a sheared warm blob, from a 3D boundary probe](../images/guide/probe_wall_3d-dark.svg#gh-dark-mode-only)
+
+| Variable | Meaning |
+|---|---|
+| `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*` | Convective fluxes through the face, positive out of the domain |
+| `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force (per radian in axisymmetric runs, as `area`) |
+| `TAU_W`, `TAU_W_X`, ... | Wall shear stress (magnitude, components) |
+| `CF`, `CP` | Skin friction and pressure coefficients of `reference` |
+| `Q_W` | Heat flux into the fluid |
+| `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
+
+Around a cylinder at Re = 40: the wall probe's `CP`, `CF` and `Y_PLUS`, the
+`mean` and `max` of `Y_PLUS`, the `integral` of the tractions (the drag) and
+the `MASS_FLUX` through a closed circle and a cut, whose net outflow settles
+to zero:
+
+![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-light.svg#gh-light-mode-only)
+![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-dark.svg#gh-dark-mode-only)
 
 With TENO, `sampling = "point"` reads each cell's reconstruction polynomial at
 the sample, so a probe converges at the scheme's order (fifth order for
@@ -457,6 +622,13 @@ Pitfalls:
   reconstructed `p / rho` at the cell's composition.
 - CSV is for small probes: it repeats the coordinates every output. Use `vtkhdf`, `hdf5`
   or `vtp` for thousands of samples.
+- Wall shear and heat flux use the viscous flux's one-sided wall gradients:
+  second-order shear on smooth meshes, first-order heat flux at isothermal
+  walls. `CF` is signed along `reference.u`.
+- A cut plane is exact for the mesh's straight-sided cells (curved cells are
+  cut as their straight versions); `bounds` clips it to a box.
+- Fluxes of boundary probes are those of the face states, not the scheme's
+  numerical fluxes: they agree as the mesh is refined.
 - Reductions of points weigh each point 1 (`integral` is a sum); curves
   integrate with three Gauss points per element between samples.
 

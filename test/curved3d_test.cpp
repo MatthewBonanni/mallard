@@ -589,7 +589,7 @@ TEST(Curved3DShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
             for (size_t a = 0; a < 9; a++) worst_J = std::max(worst_J, std::abs(J[a] - K[a]));
         }
     }
-    EXPECT_LT(worst_p, 1e-14);
-    EXPECT_LT(worst_J, 1e-11);
+    EXPECT_LT(worst_p, roundoff(1e-14));
+    EXPECT_LT(worst_J, roundoff(1e-11));
 }
 
