@@ -275,7 +275,7 @@ jobs:
           if [ "$FULL" = true ]; then
             mpirun -n 1 ./build/src/mallard test
           else
-            mpirun -n 1 ./build/src/mallard test --gtest_filter="$mpi_tests"
+            mpirun -n 1 ./build/src/mallard test --gtest_filter="$mpi_tests:CliTest.*:FrontEndTest.*:RunControlTest.*"
           fi
           # Two rank counts at once, so tests that share a file path collide
           mpirun -n 2 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests" & two=$!

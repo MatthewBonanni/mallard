@@ -237,19 +237,20 @@ those of `A` per second.
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
 | `Q` | `s-2` | `CFL`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
 | `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` | `1` |
-| `MASS_FLUX`, `SPECIES_FLUX_<s>` (boundary probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `Q_W` | `kg s-3` (W/m²) |
+| `MASS_FLUX`, `SPECIES_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
 | `CF`, `CP`, `Y_PLUS` | `1` | | |
 
 CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
-`point`, `face`, `count` and the normal `nx`, `ny`, `nz` `1`; a boundary
-probe's face `area` and its reductions' `area` in `m2` (in 2D, where faces
-are segments, `m`, the reductions' column `length`); forces in `N` (`kg m s-2`), per unit depth in 2D
+`point`, `face`, `cell`, `count` and the normal `nx`, `ny`, `nz` `1`; the
+`area` of a sample of a boundary, cut plane or surface, and its reductions'
+`area`, in `m2` (in 2D, where these are curves, `m`, the reductions' column
+`length`); forces in `N` (`kg m s-2`), per unit depth in 2D
 (`kg s-2`), and the wall model's `Q` in `W`; domain integrals carry the
 volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
 variable's units, `integral` times those of the measure (`m` along a curve,
-`m2` over a 3D boundary: `integral_MASS_FLUX` in `kg s-1`; over a region its
-`volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
+`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`;
+over a region its `volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
 forces and integrals are per radian of the revolved domain, and their units
 say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
 (`m2 rad-1`), region probes' `volume` (`m3 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
@@ -441,7 +442,7 @@ reductions = ["mean", "rms"]
 |---|---|---|
 | `name` | required | Names the files |
 | `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
-| `shape` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`) |
+| `shape` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D surfaces `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (`x`, `y`, `z` of `u`, `v`) |
 | `region` | none | Instead of `shape`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
@@ -449,6 +450,30 @@ reductions = ["mean", "rms"]
 | `reductions` | none (`region`: `integral`, `mean`, `min`, `max`) | `integral`, `mean`, `favre`, `min`, `max`, `rms` over the geometry |
 | `samples` | `true` | `false` writes only the reductions |
 | `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
+
+### Cut planes and surfaces
+
+`shape = "cut_plane"` intersects the mesh exactly with a plane: one sample per
+cut cell, and integrals exact for the reconstruction polynomials. Surfaces
+(`sphere`, `cylinder`, ...) are resampled on a grid instead. Both have normals,
+so fluxes through them are variables: a closed sphere's `integral` of
+`MASS_FLUX` is the net outflow.
+
+![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-light.svg#gh-light-mode-only)
+![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-dark.svg#gh-dark-mode-only)
+
+```toml
+[[probes]]
+name = "midplane"
+shape = "cut_plane"
+point = [0.0, 0.0, 0.5]
+normal = [0.0, 0.0, 1.0]
+variables = ["U", "P", "MASS_FLUX"]
+sampling = "point"
+format = "vtp"
+time_interval = 0.01
+reductions = ["integral"]
+```
 
 ### Boundary data
 
@@ -510,6 +535,8 @@ Pitfalls:
 - Wall shear and heat flux use the viscous flux's one-sided wall gradients:
   second-order shear on smooth meshes, first-order heat flux at isothermal
   walls. `CF` is signed along `reference.u`.
+- A cut plane is exact for the mesh's straight-sided cells (curved cells are
+  cut as their straight versions); `bounds` clips it to a box.
 - Fluxes of boundary probes are those of the face states, not the scheme's
   numerical fluxes: they agree as the mesh is refined.
 - Reductions of point sets weigh each point 1 (`integral` is a sum); curves
