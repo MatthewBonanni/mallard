@@ -2,10 +2,10 @@
 # downstream (3D build): direct numerical simulation, no turbulence model.
 #
 # Physics. Mean flow U = 1, rho = 1, sound speed 5 (Mach 0.2). The
-# nscbc_inlet at x = 0 adds isotropic digital-filter turbulence
+# inlet_state with nscbc at x = 0 adds isotropic digital-filter turbulence
 # ([boundaries.turbulence]): u' = 0.1 U, integral length L = 0.25 in every
 # direction and, by Taylor's hypothesis, integral time L / U. Re_L =
-# u' L / nu = 100. The nscbc_outlet at x = 6 lets it leave.
+# u' L / nu = 100. The outlet_pressure with nscbc at x = 6 lets it leave.
 #
 # Mesh: 384 x 128 x 128 hexahedra (dx = L / 16). Statistics over
 # t = 8-30 (3.7 flow-through times), averaged over y and z with

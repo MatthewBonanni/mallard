@@ -6,9 +6,9 @@
 # at U_b = 16.6 m/s (Re_D = 45,000 with Sutherland's viscosity) and passes an
 # equilateral triangle of edge D = 0.04 m, apex upstream, base at x = 0. The
 # rig is 6 D wide; here the span is periodic over 2 D = 0.08 m, as in the
-# workshop's computations. Inlet 5 D upstream of the base (nscbc_inlet with
+# workshop's computations. Inlet 5 D upstream of the base (inlet_state with nscbc, with
 # digital-filter turbulence: u' = 5% U_b, isotropic, integral length 10 mm),
-# outlet 17 D downstream (the rig's exit; nscbc_outlet), no-slip adiabatic
+# outlet 17 D downstream (the rig's exit; outlet_pressure with nscbc), no-slip adiabatic
 # walls (channel walls and bluff body, not wall-resolved: no wall model).
 #
 # LES: Sigma model with Scotti's filter width, hybrid KEEP / HLLC flux, MUSCL

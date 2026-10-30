@@ -163,8 +163,8 @@ $$
 The neighbors are the face neighbors. A boundary face contributes its ghost
 state ([chapter 9](boundaries_sources.md#weak-imposition)) at the mirror
 image of the cell centroid, $\Delta\mathbf{x} = 2 d\,\mathbf{n}_f$ with $d$
-the centroid's distance to the face; prescribed states (`dirichlet`, `upt`,
-`farfield`) sit at the face centroid instead. Across `extrapolation` faces
+the centroid's distance to the face; prescribed states (`dirichlet`, `inlet_state`,
+`farfield`) sit at the face centroid instead. Across `outlet_extrapolation` faces
 with an image face ([chapter 9](boundaries_sources.md#transmissive-boundaries))
 the neighbor is the image cell, moved outward by the translation that takes
 the image face onto the boundary face. Tetrahedra, whose four face
@@ -429,7 +429,7 @@ one-sided stencils of boundary cells and on triangles, where its errors
 cancel only in the interior of regular meshes; stencils that cannot
 determine the quadratic (fewer than $d + d(d+1)/2$ points, or a Cholesky
 pivot below $10^{-10}$ of its diagonal) use the linear fit. Ghosts sit at
-the mirror image of the centroid as for MUSCL. Across `extrapolation`
+the mirror image of the centroid as for MUSCL. Across `outlet_extrapolation`
 boundaries with image faces the stencil continues instead, as across a
 periodic seam: each boundary node maps to the matching node of its image
 face, and the cells around that node, moved back by the same translation,
@@ -443,7 +443,7 @@ r-weighted averages through the cells' second moments. Single gases
 differentiate $\mathbf{W}$, with
 $\nabla T = (\nabla p - R T\nabla\rho)/(\rho R)$; mixtures differentiate
 $[\mathbf{u}, T, X_1,\dots,X_{N_s}]$ directly, with the wall velocity at
-viscous walls and the prescribed $T$ and $X_k$ at `upt` boundaries
+viscous walls and the prescribed $T$ and $X_k$ at `inlet_state` boundaries
 (the cell's own values elsewhere). The face gradients built from these are
 in [chapter 7](fluxes.md#viscous-fluxes).
 

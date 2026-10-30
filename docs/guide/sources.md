@@ -171,7 +171,7 @@ Several sponges add up. Strength and reference are evaluated once, at cell
 centroids; a comparison in `strength` gives the layer any shape
 ([Geometry](geometry.md#who-uses-what)). The source is explicit and caps the time step at
 `1 / max(strength)`. Example: `channel_inflow_retau180`, a sponge over the last
-fifth of the channel in front of its `nscbc_outlet`.
+fifth of the channel in front of its `outlet_pressure` with `nscbc`.
 
 ## See also
 

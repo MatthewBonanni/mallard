@@ -23,19 +23,19 @@ $u_n = \mathbf{u}^L\cdot\mathbf{n}$, the exterior states $\mathbf{W}^b = [\rho, 
 - `symmetry`, inviscid walls: $[\rho^L,\ \mathbf{u}^L - 2u_n\mathbf{n},\ p^L]$;
 - `wall_adiabatic`, `wall_heat_flux` (viscous): $[\rho^L,\ 2\mathbf{u}_w - \mathbf{u}^L,\ p^L]$;
 - `wall_isothermal` (viscous, single gas): as above, with $\rho^b = p^L/(R\,T^b)$, $T^b = \max(2T_w - T^L,\ 0.1\,T_w)$;
-- `upt`, `dirichlet`: the prescribed state (`dirichlet`: per face, from expressions);
+- `inlet_state`, `dirichlet`: the prescribed state (`dirichlet`: per face, from expressions);
 - `farfield`: eq. $\eqref{eq:far-field}$;
-- `p_out`: subsonic ($u_n < a^L$): $[\rho^L p_b/p^L,\ \mathbf{u}^L,\ p_b]$, keeping $T$; supersonic: $\mathbf{W}^L$;
-- `p_out_average`: as `p_out` with $p^L + \Delta p$, $\Delta p$ the target minus the area average of the adjacent cells' pressure, updated at every stage (and $p \ge 10^{-3}p^L$);
-- `extrapolation`: the image-face state, below;
-- `nscbc_outlet`, `nscbc_inlet`: eq. $\eqref{eq:characteristic-boundaries-3}$.
+- `outlet_pressure`: subsonic ($u_n < a^L$): $[\rho^L p_b/p^L,\ \mathbf{u}^L,\ p_b]$, keeping $T$; supersonic: $\mathbf{W}^L$;
+- `outlet_pressure` with `average`: as `outlet_pressure` with $p^L + \Delta p$, $\Delta p$ the target minus the area average of the adjacent cells' pressure, updated at every stage (and $p \ge 10^{-3}p^L$);
+- `outlet_extrapolation`: the image-face state, below;
+- `outlet_pressure` with `nscbc`, `inlet_state` with `nscbc`: eq. $\eqref{eq:characteristic-boundaries-3}$.
 
 $\mathbf{u}_w$ is the wall velocity and $T_w$ the wall temperature. Under
 gravity, walls and symmetry planes continue the hydrostatic pressure in
 their ghosts: a ghost at distance $\delta$ beyond the face has
 $p^b = p^L + \rho^L(\mathbf{g}\cdot\mathbf{n})\,\delta$. For gas mixtures
 the exterior state also carries the mass fractions and $(\gamma, e_0)$: the
-prescribed ones at `upt` faces, the image's at transmissive faces, the
+prescribed ones at `inlet_state` faces, the image's at transmissive faces, the
 interior's elsewhere. Walls are adiabatic and non-catalytic for mixtures
 (`wall_isothermal` is not available).
 
@@ -62,7 +62,7 @@ outflow.
 
 ### Transmissive boundaries
 
-`extrapolation` faces, and characteristic faces before their
+`outlet_extrapolation` faces, and characteristic faces before their
 characteristic treatment, take the state of an *image face*: the interior
 face reached by translating the boundary face inward by the depth of the
 boundary cell (or, where no face lies there, as for pyramids, whose apex is
@@ -74,7 +74,7 @@ solution that does not vary normal to the boundary, at any order. A
 zero-gradient copy of the boundary cell would feed the cell back to itself
 at inflow boundaries, and on triangles, whose centroids are offset from the
 face, create an O(1) mass imbalance at moving shocks. The gradient stencils
-of `extrapolation` boundaries continue across them the same way, through the
+of `outlet_extrapolation` boundaries continue across them the same way, through the
 image cells ([chapter 6](finite_volume.md#gradients-for-the-viscous-terms)).
 
 ### Periodic boundaries
@@ -98,7 +98,7 @@ take a slip wall's exterior state and the model's stress and heat flux
 
 ## Characteristic boundaries
 
-`nscbc_outlet` and `nscbc_inlet` are the non-reflecting boundaries of
+`outlet_pressure` with `nscbc` and `inlet_state` with `nscbc` are the non-reflecting boundaries of
 [Poinsot & Lele 1992](../references.md#poinsot-lele-1992) in a weak,
 finite-volume form (`src/numerics/characteristic.h`;
 [design notes](../design/nscbc.md)). Each face keeps its own pressure and

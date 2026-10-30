@@ -27,7 +27,7 @@
 # by nu_u / S_L instead would move them 5 times further right.
 #
 # Setup (examples/flame_vortex/flame_vortex.py): the planar Cantera flame in its frame (fresh
-# gas entering on the left at S_L, p_out on the right) and, 3 R_c + delta_L
+# gas entering on the left at S_L, outlet_pressure on the right) and, 3 R_c + delta_L
 # upstream of it, two Gaussian vortices (stream function C exp(-d^2 / 2 R_c^2),
 # centers 2 R_c apart, so r = 4 R_c) with their cyclostrophic pressure. Only
 # the half above the pair's axis is computed (symmetry planes at the axis and

@@ -78,7 +78,7 @@ type = "symmetry"
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = {p:.17g}
 
 [[boundaries]]

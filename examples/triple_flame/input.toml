@@ -20,11 +20,11 @@
 # chemistry, mixture-averaged transport. The planar flame at Z_st = 0.304 has
 # S_L = 1.191 m/s, thermal thickness delta_L = 0.385 mm, burnt gas 2008 K and
 # rho_u / rho_b = 5.94 (sqrt: 2.44); its Lewis numbers are 0.41 (H2) and 1.67
-# (O2). The fresh gas enters on the left (upt with a composition that varies
+# (O2). The fresh gas enters on the left (inlet_state with a composition that varies
 # across the inlet: a tanh mixture-fraction profile from air to fuel, Z_st on
 # the midline, mixing thickness 4 delta_L here and 12 delta_L in thick/), the
 # sides are symmetry planes 3 delta_M + 24 delta_L apart and the burnt gas
-# leaves through p_out. The run starts from a planar front 12 delta_L from the
+# leaves through outlet_pressure. The run starts from a planar front 12 delta_L from the
 # inlet with each row's equilibrium products behind it (examples/triple_flame/triple_flame.py).
 # 12 cells per delta_L (32 um; 384 x 432 cells, thick/: 384 x 720), MUSCL,
 # HLLC, SSPRK3, CFL 0.8.

@@ -1,4 +1,4 @@
-# closed.toml with upt at the same initial mass flux in place of the
+# closed.toml with inlet_state at the same initial mass flux in place of the
 # mass-flow inlet: the velocity and the pressure are held, and the mass flow
 # drifts as the pressure in the duct rises.
 

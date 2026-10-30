@@ -3,12 +3,12 @@
 #
 # Physics. Walls at y = 0 and 2h, periodic in z, inflow at x = 0, outflow at
 # x = 8 pi h. Units h = 1, bulk density and velocity 1, Re_b = 5600, bulk
-# Mach 0.2, isothermal walls (as examples/channel_retau180). The nscbc_inlet
+# Mach 0.2, isothermal walls (as examples/channel_retau180). The inlet_state
 # takes its mean velocity and Reynolds stresses from inflow_profile.csv:
 # the statistics of the periodic channel example (tools/post/plane_average.py
 # --average x z). [boundaries.turbulence] adds digital-filter turbulence
 # with integral lengths 0.5h (u, streamwise) and 0.1-0.2h otherwise. The
-# outlet is an nscbc_outlet behind a sponge over x > 20h (not analyzed),
+# outlet is an outlet_pressure with nscbc behind a sponge over x > 20h (not analyzed),
 # with beta = 0: with the default beta, near-wall eddies leaving through it
 # reversed the flow in its last cells and the run diverged.
 #
@@ -124,7 +124,7 @@ prefix = "stats/channel"
 time_interval = 35.0
 variables = ["MEAN_*", "COV_*"]
 
-# Turbulence leaving through nscbc_outlet drives its pressure away; damp it over the last 5.1 h (not analyzed)
+# Turbulence leaving through the nscbc outlet drives its pressure away; damp it over the last 5.1 h (not analyzed)
 [[sponges]]
 strength = "x > 20.0 ? 30.0 * ((x - 20.0) / 5.1327)^2 : 0"
 u = ["8 / 7 * (1 - abs(y - 1))^(1 / 7)", 0.0, 0.0]

@@ -230,7 +230,7 @@ file = "counterflow.restart"
 [[boundaries]]
 name = "fuel"
 where = "{jet}"
-type = "upt"
+type = "inlet_state"
 u = [{U_f:.10g}, 0.0, 0.0]
 p = {P}
 T = {T_in:.10g}
@@ -239,7 +239,7 @@ X = {{ {fmt(FUEL_X)} }}
 [[boundaries]]
 name = "fuel"
 where = "{coflow}"
-type = "upt"
+type = "inlet_state"
 u = [{U_f:.10g}, 0.0, 0.0]
 p = {P}
 T = {T_in:.10g}
@@ -248,7 +248,7 @@ X = {{ "N2" = 1.0 }}
 [[boundaries]]
 name = "oxidizer"
 where = "{jet}"
-type = "upt"
+type = "inlet_state"
 u = [{-U_o:.10g}, 0.0, 0.0]
 p = {P}
 T = {T_in:.10g}
@@ -257,7 +257,7 @@ X = {{ {fmt(OX_X)} }}
 [[boundaries]]
 name = "oxidizer"
 where = "{coflow}"
-type = "upt"
+type = "inlet_state"
 u = [{-U_o:.10g}, 0.0, 0.0]
 p = {P}
 T = {T_in:.10g}
@@ -273,12 +273,12 @@ type = "symmetry"
 
 [[boundaries]]
 name = "side_y"
-type = "p_out"
+type = "outlet_pressure"
 p = {P}
 
 [[boundaries]]
 name = "side_z"
-type = "p_out"
+type = "outlet_pressure"
 p = {P}
 
 [numerics]

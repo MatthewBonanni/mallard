@@ -19,7 +19,7 @@
 # and the shock as a jump; walls are slip (symmetry) planes, so no wall
 # boundary layers. A quarter of the tube (symmetry planes y = 0 and z = 0):
 # 704 x 127 x 127 = 11.4M hexahedra over 5.5 D x 0.99 D x 0.99 D, the shock
-# 0.1 D ahead of the bubble, the post-shock state imposed at the left (upt,
+# 0.1 D ahead of the bubble, the post-shock state imposed at the left (inlet_state,
 # 1.2 D upstream of the bubble's center) and a transmissive right end. MUSCL,
 # HLLC, conservative (double_flux = false: at a 3-cell interface it removes
 # no visible pressure oscillation and makes the mixing layer 3 K too cold).

@@ -220,6 +220,45 @@ TEST(ErrorMessages, MassFlowInletTakesExactlyOneOfMdotAndMassFlux) {
     expect_parts(run_error(both), {line_prefix(both, "mdot") + "boundaries[name = \"left\"].mdot", "given together"});
 }
 
+// Each boundary type requires its keys and rejects those of other types, naming
+// the type that takes them. Fails if a type silently ignores a key of another
+// (a wall_isothermal with q runs as if q were not there) or infers its subtype
+// from the keys present.
+TEST(ErrorMessages, BoundaryKeysOfAnotherTypeNameTheTypeThatTakesThem) {
+    const std::string q = replaced(box(), "type = \"symmetry\"", "type = \"wall_isothermal\"\nT = 300.0\nq = 1.0\n");
+    expect_parts(run_error(q), {line_prefix(q, "q = 1.0") + "boundaries[name = \"left\"].q",
+                                "`q` doesn't apply to `wall_isothermal`", "Use `wall_heat_flux`",
+                                "docs/guide/boundary_conditions.md#wall_isothermal"});
+    const std::string missing = replaced(box(), "type = \"symmetry\"", "type = \"wall_isothermal\"\n");
+    expect_parts(run_error(missing), {"boundaries[name = \"left\"].T: missing; `wall_isothermal` needs `T`"});
+    const std::string nscbc =
+        replaced(box(), "type = \"symmetry\"", "type = \"inlet_stagnation\"\np0 = 2.0\nT0 = 1.2\nnscbc = { L = 1.0 }\n");
+    expect_parts(run_error(nscbc), {"`nscbc` doesn't apply to `inlet_stagnation` (not supported yet: planned in "
+                                    "https://github.com/MatthewBonanni/mallard/issues/565)",
+                                    "Use `inlet_state` or `outlet_pressure`"});
+}
+
+// Options that do not compose (yet) are errors naming both, and a vector is
+// given one way only. Fails if one of them is accepted and silently dropped.
+TEST(ErrorMessages, BoundaryOptionsThatDontComposeNameBoth) {
+    const std::string u = N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]";
+    auto error = [&](const std::string & left) { return run_error(replaced(box(), "type = \"symmetry\"", left)); };
+    expect_parts(error("type = \"outlet_pressure\"\np = 1.0\naverage = true\nnscbc = { L = 1.0 }\n"),
+                 {".average: `average` and `nscbc` don't combine on `outlet_pressure`", "issues/565", "Remove one"});
+    expect_parts(error("type = \"inlet_state\"\nu = " + u + "\np = 1.0\nT = 1.0\n"
+                       "turbulence = { reynolds_stress = " + std::string(N_DIM == 3 ? "[0.01, 0.01, 0.01, 0, 0, 0]" : "[0.01, 0.01, 0]") +
+                       ", length_scale = 0.2 }\n"),
+                 {".turbulence: `turbulence` needs `nscbc` on `inlet_state`", "Add nscbc = { L = ... }"});
+    expect_parts(error("type = \"inlet_state\"\nu = " + u + "\ndirection = " + u + "\np = 1.0\nT = 1.0\n"),
+                 {"u is a vector, so it has a direction already"});
+    expect_parts(error("type = \"wall_adiabatic\"\nu = 1.0\n"),
+                 {".u: is a speed, so the wall needs a direction", "Add direction = [...], or give u as a vector"});
+    expect_parts(error("type = \"outlet_pressure\"\np = \"1 + 0.1 * y\"\naverage = true\n"),
+                 {".p: with average = true is one area-averaged pressure: it may depend on t, not on x, y or z"});
+    expect_parts(error("type = \"outlet_pressure\"\np = 1.0\nnscbc = { L = 1.0, sigma_T = 1.0 }\n"),
+                 {".nscbc.sigma_T: doesn't apply to an outlet's nscbc"});
+}
+
 TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {
     EXPECT_EQ(std::string(InputError("mesh.transform must be a table.").what()),
               "mesh.transform must be a table. See docs/input.md#mesh.");

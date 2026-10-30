@@ -1,11 +1,11 @@
 # Design: characteristic boundary conditions and sponge layers
 
-Status: implemented (`nscbc_outlet`, `nscbc_inlet`, `[[sponges]]`).
+Status: implemented (`outlet_pressure` with `nscbc`, `inlet_state` with `nscbc`, `[[sponges]]`).
 
 Flame, jet and wake simulations need open boundaries that let acoustic waves,
 vortices and flames leave without reflecting. They must also hold a mean
-pressure or inflow state. `p_out` and `upt` impose their state exactly and
-reflect almost all of an acoustic wave. `extrapolation` holds nothing, and
+pressure or inflow state. `outlet_pressure` and `inlet_state` impose their state exactly and
+reflect almost all of an acoustic wave. `outlet_extrapolation` holds nothing, and
 (see below) still reflects. The Navier-Stokes characteristic boundary
 conditions (NSCBC) of
 [Poinsot & Lele (1992)](../references.md#poinsot-lele-1992) let outgoing
@@ -101,7 +101,7 @@ Exterior state on a subsonic face:
 | Outgoing acoustic | `W_l` |
 | Incoming acoustic | the face's `p_b`, `u_b`, combined with the local `Z` |
 | Entropy, tangential velocity and composition at outflow | `W_l`, with an isentropic density change |
-| Incoming convective waves (backflow at outlets) | the transmissive state `W_e` of `extrapolation` (the reconstructed state on the interior image face), not a copy of the boundary cell |
+| Incoming convective waves (backflow at outlets) | the transmissive state `W_e` of `outlet_extrapolation` (the reconstructed state on the interior image face), not a copy of the boundary cell |
 
 Special cases:
 
@@ -125,7 +125,7 @@ the boundary cell's inner face. With exact upwinding, such a jump in an
 outgoing wave does nothing. But the default low-Mach correction scales the
 velocity jump by `z = max(M, 0.1)`, which mixes it into the incoming wave.
 
-A normal acoustic pulse leaving through `extrapolation` (400 cells over the
+A normal acoustic pulse leaving through `outlet_extrapolation` (400 cells over the
 domain, the pulse 20 cells wide, default low-Mach correction) reflects by
 these fractions:
 
@@ -143,7 +143,7 @@ TENO-E keeps its mirror cells across characteristic faces. Its one-sided
 stencils without them are unstable in single precision, and with the face's
 own incoming wave the mirrors cost little:
 
-| Reconstruction | `extrapolation` | `nscbc_outlet`, `sigma = 0` |
+| Reconstruction | `outlet_extrapolation` | `outlet_pressure` with `nscbc`, `sigma = 0` |
 |---|---|---|
 | MUSCL | 15% | 0.2% (1% with the ghost) |
 | TENO5 | 34% | 1% |
@@ -151,7 +151,7 @@ own incoming wave the mirrors cost little:
 (the pulse reflected on quadrilaterals, 200 cells over the domain, pulse 10
 cells wide)
 
-Everything else treats the face like `extrapolation`:
+Everything else treats the face like `outlet_extrapolation`:
 
 - the image-face values and gradients of the viscous fluxes, or zero normal
   derivatives where no image exists (the outflow viscous conditions of
@@ -233,7 +233,7 @@ leaving through an outlet found three such modes:
 
 **Test case.** A 3D box `[0, 2] x [0, 1]^2`:
 
-- `nscbc_inlet` at `u = 0.2` (`c = 1`), and `nscbc_outlet` with `L = 12`
+- `inlet_state` with `nscbc` at `u = 0.2` (`c = 1`), and `outlet_pressure` with `nscbc = { L = 12 }`
 - symmetry planes on the sides, or no-slip walls with cells clustered toward
   them
 - `mu = 2e-4`, MUSCL without a limiter
@@ -290,7 +290,7 @@ diverged:
   dropping edge faces: bounded, but the mean pressure of the symmetry boxes
   rose by 6 to 53% of `p_t`.
 
-## Inlet (`nscbc_inlet`)
+## Inlet (`inlet_state` with `nscbc`)
 
 The target is `u_t`, `T_t` and, for mixtures, the composition.
 
@@ -312,7 +312,7 @@ The target is `u_t`, `T_t` and, for mixtures, the composition.
   wave depends only on the incoming acoustic condition.
 - **Ghost density**: `p_g / (R_t T_g)`, with `R_t` the gas constant of the
   target composition.
-- **Composition**: imposed exactly, as for `upt`. It is a convective wave
+- **Composition**: imposed exactly, as for `inlet_state`. It is a convective wave
   and does not reflect acoustics. A relaxed composition would need the ghost
   thermodynamics `[gamma, e0]` of a blended composition at every evaluation.
   The flow block uses the target's `[gamma, e0]` on inflow faces.
@@ -354,16 +354,16 @@ variables, and the matching term to each species partial density
   when a sponge is present.
 
 A sponge works with any boundary condition. The usual setup is a sponge in
-front of an `nscbc_outlet` or `farfield`.
+front of an `outlet_pressure` with `nscbc` or `farfield`.
 
 ## Validation (`test/nscbc_test.cpp`, `test/boundary3d_test.cpp`, MPI tests)
 
 - **Acoustic pulse at normal incidence**, default low-Mach correction:
   - `sigma = 0` reflects under 0.25% with MUSCL (quadrilaterals, triangles
     and jittered mixed meshes) and 1% with TENO5 (quadrilaterals), against
-    0.6 to 34% for `extrapolation`.
+    0.6 to 34% for `outlet_extrapolation`.
   - `sigma = 20` reflects as `dw-/dt = -K p'` predicts, within 3%.
-  - `p_out` reflects 97 to 99%.
+  - `outlet_pressure` reflects 97 to 99%.
 - **Vortex** (M = 0.25, swirl 0.05) leaving through an outlet between walls,
   against a domain three times longer. RMS pressure error at t = 3:
   - default: 0.05 times the vortex's pressure deficit, on quadrilaterals,
@@ -375,7 +375,7 @@ front of an `nscbc_outlet` or `farfield`.
   quadrilaterals, triangles and jittered meshes.
 - **Gas mixtures**:
   - an acoustic pulse in air leaves (under 2% reflected, against over 90%
-    for `p_out`)
+    for `outlet_pressure`)
   - a hot H2/N2 front leaves without disturbing the pressure by more than 5%
     of its dynamic pressure
   - the flame example above

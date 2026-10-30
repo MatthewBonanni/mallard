@@ -10,7 +10,7 @@ rho, Y). The run is a strip of Nx cells (with an aspect ratio of 10, so that
 the cross-stream faces do not limit the time step) from --upstream thermal
 thicknesses upstream of the flame (the maximum of dT/dx) to --downstream
 downstream, in the flame's frame: the fresh mixture enters on the left at
-Cantera's flame speed times --inlet-factor (upt) and leaves through a
+Cantera's flame speed times --inlet-factor (inlet_state) and leaves through a
 pressure outlet at 1 atm. Each cell starts from the average of Cantera's
 profile over 16 points. --ref-delta sizes the cells and the domain with that
 thickness instead of the flame's own (to give flames of different transport
@@ -171,7 +171,7 @@ file = "flame.restart"
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [{args.inlet_factor * S_L:.17g}, 0.0{zero}]
 p = {p}
 T = {T[0]:.17g}
@@ -179,7 +179,7 @@ X = {{ {X_in} }}
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = {p}
 
 {"" if ny > 1 else bottom_top}{extra_bc}

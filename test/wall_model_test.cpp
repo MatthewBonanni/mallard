@@ -479,3 +479,40 @@ TEST(WallModel3D, RestartIsExact) {
 }
 
 #endif
+
+// Each wall takes its own model and parameters: in one run, a gfm wall and an
+// equilibrium wall at different exchange heights each carry the stress they
+// carry when both walls are theirs. One step on a tall channel keeps each
+// wall's exchange and edge points out of reach of the other wall. Fails if a
+// run's walls share one model or one exchange height (the first or the last
+// wall's), or a per-face copy takes another wall's.
+TEST(WallModel3D, EachWallTakesItsOwnModel) {
+    const uint32_t n[3] = {3, 24, 3};
+    const std::string gfm = "type = \"wall_isothermal\"\nT = 1.0\n"
+                            "wall_model = { model = \"gfm\", exchange_distance = 0.3, edge_distance = 0.4 }\n";
+    auto ode = [](const std::string & h) {
+        return "type = \"wall_isothermal\"\nT = 1.0\nwall_model = { model = \"equilibrium\", exchange_distance = " + h +
+               " }\n";
+    };
+    auto forces = [&](const std::string & bottom, const std::string & top) {
+        Solver solver;
+        solver.init(parse_toml(channel_input(
+            "cartesian", n, bottom, top,
+            "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.5 * y * (1 - y) + 0.1 * y\", \"0.0\", \"0.0\"]\np = \"1.0\"\n",
+            "n_steps = 1\ncfl = 0.4\n")));
+        solver.run();
+        solver.copy_device_to_host();
+        auto m = solver.get_mesh();
+        return std::make_pair(solver.calc_force(m->get_face_zone("bottom")->faces)[3],
+                              solver.calc_force(m->get_face_zone("top")->faces)[3]);
+    };
+    const auto mixed = forces(gfm, ode("0.2"));
+    const auto both_gfm = forces(gfm, gfm);
+    const auto both_ode = forces(ode("0.2"), ode("0.2"));
+    const auto other_height = forces(gfm, ode("0.3"));
+    EXPECT_EQ(mixed.first, both_gfm.first);
+    EXPECT_EQ(mixed.second, both_ode.second);
+    EXPECT_NE(mixed.second, both_gfm.second);
+    EXPECT_NE(mixed.second, other_height.second);
+    EXPECT_NE(mixed.first, both_ode.first);
+}

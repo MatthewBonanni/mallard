@@ -1425,7 +1425,7 @@ q    = -lambda grad T + sum_k h_k j_k
   half the `O(Ns^2)` work on hexahedra and a third on triangles, at the same
   order. The gradients of `[u, T, X_1 .. X_Ns]` use the viscous gradient's
   stencil and weights; boundary ghosts take the ghost state's velocity
-  (no-slip walls), and the prescribed `T` and `X` at `upt` faces; isothermal
+  (no-slip walls), and the prescribed `T` and `X` at `inlet_state` faces; isothermal
   walls give the mirror image of the centroid `2 T_w - T`, heat-flux walls
   `T + 2 d q / lambda`. Symmetry planes carry no heat or species flux;
   transmissive faces take their image face's values; outflow faces have zero
@@ -1493,7 +1493,7 @@ and transport model, refined to `slope = curve = 0.02`) shifted to 6 thermal
 thicknesses `delta_T = (T_b - T_u) / max dT/dx` from the inlet, 9 to the
 outlet; 20 cells per `delta_T` (cells ten times taller than wide, so that the
 cross-stream faces do not limit the time step); fresh mixture entering at
-Cantera's flame speed through `upt` and a pressure outlet at 1 atm; MUSCL,
+Cantera's flame speed through `inlet_state` and a pressure outlet at 1 atm; MUSCL,
 HLLC, SSPRK3, CFL 0.2 (and 0.1), two flame times `delta_T / S_L`. Why this
 setup: a frame moving with the flame would need moving-frame terms the solver
 does not have, and a flame propagating into gas at rest needs a domain many
@@ -1501,7 +1501,7 @@ flame lengths long; holding it near its Cantera position keeps the domain at
 15 `delta_T`. The flame speed is measured as the consumption speed of the
 deficient reactant, `S_c = -int W_k omega_k dx / (rho_u (Y_k,u - Y_k,b))`
 (H2 or CH4 lean, O2 rich), which equals the flame speed of a steady flame in
-any frame, so the inflow velocity need not match it: the `upt` inlet, which
+any frame, so the inflow velocity need not match it: the `inlet_state` inlet, which
 imposes `p` as well as `u`, lets the inflow settle 3% below the imposed
 velocity, and the flame drifts upstream at a few cm/s. The displacement speed
 `u_inlet - dx_f/dt` of the mid-temperature point is the cross-check; both
@@ -1771,7 +1771,7 @@ X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }     # or Y = {...}; normalized; unlisted sp
 
 [[boundaries]]
 zone = "left"
-type = "upt"
+type = "inlet_state"
 u = [10.0, 0.0]
 p = 101325.0
 T = 300.0
@@ -1788,18 +1788,18 @@ surrogate `(gamma, e0)`:
 
 | Boundary | Species | Thermo |
 |---|---|---|
-| `extrapolation`, image faces | from the image | from the image |
+| `outlet_extrapolation`, image faces | from the image | from the image |
 | `symmetry`, walls | interior `Y` (zero normal diffusive flux) | interior (wall temperatures and heat fluxes enter the diffusive fluxes only) |
-| `upt`, `farfield`, `dirichlet` | given `Y`/`X` (expressions for `dirichlet`) | from given `p`, `T`, `Y` |
-| `p_out`, `p_out_average` | interior `Y` | interior `gamma` |
+| `inlet_state`, `farfield`, `dirichlet` | given `Y`/`X` (expressions for `dirichlet`) | from given `p`, `T`, `Y` |
+| `outlet_pressure`, `outlet_pressure` with `average` | interior `Y` | interior `gamma` |
 
 `farfield` uses the Riemann invariants with each side's frozen `gamma`.
 Catalytic walls and species-specific wall fluxes are out of scope.
 
-Milestone 3 supports `extrapolation`, `symmetry`, `wall_adiabatic` (slip for
-`euler`, no-slip for `navier_stokes` from milestone 9), `upt` and `p_out` for mixtures;
-`farfield`, `dirichlet` and `p_out_average` are rejected at input until they
-are needed. The composition of `upt` may vary along the boundary (stratified
+Milestone 3 supports `outlet_extrapolation`, `symmetry`, `wall_adiabatic` (slip for
+`euler`, no-slip for `navier_stokes` from milestone 9), `inlet_state` and `outlet_pressure` for mixtures;
+`farfield`, `dirichlet` and `outlet_pressure` with `average` are rejected at input until they
+are needed. The composition of `inlet_state` may vary along the boundary (stratified
 inflows such as a mixing layer feeding a triple flame): each value of `X` or
 `Y` can be an expression in `x`, `y`, `z`, with an optional `balance` species
 as in `[initialize]`. Each face then gets its own copy of the condition, with

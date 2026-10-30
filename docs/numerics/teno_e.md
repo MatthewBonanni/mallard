@@ -589,8 +589,8 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     degree cap above, orders 5 and 6 are stable: fifth order in $L_1$ and
     fourth at the walls. The fine cylinder at order 5 keeps a small drag
     noise (rms $7\times 10^{-4}$) from the outermost ring's odd-even mode
-    along the far field, which every far-field condition tried (`upt`,
-    `p_out`, `farfield`) shows, mirrored or not.
+    along the far field, which every far-field condition tried (`inlet_state`,
+    `outlet_pressure`, `farfield`) shows, mirrored or not.
 
 - **Thin cells.** Before the ranking metric, a 1% pressure pulse at rest in
     a 16 × 16 × 4 box of `cartesian_prism` cells of

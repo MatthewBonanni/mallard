@@ -106,8 +106,8 @@ def main():
     path = os.path.join(args.run_dir, "input.toml")
     text = open(path).read()
     text = text.replace('periodic = ["y"]\n', "")
-    text = text.replace('name = "right"\ntype = "p_out"\np = 101325.0\n',
-                        'name = "right"\ntype = "p_out"\np = 101325.0\n\n[[boundaries]]\nname = "bottom"\n'
+    text = text.replace('name = "right"\ntype = "outlet_pressure"\np = 101325.0\n',
+                        'name = "right"\ntype = "outlet_pressure"\np = 101325.0\n\n[[boundaries]]\nname = "bottom"\n'
                         'type = "symmetry"\n\n[[boundaries]]\nname = "top"\ntype = "symmetry"\n')
     fuel = "CH4" if "Y_CH4" in open(args.full).readline() else "H2"
     variables = ["RHO", "U", "P", "T", "HRR", "Y_" + fuel, "Y_O2"] + (["QRAD"] if args.radiation else [])

@@ -1,6 +1,6 @@
 # Design: synthetic turbulent inflow
 
-Status: implemented (`[boundaries.turbulence]` of `nscbc_inlet`).
+Status: implemented (`[boundaries.turbulence]` of `inlet_state` with `nscbc`).
 
 Spatially developing DNS (jets, flames, channels, boundary layers) need
 turbulence entering through the inlet: a prescribed mean profile, Reynolds
@@ -104,7 +104,7 @@ fixed chunks summed in order. The result is the same on every rank and
 partition. The removed mode carries about `4 L_y L_z / A` of the normal
 Reynolds stress (`2 L_y / W` in 2D).
 
-## Injection through `nscbc_inlet`
+## Injection through `inlet_state` with `nscbc`
 
 The characteristic inlet ([nscbc.md](nscbc.md)) now takes its target
 velocity per face (`BoundaryData::char_target`), set from expressions or a
@@ -136,7 +136,7 @@ the generator has no state, so turbulent inlets restart bitwise.
 
 ## Mean profile and statistics from a precursor
 
-`u` of `nscbc_inlet` takes expressions in `x`, `y`, `z`. For turbulence,
+`u` of `inlet_state` with `nscbc` takes expressions in `x`, `y`, `z`. For turbulence,
 `reynolds_stress` takes numbers or expressions, or `profile` reads a CSV of
 plane averages as `tools/post/plane_average.py` writes it from a precursor's
 `[statistics]` (`MEAN_U_*`, `COV_U_*_U_*`), interpolated along its
@@ -166,7 +166,7 @@ negative (next to walls) become zero.
 **Setup.**
 - Box `6 x 2 x 2`, periodic across, 384 x 128 x 128 hexahedra.
 - `U = 1`, `M = 0.2`, isotropic `u' = 0.1`, `L = 0.25`, `Re_L = u' L / nu = 100`.
-- MUSCL (no limiter), HLLC, SSPRK3; `nscbc_inlet` and `nscbc_outlet`, no sponge.
+- MUSCL (no limiter), HLLC, SSPRK3; `inlet_state` with `nscbc` and `outlet_pressure` with `nscbc`, no sponge.
 - Statistics over `t = 8-30` (3.7 flow-throughs), averaged over y and z.
 
 **Inlet.**
@@ -207,7 +207,7 @@ negative (next to walls) become zero.
 - `Re_b = 5600`, `M_b = 0.2`. MUSCL (no limiter), HLLC, SSPRK3.
 - The inlet's `profile` holds the statistics of Mallard's periodic channel (`Re_tau = 172`). The length scales are `0.5h, 0.15h, 0.15h` for `u` and `0.1-0.2h` for `v`, `w`.
 - The flow starts from the periodic channel repeated twice along x (`tools/setup/tile_restart.py`). Statistics run over `t = 40-110 h / U_b` (2.8 flow-throughs), averaged over z.
-- **Outlet.** A sponge covers `x > 20h` (not analyzed), and the `nscbc_outlet` runs with `beta = 0`. With the default `beta` (the local Mach number), a near-wall eddy reversed the flow in the outlet's last cells at `t = 18-19 h / U_b` and the run diverged, also with the sponge. That is a property of the outlet, not of the inflow.
+- **Outlet.** A sponge covers `x > 20h` (not analyzed), and the `outlet_pressure` with `nscbc` runs with `beta = 0`. With the default `beta` (the local Mach number), a near-wall eddy reversed the flow in the outlet's last cells at `t = 18-19 h / U_b` and the run diverged, also with the sponge. That is a property of the outlet, not of the inflow.
 
 **Development.** Quantities against the precursor, smoothed over `+-0.5h`:
 
