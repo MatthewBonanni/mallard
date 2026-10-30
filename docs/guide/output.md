@@ -467,7 +467,7 @@ Pitfalls:
 [[probes]]
 name = "box"
 variables = ["RHO", "T", "P"]
-region = {type = "box", center = [0.5, 0.5], size = [0.4, 0.2]}
+region = {type = "rectangle", center = [0.5, 0.5], size = [0.4, 0.2]}
 reductions = ["integral", "mean", "min", "max"]   # the default
 interval = 10
 ```

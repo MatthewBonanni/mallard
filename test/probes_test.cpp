@@ -282,7 +282,7 @@ TEST(ProbesTest, RegionReductionsAreFractionWeightedIntegralsOfTheCellAverages) 
     // a field whose cell averages are exact (a quadratic); a disk (ball)
     // covers cells in part, and its measure is the sum of their fractions
     const std::string dir = fresh_dir("region");
-    const std::string box = N_DIM == 2 ? "{type = \"box\", center = [0.45, 0.45], size = [0.5, 0.3]}"
+    const std::string box = N_DIM == 2 ? "{type = \"rectangle\", center = [0.45, 0.45], size = [0.5, 0.3]}"
                                        : "{type = \"box\", center = [0.45, 0.45, 0.5], size = [0.5, 0.3, 0.6]}";
     const std::string ball = "{type = \"sphere\", center = " + numbers3("0.5", "0.5", "0.5") + ", radius = 0.27}";
     const std::string probes =
@@ -334,7 +334,7 @@ TEST(ProbesTest, RegionReductionsAreTheSameOnAnyNumberOfRanks) {
     const std::string extra =
         std::string("[regions]\nball = {type = \"sphere\", center = ") + numbers3("0.45", "0.55", "0.5") +
         ", radius = 0.3, edge = 0.05}\n[[sponges]]\nstrength = 20.0\nu = " + numbers3("0.0", "0.0", "0.0") +
-        "\np = 1.2\nT = 1.0\nregion = {type = \"box\", center = " + numbers3("0.7", "0.3", "0.5") +
+        "\np = 1.2\nT = 1.0\nregion = {type = " + std::string(N_DIM == 2 ? "\"rectangle\"" : "\"box\"") + ", center = " + numbers3("0.7", "0.3", "0.5") +
         ", size = " + numbers3("0.33", "0.41", "0.37") + ", rotate = " +
         (N_DIM == 2 ? "25" : "{axis = [1, 2, 3], angle = 25}") + "}\n";
     auto input = [&](const std::string & file) {
