@@ -91,6 +91,8 @@ Restart files have the same layout whatever the number of ranks, cells in global
 
 ## Running on clusters
 
+The [Running on a cluster](../tutorials/cluster.md) tutorial goes through all of this on a case that runs on a laptop: sizing the run, a job script, the rank report, `mallard ctl`, and a stop and resume.
+
 ### Job scripts
 
 [`tools/jobs/`](https://github.com/MatthewBonanni/mallard/tree/main/tools/jobs) has a script for each way of launching Mallard (installed with Mallard in `share/mallard/tools/jobs/`). Copy one into the case directory, fill in the lines marked `<...>` (nodes, GPUs, cores, time limit, the modules Mallard was built with) and submit it:
