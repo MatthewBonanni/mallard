@@ -887,7 +887,7 @@ ranks. A probe that is not due costs nothing.
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
 | `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
-| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region, by the area, length or count of a surface, curve or points in each cell. Default none |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
@@ -1084,8 +1084,8 @@ units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
 | `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
 | `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
-| `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; curves and surfaces only by `union` |
-| `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b`, both filled |
+| `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
+| `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b`: filled regions, or a surface or curve `a` clipped to outside filled ones |
 | `boundary` | `of`: a region or its name | one dimension lower: a filled region's closed surface (2D: curve), a flat surface's edge curve, the edges of open boundary zones |
 | `interior` | `of`: a closed surface (2D: a closed curve) or its name | the filled region it encloses |
 
@@ -1127,6 +1127,27 @@ boundary of a region by name with `{type = "boundary", of = "<name>"}`.
 | open surface (3D), e.g. `disk`, `rectangle` | its edge curve | error: not closed |
 | closed curve in 3D, e.g. `circle` | error: closed | error: needs a surface |
 | boundary zones | the zones' edges (2D: end points), if they are open; error if closed | the cells inside, if the zones are closed; error if open |
+
+Surfaces and curves may also have `flip = true`, which reverses the side they
+face (the direction 3D curves run), and `resolution` (default 3 in 2D, 2 in
+3D, at most 8 in 2D and 5 in 3D): how many times each cell's triangles
+(tetrahedra) are halved where an extracted surface or curve crosses them.
+Orientation: closed surfaces (2D: curves) face out of what they enclose,
+boundary zones out of the domain, flat surfaces along `normal`, 2D curves to
+the right of travel, 3D curves counterclockwise about their `normal` (edges:
+about the surface's); the subtracted part of a difference's boundary faces
+into the subtracted region. `intersection` and `difference` of one surface or
+curve with filled regions clip it: the parts inside them (outside the
+subtracted ones), keeping its dimension and orientation; the surface or curve
+comes first in a `difference`.
+
+The surfaces of primitives (and 3D flat surfaces and curves) are exact: their
+parameters cut into patches about half a cell wide with Gauss points; planes,
+boundary zones and the faces around regions of the mesh are cut or taken
+exactly from the cells; boundaries of booleans and `implicit` regions are
+extracted as the zero set of the signed distance, linear on the subdivided
+simplices. Clipping regions cut along their surface, linearly between vertices
+(exact for planes), and on exact surfaces keep the Gauss points inside them.
 
 `interior` and `boundary` are inverses: the interior of a region's boundary is
 the region. The boundary of a boolean with regions of the mesh is assembled

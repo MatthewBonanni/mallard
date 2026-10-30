@@ -152,9 +152,12 @@ class Probes {
             void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
                                   const std::vector<double> & quad) const;
         };
-        /** @brief A region probe's samples: the owned cells the region covers, weighted by f V. */
+        /**
+         * @brief A region probe's samples: the owned cells with a weight (f V, or
+         *        the measure of a surface, curve or points in the cell).
+         */
         static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
-                                  const std::vector<double> & fractions, uint32_t n_variables);
+                                  const std::vector<double> & cell_weights, uint32_t n_variables);
 
         std::vector<std::unique_ptr<Probe>> probes;
         bool resumed = false;

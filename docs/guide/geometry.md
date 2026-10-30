@@ -10,7 +10,7 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | Feature | Geometry | Guide |
 |---|---|---|
 | `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone) | [Sources](sources.md#regions) |
-| `[[probes]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes | [Output](output.md#region-probes) |
+| `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh) | [Output](output.md#region-probes) |
 | `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength` | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
@@ -250,6 +250,77 @@ into the sphere. `filled = false` on a curve is an error that points to
 boundary zones is found by winding numbers: each connected part of the mesh
 is inside or outside them as a whole, so the interior of the zones around a
 domain is the domain, and that of a body's wall holds no cell.
+
+### Clipping across dimensions
+
+```toml
+# The part of the wall zone inside a box
+region = {type = "intersection", regions = ["wall", {type = "box", center = [0.5, 0, 0], size = [0.2, 1, 1]}]}
+```
+
+```toml
+# A plane's section of a duct, outside a centerbody
+region = {type = "difference", regions = [{type = "half_space", point = [0.3, 0, 0], normal = [1, 0, 0], filled = false}, "centerbody"]}
+```
+
+`intersection` and `difference` of one surface or curve with filled regions
+clip it and keep its dimension: an `intersection` keeps the part inside every
+filled region, a `difference` (the surface or curve first) the part outside
+the others. Clipping keeps the surface's orientation; the boundary of a clipped
+surface is where the clipping regions cut it. Two surfaces or curves combine
+only by `union`, and a `difference` that subtracts a surface from a filled
+region is an error (it would remove nothing).
+
+### Orientation
+
+Surfaces (2D: curves) face one way, which sets the sign of what is measured
+through them:
+
+| Region | Faces |
+|---|---|
+| a closed surface: the boundary of a filled region, `circle` and `ellipse` in 2D | out of the region it encloses |
+| a boundary zone, `domain`'s boundary | out of the domain |
+| a flat surface (3D `disk`, `annulus`, `rectangle`, `polygon`) | along `normal` (`polygon`: by the right-hand rule along its vertices) |
+| the part of a boundary that a `difference` subtracts | into the subtracted region (out of the result) |
+| a 2D curve | to the right of the direction of travel |
+| a 3D curve (`circle`, `ellipse`, the edge of a surface) | runs counterclockwise about its `normal`, or about the normal of the surface it bounds (right-hand rule) |
+
+`flip = true` on any surface or curve reverses it. Points have no orientation.
+
+### Surfaces and curves on a mesh
+
+```toml
+# The area of a sphere's surface and the mean pressure on it
+[[probes]]
+name = "shell"
+variables = ["P"]
+region = {type = "sphere", center = [0, 0, 0], radius = 0.1, filled = false}
+reductions = ["integral", "mean"]
+```
+
+A surface, curve or set of points is a set of elements in the cells it
+crosses: polygons, segments or points, each with its measure (area, length,
+or 1 for a point) and orientation. They are made in one of two ways, and
+`mallard check` reports which:
+
+- **Exact**: the surfaces of primitives (`sphere`, `ellipsoid`, `cylinder`,
+  `cone`, `box`, `torus`; in 2D their circles, ellipses and polygons) and the
+  flat surfaces and curves of 3D runs follow their own parameters, cut into
+  patches about half a cell wide and integrated with Gauss points, so an
+  unclipped surface has its exact area to round-off; planes (`half_space`) are
+  cut from the cells exactly; boundary zones and the faces around regions of
+  the mesh are the mesh's faces.
+- **Extracted**: the boundaries of booleans and of `implicit` regions are cut
+  from the cells as the zero set of the signed distance, linear on each cell's
+  triangles (tetrahedra) subdivided `resolution` times where the surface may
+  cross them (default 3 in 2D, 2 in 3D): second-order accurate in the
+  subdivided size.
+
+Clipping regions cut elements along their surface (exactly along planes and
+mesh-aligned boxes) where the elements are extracted or mesh faces, and keep
+the Gauss points inside them on exact surfaces. Only the parts inside the
+domain count. In axisymmetric runs measures are those of the r-z plane, not
+of the revolved surface.
 
 ### Transforms
 

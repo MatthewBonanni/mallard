@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "region_mesh.h"
 #include "common_io.h"
 #include "field_units.h"
 #include "file_format.h"
@@ -227,15 +228,15 @@ void write_pvd_file(const std::string & file, const std::vector<std::pair<double
 } // namespace
 
 void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
-                           const std::vector<double> & fractions, uint32_t n_variables) {
+                           const std::vector<double> & cell_weights, uint32_t n_variables) {
     std::vector<uint32_t> cells;
     std::vector<uint64_t> global;
     std::vector<double> weights;
     for (uint32_t c = 0; c < mesh.n_owned(); c++) {
-        if (fractions[c] == 0.0) continue;
+        if (cell_weights[c] == 0.0) continue;
         cells.push_back(c);
         global.push_back(mesh.h_global_cell(c));
-        weights.push_back(fractions[c] * double(mesh.h_cell_measure(c)));
+        weights.push_back(cell_weights[c]);
     }
     p.quadrature.select(mesh, cells, n_variables);
     if (mesh.n_global_cells > 0) {
@@ -481,8 +482,16 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
         if (p.from_region) {
             const region::Region & r = regions.get(entry.at("region"), key + ".region");
-            region::require_full_dimension(r, key + ".region");
-            select_region(p, mesh, r, regions.fractions(entry.at("region"), key + ".region"), n_evaluated);
+            // Filled regions weigh each cell by f V; surfaces, curves and points by their measure in it
+            std::vector<double> weights(mesh.n_owned(), 0.0);
+            if (r.dimension() == N_DIM) {
+                const std::vector<double> & f = regions.fractions(entry.at("region"), key + ".region");
+                for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = f[c] * double(mesh.h_cell_measure(c));
+            } else {
+                const region::Elements e = region::elements(mesh, r);
+                for (size_t k = 0; k < e.size(); k++) weights[e.cell[k]] += e.measure[k];
+            }
+            select_region(p, mesh, r, weights, n_evaluated);
             if (p.quadrature.n_global == 0) throw InputError(key + ".region contains no part of any cell.");
         } else {
             p.geometry = probe::make_geometry(entry, key);
@@ -505,11 +514,17 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                 // Regions: sum f V, per unit depth in planar 2D runs, per radian in axisymmetric ones
                 const bool volume = N_DIM == 3 || mesh.axisymmetric;
                 const Dimension cell_measure = mesh.axisymmetric ? dim::of(0, 3, 0, 0, 0, -1) : dim::of(0, N_DIM, 0);
-                const Dimension measure = p.from_region ? cell_measure : curve ? dim::length : dim::none;
+                const int d_region = p.geometry.dim;
+                const Dimension measure = !p.from_region ? (curve ? dim::length : dim::none)
+                                          : d_region == N_DIM ? cell_measure
+                                                              : dim::of(0, d_region, 0);
+                const char * names[4] = {"count", "length", "area", "volume"};
                 std::vector<std::pair<std::string, Dimension>> columns = {
                     {"step", dim::none},
                     {"t", dim::time},
-                    {p.from_region ? (volume ? "volume" : "area") : curve ? "length" : "count", measure}};
+                    {p.from_region ? (d_region == N_DIM ? (volume ? "volume" : "area") : names[d_region])
+                                   : curve ? "length" : "count",
+                     measure}};
                 for (const Reduction r : p.reductions) {
                     for (const auto & v : p.variables) {
                         const Dimension d = field_units::describe(v).dimension;

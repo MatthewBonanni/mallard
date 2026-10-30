@@ -175,6 +175,7 @@ class Parser {
                     throw InputError(where + ".flip reverses the side a surface or curve faces, and this region is " +
                                      dimension_name(p.dimension) + ".");
                 }
+                p.closed = closed(p);
                 for (Piece & piece : p.pieces) piece.flip = !piece.flip;
                 p.text += ", flipped";
             }
@@ -1036,6 +1037,17 @@ Region::Region(const Input & value, const std::string & where, const Input * nam
         m_host = host(m_filled[m_root]);
         m_host.edge = edge;
     }
+    if (table && table->contains("resolution")) {
+        if (m_dimension == N_DIM) {
+            throw InputError(key + ".resolution: the resolution of extracted boundaries applies to surfaces and "
+                             "curves, and this region is " + dimension_name(N_DIM) + ".");
+        }
+        const int64_t r = find_value<int64_t>(*table, "resolution");
+        if (r < 0 || r > MAX_RESOLUTION) {
+            throw InputError(key + ".resolution must be in [0, " + std::to_string(MAX_RESOLUTION) + "].");
+        }
+        m_resolution = static_cast<int>(r);
+    }
 }
 
 RegionView<Kokkos::HostSpace> Region::host(const Filled & shapes) const {
@@ -1298,6 +1310,10 @@ std::vector<double> fractions_of(const Mesh & mesh, const Region & region, const
 std::vector<double> cell_fractions(const Mesh & mesh, const Region & region) {
     if (region.dimension() != N_DIM) throw std::logic_error("cell_fractions: the region is not filled.");
     return fractions_of(mesh, region, region.root());
+}
+
+std::vector<double> cell_fractions(const Mesh & mesh, const Region & region, const uint32_t filled) {
+    return fractions_of(mesh, region, filled);
 }
 
 void require_full_dimension(const Region & region, const std::string & where) {

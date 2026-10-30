@@ -3746,6 +3746,14 @@
   ],
   "set_in": []
  },
+ "probes.region.center": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
  "probes.region.edge": {
   "dims": [
    2
@@ -3758,11 +3766,25 @@
   ],
   "set_in": []
  },
+ "probes.region.flip": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "probes.region.pivot": {
   "dims": [
    2
   ],
   "set_in": []
+ },
+ "probes.region.radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
  },
  "probes.region.regions": {
   "dims": [
@@ -3781,6 +3803,12 @@
   ]
  },
  "probes.region.regions.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.flip": {
   "dims": [
    2
   ],
@@ -3848,6 +3876,12 @@
    "torus",
    "union"
   ]
+ },
+ "probes.region.resolution": {
+  "dims": [
+   2
+  ],
+  "set_in": []
  },
  "probes.region.rotate": {
   "dims": [
@@ -4066,6 +4100,12 @@
   ],
   "set_in": []
  },
+ "regions.<name>.flip": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "regions.<name>.inner_radius": {
   "dims": [
    2
@@ -4093,6 +4133,12 @@
   "set_in": [
    "examples/source_regions/input.toml"
   ]
+ },
+ "regions.<name>.resolution": {
+  "dims": [
+   2
+  ],
+  "set_in": []
  },
  "regions.<name>.rotate": {
   "dims": [
@@ -4540,7 +4586,19 @@
   ],
   "set_in": []
  },
+ "sources.region.flip": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "sources.region.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "sources.region.resolution": {
   "dims": [
    2
   ],

@@ -401,6 +401,43 @@ TEST(ProbesTest, RegionsOfTheMeshAreTheSameOnAnyNumberOfRanks) {
 }
 #endif
 
+TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
+    // A sphere's surface (2D: a circle) and, in 3D, a circle: their area or length, on any number of ranks
+    const std::string dir = fresh_dir("surface_region_ranks");
+    const std::string shell = std::string("{type = \"sphere\", center = ") + numbers3("0.45", "0.55", "0.5") +
+                              ", radius = 0.3, filled = false}";
+    const std::string ring = "{type = \"circle\", center = [0.45, 0.55, 0.5], normal = [1, 1, 0], radius = 0.25}";
+    auto input = [&](const std::string & suffix) {
+        std::string probes;
+        for (const auto & [name, region] : std::vector<std::pair<std::string, std::string>>{{"shell", shell}, {"ring", ring}}) {
+            if (name == "ring" && N_DIM == 2) continue;
+            probes += "[[probes]]\nname = \"" + name + "\"\nvariables = [\"RHO\", \"P\"]\nregion = " + region +
+                      "\nreductions_file = \"" + dir + "/" + name + "_" + suffix + ".csv\"\n";
+        }
+        return box_case(10, SINE_RHO, "type = \"MUSCL\"\n", probes, "n_steps = 2\ncfl = 0.4\n");
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input("serial")));
+    run(serial);
+    for (const std::string name : {"shell", "ring"}) {
+        if (name == "ring" && N_DIM == 2) continue;
+        const std::string file = dir + "/" + name;
+        EXPECT_EQ(without_provenance(read_all(file + "_distributed.csv")), without_provenance(read_all(file + "_serial.csv")))
+            << name << " on " << comm::size() << " ranks";
+        const auto rows = read_csv(file + "_serial.csv");
+        const double exact = name == "ring" ? 2.0 * std::numbers::pi * 0.25
+                             : N_DIM == 2   ? 2.0 * std::numbers::pi * 0.3
+                                            : 4.0 * std::numbers::pi * 0.09;
+        const std::string measure = name == "ring" || N_DIM == 2 ? "length" : "area";
+        EXPECT_NEAR(rows[0].at(measure), exact, 1e-9 * exact) << name;
+        EXPECT_NEAR(rows[0].at("mean_P"), 1.0, 1e-3) << name;
+    }
+}
+
 TEST(ProbesTest, RejectsRegionProbesWithSampleKeys) {
     const std::string region = "region = {type = \"sphere\", center = " + numbers3("0.5", "0.5", "0.5") +
                                ", radius = 0.2}\n";
