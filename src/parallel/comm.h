@@ -110,6 +110,9 @@ Received<T> exchange(std::vector<std::vector<T>> && send);
  */
 std::string broadcast(const std::string & value);
 
+/** @brief Every rank's string, in rank order, on every rank (collective). */
+std::vector<std::string> allgather(const std::string & value);
+
 /**
  * @brief Concatenation of every rank's local vector, in rank order.
  */

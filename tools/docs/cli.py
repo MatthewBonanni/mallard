@@ -39,7 +39,7 @@ def commands(top):
 
 
 def section(title, page, version):
-    page = page.replace(version, "<version>").split("\nGoogleTest options (")[0]
+    page = page.replace(version, "<version>")
     return f"### {title}\n\n```text\n{page}```\n"
 
 

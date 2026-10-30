@@ -214,6 +214,40 @@ struct AdvanceFunctor {
     SpeciesView rate{};
     StateView U_end{};
     SpeciesView rhoY_end{};
+    // Repair audit (recorder active): cell volumes, flags and the run's sub-step counters
+    RepairRecorder repair{};
+    Kokkos::View<rtype *> volume{};
+    Kokkos::View<uint8_t *> repaired{};
+    Kokkos::View<uint64_t[2]> counters{};
+
+    /** @brief Adds the mass a clipping changed: species k of cell c, at the initial (0) or final (1) density. */
+    struct Clip {
+        RepairRecorder repair;
+        double mass0 = 0.0, mass1 = 0.0;
+
+        KOKKOS_INLINE_FUNCTION void operator()(const int which, const uint32_t k, const double dY) const {
+            if (dY != 0.0 && repair.active()) repair.add(k, (which ? mass1 : mass0) * dY);
+        }
+    };
+
+    KOKKOS_INLINE_FUNCTION
+    Clip clip(const uint32_t c, const double rho, const double rho_end) const {
+        if (!repair.active()) return Clip{};
+        const double V = static_cast<double>(volume(c));
+        return Clip{repair, rho * V, rho_end * V};
+    }
+
+    /** @brief After cell c's integration: its sub-steps, and its flag if a clipping happened. */
+    KOKKOS_INLINE_FUNCTION
+    void account(const uint32_t c, const chemistry::RosenbrockResult & r) const {
+        if (!repair.active()) return;
+        Kokkos::atomic_add(&counters(0), uint64_t(r.steps));
+        Kokkos::atomic_add(&counters(1), uint64_t(r.rejected));
+        if (r.clipped) {
+            repair.activate(-1);
+            repaired(c) = 1;
+        }
+    }
 
     KOKKOS_INLINE_FUNCTION
     double cell_dt(const uint32_t c) const { return time_scale.extent(0) > 0 ? dt * static_cast<double>(time_scale(c)) : dt; }
@@ -263,23 +297,31 @@ struct AdvanceFunctor {
             double * g = Y + forcing_offset;
             for (uint32_t k = 0; k <= ns; k++) g[k] = cell_forcing(c, k, rho, e);
             const chemistry::SerialLanes one;
+            const double rho_end = static_cast<double>(U_end(c, 0));
+            const Clip clipped = clip(c, rho, rho_end);
             r = sparse ? chemistry::advance_reactor<true>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
                                                           Y + ns, pivots, chemistry::NoObserver(), &pattern,
-                                                          nullptr, g)
+                                                          nullptr, g, clipped)
                        : chemistry::advance_reactor<false>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
                                                            Y + ns, pivots, chemistry::NoObserver(), &pattern,
-                                                           nullptr, g);
-            const double rho_end = static_cast<double>(U_end(c, 0));
+                                                           nullptr, g, clipped);
             for (uint32_t k = 0; k < ns; k++) rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]);
         } else {
-            r = chemistry::advance_reactor(gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns, pivots,
-                                           chemistry::NoObserver(), sparse ? &pattern : nullptr);
+            const chemistry::SerialLanes one;
+            const Clip clipped = clip(c, rho, rho);
+            r = sparse ? chemistry::advance_reactor<true>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
+                                                          Y + ns, pivots, chemistry::NoObserver(), &pattern,
+                                                          nullptr, nullptr, clipped)
+                       : chemistry::advance_reactor<false>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
+                                                           Y + ns, pivots, chemistry::NoObserver(), &pattern,
+                                                           nullptr, nullptr, clipped);
             for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
         }
         chem_h(c) = static_cast<rtype>(h);
         chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
         previous_cost(c) = static_cast<float>(r.steps + r.rejected);
         if (r.status != chemistry::RosenbrockStatus::SUCCESS) failures++;
+        account(c, r);
     }
 
     /** @brief All threads and lanes of a team per cell. */
@@ -304,9 +346,10 @@ struct AdvanceFunctor {
             team.for_each(ns + 1, [&](const uint32_t k) { g[k] = cell_forcing(c, k, rho, e); });
             team.sync();
         }
-        const chemistry::RosenbrockResult r =
-            chemistry::advance_reactor<Sparse>(team, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns,
-                                               &pivot(slot, 0), chemistry::NoObserver(), &pattern, fast, g);
+        const chemistry::RosenbrockResult r = chemistry::advance_reactor<Sparse>(
+            team, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns, &pivot(slot, 0),
+            chemistry::NoObserver(), &pattern, fast, g,
+            clip(c, rho, forcing_offset > 0 ? static_cast<double>(U_end(c, 0)) : rho));
         if (forcing_offset > 0) {
             const double rho_end = static_cast<double>(U_end(c, 0));
             team.for_each(ns, [&](const uint32_t k) { rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]); });
@@ -321,6 +364,7 @@ struct AdvanceFunctor {
         if (member.team_rank() == 0) {
             Kokkos::single(Kokkos::PerThread(member), [&]() {
                 if (r.status != chemistry::RosenbrockStatus::SUCCESS) failures++;
+                account(c, r);
             });
         }
     }
@@ -536,8 +580,9 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
     Kokkos::parallel_scan("chemistry_queue", n, QueueFunctor{active, queue, cost, previous_cost, 0}, n_active);
     stats.active = n_active;
     if (bin_by_cost && n_active > 0) sort_queue(queue, cost, n_active);
-    const ChemistryCells cells{U, rhoY, T_seed, chem_h, chem_cost, previous_cost, time_scale,
-                               forcing ? forcing->rate.species : SpeciesView(), U_end, rhoY_end};
+    const ChemistryCells cells{U,      rhoY,     T_seed,      chem_h,        chem_cost,
+                               previous_cost, time_scale, forcing ? forcing->rate.species : SpeciesView(),
+                               U_end,  rhoY_end, cell_volume, cell_repaired};
     const uint32_t kept = balance ? balance->send(cells, queue, n_active) : n_active;
     stats.sent = n_active - kept;
     stats.failures = integrate(cells, queue, cost, kept, dt);
@@ -558,6 +603,23 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
         });
     }
     return stats;
+}
+
+void CellChemistry::audit(const RepairRecorder & recorder, const Kokkos::View<rtype *> & volume,
+                          const Kokkos::View<uint8_t *> & repaired) {
+    clip_recorder = recorder;
+    cell_volume = volume;
+    cell_repaired = repaired;
+    counters = Kokkos::View<uint64_t[2]>("chemistry_substeps");
+}
+
+std::array<uint64_t, 2> CellChemistry::substeps() const {
+    std::array<uint64_t, 2> out = {0, 0};
+    if (counters.is_allocated()) {
+        const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), counters);
+        out = {h(0), h(1)};
+    }
+    return out;
 }
 
 void CellChemistry::balance_across_ranks(const double threshold) {
@@ -582,6 +644,12 @@ uint32_t CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::Vi
                                work,    pivot,              q,            0u,
                                options.reactor, dt,         n_lanes,      pattern,
                                sparse,  static_cast<uint32_t>(fast_bytes / sizeof(double)), cells.time_scale};
+        if (clip_recorder.active() && cells.volume.extent(0) > 0) {
+            functor.repair = clip_recorder;
+            functor.volume = cells.volume;
+            functor.repaired = cells.repaired;
+            functor.counters = counters;
+        }
         if (cells.forced()) {
             functor.forcing_offset = forcing_offset;
             functor.rate = cells.rate;

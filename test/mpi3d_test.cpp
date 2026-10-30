@@ -76,6 +76,31 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
 }
 
+TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
+    // Cell averages, region layers and nearest-point searches are per cell
+    const std::string rank = std::to_string(comm::rank());
+    const std::string profile = (scratch_dir() / ("profile_" + rank + ".csv")).string();
+    std::ofstream(profile) << "r,T\n0,3\n0.1,2.5\n0.25,1.2\n0.6,1\n";
+    const std::string points = (scratch_dir() / ("points_" + rank + ".csv")).string();
+    {
+        std::ofstream f(points);
+        f << "x,y,z,v\n";
+        for (int i = 0; i < 60; i++) {
+            f << 0.0167 * i << "," << std::abs(std::sin(1.7 * i)) << "," << std::abs(std::cos(2.3 * i)) << "," << 0.01 * (i % 7) << "\n";
+        }
+    }
+    const std::string layers =
+        "[[initialize.data]]\nname = \"flame\"\nfile = \"" + profile + "\"\n"
+        "region = {type = \"sphere\", center = [0.4, 0.5, 0.5], radius = 0.1}\n"
+        "[[initialize.data]]\nname = \"cloud\"\ntype = \"points\"\nfile = \"" + points + "\"\n"
+        "[[initialize.regions]]\nregion = {type = \"sphere\", center = [0.4, 0.5, 0.5], radius = 0.35}\n"
+        "T = \"flame_T\"\nu = [\"cloud_v\", \"0\", \"0\"]\n"
+        "[[initialize.regions]]\nrho = \"2\"\n"
+        "region = {type = \"box\", center = [0.6, 0.4, 0.5], size = [0.4, 0.3, 0.2], pivot = [0.6, 0.4, 0.5], "
+        "rotate = {axis = [1, 1, 0], angle = 40}}\n";
+    expect_matches_serial(blast_input("cartesian_tet", "type = \"MUSCL\"\n") + layers);
+}
+
 TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {
     expect_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"));
 }
@@ -228,6 +253,47 @@ TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
         total += std::stoull(text.substr(k + 15));
     }
     EXPECT_EQ(total, 12u * 12u);
+}
+
+TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
+    // Faces in the order of their cells' global ids, polygons over shared vertices
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_probes").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto input = [&](const std::string & sub) {
+        return box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n") +
+               "[[probes]]\nname = \"walls\"\nboundary = [\"bottom\", \"left\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
+               sub + "/walls.pvd\"\nvariables = [\"P\", \"TAU_W\", \"Q_W\", \"MASS_FLUX\"]\ninterval = 4\n"
+               "reductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub + "/walls.csv\"\n"
+               "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\npoint = [0.5, 0.4, 0.3]\nnormal = [1.0, 0.6, 0.3]\n"
+               "variables = [\"P\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub + "/cut.pvd\"\n"
+               "interval = 8\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/cut.csv\"\n";
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(input("serial")));
+    reference.run();
+    Solver distributed;
+    distributed.init(parse_toml(input("ranks")));
+    distributed.run();
+    comm::barrier();
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        for (const char * file : {"walls.csv", "walls.pvd", "walls_000008.vtp", "cut.csv", "cut_000008.vtp"}) {
+            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            EXPECT_FALSE(a.empty()) << file;
+            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+        }
+        // Each hexahedral block's face splits into two triangles: 6 x 3 at the bottom, 4 x 3 on the left
+        EXPECT_NE(read(dir + "/serial/walls_000008.vtp").find("NumberOfPolys=\"" + std::to_string(2 * (18 + 12)) + "\""),
+                  std::string::npos);
+    }
+    comm::barrier();
 }
 
 TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {

@@ -220,6 +220,24 @@ TEST(ErrorMessages, MassFlowInletTakesExactlyOneOfMdotAndMassFlux) {
     expect_parts(run_error(both), {line_prefix(both, "mdot") + "boundaries[name = \"left\"].mdot", "given together"});
 }
 
+TEST(ErrorMessages, InitialRegionsAndDataNameTheEntryAndTheColumns) {
+    const std::string region = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.2}"
+                                          : "{type = \"sphere\", center = [0.5, 0.5, 0.1], radius = 0.2}";
+    const std::string cells = box() + "[[initialize.regions]]\nT = 2.0\ncells = \"centre\"\nregion = " + region + "\n";
+    expect_parts(run_error(cells), {line_prefix(cells, "cells =") + "initialize.regions[0].cells",
+                                    "did you mean \"center\"?", "volume_fraction"});
+    const std::string empty = box() + "[[initialize.regions]]\nregion = " + region + "\n";
+    expect_parts(run_error(empty), {"initialize.regions[0]", "sets none of u, rho, p, T, X, Y", "T = 2000",
+                                    "docs/guide/initialization.md#regions"});
+    const std::string file = (scratch_dir() / "profile.csv").string();
+    std::ofstream(file) << "r,T\n0,2\n1,1\n";
+    const std::string data = box() + "[[initialize.data]]\nname = \"flame\"\nfile = \"" + file +
+                             "\"\ncoordinates = [\"radius\"]\n";
+    expect_parts(run_error(data), {line_prefix(data, "coordinates =") + "initialize.data[0].coordinates",
+                                   "has no column radius", "Accepted values: r, T",
+                                   "docs/guide/initialization.md#tabulated-data-and-point-clouds"});
+}
+
 TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {
     EXPECT_EQ(std::string(InputError("mesh.transform must be a table.").what()),
               "mesh.transform must be a table. See docs/input.md#mesh.");
