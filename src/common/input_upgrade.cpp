@@ -1,7 +1,7 @@
 /**
  * @file input_upgrade.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Renamed, moved and removed input keys and options, and `mallard upgrade-input`.
+ * @brief Renamed, moved and removed input keys and options, and `mallard input upgrade`.
  * @version 0.9
  * @date 2026-10-16
  *
@@ -12,7 +12,6 @@
 #include "input_upgrade.h"
 
 #include <array>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -535,7 +534,7 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
 } // namespace
 
 std::string advice(const Finding & finding) {
-    return describe(finding) + "; `mallard upgrade-input FILE > NEW_FILE` rewrites the file";
+    return describe(finding) + "; `mallard input upgrade FILE > NEW_FILE` rewrites the file";
 }
 
 std::string describe(const Finding & finding) {
@@ -550,7 +549,7 @@ std::vector<Finding> apply(Input & input, const std::string & version, const Rul
     }
     if (!removed.empty()) {
         throw InputError("the input uses keys or options that this release no longer reads:" + removed +
-                         "\n`mallard upgrade-input FILE > NEW_FILE` rewrites them.");
+                         "\n`mallard input upgrade FILE > NEW_FILE` rewrites them.");
     }
     return findings;
 }
@@ -583,34 +582,10 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     return toml::format(ordered);
 }
 
-int main(int argc, char ** argv) {
-    bool check = false;
-    int dim = 0;
-    std::string file;
-    for (int i = 0; i < argc; i++) {
-        if (std::strcmp(argv[i], "--check") == 0) {
-            check = true;
-        } else if (std::strcmp(argv[i], "--dim") == 0 && i + 1 < argc &&
-                   (std::strcmp(argv[i + 1], "2") == 0 || std::strcmp(argv[i + 1], "3") == 0)) {
-            dim = argv[++i][0] - '0';
-        } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0 || !file.empty()) {
-            file.clear();
-            break;
-        } else {
-            file = argv[i];
-        }
-    }
-    if (file.empty()) {
-        std::cerr << "Usage: mallard upgrade-input [--dim 2|3] old.toml > new.toml\n"
-                  << "       mallard upgrade-input --check old.toml   (exit status 1 if anything is out of date)\n"
-                  << "--dim states the case's dimension when its mesh does not tell.\n"
-                  << "Rewrites renamed, moved and removed input keys and options for Mallard " MALLARD_VERSION
-                     ", keeping comments and layout.\n";
-        return 1;
-    }
+int upgrade_file(const std::string & file, bool check, int dim) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {
-        std::cerr << "mallard upgrade-input: cannot open " << file << "\n";
+        std::cerr << "mallard input upgrade: cannot open " << file << "\n";
         return 1;
     }
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -627,7 +602,7 @@ int main(int argc, char ** argv) {
         if (check) return findings.empty() ? 0 : 1;
         std::cout << upgraded;
     } catch (const std::exception & e) {
-        std::cerr << "mallard upgrade-input: " << file << ": " << e.what() << "\n";
+        std::cerr << "mallard input upgrade: " << file << ": " << e.what() << "\n";
         return 1;
     }
     return 0;

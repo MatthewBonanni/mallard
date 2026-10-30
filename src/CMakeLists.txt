@@ -190,8 +190,13 @@ if(Mallard_ENABLE_CGNS)
     target_link_libraries(MallardCore PRIVATE ${MALLARD_CGNS_LIBRARY})
 endif()
 
-add_executable(mallard main.cpp front_end.cpp reactor_main.cpp mesh_convert.cpp)
-target_link_libraries(mallard PRIVATE MallardCore)
+# The commands of the mallard executable (cli.h), which the test suite also runs
+add_library(MallardCommands STATIC cli.cpp commands.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp)
+target_link_libraries(MallardCommands PUBLIC MallardCore)
+mallard_target_warnings(MallardCommands)
+
+add_executable(mallard main.cpp)
+target_link_libraries(mallard PRIVATE MallardCommands)
 set_target_properties(mallard PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
 mallard_target_warnings(mallard)
 # Run as mallard, either solver runs the one of the case's dimension (front_end.h)

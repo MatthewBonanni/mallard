@@ -78,7 +78,7 @@ run's full dimension, so 3D runs use `sphere`, `ellipsoid`, `box` and
 rectangle; in 2D the `z = 0` slice of an `ellipsoid` is the area inside an
 ellipse. Older inputs with the former names (`circle` and `ellipse` for the
 filled regions, `box` in 2D, `disk`, `annulus` and `rectangle` in 3D) are
-rewritten by [`mallard upgrade-input`](input_files.md#inputs-from-older-releases).
+rewritten by [`mallard input upgrade`](input_files.md#inputs-from-older-releases).
 
 In 2D, each region is the `z = 0` slice; Mallard computes the cell volume
 fractions below on a coarse triangle mesh, with the exact outline drawn over them:
