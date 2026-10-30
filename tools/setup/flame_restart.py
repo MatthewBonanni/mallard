@@ -164,7 +164,7 @@ Nx = {nx}
 Ny = {ny}
 Lx = {L:.17g}
 Ly = {h:.17g}
-{'periodic = ["y"]' + chr(10) if ny > 1 else ""}{mesh_z}
+{mesh_z}{'[[periodic]]' + chr(10) + 'zones = ["bottom", "top"]' + chr(10) if ny > 1 else ""}
 [initialize]
 type = "restart"
 file = "flame.restart"

@@ -86,7 +86,7 @@ std::string uniform_box(const std::string & run, const std::string & combustion,
                         const std::string & coupling = "strang") {
     std::ostringstream s;
     s << "[run]\n" << run << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 0.04\nLy = 0.04\n"
-      << (N_DIM == 3 ? "Nz = 3\nLz = 0.03\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
+      << (N_DIM == 3 ? "Nz = 3\nLz = 0.03\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
       << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"1500.0\"\n"
       << (N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n")
       << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
@@ -186,9 +186,10 @@ std::unique_ptr<Solver> corrugated_flames(const double amplitude, const double s
     const std::string front = "(x - " + num(16 * h) + " - " + wave + ")";
     const std::string back = "(" + num(48 * h) + " - x + " + wave + ")";
     s << "[run]\nn_steps = 1\ndt = 1e-13\n[mesh]\ntype = \"cartesian\"\nNx = 64\nNy = 12\nLx = " << 64 * h
-      << "\nLy = " << 12 * h << "\n"
-      << (N_DIM == 3 ? "Nz = 3\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n");
-    if (N_DIM == 3) s << "Lz = " << 3 * h << "\n";
+      << "\nLy = " << 12 * h << "\n";
+    if (N_DIM == 3) s << "Nz = 3\nLz = " << 3 * h << "\n";
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "");
     s << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\n"
       << "T = \"300 + 1000 * (tanh(" << front << " / " << h << ") + tanh(" << back << " / " << h << "))\"\n"
       << (N_DIM == 3 ? "u = [\"0.0\", \"0.0\", \"0.0\"]\n" : "u = [\"0.0\", \"0.0\"]\n")

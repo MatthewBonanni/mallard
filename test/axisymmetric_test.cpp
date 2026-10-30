@@ -47,7 +47,7 @@ std::string input(const Case & c) {
     std::ostringstream s;
     s << "[run]\n" << c.run
       << "[mesh]\ntype = \"" << c.mesh << "\"\nNx = " << c.n << "\nNy = " << c.n << "\nLx = 1.0\nLy = 1.0\n";
-    if (c.sides.empty()) s << "periodic = [\"x\"]\n";
+    if (c.sides.empty()) s << "[[periodic]]\nzones = [\"left\", \"right\"]\n";
     s << "[initialize]\n" << c.init
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"top\"\n" << c.top << "\n";

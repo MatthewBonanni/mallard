@@ -49,7 +49,7 @@ std::string mesh_block(const std::string & type, uint32_t nx, uint32_t n, double
     std::ostringstream s;
     s << "[mesh]\ntype = \"" << type << "\"\nNx = " << nx << "\nNy = " << n << "\nLx = " << Lx << "\nLy = " << L << "\n";
     if (N_DIM == 3) s << "Nz = " << n << "\nLz = " << L << "\n";
-    if (!periodic.empty()) s << "periodic = " << periodic << "\n";
+    s << periodic_sides(periodic);
     return s.str();
 }
 

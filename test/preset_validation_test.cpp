@@ -80,7 +80,7 @@ double wave_error(const std::string & preset, uint32_t n) {
     std::ostringstream s;
     s << "[run]\nt_stop = 0.25\n"
       << "[mesh]\ntype = \"cartesian_tri\"\nNx = " << n << "\nNy = " << n
-      << "\nLx = 1.0\nLy = 1.0\nperiodic = [\"x\", \"y\"]\n"
+      << "\nLx = 1.0\nLy = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * sin(2 * pi * x) * sin(2 * pi * y)\"\n"
       << "u = [\"1.0\", \"0.5\"]\np = \"1.0\"\n"
       << numerics(preset) << "[physics]\ntype = \"euler\"\n" << PERFECT_GAS
@@ -107,7 +107,7 @@ double taylor_green_excess_decay(const std::string & preset, uint32_t n) {
     std::ostringstream s;
     s << "[run]\nt_stop = " << t_end << "\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
-      << "\nLx = 1.0\nLy = 1.0\nperiodic = [\"x\", \"y\"]\n"
+      << "\nLx = 1.0\nLy = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
       << "u = [\"0.1 * sin(2 * pi * x) * cos(2 * pi * y)\", \"-0.1 * cos(2 * pi * x) * sin(2 * pi * y)\"]\n"
       << "p = \"1 / 1.4 + 0.0025 * (cos(4 * pi * x) + cos(4 * pi * y))\"\n"
