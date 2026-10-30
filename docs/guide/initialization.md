@@ -83,8 +83,11 @@ T = 2000              # T alone: the pressure, velocity and composition stay
 
 [[initialize.regions]]
 name = "fuel"
-region = { type = "rectangle", center = ["6 mm", 0.0], size = ["2 mm", "8 mm"],
-           pivot = ["6 mm", 0.0], rotate = 30 }
+region.type = "rectangle"
+region.center = ["6 mm", 0.0]
+region.size = ["2 mm", "8 mm"]
+region.pivot = ["6 mm", 0.0]
+region.rotate = 30
 X = { H2 = 1.0 }
 ```
 
