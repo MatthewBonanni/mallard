@@ -218,8 +218,9 @@ on GPUs up to the last bits of library functions such as `sin` and `exp`.
 
 **Variables.** `x`, `y`, `z` in meters (`z` is 0 in 2D) and, where the key
 says so, the time `t` in seconds; sources also read the local and
-domain-averaged state ([Sources](sources.md)) and probe curves their
-parameter `s`. Names are case sensitive: `T` is not `t`.
+domain-averaged state ([Sources](sources.md)), initial states the columns of
+tabulated data ([Initialization](initialization.md#tabulated-data-and-point-clouds))
+and probe curves their parameter `s`. Names are case sensitive: `T` is not `t`.
 
 **Operators and functions.**
 

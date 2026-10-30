@@ -257,6 +257,23 @@ TEST(ErrorMessages, BoundaryOptionsThatDontComposeNameBoth) {
                  {".p: with average = true is one area-averaged pressure: it may depend on t, not on x, y or z"});
     expect_parts(error("type = \"outlet_pressure\"\np = 1.0\nnscbc = { L = 1.0, sigma_T = 1.0 }\n"),
                  {".nscbc.sigma_T: doesn't apply to an outlet's nscbc"});
+
+TEST(ErrorMessages, InitialRegionsAndDataNameTheEntryAndTheColumns) {
+    const std::string region = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.2}"
+                                          : "{type = \"sphere\", center = [0.5, 0.5, 0.1], radius = 0.2}";
+    const std::string cells = box() + "[[initialize.regions]]\nT = 2.0\ncells = \"centre\"\nregion = " + region + "\n";
+    expect_parts(run_error(cells), {line_prefix(cells, "cells =") + "initialize.regions[0].cells",
+                                    "did you mean \"center\"?", "volume_fraction"});
+    const std::string empty = box() + "[[initialize.regions]]\nregion = " + region + "\n";
+    expect_parts(run_error(empty), {"initialize.regions[0]", "sets none of u, rho, p, T, X, Y", "T = 2000",
+                                    "docs/guide/initialization.md#regions"});
+    const std::string file = (scratch_dir() / "profile.csv").string();
+    std::ofstream(file) << "r,T\n0,2\n1,1\n";
+    const std::string data = box() + "[[initialize.data]]\nname = \"flame\"\nfile = \"" + file +
+                             "\"\ncoordinates = [\"radius\"]\n";
+    expect_parts(run_error(data), {line_prefix(data, "coordinates =") + "initialize.data[0].coordinates",
+                                   "has no column radius", "Accepted values: r, T",
+                                   "docs/guide/initialization.md#tabulated-data-and-point-clouds"});
 }
 
 TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {

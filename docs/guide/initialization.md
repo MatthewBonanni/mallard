@@ -2,6 +2,7 @@
 
 `[initialize]` sets the state at the start of a run: uniform, from
 expressions, or from a restart file written by an earlier run or by a script.
+Regions and tabulated data (profiles, point clouds) layer over any of these.
 
 ## Uniform state
 
@@ -32,7 +33,7 @@ p = """\
              : (y >= 0.8 ? 0.3 : 0.029032258064516)"""
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 16 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 17 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -42,7 +43,7 @@ p = """\
 | `rho`, `p`, `T` (`analytical`) | two of the three | Expressions of x, y, z |
 | `X` or `Y` | required for mixtures | Composition by species: numbers, or expressions (`analytical`) |
 | `balance` | none | Mixtures, `analytical`: the species that takes `1 - sum` of the others |
-| `n_subdivisions` | 4 (2D), 1 (3D) | Resolution of the cell averages of `analytical` states |
+| `n_subdivisions` | 4 (2D), 1 (3D) | Resolution of the cell averages of `analytical` states and [regions](#regions) |
 | `file` | required (`restart`) | Restart file to start from |
 
 Analytical states are integrated over each cell, not sampled at its center,
@@ -50,16 +51,165 @@ so discontinuities that cut a cell give the right average (and high-order runs
 start from true cell averages). In 2D each cell's triangles are split into
 `n_subdivisions`² sub-triangles; in 3D each tetrahedron of a cell into
 `n_subdivisions`³ sub-tetrahedra with a degree-5 rule. Raise it for sharp
-features smaller than a cell.
+features smaller than a cell. A cell where the state is the same at every
+point takes it exactly. The integration runs on the device (the GPU in GPU
+builds), one cell per thread.
 
 ![A triangle with one and with sixteen sub-triangles for the cell average of an analytical state](../images/guide/subdivisions-light.svg#gh-light-mode-only)
 ![A triangle with one and with sixteen sub-triangles for the cell average of an analytical state](../images/guide/subdivisions-dark.svg#gh-dark-mode-only)
 
 Expressions may use local variables, conditionals and loops
-([Expressions](input_files.md#expressions)); a comparison such as
+([Expressions](input_files.md#expressions)), and read
+[tabulated data](#tabulated-data-and-point-clouds); a comparison such as
 `hypot(x, y) < 0.2` draws a shape ([Geometry](geometry.md#who-uses-what)). Pitfall:
 TOML requires the expressions to be strings, also for constants: `u =
 ["0.0", "0.0"]` with `analytical`.
+
+## Regions
+
+```toml
+# A hot kernel with a smooth edge in air at rest, and a tilted slab of hydrogen
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = "1 atm"
+T = 300
+X = { O2 = 1.0, N2 = 3.76 }
+
+[[initialize.regions]]
+name = "kernel"
+region = { type = "disk", center = [0.0, 0.0], radius = "2 mm", edge = "0.5 mm" }
+T = 2000              # T alone: the pressure, velocity and composition stay
+
+[[initialize.regions]]
+name = "fuel"
+region = { type = "rectangle", center = ["6 mm", 0.0], size = ["2 mm", "8 mm"],
+           pivot = ["6 mm", 0.0], rotate = 30 }
+X = { H2 = 1.0 }
+```
+
+*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d).
+
+Each `[[initialize.regions]]` entry sets some of `u`, `rho`, `p`, `T` and the
+composition inside a region, and leaves the rest to the state below it. The
+regions (primitives, booleans, transforms, smooth edges) are those used
+everywhere in Mallard: see [Geometry: regions](geometry.md#regions). Values are
+numbers, quantities with units, or expressions of `x`, `y`, `z` and
+[tabulated data](#tabulated-data-and-point-clouds).
+
+- **Layers.** The base state of `[initialize]` comes first, then the regions
+  by `priority` (lowest first) and, at equal priority, in the order listed:
+  where regions overlap, the later one wins.
+- **Thermodynamic state.** A region sets at most two of `rho`, `p`, `T`. One
+  alone replaces that quantity and keeps the pressure of the state below
+  (its temperature where the state below has no pressure): `T` alone makes a
+  hot spot, `rho` alone a light or heavy bubble, at the same pressure.
+- **Composition.** `X` or `Y` (and `balance`, as in `[initialize]`) replace
+  the whole composition below.
+- **Smooth edges.** Across a region's `edge`, `u`, `p`, `T` and the mass
+  fractions blend linearly from the region's values to those below.
+- **Cells.** With `cells = "volume_fraction"` (the default) a cell holds the
+  average of the layered state over the cell: a cut cell mixes the states by
+  the volume of each part, and the integrals of mass, momentum and energy are
+  those of the regions. With `cells = "center"` a cell whose centroid is
+  inside takes the region's state whole: no mixed cells (e.g. compositions
+  that must not mix), but staircase edges whose volume depends on the mesh.
+
+![Density of an initial state built in layers on a triangle mesh: a tabulated radial profile, a rotated rectangle over it, and a smooth-edged disk of higher priority on top](../images/guide/initial-layers-light.svg#gh-light-mode-only)
+![Density of an initial state built in layers on a triangle mesh: a tabulated radial profile, a rotated rectangle over it, and a smooth-edged disk of higher priority on top](../images/guide/initial-layers-dark.svg#gh-dark-mode-only)
+
+Cells entirely inside or outside every region take the state exactly. Cells
+that a sharp surface cuts are subdivided further (four levels in 2D, three in
+3D, below `n_subdivisions`) and the finest pieces are cut along the surface:
+exactly along flat surfaces (boxes, half-spaces, polygons, and booleans and
+transforms of them: the integrals are exact to rounding), along chords of
+curved ones (second order in the piece size: a disk 10 cells across loses
+2e-6 of its area, a sphere 5 cells across 1e-3 of its volume).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `region` | required | The [region](geometry.md#regions), e.g. `{type = "sphere", center = [0, 0, 0], radius = 0.1}`, with an optional smooth `edge` |
+| `u`, `rho`, `p`, `T` | the state below | Values inside the region: numbers, quantities with units or expressions |
+| `X` or `Y`, `balance` | the composition below | Mixtures: the composition inside, as in `[initialize]` |
+| `priority` | 0 | Higher priorities go on top; equal ones in the order listed |
+| `cells` | `"volume_fraction"` | `volume_fraction`: cell averages; `center`: whole cells by their centroids |
+| `name` | `initialize.regions[i]` | Name in the run log |
+
+**Over a restart or a remap.** With `type = "restart"` or `"remap"`, regions
+change the file's state: ignite a converged cold flow, add a bubble to a
+turbulent field. Cells that no region reaches keep the file's values bit for
+bit; the step and time continue from the file.
+
+Pitfalls:
+
+- A region's values must give a physical state with the state below: `rho`
+  alone over a state given by `rho` and `T` changes the pressure.
+- With `cells = "center"` and a smooth edge, the edge's weight at the
+  centroid holds for the whole cell.
+
+## Tabulated data and point clouds
+
+```toml
+# examples/shock_bubble_2d: a bubble from its radial density profile
+[initialize]
+type = "analytical"
+rho = "bubble_rho"
+u = ["0", "0"]
+p = "1"
+
+[[initialize.data]]
+name = "bubble"
+file = "bubble.csv"          # r,rho
+interpolation = "cubic"
+at = ["hypot(x - 0.6, y)"]   # the distance from the bubble's center
+```
+
+*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d).
+
+Each `[[initialize.data]]` entry reads a CSV file (a header of column names,
+then rows of numbers; lines starting with `#` are comments) and gives every
+column other than the coordinates to the expressions of `[initialize]` and
+its regions as a variable `<name>_<column>`: above, `bubble_rho`.
+
+- **Tables** (`type = "table"`, the default): values on a grid of one to
+  three coordinates, every combination of their distinct values once, rows in
+  any order, e.g. a 1D flame `x, T, u, Y_H2, ...` or a 2D field on `(x, r)`.
+  `interpolation = "linear"` is exact for linear data; `"cubic"` (Lagrange on
+  the 4 nearest nodes of each axis, non-uniform grids too) for cubic data.
+  Outside the table, the values at its ends.
+- **Point clouds** (`type = "points"`): scattered points, e.g. the cell
+  centers of a solution from another code. A point takes the value of the
+  nearest data point (ties to the earlier row), or with `neighbors = k` the
+  average of the k nearest weighted by inverse distance squared (exact at
+  the data points). Solutions of Mallard on another mesh remap conservatively
+  with `type = "remap"` instead.
+- **Where a point reads them.** `at` gives one expression of `x`, `y`, `z`
+  per coordinate: an axis (`"x - 0.005"`, `"0.6 * x + 0.8 * y"`), a radius
+  (`"hypot(y, z)"`), any mapping; without it, coordinates named `x`, `y`, `z`
+  are read where they are. For one coordinate, `region` instead reads it at
+  the signed distance to a [region](geometry.md#regions) (negative inside):
+  a profile normal to any surface.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | required | Prefix of the variables: `<name>_<column>` (characters other than letters, digits and `_` become `_`) |
+| `file` | required | CSV file, relative to where Mallard runs |
+| `type` | `"table"` | `table` (on a grid, interpolated) or `points` (scattered) |
+| `coordinates` | first column (`table`); `x`, `y` (`z`) (`points`) | Names of the coordinate columns |
+| `at` | the coordinates, if named `x`, `y`, `z` | One expression of `x`, `y`, `z` per coordinate |
+| `region` | none | Instead of `at`, one coordinate: the signed distance to this region |
+| `interpolation` | `"linear"` | Tables: `linear` or `cubic` |
+| `neighbors` | 1 | Points: how many nearest points to weight (1-16) |
+| `units` | SI | Units of columns, e.g. `{x = "mm", T = "degC"}` |
+
+Every point of the cell integration reads the data, so cell averages are
+those of the interpolated field. Pitfalls:
+
+- Cubic interpolation overshoots at fronts sharper than the table's spacing;
+  negative mass fractions are clipped and the composition renormalized, but
+  temperatures are not: use `linear` there.
+- An entry that no expression reads is an error; so are rows that do not
+  form a grid.
 
 ## Restarts
 

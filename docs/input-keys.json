@@ -47,6 +47,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -312,6 +313,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -569,6 +571,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -1017,6 +1020,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -1059,7 +1063,8 @@
  },
  "initialize.X": {
   "dims": [
-   2
+   2,
+   3
   ],
   "set_in": [
    "examples/flame_outflow/input.toml",
@@ -1068,19 +1073,110 @@
  },
  "initialize.Y": {
   "dims": [
-   2
+   2,
+   3
   ],
   "set_in": []
  },
  "initialize.balance": {
   "dims": [
-   2
+   2,
+   3
   ],
   "required": true,
   "set_in": [
    "examples/flame_outflow/input.toml"
   ],
   "type": "string"
+ },
+ "initialize.data": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.data.at": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ],
+  "type": "array"
+ },
+ "initialize.data.coordinates": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.data.file": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ],
+  "type": "string"
+ },
+ "initialize.data.interpolation": {
+  "default": "\"linear\"",
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "cubic",
+   "linear"
+  ]
+ },
+ "initialize.data.name": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ],
+  "type": "string"
+ },
+ "initialize.data.neighbors": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.data.region": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.data.type": {
+  "default": "\"table\"",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "points",
+   "table"
+  ]
+ },
+ "initialize.data.units": {
+  "dims": [
+   2
+  ],
+  "set_in": []
  },
  "initialize.degree": {
   "default": "2",
@@ -1303,6 +1399,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
    "examples/source_regions/input.toml",
@@ -1322,6 +1419,195 @@
   ],
   "set_in": []
  },
+ "initialize.regions": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.T": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.regions.X": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.regions.Y": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.regions.balance": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.regions.cells": {
+  "default": "\"volume_fraction\"",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "center",
+   "volume_fraction"
+  ]
+ },
+ "initialize.regions.name": {
+  "default": "\"initialize.regions[1]\"",
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ],
+  "type": "string"
+ },
+ "initialize.regions.p": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.priority": {
+  "default": "0",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "integer"
+ },
+ "initialize.regions.region": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.region.center": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.region.edge": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.regions.region.normal": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.region.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.region.point": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.region.rotate": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.region.scale": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.regions.region.size": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.region.translate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.regions.region.type": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "annulus",
+   "box",
+   "cone",
+   "cylinder",
+   "difference",
+   "disk",
+   "ellipse",
+   "ellipsoid",
+   "half_space",
+   "implicit",
+   "intersection",
+   "polygon",
+   "rectangle",
+   "sphere",
+   "torus",
+   "union"
+  ]
+ },
+ "initialize.regions.rho": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.u": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/shock_bubble_2d/input.toml"
+  ]
+ },
  "initialize.rho": {
   "dims": [
    2,
@@ -1339,6 +1625,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
    "examples/viscous_shock_tube/input.toml"
@@ -1394,6 +1681,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -1443,6 +1731,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
    "examples/source_regions/input.toml",
@@ -1767,6 +2056,7 @@
    "examples/rotational_sector/sector_3d.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -1835,6 +2125,7 @@
    "examples/riemann_2d_quads/remap.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -1904,6 +2195,7 @@
    "examples/riemann_2d_quads/remap.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -2026,6 +2318,7 @@
    "examples/riemann_2d_quads/remap.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -2093,6 +2386,7 @@
    "examples/riemann_2d_quads/remap.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -2309,6 +2603,7 @@
    "examples/rotational_sector/sector_3d.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -2391,6 +2686,7 @@
    "examples/rotational_sector/sector_3d.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -2538,6 +2834,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -2797,6 +3094,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -2909,6 +3207,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -2975,6 +3274,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -3048,6 +3348,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -3122,6 +3423,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -3230,6 +3532,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -3325,6 +3628,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
    "examples/source_regions/input.toml",
@@ -3389,6 +3693,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
    "examples/source_regions/input.toml",
@@ -3537,6 +3842,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
    "examples/source_regions/input.toml",
@@ -3611,6 +3917,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
    "examples/source_regions/input.toml",
@@ -3709,6 +4016,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -4100,6 +4408,7 @@
    "examples/rotational_sector/sector_3d.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -4171,6 +4480,7 @@
    "examples/rotational_sector/sector_3d.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -4296,6 +4606,7 @@
    "examples/rotational_sector/sector_3d.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -4777,6 +5088,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -4943,6 +5255,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -5024,6 +5337,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
@@ -5085,6 +5399,7 @@
    "examples/rotational_sector/sector.toml",
    "examples/sedov_3d/input.toml",
    "examples/sedov_axisymmetric/input.toml",
+   "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
    "examples/source_regions/input.toml",
