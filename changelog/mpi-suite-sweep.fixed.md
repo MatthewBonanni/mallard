@@ -1,1 +1,2 @@
 - On several ranks, an input error found in one part of the mesh (a negative mass flux, an inlet `direction` pointing out of the domain, a boundary face assigned twice, a synthetic-turbulence inlet that is not planar or a Reynolds stress that is not positive semidefinite) is reported by every rank, instead of ending the run in an MPI error or a hang.
+- The error for a `[[boundaries]]` or `[[forces]]` zone missing from the mesh lists every zone of the mesh on any number of ranks, not the zones of one rank's part (with the internal `__partition__`).

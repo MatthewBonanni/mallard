@@ -67,6 +67,33 @@ Input unrecorded(Input value) {
     return value;
 }
 
+/**
+ * @brief The names of the mesh's boundary zones, sorted, on every rank (collective if
+ *        distributed): a rank's part of the mesh may not touch every zone.
+ */
+std::vector<std::string> boundary_zone_names(Mesh & mesh, const bool distributed) {
+    std::vector<int32_t> chars;
+    for (const FaceZone & z : *mesh.face_zones()) {
+        if (z.get_type() != FaceZoneType::BOUNDARY || z.get_name() == PARTITION_ZONE) continue;
+        for (const char c : z.get_name()) chars.push_back(c);
+        chars.push_back('\n');
+    }
+    if (distributed) chars = comm::allgatherv(chars);
+    std::vector<std::string> names;
+    std::string name;
+    for (const int32_t c : chars) {
+        if (c != '\n') {
+            name += static_cast<char>(c);
+            continue;
+        }
+        names.push_back(name);
+        name.clear();
+    }
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    return names;
+}
+
 } // namespace
 
 int Solver::init(const std::string & input_file_name, const std::string & restart_file) {
@@ -666,13 +693,7 @@ void Solver::init_boundaries() {
         if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
         // A rank's part of the mesh may not touch every zone
         if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-            std::vector<std::string> names;
-            for (const FaceZone & z : *mesh->face_zones()) {
-                if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
-            }
-            std::sort(names.begin(), names.end());
-            std::string zones;
-            for (const auto & z : names) zones += (zones.empty() ? "" : ", ") + z;
+            const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
             throw InputError({.key = where_name + ".name",
                               .line = line_of(bound, "name"),
                               .message = "the mesh has no boundary zone \"" + name + "\"",
@@ -1343,11 +1364,7 @@ void Solver::init_output() {
             FaceZone * zone = mesh->get_face_zone(monitor.zone);
             if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
             if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-                std::vector<std::string> names;
-                for (const FaceZone & z : *mesh->face_zones()) {
-                    if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
-                }
-                std::sort(names.begin(), names.end());
+                const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
                 throw InputError({.key = "forces.zone",
                                   .line = line_of(entry, "zone"),
                                   .message = "the mesh has no boundary zone \"" + monitor.zone + "\"",
