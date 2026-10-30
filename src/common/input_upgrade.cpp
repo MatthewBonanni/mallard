@@ -320,7 +320,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
             V & value = *at(root, key);
             if (!value.is_string() || value.as_string() != rule.from || added_already(root, rule, key)) continue;
             option_findings.push_back(option_finding(rule, key, line_of(value), version));
-            if (!(setup && rule.kept && !option_findings.back().removed)) value = rule.to;
+            if (rule.from != rule.to && !(setup && rule.kept && !option_findings.back().removed)) value = rule.to;
             if (!rule.add.empty()) {
                 const auto added = toml::parse_str<typename V::config_type>(rule.add);
                 auto & beside = entries_of(*at(root, parent(key)));
