@@ -96,7 +96,7 @@ TEST(CheckKeys, RemovedKeysNameWhatReplacedThem) {
     const CheckReport r = check(input);
     EXPECT_FALSE(r.ok());
     EXPECT_TRUE(mentions(r.errors, "physics.p_min was removed in 0.2.0")) << r.errors.front();
-    EXPECT_TRUE(mentions(r.errors, "mallard upgrade-input"));
+    EXPECT_TRUE(mentions(r.errors, "mallard input upgrade"));
 }
 
 TEST(CheckKeys, KeyInTheWrongTableSuggestsWhereItIsRead) {

@@ -1466,7 +1466,9 @@ void Solver::init_output() {
     }
 }
 
-Dimension Solver::measure_dimension() const { return dim::of(0, N_DIM + (axisymmetric ? 1 : 0), 0); }
+Dimension Solver::measure_dimension() const {
+    return axisymmetric ? dim::of(0, N_DIM + 1, 0, 0, 0, -1) : dim::of(0, N_DIM, 0);
+}
 
 std::vector<std::pair<std::string, Dimension>> Solver::integral_columns() const {
     const Dimension V = measure_dimension(), rate2 = dim::rate.times(dim::rate);

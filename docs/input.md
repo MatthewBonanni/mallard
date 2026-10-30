@@ -5,7 +5,7 @@ This page lists every key; the [user guide](guide/input_files.md) explains
 by topic when to use them, with examples and figures.
 Kokkos options such as `--kokkos-num-threads=N` or `--kokkos-device-id=N` can be appended.
 A renamed or removed key is still read, with a warning, for at least one minor
-release, and `mallard upgrade-input old.toml > new.toml` rewrites old inputs
+release, and `mallard input upgrade old.toml > new.toml` rewrites old inputs
 ([deprecation policy and changed keys](guide/input_files.md#inputs-from-older-releases)).
 
 The spatial dimension is fixed at build time with the CMake option
@@ -61,14 +61,7 @@ boundaries, numerics, initial solution) without time stepping and without
 writing any file, and reports on the run. It exits with status 1 if there is
 an error. Under `mpirun -n N` it checks the run on N ranks.
 
-| Option | Description |
-|---|---|
-| `--ranks N` | Memory and cost per rank for a run on N ranks (from a serial check, or one on N ranks) |
-| `--throughput R` | Cost at R cells/s per rank (cell updates per wall second, the `Throughput` of a run's summary) |
-| `--steps N` | Measure the throughput over N steps instead (after one untimed step) |
-| `--quality-vtu PREFIX` | Write the mesh-quality fields to `PREFIX_000000.vtu` (a `.pvtu` and one piece per rank under MPI) |
-
-The report, with an example: [Checking an input](guide/input_files.md#checking-an-input).
+Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an example: [Checking an input](guide/input_files.md#checking-an-input).
 
 ## `[run]`
 
