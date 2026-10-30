@@ -116,8 +116,9 @@ int upgrade_main(const Args & args) {
     if (!dim.empty() && dim != "2" && dim != "3") {
         return cli::usage_error(*cli::command("input upgrade"), "--dim takes 2 or 3, not " + dim);
     }
-    return input_upgrade::upgrade_file(file, args.has("--check"),
-                                       dim.empty() ? front_end::input_dimension(file).dim : dim[0] - '0');
+    if (!dim.empty()) return input_upgrade::upgrade_file(file, args.has("--check"), dim[0] - '0');
+    const front_end::Dimension found = front_end::input_dimension(file);
+    return input_upgrade::upgrade_file(file, args.has("--check"), found.dim, found.why);
 }
 
 int version_main(const Args &) {
