@@ -1,0 +1,1 @@
+- `mallard test --help` shows Mallard's own page only, which lists the common GoogleTest options (`--gtest_filter`, `--gtest_list_tests`, `--gtest_repeat`, `--gtest_fail_fast`, `--gtest_brief`, `--gtest_output`) with an example each, instead of appending GoogleTest's full page; other `--gtest_*` options still pass through.
