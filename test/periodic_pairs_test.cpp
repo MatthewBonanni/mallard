@@ -54,7 +54,9 @@ TEST(PeriodicPairsTest, OppositeSidesOfAGeneratedBoxAreTheBoxLengthApart) {
     ASSERT_EQ(pairs.size(), size_t(N_DIM) + 1);
     EXPECT_EQ(pairs[0].translation, along(0, 2.0_r));
     EXPECT_EQ(pairs[1].translation, along(1, 3.0_r));
-    if constexpr (N_DIM == 3) EXPECT_EQ(pairs[2].translation, along(2, 4.0_r));
+    if constexpr (N_DIM == 3) {
+        EXPECT_EQ(pairs[2].translation, along(2, 4.0_r));
+    }
     // Zone b is zone a shifted: right to left is the other way
     EXPECT_EQ(pairs.back().zone_a, "right");
     EXPECT_EQ(pairs.back().translation, along(0, -2.0_r));
