@@ -45,7 +45,7 @@ void reserve(View & v, const size_t n, const char * label) {
 } // namespace
 
 ChemistryBalance::ChemistryBalance(const uint32_t n_species_in, const double threshold_in)
-    : n_species(n_species_in), threshold(threshold_in), result_stride(n_species_in + 3) {
+    : n_species(n_species_in), threshold(threshold_in), result_stride(n_species_in + 4) {
 #ifndef Mallard_HAS_MPI
     (void)result_stride;
     throw std::logic_error("ChemistryBalance: built without MPI");
@@ -65,6 +65,8 @@ void ChemistryBalance::reserve_guests(const uint32_t n) {
         guest_queue = Kokkos::View<uint32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "chem_guest_queue"), m);
         guest_cost = Kokkos::View<float *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "chem_guest_queue_cost"), m);
         guests.time_scale = Kokkos::View<rtype *>();
+        guests.volume = Kokkos::View<rtype *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "chem_guest_volume"), m);
+        guests.repaired = Kokkos::View<uint8_t *>("chem_guest_repaired", m);
     }
     const size_t m = guests.U.extent(0);
     if (scaled && guests.time_scale.extent(0) < m) {
@@ -131,7 +133,7 @@ uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View
     n_sent = given[me];
     scaled = cells.time_scale.extent(0) > 0;
     forced = cells.forced();
-    state_stride = N_CONSERVATIVE + n_species + 4 + (forced ? n_species + N_CONSERVATIVE : 0);
+    state_stride = N_CONSERVATIVE + n_species + 5 + (forced ? n_species + N_CONSERVATIVE : 0);
 
 #ifdef Mallard_HAS_MPI
     const uint32_t S = state_stride, ns = n_species, first = kept;
@@ -154,6 +156,7 @@ uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View
                 for (uint32_t j = 0; j < ns; j++) f[j] = c.rate(cell, j);
                 for (uint32_t i = 0; i < N_CONSERVATIVE; i++) f[ns + i] = c.U_end(cell, i);
             }
+            b[S - 1] = c.volume.extent(0) > 0 ? c.volume(cell) : rtype(0);
         });
         Kokkos::fence("chemistry_balance_pack");
     }
@@ -216,6 +219,8 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
                 for (uint32_t j = 0; j < ns; j++) g.rate(k, j) = f[j];
                 for (uint32_t i = 0; i < N_CONSERVATIVE; i++) g.U_end(k, i) = f[ns + i];
             }
+            g.volume(k) = b[S - 1];
+            g.repaired(k) = 0;
             g.chem_cost(k) = rtype(0);
             q(k) = k;
             key(k) = -g.previous_cost(k);
@@ -228,6 +233,7 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
             b[ns] = g.chem_h(k);
             b[ns + 1] = g.chem_cost(k);
             b[ns + 2] = static_cast<rtype>(g.previous_cost(k));
+            b[ns + 3] = static_cast<rtype>(g.repaired(k));
         });
         Kokkos::fence("chemistry_balance_results");
         if constexpr (stage_through_host) Kokkos::deep_copy(h_guest_buffer, guest_buffer);
@@ -252,6 +258,7 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
             c.chem_h(cell) = b[ns];
             c.chem_cost(cell) += b[ns + 1];
             c.previous_cost(cell) = static_cast<float>(b[ns + 2]);
+            if (b[ns + 3] != rtype(0) && c.repaired.extent(0) > 0) c.repaired(cell) = 1;
         });
     }
 #else

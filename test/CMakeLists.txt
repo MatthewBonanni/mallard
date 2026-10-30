@@ -7,6 +7,7 @@ set(MALLARD_TEST_SOURCES
     compiled_expression_test.cpp
     region_test.cpp
     region_mesh_test.cpp
+    initial_state_test.cpp
     source_terms_test.cpp
     case_template_test.cpp
     front_end_test.cpp
@@ -36,6 +37,7 @@ set(MALLARD_TEST_SOURCES
     error_messages_test.cpp
     synthetic_inflow_test.cpp
     provenance_test.cpp
+    health_test.cpp
     input_upgrade_test.cpp
     field_units_test.cpp
     format_compat_test.cpp

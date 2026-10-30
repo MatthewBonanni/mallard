@@ -150,9 +150,8 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
     }
     ASSERT_FALSE(stop_file.empty());
     // ... and still holds the solution at that time
-    std::ifstream in(dir + "/b/" + stop_file);
-    std::string header(4096, '\0');
-    in.read(header.data(), static_cast<std::streamsize>(header.size()));
+    std::ifstream in(dir + "/b/" + stop_file, std::ios::binary);
+    const std::string header((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     const size_t k = header.find(">", header.find("Name=\"TIME\"")) + 1;
     EXPECT_EQ(std::stod(header.substr(k)), t_stop_first);
 
