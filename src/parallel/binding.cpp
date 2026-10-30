@@ -288,32 +288,6 @@ void print_table(const std::vector<Placement> & ranks) {
     }
 }
 
-Placement this_placement() {
-    Placement p;
-    p.rank = comm::rank();
-    char host[256] = {};
-    gethostname(host, sizeof(host) - 1);
-    p.host = host;
-    p.threads = Kokkos::DefaultHostExecutionSpace().concurrency();
-    p.cpus = startup_affinity();
-    p.cpu_numa = numa_nodes(p.cpus);
-    const char * bind = std::getenv("OMP_PROC_BIND");
-    p.omp_bind = (bind != nullptr && std::string_view(bind) != "false" && std::string_view(bind) != "FALSE") ||
-                 std::getenv("OMP_PLACES") != nullptr;
-    if (GPU_RUN) {
-        const int device = Kokkos::device_id();
-        p.gpu_index = device;
-        p.gpu = pci_address(device);
-        if (p.gpu.empty()) {
-            p.gpu = "device " + std::to_string(device);
-        } else {
-            p.gpu_uuid = uuid(device);
-            p.gpu_numa = pci_numa(p.gpu);
-            for (int d : visible_devices()) p.gpus_visible.push_back(pci_address(d));
-        }
-    }
-    return p;
-}
 
 } // namespace
 
@@ -585,6 +559,33 @@ void select_device([[maybe_unused]] int argc, [[maybe_unused]] char ** argv) {
     }
     setenv("KOKKOS_DEVICE_ID", std::to_string(device).c_str(), 1);
 #endif
+}
+
+Placement this_placement() {
+    Placement p;
+    p.rank = comm::rank();
+    char host[256] = {};
+    gethostname(host, sizeof(host) - 1);
+    p.host = host;
+    p.threads = Kokkos::DefaultHostExecutionSpace().concurrency();
+    p.cpus = startup_affinity();
+    p.cpu_numa = numa_nodes(p.cpus);
+    const char * bind = std::getenv("OMP_PROC_BIND");
+    p.omp_bind = (bind != nullptr && std::string_view(bind) != "false" && std::string_view(bind) != "FALSE") ||
+                 std::getenv("OMP_PLACES") != nullptr;
+    if (GPU_RUN) {
+        const int device = Kokkos::device_id();
+        p.gpu_index = device;
+        p.gpu = pci_address(device);
+        if (p.gpu.empty()) {
+            p.gpu = "device " + std::to_string(device);
+        } else {
+            p.gpu_uuid = uuid(device);
+            p.gpu_numa = pci_numa(p.gpu);
+            for (int d : visible_devices()) p.gpus_visible.push_back(pci_address(d));
+        }
+    }
+    return p;
 }
 
 void report() {

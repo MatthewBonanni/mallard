@@ -17,6 +17,8 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file of them | [Checking regions](#checking-regions) |
 | `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
+| `[[initialize.regions]]` `region` | a [region](#regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
+| `[[initialize.data]]` `region` | a [region](#regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
 | `[[mesh.curved]]` | `circle`, `sphere` or `cylinder` of its own keys (to move onto regions: [#407](https://github.com/MatthewBonanni/mallard/issues/407)) | [Curved boundaries](meshes.md#curved-boundaries) |
 
 Filled regions are volumes (areas in 2D runs). Surfaces and curves, such as
@@ -24,9 +26,10 @@ boundary zones and the [boundaries](#boundaries-and-interiors) of regions, are
 regions too; each feature states the dimension it takes, and a region of
 another dimension is an error naming both.
 
-Initial states take expressions rather than regions; a comparison such as
-`"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp region there, which the initial
-state averages over each cell.
+Sponges and analytical initial states take expressions; a comparison
+such as `"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp region there, which the
+initial state averages over each cell. `[[initialize.regions]]` takes the
+region itself, and also layers it over a restart.
 
 ## Coordinates and units
 

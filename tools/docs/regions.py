@@ -1,7 +1,9 @@
 """Figures of regions ([[sources]] region tables): the cell volume fractions
 that Mallard computes on coarse unstructured meshes, read back from runs of
 one step whose source is 1 per unit volume over the region (SOURCE_RHOE is
-then the fraction), with the exact outline drawn over them.
+then the fraction), with the exact outline drawn over them; and the density
+of an initial state built layer by layer ([[initialize.data]] and
+[[initialize.regions]]) on the same mesh.
 
     python tools/docs/regions.py --mallard build/src/mallard [--mallard3d build-3d/src/mallard] [names...]
 
@@ -374,6 +376,97 @@ def regions_3d(P, args):
     return fig
 
 
+# ------------------------------------------------------- initial-state layers
+
+LAYERS = [
+    ("base: a tabulated profile", "", None),
+    ("+ a rotated rectangle", """
+[[initialize.regions]]
+region = {type = "rectangle", center = [0.66, 0.38], size = [0.5, 0.16], pivot = [0.66, 0.38], rotate = 35}
+rho = 0.25
+""", lambda x, y: (abs(_rot(x, y, 35, 0.66, 0.38)[0]) < 0.25) & (abs(_rot(x, y, 35, 0.66, 0.38)[1]) < 0.08)),
+    ("+ a disk on top, smooth edge", """
+[[initialize.regions]]
+region = {type = "disk", center = [0.7, 0.7], radius = 0.17, edge = 0.06}
+priority = 1
+rho = 1.6
+""", lambda x, y: np.hypot(x - 0.7, y - 0.7) < 0.17),
+]
+
+
+@functools.cache
+def layers_2d(mallard):
+    """Density of each initial state of LAYERS (each adding its layer to the ones before) on the triangle mesh."""
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "square.msh"
+    triangle_mesh(mesh)
+    r = np.linspace(0.0, 0.8, 9)
+    (work / "profile.csv").write_text("r,rho\n" + "".join(f"{a:.3f},{1.0 - 0.6 * np.exp(-(a / 0.25) ** 2):.6f}\n"
+                                                         for a in r))
+    out, regions = [], ""
+    for i, (_, layer, _) in enumerate(LAYERS):
+        regions += layer
+        toml = f"""[run]
+n_steps = 1
+dt = 1e-9
+[mesh]
+type = "file"
+filename = "{mesh.name}"
+[initialize]
+type = "analytical"
+rho = "profile_rho"
+u = ["0", "0"]
+p = "1"
+[[initialize.data]]
+name = "profile"
+file = "profile.csv"
+interpolation = "cubic"
+at = ["hypot(x - 0.3, y - 0.35)"]
+{regions}
+[[boundaries]]
+name = "wall"
+type = "symmetry"
+[output]
+check_interval = 1000000
+[[write_data]]
+prefix = "layers{i}"
+format = "vtu"
+interval = 1
+variables = ["RHO"]
+{PHYSICS}"""
+        (work / f"layers{i}.toml").write_text(toml)
+        subprocess.run([str(mallard), "-i", f"layers{i}.toml", "--kokkos-num-threads=2"], cwd=work, check=True,
+                       stdout=subprocess.DEVNULL)
+        pts, conn, offs, _, data = read_vtu_cells(str(work / f"layers{i}_000000.vtu"))
+        starts = np.concatenate([[0], offs[:-1]])
+        out.append((pts, [conn[a:b] for a, b in zip(starts, offs)], data["RHO"]))
+    return out
+
+
+def initial_layers(P, args):
+    data = layers_2d(args.mallard)
+    fig, axes = plt.subplots(1, 3, figsize=(11.0, 3.7), gridspec_kw=dict(wspace=0.06))
+    norm = plt.Normalize(0.0, 1.7)
+    cmap = plt.get_cmap(P["cmap"])
+    for k, (ax, (title, _, _), (pts, cells, rho)) in enumerate(zip(axes, LAYERS, data)):
+        ax.add_collection(PolyCollection([pts[c, :2] for c in cells], facecolors=cmap(norm(rho)),
+                                         edgecolors=P["mesh"], linewidths=0.4))
+        g = np.linspace(0, 1, 300)
+        X, Y = np.meshgrid(g, g)
+        for _, _, inside in LAYERS[1:k + 1]:
+            ax.contour(X, Y, inside(X, Y).astype(float), levels=[0.5], colors=[P["fg"]], linewidths=1.2)
+        bare(ax)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_aspect("equal")
+        ax.set_title(title, fontsize=12)
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    cb = fig.colorbar(sm, ax=axes, shrink=0.75, pad=0.02)
+    cb.set_label("cell-average density")
+    cb.outline.set_edgecolor(P["muted"])
+    return fig
+
+
 HOLE = (0.3, 0.5, 0.12)
 MESH_REGIONS = [
     ('"domain" minus a disk', '{type = "difference", regions = ["domain", {type = "disk", center = [0.62, 0.55], '
@@ -497,7 +590,8 @@ class Args(tuple):
 
 
 FIGURES = {"region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
-           "region_mesh_regions": mesh_regions, "region_orientation": orientation, "regions_3d": regions_3d}
+           "region_mesh_regions": mesh_regions, "region_orientation": orientation, "regions_3d": regions_3d,
+           "initial_layers": initial_layers}
 
 
 def figures(mallard, mallard3d=None, names=()):

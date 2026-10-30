@@ -93,6 +93,33 @@ TEST(CheckKeys, UnclosedNestedArrayBeforeAKeyIsASyntaxError) {
     EXPECT_THROW(parse_input_string("s=[\"\",[\"\",\"\"[\n[="), InputError);
 }
 
+TEST(CheckKeys, MalformedNestingIsASyntaxErrorNotACrash) {
+    // Once a stack overflow and endless loops in toml11's error recovery (test/fuzz/corpus/input/
+    // deep_unclosed_array, comment_in_unclosed_array, key_on_the_line_of_a_nested_array)
+    EXPECT_THROW(parse_input_string("s=[\"\",[\"\"" + std::string(1000000, '[')), InputError);
+    EXPECT_THROW(parse_input_string("s=[\"\",[\"\"[#\n"), InputError);
+    EXPECT_THROW(parse_input_string("s=[\n\"\",[\"\"[="), InputError);
+}
+
+TEST(CheckKeys, NestingDeeperThan64IsAnInputError) {
+    const auto nested = [](size_t depth) { return std::string(depth, '[') + std::string(depth, ']'); };
+    const auto error = [](const std::string & text) {
+        try {
+            parse_input_string(text);
+        } catch (const InputError & e) {
+            return std::string(e.what());
+        }
+        return std::string("no error");
+    };
+    const std::string too_deep = "tables, arrays and inline tables are nested more than 64 deep";
+    EXPECT_NO_THROW(parse_input_string("a = " + nested(64)));
+    EXPECT_TRUE(mentions({error("x = 1\na = " + nested(65))}, "line 2: a: " + too_deep));
+    EXPECT_TRUE(mentions({error("[t]\na = " + nested(64))}, "line 2: t.a: " + too_deep));
+    std::string dotted = "a";
+    for (int i = 0; i < 64; i++) dotted += ".a";
+    EXPECT_TRUE(mentions({error(dotted + " = 1")}, too_deep));
+}
+
 TEST(CheckKeys, RemovedKeysNameWhatReplacedThem) {
     std::string input = box();
     input.replace(input.find("rho_ref = 1.0\n"), 14, "rho_ref = 1.0\np_min = 0.0\n");

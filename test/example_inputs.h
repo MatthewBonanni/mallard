@@ -104,6 +104,12 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
         }
     }
 
+    if (input.contains("initialize") && input.at("initialize").contains("data")) {
+        for (auto & d : table["initialize"].as_table().at("data").as_array()) {
+            d.as_table()["file"] = (dir / d.at("file").as_string()).string();
+        }
+    }
+
     if (const auto type = find_value_or<std::string>(input, "initialize", "type", "constant");
         type == "restart" || type == "remap") {
         if (!c.init.empty()) {
