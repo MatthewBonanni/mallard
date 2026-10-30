@@ -324,6 +324,29 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
         25));
 }
 
+TEST(MPITest, IntegralsOfAnUndistributedSolverAreThoseOfItsOwnMesh) {
+    // A serial reference on every rank integrates its whole mesh once, not once per rank
+    const std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                        bcs("type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
+                                            "type = \"wall_adiabatic\"\n", "type = \"wall_adiabatic\"\n"),
+                                        3);
+    Solver distributed, serial;
+    serial.set_distributed(false);
+    distributed.init(parse_toml(input));
+    serial.init(parse_toml(input));
+    distributed.run();
+    serial.run();
+    auto expect_close = [](double a, double b, const char * what) {
+        EXPECT_NEAR(a, b, precision_tol<double>(1e-12, 1e-5) * std::abs(b)) << what;
+    };
+    const auto U = serial.integrate_conservatives(), U_ref = distributed.integrate_conservatives();
+    FOR_I_CONSERVATIVE expect_close(double(U[i]), double(U_ref[i]), "integrate_conservatives");
+    expect_close(double(serial.integrate_flow_statistics()[0]), double(distributed.integrate_flow_statistics()[0]),
+                 "integrate_flow_statistics");
+    expect_close(double(serial.kinetic_energy_budget().convective),
+                 double(distributed.kinetic_energy_budget().convective), "kinetic_energy_budget");
+}
+
 TEST(MPITest, InletsMatchSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
                                     bcs("type = \"stagnation_inlet\"\np0 = 1.5\nT0 = 1.1\ndirection = [1.0, 0.3]\n",

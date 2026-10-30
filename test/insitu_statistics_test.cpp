@@ -120,6 +120,7 @@ TEST(SpectraTest, CorrelationsAndShellSpectraOfAPeriodicBoxMatchDirectSums) {
     // sums of a direct (non-FFT) DFT of the cells over the whole box
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"y\", \"z\"]" : "[\"x\", \"y\"]";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(box(periodic, 0.0, 4, one_sample("fields = [\"U_X\", \"RHO\"]\nproducts = [\"U_X*RHO\"]\n", 4))));
     solver.run();
     solver.copy_device_to_host();
@@ -186,6 +187,7 @@ TEST(SpectraTest, ChannelCorrelationsAtEachHeightMatchDirectSums) {
     // on their slab, and each height has its own spectra and plane means
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"z\"]" : "[\"x\"]";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(box(periodic, 1.5, 3, one_sample("fields = [\"U_Y\"]\nproducts = [\"U_X*U_Y\"]\n", 3))));
     solver.run();
     solver.copy_device_to_host();
@@ -250,7 +252,6 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
     const double u0 = 0.1, t_ref = 1.0 / 12.0;
     const uint32_t n_steps = 416, bins = 4;
     const std::string dir = (scratch_dir() / "mallard_phase_restart").string();
-    std::filesystem::remove_all(dir);
     auto run = [&](uint32_t steps, const std::string & phase, const std::string & from = "") {
         std::string input = oscillating(steps, "[statistics]\nt_start = 1.25\ninterval = 2\n"
                                                "[statistics.phase]\nfields = [\"U_X\", \"RHO\"]\nbins = 4\n" + phase);
@@ -259,6 +260,7 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
             input.replace(a, b - a, "[initialize]\ntype = \"restart\"\nfile = \"" + from + "\"\n");
         }
         auto solver = std::make_unique<Solver>();
+        solver->set_distributed(false);
         solver->init(parse_toml(input));
         solver->run();
         solver->copy_device_to_host();
@@ -274,7 +276,6 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
     // window, carries the bins and the trigger's last crossings and sample
     run(200, trigger + "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 200\n");
     const auto continued = run(n_steps, trigger, dir + "/r_000200.restart");
-    std::filesystem::remove_all(dir);
 
     std::vector<double> sum(bins, 0.0), count(bins, 0.0);
     for (uint32_t k = 81; k <= n_steps / 2; k++) {
@@ -307,7 +308,6 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     // continues the averaged spectra (restart arrays) and the phase bins as if
     // uninterrupted, and leaves the solution unchanged
     const std::string dir = (scratch_dir() / "mallard_insitu_restart").string();
-    std::filesystem::remove_all(dir);
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"z\"]" : "[\"x\"]";
     auto extra = [&](const std::string & sub, bool zlib = false) {
         return "[statistics]\nt_start = 0.01\ninterval = 3\n"
@@ -381,7 +381,6 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     for (uint32_t c = 0; c < straight->get_mesh()->n_owned(); c++) {
         for (uint32_t bin = 0; bin < 3; bin++) EXPECT_EQ(pb.host_means()(c, bin), pa.host_means()(c, bin));
     }
-    std::filesystem::remove_all(dir);
 }
 
 namespace {

@@ -87,6 +87,7 @@ double sine_amplitude(const Profile & p, double L) {
 
 /** @brief Run to completion and refresh the host copies. */
 void run(Solver & solver, const std::string & input) {
+    solver.set_distributed(false);  // the checks are over this rank's cells
     solver.init(parse_toml(input));
     solver.run();
     solver.update_primitives();
@@ -502,6 +503,7 @@ TEST(MixtureTransportTest, WallsAreImpermeableToEverySpecies) {
         std::string text = input.str();
         text.insert(text.find("[physics]\n") + 10, "phase = \"hydrogen\"\n");
         Solver solver;
+        solver.set_distributed(false);
         solver.init(parse_toml(text));
         const std::vector<rtype> before = solver.integrate_species();
         const auto energy_before = solver.integrate_conservatives();

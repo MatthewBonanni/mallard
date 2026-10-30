@@ -87,6 +87,7 @@ double max_speed(Solver & solver) {
 
 TEST(AxisymmetricTest, RevolvedGeometryOfCellsAndFaces) {
     Solver solver;
+    solver.set_distributed(false);
     Case c;
     c.mesh = "cartesian_tri";
     c.n = 8;
@@ -117,6 +118,7 @@ TEST(AxisymmetricTest, RevolvedGeometryOfCellsAndFaces) {
 TEST(AxisymmetricTest, CellCentersAreRWeightedCentroids) {
     // A linear function equals its r-weighted cell average at the cell center
     Solver solver;
+    solver.set_distributed(false);
     Case c;
     c.mesh = "cartesian_tri";
     c.n = 4;
@@ -132,6 +134,7 @@ TEST(AxisymmetricTest, CellCentersAreRWeightedCentroids) {
 
 TEST(AxisymmetricTest, AxisMustBeSymmetry) {
     Solver solver;
+    solver.set_distributed(false);
     Case c;
     c.init = "type = \"constant\"\nu = [0.0, 0.0]\np = 1.0\nT = 1.0\n";
     std::string text = input(c);
@@ -155,6 +158,7 @@ TEST_P(AxisymmetricQuiescent, GasAtUniformPressureStaysAtRest) {
     const std::string rho = physics == "type = \"euler\"" ? "1 + 0.3 * cos(3 * x) * cos(2 * y)" : "1";
     c.init = "type = \"analytical\"\nrho = \"" + rho + "\"\nu = [\"0\", \"0\"]\np = \"1\"\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(c)));
     solver.run();
     EXPECT_LT(max_speed(solver), precision_tol<double>(1e-13, 1e-5));
@@ -185,6 +189,7 @@ TEST(AxisymmetricTest, GasMixtureAtRestStaysAtRest) {
             const std::string constants = "gamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
             text.replace(text.find(constants), constants.size(), "");
             Solver solver;
+            solver.set_distributed(false);
             solver.init(parse_toml(text));
             solver.run();
             EXPECT_LT(max_speed(solver), precision_tol<double>(1e-10, 1e-3)) << type << " " << reconstruction;
@@ -203,6 +208,7 @@ TEST(AxisymmetricTest, ConservesMassAxialMomentumAndEnergy) {
     c.init = "type = \"analytical\"\nrho = \"1\"\nu = [\"0.2 * (1 - y * y)\", \"0.1 * y * sin(6.283185307179586 * x)\"]\n"
              "p = \"1 + 0.5 * exp(-20 * ((x - 0.5)^2 + y^2))\"\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(c)));
     const auto before = solver.integrate_conservatives();
     solver.run();
@@ -233,6 +239,7 @@ std::array<double, 2> poiseuille_residual(uint32_t n) {
     g << "gravity = [" << 4.0 * mu * U << ", 0.0]\n";
     c.source = g.str();
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(c)));
     const auto rhs = host_rhs(solver);
     const Mesh & mesh = *solver.get_mesh();
@@ -349,6 +356,7 @@ double mms_residual_error(const std::string & mesh, uint32_t n, const std::strin
              "p = \"1 + 0.2 * cos(2 * pi * x) * cos(pi * y)\"\n";
     c.top = "type = \"extrapolation\"";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(c)));
     const auto rhs = host_rhs(solver);
     const auto exact = mms_exact_rhs(*solver.get_mesh());

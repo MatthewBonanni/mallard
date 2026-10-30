@@ -268,12 +268,14 @@ TEST(StagnationInletTest, OneSpeciesMixtureMatchesThePerfectGas) {
                duct_boundaries(inlet + composition, "type = \"p_out\"\np = 8.0e4\n");
     };
     Solver perfect;
+    perfect.set_distributed(false);
     perfect.init(parse_toml(common + rest("") +
                             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 101325.0\nT_ref = 300.0\n"
                             "rho_ref = 1.1768292682926829\n"));
     perfect.run();
     perfect.copy_device_to_host();
     Solver mixed;
+    mixed.set_distributed(false);
     mixed.init(parse_toml(common + "Y = { AIR = 1.0 }\n" + rest("Y = { AIR = 1.0 }\n") + "[physics]\ntype = \"euler\"\ngas = \"mixture\"\n"
                           "mechanism = \"" + PERFECT_AIR + "\"\nphase = \"air\"\n"));
     mixed.run();
@@ -305,6 +307,7 @@ void expect_isentropic_duct(const std::string & reconstruction) {
         duct_boundaries("type = \"stagnation_inlet\"\np0 = 2.0e5\nT0 = 2000.0\nX = { N2 = 0.79, O2 = 0.21 }\n",
                         "type = \"p_out\"\np = 1.4e5\n");
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.update_primitives();
@@ -466,6 +469,7 @@ TEST(StagnationInletTest, NozzleMatchesTheQuasiOneDimensionalShockSolution) {
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(s.str()));
     solver.run();
     solver.update_primitives();
@@ -591,9 +595,11 @@ ClosedDuct closed_heated_duct(const std::string & inlet, const std::string & sch
         return m;
     };
     Solver start;
+    start.set_distributed(false);
     start.init(parse_toml("[run]\nn_steps = 0\ncfl = 0.5\n" + init + common));
     start.copy_device_to_host();
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml("[run]\nt_stop = 2.0e-3\ncfl = 0.5\n" + init + common));
     solver.run();
     solver.copy_device_to_host();
@@ -677,6 +683,7 @@ TEST(MassFlowInletTest, HeatedDuctMatchesRayleighFlow) {
         "[output]\ncheck_interval = 1000000\n" + PERFECT_GAS_AIR +
         duct_boundaries("type = \"mass_flow_inlet\"\nT = 300.0\nmass_flux = 100.0\n", "type = \"p_out\"\np = 1.0e5\n");
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.update_primitives();
@@ -716,7 +723,9 @@ TEST(MassFlowInletTest, InvalidInputIsRejected) {
                                      std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = \"y - 0.5\"\n"),
                                      std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = 1.0\nprofile = \"y\"\n"),
                                      std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmdot = 1.0\nprofile = \"0 * y\"\n"),
-                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = \"1 + t\"\n")}) {
+                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = \"1 + t\"\n"),
+                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = 1.0\ndirection = ") +
+                                         (N_DIM == 2 ? "[-1.0, 0.0]" : "[-1.0, 0.0, 0.0]") + "\n"}) {
         Solver solver;
         EXPECT_THROW(solver.init(parse_toml(head + duct_boundaries(left, outlet))), std::runtime_error) << left;
     }
@@ -758,6 +767,7 @@ std::vector<double> forced_run(const ForcedCase & c, double dt) {
     std::ostringstream run;
     run << "dt = " << dt << "\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(forced_input(c, run.str())));
     solver.run();
     solver.update_primitives();
@@ -866,6 +876,16 @@ TEST(ForcedInletTest, NumberOfTThatTurnsNegativeIsAnInputErrorWithFaceAndTime) {
         EXPECT_NE(what.find("at t = 0.1"), std::string::npos) << what;
         EXPECT_NE(what.find(", face (0, "), std::string::npos) << what;
     }
+}
+
+TEST(ForcedInletTest, AValueOutOfRangeOnSomeRanksStopsEveryRank) {
+    // Distributed, only the ranks holding the inlet see T turn negative; the others throw too
+    Solver solver;
+    solver.init(parse_toml(forced_input({"T(t) < 0", "type = \"upt\"\nu = " +
+                                                         std::string(N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") +
+                                                         "\np = 1.0\nT = \"1 - 10 * t\"\n", "", UNIT_GAS},
+                                        "dt = 0.004\n")));
+    EXPECT_THROW(solver.run(), InputError);
 }
 
 TEST(ForcedInletTest, ConditionsOfTKeepTheStepGraph) {
