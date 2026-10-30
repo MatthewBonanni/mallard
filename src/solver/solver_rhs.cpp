@@ -87,7 +87,125 @@ struct GeometricSourceFunctor {
     }
 };
 
+/** @brief The ledger's boundary flux of a face: the convective flux, and the viscous one if any. */
+template <typename C>
+struct LedgerBoundaryFlux {
+    C convective;
+    ViscousFluxFunctor viscous;
+    bool is_viscous;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t f, rtype * out) const {
+        convective.flux(f, out);
+        if (is_viscous) viscous.flux(f, out);
+    }
+};
+
+/** @brief The volume sources of a cell re-evaluated from its state: gravity and the mass flow force. */
+struct LedgerSources {
+    StateView U;
+    Kokkos::View<rtype *> measure;
+    Kokkos::View<rtype *> volume;
+    Kokkos::Array<double, N_DIM> g;
+    bool gravity;
+    Kokkos::Array<double, N_DIM> direction;  // of the mass flow force
+    Kokkos::View<double *> mass_flow;        // [2] is the force of this stage; empty without mass flow
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, rtype * out) const {
+        const double V = static_cast<double>(measure(c)), rho = static_cast<double>(U(c, 0));
+        double s[N_CONSERVATIVE] = {};
+        if (gravity) {
+            FOR_I_DIM {
+                s[1 + i] += rho * g[i] * V;
+                s[N_DIM + 1] += static_cast<double>(U(c, 1 + i)) * g[i] * V;
+            }
+        }
+        if (mass_flow.extent(0) > 0) {
+            const double V_m = static_cast<double>(volume(c)), f = mass_flow(2);
+            FOR_I_DIM {
+                s[1 + i] += f * direction[i] * V_m;
+                s[N_DIM + 1] += f * direction[i] * static_cast<double>(U(c, 1 + i)) / rho * V_m;
+            }
+        }
+        FOR_I_CONSERVATIVE out[i] = static_cast<rtype>(s[i]);
+    }
+};
+
+/** @brief A cell's flow block of a separate evaluation of the source terms (already times its measure). */
+struct LedgerSourceTerms {
+    StateView S;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, rtype * out) const {
+        FOR_I_CONSERVATIVE out[i] = S(c, i);
+    }
+};
+
+/** @brief The sponge source of sponge cell k: its volume times sum_i sigma_i (U_ref,i - U). */
+struct LedgerSponges {
+    StateView U;
+    Kokkos::View<rtype *> measure;
+    Kokkos::View<uint32_t *> cells;
+    Kokkos::View<rtype *> strength;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> target;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, rtype * out) const {
+        const uint32_t c = cells(k);
+        FOR_I_CONSERVATIVE out[i] = measure(c) * (target(k, i) - strength(k) * U(c, i));
+    }
+};
+
 } // namespace
+
+void Solver::ledger_stage(const State & state, const ViscousFluxFunctor * viscous) {
+    ConservationLedger & ledger = run_health.ledger;
+    ledger.begin_stage();
+    if (!is_mixture()) {
+        const ViscousFluxFunctor v = viscous ? *viscous : ViscousFluxFunctor{};
+        const auto add = [&](auto convective) {
+            ledger.add_boundary(LedgerBoundaryFlux<decltype(convective)>{convective, v, viscous != nullptr});
+        };
+        switch (riemann_solver_type) {
+            case RiemannSolverType::RUSANOV:
+                add(flux_functor<riemann::Rusanov>());
+                break;
+            case RiemannSolverType::HLL:
+                add(flux_functor<riemann::HLL>());
+                break;
+            case RiemannSolverType::HLLC:
+                add(flux_functor<riemann::HLLC>());
+                break;
+            case RiemannSolverType::ROE:
+                add(flux_functor<riemann::Roe>());
+                break;
+            case RiemannSolverType::RHLL:
+                add(flux_functor<riemann::RHLL>());
+                break;
+        }
+    }
+    if (has_gravity || hold_mass_flow) {
+        LedgerSources sources{state.flow, mesh->cell_measure, mesh->cell_volume, {}, has_gravity, {},
+                              hold_mass_flow ? mass_flow_totals : Kokkos::View<double *>()};
+        FOR_I_DIM {
+            sources.g[i] = static_cast<double>(gravity[i]);
+            sources.direction[i] = static_cast<double>(mass_flow_direction[i]);
+        }
+        ledger.add_sources(sources, mesh->n_owned());
+    }
+    if (source_terms) {
+        // Into a buffer of their own, at the stage time and domain averages the RHS just set
+        State & scratch = run_health.source_scratch;
+        if (scratch.flow.extent(0) != mesh->n_cells) {
+            scratch = State("ledger_sources", mesh->n_cells, static_cast<uint32_t>(species_names.size()));
+        }
+        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), scratch.flow, 0.0_r);
+        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), scratch.species, 0.0_r);
+        source_terms->add(state, scratch, stage_time);
+        ledger.add_sources(LedgerSourceTerms{scratch.flow}, mesh->n_owned());
+    }
+    if (sponge_cells.extent(0) > 0) {
+        ledger.add_sources(LedgerSponges{state.flow, mesh->cell_measure, sponge_cells, sponge_strength, sponge_target},
+                           static_cast<uint32_t>(sponge_cells.extent(0)));
+    }
+}
 
 void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     if (is_mixture()) {
@@ -148,6 +266,13 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
             launch_flux_functor<riemann::RHLL>();
             break;
     }
+    if (run_health.mutation.flux_factor != 1.0) {
+        const Kokkos::View<rtype *[N_CONSERVATIVE]> F = face_flux;
+        const rtype factor = static_cast<rtype>(run_health.mutation.flux_factor);
+        Kokkos::parallel_for("mutation_flux", F.extent(0), KOKKOS_LAMBDA(const uint32_t f) {
+            FOR_I_CONSERVATIVE F(f, i) *= factor;
+        });
+    }
 
     if (budget_pass) {
         budget.convective = kinetic_energy_rate();
@@ -192,7 +317,16 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
+    if (run_health.mutation.rhs_factor != 1.0) {
+        const rtype factor = static_cast<rtype>(run_health.mutation.rhs_factor);
+        Kokkos::parallel_for("mutation_rhs", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
+            FOR_I_CONSERVATIVE rhs(i_cell, i) *= factor;
+        });
+    }
     apply_sponges(state, rhs_state);
+    if (!budget_pass && run_health.ledger.on()) {
+        ledger_stage(state, physics.is_viscous() ? &viscous_functor : nullptr);
+    }
     if (budget_pass && les_on) {
         // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
         Kokkos::deep_copy(face_flux, 0.0_r);
@@ -216,7 +350,7 @@ void Solver::add_sources(const State & solution, const State & rhs_state, const 
     if (has_gravity) {
         const Kokkos::View<rtype *> vol = mesh->cell_measure;
         Kokkos::Array<rtype, N_DIM> g;
-        FOR_I_DIM g[i] = gravity[i];
+        FOR_I_DIM g[i] = gravity[i] * static_cast<rtype>(run_health.mutation.gravity_sign);
         Kokkos::parallel_for("rhs_gravity", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell) {
             const rtype V = vol(i_cell);
             rtype rhou[N_DIM];
@@ -262,8 +396,8 @@ void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::L
 }
 
 template <typename T_riemann_solver>
-void Solver::launch_flux_functor() {
-    ConvectiveFluxFunctor<T_riemann_solver> functor{mesh->face_normals,
+ConvectiveFluxFunctor<T_riemann_solver> Solver::flux_functor() const {
+    return ConvectiveFluxFunctor<T_riemann_solver>{mesh->face_normals,
                                                     mesh->face_area,
                                                     mesh->cells_of_face,
                                                     face_reconstruction->quadrature_face.weights,
@@ -276,5 +410,9 @@ void Solver::launch_flux_functor() {
                                                     low_mach_cutoff,
                                                     cell_upwind,
                                                     face_reconstruction->face_quad_normals};
-    parallel_for_faces("convective_flux", functor, rhs_faces, mesh->n_faces);
+}
+
+template <typename T_riemann_solver>
+void Solver::launch_flux_functor() {
+    parallel_for_faces("convective_flux", flux_functor<T_riemann_solver>(), rhs_faces, mesh->n_faces);
 }

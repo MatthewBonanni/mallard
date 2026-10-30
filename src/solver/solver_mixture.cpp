@@ -106,6 +106,20 @@ struct ResetEnergyFunctor {
     StateView U;
     SpeciesView rhoY;
     Kokkos::View<rtype *[2]> frozen;
+    Kokkos::View<rtype *> volume;      // repair audit: the change of rho E V and the changed cells, else empty
+    Kokkos::View<uint8_t *> touched;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c, double & change, uint64_t & changed) const {
+        const rtype before = U(c, N_DIM + 1);
+        (*this)(c);
+        const rtype after = U(c, N_DIM + 1);
+        if (after != before) {
+            change += static_cast<double>(volume(c)) * (static_cast<double>(after) - static_cast<double>(before));
+            changed++;
+            touched(c) = 3;
+        }
+    }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -393,7 +407,23 @@ void Solver::freeze_thermodynamics() {
 }
 
 void Solver::reset_energy() {
-    Kokkos::parallel_for("reset_energy", mesh->n_owned(), ResetEnergyFunctor{mixture, conservatives, species, frozen_thermo});
+    ResetEnergyFunctor functor{mixture, conservatives, species, frozen_thermo, {}, {}};
+    if (run_health.reset_site == HealthState::NONE) {
+        Kokkos::parallel_for("reset_energy", mesh->n_owned(), functor);
+        return;
+    }
+    const RepairRecorder recorder = run_health.repairs.recorder(run_health.reset_site);
+    functor.volume = mesh->cell_measure;
+    functor.touched = recorder.touched;
+    const Kokkos::View<double> change = run_health.reset_change;
+    const Kokkos::View<uint64_t> changed = run_health.reset_cells;
+    Kokkos::parallel_reduce("reset_energy", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor,
+                            Kokkos::Sum<double, Kokkos::DefaultExecutionSpace::memory_space>(change),
+                            Kokkos::Sum<uint64_t, Kokkos::DefaultExecutionSpace::memory_space>(changed));
+    Kokkos::parallel_for("reset_energy_record", 1, KOKKOS_LAMBDA(const int) {
+        recorder.change(0) += change();
+        recorder.activations(0) += changed();
+    });
 }
 
 void Solver::init_temperature_seed() {
@@ -502,6 +532,9 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
     apply_sponges(state, rhs_state);
+    if (!budget_pass && run_health.ledger.on()) {
+        ledger_stage(state, nullptr);
+    }
     if (budget_pass && les_on) {
         // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
         Kokkos::deep_copy(face_flux, 0.0_r);
