@@ -77,13 +77,14 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[chemistry]`, `[radiation]` | no | [Thermochemistry](thermochemistry.md) |
 | `[les]`, `[les.combustion]` | no | [Large-eddy simulation](les.md) |
 | `[source]`, `[[sponges]]` | no | [Sources and sponges](sources.md) |
+| `[regions]` | no | [Named regions](geometry.md#named-regions), used by `[[sources]]`, `[[sponges]]` and `[[probes]]` |
 | `[[write_data]]`, `[output]` | no | [Output](output.md) |
 | `[[probes]]`, `[[forces]]`, `[integrals]` | no | [Probes and monitors](probes.md) |
 | `[statistics]` and its subtables | no | [Statistics](statistics.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
-Shapes that several tables use (regions, probe points and curves) are on
-[Geometry](geometry.md).
+Regions that several tables use (inline, or named once in `[regions]`), and
+probe points and curves, are on [Geometry](geometry.md).
 
 Double brackets (`[[boundaries]]`) are TOML arrays of tables: repeat them, one
 entry each. Every key, with its default, is in the

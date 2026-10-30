@@ -12,7 +12,7 @@ sponge layers that damp the solution toward a reference state.
 gravity = [0.0, -9.81]          # adds rho g to momentum, rho u.g to energy
 ```
 
-*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+*Used in:* [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -67,7 +67,7 @@ region = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.01
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | `sources[i]` | Name in the terminal output |
-| `region` | everywhere | Where the source acts (below); values are multiplied by each cell's volume fraction |
+| `region` | everywhere | Where the source acts (below), or the name of a region in `[regions]`; values are multiplied by each cell's volume fraction |
 | `total` | `false` | Values are integrated rates over the region (kg/s, N, W) instead of densities; they may depend on `t` only |
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`"5 MW/m^3"`; with `total`, `"50 W"`) or expressions in SI units |
 | `rhoY` | none | Mixtures: species sources by name, `{H2 = "1e-3"}`; they also add to the mass |
@@ -99,7 +99,22 @@ region = {type = "difference",
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-light.svg#gh-light-mode-only)
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-dark.svg#gh-dark-mode-only)
 
-Every shape, boolean and transform, with figures: [Geometry](geometry.md#regions).
+Every primitive, boolean and transform, with figures: [Geometry](geometry.md#regions).
+
+A region used by several features (a source, the probe that measures it, a
+sponge) can be defined once in `[regions]` and given by its name:
+
+```toml
+[regions]
+igniter = {type = "sphere", center = [0, 0, 0], radius = 2e-3, edge = 5e-4}
+
+[[sources]]
+total = true
+rhoE = "50 W"
+region = "igniter"
+```
+
+See [named regions](geometry.md#named-regions).
 
 ### Exact totals
 
@@ -139,7 +154,8 @@ Pitfalls:
 - Domain averages cost a global sum per stage and keep steps out of CUDA graphs.
 
 Example: `examples/source_regions` heats a ring with an exact Gaussian pulse
-and pushes the gas with a tilted fan.
+and pushes the gas with a tilted fan; a probe of the same named region records
+the mass and temperature in the ring.
 
 ## Sponge layers
 
@@ -164,12 +180,29 @@ conditions alone may reflect them or let reversed flow in.
 | Key | Default | Meaning |
 |---|---|---|
 | `strength` | required | Damping rate [1/s], a number or an expression of x, y, z; zero outside the layer |
+| `region` | none | A [region](geometry.md#regions) (or its name in `[regions]`): `strength` is multiplied by each cell's volume fraction of it |
 | `u`, `p`, `T` | required | Reference state, numbers or expressions of x, y, z |
 | `X` or `Y`, `balance` | — | Mixtures: reference composition |
 
-Several sponges add up. Strength and reference are evaluated once, at cell
-centroids; a comparison in `strength` gives the layer any shape
-([Geometry](geometry.md#who-uses-what)). The source is explicit and caps the time step at
+With `region`, the layer is where the region is, and the region's smooth
+`edge` ramps it up; `strength` gives the peak rate, or a profile inside the
+region:
+
+```toml
+# 50 1/s beyond x = 4.5, ramped up smoothly between x = 4 and 5
+[[sponges]]
+strength = 50.0
+region = {type = "half_space", point = [4.5, 0.0], normal = [-1.0, 0.0], edge = 1.0}
+u = [1.0, 0.0]
+p = 1.0
+T = 1.0
+```
+
+Both forms remain: an expression alone gives any profile, a region gives any
+[region](geometry.md#regions) its volume fractions (not a staircase of cell
+centroids) and shares a named region with sources and probes. Several sponges
+add up. Strength and reference are evaluated once, at cell
+centroids. The source is explicit and caps the time step at
 `1 / max(strength)`. Example: `channel_inflow_retau180`, a sponge over the last
 fifth of the channel in front of its `nscbc_outlet`.
 

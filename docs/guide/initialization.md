@@ -15,7 +15,7 @@ T = 1.0
 # X = { O2 = 1.0, N2 = 3.76 }   gas mixtures: the composition
 ```
 
-*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions) and 2 more.
+*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet) and 4 more.
 
 ## Expressions
 
@@ -133,7 +133,7 @@ curved ones (second order in the piece size: a disk 10 cells across loses
 | `X` or `Y`, `balance` | the composition below | Mixtures: the composition inside, as in `[initialize]` |
 | `priority` | 0 | Higher priorities go on top; equal ones in the order listed |
 | `cells` | `"volume_fraction"` | `volume_fraction`: cell averages; `center`: whole cells by their centroids |
-| `name` | `initialize.regions[i]` | Name in the run log |
+| `name` | `initialize.regions[i]` | Name in the terminal output |
 
 **Over a restart or a remap.** With `type = "restart"` or `"remap"`, regions
 change the file's state: ignite a converged cold flow, add a bubble to a

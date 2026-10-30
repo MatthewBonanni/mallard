@@ -9,9 +9,12 @@
 #   volume along its long side; its work f . u, an expression of the local
 #   velocity, goes into the energy.
 #
-# The terminal output lists each source with its region and measure. SOURCE_RHOE and
-# SOURCE_RHOU_X/Y in the snapshots show where they act. The total energy
-# rises by the integral of Q, 10 sqrt(pi) 0.02 = 0.3545, plus the fan's work.
+# The ring is a named region in [regions], shared by its source and by a probe
+# that writes the mass, mean temperature and peak pressure in the ring to
+# probe_ring_reductions.csv every 50 steps. The terminal output lists each source with
+# its region and measure. SOURCE_RHOE and SOURCE_RHOU_X/Y in the snapshots show
+# where they act. The total energy rises by the integral of Q, 10 sqrt(pi) 0.02
+# = 0.3545, plus the fan's work.
 
 [run]
 t_stop = 0.3
@@ -60,11 +63,14 @@ time_integrator = "SSPRK3"
 [numerics.face_reconstruction]
 type = "MUSCL"
 
+[regions]
+ring = {type = "annulus", center = [0.3, 0.5], radius = 0.12, inner_radius = 0.06, edge = 0.02}
+
 [[sources]]
 name = "ring"
 total = true
 rhoE = "10 * exp(-((t - 0.05) / 0.02)^2)"
-region = {type = "annulus", center = [0.3, 0.5], radius = 0.12, inner_radius = 0.06, edge = 0.02}
+region = "ring"
 
 [[sources]]
 name = "fan"
@@ -74,6 +80,13 @@ region = {type = "rectangle", center = [0, 0], size = [0.3, 0.1], rotate = 30, t
 
 [output]
 check_interval = 100
+
+[[probes]]
+name = "ring"
+variables = ["RHO", "T", "P"]
+region = "ring"
+reductions = ["integral", "mean", "max"]
+interval = 50
 
 [[write_data]]
 prefix = "solut/sources"
