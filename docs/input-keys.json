@@ -251,12 +251,15 @@
   "set_in": []
  },
  "boundaries.mass_flux": {
+  "dimension": "mass flux (kg m^-2 s^-1)",
   "dims": [
    2
   ],
+  "required": true,
   "set_in": [
    "examples/heated_duct/input.toml"
-  ]
+  ],
+  "type": "number"
  },
  "boundaries.mdot": {
   "dimension": "mass flow (kg s^-1)",
