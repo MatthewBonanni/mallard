@@ -274,16 +274,6 @@ int test_main(const cli::Args & args) {
     const int dim = value[0] - '0';
     const fs::path bin = executable_path().parent_path();
     std::vector<std::string> passthrough = args.passthrough;
-    if (args.help) {
-        for (const int d : {2, 3}) {
-            const fs::path suite = test_suite(bin, d);
-            if (suite.empty() || (dim != 0 && d != dim)) continue;
-            std::cout << "\nGoogleTest options (" << suite.filename().string() << " --gtest_help):\n" << std::flush;
-            std::vector<std::string> help = {"--gtest_help"};
-            return exec(suite, help);
-        }
-        return 0;
-    }
     return run_tests(bin, dim, passthrough);
 }
 

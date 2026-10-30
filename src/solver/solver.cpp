@@ -90,6 +90,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
     f();
     Kokkos::fence();
     const double seconds = phase_timer.seconds();
+    run_health.setup_phases.emplace_back(name, seconds);
     t_wall_setup += seconds;
     logging::end_phase(seconds);
 }
@@ -131,6 +132,7 @@ int Solver::init(const Input & input_in) {
     logging::begin_record();
     print_setup();
     provenance::set_setup(logging::end_record());
+    provenance::set_placement();
     provenance::share();
     write_provenance();
     return 0;
@@ -140,6 +142,7 @@ void Solver::setup_from_input() {
     t = 0.0;
     step = 0;
     t_wall_setup = 0.0;
+    run_health.setup_phases.clear();
 
     logging::section("Setup");
     init_run_parameters();
@@ -176,6 +179,7 @@ void Solver::setup_from_input() {
         init_output();
     });
     timed_phase("initial solution", [&] { init_solution(); });
+    init_health();
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
 }
@@ -200,11 +204,24 @@ void Solver::write_provenance() {
     }
     if (integral_monitor.out) *integral_monitor.out << line << std::flush;
     probes.annotate(line);
+    std::vector<std::string> names;
+    std::vector<double> seconds, ones;
+    for (const auto & [name, s] : run_health.setup_phases) {
+        names.push_back(name);
+        seconds.push_back(s);
+        ones.push_back(1.0);
+    }
+    json::Object setup_phases;
+    for (const auto & phase : health::spread(names, seconds, ones)) {
+        setup_phases.raw(phase.name, json::Object().add("max", phase.max).add("mean", phase.all).str());
+    }
     run_log::write(json::Object()
                        .add("type", "start")
                        .add("schema", run_log::SCHEMA)
                        .add("version", run_log::VERSION)
-                       .raw("provenance", provenance::json()));
+                       .raw("provenance", provenance::json())
+                       .raw("placement", provenance::placement())
+                       .raw("setup_phases", setup_phases.str()));
 }
 
 namespace {
@@ -1488,7 +1505,8 @@ void Solver::init_output() {
             }
         }
     }
-    probes.init(input, *mesh, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart");
+    probes.init(input, *mesh, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart",
+                is_viscous());
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     if (run_log_on) {
@@ -1498,7 +1516,7 @@ void Solver::init_output() {
     } else {
         run_log::close();
     }
-    if (probes.any_point_values() && !viscous_gradients.is_allocated()) {
+    if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
@@ -2037,6 +2055,10 @@ void Solver::print_progress() {
     monitor_values = {{"monitors_step", std::to_string(step)}};
     for (const auto & [name, value] : status.monitors) monitor_values.emplace_back(name, format("%.6g", value));
 
+    if (run_health.on) {
+        report_health();
+        status.health = run_health.last;
+    }
     if (run_log_on) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
@@ -2209,6 +2231,7 @@ void Solver::print_summary(const std::string & stop) const {
     if (integral_monitor.interval > 0) add(integral_monitor.file);
     for (const auto & file : probes.files()) add(file);
     if (!files.empty()) logging::item("Files", files);
+    health_summary();
 
     json::Object end;
     end.add("type", "end")
@@ -2284,8 +2307,9 @@ void Solver::write_data(bool force) {
 
 void Solver::write_probes() {
     if (!probes.due(step, t)) return;
-    if (probes.point_values_due(step, t)) {
+    if (probes.point_values_due(step, t) || probes.gradients_due(step, t)) {
         update_cell_W();
+        if (is_mixture() && probes.transport_due(step, t)) update_transport();
     } else {
         update_primitives();
     }
@@ -2293,9 +2317,13 @@ void Solver::write_probes() {
 }
 
 ProbeFields Solver::probe_fields() {
-    ProbeFields fields{cell_sampler(), W_cells, viscous_gradient, viscous_gradients, face_reconstruction.get(),
-                       physics.gamma, {}};
-    if (is_mixture()) fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+    ProbeFields fields{cell_sampler(), W_cells,      viscous_gradient,    viscous_gradients, face_reconstruction.get(),
+                       physics,        boundary_data, is_viscous(),        axisymmetric,      mesh->face_coords,
+                       {},             {}};
+    if (is_mixture()) {
+        fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+        if (is_viscous()) fields.transport = cell_transport;
+    }
     return fields;
 }
 
@@ -2330,6 +2358,7 @@ void Solver::take_step() {
         calc_dt();
         time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
     }
+    run_health.ledger.end_step(static_cast<double>(dt));
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
