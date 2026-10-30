@@ -237,3 +237,24 @@ TEST(CliTest, UserDocsShowEveryHelpPage) {
         EXPECT_TRUE(contains(text, "```text\n" + docs_page(f) + "```\n")) << f.name << ": docs/guide/cli.md is out of date";
     }
 }
+
+TEST(CliTest, TestOptionsOnItsPageReachGoogleTest) {
+    const cli::Command & test = *cli::command("test");
+    cli::Args parsed;
+    std::string error;
+    ASSERT_TRUE(cli::parse(test, {"--gtest_filter=Sod*", "--gtest_list_tests", "--gtest_shuffle", "--dim", "2"},
+                           parsed, error))
+        << error;
+    const std::vector<std::string> gtest = {"--gtest_filter=Sod*", "--gtest_list_tests", "--gtest_shuffle"};
+    EXPECT_EQ(parsed.passthrough, gtest);
+    EXPECT_EQ(parsed.value_or("--dim", ""), "2");
+}
+
+TEST(CliTest, TestHelpIsMallardsPageAlone) {
+    SKIP_UNDER_MPI();
+    const Result r = run({"test", "--help"});
+    EXPECT_EQ(r.status, 0) << r.err;
+    std::ostringstream page;
+    cli::print_help(page, *cli::command("test"));
+    EXPECT_EQ(r.out, page.str());
+}
