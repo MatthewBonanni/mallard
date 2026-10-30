@@ -1439,7 +1439,8 @@ void Solver::init_output(region::Regions & regions) {
             }
         }
     }
-    probes.init(input, *mesh, regions, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart");
+    probes.init(input, *mesh, regions, species_names,
+                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous());
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     if (run_log_on) {
@@ -1449,7 +1450,7 @@ void Solver::init_output(region::Regions & regions) {
     } else {
         run_log::close();
     }
-    if (probes.any_point_values() && !viscous_gradients.is_allocated()) {
+    if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
@@ -2229,8 +2230,9 @@ void Solver::write_data(bool force) {
 
 void Solver::write_probes() {
     if (!probes.due(step, t)) return;
-    if (probes.point_values_due(step, t)) {
+    if (probes.point_values_due(step, t) || probes.gradients_due(step, t)) {
         update_cell_W();
+        if (is_mixture() && probes.transport_due(step, t)) update_transport();
     } else {
         update_primitives();
     }
@@ -2238,9 +2240,13 @@ void Solver::write_probes() {
 }
 
 ProbeFields Solver::probe_fields() {
-    ProbeFields fields{cell_sampler(), W_cells, viscous_gradient, viscous_gradients, face_reconstruction.get(),
-                       physics.gamma, {}};
-    if (is_mixture()) fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+    ProbeFields fields{cell_sampler(), W_cells,      viscous_gradient,    viscous_gradients, face_reconstruction.get(),
+                       physics,        boundary_data, is_viscous(),        axisymmetric,      mesh->face_coords,
+                       {},             {}};
+    if (is_mixture()) {
+        fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+        if (is_viscous()) fields.transport = cell_transport;
+    }
     return fields;
 }
 
