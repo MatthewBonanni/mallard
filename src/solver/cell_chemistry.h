@@ -14,6 +14,7 @@
 #ifndef CELL_CHEMISTRY_H
 #define CELL_CHEMISTRY_H
 
+#include <array>
 #include <cstdint>
 #include <memory>
 
@@ -22,6 +23,7 @@
 #include "kinetics.h"
 #include "mixture.h"
 #include "reactor.h"
+#include "repair_audit.h"
 #include "sparse_lu.h"
 #include "state.h"
 
@@ -76,6 +78,8 @@ struct ChemistryCells {
     SpeciesView rate;
     StateView U_end;
     SpeciesView rhoY_end;
+    Kokkos::View<rtype *> volume;      // repair audit: cell volumes, else empty
+    Kokkos::View<uint8_t *> repaired;  // repair audit: set where the composition was clipped
 
     bool forced() const { return U_end.extent(0) > 0; }
 };
@@ -142,6 +146,18 @@ class CellChemistry {
                           const Kokkos::View<rtype *> & hrr, const Kokkos::View<rtype **, Kokkos::LayoutRight> & production,
                           uint32_t n);
 
+        /**
+         * @brief Records the clipping of mass fractions (changes of the species masses,
+         *        activations) and counts the sub-steps from now on.
+         * @param volume Cell volumes.
+         * @param repaired Per cell, set where a clipping happened (reset by the caller).
+         */
+        void audit(const RepairRecorder & recorder, const Kokkos::View<rtype *> & volume,
+                   const Kokkos::View<uint8_t *> & repaired);
+
+        /** @brief Sub-steps and rejected sub-steps of every integration so far on this rank (also of guests). */
+        std::array<uint64_t, 2> substeps() const;
+
         /** @brief Vector lanes per cell thread (1: one thread per cell). */
         uint32_t lanes() const { return n_lanes; }
 
@@ -187,6 +203,10 @@ class CellChemistry {
         Kokkos::View<uint32_t *> active, queue;  // (cell): flags, then the cells that need chemistry
         Kokkos::View<float *> cost;  // binning: minus the last cost of each queued cell
         Kokkos::View<float *> previous_cost;  // (cell)
+        RepairRecorder clip_recorder;
+        Kokkos::View<rtype *> cell_volume;
+        Kokkos::View<uint8_t *> cell_repaired;
+        Kokkos::View<uint64_t[2]> counters;  // sub-steps, rejected sub-steps
 };
 
 #endif // CELL_CHEMISTRY_H

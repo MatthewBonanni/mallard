@@ -90,6 +90,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
     f();
     Kokkos::fence();
     const double seconds = phase_timer.seconds();
+    run_health.setup_phases.emplace_back(name, seconds);
     t_wall_setup += seconds;
     logging::end_phase(seconds);
 }
@@ -131,6 +132,7 @@ int Solver::init(const Input & input_in) {
     logging::begin_record();
     print_setup();
     provenance::set_setup(logging::end_record());
+    provenance::set_placement();
     provenance::share();
     write_provenance();
     return 0;
@@ -140,6 +142,7 @@ void Solver::setup_from_input() {
     t = 0.0;
     step = 0;
     t_wall_setup = 0.0;
+    run_health.setup_phases.clear();
 
     logging::section("Setup");
     init_run_parameters();
@@ -176,6 +179,7 @@ void Solver::setup_from_input() {
         init_output();
     });
     timed_phase("initial solution", [&] { init_solution(); });
+    init_health();
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
 }
@@ -200,11 +204,24 @@ void Solver::write_provenance() {
     }
     if (integral_monitor.out) *integral_monitor.out << line << std::flush;
     probes.annotate(line);
+    std::vector<std::string> names;
+    std::vector<double> seconds, ones;
+    for (const auto & [name, s] : run_health.setup_phases) {
+        names.push_back(name);
+        seconds.push_back(s);
+        ones.push_back(1.0);
+    }
+    json::Object setup_phases;
+    for (const auto & phase : health::spread(names, seconds, ones)) {
+        setup_phases.raw(phase.name, json::Object().add("max", phase.max).add("mean", phase.all).str());
+    }
     run_log::write(json::Object()
                        .add("type", "start")
                        .add("schema", run_log::SCHEMA)
                        .add("version", run_log::VERSION)
-                       .raw("provenance", provenance::json()));
+                       .raw("provenance", provenance::json())
+                       .raw("placement", provenance::placement())
+                       .raw("setup_phases", setup_phases.str()));
 }
 
 namespace {
@@ -634,6 +651,10 @@ void Solver::init_boundaries() {
     std::vector<double> profiled_flux;
     // Faces of each nscbc_inlet on this rank, by input boundary
     std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
+    boundary_fields.assign(input_boundaries.size(), nullptr);
+    boundary_composition.assign(input_boundaries.size(), nullptr);
+    field_faces.clear();
+    timed_fields = TimedBoundaryFields();
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const Input & bound = input_boundaries[i_bc];
@@ -714,8 +735,11 @@ void Solver::init_boundaries() {
             }
             dirichlet.W.emplace_back(name + ".p", quantity_or_expression(bound.at("p"), name + ".p", dim::pressure));
         }
-        const bool profiled = is_mixture() && bcs.back().prescribes_composition() &&
-                              MixtureModel::composition_varies(bound);
+        auto fields = std::make_shared<BoundaryFields>(bound, bcs.back().type, "boundaries[name = \"" + name + "\"]");
+        boundary_fields[i_bc] = fields;
+        const bool composition = is_mixture() && bcs.back().prescribes_composition() &&
+                                 MixtureModel::composition_varies(bound);
+        const bool profiled = composition || fields->varies();
         rtype direction[N_DIM];
         FOR_I_DIM direction[i] = bcs.back().data[1 + i];
         const bool directed = (bcs.back().type == BoundaryType::STAGNATION_INLET ||
@@ -812,7 +836,8 @@ void Solver::init_boundaries() {
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
         std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
         if (where) text += ", where " + find_value<std::string>(bound, "where");
-        if (profiled) text += ", varying composition";
+        if (composition) text += ", varying composition";
+        if (fields->varies()) text += fields->depends_on_time() ? ", time dependent" : ", varying along it";
         if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
         boundary_summary.emplace_back(name, text);
     }
@@ -820,8 +845,14 @@ void Solver::init_boundaries() {
         const auto [i_bc, i_face] = profiled_faces[k];
         BoundaryCondition copy = bcs[i_bc];
         if (!std::isnan(profiled_flux[k])) copy.data[N_DIM + 1] = static_cast<rtype>(profiled_flux[k]);
+        Point x{};
+        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+        // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
+        if (boundary_fields[i_bc]->varies()) boundary_fields[i_bc]->apply(copy, x, 0.0, double(physics.R));
         face_bc[i_face] = static_cast<int32_t>(bcs.size());
+        field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
         bcs.push_back(copy);
+        wall_model_specs.push_back(wall_model_specs[i_bc]);
     }
 
     if (FaceZone * partition = mesh->get_face_zone(PARTITION_ZONE)) {
@@ -868,29 +899,22 @@ void Solver::init_boundaries() {
         boundary_data.thermo = mixture.thermo;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
         boundary_data.bc_thermo = Kokkos::View<rtype *[2]>("bc_thermo", bcs.size());
-        auto h_bc_Y = Kokkos::create_mirror_view(boundary_data.bc_Y);
-        auto h_thermo = Kokkos::create_mirror_view(boundary_data.bc_thermo);
-        for (size_t i_bc = 0; i_bc < bcs.size(); i_bc++) {
-            for (uint32_t k = 0; k < n_species; k++) {
-                h_bc_Y(i_bc, k) = bc_mass_fractions[i_bc].empty() ? 0.0_r : static_cast<rtype>(bc_mass_fractions[i_bc][k]);
-            }
-            h_thermo(i_bc, 0) = static_cast<rtype>(bc_surrogates[i_bc][0]);
-            h_thermo(i_bc, 1) = static_cast<rtype>(bc_surrogates[i_bc][1]);
-        }
-        Kokkos::deep_copy(boundary_data.bc_Y, h_bc_Y);
-        Kokkos::deep_copy(boundary_data.bc_thermo, h_thermo);
         if (is_viscous()) {
             bc_transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_transport_values", bcs.size(),
                                                                               n_species + 1);
-            auto h_values = Kokkos::create_mirror_view(bc_transport_values);
-            for (size_t i_bc = 0; i_bc < bcs.size(); i_bc++) {
-                if (bc_mass_fractions[i_bc].empty()) continue;
-                const std::vector<double> X = mixture_model->mole_fractions(bc_mass_fractions[i_bc]);
-                h_values(i_bc, 0) = static_cast<rtype>(bc_temperatures[i_bc]);
-                for (uint32_t k = 0; k < n_species; k++) h_values(i_bc, 1 + k) = static_cast<rtype>(X[k]);
-            }
-            Kokkos::deep_copy(bc_transport_values, h_values);
         }
+        copy_boundary_gas();
+    }
+    for (const auto & [base, i_face, i_bc] : field_faces) {
+        const auto & composition = boundary_composition[base];
+        if (!boundary_fields[base]->depends_on_time() && !composition) continue;
+        Point x{};
+        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+        timed_fields.add(i_bc, x, boundary_fields[base], composition);
+    }
+    if (!timed_fields.empty()) {
+        timed_fields.finish();
+        if (!stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
     }
     h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
     h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
@@ -1105,7 +1129,51 @@ void Solver::update_average_pressure_outlets(StateView solution) {
     }
 }
 
-void Solver::update_boundary_states(rtype t_eval) {
+void Solver::copy_boundary_gas() {
+    const uint32_t n_species = mixture.n_species;
+    auto h_bc_Y = Kokkos::create_mirror_view(boundary_data.bc_Y);
+    auto h_thermo = Kokkos::create_mirror_view(boundary_data.bc_thermo);
+    for (size_t i_bc = 0; i_bc < h_bc_Y.extent(0); i_bc++) {
+        for (uint32_t k = 0; k < n_species; k++) {
+            h_bc_Y(i_bc, k) = bc_mass_fractions[i_bc].empty() ? 0.0_r : static_cast<rtype>(bc_mass_fractions[i_bc][k]);
+        }
+        h_thermo(i_bc, 0) = static_cast<rtype>(bc_surrogates[i_bc][0]);
+        h_thermo(i_bc, 1) = static_cast<rtype>(bc_surrogates[i_bc][1]);
+    }
+    Kokkos::deep_copy(boundary_data.bc_Y, h_bc_Y);
+    Kokkos::deep_copy(boundary_data.bc_thermo, h_thermo);
+    if (bc_transport_values.extent(0) == 0) return;
+    auto h_values = Kokkos::create_mirror_view(bc_transport_values);
+    for (size_t i_bc = 0; i_bc < h_values.extent(0); i_bc++) {
+        if (bc_mass_fractions[i_bc].empty()) continue;
+        const std::vector<double> X = mixture_model->mole_fractions(bc_mass_fractions[i_bc]);
+        h_values(i_bc, 0) = static_cast<rtype>(bc_temperatures[i_bc]);
+        for (uint32_t k = 0; k < n_species; k++) h_values(i_bc, 1 + k) = static_cast<rtype>(X[k]);
+    }
+    Kokkos::deep_copy(bc_transport_values, h_values);
+}
+
+void Solver::update_boundary_fields(const rtype t_eval, const rtype c) {
+    if (timed_fields.empty()) return;
+    set_stage_time(t_eval, c);
+    apply_boundary_fields();
+}
+
+void Solver::apply_boundary_fields() {
+    TimedBoundaryFields::Gas gas;
+    gas.R = double(physics.R);
+    if (is_mixture()) {
+        gas.mixture = true;
+        gas.thermo = boundary_data.thermo;
+        gas.bc_Y = boundary_data.bc_Y;
+        gas.bc_thermo = boundary_data.bc_thermo;
+        gas.transport = bc_transport_values;
+    }
+    timed_fields.apply(stage_time, boundary_data.bcs, gas);
+}
+
+void Solver::update_boundary_states(const rtype t_eval, const rtype c) {
+    update_boundary_fields(t_eval, c);
     update_inflow(t_eval);
     if (dirichlet_boundaries.empty() || t_eval == t_boundary_states || boundary_states_steady) {
         return;
@@ -1437,7 +1505,8 @@ void Solver::init_output() {
             }
         }
     }
-    probes.init(input, *mesh, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart");
+    probes.init(input, *mesh, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart",
+                is_viscous());
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     if (run_log_on) {
@@ -1447,7 +1516,7 @@ void Solver::init_output() {
     } else {
         run_log::close();
     }
-    if (probes.any_point_values() && !viscous_gradients.is_allocated()) {
+    if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
@@ -1849,6 +1918,8 @@ int Solver::run() {
             t_wall_output += output_timer.seconds();
             if (step % check_interval == 0) {
                 Kokkos::Timer check_timer;
+                timed_fields.check();
+                timed_inlets.check();
                 print_progress();
                 t_wall_checks += check_timer.seconds();
             }
@@ -1863,10 +1934,14 @@ int Solver::run() {
     } catch (const DivergedError &) {
         defer_chemistry = false;
         destroy_step_graph();
+        timed_fields.check();
+        timed_inlets.check();
         diverged();
     }
     defer_chemistry = false;
     destroy_step_graph();
+    timed_fields.check();
+    timed_inlets.check();
     if (step != step_last_check) print_progress();
     Kokkos::Timer output_timer;
     copy_device_to_host();
@@ -1980,6 +2055,10 @@ void Solver::print_progress() {
     monitor_values = {{"monitors_step", std::to_string(step)}};
     for (const auto & [name, value] : status.monitors) monitor_values.emplace_back(name, format("%.6g", value));
 
+    if (run_health.on) {
+        report_health();
+        status.health = run_health.last;
+    }
     if (run_log_on) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
@@ -2152,6 +2231,7 @@ void Solver::print_summary(const std::string & stop) const {
     if (integral_monitor.interval > 0) add(integral_monitor.file);
     for (const auto & file : probes.files()) add(file);
     if (!files.empty()) logging::item("Files", files);
+    health_summary();
 
     json::Object end;
     end.add("type", "end")
@@ -2227,8 +2307,9 @@ void Solver::write_data(bool force) {
 
 void Solver::write_probes() {
     if (!probes.due(step, t)) return;
-    if (probes.point_values_due(step, t)) {
+    if (probes.point_values_due(step, t) || probes.gradients_due(step, t)) {
         update_cell_W();
+        if (is_mixture() && probes.transport_due(step, t)) update_transport();
     } else {
         update_primitives();
     }
@@ -2236,9 +2317,13 @@ void Solver::write_probes() {
 }
 
 ProbeFields Solver::probe_fields() {
-    ProbeFields fields{cell_sampler(), W_cells, viscous_gradient, viscous_gradients, face_reconstruction.get(),
-                       physics.gamma, {}};
-    if (is_mixture()) fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+    ProbeFields fields{cell_sampler(), W_cells,      viscous_gradient,    viscous_gradients, face_reconstruction.get(),
+                       physics,        boundary_data, is_viscous(),        axisymmetric,      mesh->face_coords,
+                       {},             {}};
+    if (is_mixture()) {
+        fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+        if (is_viscous()) fields.transport = cell_transport;
+    }
     return fields;
 }
 
@@ -2273,6 +2358,7 @@ void Solver::take_step() {
         calc_dt();
         time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
     }
+    run_health.ledger.end_step(static_cast<double>(dt));
     if (double_flux) {
         cells_frozen = false;
         reset_energy();

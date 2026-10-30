@@ -15,6 +15,7 @@ add_library(MallardCore STATIC
     common/log.cpp
     common/provenance.cpp
     common/run_control.cpp
+    common/run_health.cpp
     common/run_log.cpp
     common/run_status.cpp
     common/input_upgrade.cpp
@@ -32,6 +33,7 @@ add_library(MallardCore STATIC
     mesh/zone.cpp
     mesh/box_tree.cpp
     boundary/boundary.cpp
+    boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp
     chemistry/mechanism.cpp
@@ -53,14 +55,18 @@ add_library(MallardCore STATIC
     solver/cell_chemistry.cpp
     solver/chemistry_balance.cpp
     solver/chemistry_benchmark.cpp
+    solver/conservation_ledger.cpp
     solver/numerics_preset.cpp
+    solver/repair_audit.cpp
     solver/probe_geometry.cpp
+    solver/probe_surface.cpp
     solver/probes.cpp
     solver/solver.cpp
     solver/solver_check.cpp
     solver/solver_chemistry.cpp
     solver/solver_control.cpp
     solver/solver_graph.cpp
+    solver/solver_health.cpp
     solver/solver_step_control.cpp
     solver/initial_state.cpp
     solver/solver_initialize.cpp

@@ -330,6 +330,13 @@ TEST(MPITest, InletsMatchSerial) {
                                         "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n"),
                                     25));
+    // Conditions of x, y and t evaluated per face at the stage times
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                    bcs("type = \"upt\"\nu = [\"0.3 + 0.1 * sin(30 * t)\", \"0.05 * y\"]\np = 1.0\n"
+                                        "T = \"1 + 0.1 * cos(20 * t)\"\n",
+                                        "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\nu = [\"0.2 * sin(10 * t)\", \"0\"]\n"),
+                                    25));
     // The total mass flow is divided among the faces by an area integral over all ranks
     expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                     bcs("type = \"mass_flow_inlet\"\nmdot = 0.5\nprofile = \"1 + y\"\nT = 1.0\n",
@@ -398,7 +405,8 @@ TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
 
 TEST(MPITest, SourcesInRegionsMatchSerial) {
     // Totals over regions are normalized by integrals summed in global cell
-    // order; sources of t and of the solution are local to each cell
+    // order, domain averages by exact sums; sources of t and of the solution
+    // are local to each cell
     const std::string ring =
         "[[sources]]\ntotal = true\nrhoE = \"2 + sin(20 * t)\"\n"
         "region = {type = \"annulus\", center = [0.4, 0.4], radius = 0.25, inner_radius = 0.1, edge = 0.05}\n";
@@ -406,7 +414,9 @@ TEST(MPITest, SourcesInRegionsMatchSerial) {
         "[[sources]]\nrho = \"-0.5 * (rho - 1)\"\n"
         "region = {type = \"rectangle\", center = [0, 0], size = [0.5, 0.2], rotate = 30, translate = [0.6, 0.4]}\n";
     const std::string plain = "[[sources]]\nrhoE = \"0.1 * x\"\n";
-    for (const std::string & sources : {plain, ring, relax}) {
+    const std::string forcing = "[[sources]]\nrhou = [\"(1 - mean_ke / mean_rho) * rho * u_x\", \"0\"]\n"
+                                "rhoE = \"(1 - mean_ke / mean_rho) * rho * u_x^2\"\n";
+    for (const std::string & sources : {plain, ring, relax, forcing}) {
         SCOPED_TRACE(sources);
         expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", "type = \"euler\"\n",
                                         bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",
@@ -789,6 +799,51 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
             return ss.str();
         };
         for (const char * file : {"circle.csv", "circle_red.csv", "line.pvd", "line_000020.vtp"}) {
+            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            EXPECT_FALSE(a.empty()) << file;
+            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+        }
+    }
+    comm::barrier();
+}
+
+TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
+    // Wall polylines chained across ranks, face states and wall gradients
+    const std::string dir = io_dir() + "_boundary_probes";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto input = [&](const std::string & sub) {
+        return box_input("cartesian_tri", "type = \"TENO\"\norder = 3\n", NS,
+                         bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                             "type = \"wall_isothermal\"\nT = 1.2\n"),
+                         10) +
+               "[[probes]]\nname = \"walls\"\nboundary_type = \"wall\"\nsampling = \"point\"\nfile = \"" + dir + "/" +
+               sub + "/walls.csv\"\nvariables = [\"P\", \"T\", \"CF\", \"Q_W\", \"Y_PLUS\"]\ninterval = 5\n"
+               "reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}\n"
+               "[[probes]]\nname = \"cut\"\nshape = \"cut_plane\"\npoint = [0.5, 0.4]\nnormal = [1.0, 0.7]\n"
+               "sampling = \"point\"\nvariables = [\"RHO\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub +
+               "/cut.pvd\"\ninterval = 10\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub +
+               "/cut.csv\"\n"
+               "[[probes]]\nname = \"open\"\nboundary = [\"left\", \"right\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
+               sub + "/open.pvd\"\nvariables = [\"MASS_FLUX\", \"MOMENTUM_FLUX\"]\ninterval = 10\n"
+               "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/open.csv\"\n";
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(input("serial")));
+    reference.run();
+    Solver distributed;
+    distributed.init(parse_toml(input("ranks")));
+    distributed.run();
+    comm::barrier();
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        for (const char * file : {"walls.csv", "open.csv", "open.pvd", "open_000010.vtp", "cut.csv", "cut_000010.vtp"}) {
             const std::string a = without_provenance(read(dir + "/serial/" + file));
             EXPECT_FALSE(a.empty()) << file;
             EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;

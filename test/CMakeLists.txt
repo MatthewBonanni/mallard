@@ -36,6 +36,7 @@ set(MALLARD_TEST_SOURCES
     error_messages_test.cpp
     synthetic_inflow_test.cpp
     provenance_test.cpp
+    health_test.cpp
     input_upgrade_test.cpp
     field_units_test.cpp
     format_compat_test.cpp
