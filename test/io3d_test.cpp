@@ -424,7 +424,6 @@ TEST(IO3DTest, VTKHDFHoldsTheVTUCells) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
 #ifdef Mallard_HAS_HDF5
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_3d").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
     for (const char * format : {"vtu", "vtkhdf"}) {
@@ -434,6 +433,7 @@ TEST(IO3DTest, VTKHDFHoldsTheVTUCells) {
                     fields.data, mesh);
         writer.write(0, 0.0);
     }
+    comm::barrier();  // Rank 0 writes the files
     auto vtu = read_appended_arrays(dir + "/vtu_000000.vtu");
     const std::string file = dir + "/vtkhdf_000000.vtkhdf";
     const auto stored = h5_all_datasets(file);
@@ -450,7 +450,6 @@ TEST(IO3DTest, VTKHDFHoldsTheVTUCells) {
     std::set<uint8_t> kinds;
     for (uint8_t t : as_vector<uint8_t>(vtu["types"])) kinds.insert(t);
     EXPECT_EQ(kinds, (std::set<uint8_t>{10, 12, 13, 14}));
-    std::filesystem::remove_all(dir);
 #endif
 }
 
@@ -458,13 +457,14 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
     // Cells of a spherical shell at its walls are quadratic: the middles of
     // their wall edges and faces lie on the spheres; the middle layer stays linear
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
 #ifdef Mallard_HAS_HDF5
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_shell").string();
-    std::filesystem::remove_all(dir);
     const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
     for (bool prisms : {false, true}) {
         const std::string file = write_temp("vtkhdf_shell.msh", shell_gmsh(3, 3, prisms, false));
         Solver solver;
+        solver.set_distributed(false);
         solver.init(parse_toml(
             "[run]\nn_steps = 1\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
             "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
@@ -537,7 +537,6 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
         EXPECT_GT(n_linear, 0u);
         EXPECT_GT(n_on_walls, n_quadratic);
     }
-    std::filesystem::remove_all(dir);
 #endif
 }
 

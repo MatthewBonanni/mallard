@@ -212,6 +212,7 @@ namespace {
 } // namespace
 
 TEST(FormatCompatTest, MeshFilesOfPastReleasesAreRead) {
+    if (comm::size() > 1) GTEST_SKIP() << "compares whole meshes with a generated one, which ranks split";
     if constexpr (N_DIM != 2 || !std::is_same_v<rtype, double>) {
         GTEST_SKIP() << "2D fixtures, compared with double-precision meshes";
     } else {

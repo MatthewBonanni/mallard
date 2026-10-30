@@ -9,9 +9,13 @@
  *
  */
 
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <string>
+#include <thread>
 
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
@@ -39,6 +43,52 @@ class RankFailures : public ::testing::EmptyTestEventListener {
         std::string name;
 };
 
+/**
+ * @brief Aborts the process when a test runs longer than the limit, naming it: a
+ *        test that hangs (a collective some ranks never reach) fails in minutes.
+ */
+class Watchdog : public ::testing::EmptyTestEventListener {
+    public:
+        explicit Watchdog(const double limit) {
+            // Never freed: the thread outlives the listener, which GoogleTest deletes at exit
+            State * s = state;
+            std::thread([s, limit] {
+                while (true) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    std::lock_guard<std::mutex> lock(s->mutex);
+                    if (!s->running || std::chrono::steady_clock::now() - s->start < std::chrono::duration<double>(limit)) {
+                        continue;
+                    }
+                    std::cout.flush();
+                    std::cerr << "[rank " << comm::rank() << "] " << s->name << " still running after " << limit
+                              << " s (MALLARD_TEST_TIMEOUT): aborting" << std::endl;
+                    std::abort();
+                }
+            }).detach();
+        }
+
+        void OnTestStart(const ::testing::TestInfo & test) override {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->name = std::string(test.test_suite_name()) + "." + test.name();
+            state->start = std::chrono::steady_clock::now();
+            state->running = true;
+        }
+
+        void OnTestEnd(const ::testing::TestInfo &) override {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->running = false;
+        }
+
+    private:
+        struct State {
+            std::mutex mutex;
+            std::string name;
+            std::chrono::steady_clock::time_point start;
+            bool running = false;
+        };
+        State * state = new State;
+};
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -53,6 +103,9 @@ int main(int argc, char** argv) {
         auto & listeners = ::testing::UnitTest::GetInstance()->listeners();
         delete listeners.Release(listeners.default_result_printer());
         listeners.Append(new RankFailures);
+    }
+    if (const char * limit = std::getenv("MALLARD_TEST_TIMEOUT")) {
+        ::testing::UnitTest::GetInstance()->listeners().Append(new Watchdog(std::atof(limit)));
     }
     install_scratch_directories();
     Kokkos::initialize(argc, argv);

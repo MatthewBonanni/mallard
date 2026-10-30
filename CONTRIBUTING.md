@@ -57,7 +57,8 @@ cmake --build build -j
   number: a test that inspects one rank's cells runs its solver undistributed
   (`set_distributed(false)`) or reduces over the ranks, loops over owned cells
   (halo cells hold stale values), and leaves shared files to rank 0 (files that
-  every rank writes on its own go in `rank_scratch_dir()`).
+  every rank writes on its own go in `rank_scratch_dir()`). `MALLARD_TEST_TIMEOUT=<seconds>`
+  aborts a test that runs longer, naming it, as CI does for the MPI runs.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 

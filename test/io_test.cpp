@@ -224,6 +224,7 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     // A run restarted at t = 0.1 rewrites the later snapshots: the XDMF time
     // series lists each time once, and numbering continues from the restart
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1) GTEST_SKIP() << "a writer of one rank's whole mesh";
     const std::string dir = (scratch_dir() / "mallard_h5_resume").string();
     auto mesh = make_mesh("cartesian_tri", 3, 2);
     Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
@@ -611,8 +612,8 @@ std::string vtkhdf_type(const std::string & file) {
 TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
     // Triangles and quadrilaterals of a Gmsh file: each cell's nodes, type
     // and values round trip, in serial cell order
+    if (comm::size() > 1) GTEST_SKIP() << "a writer of one rank's whole mesh";
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_cells").string();
-    std::filesystem::remove_all(dir);
     const std::string file = write_temp("vtkhdf_mixed.msh", jittered_mixed_mesh(6));
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"));
@@ -662,14 +663,13 @@ TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
     std::stringstream text;
     text << index.rdbuf();
     EXPECT_NE(text.str().find("{\"name\": \"f_000010.vtkhdf\", \"time\": 0.25}"), std::string::npos) << text.str();
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {
     // A run restarted at t = 0.1 continues the series of one file after its
     // second snapshot, and a series of files after its second file
+    if (comm::size() > 1) GTEST_SKIP() << "a writer of one rank's whole mesh";
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_resume").string();
-    std::filesystem::remove_all(dir);
     auto mesh = make_mesh("cartesian_tri", 3, 2);
     const uint32_t n = mesh->n_cells;
     Kokkos::View<rtype **>::host_mirror_type values("values", n, 1);
@@ -731,12 +731,11 @@ TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {
                other_data, other);
     third.resume(10, 0.1_r);
     EXPECT_THROW(third.write(25, 0.2_r), std::runtime_error);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, VTKHDFBoundaryZoneIsAPolyDataOfItsFaces) {
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_surface").string();
-    std::filesystem::remove_all(dir);
     std::ostringstream s;
     s << "[run]\nn_steps = 4\ncfl = 0.25\n"
       << "[mesh]\ntype = \"wedge\"\nNx = 12\nNy = 6\nLx = 2.0\nLy = 1.5\n"
@@ -752,6 +751,7 @@ TEST(IOTest, VTKHDFBoundaryZoneIsAPolyDataOfItsFaces) {
       << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtkhdf\"\ngeometry = \"bottom\"\n"
       << "interval = 4\nvariables = [\"P\"]\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(s.str()));
     solver.run();
     solver.update_primitives();
@@ -785,19 +785,19 @@ TEST(IOTest, VTKHDFBoundaryZoneIsAPolyDataOfItsFaces) {
         }
         EXPECT_EQ(matches, 1) << k;
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
     // Annulus cells at the walls (circles) are quadratic: their edge nodes on
     // the walls lie on the circles; the ring in between stays linear
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_curved").string();
-    std::filesystem::remove_all(dir);
     constexpr uint32_t N_T = 24;
     const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
     for (bool triangles : {false, true}) {
         const std::string file = write_temp("vtkhdf_annulus.msh", annulus_gmsh(3, N_T, 1, triangles));
         Solver solver;
+        solver.set_distributed(false);
         solver.init(parse_toml(
             "[run]\nn_steps = 1\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
             "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
@@ -836,7 +836,6 @@ TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
         EXPECT_EQ(n_quadratic, 2u * N_T);
         EXPECT_EQ(n_wall_edges, 2u * N_T);
     }
-    std::filesystem::remove_all(dir);
 }
 
 #endif

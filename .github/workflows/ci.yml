@@ -268,8 +268,11 @@ jobs:
           ok=true; wait $first || ok=false; wait $second || ok=false; $ok
       - name: Test (MPI)
         if: matrix.backend.mpi
+        timeout-minutes: 90
         env:
           FULL: ${{ matrix.backend.full }}
+          # A test that hangs (a collective some ranks never reach) aborts and names itself
+          MALLARD_TEST_TIMEOUT: 600
         run: |
           mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
           if [ "$FULL" = true ]; then
