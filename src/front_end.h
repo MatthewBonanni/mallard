@@ -15,6 +15,8 @@
 
 #include <string>
 
+#include "cli.h"
+
 namespace front_end {
 
 /**
@@ -43,8 +45,14 @@ Dimension input_dimension(const std::string & input_file);
 bool invoked(const char * argv0);
 
 /**
- * @brief Entry point of the front end: execs the solver the command needs
- *        (`mallard test`: runs the test suites installed); returns only on error.
+ * @brief `mallard test`: runs the test suites next to this executable (an
+ *        install tree) or in its build tree, or those of --dim.
+ */
+int test_main(const cli::Args & args);
+
+/**
+ * @brief Entry point of the front end: execs the solver the command needs,
+ *        or runs a command of its own (`mallard test`); returns only on error.
  */
 int main(int argc, char ** argv);
 

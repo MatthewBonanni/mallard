@@ -14,7 +14,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -33,10 +32,6 @@
 #include "thermo.h"
 
 namespace {
-
-void usage() {
-    std::cerr << "Usage: mallard reactor -i input.toml   (a [reactor] run, or with [benchmark] a chemistry benchmark)\n";
-}
 
 std::string format(const double x) {
     char buffer[32];
@@ -157,20 +152,11 @@ void benchmark(const Input & input) {
 
 } // namespace
 
-int reactor_main(int argc, char ** argv) {
-    std::string input_file;
-    for (int i = 0; i < argc; ++i) {
-        if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) {
-            input_file = argv[++i];
-        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            usage();
-            return 0;
-        }
-    }
-    if (input_file.empty()) {
-        usage();
-        return 1;
-    }
+int reactor_main(const cli::Args & args) {
+    if (!args.has("-i")) return cli::usage_error(*cli::command("reactor"), "missing -i input.toml");
+    const std::string input_file = args.value_or("-i", "");
+    int argc = args.argc;
+    char ** argv = args.argv;
     comm::Session session(argc, argv);
     if (comm::size() > 1) {
         std::cerr << "mallard reactor runs on one rank.\n";
