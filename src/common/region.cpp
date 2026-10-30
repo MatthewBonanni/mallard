@@ -170,6 +170,14 @@ class Parser {
                 p = boundary(std::move(p), where);
                 p.text = text + ", filled = false";
             }
+            if (t.contains("flip") && find_value<bool>(t, "flip")) {
+                if (p.dimension == N_DIM || p.dimension == 0) {
+                    throw InputError(where + ".flip reverses the side a surface or curve faces, and this region is " +
+                                     dimension_name(p.dimension) + ".");
+                }
+                for (Piece & piece : p.pieces) piece.flip = !piece.flip;
+                p.text += ", flipped";
+            }
             return p;
         }
 
@@ -344,9 +352,12 @@ class Parser {
                 out.pieces = {edges};
                 return out;
             }
-            if (p.pieces.size() != 1 || p.pieces[0].carriers.empty()) {
+            if (p.pieces.size() != 1) {
                 throw InputError(where + ": the boundary of a union of " + dimension_name(p.dimension).substr(2) +
                                  "s is not defined; take the union of their boundaries.");
+            }
+            if (p.pieces[0].carriers.empty()) {
+                throw InputError(where + ": the boundary of boundary zones clipped by filled regions is not defined.");
             }
             // Where the surface leaves each region that clips it
             const Piece & piece = p.pieces[0];
@@ -359,6 +370,8 @@ class Parser {
                     }
                     Piece edge = piece;
                     edge.carriers.push_back(masks[k]);
+                    // Leaving a region it keeps outside of, the edge runs the other way around
+                    edge.flip = edge.flip != !in;
                     auto & rest = in ? edge.inside : edge.outside;
                     rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(k));
                     out.pieces.push_back(edge);
@@ -563,13 +576,49 @@ class Parser {
             for (size_t i = 0; i < parts.size(); i++) {
                 ps.push_back(parse(*parts[i].first, parts[i].second, frame));
                 out.text += (i ? ", " : "") + ps.back().text;
-                if (ps.back().dimension != ps[0].dimension) {
-                    throw InputError(where + ": a " + type + " combines regions of one dimension, but " +
-                                     parts[0].second + " is " + dimension_name(ps[0].dimension) + " and " +
-                                     parts[i].second + " is " + dimension_name(ps.back().dimension) + ".");
-                }
             }
             out.text += ")";
+            size_t lower = 0;  // the parts of lower dimension than the run's
+            for (size_t i = 0; i < ps.size(); i++) {
+                if (type == "union" && ps[i].dimension != ps[0].dimension) {
+                    throw InputError(where + ": a union combines regions of one dimension, but " + parts[0].second +
+                                     " is " + dimension_name(ps[0].dimension) + " and " + parts[i].second + " is " +
+                                     dimension_name(ps[i].dimension) + ".");
+                }
+                lower += ps[i].dimension < N_DIM;
+            }
+            if (type != "union" && lower > 0 && lower < ps.size()) {
+                // A surface or curve clipped by the filled parts: inside them, or outside the subtracted ones
+                const auto it = std::find_if(ps.begin(), ps.end(), [](const Parsed & p) { return p.dimension < N_DIM; });
+                const size_t k = static_cast<size_t>(it - ps.begin());
+                const std::string kind = dimension_name(it->dimension).substr(2);
+                if (lower > 1) {
+                    throw InputError(where + ": a " + type + " clips one " + kind + " with filled regions, and " +
+                                     std::to_string(lower) + " of its parts have lower dimensions; " + kind +
+                                     "s combine by union.");
+                }
+                if (type == "difference" && k != 0) {
+                    throw InputError(where + ": a difference subtracts filled regions, and " + parts[k].second +
+                                     " is " + dimension_name(it->dimension) + ", which takes nothing from " +
+                                     parts[0].second + ".");
+                }
+                out = std::move(*it);
+                out.text = type + "(" + out.text;
+                std::vector<uint32_t> masks;
+                for (size_t i = 0; i < ps.size(); i++) {
+                    if (i == k) continue;
+                    masks.push_back(place(ps[i], where));
+                    out.text += ", " + ps[i].text;
+                }
+                out.text += ")";
+                for (Piece & piece : out.pieces) {
+                    auto & to = type == "intersection" ? piece.inside : piece.outside;
+                    to.insert(to.end(), masks.begin(), masks.end());
+                }
+                out.closed = false;
+                out.bounds = -1;
+                return out;
+            }
             out.dimension = ps[0].dimension;
             if (out.dimension < N_DIM) {
                 if (type != "union") {
