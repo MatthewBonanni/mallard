@@ -412,12 +412,35 @@ void allocate_samples(Probes::Samples & s, const std::vector<uint32_t> & h_cells
 
 } // namespace
 
-void Probes::select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables) {
-    // The quadrature points of the region's elements, in the order of their cells' global ids, then position
-    const region::Elements e = region::elements(mesh, r);
+void Probes::select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
+                             const bool per_cell) {
+    // The quadrature points of the region's elements, in the order of their cells' global ids, then position;
+    // cell averages without normals are the same summed per cell: one sample each
+    region::Elements e = region::elements(mesh, r);
+    if (per_cell) {
+        std::map<uint32_t, std::pair<double, std::array<double, 3>>> cells;
+        for (size_t k = 0; k < e.size(); k++) {
+            auto & [w, x] = cells[e.cell[k]];
+            for (uint32_t q = e.quad_offsets[k]; q < e.quad_offsets[k + 1]; q++) {
+                w += e.quad_weights[q];
+                for (size_t d = 0; d < 3; d++) x[d] += e.quad_weights[q] * e.quad_points[q][d];
+            }
+        }
+        region::Elements merged;
+        for (const auto & [c, wx] : cells) {
+            merged.cell.push_back(c);
+            std::array<double, 3> x = wx.second;
+            for (double & v : x) v /= wx.first;
+            merged.quad_points.push_back(x);
+            merged.quad_weights.push_back(wx.first);
+            merged.quad_normals.push_back({0.0, 0.0, 0.0});
+            merged.quad_offsets.push_back(static_cast<uint32_t>(merged.quad_points.size()));
+        }
+        e = std::move(merged);
+    }
     probe::CellPoints set;
     std::vector<probe::Point> normals;
-    std::vector<double> local;  // global cell, x, y, z, weight, normal
+    std::vector<double> local;  // global cell, x, y, z, weight
     for (size_t k = 0; k < e.size(); k++) {
         for (uint32_t q = e.quad_offsets[k]; q < e.quad_offsets[k + 1]; q++) {
             probe::Point x, n;
@@ -447,7 +470,7 @@ void Probes::select_elements(Probe & p, const Mesh & mesh, const region::Region 
         for (const uint64_t i : order) p.geometry.quad_weights.push_back(all[W * i + 4]);
     }
     p.quadrature.in_cells(mesh, set, {}, n_variables);
-    p.quadrature.set_normals(normals);
+    if (!per_cell) p.quadrature.set_normals(normals);
     p.geometry.dim = static_cast<uint8_t>(r.dimension());
     p.geometry.type = "region " + r.summary();
 }
@@ -929,7 +952,8 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                 for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = f[c] * double(mesh.h_cell_measure(c));
                 select_region(p, mesh, r, weights, n_evaluated);
             } else {
-                select_elements(p, mesh, r, n_evaluated);
+                const bool normals = std::any_of(h_codes.begin(), h_codes.end(), [](int32_t k) { return code::normals(k); });
+                select_elements(p, mesh, r, n_evaluated, p.sampling == Sampling::CELL && !normals && !p.gradients);
             }
             if (p.quadrature.n_global == 0) throw InputError(key + ".region contains no part of any cell.");
         } else if (boundary) {
@@ -1503,7 +1527,8 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         std::string vars;
         for (const auto & v : p.variables) vars += (vars.empty() ? "" : ", ") + v;
         const size_t n = p.from_region ? p.quadrature.n_global : p.geometry.nodes.size();
-        const char * unit = p.from_region ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
+        const bool cells = p.from_region && p.geometry.dim == N_DIM;
+        const char * unit = cells ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
         std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.type + (p.from_region ? " over " : " of ") +
                            logging::count(n) + unit +
                            (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
