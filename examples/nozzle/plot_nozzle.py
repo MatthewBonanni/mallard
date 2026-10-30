@@ -5,7 +5,7 @@ isentropic flow through the throat, a normal shock in the diverging part
 where the subsonic flow behind it leaves at the back pressure, and the
 section-averaged pressure, Mach number and stagnation pressure of the run.
 
-    plot_nozzle.py SNAPSHOT.vtu [--p-back 0.75] [--figure]
+    plot_nozzle.py SNAPSHOT [--p-back 0.75] [--figure]
 
 Prints the mass flow against the choked one, the shock position and the
 stagnation-pressure ratio across the shock.

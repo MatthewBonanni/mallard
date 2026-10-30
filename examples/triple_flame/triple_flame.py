@@ -31,7 +31,7 @@ u_in close to its propagation speed U_F it stays in the channel, and
 examples/triple_flame/triple_flame_analysis.py measures U_F = u_in - dx_tip/dt.
 
 Writes RUN_DIR/input.toml and RUN_DIR/flame.restart (float64); outputs
-RUN_DIR/solut/flame.pvd (density, velocity, T, HRR and the mass fractions of
+the series RUN_DIR/solut/flame (density, velocity, T, HRR and the mass fractions of
 H2, O2, H2O and N2; the analysis takes Z from N2, which does not react).
 """
 import argparse
@@ -222,7 +222,6 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/flame"
-format = "vtu"
 time_interval = {t_stop / args.outputs:.17g}
 variables = ["RHO", "U", "T", "HRR", "Y_H2", "Y_O2", "Y_H2O", "Y_N2"]
 

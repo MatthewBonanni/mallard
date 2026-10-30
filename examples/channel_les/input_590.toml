@@ -107,7 +107,6 @@ file = "forces_top.csv"
 
 [[write_data]]
 prefix = "./stats/channel"
-format = "vtu"
 time_interval = 50.0
 variables = ["MEAN_*", "COV_*"]
 

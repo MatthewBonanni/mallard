@@ -125,7 +125,7 @@ int check_main(const cli::Args & args) {
     }
     const std::string input_file = args.has("-i") ? args.value_or("-i", "") : args.positional[0];
     CheckOptions options;
-    options.quality_file = args.value_or("--quality-vtu", "");
+    options.quality_file = args.value_or("--quality", "");
     options.catalog_file = args.value_or("--catalog", "");
     std::string error;
     if (!number(args, "--ranks", options.ranks, error) || !number(args, "--throughput", options.throughput, error) ||

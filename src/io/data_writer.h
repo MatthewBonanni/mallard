@@ -32,18 +32,21 @@ enum class DataFormat {
     VTU,
     RESTART,
     HDF5,
+    VTKHDF,
 };
 
 static const std::unordered_map<std::string, DataFormat> FORMAT_TYPES = {
     {"vtu", DataFormat::VTU},
     {"restart", DataFormat::RESTART},
     {"hdf5", DataFormat::HDF5},
+    {"vtkhdf", DataFormat::VTKHDF},
 };
 
 static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
     {DataFormat::VTU, "vtu"},
     {DataFormat::RESTART, "restart"},
     {DataFormat::HDF5, "hdf5"},
+    {DataFormat::VTKHDF, "vtkhdf"},
 };
 
 /** @brief Named scalars of a restart file (version 3), e.g. the statistics' weight. */
@@ -193,6 +196,8 @@ class DataWriter {
         DataFormat get_format() const { return format; }
         const std::string & get_prefix() const { return prefix; }
         uint64_t files_written() const { return n_files; }
+        /** @brief The file ParaView opens for the whole series: .pvd, .vtkhdf.series, .vtkhdf or .xmf. */
+        std::string index_file() const;
         /** @brief The file written last, or empty. */
         const std::string & last_written() const { return last_file; }
         /** @brief Changes the step interval of a writer that has one; an error message, or empty. */
@@ -237,6 +242,18 @@ class DataWriter {
         void write_xdmf(const std::string & stem, const std::vector<std::pair<rtype, std::string>> & series) const;
         std::string xdmf_grid(const std::string & stem, double t, const std::string & indent) const;
         void resume_xdmf(rtype t);
+
+        /**
+         * @brief VTKHDF output: an UnstructuredGrid of the owned cells (curved
+         *        cells as quadratic ones), or a PolyData of the faces of a
+         *        boundary zone, written by every rank in global order; one
+         *        file per snapshot, or with series, one file of every snapshot.
+         */
+        void write_vtkhdf(const std::string & filename, rtype t, const Values & values);
+        void build_vtkhdf_cells();
+        void build_vtkhdf_faces();
+        void write_vtkhdf_series(const std::vector<std::pair<rtype, std::string>> & series) const;
+        void resume_vtkhdf(rtype t);
 
         /**
          * @brief An output array: one scalar, or the N_DIM components of a
@@ -289,6 +306,19 @@ class DataWriter {
         GlobalOrder cell_order;
         bool hdf5_mesh_written = false;
         uint64_t hdf5_n_nodes = 0, hdf5_topology_size = 0;
+        // VTKHDF output: this rank's block of the topology, in global order, built by the first snapshot
+        struct VtkhdfMesh {
+            bool built = false;
+            uint64_t n_points = 0, n_cells = 0, n_ids = 0;  // in the file
+            uint64_t first_point = 0, first_cell = 0, first_id = 0;
+            std::vector<rtype> points;                       // 3 per point
+            std::vector<int64_t> connectivity, offsets;      // offsets: one more on the last rank
+            std::vector<uint8_t> types;                      // cells only
+            GlobalOrder order;                               // of the cells, or of the zone's faces
+        } vtkhdf;
+        bool one_file = false;  // series = true: every snapshot in one file
+        uint64_t vtkhdf_steps = 0;  // snapshots in the series file
+        bool vtkhdf_resumed = false;
 };
 
 #endif // DATA_WRITER_H

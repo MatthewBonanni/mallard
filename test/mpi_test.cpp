@@ -865,6 +865,41 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
 #endif
 }
 
+TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
+    // Every rank writes its cells and zone faces at their global places:
+    // triangles and quads, a boundary zone, a series of one file,
+    // compression, and curved cells with their quadratic nodes
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string file = write_temp_shared("mallard_mpi_vtkhdf.msh", jittered_mixed_mesh(16));
+    std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
+                                  bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                                      "type = \"wall_adiabatic\"\n", "type = \"extrapolation\"\n"), 6);
+    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
+    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    const std::string zlib = have_hdf5_deflate() ? "compression = \"zlib\"\n" : "";
+    expect_vtkhdf_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
+                                        "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
+                                        io_dir() + "_vtkhdf", {"_000000", "_000003", "_000006"});
+    expect_vtkhdf_output_matches_serial(input, "interval = 3\nseries = true\nvariables = [\"RHO\", \"U\"]\n",
+                                        io_dir() + "_vtkhdf_series", {""});
+    expect_vtkhdf_output_matches_serial(input, "interval = 3\ngeometry = \"bottom\"\nvariables = [\"P\", \"U\"]\n" + zlib,
+                                        io_dir() + "_vtkhdf_zone", {"_000000", "_000006"});
+    const std::string annulus = write_temp_shared("mallard_mpi_vtkhdf_annulus.msh", annulus_gmsh(3, 40, 1, true));
+    expect_vtkhdf_output_matches_serial(
+        "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + annulus + "\"\n"
+        "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"
+        "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n[[boundaries]]\nname = \"outer\"\n"
+        "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
+        "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n",
+        "interval = 2\nvariables = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
+#endif
+}
+
 TEST(MPITest, GraphPartitionIsBalancedAndMatchesSerial) {
     if (!have_graph_partitioner()) GTEST_SKIP() << "built without a graph partitioner";
     const std::string input =

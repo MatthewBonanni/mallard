@@ -367,8 +367,9 @@ measures every cell of the mesh, taking for each the worst of its faces:
 | Aspect ratio | Largest over smallest distance from the cell centroid to its face centroids | 1000 |
 
 It reports the largest and mean value of each and where the worst cells are;
-`--quality-vtu PREFIX` writes the four fields to `PREFIX_000000.vtu` for
-ParaView, and `tools/mesh/plot_mesh_quality.py PREFIX_000000.vtu out.png` draws a
+`--quality PREFIX` writes the four fields to `PREFIX_000000.vtkhdf`
+(`PREFIX_000000.vtu` in builds without HDF5) for ParaView, and
+`tools/mesh/plot_mesh_quality.py PREFIX_000000.vtkhdf out.png` draws a
 2D mesh's with the worst cells circled.
 
 ![Non-orthogonality and skewness of a coarse triangle mesh around the mallard (examples/mallard), the six worst cells of each circled](../images/guide/mesh_quality-light.svg#gh-light-mode-only)

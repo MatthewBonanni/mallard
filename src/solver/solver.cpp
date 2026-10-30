@@ -1978,7 +1978,7 @@ void Solver::print_summary(const std::string & stop) const {
         if (writer->get_format() == DataFormat::RESTART) {
             add(logging::count(n) + " restart");
         } else {
-            add(logging::count(n) + " vtu (" + writer->get_prefix() + ".pvd)");
+            add(logging::count(n) + " " + FORMAT_NAMES.at(writer->get_format()) + " (" + writer->index_file() + ")");
         }
     }
     for (const auto & monitor : force_monitors) add(monitor.file);
