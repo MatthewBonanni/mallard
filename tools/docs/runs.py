@@ -359,9 +359,9 @@ def mesh_quality_data(args):
     subprocess.run([sys.executable, str(ROOT / "examples" / "mallard" / "make_mallard_mesh.py"), str(work / "mallard.msh"),
                     "--h-wall", "0.02", "--h-far", "0.1"], check=True, stdout=subprocess.DEVNULL)
     (work / "input.toml").write_text((ROOT / "examples" / "mallard" / "input.toml").read_text())
-    subprocess.run([str(args.mallard), "check", "input.toml", "--quality-vtu", "quality",
+    subprocess.run([str(args.mallard), "check", "input.toml", "--quality", "quality",
                     "--kokkos-num-threads=2"], cwd=work, check=True, stdout=subprocess.DEVNULL)
-    return read_quality(str(work / "quality_000000.vtu"))
+    return read_quality(snapshot(str(work / "quality_000000")))
 
 
 def mesh_quality(P, args):

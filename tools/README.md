@@ -123,14 +123,14 @@ Triangles around a duck silhouette (a periodic spline), refined linearly from `-
 
 ### `plot_mesh_quality.py`: mesh quality
 
-The quality fields that `mallard check --quality-vtu PREFIX` writes for a 2D
+The quality fields that `mallard check --quality PREFIX` writes for a 2D
 mesh (non-orthogonality, skewness, aspect ratio, volume ratio), with the worst
 cells circled; readable on light and dark backgrounds. Use it before a long run
 to find the cells that limit the time step or the accuracy.
 
 ```bash
-mallard check input.toml --quality-vtu quality
-python tools/mesh/plot_mesh_quality.py quality.vtu quality.png --fields NON_ORTHOGONALITY SKEWNESS --worst 10
+mallard check input.toml --quality quality
+python tools/mesh/plot_mesh_quality.py quality_000000.vtkhdf quality.png --fields NON_ORTHOGONALITY SKEWNESS --worst 10
 ```
 
 The figure is in [Meshes](../docs/guide/meshes.md#mesh-quality).

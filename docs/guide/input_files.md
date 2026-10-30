@@ -347,7 +347,7 @@ without writing any file, then reports on it; the exit status is 1 if there
 is an error. Run it under `mpirun -n N` to check a run on N ranks.
 
 ```text
-$ mallard check input.toml --ranks 4 --throughput 5e7 --quality-vtu quality
+$ mallard check input.toml --ranks 4 --throughput 5e7 --quality quality
 ...
 == Check ==================================================================================
   Input keys         all used

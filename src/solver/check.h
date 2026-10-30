@@ -23,7 +23,7 @@ struct CheckOptions {
     double throughput = 0.0;    // cells/s (cell updates per wall second) per rank; 0: steps or none
     uint64_t steps = 0;         // steps to time for a measured throughput
     size_t n_worst = 5;         // worst cells listed per quality metric
-    std::string quality_file;   // VTU of the quality fields, or empty
+    std::string quality_file;   // prefix of the quality fields' snapshot, or empty
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
 };
 

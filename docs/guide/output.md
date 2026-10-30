@@ -63,7 +63,7 @@ Builds without HDF5 write VTU instead (and say so): one file per snapshot, and
 per rank in parallel, assembled by a `.pvtu`, with a `.pvd` series. Set
 `format = "vtu"` to choose it explicitly. `format = "hdf5"` (a mesh file, one
 HDF5 file of fields per snapshot and XDMF indexes) is deprecated and will be
-removed in 0.10.0; `mallard upgrade-input` rewrites it to `"vtkhdf"`.
+removed in 0.10.0; `mallard input upgrade` rewrites it to `"vtkhdf"`.
 
 **Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
 

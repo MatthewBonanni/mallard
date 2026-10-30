@@ -171,18 +171,34 @@ def _read_ascii(text):
     return pts, conn, offs, types, out
 
 
-def read_vtu(path):
-    """Read a 2D VTU as points (n, 2), a triangle fan of each cell, the cell
-    of each triangle, and the cell arrays plus "TIME"."""
-    pts, conn, offs, types, arrays = read_vtu_cells(path)
-    if np.isin(types, list(VTK_3D_TYPES)).any():
-        raise ValueError(f"{path} is a 3D mesh; use read_vtu_cells")
+# Boundary of quadratic 2D cells (VTK Lagrange triangle, quadrilateral): corners and edge nodes in turn
+_OUTLINE = {69: [0, 3, 1, 4, 2, 5], 70: [0, 4, 1, 5, 2, 6, 3, 7]}
+
+
+def outlines(conn, offs, types):
+    """{(cells, outline): node ids} of 2D cells grouped by shape: the cells
+    (indices) and each one's boundary nodes in order, the edge nodes of
+    curved (quadratic) cells between their corners."""
     starts = np.concatenate([[0], offs[:-1]])
     sizes = offs - starts
+    groups = []
+    for t, n in sorted(set(zip(types.tolist(), sizes.tolist()))):
+        sel = np.nonzero((types == t) & (sizes == n))[0]
+        local = _OUTLINE.get(t, list(range(n)))
+        groups.append((sel, conn[starts[sel, None] + np.array(local)]))
+    return groups
+
+
+def read_vtu(path):
+    """Read a 2D VTU (or VTKHDF) snapshot as points (n, 2), a triangle fan of
+    each cell (of its outline, for curved cells), the cell of each triangle,
+    and the cell arrays plus "TIME"."""
+    pts, conn, offs, types, arrays = read_vtu_cells(path)
+    if np.isin(types, list(VTK_3D_TYPES) + [71, 72, 73, 27]).any():
+        raise ValueError(f"{path} is a 3D mesh; use read_vtu_cells")
     tri_parts, idx_parts = [], []
-    for n in np.unique(sizes):
-        sel = np.nonzero(sizes == n)[0]
-        cells = conn[starts[sel, None] + np.arange(n)]
+    for sel, cells in outlines(conn, offs, types):
+        n = cells.shape[1]
         for k in range(1, n - 1):
             tri_parts.append(cells[:, [0, k, k + 1]])
             idx_parts.append(sel)

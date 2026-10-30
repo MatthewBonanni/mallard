@@ -1,1 +1,2 @@
 - `[[write_data]] format` is optional and defaults to `"vtkhdf"`; builds without HDF5 (or without parallel HDF5, on several ranks) write VTU instead, with a warning.
+- `mallard check --quality PREFIX` replaces `--quality-vtu PREFIX` and writes the mesh-quality fields in the default snapshot format (VTKHDF; VTU in builds without HDF5).

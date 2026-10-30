@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Plot the mesh-quality fields of `mallard check --quality-vtu PREFIX` (2D).
+"""Plot the mesh-quality fields of `mallard check --quality PREFIX` (2D).
 
-    plot_mesh_quality.py PREFIX_000000.vtu OUT.png [--fields NON_ORTHOGONALITY SKEWNESS] [--worst 10]
+    plot_mesh_quality.py PREFIX_000000.vtkhdf OUT.png [--fields NON_ORTHOGONALITY SKEWNESS] [--worst 10]
         [--xlim X0 X1] [--ylim Y0 Y1]
 
 One panel per field: the cells coloured by the field, and the worst cells
@@ -19,17 +19,20 @@ import numpy as np
 from matplotlib.collections import PolyCollection
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import outlines, read_vtu_cells  # noqa: E402
 
 LABELS = {"NON_ORTHOGONALITY": "non-orthogonality [deg]", "SKEWNESS": "skewness",
           "ASPECT_RATIO": "aspect ratio", "VOLUME_RATIO": "volume ratio"}
 
 
 def read_quality(path):
-    """Cell polygons (2D) and the quality fields of a --quality-vtu file."""
-    pts, conn, offs, _, arrays = read_vtu_cells(path)
-    starts = np.concatenate([[0], offs[:-1]])
-    return [pts[conn[s:e], :2] for s, e in zip(starts, offs)], arrays
+    """Cell polygons (2D) and the quality fields of a --quality file (.vtkhdf, or .vtu without HDF5)."""
+    pts, conn, offs, types, arrays = read_vtu_cells(path)
+    polys = [None] * len(types)
+    for sel, cells in outlines(conn, offs, types):
+        for c, nodes in zip(sel, cells):
+            polys[c] = pts[nodes, :2]
+    return polys, arrays
 
 
 def draw_quality(ax, polys, values, n_worst, highlight, edges, cmap="viridis", fontsize=8, among=None):
