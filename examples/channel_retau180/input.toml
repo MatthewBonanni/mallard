@@ -67,7 +67,7 @@
 # Run:
 #   python ../../tools/setup/channel_init.py input.toml init.restart
 #   mpirun -n 2 ../../build3d/src/mallard -i input.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/post/plane_average.py stats/channel_<last>.pvtu --average x z --out profile.csv
+#   python ../../tools/post/plane_average.py stats/channel_<last>.vtkhdf --average x z --out profile.csv
 #   python ../../tools/post/plot_channel.py input.toml profile.csv forces_bottom.csv forces_top.csv --t-start 120 --t-end 320
 #   python animate_channel.py input.toml frames/*.restart --out channel --u-tau 0.0643
 # (frames: restart files every 500 steps of a continuation run, 120 of them
@@ -158,7 +158,6 @@ file = "forces_top.csv"
 
 [[write_data]]
 prefix = "./stats/channel"
-format = "vtu"
 time_interval = 40.0
 variables = ["MEAN_*", "COV_*"]
 

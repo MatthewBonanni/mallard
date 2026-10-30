@@ -12,16 +12,19 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "common_io.h"
 #include "compression.h"
 #include "data_writer.h"
 #include "gmsh_fixtures.h"
@@ -302,7 +305,13 @@ std::string output_case(const std::string & dir, const std::string & output_keys
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 6\n" << restart_keys;
     if (have_hdf5()) {
         s << "[[write_data]]\nprefix = \"" << dir << "/h5/flow\"\nformat = \"hdf5\"\ninterval = 4\n"
-          << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys;
+          << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
+          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/flow\"\nformat = \"vtkhdf\"\ninterval = 4\n"
+          << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
+          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/series\"\nseries = true\ninterval = 4\n"
+          << "variables = [\"RHO\", \"U\"]\n" << snapshot_keys
+          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/wall\"\ngeometry = \"bottom\"\ninterval = 4\n"
+          << "variables = [\"P\"]\n" << snapshot_keys;
     }
     return s.str();
 }
@@ -386,13 +395,17 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
         run_case(output_case(dir + "/sync", "async = false\n", snapshot_keys, restart_keys));
         run_case(output_case(dir + "/async", "io_threads = 3\n", snapshot_keys, restart_keys));
         const auto sync = files_under(dir + "/sync"), async = files_under(dir + "/async");
-        EXPECT_EQ(sync.size(), have_hdf5() ? 23u : 13u) << snapshot_keys;
+        EXPECT_EQ(sync.size(), have_hdf5() ? 34u : 13u) << snapshot_keys;
         ASSERT_EQ(async.size(), sync.size()) << snapshot_keys;
         for (const auto & [name, bytes] : sync) {
             ASSERT_TRUE(async.count(name)) << name;
 #ifdef Mallard_HAS_HDF5
             if (name.ends_with(".h5")) {
                 EXPECT_EQ(h5_datasets(dir + "/async/" + name), h5_datasets(dir + "/sync/" + name)) << name;
+                continue;
+            }
+            if (name.ends_with(".vtkhdf")) {
+                EXPECT_EQ(h5_all_datasets(dir + "/async/" + name), h5_all_datasets(dir + "/sync/" + name)) << name;
                 continue;
             }
 #endif
@@ -470,6 +483,28 @@ TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
         expect_within_relative_error(as_reals(std::string(h5_lossy.at(name).begin(), h5_lossy.at(name).end())),
                                      as_reals(std::string(bytes.begin(), bytes.end())), 1e-3, name);
     }
+
+    // VTKHDF: deflated datasets with the same values; rounding changes only the cell values
+    for (const char * file : {"/vtkhdf/flow_000008.vtkhdf", "/vtkhdf/series.vtkhdf", "/vtkhdf/wall_000008.vtkhdf"}) {
+        const auto raw_file = h5_all_datasets(dir + "/raw" + file);
+        EXPECT_EQ(h5_all_datasets(dir + "/zlib" + file), raw_file) << file;
+        if (!std::string(file).starts_with("/vtkhdf/wall")) {
+            EXPECT_LT(std::filesystem::file_size(dir + "/zlib" + file),
+                      std::filesystem::file_size(dir + "/raw" + file))
+                << file;
+        }
+        const auto lossy_file = h5_all_datasets(dir + "/lossy" + file);
+        ASSERT_EQ(lossy_file.size(), raw_file.size()) << file;
+        for (const auto & [name, bytes] : raw_file) {
+            if (!name.starts_with("VTKHDF/CellData/")) {
+                EXPECT_EQ(lossy_file.at(name), bytes) << file << " " << name;
+                continue;
+            }
+            expect_within_relative_error(
+                as_reals(std::string(lossy_file.at(name).begin(), lossy_file.at(name).end())),
+                as_reals(std::string(bytes.begin(), bytes.end())), 1e-3, std::string(file) + " " + name);
+        }
+    }
 #endif
 }
 
@@ -521,3 +556,287 @@ TEST(IOTest, RoundingKeepsEveryValueWithinTheRelativeError) {
     }
     EXPECT_NE(floats[1], exact[1]);
 }
+
+TEST(IOTest, VTKHDFIsTheDefaultFormatWithHDF5) {
+    auto mesh = make_mesh("cartesian_tri", 3, 2);
+    Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
+    std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
+    DataWriter writer;
+    writer.init(parse_toml("prefix = \"" + (scratch_dir() / "default_format").string() +
+                           "\"\ninterval = 1\nvariables = [\"RHO\"]\n"),
+                data, mesh);
+    EXPECT_EQ(writer.get_format(), have_hdf5() ? DataFormat::VTKHDF : DataFormat::VTU);
+    DataWriter vtu;
+    EXPECT_THROW(vtu.init(parse_toml("prefix = \"x\"\nformat = \"vtu\"\nseries = true\ninterval = 1\n"
+                                     "variables = [\"RHO\"]\n"),
+                          data, mesh),
+                 InputError);
+}
+
+#ifdef Mallard_HAS_HDF5
+
+namespace {
+
+/** @brief A snapshot's mesh and cells as VTKHDF stores them. */
+struct VtkhdfGrid {
+    std::vector<double> points;  // 3 per point
+    std::vector<int64_t> connectivity, offsets;
+    std::vector<uint8_t> types;
+
+    explicit VtkhdfGrid(const std::string & file)
+        : points(h5_values<double>(file, "VTKHDF/Points")),
+          connectivity(h5_values<int64_t>(file, "VTKHDF/Connectivity")),
+          offsets(h5_values<int64_t>(file, "VTKHDF/Offsets")),
+          types(h5_values<uint8_t>(file, "VTKHDF/Types")) {}
+
+    std::array<double, 3> point(size_t c, size_t k) const {
+        const size_t p = static_cast<size_t>(connectivity[static_cast<size_t>(offsets[c]) + k]);
+        return {points[3 * p], points[3 * p + 1], points[3 * p + 2]};
+    }
+    size_t size(size_t c) const { return static_cast<size_t>(offsets[c + 1] - offsets[c]); }
+};
+
+std::string vtkhdf_type(const std::string & file) {
+    h5::Handle f(H5Fopen(file.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, file);
+    h5::Handle top(H5Gopen2(f, "VTKHDF", H5P_DEFAULT), H5Gclose, "VTKHDF");
+    h5::Handle attr(H5Aopen(top, "Type", H5P_DEFAULT), H5Aclose, "Type");
+    h5::Handle type(H5Aget_type(attr), H5Tclose, "H5Aget_type");
+    std::string text(H5Tget_size(type), '\0');
+    h5::check(H5Aread(attr, type, text.data()), "Type");
+    return text.substr(0, text.find('\0'));
+}
+
+} // namespace
+
+TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
+    // Triangles and quadrilaterals of a Gmsh file: each cell's nodes, type
+    // and values round trip, in serial cell order
+    const std::string dir = (scratch_dir() / "mallard_vtkhdf_cells").string();
+    std::filesystem::remove_all(dir);
+    const std::string file = write_temp("vtkhdf_mixed.msh", jittered_mixed_mesh(6));
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"));
+    mesh->copy_host_to_device();
+    Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 3);
+    for (uint32_t i = 0; i < mesh->n_cells; i++) {
+        values(i, 0) = rtype(1) + rtype(i) / rtype(7);
+        values(i, 1) = rtype(i);
+        values(i, 2) = -rtype(2 * i);
+    }
+    std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0)),
+                              Data("U_X", Kokkos::subview(values, Kokkos::ALL(), 1)),
+                              Data("U_Y", Kokkos::subview(values, Kokkos::ALL(), 2))};
+    DataWriter writer;
+    writer.init(parse_toml("prefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 5\n"
+                           "variables = [\"RHO\", \"U\"]\n"),
+                data, mesh);
+    writer.write(10, 0.25_r);
+    writer.finish();
+    const std::string out = dir + "/f_000010.vtkhdf";
+    EXPECT_EQ(vtkhdf_type(out), "UnstructuredGrid");
+    EXPECT_EQ(h5_values<int64_t>(out, "VTKHDF/NumberOfCells"), std::vector<int64_t>{int64_t(mesh->n_cells)});
+    EXPECT_EQ(h5_values<int64_t>(out, "VTKHDF/NumberOfPoints"), std::vector<int64_t>{int64_t(mesh->n_nodes)});
+    EXPECT_EQ(h5_values<double>(out, "VTKHDF/FieldData/TIME"), std::vector<double>{double(0.25_r)});
+    const VtkhdfGrid grid(out);
+    ASSERT_EQ(grid.types.size(), mesh->n_cells);
+    std::set<uint8_t> kinds(grid.types.begin(), grid.types.end());
+    EXPECT_EQ(kinds, (std::set<uint8_t>{5, 9}));
+    const std::vector<double> rho = h5_values<double>(out, "VTKHDF/CellData/RHO");
+    const std::vector<double> u = h5_values<double>(out, "VTKHDF/CellData/U");
+    for (uint32_t i = 0; i < mesh->n_cells; i++) {
+        const uint32_t n = mesh->h_n_nodes_of_cell(i);
+        ASSERT_EQ(grid.size(i), n);
+        EXPECT_EQ(grid.types[i], vtk_cell_type(2, n));
+        for (uint32_t k = 0; k < n; k++) {
+            const auto x = grid.point(i, k);
+            EXPECT_EQ(x[0], double(mesh->h_node_coords(mesh->h_node_of_cell(i, k), 0)));
+            EXPECT_EQ(x[1], double(mesh->h_node_coords(mesh->h_node_of_cell(i, k), 1)));
+            EXPECT_EQ(x[2], 0.0);
+        }
+        EXPECT_EQ(rho[i], double(values(i, 0)));
+        EXPECT_EQ(u[3 * i], double(values(i, 1)));
+        EXPECT_EQ(u[3 * i + 1], double(values(i, 2)));
+        EXPECT_EQ(u[3 * i + 2], 0.0);
+    }
+    std::ifstream index(dir + "/f.vtkhdf.series");
+    std::stringstream text;
+    text << index.rdbuf();
+    EXPECT_NE(text.str().find("{\"name\": \"f_000010.vtkhdf\", \"time\": 0.25}"), std::string::npos) << text.str();
+    std::filesystem::remove_all(dir);
+}
+
+TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {
+    // A run restarted at t = 0.1 continues the series of one file after its
+    // second snapshot, and a series of files after its second file
+    const std::string dir = (scratch_dir() / "mallard_vtkhdf_resume").string();
+    std::filesystem::remove_all(dir);
+    auto mesh = make_mesh("cartesian_tri", 3, 2);
+    const uint32_t n = mesh->n_cells;
+    Kokkos::View<rtype **>::host_mirror_type values("values", n, 1);
+    std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
+    for (bool one_file : {true, false}) {
+        const std::string input = "prefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ntime_interval = 0.1\n"
+                                  "variables = [\"RHO\"]\nseries = " + (one_file ? "true" : "false") + "\n";
+        {
+            DataWriter first;
+            first.init(parse_toml(input), data, mesh);
+            for (uint64_t step = 0; step < 4; step++) {
+                for (uint32_t i = 0; i < n; i++) values(i, 0) = rtype(step);
+                first.write(10 * step, static_cast<rtype>(0.1 * static_cast<double>(step)));
+            }
+        }
+        DataWriter second;
+        second.init(parse_toml(input), data, mesh);
+        second.resume(10, 0.1_r);
+        for (uint32_t i = 0; i < n; i++) values(i, 0) = rtype(9);
+        second.write(25, 0.2_r);
+        second.finish();
+        if (!one_file) {
+            std::ifstream index(dir + "/f.vtkhdf.series");
+            std::stringstream text;
+            text << index.rdbuf();
+            for (const char * name : {"f_000000", "f_000001", "f_000002"}) {
+                EXPECT_NE(text.str().find(name), std::string::npos) << name;
+            }
+            EXPECT_EQ(text.str().find("f_000003"), std::string::npos) << text.str();
+            EXPECT_EQ(h5_values<double>(dir + "/f_000002.vtkhdf", "VTKHDF/CellData/RHO"), std::vector<double>(n, 9.0));
+            continue;
+        }
+        const std::string file = dir + "/f.vtkhdf";
+        EXPECT_EQ(h5_values<double>(file, "VTKHDF/Steps/Values"),
+                  (std::vector<double>{0.0, double(rtype(0.1)), double(rtype(0.2))}));
+        EXPECT_EQ(h5_values<int64_t>(file, "VTKHDF/Steps/CellDataOffsets/RHO"),
+                  (std::vector<int64_t>{0, int64_t(n), int64_t(2 * n)}));
+        for (const char * offsets : {"PartOffsets", "PointOffsets", "CellOffsets", "ConnectivityIdOffsets"}) {
+            EXPECT_EQ(h5_values<int64_t>(file, std::string("VTKHDF/Steps/") + offsets), std::vector<int64_t>(3, 0));
+        }
+        std::vector<double> expected(3 * n, 0.0);
+        std::fill(expected.begin() + n, expected.begin() + 2 * n, 1.0);
+        std::fill(expected.begin() + 2 * n, expected.end(), 9.0);
+        EXPECT_EQ(h5_values<double>(file, "VTKHDF/CellData/RHO"), expected);
+        h5::Handle f(H5Fopen(file.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, file);
+        h5::Handle steps(H5Gopen2(f, "VTKHDF/Steps", H5P_DEFAULT), H5Gclose, "Steps");
+        h5::Handle attr(H5Aopen(steps, "NSteps", H5P_DEFAULT), H5Aclose, "NSteps");
+        int64_t n_steps = 0;
+        h5::check(H5Aread(attr, H5T_NATIVE_INT64, &n_steps), "NSteps");
+        EXPECT_EQ(n_steps, 3);
+    }
+    // A series of another mesh is not appended to
+    auto other = make_mesh("cartesian_tri", 4, 2);
+    Kokkos::View<rtype **>::host_mirror_type other_values("values", other->n_cells, 1);
+    std::vector<Data> other_data = {Data("RHO", Kokkos::subview(other_values, Kokkos::ALL(), 0))};
+    DataWriter third;
+    third.init(parse_toml("prefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ntime_interval = 0.1\n"
+                          "variables = [\"RHO\"]\nseries = true\n"),
+               other_data, other);
+    third.resume(10, 0.1_r);
+    EXPECT_THROW(third.write(25, 0.2_r), std::runtime_error);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(IOTest, VTKHDFBoundaryZoneIsAPolyDataOfItsFaces) {
+    const std::string dir = (scratch_dir() / "mallard_vtkhdf_surface").string();
+    std::filesystem::remove_all(dir);
+    std::ostringstream s;
+    s << "[run]\nn_steps = 4\ncfl = 0.25\n"
+      << "[mesh]\ntype = \"wedge\"\nNx = 12\nNy = 6\nLx = 2.0\nLy = 1.5\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"1.5\", \"0.0\"]\np = \"1.0 + x * x\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtkhdf\"\ngeometry = \"bottom\"\n"
+      << "interval = 4\nvariables = [\"P\"]\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.update_primitives();
+    solver.copy_device_to_host();
+    const std::string file = dir + "/wall_000004.vtkhdf";
+    EXPECT_EQ(vtkhdf_type(file), "PolyData");
+    for (const char * empty : {"Vertices", "Polygons", "Strips"}) {
+        EXPECT_EQ(h5_values<int64_t>(file, std::string("VTKHDF/") + empty + "/NumberOfCells"), std::vector<int64_t>{0});
+        EXPECT_EQ(h5_values<int64_t>(file, std::string("VTKHDF/") + empty + "/Offsets"), std::vector<int64_t>{0});
+    }
+    EXPECT_EQ(h5_values<int64_t>(file, "VTKHDF/Lines/NumberOfCells"), std::vector<int64_t>{12});
+    EXPECT_EQ(h5_values<int64_t>(file, "VTKHDF/NumberOfPoints"), std::vector<int64_t>{13});
+    const std::vector<double> points = h5_values<double>(file, "VTKHDF/Points");
+    const std::vector<int64_t> connectivity = h5_values<int64_t>(file, "VTKHDF/Lines/Connectivity");
+    const std::vector<double> p = h5_values<double>(file, "VTKHDF/CellData/P");
+    ASSERT_EQ(connectivity.size(), 24u);
+    ASSERT_EQ(p.size(), 12u);
+    // Each segment carries the pressure of the cell above it
+    const auto & mesh = *solver.get_mesh();
+    FaceZone * zone = solver.get_mesh()->get_face_zone("bottom");
+    for (size_t k = 0; k < 12; k++) {
+        const double x = 0.5 * (points[3 * size_t(connectivity[2 * k])] + points[3 * size_t(connectivity[2 * k + 1])]);
+        int matches = 0;
+        for (uint32_t i = 0; i < zone->n_faces(); i++) {
+            const uint32_t f = zone->h_faces(i);
+            const double xf = 0.5 * (double(mesh.h_node_coords(mesh.h_node_of_face(f, 0), 0)) +
+                                     double(mesh.h_node_coords(mesh.h_node_of_face(f, 1), 0)));
+            if (std::abs(xf - x) > 1e-6) continue;
+            matches++;
+            EXPECT_EQ(p[k], double(solver.h_primitives(mesh.h_cells_of_face(f, 0), 2))) << k;
+        }
+        EXPECT_EQ(matches, 1) << k;
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
+    // Annulus cells at the walls (circles) are quadratic: their edge nodes on
+    // the walls lie on the circles; the ring in between stays linear
+    const std::string dir = (scratch_dir() / "mallard_vtkhdf_curved").string();
+    std::filesystem::remove_all(dir);
+    constexpr uint32_t N_T = 24;
+    const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
+    for (bool triangles : {false, true}) {
+        const std::string file = write_temp("vtkhdf_annulus.msh", annulus_gmsh(3, N_T, 1, triangles));
+        Solver solver;
+        solver.init(parse_toml(
+            "[run]\nn_steps = 1\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+            "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+            "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+            "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"
+            "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
+            "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"
+            "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+            "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+            "[output]\ncheck_interval = 1000000\n"
+            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 1\nvariables = [\"RHO\"]\n"));
+        solver.run();
+        const VtkhdfGrid grid(dir + "/f_000000.vtkhdf");
+        const uint8_t quadratic = triangles ? 69 : 70, linear = triangles ? 5 : 9;
+        const std::vector<std::array<size_t, 2>> edges =
+            triangles ? std::vector<std::array<size_t, 2>>{{0, 1}, {1, 2}, {2, 0}}
+                      : std::vector<std::array<size_t, 2>>{{0, 1}, {1, 2}, {3, 2}, {0, 3}};
+        auto radius = [](const std::array<double, 3> & x) { return std::hypot(x[0], x[1]); };
+        size_t n_quadratic = 0, n_wall_edges = 0;
+        for (size_t c = 0; c < grid.types.size(); c++) {
+            if (grid.types[c] == linear) continue;
+            ASSERT_EQ(grid.types[c], quadratic) << c;
+            ASSERT_EQ(grid.size(c), triangles ? 6u : 9u);
+            n_quadratic++;
+            for (size_t e = 0; e < edges.size(); e++) {
+                const auto a = grid.point(c, edges[e][0]), b = grid.point(c, edges[e][1]);
+                for (double wall : {1.0, 1.384}) {
+                    if (std::abs(radius(a) - wall) > tol || std::abs(radius(b) - wall) > tol) continue;
+                    n_wall_edges++;
+                    EXPECT_NEAR(radius(grid.point(c, edges.size() == 3 ? 3 + e : 4 + e)), wall, tol) << c;
+                    const std::array<double, 3> chord = {0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.0};
+                    EXPECT_GT(wall - radius(chord), 1e-3) << c;
+                }
+            }
+        }
+        EXPECT_EQ(n_quadratic, 2u * N_T);
+        EXPECT_EQ(n_wall_edges, 2u * N_T);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+#endif

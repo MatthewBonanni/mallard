@@ -9,7 +9,7 @@
 # spherical shock in the (x, r) plane tests the axisymmetric scheme along and
 # across the axis alike. Compare with the exact solution at t = 0.6 (shock at
 # R = 0.2):
-#   python plot_noh.py noh.png solut/noh_000006.vtu
+#   python plot_noh.py noh.png solut/noh_000006.vtkhdf
 # 200 x 200 quads, bound-preserving TENO5 (about 2 minutes on 4 threads): the
 # shock is at 0.2016-0.2018 in every direction (0.2034 next to the x = 0
 # plane), the post-shock density 62-63 against 64 except in the first cells
@@ -79,6 +79,5 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/noh"
-format = "vtu"
 time_interval = 0.1
 variables = ["RHO", "U_X", "U_Y", "P"]

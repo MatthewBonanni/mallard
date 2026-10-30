@@ -38,21 +38,6 @@
 
 namespace {
 
-/**
- * @brief VTK cell type of a cell or boundary face, by dimension and node count.
- */
-uint8_t vtk_type(uint32_t dim, uint32_t n_nodes) {
-    if (dim == 1 && n_nodes == 2) return 3;   // VTK_LINE
-    if (dim == 2 && n_nodes == 3) return 5;   // VTK_TRIANGLE
-    if (dim == 2 && n_nodes == 4) return 9;   // VTK_QUAD
-    if (dim == 3 && n_nodes == 4) return 10;  // VTK_TETRA
-    if (dim == 3 && n_nodes == 8) return 12;  // VTK_HEXAHEDRON
-    if (dim == 3 && n_nodes == 6) return 13;  // VTK_WEDGE
-    if (dim == 3 && n_nodes == 5) return 14;  // VTK_PYRAMID
-    throw std::runtime_error("DataWriter: no VTK cell type for a " + std::to_string(dim) + "D element with " +
-                             std::to_string(n_nodes) + " nodes.");
-}
-
 const std::unordered_map<std::string, Compression> COMPRESSION_TYPES = {
     {"none", Compression::NONE},
     {"zlib", Compression::ZLIB},
@@ -74,32 +59,57 @@ void DataWriter::init(const Input & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh_in,
                       const std::vector<std::string> & restart_variables) {
-    for (const char * key : {"prefix", "format"}) {
-        if (!input.contains(key)) {
-            throw std::runtime_error(std::string("DataWriter: ") + key + " not specified.");
-        }
+    if (!input.contains("prefix")) {
+        throw missing_key(input, "write_data.prefix",
+                          "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
     }
     const bool has_interval = input.contains("interval");
     const bool has_time_interval = input.contains("time_interval");
     if (has_interval == has_time_interval) {
-        throw std::runtime_error("DataWriter: specify exactly one of interval or time_interval.");
+        throw InputError({.key = "write_data",
+                          .line = line_of(input),
+                          .message = has_interval ? "sets both interval and time_interval; specify exactly one"
+                                                  : "specify exactly one of interval and time_interval",
+                          .fix = "Use interval for every N steps, or time_interval for every T of simulated time"});
     }
     prefix = find_value<std::string>(input, "prefix");
     if (has_interval) {
         interval = find_value<uint64_t>(input, "interval");
         if (interval == 0) {
-            throw std::runtime_error("DataWriter: interval must be positive.");
+            throw InputError({.key = "write_data.interval",
+                              .line = line_of(input, "interval"),
+                              .message = "must be positive",
+                              .fix = "Give the number of steps between files"});
         }
     } else {
         time_interval = find_real(input, "time_interval", dim::time);
         if (!(time_interval > 0.0_r)) {
-            throw std::runtime_error("DataWriter: time_interval must be positive.");
+            throw InputError({.key = "write_data.time_interval",
+                              .line = line_of(input, "time_interval"),
+                              .message = "must be positive",
+                              .fix = "Give the simulated time between files"});
         }
     }
 
-    const std::string format_str = find_value<std::string>(input, "format");
-    auto it = find_option(FORMAT_TYPES, "write_data.format", format_str);
-    format = it->second;
+    this->mesh = mesh_in;
+    const bool many_writers = mesh->n_global_cells > 0 && comm::size() > 1;
+    if (input.contains("format")) {
+        format = find_option(FORMAT_TYPES, "write_data.format", find_value<std::string>(input, "format"),
+                             line_of(input, "format"))
+                     ->second;
+    } else if (!have_hdf5() || (many_writers && !have_parallel_hdf5())) {
+        format = DataFormat::VTU;
+        static bool told = false;
+        if (!told && comm::is_root()) {
+            logging::warning(std::string("[[write_data]] writes VTU files: the default format, \"vtkhdf\", needs a build "
+                                         "with ") +
+                             (have_hdf5() ? "parallel HDF5 on several ranks" : "HDF5 (Mallard_ENABLE_HDF5=ON)") +
+                             "; set format = \"vtu\" to silence this.");
+        }
+        told = true;
+    } else {
+        format = DataFormat::VTKHDF;
+    }
 
     std::vector<std::string> variables;
     if (format == DataFormat::RESTART) {
@@ -110,13 +120,29 @@ void DataWriter::init(const Input & input,
         }
     } else {
         if (!input.contains("variables")) {
-            throw std::runtime_error("DataWriter: variables not specified.");
+            throw missing_key(input, "write_data.variables", "Add variables = [\"RHO\", \"U\", \"P\"], for example");
         }
         variables = find_value<std::vector<std::string>>(input, "variables");
     }
     if (variables.empty()) {
-        throw std::runtime_error("DataWriter: No variables specified.");
+        throw InputError({.key = "write_data.variables",
+                          .line = line_of(input, "variables"),
+                          .message = "is empty",
+                          .fix = "List the fields to write, e.g. [\"RHO\", \"U\", \"P\"]"});
     }
+    auto unknown_variable = [&](const std::string & var, const std::string & message) {
+        std::vector<std::string> names;
+        for (const auto & data_var : data) names.push_back(data_var.name());
+        std::sort(names.begin(), names.end());
+        return InputError({.key = "write_data.variables",
+                           .line = line_of(input, "variables"),
+                           .message = message,
+                           .valid = names,
+                           .suggestion = suggest_value(var, names),
+                           .fix = "Vectors also go by their name without _X, _Y, _Z (e.g. U); a trailing * selects "
+                                  "every variable it starts (e.g. Y_*)",
+                           .docs = "docs/guide/output.md#snapshots-write_data"});
+    };
     auto find_data = [&](const std::string & name) -> const Data * {
         for (const auto & data_var : data) {
             if (data_var.name() == name) return &data_var;
@@ -136,7 +162,7 @@ void DataWriter::init(const Input & input,
             if (data_var.name().rfind(stem, 0) == 0) expanded.push_back(data_var.name());
         }
         if (expanded.size() == n_before) {
-            throw InputError("write_data.variables: no variable matches \"" + var + "\".");
+            throw unknown_variable(var, "no variable matches \"" + var + "\"");
         }
     }
     variables = expanded;
@@ -153,31 +179,54 @@ void DataWriter::init(const Input & input,
             if (field.components.size() != N_DIM) field.components.clear();
         }
         if (field.components.empty()) {
-            throw InputError("write_data.variables: unknown variable \"" + var + "\".");
+            throw unknown_variable(var, "unknown variable \"" + var + "\"");
         }
         if (format != DataFormat::RESTART) field.description = field_units::describe(var);
         fields.push_back(field);
     }
-    this->mesh = mesh_in;
 
-    if (format == DataFormat::HDF5) {
+    if (format == DataFormat::HDF5 || format == DataFormat::VTKHDF) {
+        const std::string name = FORMAT_NAMES.at(format);
         if (!have_hdf5()) {
-            throw std::runtime_error(
-                "DataWriter: format = \"hdf5\" needs a build with HDF5 (configure with Mallard_ENABLE_HDF5=ON).");
+            throw InputError({.key = "write_data.format",
+                              .line = line_of(input, "format"),
+                              .message = "\"" + name + "\" needs a build with HDF5, and this one has none",
+                              .fix = "Use format = \"vtu\", or rebuild with -DMallard_ENABLE_HDF5=ON"});
         }
-        if (mesh->n_global_cells > 0 && comm::size() > 1 && !have_parallel_hdf5()) {
-            throw std::runtime_error("DataWriter: format = \"hdf5\" on several ranks needs parallel HDF5.");
+        if (many_writers && !have_parallel_hdf5()) {
+            throw InputError({.key = "write_data.format",
+                              .line = line_of(input, "format"),
+                              .message = "\"" + name + "\" on several ranks needs parallel HDF5, and this build's "
+                                         "HDF5 is serial",
+                              .fix = "Use format = \"vtu\", run on one rank, or rebuild against a parallel HDF5"});
         }
+    }
+    if (input.contains("series")) {
+        if (format != DataFormat::VTKHDF) throw InputError("write_data.series is for format = \"vtkhdf\".");
+        one_file = find_value<bool>(input, "series");
     }
 
     geometry = find_value_or<std::string>(input, "geometry", "all");
     if (geometry != "all") {
-        if (format != DataFormat::VTU) {
-            throw std::runtime_error("DataWriter: geometry can only be set for vtu output.");
+        if (format != DataFormat::VTU && format != DataFormat::VTKHDF) {
+            throw InputError({.key = "write_data.geometry",
+                              .line = line_of(input, "geometry"),
+                              .message = "boundary-zone output is written only as vtkhdf or vtu",
+                              .fix = "Set format = \"vtkhdf\" or \"vtu\" for this [[write_data]], or remove geometry"});
         }
         FaceZone * zone = mesh->get_face_zone(geometry);
         if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-            throw std::runtime_error("DataWriter: unknown geometry: " + geometry + ".");
+            std::vector<std::string> names;
+            for (const FaceZone & z : *mesh->face_zones()) {
+                if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
+            }
+            std::sort(names.begin(), names.end());
+            throw InputError({.key = "write_data.geometry",
+                              .line = line_of(input, "geometry"),
+                              .message = "the mesh has no boundary zone \"" + geometry + "\"",
+                              .valid = names,
+                              .suggestion = suggest_value(geometry, names),
+                              .fix = "Use \"all\" for the whole domain, or a boundary zone"});
         }
         surface = true;
         // Each rank writes the faces of its owned cells
@@ -188,12 +237,16 @@ void DataWriter::init(const Input & input,
     }
 
     const std::string compression_str = find_value_or<std::string>(input, "compression", "none");
-    const auto compression_it = find_option(COMPRESSION_TYPES, "write_data.compression", compression_str);
+    const auto compression_it =
+        find_option(COMPRESSION_TYPES, "write_data.compression", compression_str, line_of(input, "compression"));
     compression = compression_it->second;
     if (compression != Compression::NONE) {
-        if (surface) throw InputError("write_data.compression: boundary-zone output is ASCII, which is not compressed.");
-        if (format == DataFormat::HDF5 ? !have_hdf5_deflate() : !compression::have_zlib()) {
-            throw std::runtime_error(format == DataFormat::HDF5
+        if (surface && format == DataFormat::VTU) {
+            throw InputError("write_data.compression: boundary-zone VTU output is ASCII, which is not compressed.");
+        }
+        const bool hdf5 = format == DataFormat::HDF5 || format == DataFormat::VTKHDF;
+        if (hdf5 ? !have_hdf5_deflate() : !compression::have_zlib()) {
+            throw std::runtime_error(hdf5
                                          ? "DataWriter: compression = \"zlib\" needs an HDF5 library with the deflate filter."
                                          : "DataWriter: compression = \"zlib\" needs a build with zlib (configure with "
                                            "Mallard_ENABLE_ZLIB=ON).");
@@ -219,16 +272,14 @@ void DataWriter::init(const Input & input,
         }
     }
 
-    const std::filesystem::path parent = std::filesystem::path(prefix).parent_path();
-    if (!parent.empty() && output_files_enabled()) {
-        std::filesystem::create_directories(parent);
-    }
+    if (output_files_enabled()) create_parent_directories("the output", prefix);
 }
 
 std::pair<std::string, std::string> DataWriter::summary() const {
-    std::string text = prefix + (format == DataFormat::RESTART ? "_*.restart"
-                                 : format == DataFormat::HDF5  ? "_*.h5"
-                                                               : "_*.vtu");
+    std::string text = prefix + (format == DataFormat::RESTART  ? "_*.restart"
+                                 : format == DataFormat::HDF5   ? "_*.h5"
+                                 : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
+                                                                : "_*.vtu");
     if (geometry != "all") text += " (" + geometry + ")";
     if (compression == Compression::ZLIB) {
         text += relative_error > 0.0 ? ", zlib to relative error " + logging::real(relative_error) : ", zlib";
@@ -240,6 +291,15 @@ std::pair<std::string, std::string> DataWriter::summary() const {
         text += ": " + names;
     }
     return {FORMAT_NAMES.at(format), text};
+}
+
+std::string DataWriter::index_file() const {
+    switch (format) {
+        case DataFormat::VTKHDF: return prefix + (one_file ? ".vtkhdf" : ".vtkhdf.series");
+        case DataFormat::HDF5: return prefix + ".xmf";
+        case DataFormat::VTU: return prefix + ".pvd";
+        default: return last_file;
+    }
 }
 
 bool DataWriter::due(uint64_t step, rtype t) const {
@@ -360,6 +420,24 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             run(std::move(job), !collective);
         }
         logging::event(step, double(t), "hdf5", stem + ".h5");
+    } else if (format == DataFormat::VTKHDF) {
+        const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
+        last_file = filename;
+        history.emplace_back(t, filename);
+        const bool collective = distributed && comm::size() > 1;
+        if (distributed || root) {
+            auto job = [this, filename, t, root,
+                        values = surface ? capture_faces() : capture(mesh->n_owned()), list = history]() {
+                const uint64_t before = one_file ? file_bytes(filename) : 0;
+                write_vtkhdf(filename, t, values);
+                if (root) {
+                    n_bytes += file_bytes(filename) - std::min(before, file_bytes(filename));
+                    if (!one_file) write_vtkhdf_series(list);
+                }
+            };
+            run(std::move(job), !collective);
+        }
+        logging::event(step, double(t), surface ? "surface" : "vtkhdf", filename);
     } else {
         // Distributed runs: one piece per rank and a .pvtu index
         std::ostringstream piece;
@@ -427,6 +505,10 @@ void DataWriter::resume(uint64_t step, rtype t) {
     history.clear();
     if (format == DataFormat::HDF5) {
         resume_xdmf(t);
+        return;
+    }
+    if (format == DataFormat::VTKHDF) {
+        resume_vtkhdf(t);
         return;
     }
     // Keep the entries of the previous run's .pvd up to the restart time
@@ -663,7 +745,7 @@ void write_at(int fd, uint64_t offset, const void * data, size_t n, const std::s
     while (n > 0) {
         const ssize_t written = ::pwrite(fd, p, std::min<size_t>(n, size_t(1) << 30), static_cast<off_t>(offset));
         if (written < 0 && errno == EINTR) continue;
-        if (written <= 0) throw std::runtime_error("DataWriter: could not write " + filename + ".");
+        if (written <= 0) throw cannot_write("the restart file", filename);
         p += written;
         n -= static_cast<size_t>(written);
         offset += static_cast<uint64_t>(written);
@@ -713,7 +795,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
                 values = capture(mesh->n_cells), trailer = provenance_trailer()]() {
         std::ofstream out(filename, std::ios::binary);
         if (!out.good()) {
-            throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
+            throw cannot_write("the restart file", filename);
         }
         std::vector<std::string> names;
         for (const auto & field : fields) names.push_back(field.name);
@@ -739,7 +821,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
         put(ordered.part.values.data(), ordered.part.values.size() * sizeof(rtype));
         put(trailer.data(), trailer.size());
         out.close();
-        if (!out) throw std::runtime_error("DataWriter::write_restart: Could not write file: " + filename + ".");
+        if (!out) throw cannot_write("the restart file", filename);
         n_bytes += file_bytes(filename);
     };
     run(std::move(job));
@@ -793,7 +875,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
         const bool root = comm::is_root();
         if (root) {
             const int fd = ::open(filename.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
-            if (fd < 0) throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
+            if (fd < 0) throw cannot_write("the restart file", filename);
             ::close(fd);
         }
         comm::barrier();
@@ -801,7 +883,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
                     offsets = std::move(offsets), block = std::move(block), chunks, ordered,
                     trailer = root ? provenance_trailer() : std::vector<char>()]() {
             const int fd = ::open(filename.c_str(), O_WRONLY);
-            if (fd < 0) throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
+            if (fd < 0) throw cannot_write("the restart file", filename);
             uint64_t written = 0;
             auto put = [&](uint64_t at, const void * data, size_t size) {
                 write_at(fd, at, data, size, filename);
@@ -834,7 +916,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
                 ::close(fd);
                 throw;
             }
-            if (::close(fd) != 0) throw std::runtime_error("DataWriter::write_restart: Could not write " + filename + ".");
+            if (::close(fd) != 0) throw cannot_write("the restart file", filename);
             n_bytes += written;
         };
         run(std::move(job));
@@ -846,7 +928,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     MPI_File fh;
     if (MPI_File_open(comm::world(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh) !=
         MPI_SUCCESS) {
-        throw std::runtime_error("DataWriter::write_restart: Could not open file: " + filename + ".");
+        throw cannot_write("the restart file", filename);
     }
     MPI_File_set_size(fh, 0);
     const std::vector<char> header =
@@ -900,7 +982,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
 RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells) {
     std::ifstream in(filename, std::ios::binary);
     if (!in.good()) {
-        throw std::runtime_error("Could not open restart file: " + filename + ".");
+        throw cannot_read("the restart file", filename);
     }
     char magic[16];
     uint32_t version, real_size;
@@ -1146,7 +1228,7 @@ void DataWriter::write_pvd(const std::vector<std::pair<rtype, std::string>> & se
 void DataWriter::write_vtu_faces(const std::string & filename, rtype t, const Values & values) const {
     std::ofstream out(filename);
     if (!out.good()) {
-        throw std::runtime_error("DataWriter::write_vtu_faces: Could not open file: " + filename + ".");
+        throw cannot_write("the snapshot", filename);
     }
 
     // Renumber the nodes of the selected faces
@@ -1197,7 +1279,7 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t, const Va
     }
     out << "\n        </DataArray>\n";
     out << "        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">\n";
-    for (uint32_t f : geometry_faces) out << static_cast<int>(vtk_type(N_DIM - 1, mesh->h_n_nodes_of_face(f))) << " ";
+    for (uint32_t f : geometry_faces) out << static_cast<int>(vtk_cell_type(N_DIM - 1, mesh->h_n_nodes_of_face(f))) << " ";
     out << "\n        </DataArray>\n";
     out << "      </Cells>\n";
     out << "    </Piece>\n";
@@ -1239,7 +1321,7 @@ std::vector<char> vtu_zlib_array(const void * data, size_t n_bytes, unsigned n_t
 void DataWriter::write_vtu(const std::string & filename, rtype t, Values & values) {
     std::ofstream out(filename, std::ios::binary);
     if (!out.good()) {
-        throw std::runtime_error("DataWriter::write_vtu: Could not open file: " + filename + ".");
+        throw cannot_write("the snapshot", filename);
     }
 
     using header_t = uint64_t;
@@ -1268,7 +1350,7 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
             }
             cell_offset += n_nodes;
             offsets.push_back(cell_offset);
-            types.push_back(vtk_type(N_DIM, n_nodes));
+            types.push_back(vtk_cell_type(N_DIM, n_nodes));
         }
         arrays = {as_bytes(points), as_bytes(connectivity), as_bytes(offsets), as_bytes(types)};
         if (zlib) {
@@ -1339,5 +1421,5 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
     out << "\n  </AppendedData>\n";
     out << "</VTKFile>\n";
     out.close();
-    if (!out) throw std::runtime_error("DataWriter::write_vtu: Could not write file: " + filename + ".");
+    if (!out) throw cannot_write("the snapshot", filename);
 }

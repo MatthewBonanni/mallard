@@ -3,15 +3,14 @@
 Rayleigh flow, and the closed duct's mass against mdot t for the mass-flow
 inlet and for upt.
 
-    plot_heated_duct.py STEADY.vtu CLOSED_PREFIX CLOSED_UPT_PREFIX [--figure]
+    plot_heated_duct.py STEADY CLOSED_PREFIX CLOSED_UPT_PREFIX [--figure]
 
-STEADY.vtu is the last snapshot of input.toml; the prefixes are those of the
+STEADY is the last snapshot of input.toml (.vtkhdf, or .vtu without HDF5); the prefixes are those of the
 closed runs' series (closed.toml, closed_upt.toml). Prints the inlet pressure
 and exit state against Rayleigh flow and the closed duct's mass balance;
 --figure draws docs/images/guide/{heated_duct,mass_flow_held}-{light,dark}.svg.
 """
 import argparse
-import glob
 import os
 import sys
 
@@ -20,7 +19,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/docs"))
 import figstyle  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard import vtu  # noqa: E402
 
 GAMMA, R = 1.4, 287.0
 CP = GAMMA * R / (GAMMA - 1.0)
@@ -51,7 +50,7 @@ def rayleigh_inlet_pressure():
 
 
 def cells(path):
-    pts, conn, offs, types, arrays = read_vtu_cells(path)
+    pts, conn, offs, types, arrays = vtu.read_vtu_cells(path)
     starts = np.concatenate([[0], offs[:-1]])
     quads = np.array([conn[s:e] for s, e in zip(starts, offs)])
     xy = pts[quads][:, :, :2]
@@ -64,7 +63,7 @@ def cells(path):
 
 
 def series(prefix):
-    files = sorted(glob.glob(prefix + "_[0-9]*.vtu"))
+    files = vtu.series(os.path.dirname(prefix), os.path.basename(prefix) + "_[0-9]*")
     t, mass, rho_in = [], [], []
     for f in files:
         x, area, a = cells(f)

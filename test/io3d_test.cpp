@@ -13,12 +13,15 @@
 #include <Kokkos_Core.hpp>
 
 #include <array>
+#include <cmath>
+#include <limits>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -30,6 +33,7 @@
 #include "hdf5_output.h"
 #include "mesh_block.h"
 #include "scratch.h"
+#include "solver.h"
 
 namespace {
 
@@ -411,6 +415,129 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     EXPECT_EQ(coords, points);
     EXPECT_EQ(fields_h5.at("fields/U"), std::vector<char>(vtu["U"].begin(), vtu["U"].end()));
     EXPECT_EQ(fields_h5.at("fields/RHO"), std::vector<char>(vtu["RHO"].begin(), vtu["RHO"].end()));
+#endif
+}
+
+TEST(IO3DTest, VTKHDFHoldsTheVTUCells) {
+    // Tetrahedra, pyramids, prisms and hexahedra: the same points, cells and
+    // values as the VTU file
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string dir = (scratch_dir() / "mallard_vtkhdf_3d").string();
+    std::filesystem::remove_all(dir);
+    auto mesh = mixed_mesh();
+    CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
+    for (const char * format : {"vtu", "vtkhdf"}) {
+        DataWriter writer;
+        writer.init(parse_toml("prefix = \"" + dir + "/" + format + "\"\nformat = \"" + format +
+                               "\"\ninterval = 1\nvariables = [\"RHO\", \"U\"]\n"),
+                    fields.data, mesh);
+        writer.write(0, 0.0);
+    }
+    auto vtu = read_appended_arrays(dir + "/vtu_000000.vtu");
+    const std::string file = dir + "/vtkhdf_000000.vtkhdf";
+    const auto stored = h5_all_datasets(file);
+    auto bytes = [&](const std::string & name) { return std::vector<char>(vtu[name].begin(), vtu[name].end()); };
+    EXPECT_EQ(stored.at("VTKHDF/Connectivity"), bytes("connectivity"));
+    EXPECT_EQ(stored.at("VTKHDF/Types"), bytes("types"));
+    EXPECT_EQ(stored.at("VTKHDF/Points"), bytes("Points"));
+    EXPECT_EQ(stored.at("VTKHDF/CellData/RHO"), bytes("RHO"));
+    EXPECT_EQ(stored.at("VTKHDF/CellData/U"), bytes("U"));
+    std::vector<int64_t> offsets = {0};
+    const auto ends = as_vector<int64_t>(vtu["offsets"]);
+    offsets.insert(offsets.end(), ends.begin(), ends.end());
+    EXPECT_EQ(h5_values<int64_t>(file, "VTKHDF/Offsets"), offsets);
+    std::set<uint8_t> kinds;
+    for (uint8_t t : as_vector<uint8_t>(vtu["types"])) kinds.insert(t);
+    EXPECT_EQ(kinds, (std::set<uint8_t>{10, 12, 13, 14}));
+    std::filesystem::remove_all(dir);
+#endif
+}
+
+TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
+    // Cells of a spherical shell at its walls are quadratic: the middles of
+    // their wall edges and faces lie on the spheres; the middle layer stays linear
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string dir = (scratch_dir() / "mallard_vtkhdf_shell").string();
+    std::filesystem::remove_all(dir);
+    const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
+    for (bool prisms : {false, true}) {
+        const std::string file = write_temp("vtkhdf_shell.msh", shell_gmsh(3, 3, prisms, false));
+        Solver solver;
+        solver.init(parse_toml(
+            "[run]\nn_steps = 1\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+            "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
+            "[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
+            "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n"
+            "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
+            "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"
+            "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+            "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+            "[output]\ncheck_interval = 1000000\n"
+            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 1\nvariables = [\"RHO\"]\n"));
+        solver.run();
+        const std::string out = dir + "/f_000000.vtkhdf";
+        const auto points = h5_values<double>(out, "VTKHDF/Points");
+        const auto connectivity = h5_values<int64_t>(out, "VTKHDF/Connectivity");
+        const auto offsets = h5_values<int64_t>(out, "VTKHDF/Offsets");
+        const auto types = h5_values<uint8_t>(out, "VTKHDF/Types");
+        auto radius = [&](int64_t p) {
+            const size_t i = 3 * static_cast<size_t>(p);
+            return std::sqrt(points[i] * points[i] + points[i + 1] * points[i + 1] + points[i + 2] * points[i + 2]);
+        };
+        // Lagrange hexahedron (27 nodes) and wedge (18): edges, then quadrilateral faces
+        const std::vector<std::vector<size_t>> hex_edges = {{0, 1}, {1, 2}, {3, 2}, {0, 3}, {4, 5}, {5, 6},
+                                                            {7, 6}, {4, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+        const std::vector<std::vector<size_t>> hex_faces = {{0, 3, 7, 4}, {1, 2, 6, 5}, {0, 1, 5, 4},
+                                                            {3, 2, 6, 7}, {0, 1, 2, 3}, {4, 5, 6, 7}};
+        const std::vector<std::vector<size_t>> wedge_edges = {{0, 1}, {1, 2}, {2, 0}, {3, 4}, {4, 5},
+                                                              {5, 3}, {0, 3}, {1, 4}, {2, 5}};
+        const std::vector<std::vector<size_t>> wedge_faces = {{0, 1, 4, 3}, {1, 2, 5, 4}, {2, 0, 3, 5}};
+        const uint8_t quadratic = prisms ? 73 : 72, linear = prisms ? 13 : 12;
+        const auto & edges = prisms ? wedge_edges : hex_edges;
+        const auto & faces = prisms ? wedge_faces : hex_faces;
+        size_t n_quadratic = 0, n_linear = 0, n_on_walls = 0;
+        for (size_t c = 0; c < types.size(); c++) {
+            if (types[c] == linear) {
+                n_linear++;
+                continue;
+            }
+            ASSERT_EQ(types[c], quadratic) << c;
+            const int64_t * nodes = &connectivity[static_cast<size_t>(offsets[c])];
+            ASSERT_EQ(offsets[c + 1] - offsets[c], prisms ? 18 : 27);
+            n_quadratic++;
+            std::vector<std::vector<size_t>> groups = edges;
+            groups.insert(groups.end(), faces.begin(), faces.end());
+            auto point = [&](int64_t p) {
+                const size_t i = 3 * static_cast<size_t>(p);
+                return std::array<double, 3>{points[i], points[i + 1], points[i + 2]};
+            };
+            for (size_t g = 0; g < groups.size(); g++) {
+                // Each middle node is where VTK's node order puts it: near the middle of its corners
+                const auto x = point(nodes[(prisms ? 6 : 8) + g]);
+                std::array<double, 3> middle = {0.0, 0.0, 0.0};
+                for (size_t k : groups[g]) {
+                    for (size_t d = 0; d < 3; d++) middle[d] += point(nodes[k])[d] / double(groups[g].size());
+                }
+                const auto a = point(nodes[groups[g][0]]), b = point(nodes[groups[g][1]]);
+                EXPECT_LT(std::hypot(x[0] - middle[0], x[1] - middle[1], x[2] - middle[2]),
+                          0.25 * std::hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]))
+                    << c << " " << g;
+                for (double wall : {1.0, 1.5}) {
+                    bool on_wall = true;
+                    for (size_t k : groups[g]) on_wall = on_wall && std::abs(radius(nodes[k]) - wall) < tol;
+                    if (!on_wall) continue;
+                    n_on_walls++;
+                    EXPECT_NEAR(radius(nodes[(prisms ? 6 : 8) + g]), wall, tol) << c << " " << g;
+                }
+            }
+        }
+        EXPECT_GT(n_quadratic, 0u);
+        EXPECT_GT(n_linear, 0u);
+        EXPECT_GT(n_on_walls, n_quadratic);
+    }
+    std::filesystem::remove_all(dir);
 #endif
 }
 

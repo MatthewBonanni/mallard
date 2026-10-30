@@ -19,7 +19,7 @@
 #
 # Run:
 #   mpirun -n 1 ../../build3d/src/mallard -i input.toml
-#   python ../../tools/post/plane_average.py stats/duct_000003.vtu --average y z --out profile.csv
+#   python ../../tools/post/plane_average.py stats/duct_000003.vtkhdf --average y z --out profile.csv
 #
 # Cost: 65,000 steps, 85 ms each on one A100 (1.5 hours).
 
@@ -127,6 +127,5 @@ interval = 10000
 
 [[write_data]]
 prefix = "stats/duct"
-format = "vtu"
 time_interval = 11.0
 variables = ["MEAN_*", "COV_*", "U", "P"]

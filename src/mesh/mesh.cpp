@@ -13,6 +13,7 @@
 #include "mesh_block.h"
 
 #include "input.h"
+#include "log.h"
 
 #include <string>
 #include <cmath>
@@ -37,13 +38,13 @@ Mesh::~Mesh() {
 
 void Mesh::init(const Input & input) {
     std::string type_str = find_value_or<std::string>(input, "mesh", "type", "file");
-    set_type(find_option(MESH_TYPES, "mesh.type", type_str)->second);
+    set_type(find_option(MESH_TYPES, "mesh.type", type_str,
+                                input.contains("mesh") ? line_of(input.at("mesh"), "type") : size_t(0))->second);
 
     const std::vector<PeriodicPair> periodic = periodic_pairs(input);
     const MeshTransform transform = mesh_transform(input);
     if (get_type() == MeshType::FROM_FILE) {
-        std::string filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
-        this->init_file(filename, periodic, transform);
+        this->init_file(mesh_filename(input), periodic, transform);
         return;
     }
     if (get_type() == MeshType::ANNULUS) {
@@ -59,18 +60,22 @@ void Mesh::init(const Input & input) {
         const uint32_t Nz = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
         const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
         if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
-            throw std::runtime_error("Mesh type " + type_str + " is 2D only.");
+            throw mesh_type_dimension_error(input, type_str);
         }
         this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, get_type(), periodic, stretching);
         return;
     }
     if (!periodic.empty() || stretching != Stretching{}) {
         if (get_type() == MeshType::WEDGE && !periodic.empty()) {
-            throw std::runtime_error("The wedge mesh cannot be periodic.");
+            throw InputError({.key = "mesh.periodic",
+                              .line = line_of(input.at("mesh"), "periodic"),
+                              .message = "the wedge mesh cannot be periodic",
+                              .fix = "Remove periodic, or use type = \"cartesian\"",
+                              .docs = "docs/guide/meshes.md#generated-meshes"});
         }
         if (get_type() != MeshType::CARTESIAN && get_type() != MeshType::CARTESIAN_TRI &&
             get_type() != MeshType::WEDGE) {
-            throw std::runtime_error("Mesh type " + type_str + " is 3D only.");
+            throw mesh_type_dimension_error(input, type_str);
         }
         init_from_block(cartesian_2d_block(Nx, Ny, Lx, Ly, get_type(), 0, 1, stretching), periodic);
         return;
@@ -82,7 +87,7 @@ void Mesh::init(const Input & input) {
     } else if (get_type() == MeshType::WEDGE) {
         this->init_wedge(Nx, Ny, Lx, Ly);
     } else {
-        throw std::runtime_error("Mesh type " + type_str + " is 3D only.");
+        throw mesh_type_dimension_error(input, type_str);
     }
 }
 
@@ -162,9 +167,15 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
     for (const std::string & dir : find_value<std::vector<std::string>>(input, "mesh", "periodic")) {
         const int d = (dir == "x") ? 0 : (dir == "y") ? 1 : (dir == "z") ? 2 : -1;
+        if (N_DIM == 2 && d == 2) {
+            throw InputError({.key = "mesh.periodic",
+                              .line = line_of(input.at("mesh"), "periodic"),
+                              .message = "\"z\" is a direction of 3D meshes, but this is the 2D solver",
+                              .fix = "Remove \"z\", or run the 3D solver (built with -DMallard_DIM=3)"});
+        }
         if (d < 0 || d >= N_DIM) {
-            throw std::runtime_error("[mesh] periodic: unknown direction " + dir + " (one of x, y" +
-                                     (N_DIM == 3 ? ", z" : "") + ").");
+            throw not_accepted(input.at("mesh"), "mesh.periodic", dir,
+                               N_DIM == 3 ? std::vector<std::string>{"x", "y", "z"} : std::vector<std::string>{"x", "y"});
         }
         for (const auto & pair : pairs) {
             if (pair.zone_a == zones[d][0]) throw std::runtime_error("[mesh] periodic lists " + dir + " twice.");
@@ -320,8 +331,10 @@ void Mesh::make_axisymmetric() {
             y_min = std::min(y_min, h_node_coords(n, 1));
         }
         if (y_min < -precision_tol(1e-10, 1e-5) * y_extent) {
-            throw std::runtime_error("Axisymmetric meshes lie in y >= 0 (y is the radius); a node is at y = " +
-                                     std::to_string(double(y_min)) + ".");
+            throw std::runtime_error("physics.axisymmetric: the mesh must lie in y >= 0, as y is the radius, but a "
+                                     "node is at y = " + logging::real(double(y_min)) +
+                                     ". Move the mesh so the axis is at y = 0 ([mesh.transform] translate). See "
+                                     "docs/input.md#axisymmetric-flows.");
         }
         cell_measure = Kokkos::View<rtype *>("cell_measure", n_cells);
         face_measure = Kokkos::View<rtype *>("face_measure", n_faces);

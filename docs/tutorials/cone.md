@@ -130,7 +130,7 @@ on to t = 3 to be sure.
 python3 $MALLARD/tutorials/cone/plot_results.py . --out .
 ```
 
-reads the last snapshot of each output series (`solut/*.pvd`) and the probe
+reads the last snapshot of each output series (`solut/*.vtkhdf.series`) and the probe
 and force files, prints the measured shock angle (where the probe line
 crosses halfway up the exact pressure jump) and the surface pressure
 coefficient averaged over 0.3 ≤ x ≤ 0.95, and draws the figures of this

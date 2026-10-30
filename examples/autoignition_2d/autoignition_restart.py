@@ -171,7 +171,6 @@ check_interval = 1000
 
 [[write_data]]
 prefix = "./solut/autoignition"
-format = "vtu"
 time_interval = {args.t_stop / args.outputs:.17g}
 variables = ["RHO", "U", "P", "T", "HRR", "Y_H2", "Y_H2O", "Y_OH", "Y_HO2", "OMEGA_H2O", "X_H2O", "D_H2O"]
 

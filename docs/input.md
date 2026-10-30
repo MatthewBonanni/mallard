@@ -875,8 +875,8 @@ ranks. A probe that is not due costs nothing.
 | `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
-| `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`) or `vtp` |
-| `file` | Output file, default `probe_<name>.csv`, `.h5` or `.pvd` |
+| `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
+| `file` | Output file, default `probe_<name>.csv`, `.h5`, `.vtkhdf` or `.pvd` |
 | `samples` | `false` writes only the reductions (default `true`) |
 | `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below) |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
@@ -912,8 +912,11 @@ sample and step; a restarted run appends). `hdf5` holds `coordinates`
 `polylines/offsets`, and the extensible `step`, `time` and `fields/<variable>`
 (steps x samples); `vtp` writes one VTK PolyData file per output,
 `<stem>_<step>.vtp` (vertices for point sets, polylines with `arc_length`
-for curves), indexed by the `.pvd` series. A restarted run cuts the HDF5 rows
-and the `.pvd` entries after the restart back and continues them.
+for curves), indexed by the `.pvd` series; `vtkhdf` writes one VTKHDF PolyData
+file (the same vertices or polylines, `arc_length`, and each variable's point
+values at every output, with `Steps/Values` the times). A restarted run cuts the
+HDF5 rows, the VTKHDF outputs and the `.pvd` entries after the restart back and
+continues them.
 
 **Reductions.** Rows `step, t, length` (curves) or `count` (point sets), then
 `<reduction>_<variable>` for each reduction and variable: `integral` is
@@ -1074,7 +1077,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | `check_interval` | Print a progress row every this many steps (default 1) |
 | `run_log` | Machine-readable run log, one JSON record per line: a start record with the provenance, a progress record per progress row, file writes, warnings and errors, and an end record ([format](guide/output.md#the-run-log)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the provenance; `false` skips reading it again for very large meshes. Default `true` |
-| `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
+| `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
 
 The run's summary reports the size of the files written and the time spent writing them (in the background with `async`); `output` in its wall time is what the run waited for.
@@ -1095,15 +1098,36 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | Key | Description |
 |---|---|
 | `prefix` | Output path prefix; directories are created as needed |
-| `format` | `vtu` (with a `.pvd` series next to it), `hdf5` (with XDMF indexes; see below) or `restart` |
+| `format` | `vtkhdf` (default: VTK's HDF5 format, see below), `vtu` (with a `.pvd` series next to it), `restart`, or the deprecated `hdf5` (XDMF indexes over HDF5 files; removed in 0.10.0, `mallard input upgrade` rewrites it to `vtkhdf`). Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
+| `series` | (`vtkhdf`) `false` (default): one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`; `true`: every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
-| `geometry` | (`vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
-| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone output (`geometry`) |
-| `relative_error` | (`vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
+| `variables` | (`vtkhdf`, `vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `geometry` | (`vtkhdf`, `vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
+| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone VTU output (`geometry`), which is ASCII |
+| `relative_error` | (`vtkhdf`, `vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
 | `chunk_cells` | (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank reading some cells decompresses only the chunks that hold them |
 
-`format = "hdf5"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
+`format = "vtkhdf"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
+parallel HDF5) writes [VTKHDF](https://docs.vtk.org/en/latest/vtk_file_formats/vtkhdf_file_format/index.html)
+files, which ParaView 5.12 and later open directly. Every rank writes its part
+of one file with collective I/O, each array in global order (cell i is global
+cell i, the order of the mesh and restart files), so the files do not depend on
+the number of ranks. The volume is an `UnstructuredGrid`: `Points`, `Connectivity`,
+`Offsets` and `Types` (VTK cell types), then `CellData/<name>` (one value per
+cell, or three for vectors) and `FieldData/TIME`. Cells touching a curved wall
+(`[[mesh.curved]]` or high-order elements of the mesh file) are quadratic
+Lagrange cells (VTK types 69 to 73, and 27 for pyramids), their extra nodes
+on the curved geometry, after the mesh's nodes. A boundary zone (`geometry`)
+is a `PolyData` of its faces (`Lines` in 2D, `Polygons` in 3D). With
+`series = true` the mesh is stored once and VTKHDF's `Steps` group holds every
+snapshot's time (`Steps/Values`) and where its cell values start
+(`Steps/CellDataOffsets/<name>`). Nothing else is added to the VTKHDF layout:
+the units and descriptions are HDF5 attributes of each dataset (`units`,
+`long_name`), and the root group carries the `provenance` and the format
+`version` as HDF5 attributes, which VTK ignores.
+`tools/mallard/vtkhdf.py` reads the files.
+
+`format = "hdf5"` (deprecated; builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
 parallel HDF5) scales to large runs: every rank writes its part of one file per
 snapshot with collective I/O instead of a VTU piece of its own. It writes
 

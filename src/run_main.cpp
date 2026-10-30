@@ -8,6 +8,7 @@
 #include <chrono>
 #include <exception>
 #include <iostream>
+#include <new>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -33,6 +34,10 @@ std::string error_text(const std::exception & e) {
     std::string text = e.what();
     if (text.rfind("[error] ", 0) == 0) text.erase(0, 8);
     while (!text.empty() && text.back() == '\n') text.pop_back();
+    if (dynamic_cast<const std::bad_alloc *>(&e) || text.find("failed to allocate memory") != std::string::npos) {
+        text += "\nThe run is out of memory. mallard check input.toml --ranks N estimates the memory per rank: "
+                "run on more ranks or GPUs, or on a coarser mesh. See docs/guide/input_files.md#checking-an-input.";
+    }
     return text;
 }
 
@@ -125,7 +130,8 @@ int check_main(const cli::Args & args) {
     }
     const std::string input_file = args.has("-i") ? args.value_or("-i", "") : args.positional[0];
     CheckOptions options;
-    options.quality_file = args.value_or("--quality-vtu", "");
+    options.input_file = input_file;
+    options.quality_file = args.value_or("--quality", "");
     options.catalog_file = args.value_or("--catalog", "");
     std::string error;
     if (!number(args, "--ranks", options.ranks, error) || !number(args, "--throughput", options.throughput, error) ||
