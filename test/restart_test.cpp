@@ -151,7 +151,7 @@ TEST(RestartTest, RestartedRunMatchesUninterruptedRunExactly) {
     ASSERT_FALSE(stop_file.empty());
     // ... and still holds the solution at that time (in each piece of a distributed run's .pvtu)
     if (stop_file.ends_with(".pvtu")) stop_file = stop_file.substr(0, stop_file.size() - 5) + "_p0000.vtu";
-    std::ifstream in(dir + "/b/" + stop_file);
+    std::ifstream in(dir + "/b/" + stop_file, std::ios::binary);
     const std::string header((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     const size_t k = header.find(">", header.find("Name=\"TIME\"")) + 1;
     EXPECT_EQ(std::stod(header.substr(k)), t_stop_first);

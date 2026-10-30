@@ -25,6 +25,7 @@
 #include "solver.h"
 #include "scratch.h"
 #include "test_fixtures.h"
+#include "test_utils.h"
 #include "wall_exchange.h"
 #include "wall_model.h"
 
@@ -418,6 +419,28 @@ TEST(WallModel3D, LaminarCouetteFlowOverAModeledWall) {
         EXPECT_NEAR(F[3], 0.02 * 0.6, 2e-3 * 0.012) << mesh << " " << bottom;
         EXPECT_NEAR(F[4], 0.0, 1e-12);
         EXPECT_NEAR(F[5], 0.0, 1e-6);
+    }
+}
+
+// A modeled wall whose velocity is given as expressions gets a condition per
+// face; each keeps the wall model of its boundary. Fails if the per-face copies
+// lose the model's parameters.
+TEST(WallModel3D, ExpressionVelocityKeepsTheModel) {
+    const uint32_t n[3] = {3, 8u, 3};
+    auto run = [&](const std::string & u) {
+        Solver solver;
+        solver.init(parse_toml(channel_input(
+            "cartesian", n, MODELED_GFM + "u = " + u + "\n", "type = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0, 0.0]\n",
+            "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.1 * y\", \"0.0\", \"0.0\"]\np = \"1.0\"\n", "n_steps = 20\ncfl = 0.4\n")));
+        solver.run();
+        solver.copy_device_to_host();
+        return solver.calc_force(solver.get_mesh()->get_face_zone("bottom")->faces);
+    };
+    const auto numbers = run("[-0.05, 0.0, 0.0]");
+    const auto expressions = run("[\"-0.05 + 0 * x\", \"0 * y\", \"0 * z\"]");
+    EXPECT_GT(std::abs(double(numbers[3])), 1e-4);
+    for (size_t i = 0; i < numbers.size(); i++) {
+        EXPECT_NEAR(double(expressions[i]), double(numbers[i]), roundoff(1e-12)) << i;
     }
 }
 

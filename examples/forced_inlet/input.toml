@@ -1,0 +1,72 @@
+# A duct of air fed at 50 m/s and 300 K through a characteristic inlet
+# whose velocity and temperature are forced in time: a 10% velocity pulsation
+# at 1 kHz leaves as acoustic waves at u + c, a 5% temperature pulsation at
+# 250 Hz as entropy waves at u. The outlet lets both leave. The targets are
+# expressions of t, evaluated at every Runge-Kutta stage; a large sigma makes
+# the inlet's velocity follow its target closely (the default 0.25 would
+# relax it far more slowly than the forcing).
+#
+#   ../../build/src/mallard -i input.toml
+#   python plot_forced_inlet.py solut/duct
+
+[run]
+t_stop = 0.02
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 200
+Ny = 1
+Lx = 1.0
+Ly = 0.005
+
+[initialize]
+type = "constant"
+u = [50.0, 0.0]
+p = 1.0e5
+T = 300.0
+
+[[boundaries]]
+name = "left"
+type = "nscbc_inlet"
+u = ["50 * (1 + 0.1 * sin(2 * pi * 1000 * t))", "0"]
+T = "300 * (1 + 0.05 * sin(2 * pi * 250 * t))"
+p = 1.0e5
+L = 1.0
+sigma = 100.0      # K = sigma c (1 - M^2) / L = 35,000 1/s, well above the forcing's 6,300 1/s: u follows its target
+
+[[boundaries]]
+name = "right"
+type = "nscbc_outlet"
+p = 1.0e5
+L = 1.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0e5
+T_ref = 300.0
+rho_ref = 1.1614401858304297
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/duct"
+format = "vtu"
+time_interval = 1.0e-4
+variables = ["RHO", "U_X", "P", "T"]
