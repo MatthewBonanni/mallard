@@ -15,6 +15,7 @@ on the planes against the exact similarity profile. Writes OUTPUT_BASE.mp4
 OUTPUT_BASE.gif. Needs pyvista besides the packages in tools/README.md.
 """
 import argparse
+import json
 import os
 import re
 import sys
@@ -39,12 +40,17 @@ DISK_RADIUS = 1.08  # The planes are cut at 1.2 R(t), so the cutaway grows with 
 
 
 def series(planes, name):
-    text = open(os.path.join(planes, name + ".pvd")).read()
-    return [(float(t), os.path.join(planes, f)) for t, f in re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)]
+    index = os.path.join(planes, name + ".vtkhdf.series")
+    if os.path.exists(index):
+        entries = [(e["time"], e["name"]) for e in json.load(open(index))["files"]]
+    else:
+        text = open(os.path.join(planes, name + ".pvd")).read()
+        entries = re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)
+    return [(float(t), os.path.join(planes, f)) for t, f in entries]
 
 
 def read_plane(path):
-    """Faces of one plane (VTU or PVTU) as PolyData with cell data RHO."""
+    """Faces of one plane (VTKHDF, VTU or PVTU) as PolyData with cell data RHO."""
     return pv.read(path).extract_surface(algorithm="dataset_surface")
 
 

@@ -106,7 +106,7 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) c
                              logging::format("%.3g", r.quality[m].max) + " at " +
                              point(r.quality[m].worst.front().x) +
                              "); such cells limit the time step and accuracy and can make a run diverge: improve "
-                             "the mesh there (--quality-vtu shows where). See docs/guide/meshes.md#mesh-quality");
+                             "the mesh there (--quality shows where). See docs/guide/meshes.md#mesh-quality");
     }
     if (options.quality_file.empty()) return;
 
@@ -121,7 +121,6 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) c
     }
     Input writer_input(Input::table_type{});
     writer_input.as_table()["prefix"] = options.quality_file;
-    writer_input.as_table()["format"] = "vtu";
     writer_input.as_table()["interval"] = 1;
     writer_input.as_table()["variables"] = names;
     set_output_files_enabled(true);

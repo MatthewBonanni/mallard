@@ -89,6 +89,5 @@ interval = 50
 
 [[write_data]]
 prefix = "./solut/flame"
-format = "vtu"
 time_interval = 1.0e-5
 variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*"]

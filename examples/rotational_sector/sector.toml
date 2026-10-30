@@ -14,7 +14,7 @@
 # Run (2D build), then compare:
 #   ../../build/src/mallard -i sector.toml --kokkos-num-threads=4
 #   ../../build/src/mallard -i annulus.toml --kokkos-num-threads=4
-#   python rotational_sector.py solut/sector_000001.vtu solut/annulus_000001.vtu --sectors 4
+#   python rotational_sector.py solut/sector_000001.vtkhdf solut/annulus_000001.vtkhdf --sectors 4
 #
 # Result at t = 0.5, 110 steps through steepening waves: with TENO5 the sector
 # and the annulus agree to 1.0e-10, as the annulus agrees with its own copies
@@ -71,6 +71,5 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/sector"
-format = "vtu"
 time_interval = 0.5
 variables = ["RHO", "RHOU", "RHOE", "P"]

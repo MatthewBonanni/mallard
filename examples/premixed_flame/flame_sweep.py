@@ -90,7 +90,8 @@ def report(args):
     for name in sorted(os.listdir(args.runs_dir)):
         m = RUN.match(name)
         run_dir = os.path.join(args.runs_dir, name)
-        if not m or not os.path.exists(os.path.join(run_dir, "solut", "flame.pvd")):
+        if not m or not any(os.path.exists(os.path.join(run_dir, "solut", "flame" + index))
+                            for index in (".vtkhdf.series", ".pvd")):
             continue
         ref = dict(refs[m["case"]], case=m["case"])
         r = dict(fuel=m["fuel"], phi=float(m["phi"]), transport=m["model"], cells=float(m["cells"]),

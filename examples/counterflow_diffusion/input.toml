@@ -120,14 +120,12 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/plane"
-format = "vtu"
 geometry = "sym_z"
 time_interval = 9.135573741e-05
 variables = ["RHO", "U", "P", "T", "HRR", "Y_*"]
 
 [[write_data]]
 prefix = "./solut/volume"
-format = "vtu"
 time_interval = 0.005481344245
 variables = ["U", "T", "HRR", "Y_H2", "Y_O2", "Y_OH", "Y_H2O"]
 

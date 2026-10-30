@@ -29,7 +29,7 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../triple_flame"))
 from flame_vortex_analysis import (MARKERS, analyze, classify, control_for, load_controls, parameters,  # noqa: E402
                                    planar, relative_Q)
-from triple_flame_analysis import grid  # noqa: E402
+from triple_flame_analysis import grid, snapshots  # noqa: E402
 
 BG = "#0d0f14"
 FG = "#e8e8e8"
@@ -59,9 +59,7 @@ def main():
     runs = []
     for d in args.runs:
         p = planar(d, args.mechanism, args.phase, args.progress)
-        pvd = open(os.path.join(d, "solut", "flame.pvd")).read()
-        files = re.findall(r'file="([^"]+)"', pvd)
-        times = np.array([float(s) for s in re.findall(r'timestep="([^"]+)"', pvd)])
+        times, files = (np.array(v) for v in zip(*snapshots(os.path.join(d, "solut", "flame"))))
         rows = analyze(d, p)
         control = control_for(d, controls)
         r, u = parameters(d)
@@ -90,7 +88,7 @@ def main():
         fig.patch.set_facecolor(BG)
         for i, q in enumerate(runs):
             j = int(np.clip(np.searchsorted(q["t"], tc + 1e-9) - 1, 0, len(q["files"]) - 1))
-            t, xs, ys, a = grid(os.path.join(q["dir"], "solut", q["files"][j]), ["T", "HRR", "U"])
+            t, xs, ys, a = grid(q["files"][j], ["T", "HRR", "U"])
             dL = q["p"]["delta"]
             dx = xs[1] - xs[0]
             ux, uy = a["U"][:, :, 0], a["U"][:, :, 1]

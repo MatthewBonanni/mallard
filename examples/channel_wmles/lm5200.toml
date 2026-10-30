@@ -28,7 +28,7 @@
 # Run:
 #   python wmles_channel.py init lm5200.toml init.restart
 #   ../../build3d/src/mallard -i lm5200.toml
-#   python ../../tools/post/plane_average.py stats/channel_<last>.vtu --average x z --out profile.csv
+#   python ../../tools/post/plane_average.py stats/channel_<last>.vtkhdf --average x z --out profile.csv
 #   python wmles_channel.py analyze lm5200.toml forces_bottom.csv forces_top.csv \
 #       --t-start 200 --reference lm5200 --profile profile.csv
 
@@ -112,7 +112,6 @@ file = "forces_top.csv"
 
 [[write_data]]
 prefix = "./stats/channel"
-format = "vtu"
 time_interval = 200.0
 variables = ["MEAN_*", "COV_*"]
 

@@ -11,6 +11,8 @@
 
 #include "common_io.h"
 
+#include <stdexcept>
+
 #include "common_typedef.h"
 
 #include <cerrno>
@@ -39,6 +41,18 @@ std::string vtk_float_type() {
 uint32_t vtk_local_node(uint32_t n_nodes, uint32_t k) {
     constexpr uint32_t WEDGE[6] = {0, 2, 1, 3, 5, 4};
     return (N_DIM == 3 && n_nodes == 6) ? WEDGE[k] : k;
+}
+
+uint8_t vtk_cell_type(uint32_t dim, uint32_t n_nodes) {
+    if (dim == 1 && n_nodes == 2) return 3;   // VTK_LINE
+    if (dim == 2 && n_nodes == 3) return 5;   // VTK_TRIANGLE
+    if (dim == 2 && n_nodes == 4) return 9;   // VTK_QUAD
+    if (dim == 3 && n_nodes == 4) return 10;  // VTK_TETRA
+    if (dim == 3 && n_nodes == 8) return 12;  // VTK_HEXAHEDRON
+    if (dim == 3 && n_nodes == 6) return 13;  // VTK_WEDGE
+    if (dim == 3 && n_nodes == 5) return 14;  // VTK_PYRAMID
+    throw std::runtime_error("no VTK cell type for a " + std::to_string(dim) + "D element with " +
+                             std::to_string(n_nodes) + " nodes.");
 }
 
 namespace {
