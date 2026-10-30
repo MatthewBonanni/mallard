@@ -77,6 +77,5 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/flame"
-format = "vtu"
 time_interval = 0.00011637103889377862
 variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

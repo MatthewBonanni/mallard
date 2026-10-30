@@ -53,6 +53,5 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/annulus_3d"
-format = "vtu"
 time_interval = 0.2
 variables = ["RHO", "RHOU", "RHOE", "P"]

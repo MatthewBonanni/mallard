@@ -96,3 +96,22 @@ def provenance(path):
         return None
     value = value[0]
     return json.loads(value.decode() if isinstance(value, bytes) else value)
+
+
+def _text(value):
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
+def field_metadata(path):
+    """{dataset: (units, long_name)} of the datasets of an HDF5 output file
+    (snapshot, mesh or probe file) that carry CF units attributes."""
+    out = {}
+
+    def visit(name, obj):
+        if isinstance(obj, h5py.Dataset) and "units" in obj.attrs:
+            key = name[len("fields/"):] if name.startswith("fields/") else name
+            out[key] = (_text(obj.attrs["units"]), _text(obj.attrs.get("long_name", "")))
+
+    with h5py.File(path, "r") as f:
+        f.visititems(visit)
+    return out

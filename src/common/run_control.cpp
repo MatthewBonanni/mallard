@@ -386,26 +386,9 @@ std::string send(const std::string & run_dir, const std::string & command) {
     return text;
 }
 
-int ctl_main(int argc, char ** argv) {
-    const char * usage =
-        "Usage: mallard ctl <run-dir> status | checkpoint | stop | set <key>=<value> [<key>=<value> ...]\n";
-    if (argc < 2) {
-        std::cerr << usage;
-        return 2;
-    }
-    std::string command = argv[1];
-    if (command == "set") {
-        if (argc < 3) {
-            std::cerr << usage;
-            return 2;
-        }
-        for (int i = 2; i < argc; i++) command += std::string(" ") + argv[i];
-    } else if (argc > 2 || (command != "status" && command != "checkpoint" && command != "stop")) {
-        std::cerr << usage;
-        return 2;
-    }
-    if (chdir(argv[0]) != 0) {
-        std::cerr << "mallard ctl: cannot enter " << argv[0] << ": " << std::strerror(errno) << "\n";
+int ctl(const std::string & run_dir, const std::string & command) {
+    if (chdir(run_dir.c_str()) != 0) {
+        std::cerr << "mallard ctl: cannot enter " << run_dir << ": " << std::strerror(errno) << "\n";
         return 1;
     }
     try {

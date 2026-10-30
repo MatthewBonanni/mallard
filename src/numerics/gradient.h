@@ -77,7 +77,9 @@ struct LSQSystem {
 /**
  * @brief Weighted least-squares gradient of W = [rho, u, p] over
  *        face neighbors, with boundary ghost states placed at the mirror image
- *        of the cell centroid across the boundary face.
+ *        of the cell centroid across the boundary face; across extrapolation
+ *        boundaries with image faces, the image cell moved to the exterior
+ *        neighbor's place (see BoundaryData::image_stencil).
  *
  * Exact for linear fields on any mesh where the neighbor offsets span N_DIM
  * dimensions. Build it with make_gradient.
@@ -138,7 +140,12 @@ struct LSQGradientFunctor {
             rtype d = 0.0;
             FOR_I_DIM d += (face_coords(i_face, i) - cell_coords(i_cell, i)) * n[i];
             const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
-            if (bc.ghost_at_face()) {
+            if (boundaries.image_stencil(i_face)) {
+                // The image cell, moved to where the exterior neighbor stands
+                const int32_t image = boundaries.face_image(i_face);
+                FOR_I_DIM dx[i] = cell_coords(image, i) + boundaries.face_image_offset(i_face, i) - cell_coords(i_cell, i);
+                FOR_I_CONSERVATIVE W_j[i] = W(image, i);
+            } else if (bc.ghost_at_face()) {
                 FOR_I_DIM dx[i] = face_coords(i_face, i) - cell_coords(i_cell, i);
                 boundaries.ghost_W(i_face, W_i, n, W_j);
             } else {
@@ -214,18 +221,26 @@ void cholesky_solve(const T L[N][N], T * x) {
 }
 
 /**
- * @brief Weights of LSQVertexGradientFunctor, aligned with cells_of_cell and
- *        faces_of_cell (zero for interior faces).
+ * @brief Weights of LSQVertexGradientFunctor, aligned with cells_of_cell,
+ *        faces_of_cell (zero for interior faces) and BoundaryData::image_neighbors.
  */
 struct VertexGradientWeights {
     Kokkos::View<rtype *[N_DIM]> cells;
     Kokkos::View<rtype *[N_DIM]> faces;
+    Kokkos::View<rtype *[N_DIM]> images;
 };
+
+/** @brief Kind of a point of a vertex-gradient stencil. */
+enum class StencilPoint : uint8_t { CELL, FACE, IMAGE };
 
 /**
  * @brief Gradient over all vertex neighbors plus the boundary ghost states of
  *        the cell's own boundary faces, as a fixed linear combination of the
- *        differences to the cell's state.
+ *        differences to the cell's state. Across extrapolation boundaries with
+ *        image faces the vertex neighbors continue beyond the boundary
+ *        (BoundaryData::image_neighbors) in place of the ghosts, so that the
+ *        stencil is the one of an interior cell in a flow that does not vary
+ *        normal to the boundary.
  *
  * The weights come from an inverse-distance-squared weighted least-squares fit
  * of a quadratic, so the gradient is second-order accurate on any stencil that
@@ -247,8 +262,29 @@ struct LSQVertexGradientFunctor {
     static constexpr uint8_t NB = N_DIM + N_DIM * (N_DIM + 1) / 2;  // Linear and quadratic monomials
 
     /**
+     * @brief Calls f(j, k) for every image neighbor j of cell i_cell, k
+     *        indexing BoundaryData::image_neighbors and weights.images.
+     */
+    template <typename F>
+    KOKKOS_INLINE_FUNCTION
+    void for_each_image(const uint32_t i_cell, F && f) const {
+        const BoundaryData & b = faces.boundaries;
+        if (b.image_neighbor_offsets.extent(0) == 0) return;
+        for (uint32_t k = b.image_neighbor_offsets(i_cell); k < b.image_neighbor_offsets(i_cell + 1); k++) {
+            f(b.image_neighbors(k), k);
+        }
+    }
+
+    /** @brief Whether boundary face i_face of the cell contributes a ghost state. */
+    KOKKOS_INLINE_FUNCTION
+    bool ghost_face(const uint32_t i_face) const {
+        return faces.cells_of_face(i_face, 1) < 0 && !faces.one_sided(i_face) && !faces.boundaries.image_stencil(i_face);
+    }
+
+    /**
      * @brief Offset of every stencil point of cell i_cell, passed to
-     *        f(offset, is_face, index into cells_of_cell or faces_of_cell).
+     *        f(offset, kind, index into cells_of_cell, faces_of_cell or
+     *        BoundaryData::image_neighbors).
      */
     template <typename F>
     KOKKOS_INLINE_FUNCTION
@@ -258,17 +294,23 @@ struct LSQVertexGradientFunctor {
             FOR_I_DIM x[i] = faces.cell_coords(cells_of_cell(k), i);
             faces.periodic.forward(cells_of_cell_shift(k), x, dx);
             FOR_I_DIM dx[i] = dx[i] - faces.cell_coords(i_cell, i);
-            f(dx, false, k);
+            f(dx, StencilPoint::CELL, k);
         }
+        for_each_image(i_cell, [&](const uint32_t j, const uint32_t k) {
+            rtype dx[N_DIM];
+            FOR_I_DIM dx[i] = faces.cell_coords(j, i) + faces.boundaries.image_neighbor_shift(k, i) -
+                              faces.cell_coords(i_cell, i);
+            f(dx, StencilPoint::IMAGE, k);
+        });
         // The ghost positions do not depend on the states
         rtype W_i[N_CONSERVATIVE], W_g[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE W_i[i] = 1.0;
         for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces.faces_of_cell(k);
-            if (faces.cells_of_face(i_face, 1) >= 0 || faces.one_sided(i_face)) continue;
+            if (!ghost_face(i_face)) continue;
             rtype dx[N_DIM];
             faces.neighbor(i_cell, i_face, W_i, dx, W_g);
-            f(dx, true, k);
+            f(dx, StencilPoint::FACE, k);
         }
     }
 
@@ -282,11 +324,12 @@ struct LSQVertexGradientFunctor {
         double scale = 0.0;  // Inverse length that keeps the monomials of order one
         uint16_t n_points = 0;
         // The mean of (x - x_i)_a (x - x_i)_b over neighbor point k, minus that over cell i
-        auto moment_offset = [&](bool is_face, uint32_t k, uint8_t m) {
+        auto moment_offset = [&](StencilPoint kind, uint32_t k, uint8_t m) {
             if constexpr (N_DIM == 2) {
                 if (covariance.extent(0) == 0) return 0.0;
                 const double C_i = double(covariance(i_cell, m));
-                if (!is_face) return double(covariance(cells_of_cell(k), m)) - C_i;
+                if (kind == StencilPoint::CELL) return double(covariance(cells_of_cell(k), m)) - C_i;
+                if (kind == StencilPoint::IMAGE) return double(covariance(faces.boundaries.image_neighbors(k), m)) - C_i;
                 const uint32_t f = faces.faces_of_cell(k);
                 // A prescribed state is a point value at the face; other ghosts mirror cell i
                 if (faces.boundaries.bcs(faces.boundaries.face_bc(f)).ghost_at_face()) {
@@ -307,19 +350,19 @@ struct LSQVertexGradientFunctor {
                 }
                 return mirrored - double(covariance(i_cell, m));
             } else {
-                (void)is_face;
+                (void)kind;
                 (void)k;
                 (void)m;
                 return 0.0;
             }
         };
-        auto monomials = [&](const double * dx, double * phi, bool is_face, uint32_t k) {
+        auto monomials = [&](const double * dx, double * phi, StencilPoint kind, uint32_t k) {
             FOR_I_DIM phi[i] = dx[i] * scale;
             uint8_t m = N_DIM;
             for (uint8_t r = 0; r < N_DIM; r++) {
                 for (uint8_t c = r; c < N_DIM; c++) {
                     phi[m] = phi[r] * phi[c];
-                    if (covariance.extent(0) > 0) phi[m] += moment_offset(is_face, k, m - N_DIM) * scale * scale;
+                    if (covariance.extent(0) > 0) phi[m] += moment_offset(kind, k, m - N_DIM) * scale * scale;
                     m++;
                 }
             }
@@ -330,12 +373,12 @@ struct LSQVertexGradientFunctor {
             FOR_I_DIM d2 += dx[i] * dx[i];
             return 1.0 / d2;
         };
-        for_each_point(i_cell, [&](const rtype * dx_r, bool is_face, uint32_t k) {
+        for_each_point(i_cell, [&](const rtype * dx_r, StencilPoint kind, uint32_t k) {
             double dx[N_DIM];
             const double w = widen(dx_r, dx);
             if (n_points++ == 0) scale = Kokkos::sqrt(w);
             double phi[NB];
-            monomials(dx, phi, is_face, k);
+            monomials(dx, phi, kind, k);
             for (uint8_t p = 0; p < NB; p++) {
                 for (uint8_t q = p; q < NB; q++) A[p][q] += w * phi[p] * phi[q];
             }
@@ -346,20 +389,22 @@ struct LSQVertexGradientFunctor {
         double L[NB][NB], L_lin[N_DIM][N_DIM];
         const bool fit_quadratic = quadratic && n_points >= NB && cholesky<NB>(A, L);
         if (!fit_quadratic) cholesky<N_DIM>(M, L_lin);
-        for_each_point(i_cell, [&](const rtype * dx_r, bool is_face, uint32_t k) {
+        for_each_point(i_cell, [&](const rtype * dx_r, StencilPoint kind, uint32_t k) {
             double dx[N_DIM];
             const double w = widen(dx_r, dx);
             double c[N_DIM];
             if (fit_quadratic) {
                 double phi[NB];
-                monomials(dx, phi, is_face, k);
+                monomials(dx, phi, kind, k);
                 cholesky_solve<NB>(L, phi);
                 FOR_I_DIM c[i] = w * scale * phi[i];
             } else {
                 FOR_I_DIM c[i] = w * dx[i];
                 cholesky_solve<N_DIM>(L_lin, c);
             }
-            FOR_I_DIM (is_face ? weights.faces(k, i) : weights.cells(k, i)) = static_cast<rtype>(c[i]);
+            const auto & out = kind == StencilPoint::CELL ? weights.cells
+                             : kind == StencilPoint::FACE ? weights.faces : weights.images;
+            FOR_I_DIM out(k, i) = static_cast<rtype>(c[i]);
         });
     }
 
@@ -379,9 +424,15 @@ struct LSQVertexGradientFunctor {
                 for (uint8_t d = 0; d < N_DIM; d++) g[i][d] += weights.cells(k, d) * dW;
             }
         }
+        for_each_image(i_cell, [&](const uint32_t j, const uint32_t k) {
+            FOR_I_CONSERVATIVE {
+                const rtype dW = faces.W(j, i) - W_i[i];
+                for (uint8_t d = 0; d < N_DIM; d++) g[i][d] += weights.images(k, d) * dW;
+            }
+        });
         for (uint32_t k = faces.offsets_faces_of_cell(i_cell); k < faces.offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces.faces_of_cell(k);
-            if (faces.cells_of_face(i_face, 1) >= 0 || faces.one_sided(i_face)) continue;
+            if (!ghost_face(i_face)) continue;
             rtype dx[N_DIM], W_j[N_CONSERVATIVE];
             faces.neighbor(i_cell, i_face, W_i, dx, W_j);
             FOR_I_CONSERVATIVE {
@@ -413,7 +464,9 @@ inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & 
                                                      bool quadratic = true) {
     LSQVertexGradientFunctor functor{faces, mesh.offsets_cells_of_cell, mesh.cells_of_cell, mesh.cells_of_cell_shift,
                                      {Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_cells", mesh.cells_of_cell.extent(0)),
-                                      Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", faces.faces_of_cell.extent(0))},
+                                      Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", faces.faces_of_cell.extent(0)),
+                                      Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_images",
+                                                                   faces.boundaries.image_neighbors.extent(0))},
                                      quadratic, quadratic ? mesh.cell_covariance : Kokkos::View<rtype *[3]>()};
     Kokkos::parallel_for("vertex_gradient_weights", mesh.n_cells,
                          KOKKOS_LAMBDA(const uint32_t i_cell) { functor.compute_weights(i_cell); });

@@ -10,7 +10,7 @@ The Kokkos backend is chosen when Mallard is built (see [Getting started](https:
 mallard -i input.toml --kokkos-num-threads=8
 ```
 
-With CUDA, Mallard runs on one GPU; `--kokkos-device-id=N` picks which.
+With CUDA or HIP, each process runs on one GPU; `--kokkos-device-id=N` picks which (see [Running on clusters](#running-on-clusters) for how MPI ranks get theirs).
 
 ## MPI
 
@@ -60,13 +60,20 @@ On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo
 
 Every rank builds the same stencils as a serial run and sums each cell's face fluxes in a fixed order, so the solution is bitwise identical on any number of ranks: after 100 steps of the 2D Riemann problem on 400 × 400 quadrilaterals with fifth-order TENO-E, the restart files of runs on 1 and 3 ranks are byte for byte the same. Sums over the whole domain that are written to output files, such as force monitors, are reduced across ranks and can differ in the last digits.
 
-With threads and ranks together, keep ranks × threads at or below the number of cores. On GPUs, use one rank per GPU; Kokkos maps each rank to its own device.
+With threads and ranks together, keep ranks × threads at or below the number of cores. On GPUs, use one rank per GPU; each rank picks its own (see [Running on clusters](#running-on-clusters)).
 
 With generated meshes, and with meshes converted to Mallard's HDF5 format (`mallard mesh convert`, in builds with `-DMallard_ENABLE_HDF5=ON`; see the [input reference](../input.md)), each rank reads or generates only its share, and no rank ever holds the whole mesh. Gmsh files are still read whole by every rank, so convert large Gmsh meshes to HDF5 first.
 
 ### Output
 
-Each rank writes the cells it owns as a piece, `<prefix>_<step>_p<rank>.vtu`, and rank 0 writes a `<prefix>_<step>.pvtu` that assembles them; the `.pvd` series points at the `.pvtu` files, so ParaView opens a parallel run exactly like a serial one:
+With the default VTKHDF output every rank writes the cells it owns into one shared file per snapshot, at their global places (parallel HDF5), so the files of a run are the same on any number of ranks:
+
+```text
+solut/r.vtkhdf.series
+solut/r_000100.vtkhdf
+```
+
+With `format = "vtu"` (and in builds without parallel HDF5) each rank writes the cells it owns as a piece, `<prefix>_<step>_p<rank>.vtu`, and rank 0 writes a `<prefix>_<step>.pvtu` that assembles them; the `.pvd` series points at the `.pvtu` files, so ParaView opens a parallel run exactly like a serial one:
 
 ```text
 solut/r.pvd
@@ -81,6 +88,65 @@ Boundary-zone output (`geometry = "<zone>"`) likewise holds each rank's own face
 ### Restarts
 
 Restart files have the same layout whatever the number of ranks, cells in global order, and each rank reads only its cells by global id. A run can therefore restart on a different number of ranks, or serially from a parallel run and vice versa: a run written at step 50 on 3 ranks and continued to step 100 on 2 ranks ends with a restart file identical to that of an uninterrupted serial run.
+
+## Running on clusters
+
+### Job scripts
+
+[`tools/jobs/`](https://github.com/MatthewBonanni/mallard/tree/main/tools/jobs) has a script for each way of launching Mallard (installed with Mallard in `share/mallard/tools/jobs/`). Copy one into the case directory, fill in the lines marked `<...>` (nodes, GPUs, cores, time limit, the modules Mallard was built with) and submit it:
+
+| Script | Launches with | Submit |
+|---|---|---|
+| `slurm_single_node.sh` | `srun`, one node | `sbatch slurm_single_node.sh` |
+| `slurm_multi_node.sh` | `srun`, several nodes | `sbatch slurm_multi_node.sh` |
+| `pbs.sh` | `mpirun` under PBS Pro or Torque | `qsub pbs.sh` |
+| `kubernetes_job.yaml` | `mpirun` in one pod of the [release container](https://github.com/MatthewBonanni/mallard#container) | `kubectl apply -f kubernetes_job.yaml` |
+| `mpirun.sh` | `mpirun` on the machine you are on | `./mpirun.sh` |
+
+All of them run one rank per GPU (on CPUs, one rank per group of cores, with `OMP_NUM_THREADS` threads each), bind each rank to cores of its own, and start from the newest restart file if there is one, by adding `--restart <file>` to the command line (it replaces the input's `[initialize]` table). They also stop runs cleanly ([Running and controlling jobs](running.md)):
+
+- **Time limits.** Slurm sends `SIGUSR2` five minutes before the limit (`#SBATCH --signal=B:USR2@300`), and the PBS script does the same from a timer set to the walltime. Mallard writes a restart after the current step and exits with status 3; the script then submits its continuation, which resumes from that restart, up to `MAX_JOBS` times. Choose the margin longer than a step plus a restart write.
+- **Preemption and cancellation.** A `SIGTERM` from the scheduler, or the pod's termination, becomes a stop request, because `mpirun` would end the ranks at once on `SIGTERM`: the Slurm scripts pass it on to `srun` as `SIGUSR2`, and the `mpirun` scripts ask through the control socket (`mallard ctl . stop`), since some `mpirun` wrappers (the NVIDIA HPC SDK's) pass no signal on, falling back to `SIGUSR2` before the time loop opens the socket. The Kubernetes Job starts a new pod after an eviction or preemption (`podFailurePolicy`), which resumes from the restart, but ends after an error or divergence (status 1) or a stop you asked for (status 3). Give the scheduler's grace period (`terminationGracePeriodSeconds`, Slurm's `KillWait` or `GraceTime`) the same margin.
+- **Ctrl-C** under `mpirun.sh` writes a restart and stops; a second Ctrl-C stops at once.
+
+### GPUs and cores
+
+Before Kokkos starts, the ranks of each node find out which of them share a node (`MPI_COMM_TYPE_SHARED`) and give each rank its own GPU among those it can see:
+
+- Ranks bound to cores (as in the scripts) get a GPU on the same NUMA node as their cores, so data between host and device do not cross between sockets; ranks that may run anywhere get GPUs in turn, rank 0 the first.
+- Where the launcher gives ranks different devices (`CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `ZE_AFFINITY_MASK`, `KOKKOS_VISIBLE_DEVICES`), the GPUs are shared out among the ranks that see the same ones; a rank that sees a single GPU uses it.
+- `--kokkos-device-id`, `--kokkos-map-device-id-by`, `KOKKOS_DEVICE_ID` or `KOKKOS_MAP_DEVICE_ID_BY` turn this off.
+
+Single-process runs are unchanged. With Slurm, let every rank see every GPU of its node (`--gpus-per-node`, not `--gpus-per-task`): Slurm otherwise confines each task to its own GPU, which keeps a GPU-aware MPI from copying between GPUs directly.
+
+For OpenMP threads, set `OMP_PROC_BIND=spread` and `OMP_PLACES=threads` (the scripts and the containers do), and bind each rank to cores of its own: `srun --cpu-bind=cores`, Open MPI's `mpirun --map-by slot:PE=<threads> --bind-to core`, or MPICH's `mpiexec -bind-to core:<threads>`. Mallard leaves these settings to you.
+
+### The rank report
+
+Parallel runs list where each rank runs after the header:
+
+```text
+== Ranks ===================================================================================
+  rank  host    GPU  PCI bus       UUID          GPU NUMA  CPUs   CPU NUMA  threads
+  0     node01  2    0000:c1:00.0  GPU-c03e7a55  0         0-15   0         16
+  1     node01  3    0000:c4:00.0  GPU-71b2d9e8  0         16-31  0         16
+  2     node01  0    0000:41:00.0  GPU-8a1c3f0e  1         32-47  1         16
+  3     node01  1    0000:44:00.0  GPU-2f9d6b41  1         48-63  1         16
+```
+
+Here GPUs 2 and 3 hang off the first socket, so ranks 0 and 1, bound to its cores, got them. `GPU` is the device's index among those the rank sees, `PCI bus` and `UUID` (its first 8 hex digits, as in `nvidia-smi -L`) identify it on the node, and `GPU NUMA` is the NUMA node it is attached to. `CPUs` are the cores the rank may run on, `CPU NUMA` their NUMA nodes, and `threads` the threads of its host backend. CPU runs show only the CPU columns; without Linux's affinity and NUMA information (macOS) these read `-`. Runs on more than 64 ranks list the first 32.
+
+Warnings follow the table when the placement wastes hardware:
+
+| Warning | Usual cause and fix |
+|---|---|
+| `N ranks on <host> share its M GPUs` | More ranks than GPUs on a node: run one rank per GPU (`--ntasks-per-node` = GPUs per node) |
+| `ranks ... share GPU ... while GPU ... is idle` | Every rank was given the same device, e.g. `KOKKOS_DEVICE_ID` exported for all: remove it |
+| `ranks ... run on CPUs of NUMA node ... but their GPUs are on node ...` | Ranks bound to cores away from their GPU, e.g. by a launcher that also chose the GPU: bind ranks to cores and leave the GPU to Mallard, or use `srun --gpu-bind=closest`. On nodes whose GPUs all hang off one socket, bind the ranks to that socket's cores (e.g. `srun --cpu-bind=map_ldom:1`, or `numactl --cpunodebind=1` in front of `mallard`) |
+| `ranks on <host> run T threads on C CPUs` | (CPU runs) Ranks × threads exceed the cores: lower `OMP_NUM_THREADS` or the ranks per node |
+| `OMP_PROC_BIND/OMP_PLACES pin the threads of ranks ... to CPUs other ranks also use` | (CPU runs) Ranks share cores and OpenMP pins every rank's threads to the same ones: bind each rank to its own cores |
+
+A warning that holds on several nodes is printed once, with the number of other nodes.
 
 ## Multi-GPU scaling
 

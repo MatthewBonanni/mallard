@@ -36,10 +36,10 @@ COLORS = ["#2f9e44", "#3b82f6", "#e8590c", "#9c36b5", "#c92a2a", "#868e96"]
 
 
 def load_csv(path, **kwargs):
-    """CSV with a header row, after any leading '#' comment lines."""
+    """CSV with a header row; '#' comment lines (units, provenance) anywhere are skipped."""
     with open(path) as f:
-        skip = sum(1 for line in f if line.startswith("#"))
-    return np.genfromtxt(path, delimiter=",", names=True, skip_header=skip, **kwargs)
+        lines = [line for line in f if not line.startswith("#")]
+    return np.genfromtxt(lines, delimiter=",", names=True, **kwargs)
 
 
 def load_integrals(path, par):

@@ -112,9 +112,13 @@ class Solver {
         /**
          * @brief Initialize the solver from an input file.
          * @param input_file_name Path to the TOML input file.
+         * @param restart_file If given, start from this restart file instead of the input's [initialize].
          * @return Exit status.
          */
-        int init(const std::string & input_file_name);
+        int init(const std::string & input_file_name, const std::string & restart_file = {});
+
+        /** @brief Replaces the input's [initialize] by a start from restart_file (`--restart`). */
+        static void start_from_restart(Input & input, const std::string & restart_file);
 
         /**
          * @brief Initialize the solver from a parsed TOML input.
@@ -551,7 +555,10 @@ class Solver {
         void record_mesh_provenance() const;
         /** @brief Provenance lines of the CSV files and the run log's start record. */
         void write_provenance();
-        std::vector<std::string> integral_names() const;
+        /** @brief The columns of the integrals file after step and t, and their dimensions. */
+        std::vector<std::pair<std::string, Dimension>> integral_columns() const;
+        /** @brief Dimension of the cell measure: m^N_DIM (per unit depth in 2D); m^3 rad^-1 in axisymmetric runs. */
+        Dimension measure_dimension() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
         void write_data(bool force = false);
@@ -688,6 +695,7 @@ class Solver {
         std::vector<std::array<double, 2>> bc_surrogates;    // [gamma, e0] of prescribed states
         std::vector<double> bc_temperatures;                  // T of prescribed states
         BoundaryData boundary_data;
+        std::vector<uint8_t> image_reach;  // Halo depth each cell's image neighbors need (make_boundary_data)
         std::vector<DirichletBoundary> dirichlet_boundaries;
         struct AveragePressureOutlet {
             int32_t i_bc;

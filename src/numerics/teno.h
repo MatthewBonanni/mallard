@@ -168,8 +168,9 @@ using Moments = Kokkos::View<double **, Kokkos::LayoutRight>;
 /**
  * @brief The terms of the smoothness-indicator matrix (3D): entry e
  *        (upper_index(l, m)) is sum_t weight(t) moments(cell, moment(t)) over
- *        t in [start(e), start(e + 1)), with products of D^beta factors (whole
- *        numbers below 2^16) as weights; term(t) holds weight(t) << 16 | moment(t).
+ *        t in [start(e), start(e + 1)), with products of D^beta factors and
+ *        multinomial coefficients (whole numbers below 2^16) as weights;
+ *        term(t) holds weight(t) << 16 | moment(t).
  */
 struct SmoothnessTerms {
     Kokkos::View<uint32_t *> start;
