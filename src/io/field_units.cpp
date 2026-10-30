@@ -33,8 +33,8 @@ const Entry VECTORS[] = {
     {"RHOU", momentum_density, "momentum density"},
     {"U", dim::velocity, "velocity"},
     {"VORTICITY", dim::rate, "vorticity"},
-    // Boundary probes
-    {"MOMENTUM_FLUX", dim::pressure, "momentum flux out of the boundary"},
+    // Probes: fluxes through surfaces, wall quantities
+    {"MOMENTUM_FLUX", dim::pressure, "normal momentum flux"},
     {"TRACTION_PRESSURE", dim::pressure, "pressure traction on the boundary"},
     {"TRACTION_VISCOUS", dim::pressure, "viscous traction on the boundary"},
     {"TAU_W", dim::pressure, "wall shear stress"},
@@ -62,9 +62,9 @@ const Entry NAMED[] = {
     {"TF_OMEGA", dim::none, "flame sensor"},
     {"PASR_KAPPA", dim::none, "PaSR reacting fraction"},
     {"P_MAX", dim::pressure, "largest pressure seen"},
-    // Boundary probes
-    {"MASS_FLUX", dim::mass_flux, "mass flux out of the boundary"},
-    {"ENTHALPY_FLUX", dim::heat_flux, "total enthalpy flux out of the boundary"},
+    // Probes: fluxes through surfaces, wall quantities
+    {"MASS_FLUX", dim::mass_flux, "normal mass flux"},
+    {"ENTHALPY_FLUX", dim::heat_flux, "normal total enthalpy flux"},
     {"TAU_W", dim::pressure, "wall shear stress magnitude"},
     {"CF", dim::none, "skin friction coefficient"},
     {"CP", dim::none, "pressure coefficient"},
@@ -86,7 +86,7 @@ const Entry SPECIES[] = {
     {"D_", diffusivity, "diffusion coefficient of "},
     {"DT_", thermal_diffusion, "thermal diffusion coefficient of "},
     {"OMEGA_", dim::mass_source, "net production rate of "},
-    {"SPECIES_FLUX_", dim::mass_flux, "boundary mass flux of "},
+    {"SPECIES_FLUX_", dim::mass_flux, "normal mass flux of "},
 };
 
 bool starts_with(const std::string & s, const std::string & prefix) { return s.rfind(prefix, 0) == 0; }
