@@ -439,6 +439,7 @@ class Builder {
         Vec m_lo, m_hi;
         double m_h = 1.0;
         Elements m_out;
+        std::vector<std::array<std::array<double, 3>, 4>> m_tets;  // a cell's, reused
 
         void need_cells(const uint32_t i) {
             const Filled & f = m_region.filled()[i];
@@ -661,7 +662,7 @@ class Builder {
         }
 
         /** @brief The simplices of an owned cell, as vertex positions. */
-        std::vector<std::vector<Vec>> simplices(const uint32_t c) const {
+        std::vector<std::vector<Vec>> simplices(const uint32_t c) {
             std::vector<std::vector<Vec>> out;
             if constexpr (N_DIM == 2) {
                 const uint32_t n = m_mesh.h_n_nodes_of_cell(c);
@@ -670,39 +671,47 @@ class Builder {
                     out.push_back({v0, node(m_mesh.h_node_of_cell(c, k)), node(m_mesh.h_node_of_cell(c, k + 1))});
                 }
             } else {
-                std::vector<std::array<std::array<double, 3>, 4>> tets;
-                m_mesh.h_cell_tetrahedra(c, tets);
-                for (const auto & t : tets) out.push_back({t[0], t[1], t[2], t[3]});
+                m_mesh.h_cell_tetrahedra(c, m_tets);
+                for (const auto & t : m_tets) out.push_back({t[0], t[1], t[2], t[3]});
             }
             return out;
         }
 
         void extract(const Piece & p) {
-            const int levels = m_region.resolution();
+            // Planes are cut exactly without subdividing
+            const int levels = affine(p) ? 0 : m_region.resolution();
             for (uint32_t c = 0; c < m_mesh.n_owned(); c++) {
                 for (const auto & s : simplices(c)) extract(p, c, s, 0, levels);
             }
         }
 
         void extract(const Piece & p, const uint32_t c, const std::vector<Vec> & s, const int level, const int levels) {
-            std::vector<Vertex> simplex;
             Vec center = {0.0, 0.0, 0.0};
+            for (const Vec & x : s) center = add(center, mul(1.0 / double(s.size()), x));
+            double radius = 0.0;
+            for (const Vec & x : s) radius = std::max(radius, norm(sub(x, center)));
+            // Most simplices lie away from the surface: bounded distances say so before any vertex is evaluated
+            if (m_region.bounded()) {
+                for (const uint32_t i : p.carriers) {
+                    if (std::abs(m_views[i].distance(center.data())) >= radius) return;
+                }
+            }
+            std::vector<Vertex> simplex;
             for (const Vec & x : s) {
                 Vertex v{x, {}};
                 for (const uint32_t i : p.carriers) v.phi.push_back(m_views[i].distance(x.data()));
                 simplex.push_back(v);
-                center = add(center, mul(1.0 / double(s.size()), x));
             }
-            double radius = 0.0;
-            for (const Vec & x : s) radius = std::max(radius, norm(sub(x, center)));
+            // Vertices within round-off of a zero set lie on it: a plane through mesh faces takes them once, from
+            // the cells on its negative side, and no simplex gets a sliver
+            for (Vertex & v : simplex) {
+                for (double & phi : v.phi) phi = std::abs(phi) < 1e-12 * radius ? 0.0 : phi;
+            }
             for (size_t k = 0; k < p.carriers.size(); k++) {
                 // No zero set here: bounded distances farther than the simplex's radius, or implicit
                 // functions of one sign with a margin of twice their slope
+                if (m_region.bounded()) continue;
                 const double phi = m_views[p.carriers[k]].distance(center.data());
-                if (m_region.bounded()) {
-                    if (std::abs(phi) >= radius) return;
-                    continue;
-                }
                 bool positive = false, negative = false;
                 double slope = 0.0;
                 for (const Vertex & v : simplex) {
