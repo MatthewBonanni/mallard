@@ -34,6 +34,11 @@
 #include "probe_surface.h"
 #include "statistics.h"
 
+namespace region {
+class Region;
+class Regions;
+}
+
 /**
  * @brief The fields probes read. Point values need W of every local cell
  *        (halo included, with current boundary states), the least-squares
@@ -75,8 +80,8 @@ struct ProbeReference {
 class Probes {
     public:
         /** @brief Read [[probes]] and locate the samples; resume appends to existing files. */
-        void init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
-                  bool resume, bool viscous);
+        void init(const Input & input, const Mesh & mesh, region::Regions & regions,
+                  const std::vector<std::string> & species_names, bool resume, bool viscous);
         /** @brief A restarted run at (step, t): next output times, and series cut back to t. */
         void resume(uint64_t step, rtype t);
 
@@ -136,6 +141,8 @@ class Probes {
             void in_cells(const Mesh & mesh, const probe::CellPoints & set, const std::vector<probe::Point> & n,
                           uint32_t n_variables);
             void set_normals(const std::vector<probe::Point> & n);
+            /** @brief Owned cells as samples, numbered in global cell order. */
+            void select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables);
             /** @brief The faces of a face set, sampled on their cell side. */
             void on_faces(const Mesh & mesh, const probe::FaceSet & set, uint32_t n_variables);
             void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
@@ -163,9 +170,10 @@ class Probes {
             bool gradients = false;              // some variable needs velocity or temperature gradients
             bool transport = false;              // some variable needs the viscosity or conductivity
             ProbeReference reference;
-            probe::Geometry geometry;
+            probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
+            bool from_region = false;
             Samples nodes;
-            Samples quadrature;  // curves with reductions
+            Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
             std::vector<std::pair<double, std::string>> series;  // vtp: (t, file) of the .pvd
             uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
@@ -178,6 +186,10 @@ class Probes {
             void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
                                   const std::vector<double> & quad) const;
         };
+        /** @brief A region probe's samples: the owned cells the region covers, weighted by f V. */
+        static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
+                                  const std::vector<double> & fractions, uint32_t n_variables);
+
         std::vector<std::unique_ptr<Probe>> probes;
         bool resumed = false;
         bool distributed = false;  // samples split over the ranks, which set up and write together

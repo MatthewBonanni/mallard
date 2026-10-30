@@ -644,10 +644,21 @@ Optional sponge layers, each adding `-strength (U - U_ref)` to the conservative 
 | Key | Description |
 |---|---|
 | `strength` | Damping rate (1/s): a number or an expression in `x`, `y`, `z`, zero outside the layer, e.g. `"x > 4 ? 20 * ((x - 4) / 1)^2 : 0"` (a gradual ramp reflects less than a step) |
+| `region` | Default none (everywhere `strength` is nonzero). A [region](#regions), or the name of one in [`[regions]`](#named-regions-regions): `strength` is multiplied by each cell's volume fraction of it, so its `edge` ramps the layer up smoothly. It must fill space (a volume; an area in 2D) |
 | `u`, `p`, `T` | Reference state: numbers or expressions in `x`, `y`, `z` (`u` has one per component) |
 | `X` or `Y`, `balance` | (mixtures) Reference composition, numbers or expressions as in `[initialize]` |
 
 Strength and reference are evaluated once at cell centroids.
+
+```toml
+# 50 1/s beyond x = 0.95, ramped up from x = 0.9 to 1.0
+[[sponges]]
+strength = 50.0
+region = {type = "half_space", point = [0.95, 0.0], normal = [-1.0, 0.0], edge = 0.1}
+u = [10.0, 0.0]
+p = 101325.0
+T = 300.0
+```
 
 ## `[numerics]`
 
@@ -914,7 +925,8 @@ weights and the trigger state.
 ## `[[probes]]`
 
 Samples of the solution on a geometry (points, curves, surfaces, exact cut planes or boundary zones;
-[geometry guide](guide/geometry.md#points-and-curves)), every `interval`
+[geometry guide](guide/geometry.md#points-and-curves)), or reductions over a
+[region](#regions) (below), every `interval`
 steps or `time_interval` of simulation time, written raw and/or reduced. Setup
 locates the samples in the cells of each rank; a write evaluates them on the
 device of the ranks that own them and gathers them on rank 0, which writes them
@@ -928,13 +940,14 @@ ranks. A probe that is not due costs nothing.
 | `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (below); without it, `point` or `start`/`end` select a point or a line |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
 | `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
 | `file` | Output file, default `probe_<name>.csv`, `.h5`, `.vtkhdf` or `.pvd` |
 | `samples` | `false` writes only the reductions (default `true`) |
-| `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below) |
+| `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below); default none, and `["integral", "mean", "min", "max"]` with `region` |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
 | `scale`, `rotate`, `pivot`, `translate` | Transform of the geometry, as for [regions](#regions): scaled (a factor, or one per axis), then rotated (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`), both about `pivot` (default the origin), then translated |
 
@@ -1088,6 +1101,30 @@ per face (the face measure), points with unit weights
 (`integral` is the sum, `mean` the arithmetic mean). Rank 0 sums them in a
 fixed order, so they too are the same bit for bit on any number of ranks.
 
+**Region probes.** With `region`, the probe reduces the cell averages of the
+cells the region covers, each weighted by its volume `V` times its volume
+fraction `f`: `integral` is `sum f V q`, `mean` `sum f V q / sum f V`, `favre`
+`sum f V rho q / sum f V rho`, `rms` `sqrt(sum f V q^2 / sum f V)`, and `min`,
+`max` the extrema over the cells with `f > 0`. They go to `reductions_file`, in
+rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
+radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
+in global cell order, so they are the same bit for bit on any number of ranks.
+A region probe has no samples: `type`, `boundary`, `boundary_type`,
+`sampling`, `format`, `file` and `samples` do not apply. The region must cover part of some cell.
+
+```toml
+# Fuel mass and the extreme temperatures in the combustor
+[[probes]]
+name = "combustor"
+variables = ["RHO", "Y_CH4", "T"]
+region = {type = "cylinder", center = [0.1, 0, 0], axis = [1, 0, 0], radius = 0.04, length = 0.2}
+reductions = ["integral", "mean", "favre", "min", "max"]
+interval = 10
+```
+
+The integral of `RHO` is the mass in the region, and `favre` of `Y_CH4` the
+fuel's mass fraction there, so the fuel mass is their product.
+
 ```toml
 [[probes]]
 name = "wake"
@@ -1127,7 +1164,7 @@ graphs, except with domain averages, which need a global sum per stage).
 | Key | Default | Description |
 |---|---|---|
 | `name` | `sources[i]` | Name in the run log |
-| `region` | everywhere | A [region](#regions): the values are multiplied by each cell's volume fraction of it |
+| `region` | everywhere | A [region](#regions), or the name of one in [`[regions]`](#named-regions-regions): the values are multiplied by each cell's volume fraction of it. It must fill space (a volume; an area in 2D) |
 | `total` | `false` | `true`: the values are integrated rates over the region (kg/s, N, W; per unit depth in 2D, per radian in axisymmetric runs), spread over it in proportion to the volume fraction, so that their integral is exact on any mesh; they may then depend on `t` only |
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`rhoE = "5 MW/m^3"`, with `total`: `"50 W"`) or expressions (in SI units) |
 | `rhoY` | none | Mixtures: table of species partial-density sources, e.g. `{H2 = "1e-3"}`; the mass source `rho` is their sum (and `rho` itself is not allowed) |
@@ -1165,8 +1202,13 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 
 ## Regions
 
-Regions select parts of space in `[[sources]]` and `[[initialize.regions]]`
-(explained with figures in the [geometry guide](guide/geometry.md#regions)). A region is a table: a primitive, or a boolean of regions, each with
+Regions select parts of space in `[[sources]]`, `[[sponges]]`, `[[probes]]`,
+`[[initialize.regions]]` and `[[initialize.data]]` (explained with figures in the
+[geometry guide](guide/geometry.md#regions)). Each `region` key takes a table,
+or the name of a region defined once in [`[regions]`](#named-regions-regions).
+The regions below fill space: volumes in 3D, areas in 2D. Points, curves and
+surfaces are to join the same table, each `type` with one fixed dimension, and
+each key states the dimension it needs. A region is a table: a primitive, or a boolean of regions, each with
 optional transforms, nested to any depth. Every region has a signed distance
 (negative inside) that never exceeds the distance to its surface, which gives
 smooth edges their width and lets cell volume fractions skip cells away from
@@ -1194,6 +1236,9 @@ unless given a unit; `axis`, `normal`, `axes` and `scale` are plain numbers.
 | `implicit` | `f`, an expression in `x`, `y`, `z` | `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
 | `union`, `intersection` | `regions` = `[{...}, ...]` | |
 | `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b` |
+
+The parts of a boolean (the entries of `regions`, `a` and `b`) may be names of
+`[regions]` too.
 
 Any region, primitive or boolean, may also have, applied in this order:
 
@@ -1225,6 +1270,34 @@ region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 
 
 Expressions in regions are those of every section:
 [Expressions](guide/input_files.md#expressions).
+
+### Named regions: `[regions]`
+
+```toml
+[regions]
+flame_zone = {type = "sphere", center = [0, 0, 0], radius = 0.02, edge = 0.004}
+duct = {type = "cylinder", center = [0, 0, 0], axis = [1, 0, 0], radius = 0.05, length = 0.4}
+core = {type = "difference", regions = ["duct", "flame_zone"]}
+
+[[sources]]
+total = true
+rhoE = "2 kW"
+region = "flame_zone"
+
+[[probes]]
+name = "flame"
+variables = ["T"]
+region = "flame_zone"
+```
+
+Each key of `[regions]` (equivalently a table `[regions.<name>]`) names a
+region, which any `region` key, and any part of a boolean, may give by its
+name instead of a table. A named region is read, and its volume fractions
+computed, once for all the keys that name it. A name that is not defined is an
+error listing the defined ones, a named region whose parts name it again
+(directly or through others) is an error naming the cycle, and a named region
+nothing uses is an unused key. `edge` belongs to the outermost region: a named
+region with `edge` may not be a part of a boolean.
 
 ## `[parallel]`
 

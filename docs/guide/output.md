@@ -331,10 +331,11 @@ CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
 (`kg s-2`), and the wall model's `Q` in `W`; domain integrals carry the
 volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
 variable's units, `integral` times those of the measure (`m` along a curve,
-`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`). In axisymmetric runs,
+`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`;
+over a region its `volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
 forces and integrals are per radian of the revolved domain, and their units
 say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
-(`m2 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
+(`m2 rad-1`), region probes' `volume` (`m3 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
 field's units, `spectrum`, `correlation` and `shell` (sums, not densities)
 the product of their pair's (`U_X*U_Y`: `m2 s-2`); the `abscissa` is a
 wavenumber in `m-1` (spectra, shells) or a separation in `m` (correlations).
@@ -484,7 +485,18 @@ level by a variable at a probe point.
 
 A probe samples the solution on a geometry every `interval` steps (or
 `time_interval` of simulation time) and writes the samples, reductions over
-them, or both. The files are the same bit for bit on any number of ranks.
+them, or both; a probe of a [region](#region-probes) writes integrals, means and
+extrema over it. The files are the same bit for bit on any number of ranks.
+
+On a GPU the files have the CPU's rows, in the same order, with the same steps,
+times, coordinates, normals and areas: the geometry is set up on the host, and
+rank 0 reduces the gathered samples on the host in sample order. The values agree
+with a CPU run to rounding, not bit for bit, since the device rounds the solution
+and its point values differently (fused multiply-adds, its own math functions).
+The test suite checks every backend against a CPU reference (`test/data/probes`):
+indices, steps and times exactly, geometry to 1e-14 and values to 1e-10 of each
+column's largest magnitude. The geometry tolerance covers other CPUs and
+compilers only; on one host the geometry of every backend is the same bit for bit.
 
 ```toml
 [[probes]]
@@ -496,7 +508,7 @@ n_points = 200
 interval = 10
 ```
 
-*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow), [`shock_bubble_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-3d).
+*Used in:* [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow) and 1 more.
 
 ```toml
 # Wake survey: high-order point values on an arc, a VTK series for ParaView,
@@ -523,10 +535,11 @@ reductions = ["mean", "rms"]
 | `name` | required | Names the files |
 | `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
 | `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D surfaces `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (`x`, `y`, `z` of `u`, `v`) |
+| `region` | none | Instead of `type`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
 | `format` | `csv` | `csv`, `hdf5` (one extensible file), `vtkhdf` (one VTKHDF file of every output, which ParaView opens as a time series) or `vtp` (one file per output and a `.pvd` series) |
-| `reductions` | none | `integral`, `mean`, `favre`, `min`, `max`, `rms` along the geometry |
+| `reductions` | none (`region`: `integral`, `mean`, `min`, `max`) | `integral`, `mean`, `favre`, `min`, `max`, `rms` over the geometry |
 | `samples` | `true` | `false` writes only the reductions |
 | `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
 
@@ -628,6 +641,58 @@ Pitfalls:
   numerical fluxes: they agree as the mesh is refined.
 - Reductions of points weigh each point 1 (`integral` is a sum); curves
   integrate with three Gauss points per element between samples.
+
+### Region probes
+
+```toml
+# Mass, mean temperature and pressure range in a box, every 10 steps
+[[probes]]
+name = "box"
+variables = ["RHO", "T", "P"]
+region = {type = "rectangle", center = [0.5, 0.5], size = [0.4, 0.2]}
+reductions = ["integral", "mean", "min", "max"]   # the default
+interval = 10
+```
+
+*Used in:* [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions).
+
+A probe with `region` reduces the cell averages of the cells the region covers,
+each weighted by its volume times its volume fraction `f`, so a region need not
+follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`),
+`mean` that over `sum f V`, `favre` the density-weighted mean, `rms` the root
+mean square, and `min`, `max` the extremes over the cells with `f > 0`. Rank 0
+sums them in global cell order, so they are the same bit for bit on any number
+of ranks. Each output appends a row to `reductions_file` (default
+`probe_<name>_reductions.csv`):
+
+```
+step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P
+```
+
+The third column is `sum f V`: `volume` in 3D and axisymmetric runs (per
+radian), `area` in planar 2D runs (per unit depth). Give the region by name to
+measure exactly where a source or sponge acts:
+
+```toml
+[regions]
+heater = {type = "sphere", center = [0, 0, 0], radius = 0.01, edge = 0.002}
+
+[[sources]]
+rhoE = "1 MW/m^3"
+region = "heater"
+
+[[probes]]
+name = "heater"
+variables = ["T"]
+region = "heater"
+```
+
+Pitfalls:
+
+- Values are cell averages, so `min` and `max` are those of the cells, not of
+  the field inside them, and include cells the region only touches.
+- A region probe has no samples: `type`, `boundary`, `boundary_type`,
+  `sampling`, `format`, `file` and `samples` do not apply to it.
 
 ## Post-processing
 
