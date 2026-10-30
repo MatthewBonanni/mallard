@@ -16,7 +16,6 @@
 #include <cmath>
 #include <limits>
 #include <optional>
-#include <sstream>
 #include <utility>
 
 #include "comm.h"
