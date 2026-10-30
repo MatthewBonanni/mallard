@@ -89,7 +89,7 @@ struct Surfaces {
     bool empty() const { return faces.empty(); }
 };
 
-/** @brief Shapes of the [[mesh.curved]] entries (none if [mesh] curved_geometry = false). */
+/** @brief Shapes of the [[mesh.curved]] entries. */
 std::vector<Shape> read_shapes(const Input & input);
 
 /** @brief [mesh] curved: whether curved geometry is used at all (default true). */

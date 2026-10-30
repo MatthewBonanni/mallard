@@ -14,10 +14,8 @@
 #include <Kokkos_Core.hpp>
 
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <functional>
-#include <cstring>
 #include <map>
 #include <random>
 #include <sstream>
@@ -31,7 +29,6 @@
 #include "gmsh_fixtures.h"
 #include "mesh.h"
 #include "physics.h"
-#include "region.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "test_utils.h"
@@ -425,18 +422,6 @@ TEST(Curved3DTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {
     EXPECT_LT(shell_polynomial_error(4, "curved", 5, true, 3), 1e-11);
     EXPECT_GT(shell_polynomial_error(4, "curved", 5, true, 4), 1e-6);
     EXPECT_LT(shell_polynomial_error(4, "curved", 5, true, 4, "curved_wall_degree = 4\n"), 1e-11);
-}
-
-TEST(ZZBitwise, Dump) {
-    uint64_t h = 1469598103934665603ull;
-    auto mix = [&](double v) { uint64_t b; std::memcpy(&b, &v, 8); h = (h ^ b) * 1099511628211ull; };
-    for (bool prisms : {false, true}) {
-        auto mesh = shell_mesh(4, 2, prisms, "curved");
-        for (uint32_t c = 0; c < mesh->n_cells; c++) { mix(double(mesh->h_cell_volume(c))); mix(double(mesh->h_cell_coords(c, 0))); }
-        std::vector<curved::Vec3> x; std::vector<double> w;
-        for (uint32_t c = 0; c < mesh->n_cells; c++) { mesh->curved_geometry->cell_rule(c, 6, x, w); for (size_t q = 0; q < w.size(); q++) { mix(w[q]); mix(x[q][0]); mix(x[q][1]); mix(x[q][2]); } }
-    }
-    printf("BITWISE %016llx\n", static_cast<unsigned long long>(h));
 }
 
 TEST(Curved3DTENO, WallValuesConvergeAtDesignOrderOnSpheresAndEllipsoids) {

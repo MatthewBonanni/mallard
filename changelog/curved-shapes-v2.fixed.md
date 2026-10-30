@@ -1,0 +1,1 @@
+- `[mesh] curved_geometry = false` leaves `[[mesh.curved]]` out instead of stopping the run on its keys as unused, as documented (#407).

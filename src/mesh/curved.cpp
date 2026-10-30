@@ -434,7 +434,7 @@ bool enabled(const Input & input) {
 
 std::vector<Shape> read_shapes(const Input & input) {
     std::vector<Shape> shapes;
-    if (!enabled(input) || !input.contains("mesh") || !input.at("mesh").contains("curved")) return shapes;
+    if (!input.contains("mesh") || !input.at("mesh").contains("curved")) return shapes;
     const auto entries = find_value<std::vector<Input>>(input, "mesh", "curved");
     for (size_t i = 0; i < entries.size(); i++) {
         const std::string where = "mesh.curved[" + std::to_string(i) + "]";
@@ -448,8 +448,9 @@ std::vector<Shape> read_shapes(const Input & input) {
 
 Surfaces surfaces_of_mesh(const Mesh & mesh, const Input & input) {
     Surfaces out;
-    if (!enabled(input)) return out;
+    // Read even when disabled, so that the entries are checked and not unused keys
     out.shapes = read_shapes(input);
+    if (!enabled(input)) return {};
     for (size_t s = 0; s < out.shapes.size(); s++) {
         const FaceZone * zone = nullptr;
         for (const FaceZone & z : mesh.h_face_zones()) {
@@ -475,8 +476,9 @@ Surfaces surfaces_of_mesh(const Mesh & mesh, const Input & input) {
 
 Surfaces surfaces_of_block(const MeshBlock & block, const Input & input) {
     Surfaces out;
-    if (!enabled(input)) return out;
+    // Read even when disabled, so that the entries are checked and not unused keys
     out.shapes = read_shapes(input);
+    if (!enabled(input)) return {};
     for (const Shape & s : out.shapes) {
         if (std::find(block.zone_names.begin(), block.zone_names.end(), s.zone) == block.zone_names.end()) {
             throw InputError("mesh.curved: no boundary zone named " + s.zone + ".");
