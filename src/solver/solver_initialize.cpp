@@ -14,20 +14,13 @@
 #include "input.h"
 
 #include <algorithm>
-#include <array>
-#include <atomic>
-#include <exception>
-#include <memory>
-#include <mutex>
-#include <optional>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
 
-#include "quadrature.h"
+#include "initial_state.h"
 #include "remap.h"
 
 enum class InitType {
@@ -56,19 +49,27 @@ void Solver::init_solution() {
     const std::string type_str = find_value_or<std::string>(input, "initialize", "type", "constant");
     auto it = find_option(INIT_TYPES, "initialize.type", type_str, line_of(input.at("initialize"), "type"));
     initial_state = type_str;
-    if (it->second == InitType::CONSTANT) {
+    const bool from_file = it->second == InitType::RESTART || it->second == InitType::REMAP;
+    const bool layered = InitialState::layered(input);
+    if (it->second == InitType::CONSTANT && !layered) {
         init_solution_constant();
-    } else if (it->second == InitType::ANALYTICAL) {
-        init_solution_analytical();
     } else if (it->second == InitType::RESTART) {
         init_solution_restart();
-    } else {
+    } else if (it->second == InitType::REMAP) {
         init_solution_remap();
     }
+    if (!from_file && !(it->second == InitType::CONSTANT && !layered)) {
+        const InitialState state(input, *mesh, physics, mixture_model.get(), false);
+        state.apply(h_conservatives, h_species, h_T_seed);
+        if (layered) initial_state = state.summary();
+    } else if (layered) {
+        const InitialState state(input, *mesh, physics, mixture_model.get(), true);
+        state.apply(h_conservatives, h_species, h_T_seed);
+        initial_state += "; " + state.summary();
+    }
     copy_host_to_device();
-    const bool from_file = it->second == InitType::RESTART || it->second == InitType::REMAP;
     if (!from_file) statistics.start(t);
-    if (is_mixture() && !from_file) init_temperature_seed();
+    if (is_mixture() && (!from_file || layered)) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();
 }
@@ -205,381 +206,4 @@ void Solver::init_solution_constant() {
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
         FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = cons[i];
     }
-}
-
-namespace {
-
-/**
- * @brief The texts of the analytical initial state, which each host thread
- *        compiles into its own PointState.
- */
-struct InitialStateText {
-    std::vector<std::string> u;
-    std::optional<std::string> rho, p, T;
-    std::vector<std::pair<std::string, std::string>> fractions;  // (name, expression)
-};
-
-/**
- * @brief Compiled expressions and scratch of one host thread: exprtk
- *        expressions hold their variables' values, so threads cannot share
- *        them.
- */
-struct PointState {
-    PointState(const InitialStateText & text, uint32_t n_species, uint32_t n_vars) :
-        fraction_values(n_species), sum(n_vars), cons(n_vars) {
-        const std::vector<std::string> xyz = {"x", "y", "z"};
-        for (size_t i = 0; i < text.u.size(); i++) u.emplace_back("initialize.u[" + std::to_string(i) + "]", text.u[i], xyz);
-        if (text.rho) rho.emplace("initialize.rho", *text.rho, xyz);
-        if (text.p) p.emplace("initialize.p", *text.p, xyz);
-        if (text.T) T.emplace("initialize.T", *text.T, xyz);
-        for (const auto & [name, expression] : text.fractions) fractions.emplace_back("initialize." + name, expression, xyz);
-    }
-    PointState(const PointState &) = delete;
-    PointState & operator=(const PointState &) = delete;
-
-    double x[3] = {0.0, 0.0, 0.0};
-    std::vector<Expression> u;
-    std::optional<Expression> rho, p, T;
-    std::vector<Expression> fractions;
-    std::vector<double> fraction_values;
-    std::vector<double> sum;
-    std::vector<rtype> cons;
-    std::vector<std::array<std::array<double, 3>, 4>> tets;
-};
-
-/**
- * @brief Average of f over a 2D cell (r-weighted in axisymmetric runs): a
- *        triangle, or the fan of triangles of a quadrilateral from its vertex
- *        average, each split into n_sub^2 sub-triangles carrying the rule quad.
- */
-template <typename F>
-void cell_average_2d(const Mesh & mesh, const TriangleDunavant & quad, double weight_sum, uint32_t n_sub,
-                     uint32_t i_cell, PointState & s, const F & f) {
-    const uint32_t n_quad = static_cast<uint32_t>(quad.h_weights.extent(0));
-    const uint32_t n_nodes = mesh.h_n_nodes_of_cell(i_cell);
-    std::fill(s.sum.begin(), s.sum.end(), 0.0);
-    double area_sum = 0.0, revolved_sum = 0.0;
-    auto node = [&](uint32_t k, int d) { return double(mesh.h_node_coords(mesh.h_node_of_cell(i_cell, k % n_nodes), d)); };
-    double center[2] = {0.0, 0.0};
-    for (uint32_t k = 0; k < n_nodes; k++) {
-        for (int d = 0; d < 2; d++) center[d] += node(k, d) / n_nodes;
-    }
-    const bool triangle = n_nodes == 3;
-    for (uint32_t k = 0; k < (triangle ? 1 : n_nodes); k++) {
-        const double v0[2] = {triangle ? node(0, 0) : center[0], triangle ? node(0, 1) : center[1]};
-        const uint32_t k1 = triangle ? 1 : k, k2 = triangle ? 2 : k + 1;
-        const double e1[2] = {(node(k1, 0) - v0[0]) / n_sub, (node(k1, 1) - v0[1]) / n_sub};
-        const double e2[2] = {(node(k2, 0) - v0[0]) / n_sub, (node(k2, 1) - v0[1]) / n_sub};
-        const double sub_area = 0.5 * std::abs(e1[0] * e2[1] - e1[1] * e2[0]);
-        for (uint32_t a = 0; a < n_sub; a++) {
-            for (uint32_t b = 0; a + b < n_sub; b++) {
-                // Upward sub-triangle with origin (a, b), and the downward one if it exists
-                for (int orient = 0; orient < 2; orient++) {
-                    if (orient == 1 && a + b + 1 >= n_sub) continue;
-                    double o[2], d1[2], d2[2];
-                    if (orient == 0) {
-                        for (int i = 0; i < 2; i++) {
-                            o[i] = v0[i] + a * e1[i] + b * e2[i];
-                            d1[i] = e1[i];
-                            d2[i] = e2[i];
-                        }
-                    } else {
-                        for (int i = 0; i < 2; i++) {
-                            o[i] = v0[i] + (a + 1) * e1[i] + (b + 1) * e2[i];
-                            d1[i] = -e1[i];
-                            d2[i] = -e2[i];
-                        }
-                    }
-                    for (uint32_t q = 0; q < n_quad; q++) {
-                        const double xi = double(quad.h_points(q, 0));
-                        const double eta = double(quad.h_points(q, 1));
-                        const double y = o[1] + xi * d1[1] + eta * d2[1];
-                        f(s, o[0] + xi * d1[0] + eta * d2[0], y, 0.0);
-                        double w = double(quad.h_weights(q)) / weight_sum * sub_area;
-                        if (mesh.axisymmetric) {
-                            w *= y;
-                            revolved_sum += w;
-                        }
-                        for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += w * double(s.cons[i]);
-                    }
-                    area_sum += sub_area;
-                }
-            }
-        }
-    }
-    const double measure = mesh.axisymmetric ? revolved_sum : area_sum;
-    for (double & v : s.sum) v /= measure;
-}
-
-/**
- * @brief Composite rule on the reference tetrahedron (0,0,0), (1,0,0),
- *        (0,1,0), (0,0,1): the tetrahedron is split uniformly into n_sub^3
- *        sub-tetrahedra (corner tetrahedra, octahedra split in four, inverted
- *        tetrahedra), each carrying the symmetric 14-point degree-5 rule
- *        (positive weights, interior points). Weights sum to 1/6.
- */
-struct TetrahedronRule {
-    std::vector<std::array<double, 3>> points;
-    std::vector<double> weights;
-
-    explicit TetrahedronRule(uint32_t n_sub) {
-        // Barycentric points (orbits of (a, a, a, 1 - 3a) and (b, b, 1/2 - b, 1/2 - b)) and weights
-        const double a[2] = {0.09273525031089122640, 0.31088591926330060980};
-        const double wa[2] = {0.01224884051939365826, 0.01878132095300264180};
-        const double b = 0.04550370412564964949, wb = 0.00709100346284691107;
-        std::vector<std::array<double, 4>> bary;
-        std::vector<double> w;
-        for (int i = 0; i < 2; i++) {
-            for (size_t k = 0; k < 4; k++) {
-                std::array<double, 4> l;
-                l.fill(a[i]);
-                l[k] = 1.0 - 3.0 * a[i];
-                bary.push_back(l);
-                w.push_back(wa[i]);
-            }
-        }
-        for (size_t j = 0; j < 4; j++) {
-            for (size_t k = j + 1; k < 4; k++) {
-                std::array<double, 4> l;
-                l.fill(0.5 - b);
-                l[j] = l[k] = b;
-                bary.push_back(l);
-                w.push_back(wb);
-            }
-        }
-        using Lattice = std::array<uint32_t, 3>;
-        auto add = [&](const Lattice & p0, const Lattice & p1, const Lattice & p2, const Lattice & p3) {
-            const Lattice * v[4] = {&p0, &p1, &p2, &p3};
-            for (size_t q = 0; q < w.size(); q++) {
-                std::array<double, 3> x = {0.0, 0.0, 0.0};
-                for (size_t k = 0; k < 4; k++) {
-                    for (size_t d = 0; d < 3; d++) x[d] += bary[q][k] * (*v[k])[d];
-                }
-                for (double & xd : x) xd /= n_sub;
-                points.push_back(x);
-                weights.push_back(w[q] / (n_sub * n_sub * n_sub));
-            }
-        };
-        for (uint32_t i = 0; i < n_sub; i++) {
-            for (uint32_t j = 0; i + j < n_sub; j++) {
-                for (uint32_t k = 0; i + j + k < n_sub; k++) {
-                    add({i, j, k}, {i + 1, j, k}, {i, j + 1, k}, {i, j, k + 1});
-                    if (i + j + k + 2 > n_sub) continue;
-                    // Octahedron around the diagonal (i + 1, j, k) - (i, j + 1, k + 1)
-                    const Lattice d0 = {i + 1, j, k}, d1 = {i, j + 1, k + 1};
-                    const Lattice ring[4] = {{i, j + 1, k}, {i, j, k + 1}, {i + 1, j, k + 1}, {i + 1, j + 1, k}};
-                    for (int r = 0; r < 4; r++) add(d0, d1, ring[r], ring[(r + 1) % 4]);
-                    if (i + j + k + 3 > n_sub) continue;
-                    add({i + 1, j + 1, k}, {i + 1, j, k + 1}, {i, j + 1, k + 1}, {i + 1, j + 1, k + 1});
-                }
-            }
-        }
-    }
-};
-
-/**
- * @brief Average of f over a 3D cell: rule on each tetrahedron of the cell.
- */
-template <typename F>
-void cell_average_3d(const Mesh & mesh, const TetrahedronRule & rule, uint32_t i_cell, PointState & s, const F & f) {
-    mesh.h_cell_tetrahedra(i_cell, s.tets);
-    std::fill(s.sum.begin(), s.sum.end(), 0.0);
-    double vol_sum = 0.0;
-    for (const auto & tet : s.tets) {
-        double e[3][3];
-        for (size_t k = 0; k < 3; k++) {
-            for (size_t d = 0; d < 3; d++) e[k][d] = tet[k + 1][d] - tet[0][d];
-        }
-        const double six_vol = std::abs(e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
-                                        e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
-                                        e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]));
-        for (size_t q = 0; q < rule.weights.size(); q++) {
-            const std::array<double, 3> & r = rule.points[q];
-            double p[3];
-            for (size_t d = 0; d < 3; d++) p[d] = tet[0][d] + r[0] * e[0][d] + r[1] * e[1][d] + r[2] * e[2][d];
-            f(s, p[0], p[1], p[2]);
-            const double weight = rule.weights[q] * six_vol;
-            for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += weight * double(s.cons[i]);
-            vol_sum += weight;
-        }
-    }
-    for (double & v : s.sum) v /= vol_sum;
-}
-
-/**
- * @brief Average of f over a curved cell, with its cone rule (curved::Geometry::cell_rule).
- */
-template <typename F>
-void cell_average_curved(const curved::Geometry & geometry, uint32_t i_cell, PointState & s, const F & f) {
-    std::vector<curved::Vec3> x;
-    std::vector<double> w;
-    geometry.cell_rule(i_cell, N_DIM == 2 ? 10 : 8, x, w);
-    std::fill(s.sum.begin(), s.sum.end(), 0.0);
-    double vol_sum = 0.0;
-    for (size_t q = 0; q < w.size(); q++) {
-        f(s, x[q][0], x[q][1], x[q][2]);
-        for (size_t i = 0; i < s.sum.size(); i++) s.sum[i] += w[q] * double(s.cons[i]);
-        vol_sum += w[q];
-    }
-    for (double & v : s.sum) v /= vol_sum;
-}
-
-}  // namespace
-
-/**
- * Cell averages of the conservative variables are computed by splitting each
- * cell into simplices and applying a composite rule on each: in 2D, a fan of
- * triangles, each subdivided into n_sub^2 sub-triangles with a degree-5
- * Dunavant rule; in 3D, the tetrahedra of Mesh::h_cell_tetrahedra, each
- * subdivided into n_sub^3 sub-tetrahedra with a 14-point degree-5 rule. This resolves
- * discontinuous initial data that do not align with the mesh and is
- * high-order accurate for smooth data. Curved cells use their own rule
- * (curved::Geometry::cell_rule). Cells are averaged in parallel on the
- * host, each thread with its own compiled expressions; every cell's sum runs
- * in the same order as on one thread, so the result does not depend on the
- * thread count.
- */
-void Solver::init_solution_analytical() {
-    const Input & init = input.at("initialize");
-    if (!init.contains("u") || !init.at("u").is_array() || init.at("u").as_array().size() != N_DIM) {
-        throw InputError({.key = "initialize.u",
-                          .line = line_of(init, "u"),
-                          .message = "must be an array of " + std::to_string(N_DIM) + " components",
-                          .fix = N_DIM == 3 ? "Write u = [\"ux\", \"uy\", \"uz\"], each a number or an expression"
-                                            : "Write u = [\"ux\", \"uy\"], each a number or an expression"});
-    }
-    const bool rho_in = init.contains("rho");
-    const bool p_in = init.contains("p");
-    const bool T_in = init.contains("T");
-    if (rho_in + p_in + T_in != 2) {
-        throw InputError({.key = "initialize",
-                          .line = line_of(init),
-                          .message = std::string("sets ") + std::to_string(rho_in + p_in + T_in) +
-                                     " of rho, p and T; type = \"analytical\" needs exactly two (the gas law gives "
-                                     "the third)",
-                          .fix = "Give two of rho, p and T"});
-    }
-    const uint32_t n_sub = find_value_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
-
-    InitialStateText text;
-    for (const auto & u : init.at("u").as_array()) text.u.push_back(quantity_or_expression(u, "initialize.u", dim::velocity));
-    if (rho_in) text.rho = quantity_or_expression(init.at("rho"), "initialize.rho", dim::density);
-    if (p_in) text.p = quantity_or_expression(init.at("p"), "initialize.p", dim::pressure);
-    if (T_in) text.T = quantity_or_expression(init.at("T"), "initialize.T", dim::temperature);
-
-    // Mixtures: one expression per listed species of X or Y, and optionally a
-    // balance species taking the rest; otherwise the listed values are normalized
-    bool mole = false;
-    int32_t balance = -1;
-    std::vector<int32_t> listed;
-    if (is_mixture()) {
-        if (init.contains("X") == init.contains("Y")) {
-            throw InputError("initialize: give the composition as exactly one of X and Y.");
-        }
-        mole = init.contains("X");
-        const std::string key = mole ? "X" : "Y";
-        if (!init.at(key).is_table()) throw InputError("initialize." + key + " must be a table of species.");
-        for (const auto & [name, value] : init.at(key).as_table()) {
-            const int32_t k = mixture_model->mechanism().species_index(name);
-            if (k < 0) throw mixture_model->unknown_species(init.at(key), "initialize." + key + "." + name, name);
-            listed.push_back(k);
-            text.fractions.emplace_back(key + "." + name, quantity_or_expression(value, name, dim::none));
-        }
-        if (init.contains("balance")) {
-            const std::string name = find_value<std::string>(init, "balance");
-            balance = mixture_model->mechanism().species_index(name);
-            if (balance < 0) throw InputError("initialize.balance: no species " + name + " in the mechanism.");
-        }
-    }
-    const uint32_t n_species = static_cast<uint32_t>(species_names.size());
-    const uint32_t n_vars = N_CONSERVATIVE + n_species;
-
-    // Sets s.cons to the conservatives at (px, py, pz)
-    auto point_conservatives = [&](PointState & s, double px, double py, double pz) {
-        s.x[0] = px;
-        s.x[1] = py;
-        s.x[2] = pz;
-        rtype * cons = s.cons.data();
-        if (is_mixture()) {
-            std::vector<double> & fractions = s.fraction_values;
-            std::fill(fractions.begin(), fractions.end(), 0.0);
-            double sum = 0.0;
-            for (size_t i = 0; i < listed.size(); i++) {
-                fractions[static_cast<size_t>(listed[i])] = std::max(s.fractions[i].value(s.x), 0.0);
-                if (listed[i] != balance) sum += fractions[static_cast<size_t>(listed[i])];
-            }
-            if (balance >= 0) {
-                fractions[static_cast<size_t>(balance)] = std::max(1.0 - sum, 0.0);
-                sum += fractions[static_cast<size_t>(balance)];
-            }
-            if (!(sum > 0.0)) {
-                throw InputError("initialize: the composition is zero at (" + std::to_string(px) + ", " +
-                                 std::to_string(py) + (N_DIM == 3 ? ", " + std::to_string(pz) : std::string()) +
-                                 "). Give at least one species a positive fraction everywhere, or name a balance "
-                                 "species (initialize.balance).");
-            }
-            for (double & f : fractions) f /= sum;
-            const std::vector<double> Y = mole ? mixture_model->mass_fractions_from_mole(fractions) : fractions;
-            const double R = mixture_model->gas_constant(Y);
-            const double rho_m = rho_in ? s.rho->value(s.x) : 0.0;
-            double p_m = p_in ? s.p->value(s.x) : 0.0;
-            double T_m = T_in ? s.T->value(s.x) : 0.0;
-            if (!p_in) p_m = rho_m * R * T_m;
-            if (!T_in) T_m = p_m / (rho_m * R);
-            rtype u[N_DIM];
-            FOR_I_DIM u[i] = static_cast<rtype>(s.u[i].value(s.x));
-            mixture_model->conservatives(p_m, T_m, u, Y, cons, cons + N_CONSERVATIVE);
-            return;
-        }
-        rtype rho = static_cast<rtype>(rho_in ? s.rho->value(s.x) : 0.0);
-        rtype p = static_cast<rtype>(p_in ? s.p->value(s.x) : 0.0);
-        const rtype T = static_cast<rtype>(T_in ? s.T->value(s.x) : 0.0);
-        if (!rho_in) rho = physics.get_density_from_pressure_temperature(p, T);
-        if (!p_in) p = physics.get_pressure_from_density_temperature(rho, T);
-        rtype W[N_CONSERVATIVE];
-        W[0] = rho;
-        FOR_I_DIM W[1 + i] = static_cast<rtype>(s.u[i].value(s.x));
-        W[N_DIM + 1] = p;
-        physics.compute_conservatives_from_W(cons, W);
-    };
-
-    using HostSpace = Kokkos::DefaultHostExecutionSpace;
-    Kokkos::Experimental::UniqueToken<HostSpace> token;
-    std::vector<std::unique_ptr<PointState>> states;
-    for (int32_t i = 0; i < token.size(); i++) states.push_back(std::make_unique<PointState>(text, n_species, n_vars));
-
-    const TetrahedronRule tet_rule(N_DIM == 3 ? n_sub : 1);
-    const TriangleDunavant quad(5);
-    double weight_sum = 0.0;
-    for (uint32_t q = 0; q < quad.h_weights.extent(0); q++) weight_sum += double(quad.h_weights(q));
-
-    std::mutex error_mutex;
-    std::exception_ptr error;
-    std::atomic<bool> failed = false;
-    Kokkos::parallel_for("init_solution_analytical",
-                         Kokkos::RangePolicy<HostSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, mesh->n_cells),
-                         [&](const uint32_t i_cell) {
-        if (failed.load(std::memory_order_relaxed)) return;
-        const int32_t id = token.acquire();
-        PointState & s = *states[static_cast<size_t>(id)];
-        try {
-            if (mesh->curved_geometry && mesh->curved_geometry->cell_is_curved(i_cell)) {
-                cell_average_curved(*mesh->curved_geometry, i_cell, s, point_conservatives);
-            } else if constexpr (N_DIM == 3) {
-                cell_average_3d(*mesh, tet_rule, i_cell, s, point_conservatives);
-            } else {
-                cell_average_2d(*mesh, quad, weight_sum, n_sub, i_cell, s, point_conservatives);
-            }
-            FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = static_cast<rtype>(s.sum[i]);
-            for (uint32_t k = 0; k < n_species; k++) {
-                h_species(i_cell, k) = static_cast<rtype>(s.sum[N_CONSERVATIVE + k]);
-            }
-        } catch (...) {
-            const std::lock_guard<std::mutex> lock(error_mutex);
-            if (!error) error = std::current_exception();
-            failed = true;
-        }
-        token.release(id);
-    });
-    if (error) std::rethrow_exception(error);
 }
