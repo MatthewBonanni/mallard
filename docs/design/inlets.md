@@ -1,6 +1,6 @@
 # Design: inlets
 
-Status: implemented (`stagnation_inlet`, `mass_flow_inlet`).
+Status: implemented (`stagnation_inlet`, `mass_flow_inlet`, numbers as expressions of x, y, z, t).
 
 `upt` imposes velocity, pressure and temperature, which over-specifies a
 subsonic inflow: one characteristic, the acoustic wave travelling upstream,
@@ -209,3 +209,48 @@ fixed velocity.
   inlet density rises from 1.16 to 1.69 kg/m³. With `upt`, the duct first
   gains less, then loses gas through the inlet once its pressure exceeds the
   inlet's.
+
+## Numbers as expressions of x, y, z and t
+
+The inflow numbers (`u`, `p`, `T` of `upt` and `nscbc_inlet`, `p0`, `T0`,
+`mass_flux`), the wall velocity and the mixture composition may be
+expressions (`BoundaryFields`, `src/boundary/boundary_fields.h`).
+
+- **Per face.** A condition with an expression gets a copy for each of its
+  faces, as composition profiles already did, holding the values at the
+  face center.
+- **Per stage.** The expressions are compiled (`expr::Program`). Copies with
+  expressions of `t` are re-evaluated by one kernel at each stage time
+  (`TimedBoundaryFields`), which reads the time from the device scalar
+  `stage_time`, so the step's CUDA graph replays it. For mixtures the kernel
+  also sets the composition, gas constant, frozen `[gamma, e0]` and the
+  transport values. `nscbc_inlet`'s velocity goes into its faces' targets:
+  at the stage time, and at the end of the step for the target's own
+  incoming wave (`TimedInletTargets`).
+- **Cost.** Time-independent inputs are evaluated once, and nothing runs per
+  stage for them. Time-dependent ones cost one small kernel per stage and
+  keep the CUDA graph (mixtures and characteristic boundaries step without
+  one anyway).
+- **Range.** A device flag records the first number of `t` out of its range
+  (face, time, value); the host checks it at each progress check and before
+  reporting a divergence, and stops with an input error.
+
+`test/inlet_test.cpp` (`ForcedInletTest`) checks the stage times. With
+SSPRK3 on a fixed mesh, a temporal-refinement study (steps `dt` and `dt / 2`
+against `dt / 8`, forcing at 40 rad/s with `dt = 0.0075`, and at 20 rad/s with
+`dt = 0.004` for `nscbc_inlet`) converges at:
+
+| Forced input | Order |
+|---|---|
+| `upt` `T(t)` | 2.75 |
+| `upt` `u(t)` | 2.91 |
+| `stagnation_inlet` `p0(t)` | 3.00 |
+| `mass_flow_inlet` `mass_flux(t)` | 2.91 |
+| moving wall `u(t)` | 3.02 |
+| `nscbc_inlet` `u(t)` | 1.20 |
+
+The same study gives 1.21 to 1.28 if the inputs are taken at the start of
+each step instead of at the stage times. In single precision the moving
+wall's errors reach round-off; the test then checks that they fall to it.
+`nscbc_inlet` is first order either way: its boundary point advances by a
+forward-Euler step of the LODI relation once per step.

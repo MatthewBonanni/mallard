@@ -16,9 +16,10 @@ the commands stay working.
 | 4 | [Supersonic flow over a cone](cone.md) | 3D builds, tetrahedra, symmetry planes, a characteristic far field, surface output, MPI ranks and GPUs | minutes, laptop | Taylor-Maccoll solution |
 | 5 | Premixed flame against Cantera (in preparation) | Gas mixtures, mechanisms, finite-rate chemistry, flame speed | | Cantera |
 | 6 | [Channel LES](channel_les.md) | Periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics, the dissipation budget | an hour, one GPU | DNS of Moser, Kim & Mansour |
-| 7 | [Measuring a flow](measuring.md) | Named regions, region probes, fluxes through cut planes, wall probes, a control-volume balance, phase averages, a probe's spectrum | 10 minutes, laptop | The wall force and the conservation laws |
+| 7 | [Running on a cluster](cluster.md) | Sizing a run with `mallard check`, the job scripts for `mpirun`, Slurm, PBS and Kubernetes, GPU and core binding, `mallard ctl`, stopping and resuming from the newest restart, reading the log and the run health | minutes, laptop | Uninterrupted run, bit for bit |
+| 8 | [Measuring a flow](measuring.md) | Named regions, region probes, fluxes through cut planes, wall probes, a control-volume balance, phase averages, a probe's spectrum | 10 minutes, laptop | The wall force and the conservation laws |
 
-Tutorials 1 to 4 and 7 run on a laptop CPU; 7 follows on from 3. For more cases, the
+Tutorials 1 to 4, 7 and 8 run on a laptop CPU; 8 follows on from 3. For more cases, the
 [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are a catalog of ready-to-run inputs,
 each with what it demonstrates and how long it takes, and the
 [validation](https://matthewbonanni.github.io/mallard/validation/) page shows the accuracy to expect.

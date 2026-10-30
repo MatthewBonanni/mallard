@@ -330,6 +330,13 @@ TEST(MPITest, InletsMatchSerial) {
                                         "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n"),
                                     25));
+    // Conditions of x, y and t evaluated per face at the stage times
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                    bcs("type = \"upt\"\nu = [\"0.3 + 0.1 * sin(30 * t)\", \"0.05 * y\"]\np = 1.0\n"
+                                        "T = \"1 + 0.1 * cos(20 * t)\"\n",
+                                        "type = \"p_out\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\nu = [\"0.2 * sin(10 * t)\", \"0\"]\n"),
+                                    25));
     // The total mass flow is divided among the faces by an area integral over all ranks
     expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                     bcs("type = \"mass_flow_inlet\"\nmdot = 0.5\nprofile = \"1 + y\"\nT = 1.0\n",
@@ -417,6 +424,37 @@ TEST(MPITest, SourcesInRegionsMatchSerial) {
                                         20) +
                               sources);
     }
+}
+
+TEST(MPITest, InitialRegionsAndDataMatchSerial) {
+    // Cell averages, region layers and nearest-point searches are per cell
+    const std::string rank = std::to_string(comm::rank());
+    const std::string profile = (scratch_dir() / ("profile_" + rank + ".csv")).string();
+    std::ofstream(profile) << "r,T,u\n0,3,0.5\n0.1,2.5,0.3\n0.25,1.2,0.1\n0.6,1,0\n";
+    const std::string points = (scratch_dir() / ("points_" + rank + ".csv")).string();
+    {
+        std::ofstream f(points);
+        f << "x,y,v\n";
+        for (int i = 0; i < 40; i++) f << 0.025 * i << "," << 0.8 * std::abs(std::sin(1.7 * i)) << "," << 0.01 * (i % 7) << "\n";
+    }
+    const std::string layers =
+        "[[initialize.data]]\nname = \"flame\"\nfile = \"" + profile + "\"\ninterpolation = \"cubic\"\n"
+        "at = [\"hypot(x - 0.4, y - 0.4)\"]\n"
+        "[[initialize.data]]\nname = \"cloud\"\ntype = \"points\"\nneighbors = 4\nfile = \"" + points + "\"\n"
+        "[[initialize.regions]]\nregion = {type = \"disk\", center = [0.4, 0.4], radius = 0.3, edge = 0.05}\n"
+        "T = \"flame_T\"\nu = [\"flame_u\", \"cloud_v\"]\n"
+        "[[initialize.regions]]\npriority = 1\nrho = \"2\"\n"
+        "region = {type = \"rectangle\", center = [0, 0], size = [0.5, 0.2], rotate = 30, translate = [0.6, 0.4]}\n"
+        "[[initialize.regions]]\ncells = \"center\"\np = \"0.5\"\n"
+        "region = {type = \"implicit\", f = \"y - 0.5 - 0.1 * sin(10 * x)\"}\n";
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",
+                                        "type = \"symmetry\"\n"),
+                                    2) +
+                          layers);
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "", "euler") +
+                          "[[initialize.regions]]\nT = \"2000\"\nX = {H2 = \"1\", N2 = \"1 + x\"}\n"
+                          "region = {type = \"disk\", center = [0.7, 0.15], radius = 0.1, edge = 0.02}\n");
 }
 
 TEST(MPITest, AxisymmetricRunsMatchSerial) {

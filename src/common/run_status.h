@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "json.h"
+#include "run_health.h"
 
 /** @brief Memory in bytes, -1 where unknown. */
 struct MemoryUsage {
@@ -50,6 +51,7 @@ struct RunStatus {
     MemoryUsage memory;             // largest of the ranks
     std::vector<std::pair<std::string, double>> monitors;  // the progress row's diagnostics
     std::vector<MonitorValues> monitored;                  // the latest values of the monitors
+    health::Report health;                                 // [output] health
 
     /** @brief The run log's progress record. */
     json::Object record() const;
