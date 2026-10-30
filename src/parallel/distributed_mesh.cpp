@@ -140,7 +140,11 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
             const std::string & zone = side ? pairs[k].zone_b : pairs[k].zone_a;
             const auto it = std::find(block.zone_names.begin(), block.zone_names.end(), zone);
             if (it == block.zone_names.end()) {
-                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh.");
+                std::string names;
+                for (const auto & name : block.zone_names) names += (names.empty() ? "" : ", ") + name;
+                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh (zones: " +
+                                         names + "). Pair zones of the mesh in [[periodic]] zones. See "
+                                         "docs/guide/meshes.md#periodic-boundaries.");
             }
             role[static_cast<size_t>(it - block.zone_names.begin())] = static_cast<uint32_t>(2 * k + side);
         }
@@ -254,13 +258,16 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
         for (size_t side = 0; side < 2; side++) {
             if (counts[2 * k + side] == 0) {
                 throw std::runtime_error("Periodic zone " + (side ? pairs[k].zone_b : pairs[k].zone_a) +
-                                         " is not a boundary zone of the mesh.");
+                                         " is not a boundary zone of the mesh. Pair zones of the mesh in [[periodic]] "
+                                         "zones. See docs/guide/meshes.md#periodic-boundaries.");
             }
         }
         if (counts[2 * k] != counts[2 * k + 1]) {
             throw std::runtime_error("Periodic zones " + pairs[k].zone_a + " and " + pairs[k].zone_b + " have " +
                                      std::to_string(counts[2 * k]) + " and " + std::to_string(counts[2 * k + 1]) +
-                                     " nodes.");
+                                     " nodes, but periodic zones need matching nodes. Make the mesh periodic in "
+                                     "the generator (in Gmsh: Periodic Curve or Surface). See "
+                                     "docs/guide/meshes.md#periodic-boundaries.");
         }
     }
 

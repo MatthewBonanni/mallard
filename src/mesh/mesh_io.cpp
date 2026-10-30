@@ -22,6 +22,8 @@
 #include <utility>
 
 #include "comm.h"
+#include "common_io.h"
+#include "log.h"
 #include "periodic.h"
 
 namespace {
@@ -38,6 +40,17 @@ FaceKey face_key(const Nodes & nodes, size_t n) {
     for (size_t k = 0; k < n; k++) key[k] = nodes[k];
     std::sort(key.begin(), key.end());  // the NO_NODE padding sorts last
     return key;
+}
+
+/** @brief "(x, y)" of the centroid of a face's nodes. */
+std::string centroid_text(const std::vector<std::array<rtype, N_DIM>> & nodes, const std::vector<uint32_t> & face) {
+    std::string text;
+    for (size_t d = 0; d < N_DIM; d++) {
+        double x = 0.0;
+        for (const uint32_t n : face) x += double(nodes[n][d]);
+        text += (d ? ", " : "(") + logging::real(x / double(face.size()));
+    }
+    return text + ")";
 }
 
 } // namespace
@@ -131,7 +144,11 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     for (uint32_t i = 0; i < n_half;) {
         uint32_t j = i + 1;
         while (j < n_half && halves[j].first == halves[i].first) j++;
-        if (j - i > 2) throw std::runtime_error("Mesh: a face is shared by more than two cells.");
+        if (j - i > 2) {
+            throw std::runtime_error("Mesh: a face is shared by " + std::to_string(j - i) + " cells, so the mesh has "
+                                     "duplicate or overlapping cells. Remove duplicate elements and nodes in the "
+                                     "mesh generator (in Gmsh: Coherence Mesh).");
+        }
         if (j - i == 2) {
             partner[halves[i].second] = halves[i + 1].second;
             partner[halves[i + 1].second] = halves[i].second;
@@ -195,18 +212,26 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
         const FaceKey key = face_key(half_nodes, half_nodes.size());
         const auto it = std::lower_bound(halves.begin(), halves.end(), std::make_pair(key, uint32_t(0)));
         if (bf.nodes.size() > KEY || it == halves.end() || it->first != key) {
-            throw std::runtime_error("Mesh: boundary face of " + bf.zone + " is not a cell face.");
+            throw std::runtime_error("Mesh: a face of zone " + bf.zone + " at " + centroid_text(nodes, bf.nodes) +
+                                     " is not a face of any cell. Mesh the boundary together with the domain, so "
+                                     "they share nodes, and check that the zone holds only boundary elements.");
         }
         const uint32_t f = cell_faces[it->second];
         if (std::find(periodic_zones.begin(), periodic_zones.end(), bf.zone) != periodic_zones.end()) {
             if (face_cells[f][1] == -1) {
-                throw std::runtime_error("Mesh: a face of periodic zone " + bf.zone +
-                                         " has no matching face in its partner zone.");
+                throw std::runtime_error("Mesh: the face of periodic zone " + bf.zone + " at " +
+                                         centroid_text(nodes, bf.nodes) +
+                                         " has no matching face in its partner zone. The two zones need the same "
+                                         "face layout, offset by the translation (or rotation): make the mesh "
+                                         "periodic in the generator (in Gmsh: Periodic Curve or Surface). See "
+                                         "docs/guide/meshes.md#periodic-boundaries.");
             }
             continue;
         }
         if (face_cells[f][1] != -1) {
-            throw std::runtime_error("Mesh: boundary face of " + bf.zone + " is an interior face.");
+            throw std::runtime_error("Mesh: zone " + bf.zone + " holds the face at " + centroid_text(nodes, bf.nodes) +
+                                     ", which is between two cells, not on the boundary. Remove interior curves "
+                                     "or surfaces from the zone's physical group.");
         }
         if (!zoned[f]) {
             zone_faces[bf.zone].push_back(f);
@@ -374,7 +399,7 @@ void expect_section(std::istream & in, const std::string & name) {
 MeshFileData read_gmsh(const std::string & filename) {
     std::ifstream in(filename);
     if (!in.good()) {
-        throw std::runtime_error("Could not open mesh file: " + filename + ".");
+        throw cannot_read("the mesh file", filename);
     }
     MeshFileData data;
     double version = 0.0;
@@ -390,10 +415,16 @@ MeshFileData read_gmsh(const std::string & filename) {
         }
     };
     if (file_type != 0) {
-        throw std::runtime_error("Gmsh file " + filename + ": only ASCII files are supported.");
+        throw std::runtime_error("Gmsh file " + filename + " is binary; Mallard reads ASCII files. Save it as "
+                                 "ASCII (in Gmsh: Mesh.Binary = 0, or uncheck Binary when exporting). See "
+                                 "docs/guide/meshes.md#mesh-files-gmsh.");
     }
     if (!(version == 2.2 || (version >= 4.1 && version < 5.0))) {
-        throw std::runtime_error("Gmsh file " + filename + ": unsupported format version.");
+        std::ostringstream v;
+        v << version;
+        throw std::runtime_error("Gmsh file " + filename + " has format version " + v.str() +
+                                 "; Mallard reads versions 2.2 and 4.1. Export it again as one of those (in Gmsh: "
+                                 "Mesh.MshFileVersion = 4.1, or gmsh -format msh41).");
     }
 
     std::map<int, std::string> physical_names;                  // Boundary-dimension groups only
@@ -406,8 +437,11 @@ MeshFileData read_gmsh(const std::string & filename) {
         const GmshElementType et = gmsh_element_type(type, filename);
         if (et.dim > N_DIM) {
             throw std::runtime_error("Gmsh file " + filename + " has " + std::to_string(et.dim) +
-                                     "D elements, but Mallard was built with Mallard_DIM = " +
-                                     std::to_string(N_DIM) + ".");
+                                     "D elements, but this Mallard is the " + std::to_string(N_DIM) +
+                                     "D solver (built with Mallard_DIM = " + std::to_string(N_DIM) +
+                                     "). Run the " + std::to_string(et.dim) + "D solver (built with -DMallard_DIM=" +
+                                     std::to_string(et.dim) + "), or mesh only the " + std::to_string(N_DIM) +
+                                     "D geometry. See docs/guide/meshes.md#mesh-files-gmsh.");
         }
         if (et.dim < BOUNDARY_DIM || (et.dim == BOUNDARY_DIM && physical == 0)) return;
         high_order |= et.n_nodes > et.n_corners;
@@ -541,7 +575,11 @@ MeshFileData read_gmsh(const std::string & filename) {
         }
     }
     if (data.cells.empty()) {
-        throw std::runtime_error("Gmsh file " + filename + " contains no " + std::to_string(N_DIM) + "D elements.");
+        throw std::runtime_error("Gmsh file " + filename + " contains no " + std::to_string(N_DIM) +
+                                 "D elements, the cells of the " + std::to_string(N_DIM) +
+                                 "D solver. Generate the " + std::to_string(N_DIM) + "D mesh (gmsh -" +
+                                 std::to_string(N_DIM) + "); if you saved only physical groups, include the " +
+                                 (N_DIM == 2 ? "surfaces" : "volumes") + " in one (or set Mesh.SaveAll = 1).");
     }
     if (high_order) drop_unused_nodes(data);
     return data;

@@ -60,21 +60,14 @@ const std::string PLANNED = "planned in https://github.com/MatthewBonanni/mallar
 
 std::string guide(const std::string & anchor) { return "docs/guide/boundary_conditions.md#" + anchor; }
 
-std::size_t line_in(const Input & entry, const std::string & key) {
-    const auto & entries = entry.as_table().entries();
-    const auto it = entries.find(key);
-    const auto location = it != entries.end() ? it->second.location() : entry.location();
-    return location.is_ok() ? location.first_line_number() : 0;
-}
-
+/** @brief An error of key `key` of a [[boundaries]] entry (or its nscbc table): what is wrong, what to do. */
 [[noreturn]] void fail(const Input & entry, const std::string & where, const std::string & key,
-                       const std::string & message, const std::string & anchor) {
-    Diagnostic d;
-    d.key = where + "." + key;
-    d.line = line_in(entry, key);
-    d.message = message;
-    d.docs = guide(anchor);
-    throw InputError(d);
+                       const std::string & message, const std::string & fix, const std::string & anchor) {
+    throw InputError({.key = where + "." + key,
+                      .line = line_of(entry, key),
+                      .message = message,
+                      .fix = fix,
+                      .docs = guide(anchor)});
 }
 
 std::string quoted(const std::vector<std::string> & names) {
@@ -117,25 +110,29 @@ void read_nscbc(const Input & entry, const std::string & where, BoundaryConditio
     const std::string anchor = "nscbc";
     const Input & table = entry.at("nscbc");
     const std::string tw = where + ".nscbc";
-    if (!table.is_table()) fail(entry, where, "nscbc", "must be a table: nscbc = { L = ... }", anchor);
+    if (!table.is_table()) fail(entry, where, "nscbc", "must be a table", "Write nscbc = { L = ... }", anchor);
     const bool inlet = bc.type == BoundaryType::INLET_STATE;
     for (const char * key : {"sigma_T", "sigma_t"}) {
         if (!inlet && table.as_table().entries().contains(key)) {
             fail(table, tw, key, std::string("doesn't apply to an outlet's nscbc: it relaxes an inlet's ") +
-                                     (key[6] == 'T' ? "temperature" : "tangential velocity"), anchor);
+                                     (key[6] == 'T' ? "temperature" : "tangential velocity"),
+                 "Remove it", anchor);
         }
     }
     if (!table.contains("L")) {
-        fail(table, tw, "L", "missing; nscbc needs L, a length of the domain (its extent normal to the boundary)",
-             anchor);
+        fail(table, tw, "L", "missing; nscbc needs L, a length of the domain",
+             "Use the domain's extent normal to the boundary, e.g. nscbc = { L = 0.1 }", anchor);
     }
     const rtype L = find_real(table, "L", dim::length);
-    if (!(L > 0.0_r)) fail(table, tw, "L", "must be positive: a length of the domain", anchor);
+    if (!(L > 0.0_r)) {
+        fail(table, tw, "L", "must be positive", "Use a length of the domain, e.g. its extent normal to the boundary",
+             anchor);
+    }
     // sigma / L, or a negative fallback if the key is absent
     auto rate = [&](const char * key, rtype fallback) {
         if (!table.contains(key)) return fallback;
         const rtype sigma = find_real(table, key, dim::none);
-        if (!(sigma >= 0.0_r)) fail(table, tw, key, "must be non-negative", anchor);
+        if (!(sigma >= 0.0_r)) fail(table, tw, key, "must be non-negative", "", anchor);
         return sigma / L;
     };
     bc.relax[Relax::ACOUSTIC] = table.contains("sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
@@ -145,7 +142,7 @@ void read_nscbc(const Input & entry, const std::string & where, BoundaryConditio
     if (table.contains("beta")) {
         bc.relax[Relax::BETA] = find_real(table, "beta", dim::none);
         if (!(bc.relax[Relax::BETA] >= 0.0_r && bc.relax[Relax::BETA] <= 1.0_r)) {
-            fail(table, tw, "beta", "must be in [0, 1]", anchor);
+            fail(table, tw, "beta", "must be in [0, 1]", "", anchor);
         }
     }
     if (inlet) {
@@ -160,7 +157,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
     const std::string name = find_value<std::string>(input, "name");
     const std::string type_str = find_value<std::string>(input, "type");
     const std::string where = "boundaries[name = \"" + name + "\"]";
-    auto it = find_option(BOUNDARY_TYPES, where + ".type", type_str);
+    auto it = find_option(BOUNDARY_TYPES, where + ".type", type_str, line_of(input, "type"));
     BoundaryCondition bc;
     bc.type = it->second;
     const BoundarySubtype & subtype =
@@ -185,8 +182,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         if (!present(key) || std::find(taken.begin(), taken.end(), key) != taken.end()) continue;
         std::string message = "`" + key + "` doesn't apply to `" + type_str + "`";
         if (key == "nscbc" || key == "turbulence") message += " (not supported yet: " + PLANNED + ")";
-        message += "; use " + quoted(owners);
-        fail(input, where, key, message, anchor);
+        fail(input, where, key, message, "Use " + quoted(owners) + ", or remove " + key, anchor);
     }
     for (const auto & r : subtype.required) {
         if (r == "u" && bc.type == BoundaryType::INLET_STATE && present("turbulence") &&
@@ -202,12 +198,12 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         if (given == 0) {
             fail(input, where, alternatives[0],
                  "missing; `" + type_str + "` needs " + (alternatives.size() > 1 ? "one of " : "") + quoted(alternatives),
-                 anchor);
+                 "", anchor);
         }
         if (given > 1) {
             fail(input, where, alternatives[1], "given together with " + quoted({alternatives[0]}) +
-                                                    "; they are two ways to set the same flow: give exactly one",
-                 anchor);
+                                                    "; they are two ways to set the same flow",
+                 "Give exactly one", anchor);
         }
     }
 
@@ -217,33 +213,35 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         if (find_value<bool>(input, "average")) bc.options |= AVERAGE;
     }
     if (bc.has(NSCBC) && bc.has(AVERAGE)) {
-        fail(input, where, "average", "`average` and `nscbc` don't combine on `outlet_pressure` (" + PLANNED +
-                                          "); remove one of them", anchor);
+        fail(input, where, "average", "`average` and `nscbc` don't combine on `outlet_pressure` (" + PLANNED + ")",
+             "Remove one of them", anchor);
     }
     if (present("turbulence") && !bc.has(NSCBC)) {
         fail(input, where, "turbulence", "`turbulence` needs `nscbc` on `inlet_state` (synthetic turbulence on "
-                                         "inlets without nscbc is " + PLANNED + "); add nscbc = { L = ... }",
-             "synthetic-turbulence");
+                                         "inlets without nscbc is " + PLANNED + ")",
+             "Add nscbc = { L = ... }", "synthetic-turbulence-turbulence");
     }
     if (present("profile") && !present("mdot")) {
-        fail(input, where, "profile", "goes with mdot: it shapes a total flow rate across the inlet; use mdot with "
-                                      "it, or write the shape into mass_flux as an expression", anchor);
+        fail(input, where, "profile", "goes with mdot: it shapes a total flow rate across the inlet",
+             "Use mdot with the profile, or write the shape into mass_flux as an expression", anchor);
     }
     const bool vector_u = present("u") && input.at("u").is_array();
     if (bc.is_wall() && present("u") && !vector_u && !present("direction")) {
-        fail(input, where, "u", "is a speed, so the wall needs a direction to move along: add direction = [...], or "
-                                "give u as a vector (a wall moving along its normal is " + PLANNED + ")", anchor);
+        fail(input, where, "u", "is a speed, so the wall needs a direction to move along (a wall moving along its "
+                                "normal is " + PLANNED + ")",
+             "Add direction = [...], or give u as a vector", anchor);
     }
     if (bc.type == BoundaryType::FARFIELD && present("u") && !vector_u) {
-        fail(input, where, "u", "must be the free-stream velocity vector, u = [...]", anchor);
+        fail(input, where, "u", "must be the free-stream velocity vector",
+             N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]", anchor);
     }
     if (bc.is_wall() && present("direction") && !present("u")) {
-        fail(input, where, "direction", "goes with a wall speed u; remove it, or add u", anchor);
+        fail(input, where, "direction", "goes with a wall speed u", "Remove it, or add u", anchor);
     }
     if (bc.type == BoundaryType::INLET_MASS_FLOW && present("mass_flux") && input.at("mass_flux").is_array() &&
         present("direction")) {
-        fail(input, where, "direction", "doesn't go with a mass_flux vector, which has its direction already; remove "
-                                        "it, or give mass_flux as the flux into the domain", anchor);
+        fail(input, where, "direction", "doesn't go with a mass_flux vector, which has its direction already",
+             "Remove it, or give mass_flux as the flux into the domain", anchor);
     }
 
     // Numbers that are expressions of x, y, z, t are set per face by the solver
@@ -254,7 +252,8 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         for (uint16_t x = 0; x < 3 && p->compiled(); x++) {
             if (p->compiled()->uses(x)) {
                 fail(input, where, "p", "with average = true is one area-averaged pressure: it may depend on t, not "
-                                        "on x, y or z", "average");
+                                        "on x, y or z",
+                     "Remove average to impose p face by face", "average-area-averaged-pressure");
             }
         }
     }
@@ -273,8 +272,8 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         for (const rtype c : dv) norm += c * c;
         norm = std::sqrt(norm);
         if (dv.size() != N_DIM || !(norm > 0.0_r)) {
-            fail(input, where, "direction", "must be a nonzero vector of " + std::to_string(N_DIM) +
-                                                " components; remove it to use each face's inward normal", anchor);
+            fail(input, where, "direction", "must be a nonzero vector of " + std::to_string(N_DIM) + " components",
+                 "Remove it to use each face's inward normal", anchor);
         }
         FOR_I_DIM bc.data[1 + i] = dv[i] / norm;
     }

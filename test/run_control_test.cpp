@@ -225,6 +225,8 @@ TEST(RunControlTest, DivergenceReportsTheCellAndWritesTheLastValidState) {
         << message;
     const std::string last = restart_file(dir, bad - 1);
     EXPECT_NE(message.find("last valid state (step " + std::to_string(bad - 1)), std::string::npos) << message;
+    EXPECT_NE(message.find("lower run.cfl"), std::string::npos) << message;
+    EXPECT_NE(message.find("docs/guide/running.md#divergence"), std::string::npos) << message;
     ASSERT_TRUE(fs::exists(last)) << message;
     const RestartData restart = read_restart(last);
     EXPECT_EQ(restart.step, bad - 1);
