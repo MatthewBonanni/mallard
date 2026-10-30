@@ -13,12 +13,15 @@ and how Mallard puts them on a mesh. Every key, with its default, is in the
 | `[[probes]]` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
 | `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
+| `[[initialize.regions]]` `region` | a [region](#regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
+| `[[initialize.data]]` `region` | a [region](#regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `[[mesh.curved]]` | `circle`, `sphere` or `cylinder` of its own keys (to move onto regions: [#407](https://github.com/MatthewBonanni/mallard/issues/407)) | [Curved boundaries](meshes.md#curved-boundaries) |
 
-Initial states and sponges take expressions rather than regions; a comparison
+Sponges and analytical initial states take expressions; a comparison
 such as `"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp region there, which the
-initial state averages over each cell.
+initial state averages over each cell. `[[initialize.regions]]` takes the
+region itself, and also layers it over a restart.
 
 ## Coordinates and units
 
