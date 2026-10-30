@@ -46,14 +46,17 @@ inline std::string write_temp_shared(const std::string & name, const std::string
 
 /**
  * @brief Gmsh 2.2 file of the unit square: columns alternate between quads and
- *        pairs of triangles, and interior nodes are randomly displaced.
+ *        pairs of triangles, and interior nodes are randomly displaced. With
+ *        cell_zones, the cells of the left and right halves of the columns
+ *        are the physical groups "left_half" and "right_half".
  */
-inline std::string jittered_mixed_mesh(uint32_t n) {
+inline std::string jittered_mixed_mesh(uint32_t n, bool cell_zones = false) {
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> jitter(-0.2, 0.2);
     std::ostringstream s;
-    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n4\n"
-      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n$EndPhysicalNames\n";
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n" << (cell_zones ? 6 : 4) << "\n"
+      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n"
+      << (cell_zones ? "2 5 \"left_half\"\n2 6 \"right_half\"\n" : "") << "$EndPhysicalNames\n";
     auto id = [&](uint32_t i, uint32_t j) { return j * (n + 1) + i + 1; };
     s << "$Nodes\n" << (n + 1) * (n + 1) << "\n";
     for (uint32_t j = 0; j <= n; j++) {
@@ -75,11 +78,12 @@ inline std::string jittered_mixed_mesh(uint32_t n) {
         for (uint32_t i = 0; i < n; i++) {
             const auto a = std::to_string(id(i, j)), b = std::to_string(id(i + 1, j));
             const auto c = std::to_string(id(i + 1, j + 1)), d = std::to_string(id(i, j + 1));
+            const std::string tags = !cell_zones ? "2 0 1 " : 2 * i < n ? "2 5 1 " : "2 6 1 ";
             if (i % 2 == 0) {
-                elements.push_back("3 2 0 1 " + a + " " + b + " " + c + " " + d);
+                elements.push_back("3 " + tags + a + " " + b + " " + c + " " + d);
             } else {
-                elements.push_back("2 2 0 1 " + a + " " + b + " " + c);
-                elements.push_back("2 2 0 1 " + a + " " + c + " " + d);
+                elements.push_back("2 " + tags + a + " " + b + " " + c);
+                elements.push_back("2 " + tags + a + " " + c + " " + d);
             }
         }
     }

@@ -107,11 +107,57 @@ def tetrahedron_mesh(path, n=14, jitter=0.25, seed=11):
     path.write_text("\n".join(lines) + "\n")
 
 
+def holed_mesh(path, n=14, jitter=0.25, seed=3, hole=(0.3, 0.5, 0.12)):
+    """Gmsh 2.2 file of the unit square with a round hole: boundary zones "outer" and "hole", cell zones "left_half"
+    and "right_half" (cell centroids left and right of x = 0.5)."""
+    rng = np.random.default_rng(seed)
+    hx, hy, hr = hole
+    g = np.linspace(0.0, 1.0, n + 1)
+    X, Y = np.meshgrid(g, g, indexing="ij")
+    pts = np.column_stack([X.ravel(), Y.ravel()])
+    inner = (pts[:, 0] > 0) & (pts[:, 0] < 1) & (pts[:, 1] > 0) & (pts[:, 1] < 1)
+    pts[inner] += rng.uniform(-jitter, jitter, (inner.sum(), 2)) / n
+    pts = pts[np.hypot(pts[:, 0] - hx, pts[:, 1] - hy) > hr + 0.4 / n]
+    m = int(np.ceil(2 * np.pi * hr * n * 1.3))
+    a = np.linspace(0.0, 2 * np.pi, m, endpoint=False)
+    pts = np.vstack([pts, np.column_stack([hx + hr * np.cos(a), hy + hr * np.sin(a)])])
+    tri = Delaunay(pts).simplices
+    c = pts[tri].mean(axis=1)
+    tri = tri[np.hypot(c[:, 0] - hx, c[:, 1] - hy) > hr]
+    edges = {}
+    for t in tri:
+        for u, v in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])):
+            key = (min(u, v), max(u, v))
+            edges[key] = edges.get(key, 0) + 1
+    boundary = [e for e, count in edges.items() if count == 1]
+    lines = ["$MeshFormat", "2.2 0 8", "$EndMeshFormat", "$PhysicalNames", "4", '1 1 "outer"', '1 2 "hole"',
+             '2 3 "left_half"', '2 4 "right_half"', "$EndPhysicalNames", "$Nodes", str(len(pts))]
+    lines += [f"{i + 1} {x:.17g} {y:.17g} 0" for i, (x, y) in enumerate(pts)]
+    lines += ["$EndNodes", "$Elements", str(len(boundary) + len(tri))]
+    k = 1
+    for u, v in boundary:
+        mid = 0.5 * (pts[u] + pts[v])
+        zone = 2 if np.hypot(mid[0] - hx, mid[1] - hy) < hr + 0.5 / n else 1
+        lines.append(f"{k} 1 2 {zone} {zone} {u + 1} {v + 1}")
+        k += 1
+    for t in tri:
+        q = pts[t]
+        if (q[1, 0] - q[0, 0]) * (q[2, 1] - q[0, 1]) - (q[1, 1] - q[0, 1]) * (q[2, 0] - q[0, 0]) < 0:
+            t = t[[0, 2, 1]]
+        zone = 3 if q[:, 0].mean() < 0.5 else 4
+        lines.append(f"{k} 2 2 {zone} {zone} {t[0] + 1} {t[1] + 1} {t[2] + 1}")
+        k += 1
+    lines.append("$EndElements")
+    path.write_text("\n".join(lines) + "\n")
+    return pts, [pts[[u, v]] for u, v in boundary]
+
+
 # ------------------------------------------------------------------- runs
 
-def fractions(binary, mesh, region, work, name, dim):
+def fractions(binary, mesh, region, work, name, dim, zones=("wall",)):
     """Cells of the mesh and the region's volume fraction in each, from a one-step run."""
     zero = "[0.0, 0.0]" if dim == 2 else "[0.0, 0.0, 0.0]"
+    boundaries = "".join(f'[[boundaries]]\nname = "{z}"\ntype = "symmetry"\n' for z in zones)
     toml = f"""[run]
 n_steps = 1
 dt = 1e-9
@@ -123,10 +169,7 @@ type = "constant"
 u = {zero}
 p = 1.0
 T = 1.0
-[[boundaries]]
-name = "wall"
-type = "symmetry"
-[[sources]]
+{boundaries}[[sources]]
 rhoE = 1
 region = {region}
 [output]
@@ -331,6 +374,44 @@ def regions_3d(P, args):
     return fig
 
 
+HOLE = (0.3, 0.5, 0.12)
+MESH_REGIONS = [
+    ('"domain" minus a disk', '{type = "difference", regions = ["domain", {type = "disk", center = [0.62, 0.55], '
+     'radius = 0.24}]}', lambda x, y: np.hypot(x - 0.62, y - 0.55) >= 0.24),
+    ('"left_half" and inside a circle',
+     '{type = "intersection", regions = ["left_half", {type = "interior", of = {type = "circle", '
+     'center = [0.45, 0.5], radius = 0.33}}]}', lambda x, y: np.hypot(x - 0.45, y - 0.5) < 0.33),
+    ('inside the zone "outer"', '{type = "interior", of = "outer"}', None),
+]
+
+
+@functools.cache
+def data_mesh_regions(mallard):
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "holed.msh"
+    _, edges = holed_mesh(mesh, hole=HOLE)
+    out = {title: fractions(mallard, mesh.name, region, work, f"m{i}", 2, zones=("outer", "hole"))
+           for i, (title, region, _) in enumerate(MESH_REGIONS)}
+    return out, edges
+
+
+def mesh_regions(P, args):
+    """Regions made with the mesh's own: the domain, a cell zone and the interior of a boundary zone."""
+    data, edges = data_mesh_regions(args.mallard)
+    fig, axes = plt.subplots(1, 3, figsize=(11.0, 3.8), gridspec_kw=dict(wspace=0.08))
+    for (title, _, inside), ax in zip(MESH_REGIONS, axes.flat):
+        panel(ax, P, *data[title], inside, title)
+    hx, hy, hr = HOLE
+    for e in edges:
+        hole = np.hypot(e[:, 0].mean() - hx, e[:, 1].mean() - hy) < hr + 0.05
+        axes[-1].plot(e[:, 0], e[:, 1], color=P["flame"] if not hole else P["blue"], lw=2.2, solid_capstyle="round")
+    label(axes[-1], 0.5, -0.06, '"outer"', P, color=P["flame"], size=10, va="top")
+    label(axes[-1], hx, hy, '"hole"', P, color=P["blue"], size=10)
+    axes[1].axvline(0.5, color=P["muted"], lw=1.0, ls="--")
+    colorbar(fig, axes, P)
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -342,7 +423,7 @@ class Args(tuple):
 
 
 FIGURES = {"region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
-           "regions_3d": regions_3d}
+           "region_mesh_regions": mesh_regions, "regions_3d": regions_3d}
 
 
 def figures(mallard, mallard3d=None, names=()):

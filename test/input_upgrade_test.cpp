@@ -194,6 +194,11 @@ TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
                        "[[probes]]\nname = \"p\"\ntype = \"circle\"   # sampled\n");
     EXPECT_EQ(findings.size(), 4u);
 
+    // The region of a boundary or interior postdates the old names: a circle there is the curve
+    const std::string interior = "[[sources]]\nrhoE = 1\nregion = {type = \"interior\", of = {type = \"circle\", "
+                                 "center = [0, 0], radius = 1}}\n";
+    EXPECT_EQ(input_upgrade::upgrade_text(interior, findings, reformatted), interior);
+
     // Without the case's dimension, a rename that depends on it is an error
     EXPECT_THROW(input_upgrade::upgrade_text(region, findings, reformatted, input_upgrade::rules(), 0), InputError);
     EXPECT_NO_THROW(input_upgrade::upgrade_text(probe, findings, reformatted, input_upgrade::rules(), 0));

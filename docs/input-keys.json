@@ -3734,6 +3734,170 @@
    "examples/source_regions/input.toml"
   ]
  },
+ "probes.region.a": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.b": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.edge": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "probes.region.regions.center": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "probes.region.regions.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "probes.region.regions.rotate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.scale": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.translate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.type": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "annulus",
+   "boundary",
+   "circle",
+   "cone",
+   "cylinder",
+   "difference",
+   "disk",
+   "ellipse",
+   "ellipsoid",
+   "frustum",
+   "half_space",
+   "implicit",
+   "interior",
+   "intersection",
+   "polygon",
+   "rectangle",
+   "sphere",
+   "torus",
+   "union"
+  ]
+ },
+ "probes.region.rotate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.scale": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.translate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.type": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "annulus",
+   "boundary",
+   "circle",
+   "cone",
+   "cylinder",
+   "difference",
+   "disk",
+   "ellipse",
+   "ellipsoid",
+   "frustum",
+   "half_space",
+   "implicit",
+   "interior",
+   "intersection",
+   "polygon",
+   "rectangle",
+   "sphere",
+   "torus",
+   "union"
+  ]
+ },
  "probes.rotate": {
   "dims": [
    2,
@@ -3896,6 +4060,12 @@
    "examples/source_regions/input.toml"
   ]
  },
+ "regions.<name>.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "regions.<name>.inner_radius": {
   "dims": [
    2
@@ -3953,15 +4123,18 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
+   "boundary",
+   "circle",
    "cone",
    "cylinder",
    "difference",
    "disk",
    "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
+   "interior",
    "intersection",
    "polygon",
    "rectangle",
@@ -4361,6 +4534,12 @@
    "examples/source_regions/input.toml"
   ]
  },
+ "sources.region.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "sources.region.pivot": {
   "dims": [
    2
@@ -4408,14 +4587,18 @@
   "type": "string",
   "values": [
    "annulus",
+   "boundary",
+   "circle",
    "cone",
    "cylinder",
    "difference",
    "disk",
+   "ellipse",
    "ellipsoid",
    "frustum",
    "half_space",
    "implicit",
+   "interior",
    "intersection",
    "polygon",
    "rectangle",

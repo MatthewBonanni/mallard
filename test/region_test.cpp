@@ -191,9 +191,9 @@ std::vector<Case> cases() {
 std::shared_ptr<Mesh> coarse_unstructured_mesh() {
     auto mesh = std::make_shared<Mesh>();
     if constexpr (N_DIM == 2) {
-        mesh->init_file(write_temp("mallard_region.msh", jittered_mixed_mesh(8)));
+        mesh->init_file(write_temp_shared("mallard_region.msh", jittered_mixed_mesh(8)));
     } else {
-        mesh->init_file(write_temp("mallard_region.msh", jittered_periodic_mesh_3d(5, 0.2)));
+        mesh->init_file(write_temp_shared("mallard_region.msh", jittered_periodic_mesh_3d(5, 0.2)));
     }
     return mesh;
 }
@@ -348,28 +348,205 @@ TEST(RegionTest, RejectsInvalidRegions) {
     }
 }
 
-TEST(RegionTest, TypesOfAnotherDimensionNameTheRegionToUse) {
-    const std::vector<std::pair<std::string, std::string>> cases =
-        N_DIM == 2 ? std::vector<std::pair<std::string, std::string>>{{"circle", "\"disk\""},
-                                                                     {"ellipse", "\"ellipsoid\""},
-                                                                     {"box", "\"rectangle\""}}
-                   : std::vector<std::pair<std::string, std::string>>{{"circle", "\"sphere\""},
-                                                                     {"ellipse", "\"ellipsoid\""},
-                                                                     {"disk", "\"sphere\""},
-                                                                     {"rectangle", "\"box\""},
-                                                                     {"annulus", "\"cylinder\" with inner_radius"},
-                                                                     {"polygon", "\"implicit\""}};
-    for (const auto & [type, use] : cases) {
+TEST(RegionTest, EachTypeHasOneDimension) {
+    const std::string c = N_DIM == 2 ? "center = [0.5, 0.5]" : "center = [0.5, 0.5, 0.5], normal = [0, 0, 1]";
+    const std::vector<std::pair<std::string, int>> cases = {
+        {"{type = \"circle\", " + c + ", radius = 0.2}", 1},
+        {"{type = \"ellipse\", " + c + ", semi_axes = [0.2, 0.1]}", 1},
+        {"{type = \"disk\", " + c + ", radius = 0.2}", 2},
+        {"{type = \"annulus\", " + c + ", radius = 0.2, inner_radius = 0.1}", 2},
+        {"{type = \"rectangle\", " + c + ", size = [0.2, 0.1]}", 2},
+        {"{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2}", N_DIM}};
+    for (const auto & [table, dimension] : cases) {
+        const region::Region r = make_region(table);
+        EXPECT_EQ(r.dimension(), dimension) << table;
+        EXPECT_EQ(r.closed(), dimension == 1) << table;
+    }
+    if constexpr (N_DIM == 2) {
         try {
-            make_region("{type = \"" + type + "\", center = [0, 0, 0], radius = 1, size = [1, 1, 1]}");
-            ADD_FAILURE() << type << " was accepted";
+            make_region("{type = \"box\", center = [0, 0], size = [1, 1]}");
+            ADD_FAILURE() << "a 2D box was accepted";
         } catch (const InputError & e) {
-            const std::string what = e.what();
-            EXPECT_NE(what.find(std::string("regions here are ") + (N_DIM == 2 ? "areas" : "volumes") + ": use " + use),
-                      std::string::npos)
-                << what;
+            EXPECT_NE(std::string(e.what()).find("use \"rectangle\""), std::string::npos) << e.what();
         }
     }
+}
+
+TEST(RegionTest, BoundaryAndInteriorAreInverses) {
+    const auto mesh = coarse_unstructured_mesh();
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.45, 0.5], radius = 0.3}"
+                                        : "{type = \"sphere\", center = [0.45, 0.5, 0.5], radius = 0.3}";
+    const std::string box = N_DIM == 2 ? "{type = \"rectangle\", center = [0.6, 0.5], size = [0.3, 0.9]}"
+                                       : "{type = \"box\", center = [0.6, 0.5, 0.5], size = [0.3, 0.9, 0.9]}";
+    for (const std::string & table : {ball, "{type = \"difference\", a = " + ball + ", b = " + box + "}"}) {
+        const std::vector<double> f = region::cell_fractions(*mesh, make_region(table));
+        const region::Region boundary = make_region("{type = \"boundary\", of = " + table + "}");
+        EXPECT_EQ(boundary.dimension(), N_DIM - 1);
+        EXPECT_TRUE(boundary.closed());
+        const std::string unfilled = table.substr(0, table.size() - 1) + ", filled = false}";
+        EXPECT_EQ(make_region(unfilled).dimension(), N_DIM - 1);
+        for (const std::string & inverse : {"{type = \"interior\", of = {type = \"boundary\", of = " + table + "}}",
+                                            "{type = \"interior\", of = " + unfilled + "}"}) {
+            EXPECT_EQ(region::cell_fractions(*mesh, make_region(inverse)), f) << inverse;
+        }
+    }
+}
+
+TEST(RegionTest, CurvesAreTheBoundariesOfFlatRegions) {
+    const auto mesh = coarse_unstructured_mesh();
+    if constexpr (N_DIM == 2) {
+        // A circle and an ellipse are the boundaries of a disk and of an ellipsoid's slice
+        const std::vector<double> disk =
+            region::cell_fractions(*mesh, make_region("{type = \"disk\", center = [0.5, 0.5], radius = 0.3}"));
+        EXPECT_EQ(region::cell_fractions(*mesh, make_region("{type = \"interior\", of = {type = \"circle\", "
+                                                            "center = [0.5, 0.5], radius = 0.3}}")),
+                  disk);
+        EXPECT_EQ(region::cell_fractions(*mesh, make_region("{type = \"interior\", of = {type = \"disk\", "
+                                                            "center = [0.5, 0.5], radius = 0.3, filled = false}}")),
+                  disk);
+        const region::Region ellipse =
+            make_region("{type = \"interior\", of = {type = \"ellipse\", center = [0.5, 0.5], semi_axes = [0.3, 0.2]}}");
+        EXPECT_EQ(region::cell_fractions(*mesh, ellipse),
+                  region::cell_fractions(*mesh, make_region("{type = \"ellipsoid\", center = [0.5, 0.5], "
+                                                            "semi_axes = [0.3, 0.2]}")));
+    } else {
+        // Flat surfaces have an edge curve, which is closed
+        for (const std::string table : {"{type = \"rectangle\", center = [0.5, 0.5, 0.5], normal = [1, 1, 0], "
+                                        "size = [0.4, 0.2], filled = false}",
+                                        "{type = \"boundary\", of = {type = \"disk\", center = [0.5, 0.5, 0.5], "
+                                        "normal = [0, 0, 1], radius = 0.3}}"}) {
+            const region::Region edge = make_region(table);
+            EXPECT_EQ(edge.dimension(), 1) << table;
+            EXPECT_TRUE(edge.closed()) << table;
+        }
+        // An annulus has two edges, one piece where each circle of its region meets the plane
+        const region::Region rings = make_region("{type = \"boundary\", of = {type = \"annulus\", center = [0, 0, 0], "
+                                                 "normal = [0, 0, 1], radius = 2, inner_radius = 1}}");
+        EXPECT_EQ(rings.dimension(), 1);
+        EXPECT_EQ(rings.pieces().size(), 1u);
+        EXPECT_EQ(rings.pieces()[0].carriers.size(), 2u);
+    }
+}
+
+TEST(RegionTest, BoundariesAndInteriorsFollowTheDimensionRules) {
+    const std::string c = N_DIM == 2 ? "center = [0, 0]" : "center = [0, 0, 0], normal = [0, 0, 1]";
+    const std::string circle = "{type = \"circle\", " + c + ", radius = 1}";
+    const std::string disk = "{type = \"disk\", " + c + ", radius = 1}";
+    const std::string sphere = "{type = \"sphere\", center = [0, 0, 0], radius = 1}";
+    auto error = [](const std::string & table) {
+        try {
+            make_region(table);
+        } catch (const InputError & e) {
+            return std::string(e.what());
+        }
+        return std::string("accepted");
+    };
+    // Closed regions have no boundary, open ones no interior, filled ones are already filled
+    EXPECT_NE(error("{type = \"boundary\", of = " + circle + "}").find("closed curve, which has no boundary"),
+              std::string::npos);
+    EXPECT_NE(error("{type = \"boundary\", of = {type = \"boundary\", of = " + sphere + "}}").find("no boundary"),
+              std::string::npos);
+    EXPECT_NE(error("{type = \"interior\", of = " + sphere + "}").find("already"), std::string::npos);
+    const std::string shell = sphere.substr(0, sphere.size() - 1) + ", filled = false}";
+    EXPECT_NE(error("{type = \"interior\", of = {type = \"union\", regions = [" + shell + ", " + shell + "]}}")
+                  .find("union"),
+              std::string::npos);
+    EXPECT_NE(error(circle.substr(0, circle.size() - 1) + ", filled = false}").find("{type = \"boundary\", of = ...}"),
+              std::string::npos);
+    EXPECT_NE(error(circle.substr(0, circle.size() - 1) + ", edge = 0.1}").find("edge"), std::string::npos);
+    EXPECT_NE(error("{type = \"intersection\", regions = [" + circle + ", " + circle + "]}").find("combine by union"),
+              std::string::npos);
+    EXPECT_NE(error("{type = \"union\", regions = [" + circle + ", " + sphere + "]}").find("one dimension"),
+              std::string::npos);
+    if constexpr (N_DIM == 3) {
+        EXPECT_NE(error("{type = \"interior\", of = " + disk + "}").find("not closed"), std::string::npos);
+        EXPECT_NE(error("{type = \"interior\", of = " + circle + "}").find("is a curve; interior takes a closed surface"),
+                  std::string::npos);
+        EXPECT_NE(error("{type = \"boundary\", of = {type = \"boundary\", of = " + disk + "}}").find("no boundary"),
+                  std::string::npos);
+    } else {
+        EXPECT_EQ(error("{type = \"interior\", of = " + circle + "}"), "accepted");
+    }
+}
+
+TEST(RegionTest, MeshZonesAndTheDomainAreRegionsByName) {
+    const auto mesh = coarse_unstructured_mesh();
+    const region::MeshRegions automatic(*mesh);
+    const auto names = automatic.names();
+    EXPECT_EQ(names[0], "domain");
+    EXPECT_NE(std::find(names.begin(), names.end(), "left"), names.end());
+    auto region = [&](const std::string & table) {
+        return region::Region(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic);
+    };
+    EXPECT_EQ(region::cell_fractions(*mesh, region("\"domain\"")), std::vector<double>(mesh->n_cells, 1.0));
+    const region::Region left = region("\"left\"");
+    EXPECT_EQ(left.dimension(), N_DIM - 1);
+    EXPECT_FALSE(left.closed());
+    // Shapes and regions of the mesh combine exactly: the domain minus a ball is the ball's complement
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.45, 0.5], radius = 0.3}"
+                                        : "{type = \"sphere\", center = [0.45, 0.5, 0.5], radius = 0.3}";
+    const std::vector<double> in = region::cell_fractions(*mesh, region(ball));
+    const std::vector<double> out =
+        region::cell_fractions(*mesh, region("{type = \"difference\", regions = [\"domain\", " + ball + "]}"));
+    for (uint32_t c = 0; c < mesh->n_cells; c++) EXPECT_EQ(out[c], 1.0 - in[c]);
+    EXPECT_EQ(region::cell_fractions(*mesh, region("{type = \"intersection\", regions = [\"domain\", " + ball + "]}")), in);
+    EXPECT_EQ(region::cell_fractions(*mesh, region("{type = \"interior\", of = {type = \"boundary\", of = "
+                                                   "{type = \"difference\", regions = [\"domain\", " + ball + "]}}}")),
+              out);
+    // The mesh's regions stay where they are, and have no smooth edge
+    EXPECT_ANY_THROW(region("{type = \"union\", regions = [\"domain\"], translate = [1, 0, 0]}"));
+    EXPECT_ANY_THROW(region("{type = \"union\", regions = [\"domain\", " + ball + "], edge = 0.1}"));
+    EXPECT_ANY_THROW(region("{type = \"interior\", of = \"left\"}"));
+    try {
+        region("\"lefft\"");
+        ADD_FAILURE() << "an unknown name was accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("of the mesh (domain, "), std::string::npos) << e.what();
+    }
+}
+
+TEST(RegionTest, TheInteriorOfClosedZonesIsTheCellsTheyEnclose) {
+    auto mesh = std::make_shared<Mesh>();
+#if N_DIM == 2
+    mesh->init_file(write_temp_shared("mallard_region_annulus.msh", annulus_gmsh(4, 24)));
+#else
+    mesh->init_file(write_temp_shared("mallard_region_shell.msh", shell_gmsh(3, 2, false, false)));
+#endif
+    const region::MeshRegions automatic(*mesh);
+    auto fractions = [&](const std::string & table) {
+        return region::cell_fractions(*mesh, region::Region(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic));
+    };
+    EXPECT_TRUE(automatic.closed({"outer"}));
+    EXPECT_TRUE(automatic.closed({"inner"}));
+    EXPECT_TRUE(automatic.closed({"inner", "outer"}));
+    // The outer wall encloses the fluid; the inner one only the hole
+    EXPECT_EQ(fractions("{type = \"interior\", of = \"outer\"}"), std::vector<double>(mesh->n_cells, 1.0));
+    EXPECT_EQ(fractions("{type = \"interior\", of = \"inner\"}"), std::vector<double>(mesh->n_cells, 0.0));
+    EXPECT_EQ(fractions("{type = \"interior\", of = {type = \"boundary\", of = \"domain\"}}"),
+              std::vector<double>(mesh->n_cells, 1.0));
+}
+
+TEST(RegionTest, CellZonesOfMeshFilesAreRegions) {
+    // Two physical groups of cells split the unit square (cube) at x = 0.5
+    const auto mesh = coarse_unstructured_mesh();
+    std::vector<std::string> names = {"left_half", "right_half"};
+    mesh->cell_zone_names = names;
+    mesh->h_cell_zone.resize(mesh->n_cells);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) mesh->h_cell_zone[c] = mesh->h_cell_coords(c, 0) < 0.5 ? 0 : 1;
+    const region::MeshRegions automatic(*mesh);
+    auto fractions = [&](const std::string & table) {
+        return region::cell_fractions(*mesh, region::Region(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic));
+    };
+    const std::vector<double> left = fractions("\"left_half\""), right = fractions("\"right_half\"");
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        EXPECT_EQ(left[c], mesh->h_cell_zone[c] == 0 ? 1.0 : 0.0);
+        EXPECT_EQ(left[c] + right[c], 1.0);
+    }
+    EXPECT_EQ(fractions("{type = \"union\", regions = [\"left_half\", \"right_half\"]}"), fractions("\"domain\""));
+    // A cell zone with the name of a boundary zone is no region
+    mesh->cell_zone_names = {"left", "right_half"};
+    const region::MeshRegions clashing(*mesh);
+    EXPECT_EQ(clashing.cell_zones, std::vector<std::string>{"right_half"});
 }
 
 TEST(RegionTest, ReportsKeysTheRegionDoesNotRead) {

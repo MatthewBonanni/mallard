@@ -480,8 +480,10 @@ follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`),
 `mean` that over `sum f V`, `favre` the density-weighted mean, `rms` the root
 mean square, and `min`, `max` the extremes over the cells with `f > 0`. Rank 0
 sums them in global cell order, so they are the same bit for bit on any number
-of ranks. Each output appends a row to `reductions_file` (default
-`probe_<name>_reductions.csv`):
+of ranks. The region may be one of the mesh's own: `region = "domain"` gives
+the totals of the whole domain (the mass, for `RHO`), a cell zone those of its
+cells ([regions of the mesh](geometry.md#regions-of-the-mesh)). Each output
+appends a row to `reductions_file` (default `probe_<name>_reductions.csv`):
 
 ```
 step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P

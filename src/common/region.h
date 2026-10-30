@@ -210,30 +210,76 @@ struct RegionView {
 };
 
 /**
+ * @brief A filled region (a volume; an area in 2D) of a Region: shapes with a
+ *        signed distance, the mesh's cells, or a boolean of filled regions.
+ */
+struct Filled {
+    enum class Kind : uint8_t { SHAPES, ALL, CELL_ZONE, INSIDE, UNION, INTERSECTION, DIFFERENCE };
+    Kind kind = Kind::SHAPES;
+    uint32_t first = 0, count = 0;   // SHAPES: its nodes, in postfix order
+    std::vector<std::string> zones;  // CELL_ZONE: its name; INSIDE: the boundary zones that enclose it
+    std::vector<uint32_t> parts;     // booleans: filled regions (DIFFERENCE: the first minus the others)
+    bool cells = false;              // every cell entirely inside or outside (no shapes)
+};
+
+/**
+ * @brief Part of a region of lower dimension (a surface, curve or points):
+ *        where the boundaries of the carriers meet (each one lowers the
+ *        dimension by one), or a set of mesh faces or their edges, in every
+ *        inside filled region and outside every outside one.
+ */
+struct Piece {
+    std::vector<uint32_t> carriers;  // filled regions of SHAPES whose boundaries meet here
+    std::vector<std::string> zones;  // or: the faces of these boundary zones
+    int32_t cells = -1;              // or: the faces between a cells-only filled region and the rest
+    bool edges = false;              // faces: their edges (2D: end points) that only one face of the set has
+    std::vector<uint32_t> inside, outside;
+    bool flip = false;               // facing into the filled region it bounds (the inner side of a difference)
+};
+
+/**
+ * @brief What a region may refer to besides [regions]: the mesh, whose
+ *        boundary zones, cell zones and whole domain are regions by name.
+ */
+struct MeshRegions {
+    const Mesh * mesh = nullptr;
+    std::vector<std::string> boundary_zones;  // every rank's, sorted
+    std::vector<std::string> cell_zones;
+
+    MeshRegions() = default;
+    /** @brief The automatic regions of the mesh. Collective. */
+    explicit MeshRegions(const Mesh & mesh);
+
+    /** @brief The automatic region names: domain, the boundary zones, the cell zones. */
+    std::vector<std::string> names() const;
+
+    /** @brief Whether the faces of the zones form closed surfaces (2D: curves). Collective. */
+    bool closed(const std::vector<std::string> & zones) const;
+};
+
+/**
  * @brief The [regions] table of an input (named regions), or null without one.
  */
 const Input * named_regions(const Input & input);
 
 /**
- * @brief The table of the region of that name in names (a [regions] table,
- *        or null); an error listing the defined names if there is none.
- * @param where The key that gives the name, for error messages.
- */
-const Input & lookup(const Input * names, const std::string & name, const std::string & where);
-
-/**
  * @brief A region from its input table: a primitive or a boolean of
- *        regions, each with optional transforms. See docs/input.md.
+ *        regions, each with optional transforms, the boundary or interior of
+ *        a region, or a region of the mesh. See docs/input.md.
  */
 class Region {
     public:
         /**
-         * @param value The region's table, or the name of one in names; the
-         *        parts of booleans may be names too.
+         * @param value The region's table, or the name of one in names or of
+         *        an automatic region of the mesh; the parts of booleans may be
+         *        names too.
          * @param where Its place in the input, for error messages.
          * @param names The named regions (named_regions of the input), or null.
+         * @param mesh The automatic regions, or null for none. Parsing a
+         *        region of the mesh is collective.
          */
-        Region(const Input & value, const std::string & where, const Input * names = nullptr);
+        Region(const Input & value, const std::string & where, const Input * names = nullptr,
+               const MeshRegions * mesh = nullptr);
 
         // host() views the node vectors, which moves keep and copies would not
         Region(const Region &) = delete;
@@ -242,17 +288,23 @@ class Region {
         Region & operator=(Region &&) = default;
 
         /**
-         * @brief Number of dimensions, fixed by the type of its primitives:
-         *        N_DIM for the solid shapes (volumes, areas in 2D); points,
-         *        curves and surfaces are to have fewer.
+         * @brief Number of dimensions, fixed by its type: N_DIM for filled
+         *        regions (volumes, areas in 2D), fewer for surfaces, curves
+         *        and points.
          */
         int dimension() const { return m_dimension; }
 
-        /** @brief Its name in [regions], or empty if given inline. */
+        /** @brief Lower dimensions: whether it has no boundary (a closed surface or curve). */
+        bool closed() const { return m_closed; }
+
+        /** @brief Its name in [regions] or of the mesh, or empty if given inline. */
         const std::string & name() const { return m_name; }
 
         /** @brief Width of the smooth edge (0: sharp). */
         double edge() const { return m_host.edge; }
+
+        /** @brief Whether it is a filled region of shapes alone, with a signed distance (host(), distance()). */
+        bool analytic() const { return m_dimension == N_DIM && m_filled[m_root].kind == Filled::Kind::SHAPES; }
 
         /** @brief Whether |distance| bounds the distance to the surface (no implicit regions). */
         bool bounded() const { return m_bounded; }
@@ -260,9 +312,19 @@ class Region {
         double distance(const double x[3]) const { return m_host.distance(x); }
         double weight(const double x[3]) const { return m_host.weight(x); }
 
-        /** @brief The region in host memory and in the default device's. */
+        /** @brief The analytic region in host memory and in the default device's. */
         const RegionView<Kokkos::HostSpace> & host() const { return m_host; }
         RegionView<> device() const;
+
+        /** @brief The filled regions; for a filled region, root() is the whole one. */
+        const std::vector<Filled> & filled() const { return m_filled; }
+        uint32_t root() const { return m_root; }
+
+        /** @brief For lower dimensions, the parts it is the union of. */
+        const std::vector<Piece> & pieces() const { return m_pieces; }
+
+        /** @brief A view of the nodes of a filled region of SHAPES. */
+        RegionView<Kokkos::HostSpace> host(const Filled & shapes) const;
 
         /** @brief One-line description for the run log. */
         const std::string & summary() const { return m_summary; }
@@ -274,8 +336,12 @@ class Region {
         std::vector<Node> m_nodes;
         std::vector<double> m_vertices;
         std::vector<expr::Program> m_programs;
+        std::vector<Filled> m_filled;
+        std::vector<Piece> m_pieces;
+        uint32_t m_root = 0;
         RegionView<Kokkos::HostSpace> m_host;
         bool m_bounded = true;
+        bool m_closed = false;
         int m_dimension = N_DIM;
         std::string m_name;
         std::string m_summary;
@@ -285,28 +351,35 @@ class Region {
 void require_full_dimension(const Region & region, const std::string & where);
 
 /**
- * @brief Fraction of every cell of the mesh (owned and halo) inside the
- *        region, by volume (area in 2D): the cell average of its indicator,
- *        sampled on the cell's simplices subdivided adaptively where the
- *        surface or smooth edge crosses them (r-weighted in axisymmetric
- *        runs). Exactly 1 in cells entirely inside, 0 in cells entirely outside.
+ * @brief Fraction of every cell of the mesh (owned and halo) inside a filled
+ *        region, by volume (area in 2D): for shapes, the cell average of
+ *        their indicator, sampled on the cell's simplices subdivided
+ *        adaptively where the surface or smooth edge crosses them
+ *        (r-weighted in axisymmetric runs); 1 or 0 for the mesh's own
+ *        regions. Exactly 1 in cells entirely inside, 0 in cells entirely
+ *        outside. Collective for regions inside boundary zones.
  */
 std::vector<double> cell_fractions(const Mesh & mesh, const Region & region);
 
 /**
  * @brief The regions that the region keys of a run give on its mesh. A named
  *        region is parsed, and its volume fractions computed, once for all
- *        the keys that name it.
+ *        the keys that name it. The mesh's boundary zones, cell zones and
+ *        domain are regions by name too.
  */
 class Regions {
     public:
-        /** @brief Reads [regions] of input lazily: names nothing refers to stay unused keys. */
+        /**
+         * @brief Reads [regions] of input lazily: names nothing refers to stay
+         *        unused keys. A name of [regions] that is also a region of the
+         *        mesh is an error. Collective.
+         */
         Regions(const Input & input, const Mesh & mesh);
 
-        /** @brief The region a key gives: an inline table or a name. */
+        /** @brief The region a key gives: an inline table or a name. Collective. */
         const Region & get(const Input & value, const std::string & where);
 
-        /** @brief Its volume fractions in every cell of the mesh (see cell_fractions). */
+        /** @brief Its volume fractions in every cell of the mesh (see cell_fractions). Collective. */
         const std::vector<double> & fractions(const Input & value, const std::string & where);
 
     private:
@@ -318,6 +391,7 @@ class Regions {
 
         const Input * m_names;
         const Mesh & m_mesh;
+        MeshRegions m_automatic;
         std::vector<std::unique_ptr<Entry>> m_entries;
         std::map<std::string, size_t> m_by_name;
 };
