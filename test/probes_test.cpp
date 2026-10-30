@@ -791,3 +791,147 @@ TEST(ProbesTest, Hdf5ProbesAndAsynchronousHdf5OutputShareTheLibrary) {
     }
 }
 #endif
+
+TEST(ProbesTest, CutPlaneIntegralsAreExactForPolynomialFields) {
+    // The cut of the quadratic field's TENO (order 3) reconstruction, within
+    // a box away from the periodic seam, integrates as the field itself
+    const char * rho = "2.0 + 0.3 * x - 0.2 * y + 0.25 * x^2 + 0.15 * x * y - 0.1 * y^2";
+    auto f = [](double x, double y) { return 2.0 + 0.3 * x - 0.2 * y + 0.25 * x * x + 0.15 * x * y - 0.1 * y * y; };
+    const std::string dir = fresh_dir("cut_exact");
+    const std::string plane = N_DIM == 2 ? "point = [0.5, 0.47]\nnormal = [0.3, 1.0]\nbounds = [[0.3, 0.3], [0.7, 0.7]]\n"
+                                         : "point = [0.5, 0.5, 0.47]\nnormal = [0.0, 0.0, 1.0]\n"
+                                           "bounds = [[0.3, 0.32, 0.3], [0.7, 0.68, 0.7]]\n";
+    const std::string probe = "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\n" + plane +
+                              "variables = [\"RHO\", \"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
+                              "reductions = [\"integral\", \"favre\"]\nreductions_file = \"" + dir + "/cut.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(box_case(20, rho, "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probe)));
+    run(solver);
+    double measure = 0.0, integral = 0.0, square = 0.0, flux = 0.0;
+    if constexpr (N_DIM == 2) {
+        // The line through (0.5, 0.47) normal to (0.3, 1) leaves the box at x = 0.3 and 0.7
+        auto y = [](double x) { return 0.47 - 0.3 * (x - 0.5); };
+        const double L = std::hypot(0.4, y(0.7) - y(0.3));
+        measure = L;
+        integral = L / 0.4 * boole([&](double x) { return f(x, y(x)); }, 0.3, 0.7);
+        square = L / 0.4 * boole([&](double x) { return std::pow(f(x, y(x)), 2); }, 0.3, 0.7);
+        flux = (0.3 * 0.3 - 0.1) / std::hypot(0.3, 1.0) * integral;  // rho u . n with u = (0.3, -0.1)
+    } else {
+        measure = 0.4 * 0.36;
+        integral = boole([&](double x) { return boole([&](double y) { return f(x, y); }, 0.32, 0.68); }, 0.3, 0.7);
+        square = boole([&](double x) { return boole([&](double y) { return std::pow(f(x, y), 2); }, 0.32, 0.68); },
+                       0.3, 0.7);
+        flux = 0.2 * integral;  // u_z = 0.2
+    }
+    const auto r = read_csv(dir + "/cut.csv").front();
+    const double tol = precision_tol<double>(1e-12, 1e-5);
+    EXPECT_NEAR(r.at(MEASURE), measure, tol * measure);
+    EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
+    EXPECT_NEAR(r.at("favre_RHO"), square / integral, tol * square / integral);
+    EXPECT_NEAR(r.at("integral_MASS_FLUX"), flux, tol * std::fabs(integral));
+}
+
+TEST(ProbesTest, AxisymmetricRunsKeepPerRadianIntegralsOnBoundaries) {
+    if (N_DIM != 2) GTEST_SKIP() << "axisymmetric runs are 2D";
+    // Only boundary probes integrate over the revolved surface: cut planes and
+    // curves sample, but take no fluxes and (cut planes) no reductions
+    auto input = [](const std::string & probe) {
+        return "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n"
+               "periodic = [\"x\"]\n[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\n"
+               "type = \"wall_adiabatic\"\n[initialize]\ntype = \"constant\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\n"
+               "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n" +
+               PERFECT_GAS + "axisymmetric = true\n[output]\ncheck_interval = 1000000\n[[probes]]\nname = \"p\"\n" +
+               "file = \"" + fresh_dir("axisymmetric") + "/p.csv\"\n" + probe;
+    };
+    const std::string cut = "type = \"cut_plane\"\npoint = [0.5, 0.5]\nnormal = [1.0, 0.0]\n";
+    const std::string circle = "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n";
+    for (const std::string & rejected : {cut + "variables = [\"MASS_FLUX\"]\n", circle + "variables = [\"MASS_FLUX\"]\n",
+                                         cut + "variables = [\"P\"]\nreductions = [\"integral\"]\n"}) {
+        Solver solver;
+        EXPECT_THROW(solver.init(parse_toml(input(rejected))), InputError) << rejected;
+    }
+    Solver solver;
+    EXPECT_NO_THROW(solver.init(parse_toml(input(cut + "variables = [\"P\"]\n"))));
+}
+
+TEST(ProbesTest, CutPlanesTakeFacesOnTheirPlaneOnce) {
+    // A plane through mesh faces cuts each column of cells once: the plane's whole area
+    const std::string dir = fresh_dir("cut_faces");
+    const std::string probe = "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\npoint = " + numbers3("0.5", "0", "0") +
+                              "\nnormal = " + numbers3("1", "0", "0") + "\nvariables = [\"P\"]\nfile = \"" + dir +
+                              "/cut.csv\"\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/red.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"MUSCL\"\n", probe)));
+    run(solver);
+    size_t n = 0;
+    for (const auto & row : read_csv(dir + "/cut.csv")) n += row.at("step") == 0.0;
+    EXPECT_EQ(n, N_DIM == 2 ? 8u : 8u * 4u);
+    EXPECT_NEAR(read_csv(dir + "/red.csv").front().at(MEASURE), 1.0, 1e-13);
+}
+
+TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
+    // The outward flux of a linear velocity through a circle (sphere) is the
+    // integral of its divergence over the disk (ball)
+    const std::string dir = fresh_dir("divergence");
+    const std::string shape = N_DIM == 2 ? "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 64\n"
+                                         : "type = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [24, 48]\n";
+    const std::string probe = "[[probes]]\nname = \"closed\"\n" + shape +
+                              "variables = [\"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
+                              "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/closed.csv\"\n";
+    std::string input = box_case(16, "1.0", "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probe);
+    const std::string u = "u = " + vector3("0.3", "-0.1", "0.2");
+    input.replace(input.find(u), u.size(), "u = " + vector3("0.1 * (x - 0.5)", "0.2 * (y - 0.5)", "-0.05 * (z - 0.5)"));
+    Solver solver;
+    solver.init(parse_toml(input));
+    run(solver);
+    const double r = 0.2, pi = std::numbers::pi;
+    const double expected = N_DIM == 2 ? 0.3 * pi * r * r : 0.25 * 4.0 / 3.0 * pi * r * r * r;
+    EXPECT_NEAR(read_csv(dir + "/closed.csv").front().at("integral_MASS_FLUX"), expected,
+                precision_tol<double>(1e-9, 1e-5) * expected);
+}
+
+#if N_DIM == 3
+TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
+    const double pi = std::numbers::pi;
+    auto area = [](const probe::Geometry & g) {
+        double sum = 0.0;
+        for (double w : g.quad_weights) sum += w;
+        return sum;
+    };
+    struct Case {
+        std::string toml;
+        double area;
+        bool flat;    // normals along +z
+        int radial;   // else: away from the origin in the first `radial` coordinates
+    };
+    const std::vector<Case> cases = {
+        {"type = \"rectangle\"\ncenter = [0.1, 0.2, 0.3]\nnormal = [0.0, 0.0, 1.0]\nsize = [0.4, 0.3]\nn_points = [5, 4]\n",
+         0.12, true, 0},
+        {"type = \"disk\"\ncenter = [0.0, 0.0, 0.0]\nnormal = [0.0, 0.0, 1.0]\nradius = 0.5\ninner_radius = 0.2\n"
+         "n_points = [6, 32]\n",
+         pi * (0.25 - 0.04), true, 0},
+        {"type = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 0.5\nn_points = [16, 32]\n", pi, false, 3},
+        {"type = \"cylinder\"\ncenter = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nradius = 0.3\nlength = 2.0\n"
+         "n_points = [5, 32]\n",
+         2.0 * pi * 0.3 * 2.0, false, 2},
+        {"type = \"cone\"\nbase = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nlength = 1.0\nbase_radius = 0.5\n"
+         "top_radius = 0.2\nn_points = [5, 32]\n",
+         pi * 0.7 * std::hypot(1.0, 0.3), false, 2},
+    };
+    for (const auto & c : cases) {
+        const probe::Geometry g = probe::make_geometry(parse_toml(c.toml), "surface");
+        EXPECT_EQ(g.dim, 2);
+        EXPECT_NEAR(area(g), c.area, 1e-7 * c.area) << c.toml;
+        ASSERT_EQ(g.normals.size(), g.nodes.size());
+        for (size_t i = 0; i < g.nodes.size(); i++) {
+            if (c.flat) {
+                EXPECT_NEAR(g.normals[i][2], 1.0, 1e-14) << c.toml;
+                continue;
+            }
+            double radial = 0.0;
+            for (size_t d = 0; d < size_t(c.radial); d++) radial += g.normals[i][d] * g.nodes[i][d];
+            EXPECT_GE(radial, -1e-12) << c.toml << " node " << i;
+        }
+    }
+}
+#endif

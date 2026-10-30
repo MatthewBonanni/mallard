@@ -343,6 +343,118 @@ def wall_heat_flux(P, args):
     return fig
 
 
+# ------------------------------------------- 3D cut plane and sphere surface
+
+@functools.cache
+def cut3d_data(mallard3d):
+    work = Path(tempfile.mkdtemp())
+    blob = "exp(-((x - 0.35)^2 + (y - 0.6)^2 + (z - 0.45)^2) / 0.03)"
+    toml = f"""
+[run]
+n_steps = 1
+dt = 1.0e-9
+[mesh]
+type = "cartesian_tet"
+Nx = 10
+Ny = 10
+Nz = 10
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["0.0", "0.0", "0.0"]
+p = "1.0 + 0.5 * {blob} - 0.3 * exp(-((x - 0.7)^2 + (y - 0.3)^2 + (z - 0.6)^2) / 0.02)"
+""" + "".join(f'[[boundaries]]\nname = "{z}"\ntype = "symmetry"\n'
+              for z in ("left", "right", "bottom", "top", "back", "front")) + f"""
+[numerics.face_reconstruction]
+type = "TENO"
+order = 3
+troubled_threshold = 1.0
+{PHYSICS}
+[[probes]]
+name = "cut"
+type = "cut_plane"
+point = [0.5, 0.5, 0.5]
+normal = [0.6, 0.35, 1.0]
+sampling = "point"
+format = "vtp"
+variables = ["P"]
+
+[[probes]]
+name = "sphere"
+type = "sphere"
+center = [0.5, 0.5, 0.5]
+radius = 0.32
+n_points = [24, 48]
+sampling = "point"
+format = "vtp"
+variables = ["P"]
+"""
+    run(mallard3d, toml, work)
+    return read_vtp(work / "probe_cut_000000.vtp"), read_vtp(work / "probe_sphere_000000.vtp")
+
+
+def _view(p, azimuth=-0.6, elevation=0.45):
+    """Orthographic view: screen (x, y) and depth of points p (n x 3)."""
+    ca, sa, ce, se = math.cos(azimuth), math.sin(azimuth), math.cos(elevation), math.sin(elevation)
+    x = ca * p[:, 0] - sa * p[:, 1]
+    y0 = sa * p[:, 0] + ca * p[:, 1]
+    return np.column_stack([x, ce * p[:, 2] - se * y0]), se * p[:, 2] + ce * y0
+
+
+def _box(ax, P):
+    corners = np.array([[i, j, k] for i in (0, 1) for j in (0, 1) for k in (0, 1)], dtype=float)
+    for a in range(8):
+        for b in range(a + 1, 8):
+            if np.sum(np.abs(corners[a] - corners[b])) == 1:
+                xy, _ = _view(corners[[a, b]])
+                ax.plot(*xy.T, color=P["muted"], lw=0.8, ls=(0, (3, 2)))
+
+
+def cut_and_sphere(P, args):
+    cut, sphere = cut3d_data(args.mallard3d)
+    lo, hi = 0.75, 1.45
+    cmap = plt.get_cmap(P["cmap"])
+    fig, axes = plt.subplots(1, 2, figsize=(9.4, 4.4), gridspec_kw=dict(wspace=0.02))
+    # Exact cut through tetrahedra: one polygon per cut cell, colored by its point value
+    a = cut
+    starts = np.concatenate([[0], a["offsets"][:-1, 0]])
+    polys = [_view(a["Points"][a["connectivity"][s:e, 0]])[0] for s, e in zip(starts, a["offsets"][:, 0])]
+    pc = PolyCollection(polys, cmap=cmap, edgecolor=P["mesh"], lw=0.3)
+    pc.set_array(a["P"][:, 0])
+    pc.set_clim(lo, hi)
+    axes[0].add_collection(pc)
+    _box(axes[0], P)
+    axes[0].set_title("cut_plane through tetrahedra", fontsize=12)
+    # Sphere: quadrilaterals of the grid facing the viewer, colored by the mean of their corners
+    b = sphere
+    pts, conn, offs, values = b["Points"], b["connectivity"][:, 0], b["offsets"][:, 0], b["P"][:, 0]
+    starts = np.concatenate([[0], offs[:-1]])
+    xy, depth = _view(pts)
+    _, toward = _view(np.array([[0.5, 0.5, 0.5]]))
+    quads, colors, order = [], [], []
+    for s, e in zip(starts, offs):
+        idx = conn[s:e]
+        quads.append(xy[idx])
+        colors.append(values[idx].mean())
+        order.append(depth[idx].mean())
+    keep = np.argsort(order)  # painter's algorithm: far first
+    pc2 = PolyCollection([quads[k] for k in keep], cmap=cmap, edgecolor=P["bg"], lw=0.2)
+    pc2.set_array(np.array(colors)[keep])
+    pc2.set_clim(lo, hi)
+    axes[1].add_collection(pc2)
+    _box(axes[1], P)
+    axes[1].set_title("sphere, resampled with point values", fontsize=12)
+    corners, _ = _view(np.array([[i, j, k] for i in (0, 1) for j in (0, 1) for k in (0, 1)], dtype=float))
+    for ax in axes:
+        ax.set_xlim(corners[:, 0].min() - 0.03, corners[:, 0].max() + 0.03)
+        ax.set_ylim(corners[:, 1].min() - 0.03, corners[:, 1].max() + 0.03)
+        bare(ax)
+    cb = fig.colorbar(pc, ax=axes, fraction=0.025, pad=0.01)
+    cb.set_label("pressure")
+    cb.outline.set_visible(False)
+    return fig
+
+
 class Args(tuple):
     def __new__(cls, mallard, mallard3d):
         return super().__new__(cls, (mallard, mallard3d))
@@ -352,7 +464,7 @@ class Args(tuple):
 
 
 FIGURES = {"probe_shapes": (probe_shapes, False), "probe_walls": (wall_polylines, False),
-           "probe_wall_3d": (wall_heat_flux, True)}
+           "probe_wall_3d": (wall_heat_flux, True), "probe_cut_3d": (cut_and_sphere, True)}
 
 
 def main():
