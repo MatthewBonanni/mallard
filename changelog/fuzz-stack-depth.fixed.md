@@ -1,0 +1,1 @@
+- Malformed input with deeply nested or unclosed arrays and inline tables, or a comment inside one (as in `s=["",[""[#`), no longer crashes or hangs the input reader; it reports the TOML syntax error. Tables, arrays and inline tables nested more than 64 deep are an input error naming the key and line, instead of a stack overflow.
