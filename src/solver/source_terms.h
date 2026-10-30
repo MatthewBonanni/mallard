@@ -148,6 +148,7 @@ class SourceTerms {
         Kokkos::View<rtype **, Kokkos::LayoutRight> static_field;  // (cell, column), per unit volume; empty if none
         Kokkos::View<double **, Kokkos::LayoutRight> weights;      // (row, cell)
         Kokkos::View<double *> means;
+        Kokkos::View<double *[N_MEANS + 1]> mean_terms;  // (cell, [volume, mean integrands])
         logging::Items m_summary;
 
 };
