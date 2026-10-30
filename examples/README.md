@@ -47,7 +47,7 @@ hardware they were measured on.
 
 | Case | What it shows | Cells | Run time |
 |---|---|---|---|
-| `source_regions` | `[[sources]]` in regions: an annulus with a smooth edge releases a Gaussian heat pulse of exact total energy (`total = true`), a rotated rectangle pushes the gas with a body force and its work | 51,200 triangles | ~2 minutes on 4 CPU threads |
+| `source_regions` | `[[sources]]` in regions: an annulus with a smooth edge releases a Gaussian heat pulse of exact total energy (`total = true`), a rotated rectangle pushes the gas with a body force and its work; a probe of the same named region records the mass and temperature in the ring | 51,200 triangles | ~2 minutes on 4 CPU threads |
 
 ## Viscous flows
 
