@@ -355,6 +355,40 @@ $\overline{v}_i + \theta(v_q - \overline{v}_i)$ within $[m, M]$, for $v = \rho, 
 and the extrema $m$, $M$ of the cell and its face neighbors
 ([Zhang & Shu 2010](../references.md#zhang-shu-2010)).
 
+Admissible face values do not make the update admissible: a troubled cell's
+faces take different stencils, so its face values are not those of one
+polynomial with the cell's average, and their fluxes can draw more internal
+energy from the cell than it holds (in flows where the internal energy is a
+small part of the total, Mach 10 and above). With `bound_preserving = true`
+in planar single-gas runs, the convective fluxes are then limited
+([Hu, Adams & Shu 2013](../references.md#hu-adams-shu-2013)). With the
+closure $\sum_f A_f\mathbf{n}_f = 0$, the forward-Euler update of cell $i$
+with face rates $\mathbf{R}_f$ (the flux into the cell, integrated over the
+face) is a convex combination of partial states,
+
+$$
+\begin{equation}
+\mathbf{U}_i^{n+1} = \sum_f \mu_f\,\mathbf{U}_i^f, \quad
+\mathbf{U}_i^f = \mathbf{U}_i + \frac{\kappa_i}{A_f\alpha_f}\left(\mathbf{R}_f + A_f\,\mathbf{F}(\mathbf{U}_i)\cdot\mathbf{n}_f\right), \quad
+\mu_f = \frac{A_f\alpha_f}{\sum_g A_g\alpha_g}, \quad
+\kappa_i = \frac{\Delta t}{\lvert\Omega_i\rvert}\sum_g A_g\alpha_g,
+\label{eq:positivity-limiter}
+\end{equation}
+$$
+
+with $\alpha_f$ the larger $\lvert u_n\rvert + a$ of the face's two cell
+averages (or the cell and its ghost), as in the time step. For the local
+Lax-Friedrichs flux of the cell averages, $\mathbf{R}_f^{LF}$, every partial
+state is admissible when $\kappa_i \le 1$, that is $\mathrm{CFL} \le 0.5$ at
+the start of the step. Each face takes
+$\mathbf{R}_f = \mathbf{R}_f^{LF} + \theta_f(\mathbf{R}_f^{HO} - \mathbf{R}_f^{LF})$
+with the largest $\theta_f \in [0, 1]$ that keeps the partial states of both
+its cells above $10^{-10}$ of their Lax-Friedrichs density and pressure:
+linear in $\theta_f$ for the density, and a bound for the pressure, which is
+concave in $\theta_f$. Faces that need no limiting keep their flux exactly,
+and the scheme stays conservative. SSP Runge-Kutta stages are convex
+combinations of such steps.
+
 ### Gas mixtures
 
 Mixtures reconstruct $\mathbf{W} = [\rho, \mathbf{u}, p]$ with the scheme

@@ -193,7 +193,7 @@ bound_preserving = true   # for very strong shocks
 | Key | Default | Meaning |
 |---|---|---|
 | `order` | 5 | 3 to 6 |
-| `bound_preserving` | `false` | Keep density and pressure in the neighbors' range in troubled cells: for very strong shocks and blasts (Noh, Sedov, Mach 8 flows) |
+| `bound_preserving` | `false` | Keep density and pressure in the neighbors' range in troubled cells, and (planar single gas) positive in every cell at `cfl` up to 0.5: for very strong shocks, blasts and near vacuum (Noh, Sedov, Mach 8 flows) |
 | `stencil_factor` | 2 | Large-stencil size over the number of coefficients; 1.5 is markedly less dissipative for fine smooth waves, less robust at shocks |
 | `troubled_threshold`, `troubled_upper` | 1e-3, 1e-2 | Troubled-cell indicator: where stencil selection starts, and where its cutoff is most dissipative |
 | `C_T` | adaptive | Fixed TENO cutoff instead of the adaptive one (1e-10 to 1e-6) |

@@ -1250,6 +1250,8 @@ void Solver::init_numerics() {
     face_reconstruction->init(face_reconstruction_input);
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
     if (is_mixture()) {
         scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
     }
@@ -1590,6 +1592,7 @@ void Solver::allocate_memory() {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
+    if (positivity_limiter) positivity_kappa = Kokkos::View<rtype *>("positivity_kappa", mesh->n_cells);
     if (hybrid_flux) {
         cell_upwind = Kokkos::View<rtype *>("cell_upwind", mesh->n_cells);
         if (!viscous_gradients.is_allocated()) {
