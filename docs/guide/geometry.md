@@ -190,9 +190,8 @@ On a square mesh with a hole (boundary zones `outer` and `hole`, cell zones
 Pitfalls:
 
 - A name in `[regions]` that is also a boundary zone, a cell zone or `domain`
-  is an error naming both. A mesh whose cell zone has the name of a boundary
-  zone (or `domain`) keeps the boundary zone; the cell zone is no region, and
-  a warning says so.
+  is an error naming both, and so is a mesh whose cell zone has the name of a
+  boundary zone or `domain`: rename one of them in the mesh file.
 - Regions of the mesh do not move: transforms of a boolean that holds one, and
   `edge`, are errors.
 - They need no use: unlike named regions, an unused one is not an unused key.

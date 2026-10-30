@@ -881,10 +881,11 @@ MeshRegions::MeshRegions(const Mesh & m) : mesh(&m) {
     boundary_zones.erase(std::unique(boundary_zones.begin(), boundary_zones.end()), boundary_zones.end());
     for (const std::string & zone : m.cell_zone_names) {
         if (zone == "domain" || std::binary_search(boundary_zones.begin(), boundary_zones.end(), zone)) {
-            logging::warning("the mesh's cell zone \"" + zone + "\" has the name of " +
-                             (zone == "domain" ? std::string("the whole domain") : "a boundary zone") +
-                             ", so it is no region by name.");
-            continue;
+            throw InputError("mesh: the cell zone \"" + zone + "\" has the name of " +
+                             (zone == "domain" ? std::string("the region of the whole domain, domain")
+                                               : "a boundary zone") +
+                             ", and regions are named by both; rename one of them in the mesh file. See "
+                             "docs/guide/geometry.md#regions-of-the-mesh.");
         }
         cell_zones.push_back(zone);
     }

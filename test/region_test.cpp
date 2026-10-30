@@ -543,10 +543,16 @@ TEST(RegionTest, CellZonesOfMeshFilesAreRegions) {
         EXPECT_EQ(left[c] + right[c], 1.0);
     }
     EXPECT_EQ(fractions("{type = \"union\", regions = [\"left_half\", \"right_half\"]}"), fractions("\"domain\""));
-    // A cell zone with the name of a boundary zone is no region
-    mesh->cell_zone_names = {"left", "right_half"};
-    const region::MeshRegions clashing(*mesh);
-    EXPECT_EQ(clashing.cell_zones, std::vector<std::string>{"right_half"});
+    // A cell zone with the name of a boundary zone, or of the domain, is an error naming it
+    for (const std::string clash : {"left", "domain"}) {
+        mesh->cell_zone_names = {clash, "right_half"};
+        try {
+            const region::MeshRegions clashing(*mesh);
+            ADD_FAILURE() << clash << " was accepted";
+        } catch (const InputError & e) {
+            EXPECT_NE(std::string(e.what()).find("cell zone \"" + clash + "\""), std::string::npos) << e.what();
+        }
+    }
 }
 
 TEST(RegionTest, ReportsKeysTheRegionDoesNotRead) {
