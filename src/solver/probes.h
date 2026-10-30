@@ -197,7 +197,8 @@ class Probes {
         static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
                                   const std::vector<double> & cell_weights, uint32_t n_variables);
         /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
-        static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables);
+        static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
+                                    bool per_cell);
 
         std::vector<std::unique_ptr<Probe>> probes;
         bool resumed = false;
