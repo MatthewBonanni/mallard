@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CATALOG = ROOT / "docs" / "input-keys.json"
 SIZE_KEYS = ("Nx", "Ny", "Nz")
-TUTORIAL_DIMS = {"wedge": 2, "cylinder": 2, "cone": 3, "channel_les": 3}
+TUTORIAL_DIMS = {"wedge": 2, "cylinder": 2, "measuring": 2, "cone": 3, "channel_les": 3}
 
 
 def inputs():

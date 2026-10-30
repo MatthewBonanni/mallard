@@ -1,0 +1,163 @@
+# Measuring a flow (2D build, Navier-Stokes): the cylinder wake of the
+# cylinder tutorial at Re = 100 and Mach 0.2, measured with named regions,
+# region probes, fluxes through cut planes, wall probes, phase averages and a
+# probe time series. Tutorial: docs/tutorials/measuring.md.
+# Mesh: gmsh ../cylinder/cylinder.geo -2 -o cylinder.msh
+#
+# Units as in the cylinder tutorial: D = 1, free-stream density and sound
+# speed 1, U = 0.2, p = T = 1 / gamma, mu = 0.002. One shedding period is
+# about 30 time units; shedding saturates by t = 60.
+
+[run]
+t_stop = 200.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "cylinder.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["0.2 * (1 - exp(-4 * (x^2 + y^2 - 0.25)))",
+     "0.1 * exp(-((x - 1.5)^2 + y^2))"]
+p = "0.7142857142857143"
+
+[[boundaries]]
+name = "cylinder"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "farfield"
+type = "farfield"
+u = [0.2, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 3
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.002
+Pr = 0.72
+
+[output]
+check_interval = 2000
+
+# A control volume around the cylinder, -2 < x < 4, -2 < y < 2, and its four
+# sides, each a cut plane with its normal pointing out of the box
+[regions]
+box = {type = "rectangle", center = [1.0, 0.0], size = [6.0, 4.0]}
+west = {type = "cut_plane", point = [-2.0, 0.0], normal = [-1.0, 0.0], bounds = [[-3.0, -2.0], [5.0, 2.0]]}
+east = {type = "cut_plane", point = [4.0, 0.0], normal = [1.0, 0.0], bounds = [[-3.0, -2.0], [5.0, 2.0]]}
+south = {type = "cut_plane", point = [0.0, -2.0], normal = [0.0, -1.0], bounds = [[-2.0, -3.0], [4.0, 3.0]]}
+north = {type = "cut_plane", point = [0.0, 2.0], normal = [0.0, 1.0], bounds = [[-2.0, -3.0], [4.0, 3.0]]}
+
+[[forces]]
+zone = "cylinder"
+interval = 20
+file = "forces_cylinder.csv"
+
+# The wall: the integral of the tractions is the force of [[forces]]
+[[probes]]
+name = "wall"
+boundary = "cylinder"
+variables = ["TRACTION_PRESSURE", "TRACTION_VISCOUS"]
+samples = false
+reductions = ["integral"]
+interval = 20
+
+# The wall pressure coefficient around the cylinder, for its mean
+[[probes]]
+name = "wall_cp"
+boundary = "cylinder"
+variables = ["CP"]
+reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
+time_interval = 2.0
+
+# Mass, momentum (favre U times mass) and enthalpy in the box
+[[probes]]
+name = "box"
+region = "box"
+variables = ["RHO", "U_X", "U_Y", "P", "H"]
+reductions = ["integral", "favre"]
+interval = 20
+
+# Fluxes out of the box through each side
+[[probes]]
+name = "west"
+region = "west"
+variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+sampling = "point"
+samples = false
+reductions = ["integral"]
+interval = 20
+
+[[probes]]
+name = "east"
+region = "east"
+variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+sampling = "point"
+samples = false
+reductions = ["integral"]
+interval = 20
+
+[[probes]]
+name = "south"
+region = "south"
+variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+sampling = "point"
+samples = false
+reductions = ["integral"]
+interval = 20
+
+[[probes]]
+name = "north"
+region = "north"
+variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+sampling = "point"
+samples = false
+reductions = ["integral"]
+interval = 20
+
+# A point in the wake, for the spectrum of the cross-stream velocity
+[[probes]]
+name = "wake"
+type = "point"
+point = [3.0, 0.5]
+variables = ["U_Y", "P"]
+sampling = "point"
+time_interval = 0.5
+
+# Time averages from t = 60, and phase averages in 8 bins of the shedding
+# cycle, from the upward zero crossings of U_Y on the wake axis
+[statistics]
+fields = ["U_X", "U_Y", "P"]
+products = ["U_X*U_X", "U_Y*U_Y", "U_X*U_Y"]
+t_start = 60.0
+interval = 10
+
+[statistics.phase]
+fields = ["U_X", "U_Y", "P"]
+bins = 8
+probe = [3.0, 0.0]
+variable = "U_Y"
+level = 0.0
+
+# The box's cells at the end: the time and phase averages
+[[write_data]]
+prefix = "./solut/box"
+region = "box"
+time_interval = 200.0
+variables = ["U_X", "U_Y", "P", "MEAN_*", "COV_*", "PHASE_*"]
