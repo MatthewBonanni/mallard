@@ -268,7 +268,7 @@ std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
 
 /**
  * @brief A VTK XML PolyData file with its arrays appended raw: the samples as
- *        vertices (point sets), polyline points (curves) or polygons (3D
+ *        vertices (points), polyline points (curves) or polygons (3D
  *        surfaces of mesh faces), with one array per variable.
  */
 void write_vtp_file(const std::string & file, const probe::Geometry & g, const std::vector<std::string> & names,
@@ -1056,7 +1056,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                 for (const Reduction r : p.reductions) {
                     for (const auto & v : p.variables) {
                         const Dimension d = field_units::describe(v).dimension;
-                        // Integrals take the units of the measure (sums over point sets)
+                        // Integrals take the units of the measure (sums over points)
                         columns.emplace_back(reduction_name(r) + "_" + v,
                                              r == Reduction::INTEGRAL ? d.times(measure) : d);
                     }
