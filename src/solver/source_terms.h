@@ -27,6 +27,10 @@
 #include "mesh.h"
 #include "state.h"
 
+namespace region {
+class Regions;
+}
+
 namespace sources {
 
 /** @brief Variables of source expressions, by index; species follow. */
@@ -85,7 +89,7 @@ struct CellVariables {
 struct Term {
     uint32_t program = 0;
     uint32_t column = 0;       // < N_CONSERVATIVE: flow; else species column - N_CONSERVATIVE
-    int32_t weights = -1;      // row of the volume fractions, -1 for none
+    int32_t weights = -1;      // row of the cell fractions, -1 for none
     double scale = 1.0;        // 1 / (integral of the fraction) for totals, else 1
 };
 
@@ -100,9 +104,10 @@ class SourceTerms {
          * @param input The input (reads [source] rho, rhou, rhoE and [[sources]]).
          * @param species Species names (empty for a single gas).
          * @param fields The cell fields the expressions read.
+         * @param regions The regions of the run, on mesh.
          */
         SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh,
-                    const std::vector<std::string> & species, const CellFields & fields);
+                    const std::vector<std::string> & species, const CellFields & fields, region::Regions & regions);
 
         bool empty() const { return m_empty; }
         /** @brief Whether some expression reads t (the stage time must be set on the device). */

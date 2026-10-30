@@ -112,7 +112,7 @@ cell's triangles (2D fan) or tetrahedra (`Mesh::h_cell_tetrahedra`), each
 subdivided by midpoints only where the surface (or the smooth band) can cross
 it: a simplex whose centroid is farther from the surface than the simplex's
 radius is uniform, by the Lipschitz bound. Up to 8 levels in 2D and 5 in 3D,
-the volumes of the tests' shapes come out within 2e-5 (2D) and 2e-4 (3D) on
+the volumes of the tests' regions come out within 2e-5 (2D) and 2e-4 (3D) on
 meshes of 8 and 5 cells across. A cell entirely inside gets exactly 1. Implicit
 regions have no bound; they subdivide where `f` may change sign over a simplex
 by twice its slope there.
@@ -150,5 +150,23 @@ every stage; cells outside a region skip it.
 
 Boundary expressions (#316), sponges and `[initialize]` still evaluate exprtk
 on the host where they are evaluated once (checked by `expr::Program`);
-adopting it for evaluation is a matter of binding their variables (#449). Regions are meant for sponge and
-initialization regions and for probes (#318).
+adopting it for evaluation is a matter of binding their variables (#449). Sponges
+and probes take regions too (#499), and initialization is to (#324).
+
+`region::Regions` holds the regions of one setup: inline ones, and each name of
+`[regions]` once, with its volume fractions computed the first time a key asks
+and shared by every key that names it (a source, the sponge and the probe of
+the same region read one array). It reads `[regions]` lazily, entry by entry,
+so a name no key uses stays an unused key, reported like any other. Each
+primitive type has one fixed dimension (`PRIMITIVES` in `region.cpp`; all of
+them fill space so far), a boolean requires its parts to share it, and
+consumers check it (`require_full_dimension` for sources, sponges and region
+probes), so that
+points, curves and surfaces can join the same table without any consumer
+inferring a dimension from where it is used.
+
+Region probes reduce cell averages weighted by `f V` over the cells with
+`f > 0`. Each rank evaluates its cells on the device; rank 0 gathers the values
+and the weights in global cell order and sums them in that order, as the
+probes of points and curves do, so the reductions are the same bit for bit on
+any number of ranks.

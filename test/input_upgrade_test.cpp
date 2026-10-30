@@ -171,6 +171,70 @@ TEST(InputUpgradeTest, KeysAreDeprecatedForAtLeastOneMinorReleaseBeforeRemoval) 
     for (const auto & rule : input_upgrade::rules().options) check(rule.key, rule.since, rule.removed);
 }
 
+TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
+    const std::string region = "[[sources]]\n"
+                               "rhoE = 1\n"
+                               "region = {type = \"union\", regions = [{type = \"circle\", center = [0, 0], radius = 1},\n"
+                               "          {type = \"ellipse\", center = [0, 0], semi_axes = [1, 2]},\n"
+                               "          {type = \"box\", center = [0, 0], size = [1, 1]},\n"
+                               "          {type = \"annulus\", center = [0, 0], radius = 2, inner_radius = 1}]}\n";
+    const std::string probe = "[[probes]]\nname = \"p\"\nshape = \"circle\"   # sampled\n";
+    std::vector<Finding> findings;
+    bool reformatted = false;
+    const std::string out = input_upgrade::upgrade_text(region + probe, findings, reformatted);
+    EXPECT_FALSE(reformatted);
+    EXPECT_EQ(out, "[[sources]]\n"
+                   "rhoE = 1\n"
+                   "region = {type = \"union\", regions = [{type = \"" + std::string(N_DIM == 2 ? "disk" : "sphere") +
+                       "\", center = [0, 0], radius = 1},\n"
+                       "          {type = \"ellipsoid\", center = [0, 0], semi_axes = [1, 2]},\n"
+                       "          {type = \"" + (N_DIM == 2 ? "rectangle" : "box") + "\", center = [0, 0], size = [1, 1]},\n"
+                       "          {type = \"" + (N_DIM == 2 ? "annulus\"" : "cylinder\", axis = [0, 0, 1]") +
+                       ", center = [0, 0], radius = 2, inner_radius = 1}]}\n"
+                       "[[probes]]\nname = \"p\"\ntype = \"circle\"   # sampled\n");
+    EXPECT_EQ(findings.size(), 4u);
+
+    // The region of a boundary or interior postdates the old names: a circle there is the curve
+    const std::string interior = "[[sources]]\nrhoE = 1\nregion = {type = \"interior\", of = {type = \"circle\", "
+                                 "center = [0, 0], radius = 1}}\n";
+    EXPECT_EQ(input_upgrade::upgrade_text(interior, findings, reformatted), interior);
+
+    // Without the case's dimension, a rename that depends on it is an error
+    EXPECT_THROW(input_upgrade::upgrade_text(region, findings, reformatted, input_upgrade::rules(), 0), InputError);
+    EXPECT_NO_THROW(input_upgrade::upgrade_text(probe, findings, reformatted, input_upgrade::rules(), 0));
+}
+
+TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
+    const Rules rules = {{}, {{"s[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0", "hollow", false,
+                               0, "axis = [0, 0, 1]"}}};
+    const std::string text = "[[s]]\n"
+                             "region = {type = \"union\", regions = [{type = \"annulus\", radius = 2}]}\n"
+                             "[[s]]\n"
+                             "[s.region]\n"
+                             "  type = \"annulus\"  # a ring\n"
+                             "  radius = 1\n"
+                             "[[s]]\n"
+                             "region = {type = \"annulus\", axis = [1, 0, 0]}\n";
+    std::vector<Finding> findings;
+    bool reformatted = false;
+    const std::string out = input_upgrade::upgrade_text(text, findings, reformatted, rules);
+    EXPECT_FALSE(reformatted);
+    EXPECT_EQ(out, "[[s]]\n"
+                   "region = {type = \"union\", regions = [{type = \"cylinder\", axis = [0, 0, 1], radius = 2}]}\n"
+                   "[[s]]\n"
+                   "[s.region]\n"
+                   "  type = \"cylinder\"  # a ring\n"
+                   "  axis = [0, 0, 1]\n"
+                   "  radius = 1\n"
+                   "[[s]]\n"
+                   "region = {type = \"cylinder\", axis = [1, 0, 0]}\n");
+
+    Input input = parse_input_string(text);
+    input_upgrade::apply(input, "0.9.0", rules);
+    EXPECT_EQ(input.at("s").at(1).at("region").at("axis").as_array().size(), 3u);
+    EXPECT_EQ(input.at("s").at(2).at("region").at("axis").at(0).as_integer(), 1);
+}
+
 TEST(InputUpgradeTest, KeptOptionsWorkAsBeforeButAreRewritten) {
     // format = "hdf5" still writes XDMF and HDF5 while deprecated; the
     // upgraded file asks for VTKHDF

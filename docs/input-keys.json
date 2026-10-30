@@ -3592,6 +3592,7 @@
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
+   "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
   ],
@@ -3662,6 +3663,7 @@
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
+   "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
   ],
@@ -3692,6 +3694,7 @@
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
+   "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
   ],
@@ -3717,8 +3720,18 @@
    2,
    3
   ],
-  "set_in": [],
-  "type": "array"
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "array",
+  "values": [
+   "favre",
+   "integral",
+   "max",
+   "mean",
+   "min",
+   "rms"
+  ]
  },
  "probes.reductions_file": {
   "default": "\"probe_inlet_p_reductions.csv\"",
@@ -3739,6 +3752,179 @@
    3
   ],
   "set_in": []
+ },
+ "probes.region": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "probes.region.a": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.b": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.edge": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "probes.region.regions.center": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "probes.region.regions.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "probes.region.regions.rotate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.scale": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.translate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.type": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "annulus",
+   "boundary",
+   "circle",
+   "cone",
+   "cylinder",
+   "difference",
+   "disk",
+   "ellipse",
+   "ellipsoid",
+   "frustum",
+   "half_space",
+   "implicit",
+   "interior",
+   "intersection",
+   "polygon",
+   "rectangle",
+   "sphere",
+   "torus",
+   "union"
+  ]
+ },
+ "probes.region.rotate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.scale": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.translate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.type": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "annulus",
+   "boundary",
+   "circle",
+   "cone",
+   "cylinder",
+   "difference",
+   "disk",
+   "ellipse",
+   "ellipsoid",
+   "frustum",
+   "half_space",
+   "implicit",
+   "interior",
+   "intersection",
+   "polygon",
+   "rectangle",
+   "sphere",
+   "torus",
+   "union"
+  ]
  },
  "probes.rotate": {
   "dims": [
@@ -3776,24 +3962,6 @@
   ],
   "set_in": []
  },
- "probes.shape": {
-  "default": "\"\"",
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": [],
-  "type": "string",
-  "values": [
-   "arc",
-   "circle",
-   "curve",
-   "line",
-   "point",
-   "points",
-   "polyline"
-  ]
- },
  "probes.start": {
   "dims": [
    2,
@@ -3821,6 +3989,24 @@
   ],
   "set_in": []
  },
+ "probes.type": {
+  "default": "\"\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "arc",
+   "circle",
+   "curve",
+   "line",
+   "point",
+   "points",
+   "polyline"
+  ]
+ },
  "probes.variables": {
   "dims": [
    2,
@@ -3831,6 +4017,7 @@
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/shock_bubble_3d/input.toml",
+   "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "tutorials/wedge/input.toml"
   ],
@@ -3867,6 +4054,122 @@
    2
   ],
   "set_in": []
+ },
+ "regions": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.center": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.edge": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.inner_radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.length": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
+ "regions.<name>.rotate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.scale": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.translate": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "regions.<name>.type": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "annulus",
+   "boundary",
+   "circle",
+   "cone",
+   "cylinder",
+   "difference",
+   "disk",
+   "ellipse",
+   "ellipsoid",
+   "frustum",
+   "half_space",
+   "implicit",
+   "interior",
+   "intersection",
+   "polygon",
+   "rectangle",
+   "sphere",
+   "torus",
+   "union"
+  ]
  },
  "run": {
   "dims": [
@@ -4259,15 +4562,7 @@
    "examples/source_regions/input.toml"
   ]
  },
- "sources.region.inner_radius": {
-  "dims": [
-   2
-  ],
-  "set_in": [
-   "examples/source_regions/input.toml"
-  ]
- },
- "sources.region.length": {
+ "sources.region.filled": {
   "dims": [
    2
   ],
@@ -4278,14 +4573,6 @@
    2
   ],
   "set_in": []
- },
- "sources.region.radius": {
-  "dims": [
-   2
-  ],
-  "set_in": [
-   "examples/source_regions/input.toml"
-  ]
  },
  "sources.region.rotate": {
   "dims": [
@@ -4328,15 +4615,18 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
+   "boundary",
+   "circle",
    "cone",
    "cylinder",
    "difference",
    "disk",
    "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
+   "interior",
    "intersection",
    "polygon",
    "rectangle",
@@ -4409,6 +4699,12 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml"
   ]
+ },
+ "sponges.region": {
+  "dims": [
+   3
+  ],
+  "set_in": []
  },
  "sponges.strength": {
   "dims": [
@@ -4657,18 +4953,6 @@
    "vtu"
   ]
  },
- "write_data.geometry": {
-  "default": "\"all\"",
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": [
-   "examples/detonation_3d/input.toml",
-   "examples/sedov_3d/input.toml"
-  ],
-  "type": "string"
- },
  "write_data.interval": {
   "dims": [
    2,
@@ -4753,6 +5037,23 @@
    "tutorials/wedge/input.toml"
   ],
   "type": "string"
+ },
+ "write_data.region": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/detonation_3d/input.toml",
+   "examples/sedov_3d/input.toml"
+  ]
+ },
+ "write_data.regions": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
  },
  "write_data.relative_error": {
   "dims": [

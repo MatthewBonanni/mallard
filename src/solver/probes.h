@@ -1,7 +1,7 @@
 /**
  * @file probes.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief [[probes]]: samples of the solution on point sets and curves, as
+ * @brief [[probes]]: samples of the solution on points and curves, as
  *        cell averages or high-order point values, written raw (CSV, HDF5,
  *        VTK) or reduced (integrals, means, extrema).
  * @version 0.2
@@ -32,7 +32,13 @@
 #include "boundary.h"
 #include "probe_geometry.h"
 #include "probe_surface.h"
+#include "data.h"
 #include "statistics.h"
+
+namespace region {
+class Region;
+class Regions;
+}
 
 /**
  * @brief The fields probes read. Point values need W of every local cell
@@ -64,6 +70,28 @@ struct ProbeReference {
     rtype e[N_DIM] = {};
 };
 
+namespace probe {
+
+/**
+ * @brief What a region key gives: the whole mesh (`"domain"`), a filled
+ *        region, boundary zones, or a probe type as a region (a table whose
+ *        `type` is point, points, line, polyline, arc, curve, cut_plane or
+ *        surface), sampled like that probe.
+ */
+struct RegionValue {
+    enum class Kind { WHOLE_MESH, VOLUME, ZONE, SAMPLED };
+    Kind kind = Kind::VOLUME;
+    const Input * table = nullptr;   // SAMPLED: its keys
+    std::vector<std::string> zones;  // ZONE
+    std::string name;                // given by name; empty when given inline
+};
+
+/** @brief The region a key's value gives (collective); where names the key in errors. */
+RegionValue classify_region(const Input & input, region::Regions & regions, const Input & value,
+                            const std::string & where);
+
+} // namespace probe
+
 /**
  * @brief The [[probes]] of a run. Each probe samples its geometry every
  *        `interval` steps or `time_interval` of simulation time. Setup locates
@@ -74,13 +102,43 @@ struct ProbeReference {
  */
 class Probes {
     public:
+        enum class Sampling { CELL, POINT };
+        enum class Format { CSV, HDF5, VTP, VTKHDF };
+        enum class Reduction { INTEGRAL, MEAN, FAVRE, MIN, MAX, RMS };
+
+        /** @brief What setting up a probe reads: the input, the mesh and its regions. */
+        struct Context {
+            const Input & input;
+            const Mesh & mesh;
+            region::Regions & regions;
+            const std::vector<std::string> & species_names;
+            bool resume = false;  // append to existing files
+            bool viscous = false;
+            const std::vector<Data> * cell_data = nullptr;  // snapshots: the cell fields they may write
+        };
+        /** @brief A [[write_data]] snapshot of a surface, curve, points or boundary zone: point values on it. */
+        struct Snapshot {
+            std::string name;        // its prefix
+            std::string key;         // of the entry, in errors
+            const Input * region = nullptr;
+            std::string region_key;  // of the region, in errors
+            std::string file;
+            Format format = Format::VTKHDF;
+        };
+
         /** @brief Read [[probes]] and locate the samples; resume appends to existing files. */
-        void init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
-                  bool resume, bool viscous);
+        void init(const Context & context);
+        /** @brief Adds a snapshot, with the interval, time_interval and variables of its [[write_data]] entry. */
+        void add_snapshot(const Context & context, const Input & entry, const Snapshot & snapshot);
         /** @brief A restarted run at (step, t): next output times, and series cut back to t. */
         void resume(uint64_t step, rtype t);
 
+        /** @brief Whether a probe or a snapshot is due now. */
         bool due(uint64_t step, rtype t) const;
+        bool probes_due(uint64_t step, rtype t) const;
+        bool snapshots_due(uint64_t step, rtype t) const;
+        /** @brief Whether some snapshot needs the mixture transport properties. */
+        bool snapshots_need_transport() const;
         /** @brief Whether a probe due now samples point values (ProbeFields::W must then be current). */
         bool point_values_due(uint64_t step, rtype t) const;
         bool any_point_values() const;
@@ -90,12 +148,17 @@ class Probes {
         bool any_gradients() const;
         /** @brief Earliest output time of the time-based probes (infinity if none). */
         rtype next_time() const;
-        void write(uint64_t step, rtype t, const ProbeFields & fields);
+        bool any_snapshots() const;
+        /**
+         * @brief Writes the probes, or the snapshots, due; with force, every snapshot not yet
+         *        written at this step. Snapshots of cell fields need the host Data current.
+         */
+        void write(uint64_t step, rtype t, const ProbeFields & fields, bool snapshots = false, bool force = false);
 
-        /** @brief Changes the step interval of the probe of that name; an error message, or empty. */
-        std::string set_interval(const std::string & name, uint64_t steps);
-        /** @brief Changes the time interval of the probe of that name, the next output due after t. */
-        std::string set_time_interval(const std::string & name, rtype value, rtype t);
+        /** @brief Changes the step interval of the probe (or snapshot) of that name; an error message, or empty. */
+        std::string set_interval(const std::string & name, uint64_t steps, bool snapshot = false);
+        /** @brief Changes the time interval of the probe (or snapshot) of that name, the next output due after t. */
+        std::string set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot = false);
 
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
@@ -105,9 +168,8 @@ class Probes {
          */
         void annotate(const std::string & csv_line);
 
-        enum class Sampling { CELL, POINT };
-        enum class Format { CSV, HDF5, VTP, VTKHDF };
-        enum class Reduction { INTEGRAL, MEAN, FAVRE, MIN, MAX, RMS };
+        /** @brief Columns of the values filled on the host with a cell field's value in each sample's cell. */
+        using CellColumns = std::vector<std::pair<uint32_t, const Data *>>;
 
         /** @brief This rank's share of a set of samples, and their values on the device. */
         struct Samples {
@@ -115,6 +177,7 @@ class Probes {
             bool distributed = false;               // samples split over the ranks (else each holds them all)
             std::vector<uint64_t> gathered_row;     // rank 0: row in the gathered values of each global sample
             Kokkos::View<uint32_t *> cells;
+            std::vector<uint32_t> host_cells;
             // Samples of surfaces (and 2D curves): their unit normals; samples
             // on boundary faces: the face and its normal distance from the
             // cell centroid (empty otherwise)
@@ -135,13 +198,15 @@ class Probes {
             /** @brief Points of known cells, all with the normal n (if given). */
             void in_cells(const Mesh & mesh, const probe::CellPoints & set, const std::vector<probe::Point> & n,
                           uint32_t n_variables);
+            /** @brief Owned cells as samples (cell values), numbered in global cell order. */
+            void select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables);
             void set_normals(const std::vector<probe::Point> & n);
             /** @brief The faces of a face set, sampled on their cell side. */
             void on_faces(const Mesh & mesh, const probe::FaceSet & set, uint32_t n_variables);
             void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
                           const ProbeReference & reference, bool gradients);
             /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
-            std::vector<double> gather() const;
+            std::vector<double> gather(const CellColumns & columns = {}) const;
         };
 
     private:
@@ -163,9 +228,12 @@ class Probes {
             bool gradients = false;              // some variable needs velocity or temperature gradients
             bool transport = false;              // some variable needs the viscosity or conductivity
             ProbeReference reference;
-            probe::Geometry geometry;
+            probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
+            bool from_region = false;
+            bool snapshot = false;     // of a [[write_data]] entry
+            CellColumns cell_columns;  // snapshots: cell fields, at the samples' cells
             Samples nodes;
-            Samples quadrature;  // curves with reductions
+            Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
             std::vector<std::pair<double, std::string>> series;  // vtp: (t, file) of the .pvd
             uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
@@ -178,6 +246,11 @@ class Probes {
             void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
                                   const std::vector<double> & quad) const;
         };
+        void add(const Context & context, const Input & entry, const Snapshot * snapshot);
+        /** @brief A region probe's samples: the owned cells the region covers, weighted by f V. */
+        static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
+                                  const std::vector<double> & fractions, uint32_t n_variables);
+
         std::vector<std::unique_ptr<Probe>> probes;
         bool resumed = false;
         bool distributed = false;  // samples split over the ranks, which set up and write together

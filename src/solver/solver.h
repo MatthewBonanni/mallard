@@ -504,7 +504,7 @@ class Solver {
         void check_cost(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker);
         void check_settings(CheckReport & report) const;
         void init_run_parameters();
-        void init_output();
+        void init_output(region::Regions & regions);
         void init_solution();
         void init_solution_constant();
         void init_solution_analytical();
@@ -527,8 +527,8 @@ class Solver {
          */
         std::vector<double> mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
                                                    BoundaryCondition & bc) const;
-        void init_sources();
-        void init_sponges();
+        void init_sources(region::Regions & regions);
+        void init_sponges(region::Regions & regions);
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const;

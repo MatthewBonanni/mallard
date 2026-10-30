@@ -732,7 +732,7 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
     auto probes = [&](const std::string & sub) {
         const std::string at = "file = \"" + dir + "/" + sub;
         return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nvariables = [\"RHO\", \"U\", \"T\", \"H\"]\n"
-               "sampling = \"point\"\nshape = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
+               "sampling = \"point\"\ntype = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
                "interval = 5\nreductions = [\"integral\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_" + at +
                "/circle_red.csv\"\n"
                "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nvariables = [\"P\"]\n"

@@ -90,6 +90,7 @@ struct ZoneInfo {
     std::vector<ElementRef> elements;  // by element id - 1
     std::vector<int> face_section;     // per boundary face of this zone: its section
     std::vector<std::string> section_names;
+    std::vector<std::string> section_families;  // a section's family zone name, or empty
 };
 
 /** @brief Name of the zone a BC or section belongs to: its family's FamilyName (as Gmsh writes physical names), or the family name. */
@@ -169,6 +170,7 @@ MeshFileData read_cgns(const std::string & filename) {
     MeshFileData data;
     std::vector<std::vector<uint64_t>> cell_nodes, face_nodes, face_all_nodes;  // file-wide node ids
     std::vector<int> face_zone;  // zone index of every boundary face
+    std::vector<std::pair<size_t, size_t>> cell_section;  // zone and section of every cell
 
     for (int z = 1; z <= n_zones; z++) {
         ZoneInfo & zone = zones[size_t(z - 1)];
@@ -256,6 +258,7 @@ MeshFileData read_cgns(const std::string & filename) {
                 if (info.dim == N_DIM) {
                     ref = {ElementRef::CELL, uint32_t(cell_nodes.size())};
                     cell_nodes.emplace_back(nodes.begin(), nodes.begin() + info.n_corners);
+                    cell_section.emplace_back(size_t(z - 1), size_t(s - 1));
                 } else if (info.dim == BOUNDARY_DIM) {
                     ref = {ElementRef::FACE, uint32_t(face_nodes.size())};
                     face_nodes.emplace_back(nodes.begin(), nodes.begin() + info.n_corners);
@@ -369,10 +372,12 @@ MeshFileData read_cgns(const std::string & filename) {
                 if (face_name[f].empty()) face_name[f] = name;
             }
         }
+        zone.section_families.assign(zone.section_names.size(), "");
         for (size_t s = 0; s < zone.section_names.size(); s++) {
             std::string family;
             if (cg_goto(fn, B, "Zone_t", z, "Elements_t", int(s + 1), "end") == CG_OK && read_famname(family)) {
                 zone.section_names[s] = family_zone_name(file, B, family);
+                zone.section_families[s] = zone.section_names[s];
             }
         }
     }
@@ -408,6 +413,10 @@ MeshFileData read_cgns(const std::string & filename) {
         return out;
     };
     for (const auto & c : cell_nodes) data.cells.push_back(renumber(c));
+    for (size_t c = 0; c < cell_section.size(); c++) {
+        const std::string & family = zones[cell_section[c].first].section_families[cell_section[c].second];
+        if (!family.empty()) data.set_cell_zone(c, family);
+    }
     for (size_t f = 0; f < face_nodes.size(); f++) {
         data.boundary_faces.push_back({renumber(face_nodes[f]), face_name[f]});
         std::vector<curved::Vec3> ho;

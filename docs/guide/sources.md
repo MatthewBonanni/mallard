@@ -67,7 +67,7 @@ region = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.01
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | `sources[i]` | Name in the run log |
-| `region` | everywhere | Where the source acts (below); values are multiplied by each cell's volume fraction |
+| `region` | everywhere | Where the source acts (below), or the name of a region in `[regions]`; values are multiplied by each cell's volume fraction |
 | `total` | `false` | Values are integrated rates over the region (kg/s, N, W) instead of densities; they may depend on `t` only |
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`"5 MW/m^3"`; with `total`, `"50 W"`) or expressions in SI units |
 | `rhoY` | none | Mixtures: species sources by name, `{H2 = "1e-3"}`; they also add to the mass |
@@ -81,25 +81,44 @@ act.
 
 ### Regions
 
-A region is a shape — sphere, cylinder (solid or annular), cone, box, torus,
-half-space, polygon, any implicit `f(x, y, z) < 0` — or a union, intersection
-or difference of shapes, each scaled, rotated and translated. Shapes need not
+A region is a primitive — sphere, cylinder (solid or annular), cone, box (2D:
+rectangle), torus, half-space, polygon (2D), any implicit `f(x, y, z) < 0` — or a union, intersection
+or difference of regions, each scaled, rotated and translated. Regions need not
 follow the mesh: each cell gets its volume fraction, so a coarse mesh sees the
-right amount of the shape instead of a staircase of whole cells. `edge` (on the
+right amount of the region instead of a staircase of whole cells. `edge` (on the
 outermost region) smooths the boundary over a band of that width, so that a
 source switches on gradually and excites fewer grid-scale waves.
 
 ```toml
 # A disk with a rotated slot cut out of it
-region = {type = "difference",
-          a = {type = "disk", center = [0.5, 0.5], radius = 0.38},
-          b = {type = "rectangle", center = [0.5, 0.5], size = [0.5, 0.16], rotate = 45, pivot = [0.5, 0.5]}}
+region.type = "difference"
+region.a = {type = "disk", center = [0.5, 0.5], radius = 0.38}
+region.b = {type = "rectangle", center = [0.5, 0.5], size = [0.5, 0.16], rotate = 45, pivot = [0.5, 0.5]}
 ```
 
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-light.svg#gh-light-mode-only)
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-dark.svg#gh-dark-mode-only)
 
-Every shape, boolean and transform, with figures: [Geometry](geometry.md#regions).
+Every primitive, boolean and transform, with figures: [Geometry](geometry.md#regions).
+
+A region used by several features (a source, the probe that measures it, a
+sponge) can be defined once in `[regions]` and given by its name:
+
+```toml
+[regions]
+igniter = {type = "sphere", center = [0, 0, 0], radius = 2e-3, edge = 5e-4}
+
+[[sources]]
+total = true
+rhoE = "50 W"
+region = "igniter"
+```
+
+See [named regions](geometry.md#named-regions). The mesh's own regions need
+no definition: `region = "domain"` is every cell, and a cell zone of the mesh
+file (a Gmsh physical group of cells, a Fluent cell zone, ...) is a region by
+its name, e.g. `region = "flame_holder"`
+([regions of the mesh](geometry.md#regions-of-the-mesh)).
 
 ### Exact totals
 
@@ -139,7 +158,8 @@ Pitfalls:
 - Domain averages cost a global sum per stage and keep steps out of CUDA graphs.
 
 Example: `examples/source_regions` heats a ring with an exact Gaussian pulse
-and pushes the gas with a tilted fan.
+and pushes the gas with a tilted fan; a probe of the same named region records
+the mass and temperature in the ring.
 
 ## Sponge layers
 
@@ -164,12 +184,29 @@ conditions alone may reflect them or let reversed flow in.
 | Key | Default | Meaning |
 |---|---|---|
 | `strength` | required | Damping rate [1/s], a number or an expression of x, y, z; zero outside the layer |
+| `region` | none | A [region](geometry.md#regions) (or its name in `[regions]`): `strength` is multiplied by each cell's volume fraction of it |
 | `u`, `p`, `T` | required | Reference state, numbers or expressions of x, y, z |
 | `X` or `Y`, `balance` | — | Mixtures: reference composition |
 
-Several sponges add up. Strength and reference are evaluated once, at cell
-centroids; a comparison in `strength` gives the layer any shape
-([Geometry](geometry.md#who-uses-what)). The source is explicit and caps the time step at
+With `region`, the layer is where the region is, and the region's smooth
+`edge` ramps it up; `strength` gives the peak rate, or a profile inside the
+region:
+
+```toml
+# 50 1/s beyond x = 4.5, ramped up smoothly between x = 4 and 5
+[[sponges]]
+strength = 50.0
+region = {type = "half_space", point = [4.5, 0.0], normal = [-1.0, 0.0], edge = 1.0}
+u = [1.0, 0.0]
+p = 1.0
+T = 1.0
+```
+
+Both forms remain: an expression alone gives any profile, a region gives any
+[region](geometry.md#regions) its volume fractions (not a staircase of cell
+centroids) and shares a named region with sources and probes. Several sponges
+add up. Strength and reference are evaluated once, at cell
+centroids. The source is explicit and caps the time step at
 `1 / max(strength)`. Example: `channel_inflow_retau180`, a sponge over the last
 fifth of the channel in front of its `nscbc_outlet`.
 

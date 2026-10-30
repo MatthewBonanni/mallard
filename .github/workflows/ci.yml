@@ -66,6 +66,8 @@ jobs:
           python3 tools/dev/check_workflow_triggers.py
       - name: Check the documented input defaults against the key catalog
         run: python3 tools/dev/input_catalog.py docs
+      - name: Check that the TOML snippets of the docs parse
+        run: python3 tools/dev/check_doc_toml.py
       - name: Check for a changelog fragment
         env:
           GH_TOKEN: ${{ github.token }}
