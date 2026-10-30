@@ -81,7 +81,7 @@ p = T = 1/γ with a gas constant of 1 (`p_ref = T_ref = 1/γ`, `rho_ref = 1`).
 | `[physics]` | `euler`, γ = 1.4 |
 | `[[forces]]` | The force on the cone, every 10 steps, `forces_cone.csv` |
 | `[[probes]]` | 40 points across the shock layer at x = 0.8 in the plane y = z, every 20 steps, `probe_layer.csv` |
-| `[[write_data]]` | Every 0.5: the volume (`solut/flow`), the cone's faces (`region = "cone"`) and the symmetry plane z = 0 (`region = "symmetry_z"`) with the values of their cells |
+| `[[write_data]]` | Every 0.5: the volume (`solut/flow`), the cone's faces (`region = "cone"`) and the symmetry plane z = 0 (`region = "symmetry_z"`), point values at their faces |
 
 ## 4. Run
 
