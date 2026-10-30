@@ -223,6 +223,9 @@ TEST(SourceTermsTest, RegionNamesMustExistWithoutCyclesAndBeUsed) {
                                                     "\"nope\"\n"));
     EXPECT_NE(unknown.find("no region named \"nope\" in [regions] (defined: a, b)"), std::string::npos) << unknown;
     EXPECT_NE(unknown.find("named-regions"), std::string::npos) << unknown;
+    const std::string typo = error_of(closed_box("[regions]\nflame = " + ball + "\n" + source + "\"flme\"\n"));
+    EXPECT_NE(typo.find("did you mean \"flame\"?"), std::string::npos) << typo;
+    EXPECT_NE(typo.find("line "), std::string::npos) << typo;
     const std::string cycle = error_of(closed_box(
         "[regions]\na = {type = \"union\", regions = [\"b\", " + ball + "]}\nb = {type = \"difference\", regions = [" +
         ball + ", \"a\"]}\n" + source + "\"a\"\n"));

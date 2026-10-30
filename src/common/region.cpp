@@ -105,7 +105,7 @@ class Parser {
         int depth = 0, max_depth = 0;
 
         std::string parse(const Input & value, const std::string & where, const Frame & parent) {
-            if (value.is_string()) return named(value.as_string(), where, parent);
+            if (value.is_string()) return named(value, where, parent);
             return parse_table(value, where, parent);
         }
 
@@ -125,17 +125,28 @@ class Parser {
         }
 
     private:
-        std::string named(const std::string & name, const std::string & where, const Frame & parent) {
-            const Input & t = lookup(names, name, where);
+        std::string named(const Input & value, const std::string & where, const Frame & parent) {
+            const std::string name = value.as_string();
+            const Input & t = lookup(names, value, where);
             const auto repeat = std::find(resolving.begin(), resolving.end(), name);
             if (repeat != resolving.end()) {
                 std::string cycle;
                 for (auto it = repeat; it != resolving.end(); ++it) cycle += *it + " -> ";
-                throw InputError("regions: " + cycle + name + " is a cycle of named regions.");
+                throw InputError(Diagnostic{.key = where,
+                                            .line = line_of(value),
+                                            .message = "\"" + name + "\" makes a cycle of named regions, " + cycle +
+                                                       name,
+                                            .fix = "Define one of them without naming the others",
+                                            .docs = "docs/guide/geometry.md#named-regions"});
             }
             if (t.is_table() && t.contains("edge")) {
-                throw InputError("regions." + name + ".edge: a smooth edge belongs to a whole region, but " + where +
-                                 " uses " + name + " inside another region.");
+                throw InputError(Diagnostic{.key = "regions." + name + ".edge",
+                                            .line = line_of(t, "edge"),
+                                            .message = "a smooth edge belongs to a whole region, but " + where +
+                                                       " uses \"" + name + "\" as a part of another region",
+                                            .fix = "Move edge to the outermost region, or define the part again "
+                                                   "without it",
+                                            .docs = "docs/guide/geometry.md#named-regions"});
             }
             resolving.push_back(name);
             const std::string text = parse_table(t, "regions." + name, parent);
@@ -288,9 +299,12 @@ class Parser {
                 text += (i ? ", " : "") + parse(*parts[i].first, parts[i].second, frame);
                 if (i >= 1) push(op);
                 if (i >= 1 && last_dimension != d) {
-                    throw InputError(where + ": a " + type + " combines regions of one dimension, but " +
-                                     parts[0].second + " is " + dimension_name(d) + " and " + parts[i].second +
-                                     " is " + dimension_name(last_dimension) + ".");
+                    throw InputError(Diagnostic{.key = where,
+                                                .line = line_of(t, "type"),
+                                                .message = "a " + type + " combines regions of one dimension, but " +
+                                                           parts[0].second + " is " + dimension_name(d) + " and " +
+                                                           parts[i].second + " is " + dimension_name(last_dimension),
+                                                .docs = "docs/guide/geometry.md#regions"});
                 }
                 d = last_dimension;
             }
@@ -398,31 +412,42 @@ class Parser {
 
 } // namespace
 
-const Input & lookup(const Input * names, const std::string & name, const std::string & where) {
+const Input & lookup(const Input * names, const Input & value, const std::string & where) {
+    const std::string name = value.as_string();
     if (names && names->as_table().entries().contains(name)) return names->at(name);
     std::vector<std::string> defined;
     if (names) {
-        for (const auto & [key, value] : names->as_table().entries()) defined.push_back(key);
+        for (const auto & entry : names->as_table().entries()) defined.push_back(entry.first);
     }
     std::sort(defined.begin(), defined.end());
     std::string list;
     for (const auto & d : defined) list += (list.empty() ? "" : ", ") + d;
-    throw InputError(where + ": no region named \"" + name + "\" in [regions] (" +
-                     (list.empty() ? std::string("none defined") : "defined: " + list) +
-                     "). See docs/guide/geometry.md#named-regions.");
+    throw InputError(Diagnostic{.key = where,
+                                .line = line_of(value),
+                                .message = "no region named \"" + name + "\" in [regions] (" +
+                                           (list.empty() ? std::string("none defined") : "defined: " + list) + ")",
+                                .suggestion = suggest_value(name, defined),
+                                .fix = "Define it as [regions." + name + "], or give the region as a table",
+                                .docs = "docs/guide/geometry.md#named-regions"});
 }
 
 const Input * named_regions(const Input & input) {
     if (!input.contains("regions")) return nullptr;
     const Input & names = input.at("regions");
-    if (!names.is_table()) throw InputError("regions must be a table of named regions: [regions.<name>].");
+    if (!names.is_table()) {
+        throw InputError(Diagnostic{.key = "regions",
+                                    .line = line_of(names),
+                                    .message = "must be a table of named regions",
+                                    .fix = "Write each as [regions.<name>] or <name> = {type = ...} under [regions]",
+                                    .docs = "docs/guide/geometry.md#named-regions"});
+    }
     return &names;
 }
 
 Region::Region(const Input & value, const std::string & where, const Input * names) {
     Parser parser;
     parser.names = names;
-    const Input & table = value.is_string() ? lookup(names, value.as_string(), where) : value;
+    const Input & table = value.is_string() ? lookup(names, value, where) : value;
     if (value.is_string()) parser.resolving.push_back(value.as_string());
     m_summary = parser.parse_table(table, value.is_string() ? "regions." + value.as_string() : where, Frame());
     if (value.is_string()) {
@@ -585,11 +610,14 @@ std::vector<double> volume_fractions(const Mesh & mesh, const Region & region) {
     return fractions;
 }
 
-void require_full_dimension(const Region & region, const std::string & where) {
+void require_full_dimension(const Region & region, const Input & value, const std::string & where) {
     if (region.dimension() == N_DIM) return;
-    const std::string what = region.name().empty() ? "this region" : "'" + region.name() + "'";
-    throw InputError(where + " needs " + dimension_name(N_DIM) + "; " + what + " is " +
-                     dimension_name(region.dimension()) + ".");
+    const std::string what = region.name().empty() ? "this region" : "\"" + region.name() + "\"";
+    throw InputError(Diagnostic{.key = where,
+                                .line = line_of(value),
+                                .message = "needs " + dimension_name(N_DIM) + ", but " + what + " is " +
+                                           dimension_name(region.dimension()),
+                                .docs = "docs/guide/geometry.md#who-uses-what"});
 }
 
 Regions::Regions(const Input & input, const Mesh & mesh) : m_names(named_regions(input)), m_mesh(mesh) {}

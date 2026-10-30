@@ -215,11 +215,11 @@ struct RegionView {
 const Input * named_regions(const Input & input);
 
 /**
- * @brief The table of the region of that name in names (a [regions] table,
+ * @brief The table of the region value names (a string) in names (a [regions] table,
  *        or null); an error listing the defined names if there is none.
  * @param where The key that gives the name, for error messages.
  */
-const Input & lookup(const Input * names, const std::string & name, const std::string & where);
+const Input & lookup(const Input * names, const Input & value, const std::string & where);
 
 /**
  * @brief A region from its input table: a primitive or a boolean of
@@ -282,7 +282,7 @@ class Region {
 };
 
 /** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
-void require_full_dimension(const Region & region, const std::string & where);
+void require_full_dimension(const Region & region, const Input & value, const std::string & where);
 
 /**
  * @brief Volume fraction of the region in every cell of the mesh (owned and

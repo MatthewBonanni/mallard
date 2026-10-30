@@ -424,8 +424,14 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         p.from_region = entry.contains("region");
         for (const char * k : {"shape", "sampling", "format", "file", "samples"}) {
             if (p.from_region && entry.contains(k)) {
-                throw InputError(key + "." + k + ": a region probe writes only its reductions, to reductions_file; " +
-                                 k + " applies to points and curves.");
+                throw InputError(Diagnostic{.key = key + "." + k,
+                                            .line = line_of(entry, k),
+                                            .message = std::string("applies to probes of points and curves, but a "
+                                                                   "region probe writes only its reductions, to "
+                                                                   "reductions_file"),
+                                            .fix = std::string("Remove ") + k + ", or give the probe a shape instead "
+                                                   "of a region",
+                                            .docs = "docs/guide/output.md#region-probes"});
             }
         }
         const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
@@ -481,9 +487,15 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
         if (p.from_region) {
             const region::Region & r = regions.get(entry.at("region"), key + ".region");
-            region::require_full_dimension(r, key + ".region");
+            region::require_full_dimension(r, entry.at("region"), key + ".region");
             select_region(p, mesh, r, regions.fractions(entry.at("region"), key + ".region"), n_evaluated);
-            if (p.quadrature.n_global == 0) throw InputError(key + ".region contains no part of any cell.");
+            if (p.quadrature.n_global == 0) {
+                throw InputError(Diagnostic{.key = key + ".region",
+                                            .line = line_of(entry, "region"),
+                                            .message = "covers no part of any cell of the mesh",
+                                            .fix = "Move or enlarge the region so that it overlaps the domain",
+                                            .docs = "docs/guide/output.md#region-probes"});
+            }
         } else {
             p.geometry = probe::make_geometry(entry, key);
             p.nodes.locate(mesh, p.geometry.nodes, n_evaluated);
