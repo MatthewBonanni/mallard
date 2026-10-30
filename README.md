@@ -65,7 +65,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - TOML input with units (`p = "1 atm"`, `Lx = "5 mm"`), converted to SI and checked against each key's dimension; initial conditions, boundary states, sources and sponges as analytical expressions; misspelled or unused keys are errors, with suggestions
 - Pre-flight check (`mallard check`): mesh quality, stable time step, memory per GPU and cost estimate before a run
 - Case templates (`mallard new <template>`): a ready-to-run case with mesh, run and post-processing scripts
-- Stable inputs and files across releases: renamed keys keep working with a warning for a release and `mallard upgrade-input` rewrites old inputs; restart, mesh and output files carry format versions, and files written since 0.6 are read by later releases
+- Stable inputs and files across releases: renamed keys keep working with a warning for a release and `mallard input upgrade` rewrites old inputs; restart, mesh and output files carry format versions, and files written since 0.6 are read by later releases
 - Conservative, high-order remap of a restart onto another mesh (any cell type, resolution or rank count): exact cell intersections, integrals kept to rounding
 - VTKHDF output for ParaView (default; one file per snapshot written by all ranks in parallel, or one file for the whole series; curved cells as quadratic cells), or VTU; surface output of boundary zones
 - Running means and covariances; probes on points and curves (cell averages or high-order point values, CSV, HDF5 or VTK, with integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces
@@ -98,7 +98,7 @@ Three ways to install Mallard, quickest first:
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development; options the others lack | CMake |
 
-Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `upgrade-input` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them.
+Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](docs/guide/cli.md)).
 
 ### Container
 

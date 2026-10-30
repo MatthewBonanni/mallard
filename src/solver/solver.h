@@ -548,7 +548,7 @@ class Solver {
         void write_provenance();
         /** @brief The columns of the integrals file after step and t, and their dimensions. */
         std::vector<std::pair<std::string, Dimension>> integral_columns() const;
-        /** @brief Dimension of the cell measure: m^N_DIM, per unit depth in 2D, per radian in axisymmetric runs. */
+        /** @brief Dimension of the cell measure: m^N_DIM (per unit depth in 2D); m^3 rad^-1 in axisymmetric runs. */
         Dimension measure_dimension() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
