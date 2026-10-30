@@ -766,6 +766,47 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
     comm::barrier();
 }
 
+TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
+    // Wall polylines chained across ranks, face states and wall gradients
+    const std::string dir = io_dir() + "_boundary_probes";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto input = [&](const std::string & sub) {
+        return box_input("cartesian_tri", "type = \"TENO\"\norder = 3\n", NS,
+                         bcs("type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                             "type = \"wall_isothermal\"\nT = 1.2\n"),
+                         10) +
+               "[[probes]]\nname = \"walls\"\nboundary_type = \"wall\"\nsampling = \"point\"\nfile = \"" + dir + "/" +
+               sub + "/walls.csv\"\nvariables = [\"P\", \"T\", \"CF\", \"Q_W\", \"Y_PLUS\"]\ninterval = 5\n"
+               "reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}\n"
+               "[[probes]]\nname = \"open\"\nboundary = [\"left\", \"right\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
+               sub + "/open.pvd\"\nvariables = [\"MASS_FLUX\", \"MOMENTUM_FLUX\"]\ninterval = 10\n"
+               "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/open.csv\"\n";
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(input("serial")));
+    reference.run();
+    Solver distributed;
+    distributed.init(parse_toml(input("ranks")));
+    distributed.run();
+    comm::barrier();
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        for (const char * file : {"walls.csv", "open.csv", "open.pvd", "open_000010.vtp"}) {
+            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            EXPECT_FALSE(a.empty()) << file;
+            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+        }
+    }
+    comm::barrier();
+}
+
 TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     const std::string dir = io_dir() + "_vtu";
     if (comm::is_root()) std::filesystem::remove_all(dir);

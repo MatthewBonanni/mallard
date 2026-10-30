@@ -143,7 +143,13 @@ std::string channel(const std::string & dir) {
       << "reductions_file = \"" << dir << "/line_reductions.csv\"\n"
       << "[[probes]]\nname = \"vtp\"\nformat = \"vtp\"\nfile = \"" << dir << "/vtp.pvd\"\nstart = "
       << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = " << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]")
-      << "\nn_points = 4\nvariables = [\"RHO\", \"T\"]\n";
+      << "\nn_points = 4\nvariables = [\"RHO\", \"T\"]\n"
+      << "[[probes]]\nname = \"wall\"\nfile = \"" << dir << "/wall.csv\"\nboundary = \"bottom\"\n"
+      << "variables = [\"P\", \"CP\", \"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENTHALPY_FLUX\", \"TRACTION_PRESSURE\"]\n"
+      << "reference = {rho = 1.0, u = " << (N_DIM == 3 ? "[0.5, 0.0, 0.0]" : "[0.5, 0.0]") << ", p = 1.0}\n"
+      << "reductions = [\"integral\", \"mean\"]\nreductions_file = \"" << dir << "/wall_reductions.csv\"\n"
+      << "[[probes]]\nname = \"wall_vtp\"\nformat = \"vtp\"\nfile = \"" << dir << "/wall_vtp.pvd\"\n"
+      << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\", \"TRACTION_PRESSURE\"]\n";
     const std::string variables =
         "variables = [\"RHO\", \"RHOU\", \"RHOE\", \"U\", \"U_X\", \"P\", \"T\", \"H\", \"CFL\", \"Q\", \"VORTICITY\", "
         "\"MEAN_*\", \"COV_*\"]\n";
@@ -156,13 +162,17 @@ std::string channel(const std::string & dir) {
           << "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/probe.h5\"\nstart = "
           << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
           << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nvariables = [\"RHO\", \"U\"]\n"
+          << "[[probes]]\nname = \"wall_h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/wall_probe.h5\"\n"
+          << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\"]\n"
           << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\ninterval = 2\n" << variables
           << "[[write_data]]\nprefix = \"" << dir << "/ks\"\nformat = \"vtkhdf\"\nseries = true\ninterval = 2\n"
           << variables << "[[write_data]]\nprefix = \"" << dir << "/kwall\"\nformat = \"vtkhdf\"\n"
           << "geometry = \"bottom\"\ninterval = 2\nvariables = [\"P\", \"U\"]\n"
           << "[[probes]]\nname = \"vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/probe.vtkhdf\"\nstart = "
           << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
-          << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nvariables = [\"RHO\", \"U\"]\n";
+          << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nvariables = [\"RHO\", \"U\"]\n"
+          << "[[probes]]\nname = \"wall_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/wall_probe.vtkhdf\"\n"
+          << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\"]\n";
     }
 #endif
     return s.str();
@@ -188,6 +198,17 @@ TEST(FieldUnitsTest, UnitsFollowFromTheDimensions) {
     EXPECT_EQ(field_units::describe("X_N2").long_name, "mole fraction of N2");
     EXPECT_EQ(units_of("NON_ORTHOGONALITY"), "degree") << "mallard check writes it in degrees";
     EXPECT_EQ(field_units::describe("U_Y").long_name, "y component of velocity");
+    // Boundary probes: flux densities through faces and wall quantities
+    EXPECT_EQ(units_of("MASS_FLUX"), "kg m-2 s-1");
+    EXPECT_EQ(units_of("SPECIES_FLUX_H2"), "kg m-2 s-1");
+    EXPECT_EQ(units_of("ENTHALPY_FLUX"), "kg s-3");
+    EXPECT_EQ(units_of("Q_W"), "kg s-3");
+    EXPECT_EQ(units_of("MOMENTUM_FLUX_X"), "kg m-1 s-2");
+    EXPECT_EQ(units_of("TRACTION_VISCOUS_Y"), "kg m-1 s-2");
+    EXPECT_EQ(units_of("TAU_W_X"), "kg m-1 s-2");
+    EXPECT_EQ(field_units::describe("TAU_W").long_name, "wall shear stress magnitude");
+    EXPECT_EQ(units_of("U_TAU"), "m s-1");
+    for (const char * name : {"CF", "CP", "Y_PLUS"}) EXPECT_EQ(units_of(name), "1") << name;
 }
 
 TEST(FieldUnitsTest, DerivedFieldsTakeTheirUnitsFromTheirFields) {
@@ -237,6 +258,8 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
         EXPECT_NE(std::find(names.begin(), names.end(), name), names.end()) << name;
     }
     expect_vtk_units(dir + "/vtp_000002.vtp", {{"arc_length", "m"}});
+    const std::string area = N_DIM == 3 ? "m2" : "m";
+    expect_vtk_units(dir + "/wall_vtp_000002.vtp", {{"arc_length", "m"}, {"normal", "1"}, {"measure", area}});
 
     // CSV: the columns' own units
     const std::string measure = dim::of(0, N_DIM, 0).udunits();
@@ -256,6 +279,22 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
     auto forces = csv_units(dir + "/forces.csv");
     EXPECT_EQ(forces["Fx_pressure"], N_DIM == 3 ? "kg m s-2" : "kg s-2") << "per unit depth in 2D";
     EXPECT_EQ(forces["Fy_viscous"], forces["Fx_pressure"]);
+    auto wall = csv_units(dir + "/wall.csv");
+    EXPECT_EQ(wall["face"], "1");
+    EXPECT_EQ(wall["x"], "m");
+    if (N_DIM == 2) {
+        EXPECT_EQ(wall["s"], "m");
+    }
+    EXPECT_EQ(wall["ny"], "1");
+    EXPECT_EQ(wall["area"], area) << "a segment's length in 2D";
+    for (const char * v : {"P", "CP", "MASS_FLUX", "MOMENTUM_FLUX_X", "ENTHALPY_FLUX", "TRACTION_PRESSURE_Y"}) {
+        EXPECT_EQ(wall[v], units_of(v)) << v;
+    }
+    auto wall_reductions = csv_units(dir + "/wall_reductions.csv");
+    EXPECT_EQ(wall_reductions[N_DIM == 3 ? "area" : "length"], area);
+    EXPECT_EQ(wall_reductions["integral_MASS_FLUX"], N_DIM == 3 ? "kg s-1" : "kg m-1 s-1");
+    EXPECT_EQ(wall_reductions["integral_TRACTION_PRESSURE_Y"], forces["Fy_pressure"]) << "a force";
+    EXPECT_EQ(wall_reductions["mean_CP"], "1");
     auto integrals = csv_units(dir + "/integrals.csv");
     EXPECT_EQ(integrals["kinetic_energy"], N_DIM == 3 ? "kg m2 s-2" : "kg m s-2");
     EXPECT_EQ(integrals["temperature"], N_DIM == 3 ? "m3 K" : "m2 K");
@@ -329,11 +368,39 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
             EXPECT_EQ(h5::read_string_attribute(dset, "units"), units_of(name.substr(name.rfind('/') + 1))) << path;
         }
 
+        // A boundary probe's VTKHDF: polygons (3D) carry the samples as cell data, polylines (2D) as point data
+        {
+            h5::Handle h5file(H5Fopen((dir + "/wall_probe.vtkhdf").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "wall");
+            const std::string data = N_DIM == 3 ? "VTKHDF/CellData/" : "VTKHDF/PointData/";
+            for (const auto & [name, units] : std::map<std::string, std::string>{
+                     {"P", units_of("P")}, {"MASS_FLUX", units_of("MASS_FLUX")}, {"normal", "1"}, {"measure", area}}) {
+                h5::Handle dset(H5Dopen2(h5file, (data + name).c_str(), H5P_DEFAULT), H5Dclose, name);
+                EXPECT_EQ(h5::read_string_attribute(dset, "units"), units) << name;
+            }
+            h5::Handle cells(H5Dopen2(h5file, N_DIM == 3 ? "VTKHDF/Polygons/NumberOfCells" : "VTKHDF/Lines/NumberOfCells",
+                                      H5P_DEFAULT),
+                             H5Dclose, "NumberOfCells");
+            int64_t n_cells = 0;
+            h5::check(H5Dread(cells, H5T_NATIVE_INT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &n_cells), "H5Dread");
+            EXPECT_EQ(n_cells, N_DIM == 3 ? 12 : 1) << "a polygon per face of the 4 x 3 bottom (3D), one polyline (2D)";
+        }
+
         h5::Handle probe(H5Fopen((dir + "/probe.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "probe");
         for (const auto & [name, units] : std::map<std::string, std::string>{
                  {"time", "s"}, {"coordinates", "m"}, {"arc_length", "m"}, {"fields/RHO", units_of("RHO")},
                  {"fields/U_Y", units_of("U_Y")}}) {
             h5::Handle dset(H5Dopen2(probe, name.c_str(), H5P_DEFAULT), H5Dclose, name);
+            EXPECT_EQ(h5::read_string_attribute(dset, "units"), units) << name;
+        }
+        h5::Handle wall_probe(H5Fopen((dir + "/wall_probe.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "wall");
+        std::map<std::string, std::string> wall_units = {{"coordinates", "m"},
+                                                         {"normals", "1"},
+                                                         {"area", area},
+                                                         {"fields/P", units_of("P")},
+                                                         {"fields/MASS_FLUX", units_of("MASS_FLUX")}};
+        if (N_DIM == 3) wall_units["vertices"] = "m";
+        for (const auto & [name, units] : wall_units) {
+            h5::Handle dset(H5Dopen2(wall_probe, name.c_str(), H5P_DEFAULT), H5Dclose, name);
             EXPECT_EQ(h5::read_string_attribute(dset, "units"), units) << name;
         }
 
@@ -374,7 +441,10 @@ TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
       << "[physics]\naxisymmetric = true\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\nrun_log = \"\"\n"
       << "[integrals]\nfile = \"" << dir << "/integrals.csv\"\n"
-      << "[[forces]]\nzone = \"top\"\nfile = \"" << dir << "/forces.csv\"\n";
+      << "[[forces]]\nzone = \"top\"\nfile = \"" << dir << "/forces.csv\"\n"
+      << "[[probes]]\nname = \"top\"\nboundary = \"top\"\nfile = \"" << dir << "/top.csv\"\n"
+      << "variables = [\"P\", \"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"mean\"]\n"
+      << "reductions_file = \"" << dir << "/top_reductions.csv\"\n";
     {
         Solver solver;
         solver.init(parse_toml(s.str()));
@@ -383,7 +453,14 @@ TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
     comm::barrier();
     if (!comm::is_root()) return;
     // Forces and volume integrals over a radian of the revolved domain
-    EXPECT_EQ(csv_units(dir + "/forces.csv")["Fx_pressure"], "kg m s-2 rad-1");
+    const std::string force = csv_units(dir + "/forces.csv")["Fx_pressure"];
+    EXPECT_EQ(force, "kg m s-2 rad-1");
+    // Boundary probes: faces of the revolved wall, per radian
+    EXPECT_EQ(csv_units(dir + "/top.csv")["area"], "m2 rad-1");
+    auto top = csv_units(dir + "/top_reductions.csv");
+    EXPECT_EQ(top["area"], "m2 rad-1");
+    EXPECT_EQ(top["integral_TRACTION_PRESSURE_Y"], force);
+    EXPECT_EQ(top["mean_P"], units_of("P"));
     auto integrals = csv_units(dir + "/integrals.csv");
     EXPECT_EQ(integrals["kinetic_energy"], "kg m2 s-2 rad-1");
     EXPECT_EQ(integrals["temperature"], "m3 K rad-1");
