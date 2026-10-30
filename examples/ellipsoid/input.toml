@@ -20,7 +20,7 @@
 # scaled by 3; Cp error: RMS against potential flow over the wall faces).
 # Flat facets are corners for the inviscid flow: it turns unsteady, with local
 # Mach numbers up to 0.9 and a quarter of the cells troubled; on the curved
-# faces it stays steady, with the potential-flow peak Mach number 0.367.
+# faces it stays steady, with a peak Mach number of 0.365 (potential flow: 0.363).
 #
 # Mesh: tetrahedra of the quarter y >= 0, z >= 0 of the box [-6, 8] x [-6, 6]^2
 # (y = 0 and z = 0 are symmetry planes), spheroid of length 2 and diameter 1,
