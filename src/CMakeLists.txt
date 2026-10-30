@@ -4,6 +4,7 @@ add_library(MallardCore STATIC
     common/compiled_expression.cpp
     common/region.cpp
     common/region_mesh.cpp
+    io/case_view.cpp
     common/common_io.cpp
     common/input.cpp
     common/units.cpp

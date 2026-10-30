@@ -171,11 +171,11 @@ void Solver::setup_from_input() {
         init_les();
         statistics.init(input, species_names, *mesh);
         init_rhs_split();
-        region::Regions regions(input, *mesh);
-        init_sources(regions);
-        init_sponges(regions);
+        used_regions = std::make_unique<region::Regions>(input, *mesh);
+        init_sources(*used_regions);
+        init_sponges(*used_regions);
         register_data();
-        init_output(regions);
+        init_output(*used_regions);
     });
     timed_phase("initial solution", [&] { init_solution(); });
     logging::begin_phase("total");

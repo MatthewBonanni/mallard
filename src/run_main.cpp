@@ -133,6 +133,7 @@ int check_main(const cli::Args & args) {
     options.input_file = input_file;
     options.quality_file = args.value_or("--quality", "");
     options.catalog_file = args.value_or("--catalog", "");
+    options.view_dir = args.value_or("--view", "");
     std::string error;
     if (!number(args, "--ranks", options.ranks, error) || !number(args, "--throughput", options.throughput, error) ||
         !number(args, "--steps", options.steps, error)) {

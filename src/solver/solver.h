@@ -54,6 +54,7 @@
 #include "numerics_preset.h"
 #include "run_status.h"
 #include "input_upgrade.h"
+#include "region.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -503,6 +504,7 @@ class Solver {
         void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
         void check_cost(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker);
         void check_settings(CheckReport & report) const;
+        void check_regions(CheckReport & report, const CheckOptions & options) const;
         void init_run_parameters();
         void init_output(region::Regions & regions);
         void init_solution();
@@ -674,6 +676,7 @@ class Solver {
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
+        std::unique_ptr<region::Regions> used_regions;  // every region the setup used
         Euler physics;
         std::vector<std::string> species_names;
         std::shared_ptr<MixtureModel> mixture_model;  // null for a single gas

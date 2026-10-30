@@ -14,6 +14,7 @@
 #ifndef REGION_H
 #define REGION_H
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -355,6 +356,13 @@ class Region {
         std::string m_summary;
 };
 
+/**
+ * @brief A box around a region, from its primitives: [lo, hi] per axis,
+ *        infinite where a part is unbounded or of the mesh (2D: z spans
+ *        the primitives' z extent).
+ */
+std::array<std::array<double, 3>, 2> bounds(const Region & region);
+
 /** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
 void require_full_dimension(const Region & region, const std::string & where);
 
@@ -393,10 +401,17 @@ class Regions {
         /** @brief Its volume fractions in every cell of the mesh (see cell_fractions). Collective. */
         const std::vector<double> & fractions(const Input & value, const std::string & where);
 
+        /** @brief The regions the run uses, in the order of first use: by name, or by the key of inline ones. */
+        std::vector<std::pair<std::string, const Region *>> used() const;
+
+        /** @brief The regions of the mesh. */
+        const MeshRegions & automatic() const { return m_automatic; }
+
     private:
         struct Entry {
             Region region;
             std::vector<double> fractions;  // empty until asked for
+            std::string label;
         };
         Entry & entry(const Input & value, const std::string & where);
 
@@ -404,7 +419,7 @@ class Regions {
         const Mesh & m_mesh;
         MeshRegions m_automatic;
         std::vector<std::unique_ptr<Entry>> m_entries;
-        std::map<std::string, size_t> m_by_name;
+        std::map<std::string, size_t> m_by_name;  // names, and the keys of inline regions
 };
 
 } // namespace region
