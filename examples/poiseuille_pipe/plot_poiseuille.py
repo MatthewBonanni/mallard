@@ -2,7 +2,7 @@
 """Axial velocity of an axisymmetric Hagen-Poiseuille run against the exact
 profile u = U (1 - r^2 / R^2), compared as r-weighted cell averages.
 
-    plot_poiseuille.py OUTPUT.png RUN.vtu [RUN.vtu ...] [--U 0.01] [--R 1]
+    plot_poiseuille.py OUTPUT.png SNAPSHOT [SNAPSHOT ...] [--U 0.01] [--R 1]
 """
 import argparse
 import os

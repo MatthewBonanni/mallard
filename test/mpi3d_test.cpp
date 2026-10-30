@@ -230,6 +230,47 @@ TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
     EXPECT_EQ(total, 12u * 12u);
 }
 
+TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
+    // Faces in the order of their cells' global ids, polygons over shared vertices
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_probes").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto input = [&](const std::string & sub) {
+        return box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n") +
+               "[[probes]]\nname = \"walls\"\nboundary = [\"bottom\", \"left\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
+               sub + "/walls.pvd\"\nvariables = [\"P\", \"TAU_W\", \"Q_W\", \"MASS_FLUX\"]\ninterval = 4\n"
+               "reductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub + "/walls.csv\"\n"
+               "[[probes]]\nname = \"cut\"\nshape = \"cut_plane\"\npoint = [0.5, 0.4, 0.3]\nnormal = [1.0, 0.6, 0.3]\n"
+               "variables = [\"P\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub + "/cut.pvd\"\n"
+               "interval = 8\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/cut.csv\"\n";
+    };
+    Solver reference;
+    reference.set_distributed(false);
+    reference.init(parse_toml(input("serial")));
+    reference.run();
+    Solver distributed;
+    distributed.init(parse_toml(input("ranks")));
+    distributed.run();
+    comm::barrier();
+    if (comm::is_root()) {
+        auto read = [](const std::string & path) {
+            std::ifstream in(path);
+            std::stringstream ss;
+            ss << in.rdbuf();
+            return ss.str();
+        };
+        for (const char * file : {"walls.csv", "walls.pvd", "walls_000008.vtp", "cut.csv", "cut_000008.vtp"}) {
+            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            EXPECT_FALSE(a.empty()) << file;
+            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+        }
+        // Each hexahedral block's face splits into two triangles: 6 x 3 at the bottom, 4 x 3 on the left
+        EXPECT_NE(read(dir + "/serial/walls_000008.vtp").find("NumberOfPolys=\"" + std::to_string(2 * (18 + 12)) + "\""),
+                  std::string::npos);
+    }
+    comm::barrier();
+}
+
 TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
     // Tetrahedra, pyramids, prisms and hexahedra at their global ids
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
@@ -238,6 +279,30 @@ TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
     const std::string dir = (scratch_dir() / "mallard_mpi3d_hdf5").string();
     expect_hdf5_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
                                       "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
+#endif
+}
+
+TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
+    // Tetrahedra, pyramids, prisms and hexahedra, and the quadratic cells of
+    // a curved shell, at their global places
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_vtkhdf").string();
+    expect_vtkhdf_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
+                                        "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir,
+                                        {"_000000", "_000004", "_000008"});
+    const std::string file = write_temp_shared("mallard_mpi_vtkhdf_shell.msh", shell_gmsh(4, 3, true, false));
+    expect_vtkhdf_output_matches_serial(
+        "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+        "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n"
+        "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n[[boundaries]]\nname = \"outer\"\n"
+        "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
+        "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n",
+        "interval = 2\nseries = true\nvariables = [\"RHO\", \"U\"]\n", dir + "_curved", {""});
 #endif
 }
 

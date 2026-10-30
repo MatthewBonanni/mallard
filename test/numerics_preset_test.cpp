@@ -133,7 +133,8 @@ TEST(NumericsPreset, InvalidPresetsAreInputErrors) {
         FAIL() << "no error for an unknown preset";
     } catch (const InputError & e) {
         EXPECT_EQ(std::string(e.what()),
-                  "numerics.preset = \"fast\" is not one of: accurate, les, reacting, robust.");
+                  "line 2: numerics.preset: \"fast\" is not accepted. Accepted values: accurate, les, reacting, robust. "
+                  "See docs/input.md#numerics.");
     }
     EXPECT_THROW(resolve("[numerics]\npreset = 1\n"), InputError);
 }
@@ -160,6 +161,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"flame_outflow/input.toml", "reacting", 2, "", {}, ""},
     {"flame_vortex/input.toml", "reacting", 2, "", {}, ""},
     {"flame_vortex_quenching/input.toml", "reacting", 2, "", {}, ""},
+    {"forced_inlet/input.toml", "robust", 2, "", {}, ""},
     {"heated_duct/closed.toml", "robust", 2, "", {}, ""},
     {"heated_duct/closed_upt.toml", "robust", 2, "", {}, ""},
     {"heated_duct/input.toml", "robust", 2, "", {}, ""},

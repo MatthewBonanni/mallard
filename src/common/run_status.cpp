@@ -81,5 +81,6 @@ json::Object RunStatus::record() const {
         for (const auto & [name, value] : monitor.values) values.add(name, value);
         r.raw(monitor.name, values.str());
     }
+    if (!health.empty()) r.raw("health", health.record().str());
     return r;
 }

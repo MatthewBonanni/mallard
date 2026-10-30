@@ -64,6 +64,5 @@ file = "forces_cylinder.csv"
 
 [[write_data]]
 prefix = "./solut/cylinder"
-format = "vtu"
 time_interval = 2.0
 variables = ["RHO", "U_X", "U_Y", "P", "VORTICITY"]

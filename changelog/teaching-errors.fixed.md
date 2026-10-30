@@ -1,0 +1,2 @@
+- A value of the wrong type (`Nx = 16.0`, `Nx = "16"`, `keep_last_good = "false"`) or a negative count is an error instead of silently taking the default or wrapping around; an integer is accepted where a number is expected.
+- `run.cfl` and `run.dt` must be positive, and the forces and integrals files must open, instead of failing later.

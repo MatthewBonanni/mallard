@@ -2,7 +2,7 @@
  * @file input_upgrade.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Renamed, moved and removed input keys and options: warnings while
- *        they are deprecated, errors once removed, and `mallard upgrade-input`,
+ *        they are deprecated, errors once removed, and `mallard input upgrade`,
  *        which rewrites an input file keeping its comments and layout.
  * @version 0.9
  * @date 2026-10-16
@@ -36,11 +36,16 @@ struct KeyRule {
     std::string (*convert)(const std::string & toml_text) = nullptr;
 };
 
-/** @brief A string option renamed: `key = "from"` becomes `key = "to"`. */
+/**
+ * @brief A string option renamed: `key = "from"` becomes `key = "to"`. A kept
+ *        option still does what it did while deprecated (the setup reads it
+ *        unchanged); only the rewritten file switches to `to`.
+ */
 struct OptionRule {
     std::string key;
     std::string from, to;
     std::string since, removed, note;
+    bool kept = false;
 };
 
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */
@@ -67,8 +72,8 @@ std::string advice(const Finding & finding);
 
 /**
  * @brief Rewrites the deprecated keys and options of `input` in place, as the
- *        setup reads them, and returns them. Throws an InputError listing the
- *        removed ones, with what to do (`mallard upgrade-input`). `version`
+ *        setup reads them (kept options stay), and returns them. Throws an InputError listing the
+ *        removed ones, with what to do (`mallard input upgrade`). `version`
  *        is this release's (MALLARD_VERSION when empty).
  */
 std::vector<Finding> apply(Input & input, const std::string & version = "", const Rules & table = rules());
@@ -84,8 +89,12 @@ std::vector<Finding> apply(Input & input, const std::string & version = "", cons
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
                          bool & reformatted, const Rules & table = rules());
 
-/** @brief `mallard upgrade-input [--check] old.toml > new.toml`; arguments after the command name. */
-int main(int argc, char ** argv);
+/**
+ * @brief `mallard input upgrade [--check] old.toml > new.toml`: writes the
+ *        upgraded file to stdout and the changes to stderr; with `check`, only
+ *        the changes, and exit status 1 if there are any. Returns the exit status.
+ */
+int upgrade_file(const std::string & file, bool check);
 
 } // namespace input_upgrade
 

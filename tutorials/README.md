@@ -3,7 +3,7 @@
 The files of the step-by-step tutorials in [`docs/tutorials/`](../docs/tutorials/index.md)
 (on the website: *Tutorials*): one directory per tutorial with its Gmsh script (if any),
 input file and the Python scripts that set it up and draw its figures, and
-`common/` with what they share (figure style, mesh and VTU readers).
+`common/` with what they share (figure style, mesh and snapshot readers).
 
 | Directory | Tutorial |
 |---|---|

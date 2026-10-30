@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a Mallard VTU time series to MP4/GIF: density and numerical schlieren.
+"""Render a Mallard time series (VTKHDF or VTU) to MP4/GIF: density and numerical schlieren.
 
     animate.py SERIES_DIR OUTPUT_STEM [--var RHO] [--res 1000] [--fps 20]
 
@@ -164,7 +164,7 @@ def main():
     ap.add_argument("--vmin", type=float, help="Color range minimum (default: the series minimum)")
     ap.add_argument("--vmax", type=float, help="Color range maximum (default: the series maximum)")
     ap.add_argument("--glob", default="*",
-                    help="Snapshot file pattern within the series directory (PVTU files of MPI runs are preferred)")
+                    help="Snapshot file pattern within the series directory (VTKHDF files, else the PVTU files of MPI runs, are preferred)")
     ap.add_argument("--width", type=float, default=14.0, help="Figure width in inches; text scales with it")
     ap.add_argument("--dpi", type=int, default=100)
     ap.add_argument("--layout", choices=["auto", "stacked", "side", "single"], default="auto",

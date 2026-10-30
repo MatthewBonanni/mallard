@@ -16,6 +16,8 @@
 #include <sstream>
 #include <string>
 
+#include "hdf5_output.h"
+#include "mesh_block.h"
 #include "data_paths.h"
 #include "test_fixtures.h"
 #include "check.h"
@@ -85,13 +87,18 @@ TEST(CheckKeys, MisspelledKeysAreReportedWithLineAndSuggestion) {
     EXPECT_FALSE(r.ok());
 }
 
+TEST(CheckKeys, UnclosedNestedArrayBeforeAKeyIsASyntaxError) {
+    // Once an endless loop in toml11's error recovery (test/fuzz/corpus/input/unclosed_nested_array)
+    EXPECT_THROW(parse_input_string("s=[\"\",[\"\",\"\"[\n[="), InputError);
+}
+
 TEST(CheckKeys, RemovedKeysNameWhatReplacedThem) {
     std::string input = box();
     input.replace(input.find("rho_ref = 1.0\n"), 14, "rho_ref = 1.0\np_min = 0.0\n");
     const CheckReport r = check(input);
     EXPECT_FALSE(r.ok());
     EXPECT_TRUE(mentions(r.errors, "physics.p_min was removed in 0.2.0")) << r.errors.front();
-    EXPECT_TRUE(mentions(r.errors, "mallard upgrade-input"));
+    EXPECT_TRUE(mentions(r.errors, "mallard input upgrade"));
 }
 
 TEST(CheckKeys, KeyInTheWrongTableSuggestsWhereItIsRead) {
@@ -239,6 +246,19 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     EXPECT_FALSE(std::filesystem::exists(dir / "out"));
     EXPECT_FALSE(std::filesystem::exists(dir / "forces.csv"));
     EXPECT_FALSE(std::filesystem::exists(dir / "integrals.csv"));
+    EXPECT_TRUE(output_files_enabled());
+    // The default snapshot format: VTKHDF, or VTU pieces without (parallel) HDF5
+#ifdef Mallard_HAS_HDF5
+    if (comm::size() == 1 || have_parallel_hdf5()) {
+        comm::barrier();
+        if (!comm::is_root()) return;
+        const auto datasets = h5_all_datasets((dir / "quality" / "mesh_000000.vtkhdf").string());
+        for (const char * field : MeshQuality::FIELDS) {
+            EXPECT_TRUE(datasets.count(std::string("VTKHDF/CellData/") + field)) << field;
+        }
+        return;
+    }
+#endif
     std::ostringstream piece;  // each rank's own piece
     piece << "mesh_000000" << (comm::size() > 1 ? "_p" + std::string(3, '0') + std::to_string(comm::rank()) : "")
           << ".vtu";
@@ -246,7 +266,6 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     ASSERT_TRUE(vtu.good());
     const std::string text((std::istreambuf_iterator<char>(vtu)), std::istreambuf_iterator<char>());
     for (const char * field : MeshQuality::FIELDS) EXPECT_NE(text.find(field), std::string::npos) << field;
-    EXPECT_TRUE(output_files_enabled());
 }
 
 TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {

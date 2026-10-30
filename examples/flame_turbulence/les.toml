@@ -100,7 +100,6 @@ budget = true
 
 [[write_data]]
 prefix = "./solut/les"
-format = "vtu"
 time_interval = 2.5e-5
 variables = ["T", "HRR", "Q", "Y_H2", "OMEGA_H2", "TF_E", "TF_F", "MU_T"]
 

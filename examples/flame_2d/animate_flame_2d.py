@@ -1,6 +1,6 @@
 """Side-by-side animation of 2D premixed flame runs (examples/flame_2d).
 
-    python examples/flame_2d/animate_flame_2d.py OUT.mp4 --run LABEL SERIES.pvd FULL.csv [--run ...]
+    python examples/flame_2d/animate_flame_2d.py OUT.mp4 --run LABEL SERIES FULL.csv [--run ...]
         [--mechanism mechanisms/h2o2.yaml --phase ohmech] [--fps 15] [--gif OUT.gif]
         [--png OUT.png] [--title TEXT] [--subtitle TEXT] [--tile 2] [--t-range 0.08]
 
@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import grid_fields  # noqa: E402
+from mallard.vtu import grid_fields, read_index  # noqa: E402
 
 BG = "#0d0f14"
 FG = "#e8e8e8"
@@ -57,7 +57,7 @@ def planar_hrr_integral(full, mechanism, phase):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
-    ap.add_argument("--run", nargs=3, action="append", metavar=("LABEL", "PVD", "FULL"), required=True)
+    ap.add_argument("--run", nargs=3, action="append", metavar=("LABEL", "SERIES", "FULL"), required=True)
     ap.add_argument("--mechanism", default="mechanisms/h2o2.yaml")
     ap.add_argument("--phase", default="ohmech")
     ap.add_argument("--fps", type=float, default=15)
@@ -69,11 +69,10 @@ def main():
     ap.add_argument("--subtitle", default="")
     args = ap.parse_args()
     runs = []
-    for label, pvd, full in args.run:
-        files = re.findall(r'file="([^"]+)"', open(pvd).read())
+    for label, series, full in args.run:
+        listed = read_index(series)
         I_ref, H_ref, S_L, T_u, T_b = planar_hrr_integral(full, args.mechanism, args.phase)
-        t_last = float(re.findall(r'timestep="([^"]+)"', open(pvd).read())[-1])
-        runs.append(dict(label=label, base=os.path.dirname(pvd), files=files, t_last=t_last, I_ref=I_ref, H_ref=H_ref, S_L=S_L,
+        runs.append(dict(label=label, files=[f for _, f in listed], t_last=listed[-1][0], I_ref=I_ref, H_ref=H_ref, S_L=S_L,
                          T_u=T_u, T_b=T_b, t=[], sc=[]))
     n_frames = min(len(r["files"]) for r in runs)
     t_end = 1e3 * min(r["t_last"] for r in runs)
@@ -90,7 +89,7 @@ def main():
         gap = 0.03
         w = (0.92 - gap * (n - 1)) / n
         for i, r in enumerate(runs):
-            t, x, y, fld = grid_fields(os.path.join(r["base"], r["files"][k]), ["T", "HRR"])
+            t, x, y, fld = grid_fields(r["files"][k], ["T", "HRR"])
             dx, dy = x[1] - x[0], y[1] - y[0]
             Ly = y.size * dy
             sc = fld["HRR"].sum() * dx * dy / Ly / r["I_ref"]

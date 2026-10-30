@@ -7,11 +7,56 @@
 
 #include "input.h"
 
+#include "common_io.h"
+
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <map>
 #include <mutex>
 #include <sstream>
+
+// toml11 4.4's skip_array_like (error recovery in a malformed array) with one fix: a nested
+// array that stops at a `=` rewinds to the start of that line, which can be the nested array's
+// own `[` (as in `s=["",["",""[\n[=`), and the loop then skipped that array forever. A nested
+// array that made no progress now ends the skip. Drop this once toml11 has the fix.
+template <>
+void toml::detail::skip_array_like<InputConfig>(location & loc, const context<InputConfig> & ctx) {
+    const auto & spec = ctx.toml_spec();
+    loc.advance();
+    while (!loc.eof()) {
+        if (loc.current() == '\"' || loc.current() == '\'') {
+            skip_string_like(loc, ctx);
+        } else if (loc.current() == '#') {
+            skip_comment_block(loc, ctx);
+        } else if (loc.current() == '{') {
+            skip_inline_table_like(loc, ctx);
+        } else if (loc.current() == '[') {
+            const auto checkpoint = loc;
+            if (syntax::std_table(spec).scan(loc).is_ok() || syntax::array_table(spec).scan(loc).is_ok()) {
+                loc = checkpoint;
+                break;
+            }
+            skip_array_like(loc, ctx);
+            if (loc.get_location() <= checkpoint.get_location()) break;
+        } else if (loc.current() == '=') {
+            while (loc.get_location() != 0) {
+                loc.retrace();
+                if (loc.current() == '\n') {
+                    loc.advance();
+                    break;
+                }
+            }
+            break;
+        } else if (loc.current() == ']') {
+            break;
+        } else {
+            loc.advance();
+        }
+    }
+}
 
 namespace {
 
@@ -221,15 +266,40 @@ std::string key_catalog(const Input & input) {
     return out + "\n}\n";
 }
 
+namespace {
+
+/** @brief toml11's syntax error, and what usually causes one. */
+[[noreturn]] void syntax_error(const toml::syntax_error & e) {
+    std::string text = e.what();
+    if (text.rfind("[error] ", 0) == 0) text.erase(0, 8);
+    while (!text.empty() && text.back() == '\n') text.pop_back();
+    throw InputError(text + "\nThe input is not valid TOML there. Common causes: text values without quotes "
+                            "(type = \"euler\"), a missing = or closing bracket, or a key set twice. See "
+                            "docs/guide/input_files.md#anatomy-of-an-input.");
+}
+
+} // namespace
+
 Input parse_input(const std::string & filename) {
-    Input input = toml::parse<InputConfig>(filename);
+    if (!std::ifstream(filename)) throw cannot_read("the input file", filename);
+    Input input;
+    try {
+        input = toml::parse<InputConfig>(filename);
+    } catch (const toml::syntax_error & e) {
+        syntax_error(e);
+    }
     forget_lookups(input);
     return input;
 }
 
 Input parse_input_string(const std::string & text, const std::string & name) {
     std::istringstream stream(text);
-    Input input = toml::parse<InputConfig>(stream, name);
+    Input input;
+    try {
+        input = toml::parse<InputConfig>(stream, name);
+    } catch (const toml::syntax_error & e) {
+        syntax_error(e);
+    }
     forget_lookups(input);
     return input;
 }
@@ -261,10 +331,158 @@ std::string explain(const Diagnostic & d) {
         text += " (did you mean " + d.suggestion + "?)";
     }
     if (!text.empty() && text.back() != '.') text += ".";
+    if (!d.valid.empty()) {
+        text += " Accepted values:";
+        for (size_t i = 0; i < d.valid.size(); i++) text += (i ? ", " : " ") + d.valid[i];
+        text += ".";
+    }
     if (!d.expected.empty()) text += " Expected " + d.expected + ".";
-    if (!d.docs.empty()) text += " See " + d.docs + ".";
+    if (!d.fix.empty()) text += " " + d.fix + (d.fix.back() == '.' ? "" : ".");
+    const std::string docs = d.docs.empty() && !d.key.empty() ? docs_of(d.key) : d.docs;
+    if (!docs.empty()) text += " See " + docs + ".";
     return text;
 }
+
+std::string docs_of(const std::string & key) {
+    const std::string section = lower(key.substr(0, key.find_first_of(".[ ")));
+    if (section == "reactor" || section == "benchmark") return "docs/input.md#mallard-reactor";
+    return section.empty() ? "docs/input.md" : "docs/input.md#" + section;
+}
+
+std::string with_docs(const std::string & text) {
+    if (text.find("See docs/") != std::string::npos || text.rfind("[error]", 0) == 0) return text;
+    size_t begin = 0;
+    while (begin < text.size() && text[begin] == '[') begin++;
+    size_t end = begin;
+    while (end < text.size() && (std::islower(static_cast<unsigned char>(text[end])) || text[end] == '_')) end++;
+    if (end == begin || end == text.size()) return text;
+    const char next = text[end];
+    const bool key = next == '.' || next == ':' || (begin > 0 && next == ']') || (next == '[' && begin == 0) ||
+                     text.compare(end, 2, " =") == 0;
+    if (!key) return text;
+    std::string out = text;
+    while (!out.empty() && (out.back() == '\n' || out.back() == ' ')) out.pop_back();
+    if (!out.empty() && out.back() != '.') out += ".";
+    return out + " See " + docs_of(text.substr(begin, end - begin)) + ".";
+}
+
+size_t line_of(const Input & v) {
+    const auto location = v.location();
+    return location.is_ok() ? location.first_line_number() : 0;
+}
+
+size_t line_of(const Input & table, const std::string & key) {
+    if (table.is_table() && table.as_table().entries().count(key)) return line_of(table.as_table().entries().at(key));
+    return line_of(table);
+}
+
+std::string suggest_value(const std::string & value, const std::vector<std::string> & names) {
+    std::string best;
+    size_t best_distance = std::max<size_t>(1, value.size() / 3) + 1;
+    for (const auto & name : names) {
+        const size_t distance = edit_distance(value, name);
+        if (distance < best_distance) {
+            best_distance = distance;
+            best = name;
+        }
+    }
+    if (!best.empty()) return "\"" + best + "\"";
+    std::vector<std::string> containing;
+    if (value.size() >= 3) {
+        for (const auto & name : names) {
+            if (lower(name).find(lower(value)) != std::string::npos) containing.push_back(name);
+        }
+    }
+    if (containing.empty() || containing.size() > 3) return "";
+    std::string text;
+    for (size_t i = 0; i < containing.size(); i++) {
+        text += (i == 0 ? "" : i + 1 == containing.size() ? " or " : ", ") + ("\"" + containing[i] + "\"");
+    }
+    return text;
+}
+
+InputError missing_key(const Input & table, const std::string & key, const std::string & fix) {
+    Diagnostic d;
+    d.key = key;
+    d.line = line_of(table);
+    const size_t dot = key.rfind('.');
+    const std::string name = dot == std::string::npos ? key : key.substr(dot + 1);
+    d.message = "missing; this key is required here";
+    d.fix = !fix.empty() ? fix
+            : dot == std::string::npos
+                ? "Add " + name + " = ... to the input"
+                : "Add " + name + " = ... to [" + key.substr(0, dot) + "]";
+    return InputError(d);
+}
+
+InputError not_accepted(const Input & table, const std::string & key, const std::string & value,
+                        std::vector<std::string> valid) {
+    Diagnostic d;
+    d.key = key;
+    const size_t dot = key.find_last_of('.');
+    d.line = line_of(table, dot == std::string::npos ? key : key.substr(dot + 1));
+    d.message = "\"" + value + "\" is not accepted";
+    d.suggestion = suggest_value(value, valid);
+    d.valid = std::move(valid);
+    return InputError(d);
+}
+
+namespace input_detail {
+
+namespace {
+
+std::string value_text(const Input & v) {
+    if (v.is_string()) return "\"" + v.as_string() + "\" (a string)";
+    if (v.is_integer()) return std::to_string(v.as_integer()) + " (an integer)";
+    if (v.is_floating()) {
+        std::ostringstream os;
+        os << v.as_floating();
+        return os.str() + " (a float)";
+    }
+    if (v.is_boolean()) return v.as_boolean() ? "true" : "false";
+    if (v.is_array()) return "an array";
+    if (v.is_table()) return "a table";
+    return "a date or time";
+}
+
+bool is_number_text(const std::string & s) {
+    if (s.empty()) return false;
+    char * end = nullptr;
+    std::strtod(s.c_str(), &end);
+    return end && *end == '\0';
+}
+
+} // namespace
+
+InputError wrong_type(const Input & v, const std::string & key, const std::string & wanted, int64_t lo, int64_t hi) {
+    Diagnostic d;
+    d.key = key;
+    d.line = line_of(v);
+    const bool integer = wanted.find("integer") != std::string::npos && wanted.find("array") == std::string::npos;
+    if (integer && v.is_integer()) {
+        d.message = std::to_string(v.as_integer()) + " is out of range";
+        d.expected = wanted + (lo == 0 ? " up to " + std::to_string(hi) : " from " + std::to_string(lo) + " to " +
+                                                                           std::to_string(hi));
+        return InputError(d);
+    }
+    d.message = "is " + value_text(v) + ", but must be " + wanted;
+    if (integer && v.is_floating() && v.as_floating() == std::floor(v.as_floating())) {
+        d.fix = "Write it without a decimal point: " + std::to_string(static_cast<long long>(v.as_floating()));
+    } else if ((integer || wanted == "a number") && v.is_string() && is_number_text(v.as_string())) {
+        d.fix = "Remove the quotes: " + v.as_string();
+    } else if (wanted == "true or false" && v.is_string() && (v.as_string() == "true" || v.as_string() == "false")) {
+        d.fix = "Remove the quotes: " + v.as_string();
+    } else if (wanted.rfind("a string", 0) == 0 && !v.is_array() && !v.is_table()) {
+        d.fix = "Put the value in double quotes";
+    } else if (wanted.rfind("an array", 0) == 0 && v.is_table()) {
+        d.fix = "For a list of tables, write each one's header with double brackets: [[" + key + "]]";
+    } else if (wanted.rfind("an array", 0) == 0 && !v.is_array()) {
+        d.fix = "Write it in square brackets, e.g. [a, b]";
+    }
+    return InputError(d);
+}
+
+} // namespace input_detail
 
 namespace {
 

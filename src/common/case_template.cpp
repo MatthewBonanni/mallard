@@ -11,6 +11,7 @@
 
 #include "case_template.h"
 #include "input.h"
+#include "mesh_block.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -250,20 +251,6 @@ size_t edit_distance(const std::string & a, const std::string & b) {
     return row[b.size()];
 }
 
-void print_usage(std::ostream & out) {
-    out << "Usage: mallard new <template> [directory] [--quick] [--force]\n"
-           "       mallard new --list\n"
-           "\n"
-           "Creates a ready-to-run case from one of Mallard's examples or tutorials:\n"
-           "input.toml, run.sh, the mesh or initial-state script it needs, post.sh and\n"
-           "a README. The directory defaults to the template's name.\n"
-           "\n"
-           "  --list, -l   the templates, with what each shows and what it costs\n"
-           "  --quick      a coarse, short version that runs in seconds to a minute:\n"
-           "               for trying the steps, not for the physical result\n"
-           "  --force      write into a directory that is not empty\n";
-}
-
 bool solver_installed(int dim) {
     return fs::exists(executable_path().parent_path() / ("mallard" + std::to_string(dim) + "d"));
 }
@@ -358,6 +345,8 @@ std::set<std::string> close_imports(const fs::path & tools, const std::vector<fs
                 }
                 for (const std::string & sub : {match[3].str(), match[4].str()}) {
                     if (sub.empty() || !fs::exists(tools / "mallard" / (sub + ".py"))) continue;
+                    // mallard.vtu reads this build's default snapshots (VTKHDF) with mallard.vtkhdf
+                    if (needed && (sub == "vtu" || sub == "vtkhdf") && have_hdf5()) packages.insert("h5py");
                     pending.emplace_back(tools / "mallard" / (sub + ".py"), top_level);
                 }
             } else if (script.parent_path().parent_path() == tools && fs::exists(sibling)) {
@@ -486,7 +475,8 @@ std::string readme(const Template & t, const Manifest & m, bool mesh, bool init,
     r += "- `run.sh`: runs Mallard.\n";
     if (!t.post.empty()) r += "- `post.sh`: post-processing.\n";
     r += "- `tools/`: the Python scripts these call, from Mallard's `tools/`.\n";
-    r += "\nSnapshots (`.vtu`, `.pvd`) open in ParaView. To change the case, edit `input.toml` and run again.\n";
+    r += "\nSnapshots open in ParaView: the series `PREFIX.vtkhdf.series` (`PREFIX.pvd` in builds without HDF5). "
+         "To change the case, edit `input.toml` and run again.\n";
     return r;
 }
 
@@ -613,9 +603,9 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     written.emplace_back("run.sh", "runs it: ./run.sh [-t threads] [-n MPI ranks]");
     if (!post.empty()) {
         const std::string last =
-            "# The newest snapshot PREFIX_N: .vtu, or .pvtu of an MPI run (not its pieces)\n"
+            "# The newest snapshot PREFIX_N: .vtkhdf, or without HDF5 .vtu (.pvtu of an MPI run, not its pieces)\n"
             "last() {\n"
-            "    newest=$(ls -t \"$1\"_[0-9]*.vtu \"$1\"_[0-9]*.pvtu 2>/dev/null | grep -v '_p[0-9]*\\.vtu$' | head -n 1)\n"
+            "    newest=$(ls -t \"$1\"_[0-9]*.vtkhdf \"$1\"_[0-9]*.vtu \"$1\"_[0-9]*.pvtu 2>/dev/null | grep -v '_p[0-9]*\\.vtu$' | head -n 1)\n"
             "    [ -n \"$newest\" ] || { echo \"post.sh: no snapshots $1_*: run ./run.sh first\" >&2; exit 1; }\n"
             "    ls \"$1\"_[0-9]*.\"${newest##*.}\" | grep -v '_p[0-9]*\\.vtu$' | tail -n 1\n"
             "}\n";
@@ -701,41 +691,13 @@ std::string relocate(const std::string & text) {
     return out;
 }
 
-int new_main(int argc, char ** argv) {
-    std::vector<std::string> positional;
-    bool list = false;
-    bool quick = false;
-    bool force = false;
-    for (int i = 0; i < argc; ++i) {
-        const std::string arg = argv[i];
-        if (arg == "--list" || arg == "-l") {
-            list = true;
-        } else if (arg == "--quick") {
-            quick = true;
-        } else if (arg == "--force") {
-            force = true;
-        } else if (arg == "--help" || arg == "-h") {
-            print_usage(std::cout);
-            return 0;
-        } else if (arg.rfind('-', 0) == 0) {
-            std::cerr << "mallard new: unknown option " << arg << "\n\n";
-            print_usage(std::cerr);
-            return 2;
-        } else {
-            positional.push_back(arg);
-        }
-    }
+int new_case(const std::vector<std::string> & positional, bool list, bool quick, bool force) {
     try {
         if (list || positional.empty()) {
             const Manifest m = load_manifest();
             print_list(m);
             if (!list) std::cout << "\nCreate one with: mallard new <template> [directory]\n";
             return list ? 0 : 2;
-        }
-        if (positional.size() > 2) {
-            std::cerr << "mallard new: too many arguments\n\n";
-            print_usage(std::cerr);
-            return 2;
         }
         const Manifest m = load_manifest();
         const std::string & name = positional[0];

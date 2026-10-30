@@ -34,6 +34,7 @@
 #include "common_io.h"
 #include "device_comm.h"
 #include "common.h"
+#include "field_units.h"
 #include "log.h"
 #include "mesh_block.h"
 #include "partition.h"
@@ -89,6 +90,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
     f();
     Kokkos::fence();
     const double seconds = phase_timer.seconds();
+    run_health.setup_phases.emplace_back(name, seconds);
     t_wall_setup += seconds;
     logging::end_phase(seconds);
 }
@@ -130,6 +132,7 @@ int Solver::init(const Input & input_in) {
     logging::begin_record();
     print_setup();
     provenance::set_setup(logging::end_record());
+    provenance::set_placement();
     provenance::share();
     write_provenance();
     return 0;
@@ -139,6 +142,7 @@ void Solver::setup_from_input() {
     t = 0.0;
     step = 0;
     t_wall_setup = 0.0;
+    run_health.setup_phases.clear();
 
     logging::section("Setup");
     init_run_parameters();
@@ -175,6 +179,7 @@ void Solver::setup_from_input() {
         init_output();
     });
     timed_phase("initial solution", [&] { init_solution(); });
+    init_health();
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
 }
@@ -199,11 +204,24 @@ void Solver::write_provenance() {
     }
     if (integral_monitor.out) *integral_monitor.out << line << std::flush;
     probes.annotate(line);
+    std::vector<std::string> names;
+    std::vector<double> seconds, ones;
+    for (const auto & [name, s] : run_health.setup_phases) {
+        names.push_back(name);
+        seconds.push_back(s);
+        ones.push_back(1.0);
+    }
+    json::Object setup_phases;
+    for (const auto & phase : health::spread(names, seconds, ones)) {
+        setup_phases.raw(phase.name, json::Object().add("max", phase.max).add("mean", phase.all).str());
+    }
     run_log::write(json::Object()
                        .add("type", "start")
                        .add("schema", run_log::SCHEMA)
                        .add("version", run_log::VERSION)
-                       .raw("provenance", provenance::json()));
+                       .raw("provenance", provenance::json())
+                       .raw("placement", provenance::placement())
+                       .raw("setup_phases", setup_phases.str()));
 }
 
 namespace {
@@ -304,13 +322,13 @@ void Solver::init_mesh() {
     partitioner = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
     record_options("parallel.partitioner", {"graph", "hilbert", "multijagged"});
     if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
-        throw InputError("parallel.partitioner = \"" + partitioner + "\" is not one of: graph, hilbert, multijagged.");
+        throw not_accepted(input.at("parallel"), "parallel.partitioner", partitioner, {"graph", "hilbert", "multijagged"});
     }
     const std::string exchange =
         find_value_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
     record_options("parallel.halo_exchange", {"nccl", "mpi"});
     if (exchange != "nccl" && exchange != "mpi") {
-        throw InputError("parallel.halo_exchange = \"" + exchange + "\" is not one of: nccl, mpi.");
+        throw not_accepted(input.at("parallel"), "parallel.halo_exchange", exchange, {"mpi", "nccl"});
     }
     if (!is_distributed()) {
         mesh = std::make_shared<Mesh>();
@@ -335,7 +353,11 @@ void Solver::init_mesh() {
         }
         mesh = setup->build_local_mesh(halo_layers, distribution);
         if (exchange == "nccl" && !comm::nccl_available()) {
-            throw InputError("parallel.halo_exchange = \"nccl\" needs a build with Mallard_ENABLE_NCCL.");
+            throw InputError({.key = "parallel.halo_exchange",
+                              .line = line_of(input.at("parallel"), "halo_exchange"),
+                              .message = "\"nccl\" needs a build with NCCL, and this one has none",
+                              .fix = "Set halo_exchange = \"mpi\", or rebuild with -DMallard_ENABLE_NCCL=ON",
+                              .docs = "docs/guide/parallel.md#mpi"});
         }
         halo = HaloExchange(distribution, exchange == "nccl");
     }
@@ -351,7 +373,13 @@ void Solver::init_mesh() {
     if (!transform.is_identity()) mesh_summary.insert(mesh_summary.begin() + 1, {"Transform", transform.description});
     const Stretching stretching = mesh_stretching(input);
     if (stretching != Stretching{}) {
-        if (type == "file") throw InputError("[mesh] stretching applies to generated meshes.");
+        if (type == "file") {
+            throw InputError({.key = "mesh.stretching",
+                              .line = line_of(input.at("mesh"), "stretching"),
+                              .message = "applies only to generated meshes, not to a mesh file",
+                              .fix = "Remove stretching and grade the mesh in the program that made the file",
+                              .docs = "docs/guide/meshes.md#stretching"});
+        }
         std::string text;
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(stretching[i]));
         mesh_summary.insert(mesh_summary.begin() + 1, {"Stretching", text + "] (tanh, toward both ends)"});
@@ -396,15 +424,26 @@ void Solver::init_mesh() {
     axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
     if (axisymmetric) {
         if (mesh->curved_geometry) {
-            throw InputError("physics.axisymmetric: curved boundaries are not supported in axisymmetric runs yet "
-                             "(set [mesh] curved_geometry = false).");
+            throw InputError({.key = "physics.axisymmetric",
+                              .line = line_of(input.at("physics"), "axisymmetric"),
+                              .message = "curved boundaries are not supported in axisymmetric runs yet",
+                              .fix = "Set curved_geometry = false in [mesh]",
+                              .docs = "docs/input.md#axisymmetric-flows"});
         }
         if (mesh->is_rotational()) {
-            throw InputError("physics.axisymmetric: rotational periodicity is not supported in axisymmetric runs.");
+            throw InputError({.key = "physics.axisymmetric",
+                              .line = line_of(input.at("physics"), "axisymmetric"),
+                              .message = "rotational periodicity is not supported in axisymmetric runs",
+                              .fix = "Remove the angle of the [[periodic]] pair, or run in 3D",
+                              .docs = "docs/input.md#axisymmetric-flows"});
         }
         for (const auto & translation : mesh->periodic_translations) {
             if (translation[1] != 0.0_r) {
-                throw InputError("physics.axisymmetric: the mesh cannot be periodic in y (the radius).");
+                throw InputError({.key = "physics.axisymmetric",
+                                  .line = line_of(input.at("physics"), "axisymmetric"),
+                                  .message = "the mesh is periodic in y, which is the radius of an axisymmetric run",
+                                  .fix = "Remove the periodicity in y",
+                                  .docs = "docs/input.md#axisymmetric-flows"});
             }
         }
         mesh->make_axisymmetric();
@@ -533,16 +572,27 @@ void Solver::init_rhs_split() {
 }
 
 void Solver::init_physics() {
-    if (!input.contains("physics")) throw InputError("missing [physics] table.");
+    if (!input.contains("physics")) {
+        throw InputError({.key = "physics",
+                          .message = "the [physics] table is missing; every input needs one",
+                          .fix = "Add [physics] with type = \"euler\" (inviscid) or \"navier_stokes\" (viscous) "
+                                 "and the gas properties, e.g. gamma = 1.4"});
+    }
     const std::string gas = find_value_or<std::string>(input, "physics", "gas", "perfect");
     record_options("physics.gas", {"perfect", "mixture"});
     if (gas == "perfect") {
-        if (input.contains("chemistry")) throw InputError("[chemistry] needs physics.gas = \"mixture\".");
+        if (input.contains("chemistry")) {
+            throw InputError({.key = "chemistry",
+                              .line = line_of(input, "chemistry"),
+                              .message = "[chemistry] needs a mixture of species, but physics.gas is \"perfect\"",
+                              .fix = "Set gas = \"mixture\" in [physics], or remove [chemistry]",
+                              .docs = "docs/guide/thermochemistry.md"});
+        }
         physics = Euler::from_input(input);
         return;
     }
     if (gas != "mixture") {
-        throw InputError("physics.gas = \"" + gas + "\" is not one of: perfect, mixture.");
+        throw not_accepted(input.at("physics"), "physics.gas", gas, {"mixture", "perfect"});
     }
     mixture_model = std::make_shared<MixtureModel>(MixtureModel::from_input(input));
     mixture = mixture_model->device();
@@ -601,19 +651,37 @@ void Solver::init_boundaries() {
     std::vector<double> profiled_flux;
     // Faces of each nscbc_inlet on this rank, by input boundary
     std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
+    boundary_fields.assign(input_boundaries.size(), nullptr);
+    boundary_composition.assign(input_boundaries.size(), nullptr);
+    field_faces.clear();
+    timed_fields = TimedBoundaryFields();
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const Input & bound = input_boundaries[i_bc];
+        const std::string entry = "boundaries[" + std::to_string(i_bc) + "]";
         if (!bound.contains("name")) {
-            throw std::runtime_error("Boundary name not specified.");
-        }
-        if (!bound.contains("type")) {
-            throw std::runtime_error("Boundary type not specified.");
+            throw missing_key(bound, entry + ".name",
+                              "Add name = \"...\": the mesh zone this condition applies to");
         }
         const std::string name = find_value<std::string>(bound, "name");
+        const std::string where_name = "boundaries[name = \"" + name + "\"]";
+        if (!bound.contains("type")) {
+            std::vector<std::string> types;
+            for (const auto & entry_type : BOUNDARY_TYPES) types.push_back(entry_type.first);
+            std::sort(types.begin(), types.end());
+            Diagnostic d = missing_key(bound, where_name + ".type").diagnostic;
+            d.valid = types;
+            d.fix = "Add type = \"...\"";
+            d.docs = "docs/guide/boundary_conditions.md#choosing-a-condition";
+            throw InputError(d);
+        }
         const auto & periodic = mesh->periodic_zones;
         if (std::find(periodic.begin(), periodic.end(), name) != periodic.end()) {
-            throw InputError("boundaries: zone \"" + name + "\" is periodic and takes no condition.");
+            throw InputError({.key = where_name,
+                              .line = line_of(bound),
+                              .message = "zone \"" + name + "\" is periodic, so it takes no condition",
+                              .fix = "Remove this [[boundaries]] entry, or the periodic pairing of the zone",
+                              .docs = "docs/guide/meshes.md#periodic-boundaries"});
         }
         FaceZone * zone = mesh->get_face_zone(name);
         if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
@@ -626,7 +694,14 @@ void Solver::init_boundaries() {
             std::sort(names.begin(), names.end());
             std::string zones;
             for (const auto & z : names) zones += (zones.empty() ? "" : ", ") + z;
-            throw InputError("boundaries: no boundary zone \"" + name + "\" in the mesh (zones: " + zones + ").");
+            throw InputError({.key = where_name + ".name",
+                              .line = line_of(bound, "name"),
+                              .message = "the mesh has no boundary zone \"" + name + "\"",
+                              .valid = names,
+                              .suggestion = suggest_value(name, names),
+                              .fix = "Use a zone of the mesh: the physical names of a mesh file, or left, right, "
+                                     "bottom, top (back, front in 3D) for generated meshes",
+                              .docs = "docs/guide/boundary_conditions.md"});
         }
         bcs.push_back(BoundaryCondition::from_input(bound, physics));
         WallModelSpec wall_model_spec;
@@ -644,12 +719,13 @@ void Solver::init_boundaries() {
         DirichletBoundary dirichlet;
         if (bcs.back().type == BoundaryType::DIRICHLET) {
             for (const char * key : {"rho", "u", "p"}) {
-                if (!bound.contains(key)) {
-                    throw std::runtime_error(std::string("Missing ") + key + " for boundary: " + name + ".");
-                }
+                if (!bound.contains(key)) throw missing_key(bound, where_name + "." + key);
             }
             if (!bound.at("u").is_array() || bound.at("u").as_array().size() != N_DIM) {
-                throw std::runtime_error("Invalid u for boundary: " + name + ".");
+                throw InputError({.key = where_name + ".u",
+                                  .line = line_of(bound, "u"),
+                                  .message = "must be an array of " + std::to_string(N_DIM) + " components",
+                                  .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
             }
             const auto & u = bound.at("u").as_array();
             dirichlet.W.emplace_back(name + ".rho", quantity_or_expression(bound.at("rho"), name + ".rho", dim::density));
@@ -659,8 +735,11 @@ void Solver::init_boundaries() {
             }
             dirichlet.W.emplace_back(name + ".p", quantity_or_expression(bound.at("p"), name + ".p", dim::pressure));
         }
-        const bool profiled = is_mixture() && bcs.back().prescribes_composition() &&
-                              MixtureModel::composition_varies(bound);
+        auto fields = std::make_shared<BoundaryFields>(bound, bcs.back().type, "boundaries[name = \"" + name + "\"]");
+        boundary_fields[i_bc] = fields;
+        const bool composition = is_mixture() && bcs.back().prescribes_composition() &&
+                                 MixtureModel::composition_varies(bound);
+        const bool profiled = composition || fields->varies();
         rtype direction[N_DIM];
         FOR_I_DIM direction[i] = bcs.back().data[1 + i];
         const bool directed = (bcs.back().type == BoundaryType::STAGNATION_INLET ||
@@ -674,15 +753,35 @@ void Solver::init_boundaries() {
                 continue;
             }
             if (face_bc[i_face] != -1) {
-                throw std::runtime_error("Boundary " + name + " assigned more than once.");
+                const auto & first = input_boundaries[static_cast<size_t>(face_bc[i_face])];
+                std::string at;
+                for (uint8_t d = 0; d < N_DIM; d++) {
+                    at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
+                }
+                throw InputError({.key = where_name,
+                                  .line = line_of(bound),
+                                  .message = "the face at " + at + ") already has a condition, from the entry on "
+                                             "line " + std::to_string(line_of(first)) + " (name = \"" +
+                                             find_value<std::string>(first, "name") + "\")",
+                                  .fix = "Give each face one condition: one entry per zone, or where = \"...\" "
+                                         "filters that do not overlap",
+                                  .docs = "docs/guide/boundary_conditions.md"});
             }
             face_bc[i_face] = static_cast<int>(i_bc);
             if (directed) {
                 rtype inward = 0.0_r;
                 for (uint8_t k = 0; k < N_DIM; k++) inward -= direction[k] * mesh->h_face_normals(i_face, k);
                 if (!(inward > 0.0_r)) {
-                    throw InputError("boundaries[name = \"" + name + "\"].direction must point into the domain at "
-                                     "every face of the boundary.");
+                    std::string at;
+                    for (uint8_t d = 0; d < N_DIM; d++) {
+                        at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
+                    }
+                    throw InputError({.key = where_name + ".direction",
+                                      .line = line_of(bound, "direction"),
+                                      .message = "points out of the domain at the face at " + at + ")",
+                                      .fix = "Give a direction into the domain at every face of the zone, or "
+                                             "remove it to use each face's inward normal",
+                                      .docs = "docs/guide/boundary_conditions.md#stagnation-inlet"});
                 }
             }
 
@@ -691,7 +790,14 @@ void Solver::init_boundaries() {
             n_owned_selected += static_cast<uint32_t>(mesh->h_cells_of_face(i_face, 0)) < mesh->n_owned();
         }
         if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
-            throw std::runtime_error("Boundary " + name + " selects no faces.");
+            throw InputError({.key = where ? where_name + ".where" : where_name,
+                              .line = where ? line_of(bound, "where") : line_of(bound),
+                              .message = where ? "selects no face of zone \"" + name + "\""
+                                               : "zone \"" + name + "\" has no faces",
+                              .fix = where ? "Check the expression against the zone's coordinates; a face is kept "
+                                             "where it is nonzero"
+                                           : "Remove this entry, or check the zone in the mesh file",
+                              .docs = "docs/guide/boundary_conditions.md"});
         }
         const std::vector<double> flux = mass_flow_inlet_fluxes(bound, dirichlet.faces, bcs.back());
         for (size_t k = 0; k < dirichlet.faces.size(); k++) {
@@ -730,7 +836,8 @@ void Solver::init_boundaries() {
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
         std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
         if (where) text += ", where " + find_value<std::string>(bound, "where");
-        if (profiled) text += ", varying composition";
+        if (composition) text += ", varying composition";
+        if (fields->varies()) text += fields->depends_on_time() ? ", time dependent" : ", varying along it";
         if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
         boundary_summary.emplace_back(name, text);
     }
@@ -738,8 +845,14 @@ void Solver::init_boundaries() {
         const auto [i_bc, i_face] = profiled_faces[k];
         BoundaryCondition copy = bcs[i_bc];
         if (!std::isnan(profiled_flux[k])) copy.data[N_DIM + 1] = static_cast<rtype>(profiled_flux[k]);
+        Point x{};
+        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+        // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
+        if (boundary_fields[i_bc]->varies()) boundary_fields[i_bc]->apply(copy, x, 0.0, double(physics.R));
         face_bc[i_face] = static_cast<int32_t>(bcs.size());
+        field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
         bcs.push_back(copy);
+        wall_model_specs.push_back(wall_model_specs[i_bc]);
     }
 
     if (FaceZone * partition = mesh->get_face_zone(PARTITION_ZONE)) {
@@ -749,15 +862,25 @@ void Solver::init_boundaries() {
         for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = static_cast<int>(bcs.size() - 1);
     }
     const std::string uncovered = zones_without_condition(face_bc);
-    if (!uncovered.empty()) throw InputError("boundaries: no condition for " + uncovered + ".");
+    if (!uncovered.empty()) {
+        throw InputError({.key = "boundaries",
+                          .message = "no condition for " + uncovered + "; every boundary face needs one",
+                          .fix = "Add a [[boundaries]] entry with this name and a type (e.g. \"wall_adiabatic\", "
+                                 "\"symmetry\" or \"p_out\") for each zone",
+                          .docs = "docs/guide/boundary_conditions.md#choosing-a-condition"});
+    }
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
         // Faces on the axis carry no flux (zero revolved area); their ghost
         // states feed reconstruction and gradients, which need the mirror image
         if (axisymmetric && mesh->h_cells_of_face(i_face, 1) < 0 && mesh->h_face_measure(i_face) == 0.0_r) {
             const BoundaryType type = bcs[static_cast<size_t>(face_bc[i_face])].type;
             if (type != BoundaryType::SYMMETRY && type != BoundaryType::PARTITION) {
-                throw InputError("physics.axisymmetric: boundary faces on the axis (y = 0) need type = "
-                                 "\"symmetry\", not \"" + BOUNDARY_NAMES.at(type) + "\".");
+                throw InputError({.key = "physics.axisymmetric",
+                                  .line = line_of(input.at("physics"), "axisymmetric"),
+                                  .message = "boundary faces on the axis (y = 0) have type = \"" +
+                                             BOUNDARY_NAMES.at(type) + "\", but the axis is a line of symmetry",
+                                  .fix = "Give the zone on the axis type = \"symmetry\"",
+                                  .docs = "docs/input.md#axisymmetric-flows"});
             }
         }
     }
@@ -776,29 +899,22 @@ void Solver::init_boundaries() {
         boundary_data.thermo = mixture.thermo;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
         boundary_data.bc_thermo = Kokkos::View<rtype *[2]>("bc_thermo", bcs.size());
-        auto h_bc_Y = Kokkos::create_mirror_view(boundary_data.bc_Y);
-        auto h_thermo = Kokkos::create_mirror_view(boundary_data.bc_thermo);
-        for (size_t i_bc = 0; i_bc < bcs.size(); i_bc++) {
-            for (uint32_t k = 0; k < n_species; k++) {
-                h_bc_Y(i_bc, k) = bc_mass_fractions[i_bc].empty() ? 0.0_r : static_cast<rtype>(bc_mass_fractions[i_bc][k]);
-            }
-            h_thermo(i_bc, 0) = static_cast<rtype>(bc_surrogates[i_bc][0]);
-            h_thermo(i_bc, 1) = static_cast<rtype>(bc_surrogates[i_bc][1]);
-        }
-        Kokkos::deep_copy(boundary_data.bc_Y, h_bc_Y);
-        Kokkos::deep_copy(boundary_data.bc_thermo, h_thermo);
         if (is_viscous()) {
             bc_transport_values = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_transport_values", bcs.size(),
                                                                               n_species + 1);
-            auto h_values = Kokkos::create_mirror_view(bc_transport_values);
-            for (size_t i_bc = 0; i_bc < bcs.size(); i_bc++) {
-                if (bc_mass_fractions[i_bc].empty()) continue;
-                const std::vector<double> X = mixture_model->mole_fractions(bc_mass_fractions[i_bc]);
-                h_values(i_bc, 0) = static_cast<rtype>(bc_temperatures[i_bc]);
-                for (uint32_t k = 0; k < n_species; k++) h_values(i_bc, 1 + k) = static_cast<rtype>(X[k]);
-            }
-            Kokkos::deep_copy(bc_transport_values, h_values);
         }
+        copy_boundary_gas();
+    }
+    for (const auto & [base, i_face, i_bc] : field_faces) {
+        const auto & composition = boundary_composition[base];
+        if (!boundary_fields[base]->depends_on_time() && !composition) continue;
+        Point x{};
+        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+        timed_fields.add(i_bc, x, boundary_fields[base], composition);
+    }
+    if (!timed_fields.empty()) {
+        timed_fields.finish();
+        if (!stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
     }
     h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
     h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
@@ -831,7 +947,11 @@ void Solver::init_sources() {
     if (source.contains("gravity")) {
         std::vector<rtype> g = find_real_vector(input, "source", "gravity", dim::acceleration);
         if (g.size() != N_DIM) {
-            throw std::runtime_error("source.gravity must have " + std::to_string(N_DIM) + " components.");
+            throw InputError({.key = "source.gravity",
+                              .line = line_of(source, "gravity"),
+                              .message = "has " + std::to_string(g.size()) + " components, but this build is " +
+                                         std::to_string(N_DIM) + "D",
+                              .fix = N_DIM == 3 ? "Write gravity = [gx, gy, gz]" : "Write gravity = [gx, gy]"});
         }
         has_gravity = true;
         FOR_I_DIM gravity[i] = g[i];
@@ -844,13 +964,20 @@ void Solver::init_sources() {
     if (source.contains("mass_flow")) {
         const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow", dim::mass_flux);
         if (m.size() != N_DIM) {
-            throw InputError("source.mass_flow must have " + std::to_string(N_DIM) + " components.");
+            throw InputError({.key = "source.mass_flow",
+                              .line = line_of(source, "mass_flow"),
+                              .message = "has " + std::to_string(m.size()) + " components, but this build is " +
+                                         std::to_string(N_DIM) + "D",
+                              .fix = N_DIM == 3 ? "Write mass_flow = [mx, my, mz]" : "Write mass_flow = [mx, my]"});
         }
         rtype norm = 0.0_r;
         FOR_I_DIM norm += m[i] * m[i];
         norm = std::sqrt(norm);
         if (!(norm > 0.0_r) || !std::isfinite(norm)) {
-            throw InputError("source.mass_flow must be a finite, nonzero vector.");
+            throw InputError({.key = "source.mass_flow",
+                              .line = line_of(source, "mass_flow"),
+                              .message = "must be a finite, nonzero vector: its direction is the flow's",
+                              .fix = "Give the target mass flux per unit area along the flow, e.g. [1.0, 0.0]"});
         }
         hold_mass_flow = true;
         mass_flow_target = double(norm);
@@ -1002,7 +1129,51 @@ void Solver::update_average_pressure_outlets(StateView solution) {
     }
 }
 
-void Solver::update_boundary_states(rtype t_eval) {
+void Solver::copy_boundary_gas() {
+    const uint32_t n_species = mixture.n_species;
+    auto h_bc_Y = Kokkos::create_mirror_view(boundary_data.bc_Y);
+    auto h_thermo = Kokkos::create_mirror_view(boundary_data.bc_thermo);
+    for (size_t i_bc = 0; i_bc < h_bc_Y.extent(0); i_bc++) {
+        for (uint32_t k = 0; k < n_species; k++) {
+            h_bc_Y(i_bc, k) = bc_mass_fractions[i_bc].empty() ? 0.0_r : static_cast<rtype>(bc_mass_fractions[i_bc][k]);
+        }
+        h_thermo(i_bc, 0) = static_cast<rtype>(bc_surrogates[i_bc][0]);
+        h_thermo(i_bc, 1) = static_cast<rtype>(bc_surrogates[i_bc][1]);
+    }
+    Kokkos::deep_copy(boundary_data.bc_Y, h_bc_Y);
+    Kokkos::deep_copy(boundary_data.bc_thermo, h_thermo);
+    if (bc_transport_values.extent(0) == 0) return;
+    auto h_values = Kokkos::create_mirror_view(bc_transport_values);
+    for (size_t i_bc = 0; i_bc < h_values.extent(0); i_bc++) {
+        if (bc_mass_fractions[i_bc].empty()) continue;
+        const std::vector<double> X = mixture_model->mole_fractions(bc_mass_fractions[i_bc]);
+        h_values(i_bc, 0) = static_cast<rtype>(bc_temperatures[i_bc]);
+        for (uint32_t k = 0; k < n_species; k++) h_values(i_bc, 1 + k) = static_cast<rtype>(X[k]);
+    }
+    Kokkos::deep_copy(bc_transport_values, h_values);
+}
+
+void Solver::update_boundary_fields(const rtype t_eval, const rtype c) {
+    if (timed_fields.empty()) return;
+    set_stage_time(t_eval, c);
+    apply_boundary_fields();
+}
+
+void Solver::apply_boundary_fields() {
+    TimedBoundaryFields::Gas gas;
+    gas.R = double(physics.R);
+    if (is_mixture()) {
+        gas.mixture = true;
+        gas.thermo = boundary_data.thermo;
+        gas.bc_Y = boundary_data.bc_Y;
+        gas.bc_thermo = boundary_data.bc_thermo;
+        gas.transport = bc_transport_values;
+    }
+    timed_fields.apply(stage_time, boundary_data.bcs, gas);
+}
+
+void Solver::update_boundary_states(const rtype t_eval, const rtype c) {
+    update_boundary_fields(t_eval, c);
     update_inflow(t_eval);
     if (dirichlet_boundaries.empty() || t_eval == t_boundary_states || boundary_states_steady) {
         return;
@@ -1029,9 +1200,15 @@ void Solver::init_numerics() {
     const std::string riemann_solver_str = find_value_or<std::string>(input, "numerics", "riemann_solver", "HLLC");
     const std::string time_integrator_str = find_value_or<std::string>(input, "numerics", "time_integrator", "SSPRK3");
 
-    auto it_face = find_option(FACE_RECONSTRUCTION_TYPES, "numerics.face_reconstruction.type", face_reconstruction_str);
-    auto it_riemann = find_option(RIEMANN_SOLVER_TYPES, "numerics.riemann_solver", riemann_solver_str);
-    auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str);
+    const auto numerics_line = [&](const char * key) {
+        return input.contains("numerics") ? line_of(input.at("numerics"), key) : size_t(0);
+    };
+    auto it_face = find_option(FACE_RECONSTRUCTION_TYPES, "numerics.face_reconstruction.type", face_reconstruction_str,
+                               line_of(face_reconstruction_input, "type"));
+    auto it_riemann =
+        find_option(RIEMANN_SOLVER_TYPES, "numerics.riemann_solver", riemann_solver_str, numerics_line("riemann_solver"));
+    auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str,
+                               numerics_line("time_integrator"));
 
     switch (it_face->second) {
         case FaceReconstructionType::FIRST_ORDER:
@@ -1078,40 +1255,57 @@ void Solver::init_numerics() {
     }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
     if (double_flux && !is_mixture()) {
-        throw InputError("numerics.double_flux needs gas = \"mixture\".");
+        throw InputError({.key = "numerics.double_flux",
+                          .line = line_of(input.at("numerics"), "double_flux"),
+                          .message = "is for mixtures, but physics.gas is \"perfect\"",
+                          .fix = "Remove double_flux, or set gas = \"mixture\" in [physics]"});
     }
     if (double_flux && simpler) {
-        throw InputError("numerics.double_flux is not available with chemistry.coupling = \"simpler\" (its "
-                         "thermodynamics are frozen over a step, which the reaction substep would leave stale).");
+        throw InputError({.key = "numerics.double_flux",
+                          .line = line_of(input.at("numerics"), "double_flux"),
+                          .message = "is not available with chemistry.coupling = \"simpler\": its thermodynamics "
+                                     "are frozen over a step, which the reaction substep would leave stale",
+                          .fix = "Set coupling = \"strang\" in [chemistry], or remove double_flux"});
     }
 
     rhs_func = [this](State solution, State rhs, rtype t_stage, rtype c) { calc_rhs(solution, rhs, t_stage, c); };
     check_nan = find_value_or<bool>(input, "numerics", "check_nan", false);
     low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", dim::none, 0.1_r);
     if (!(low_mach_cutoff > 0.0_r)) {
-        throw std::runtime_error("numerics: low_mach_cutoff must be positive (1 disables the low-Mach correction).");
+        throw InputError({.key = "numerics.low_mach_cutoff",
+                          .line = line_of(input.at("numerics"), "low_mach_cutoff"),
+                          .message = "must be positive",
+                          .fix = "Use a value in (0, 1]; 1 disables the low-Mach correction"});
     }
     const std::string flux = find_value_or<std::string>(input, "numerics", "convective_flux", "riemann");
     record_options("numerics.convective_flux", {"riemann", "hybrid"});
     if (flux != "riemann" && flux != "hybrid") {
-        throw InputError("numerics.convective_flux = \"" + flux + "\" is not one of: riemann, hybrid.");
+        throw not_accepted(input.at("numerics"), "numerics.convective_flux", flux, {"hybrid", "riemann"});
     }
     hybrid_flux = flux == "hybrid";
     if (hybrid_flux && simpler) {
-        throw InputError(
-            "numerics.convective_flux = \"hybrid\" is not available with chemistry.coupling = \"simpler\": SIMPLER "
-            "turns the flow integrator into 1 + z + z^2/2 + z^3/8 + z^4/48, which amplifies every mode on the "
-            "imaginary axis, and the hybrid flux's central part has no dissipation to damp them. Use "
-            "chemistry.coupling = \"strang\", or convective_flux = \"riemann\".");
+        throw InputError({.key = "numerics.convective_flux",
+                          .line = line_of(input.at("numerics"), "convective_flux"),
+                          .message = "\"hybrid\" is not available with chemistry.coupling = \"simpler\": SIMPLER "
+                                     "turns the flow integrator into 1 + z + z^2/2 + z^3/8 + z^4/48, which amplifies "
+                                     "every mode on the imaginary axis, and the hybrid flux's central part has no "
+                                     "dissipation to damp them",
+                          .fix = "Use chemistry.coupling = \"strang\", or convective_flux = \"riemann\""});
     }
     const Input hybrid_input = toml::find_or(input, "numerics", "hybrid", Input(Input::table_type{}));
     if (!hybrid_flux && !hybrid_input.as_table().empty()) {
-        throw InputError("[numerics.hybrid] needs numerics.convective_flux = \"hybrid\".");
+        throw InputError({.key = "numerics.hybrid",
+                          .line = line_of(input.at("numerics"), "hybrid"),
+                          .message = "has no effect: numerics.convective_flux is \"riemann\"",
+                          .fix = "Set convective_flux = \"hybrid\" in [numerics], or remove [numerics.hybrid]"});
     }
     hybrid_threshold = find_real_or(hybrid_input, "sensor_threshold", dim::none, 0.65_r);
     hybrid_floor = find_real_or(hybrid_input, "upwind_floor", dim::none, 0.0_r);
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
-        throw InputError("numerics.hybrid: sensor_threshold and upwind_floor must be in [0, 1].");
+        throw InputError({.key = "numerics.hybrid",
+                          .line = line_of(hybrid_input),
+                          .message = "sensor_threshold and upwind_floor must be in [0, 1]",
+                          .fix = "The defaults are sensor_threshold = 0.65 and upwind_floor = 0.0"});
     }
     init_error_control();
 }
@@ -1138,21 +1332,43 @@ void Solver::init_axisymmetric_weights() {
 
 void Solver::init_run_parameters() {
     if (!input.contains("run")) {
-        throw InputError("missing [run] table.");
+        throw InputError({.key = "run",
+                          .message = "the [run] table is missing; it sets the time step and when the run stops",
+                          .fix = "Add [run] with cfl = 0.5 (or a fixed dt) and t_stop or n_steps"});
     }
     const Input & run = input.at("run");
     if (run.contains("dt") == run.contains("cfl")) {
-        throw InputError("run: specify exactly one of dt and cfl.");
+        throw InputError({.key = "run",
+                          .line = line_of(run),
+                          .message = run.contains("dt") ? "sets both dt and cfl; specify exactly one"
+                                                        : "specify exactly one of dt and cfl",
+                          .fix = "Use cfl (e.g. cfl = 0.5) for a time step that adapts to the flow, or dt for a "
+                                 "fixed one"});
     }
     if (!run.contains("n_steps") && !run.contains("t_stop") && !run.contains("t_wall_stop")) {
-        throw InputError("run: specify at least one of n_steps, t_stop and t_wall_stop.");
+        throw InputError({.key = "run",
+                          .line = line_of(run),
+                          .message = "nothing stops the run: specify at least one of n_steps, t_stop and t_wall_stop",
+                          .fix = "Add t_stop (simulated time), n_steps or t_wall_stop (wall-clock time)"});
     }
     use_cfl = run.contains("cfl");
     if (use_cfl) {
         cfl = find_real(input, "run", "cfl", dim::none);
+        if (!(cfl > 0.0_r)) {
+            throw InputError({.key = "run.cfl",
+                              .line = line_of(run, "cfl"),
+                              .message = "must be positive",
+                              .fix = "Start from cfl = 0.5; most explicit schemes are stable up to about 1"});
+        }
     } else {
         dt_fixed = find_real(input, "run", "dt", dim::time);
         dt = dt_fixed;
+        if (!(dt_fixed > 0.0_r)) {
+            throw InputError({.key = "run.dt",
+                              .line = line_of(run, "dt"),
+                              .message = "must be positive",
+                              .fix = "Give the time step in seconds, or use cfl for one that adapts to the flow"});
+        }
     }
     n_steps = find_value_or<uint64_t>(input, "run", "n_steps", 0);
     cuda_graphs = find_value_or<bool>(input, "run", "cuda_graphs", true);
@@ -1166,12 +1382,18 @@ void Solver::init_run_parameters() {
 void Solver::init_output() {
     check_interval = find_value_or<uint32_t>(input, "output", "check_interval", 1);
     if (check_interval == 0) {
-        throw InputError("output.check_interval must be positive.");
+        throw InputError({.key = "output.check_interval",
+                          .line = line_of(input.at("output"), "check_interval"),
+                          .message = "must be positive",
+                          .fix = "Use 1 to check every step"});
     }
     const bool async_output = find_value_or<bool>(input, "output", "async", true);
     const uint32_t io_threads = find_value_or<uint32_t>(input, "output", "io_threads", 1);
     if (io_threads == 0) {
-        throw InputError("output.io_threads must be positive.");
+        throw InputError({.key = "output.io_threads",
+                          .line = line_of(input.at("output"), "io_threads"),
+                          .message = "must be positive",
+                          .fix = "Use 1 (the default), or more to write several files at once"});
     }
     if (input.contains("forces")) {
         for (const auto & entry : find_value<std::vector<Input>>(input, "forces")) {
@@ -1180,7 +1402,16 @@ void Solver::init_output() {
             FaceZone * zone = mesh->get_face_zone(monitor.zone);
             if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
             if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-                throw std::runtime_error("forces: unknown boundary zone " + monitor.zone + ".");
+                std::vector<std::string> names;
+                for (const FaceZone & z : *mesh->face_zones()) {
+                    if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
+                }
+                std::sort(names.begin(), names.end());
+                throw InputError({.key = "forces.zone",
+                                  .line = line_of(entry, "zone"),
+                                  .message = "the mesh has no boundary zone \"" + monitor.zone + "\"",
+                                  .valid = names,
+                                  .suggestion = suggest_value(monitor.zone, names)});
             }
             std::vector<uint32_t> owned;
             for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
@@ -1203,24 +1434,36 @@ void Solver::init_output() {
             monitor.modeled = comm::allreduce(modeled, comm::Op::MAX) > 0;
             monitor.interval = find_value_or<uint64_t>(entry, "interval", 1);
             if (monitor.interval == 0) {
-                throw std::runtime_error("forces: interval must be positive.");
+                throw InputError({.key = "forces.interval",
+                                  .line = line_of(entry, "interval"),
+                                  .message = "must be positive",
+                                  .fix = "Use 1 to write the forces every step"});
             }
             const std::string file = find_value_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
             monitor.file = file;
             if (comm::is_root() && output_files_enabled()) {
-                const std::filesystem::path parent = std::filesystem::path(file).parent_path();
-                if (!parent.empty()) std::filesystem::create_directories(parent);
+                create_parent_directories("the forces file", file);
                 // init_output runs before the restart state is read, so check the input
                 const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                                     std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
                 monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
+                if (!monitor.out->good()) throw cannot_write("the forces file", file);
                 if (!resume) {
+                    // Over the zone's faces: per unit depth in 2D, per radian in axisymmetric runs
+                    const Dimension area = measure_dimension().times(dim::length, -1);
+                    std::vector<Dimension> units = {dim::none, dim::time};
                     *monitor.out << "step,t";
                     for (const char * kind : {"pressure", "viscous"}) {
-                        FOR_I_DIM *monitor.out << ",F" << "xyz"[i] << "_" << kind;
+                        FOR_I_DIM {
+                            *monitor.out << ",F" << "xyz"[i] << "_" << kind;
+                            units.push_back(dim::pressure.times(area));
+                        }
                     }
-                    if (monitor.modeled) *monitor.out << ",Q";
-                    *monitor.out << "\n";
+                    if (monitor.modeled) {
+                        *monitor.out << ",Q";
+                        units.push_back(dim::heat_flux.times(area));
+                    }
+                    *monitor.out << "\n" << field_units::csv_line(units) << "\n";
                 }
             }
             force_monitors.push_back(monitor);
@@ -1229,7 +1472,10 @@ void Solver::init_output() {
     if (input.contains("integrals")) {
         integral_monitor.interval = find_value_or<uint64_t>(input, "integrals", "interval", 1);
         if (integral_monitor.interval == 0) {
-            throw std::runtime_error("integrals: interval must be positive.");
+            throw InputError({.key = "integrals.interval",
+                              .line = line_of(input.at("integrals"), "interval"),
+                              .message = "must be positive",
+                              .fix = "Use 1 to write the integrals every step"});
         }
         if (!viscous_gradients.is_allocated()) {
             viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
@@ -1243,19 +1489,24 @@ void Solver::init_output() {
         const std::string file = find_value_or<std::string>(input, "integrals", "file", "integrals.csv");
         integral_monitor.file = file;
         if (comm::is_root() && output_files_enabled()) {
-            const std::filesystem::path parent = std::filesystem::path(file).parent_path();
-            if (!parent.empty()) std::filesystem::create_directories(parent);
+            create_parent_directories("the integrals file", file);
             const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                                 std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
             integral_monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
+            if (!integral_monitor.out->good()) throw cannot_write("the integrals file", file);
             if (!resume) {
+                std::vector<Dimension> units = {dim::none, dim::time};
                 *integral_monitor.out << "step,t";
-                for (const auto & name : integral_names()) *integral_monitor.out << "," << name;
-                *integral_monitor.out << "\n";
+                for (const auto & [name, dimension] : integral_columns()) {
+                    *integral_monitor.out << "," << name;
+                    units.push_back(dimension);
+                }
+                *integral_monitor.out << "\n" << field_units::csv_line(units) << "\n";
             }
         }
     }
-    probes.init(input, *mesh, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart");
+    probes.init(input, *mesh, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart",
+                is_viscous());
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     if (run_log_on) {
@@ -1265,7 +1516,7 @@ void Solver::init_output() {
     } else {
         run_log::close();
     }
-    if (probes.any_point_values() && !viscous_gradients.is_allocated()) {
+    if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
@@ -1284,17 +1535,31 @@ void Solver::init_output() {
     }
 }
 
-std::vector<std::string> Solver::integral_names() const {
-    std::vector<std::string> names = {"kinetic_energy", "enstrophy", "dilatation_squared", "pressure_dilatation",
-                                      "velocity_squared", "vorticity_squared", "density_squared", "temperature",
-                                      "temperature_squared"};
+Dimension Solver::measure_dimension() const {
+    return axisymmetric ? dim::of(0, N_DIM + 1, 0, 0, 0, -1) : dim::of(0, N_DIM, 0);
+}
+
+std::vector<std::pair<std::string, Dimension>> Solver::integral_columns() const {
+    const Dimension V = measure_dimension(), rate2 = dim::rate.times(dim::rate);
+    const Dimension energy = dim::pressure.times(V), power = energy.times(dim::time, -1);
+    std::vector<std::pair<std::string, Dimension>> columns = {
+        {"kinetic_energy", energy},
+        {"enstrophy", dim::density.times(rate2).times(V)},
+        {"dilatation_squared", rate2.times(V)},
+        {"pressure_dilatation", dim::pressure.times(dim::rate).times(V)},
+        {"velocity_squared", dim::velocity_squared.times(V)},
+        {"vorticity_squared", rate2.times(V)},
+        {"density_squared", dim::density.times(dim::density).times(V)},
+        {"temperature", dim::temperature.times(V)},
+        {"temperature_squared", dim::temperature.times(dim::temperature).times(V)}};
     if (integral_monitor.budget) {
-        names.insert(names.end(),
-                     {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"});
+        for (const char * name : {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"}) {
+            columns.emplace_back(name, power);
+        }
     }
-    if (les_on && les.dynamic) names.emplace_back("les_C");
-    if (dynamic_efficiency()) names.emplace_back("tf_beta");
-    return names;
+    if (les_on && les.dynamic) columns.emplace_back("les_C", dim::none);
+    if (dynamic_efficiency()) columns.emplace_back("tf_beta", dim::none);
+    return columns;
 }
 
 void Solver::allocate_memory() {
@@ -1653,6 +1918,8 @@ int Solver::run() {
             t_wall_output += output_timer.seconds();
             if (step % check_interval == 0) {
                 Kokkos::Timer check_timer;
+                timed_fields.check();
+                timed_inlets.check();
                 print_progress();
                 t_wall_checks += check_timer.seconds();
             }
@@ -1667,10 +1934,14 @@ int Solver::run() {
     } catch (const DivergedError &) {
         defer_chemistry = false;
         destroy_step_graph();
+        timed_fields.check();
+        timed_inlets.check();
         diverged();
     }
     defer_chemistry = false;
     destroy_step_graph();
+    timed_fields.check();
+    timed_inlets.check();
     if (step != step_last_check) print_progress();
     Kokkos::Timer output_timer;
     copy_device_to_host();
@@ -1784,6 +2055,10 @@ void Solver::print_progress() {
     monitor_values = {{"monitors_step", std::to_string(step)}};
     for (const auto & [name, value] : status.monitors) monitor_values.emplace_back(name, format("%.6g", value));
 
+    if (run_health.on) {
+        report_health();
+        status.health = run_health.last;
+    }
     if (run_log_on) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
@@ -1949,13 +2224,14 @@ void Solver::print_summary(const std::string & stop) const {
         if (writer->get_format() == DataFormat::RESTART) {
             add(logging::count(n) + " restart");
         } else {
-            add(logging::count(n) + " vtu (" + writer->get_prefix() + ".pvd)");
+            add(logging::count(n) + " " + FORMAT_NAMES.at(writer->get_format()) + " (" + writer->index_file() + ")");
         }
     }
     for (const auto & monitor : force_monitors) add(monitor.file);
     if (integral_monitor.interval > 0) add(integral_monitor.file);
     for (const auto & file : probes.files()) add(file);
     if (!files.empty()) logging::item("Files", files);
+    health_summary();
 
     json::Object end;
     end.add("type", "end")
@@ -2031,8 +2307,9 @@ void Solver::write_data(bool force) {
 
 void Solver::write_probes() {
     if (!probes.due(step, t)) return;
-    if (probes.point_values_due(step, t)) {
+    if (probes.point_values_due(step, t) || probes.gradients_due(step, t)) {
         update_cell_W();
+        if (is_mixture() && probes.transport_due(step, t)) update_transport();
     } else {
         update_primitives();
     }
@@ -2040,9 +2317,13 @@ void Solver::write_probes() {
 }
 
 ProbeFields Solver::probe_fields() {
-    ProbeFields fields{cell_sampler(), W_cells, viscous_gradient, viscous_gradients, face_reconstruction.get(),
-                       physics.gamma, {}};
-    if (is_mixture()) fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+    ProbeFields fields{cell_sampler(), W_cells,      viscous_gradient,    viscous_gradients, face_reconstruction.get(),
+                       physics,        boundary_data, is_viscous(),        axisymmetric,      mesh->face_coords,
+                       {},             {}};
+    if (is_mixture()) {
+        fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+        if (is_viscous()) fields.transport = cell_transport;
+    }
     return fields;
 }
 
@@ -2077,6 +2358,7 @@ void Solver::take_step() {
         calc_dt();
         time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
     }
+    run_health.ledger.end_step(static_cast<double>(dt));
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -2150,7 +2432,10 @@ void Solver::calc_dt() {
         dt = t_target - t;
     }
     if (!(dt > 0.0_r)) {
-        throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");
+        throw std::runtime_error("the time step is " + logging::real(double(dt)) + " at step " + std::to_string(step) +
+                                 ", t = " + logging::real(double(t)) +
+                                 ": it must be positive. Check run.dt, run.cfl, the sponges' and the step "
+                                 "controller's limits, and that t_stop is after the initial time.");
     }
     // cfl_local holds dt_cfl1 per cell; convert to local CFL number
     Kokkos::View<rtype *> c = cfl_local;
@@ -2582,9 +2867,9 @@ void Solver::write_integrals() {
     }
     if (les_on && les.dynamic) values.push_back(double(les.C));
     if (dynamic_efficiency()) values.push_back(double(thickened_flame.beta));
-    const std::vector<std::string> names = integral_names();
+    const auto columns = integral_columns();
     integral_monitor.last = {"integrals", step, double(t), {}};
-    for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(names[i], values[i]);
+    for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(columns[i].first, values[i]);
     if (!integral_monitor.out) return;
     *integral_monitor.out << step << "," << std::setprecision(12) << t;
     for (const double v : values) *integral_monitor.out << "," << v;

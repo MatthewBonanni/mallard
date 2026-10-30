@@ -3,7 +3,7 @@
 
     python plot_results.py RUN_DIR [--t-start 60] [--out DIR]
 
-RUN_DIR holds a run of input.toml (forces_cylinder.csv, solut/cylinder.pvd).
+RUN_DIR holds a run of input.toml (forces_cylinder.csv, solut/cylinder.vtkhdf.series).
 From --t-start on, prints the Strouhal number (from the lift's period), the
 mean drag coefficient and the lift amplitude against the references, and
 writes the figures cylinder_history (drag and lift against time) and
@@ -59,7 +59,7 @@ def main():
     print(f"t >= {args.t_start:g}: St {st:.4f}, mean Cd {mean_cd:.4f}, Cl amplitude {amp:.4f} "
           f"(references: St {REF['St'][0]}-{REF['St'][1]}, Cd {REF['Cd'][0]}-{REF['Cd'][1]}, "
           f"Cl {REF['Cl'][0]}-{REF['Cl'][1]})")
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(args.run, "solut", "cylinder.pvd")))
+    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(args.run, "solut", "cylinder")))
     polys, _ = snapshots.cells(pts, conn, offs)
     polys = [p[:, :2] for p in polys]
     w = a["VORTICITY"]
