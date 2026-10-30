@@ -1,0 +1,115 @@
+# Inviscid flow past a prolate spheroid at Mach 0.3 (3D build), with the wall
+# faces curved onto the analytic ellipsoid, against the same mesh with flat
+# faces ([mesh] curved_geometry = false). The exact steady solution has no
+# drag (d'Alembert) and uniform entropy, and its surface pressure is close to
+# incompressible potential flow, Cp = 1 - (1 + k)^2 (1 - n_x^2) with
+# k = 0.2100 for a 2:1 spheroid (Lamb, Hydrodynamics, art. 105; n is the wall
+# normal): any drag and entropy rise are numerical errors, which flat facets
+# make at the wall and the curved faces remove.
+#
+# Mesh: tetrahedra of the quarter domain y >= 0, z >= 0 (y = 0 and z = 0 are
+# symmetry planes), spheroid of length 2 and diameter 1. Generate it first:
+#   python make_ellipsoid_mesh.py ellipsoid.msh --scale 4
+# Nondimensionalization: free-stream density and sound speed 1, so U = M = 0.3.
+#
+# Run, then compare with the flat faces:
+#   ../../build3d/src/mallard -i input.toml
+#   python compare_ellipsoid.py runs --mallard ../../build3d/src/mallard
+# (compare_ellipsoid.py runs both geometries on meshes of the given scales and
+# plots the drag, entropy error and wall pressure).
+
+[run]
+t_stop = 40.0
+cfl = 0.4
+
+[mesh]
+type = "file"
+filename = "ellipsoid.msh"
+curved_geometry = true
+
+[[mesh.curved]]
+zone = "ellipsoid"
+shape = {type = "ellipsoid", center = [0.0, 0.0, 0.0], semi_axes = [1.0, 0.5, 0.5]}
+
+[initialize]
+type = "constant"
+u = [0.3, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "ellipsoid"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "inflow"
+type = "farfield"
+u = [0.3, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "lateral"
+type = "farfield"
+u = [0.3, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "outflow"
+type = "farfield"
+u = [0.3, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "symmetry_y"
+type = "symmetry"
+
+[[boundaries]]
+name = "symmetry_z"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+
+[output]
+check_interval = 500
+
+[[forces]]
+zone = "ellipsoid"
+interval = 10
+file = "./solut/forces_ellipsoid.csv"
+
+[[write_data]]
+prefix = "./solut/ellipsoid"
+format = "vtu"
+time_interval = 10.0
+variables = ["RHO", "U", "P"]
+
+[[write_data]]
+prefix = "./solut/wall"
+format = "vtu"
+geometry = "ellipsoid"
+time_interval = 10.0
+variables = ["P"]
+
+[[write_data]]
+prefix = "./solut/y0"
+format = "vtu"
+geometry = "symmetry_y"
+time_interval = 10.0
+variables = ["RHO", "U", "P"]
