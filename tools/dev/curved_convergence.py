@@ -100,6 +100,7 @@ GENERAL_SHAPES = """
 zone = "inner"
 type = "implicit"
 f = "x^2 + y^2 - {r_in}^2"
+filled = false
 
 [[mesh.curved]]
 zone = "outer"

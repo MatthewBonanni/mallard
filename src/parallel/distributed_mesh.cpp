@@ -140,7 +140,11 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
             const std::string & zone = side ? pairs[k].zone_b : pairs[k].zone_a;
             const auto it = std::find(block.zone_names.begin(), block.zone_names.end(), zone);
             if (it == block.zone_names.end()) {
-                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh.");
+                std::string names;
+                for (const auto & name : block.zone_names) names += (names.empty() ? "" : ", ") + name;
+                throw std::runtime_error("Periodic zone " + zone + " is not a boundary zone of the mesh (zones: " +
+                                         names + "). Pair zones of the mesh in [[periodic]] zones. See "
+                                         "docs/guide/meshes.md#periodic-boundaries.");
             }
             role[static_cast<size_t>(it - block.zone_names.begin())] = static_cast<uint32_t>(2 * k + side);
         }
@@ -254,13 +258,16 @@ void DistributedMesh::match_periodic(const std::vector<Mesh::PeriodicPair> & pai
         for (size_t side = 0; side < 2; side++) {
             if (counts[2 * k + side] == 0) {
                 throw std::runtime_error("Periodic zone " + (side ? pairs[k].zone_b : pairs[k].zone_a) +
-                                         " is not a boundary zone of the mesh.");
+                                         " is not a boundary zone of the mesh. Pair zones of the mesh in [[periodic]] "
+                                         "zones. See docs/guide/meshes.md#periodic-boundaries.");
             }
         }
         if (counts[2 * k] != counts[2 * k + 1]) {
             throw std::runtime_error("Periodic zones " + pairs[k].zone_a + " and " + pairs[k].zone_b + " have " +
                                      std::to_string(counts[2 * k]) + " and " + std::to_string(counts[2 * k + 1]) +
-                                     " nodes.");
+                                     " nodes, but periodic zones need matching nodes. Make the mesh periodic in "
+                                     "the generator (in Gmsh: Periodic Curve or Surface). See "
+                                     "docs/guide/meshes.md#periodic-boundaries.");
         }
     }
 
@@ -557,6 +564,7 @@ std::vector<std::array<double, N_DIM>> DistributedMesh::block_cell_centers() con
 void DistributedMesh::append_record(std::vector<uint64_t> & out, uint32_t c) const {
     out.push_back(block.first_cell + c);
     out.push_back(static_cast<uint64_t>(owner[c]));
+    if (!block.cell_zone_names.empty()) out.push_back(block.cell_zone[c]);
     out.push_back(block.cell_offsets[c + 1] - block.cell_offsets[c]);
     out.insert(out.end(), block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c]),
                block.cell_nodes.begin() + static_cast<std::ptrdiff_t>(block.cell_offsets[c + 1]));
@@ -585,6 +593,7 @@ void DistributedMesh::read_records(const std::vector<uint64_t> & from, uint8_t l
             if (layer > 0) halo_index.emplace(g, cells.gid.size());
             cells.gid.push_back(g);
             cells.owner.push_back(static_cast<int>(from[i++]));
+            if (!block.cell_zone_names.empty()) cells.zone.push_back(static_cast<uint32_t>(from[i++]));
             cells.layer.push_back(layer);
             const uint64_t n = from[i++];
             cells.nodes.insert(cells.nodes.end(), &from[i], &from[i] + n);
@@ -787,6 +796,10 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     mesh->h_global_node_id = std::move(node_ids);
     mesh->n_global_nodes = node_dist.back();
     mesh->init_from_connectivity(nodes, local_cells, boundary_faces, PARTITION_ZONE, classes);
+    if (!block.cell_zone_names.empty()) {
+        mesh->cell_zone_names = block.cell_zone_names;
+        mesh->h_cell_zone.assign(cells.zone.begin(), cells.zone.begin() + n_local);
+    }
     mesh->n_owned_cells = dist.n_owned;
     mesh->n_reconstructed_cells =
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; }));

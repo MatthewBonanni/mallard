@@ -33,6 +33,12 @@ struct MeshFileData {
     std::vector<std::vector<uint32_t>> cells;
     std::vector<Mesh::BoundaryFace> boundary_faces;
     std::vector<std::vector<curved::Vec3>> boundary_high_order;
+    // Cell zones: the zone of each cell (Mesh::NO_CELL_ZONE: none), empty if the file has none
+    std::vector<uint32_t> cell_zone;
+    std::vector<std::string> cell_zone_names;
+
+    /** @brief Put cell c (cells numbered in order) in the zone of that name, created if new. */
+    void set_cell_zone(size_t c, const std::string & name);
 };
 
 /**

@@ -77,11 +77,12 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[chemistry]`, `[radiation]` | no | [Thermochemistry](thermochemistry.md) |
 | `[les]`, `[les.combustion]` | no | [Large-eddy simulation](les.md) |
 | `[source]`, `[[sponges]]` | no | [Sources and sponges](sources.md) |
+| `[regions]` | no | [Named regions](geometry.md#named-regions), used by `[[sources]]`, `[[sponges]]` and `[[probes]]` |
 | `[[write_data]]`, `[output]`, `[[forces]]`, `[integrals]`, `[statistics]`, `[[probes]]` | no | [Output and diagnostics](output.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
-Regions that several tables use (sources' regions, probe points and curves) are on
-[Geometry](geometry.md).
+Regions that several tables use (inline, or named once in `[regions]`), and
+probe points and curves, are on [Geometry](geometry.md).
 
 Double brackets (`[[boundaries]]`) are TOML arrays of tables: repeat them, one
 entry each. Every key, with its default, is in the
@@ -323,7 +324,7 @@ Keys and options changed so far:
 | `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; until removed, `"hdf5"` still writes XDMF and HDF5 files | 0.9.0 | 0.10.0 |
 | `[[probes]]` `shape` | `type` | 0.9.0 | 0.10.0 |
-| `[[mesh.curved]]` `shape` | `type`: the zone lies on the surface of a [region](geometry.md#regions) | 0.9.0 | 0.10.0 |
+| `[[mesh.curved]]` `shape` | `type`: the zone lies on a [surface region](geometry.md#regions); `"sphere"` and `"cylinder"` (3D) get `filled = false`, their surface | 0.9.0 | 0.10.0 |
 | `[[sources]]` `region` `type = "circle"` (a filled circle) | 2D `"disk"`, 3D `"sphere"`: `circle` is the curve | 0.9.0 | 0.10.0 |
 | `[[sources]]` `region` `type = "ellipse"` (a filled ellipse) | `"ellipsoid"`: `ellipse` is the curve | 0.9.0 | 0.10.0 |
 | `[[sources]]` `region` `type = "disk"`, `"rectangle"` in 3D | `"sphere"`, `"box"`: disks and rectangles are flat | 0.9.0 | 0.10.0 |
@@ -350,6 +351,21 @@ error: input.toml: keys that are unknown or unused with these settings (mallard 
 
 When another error stops the setup first, the keys with a suggestion are
 listed under it as possible misspellings.
+
+## Error messages
+
+An error in the input names the file, the line and the key, says what is
+wrong, lists the accepted values or the closest one, says what to do, and
+links the docs that explain the key; `mallard check` reports it the same way:
+
+```text
+error: input.toml: line 6: mesh.Nx: is 16 (a float), but must be a non-negative integer. Write it without a decimal point: 16. See docs/input.md#mesh.
+error: input.toml: line 20: boundaries[name = "inlet"].type: "wall" is not accepted (did you mean "wall_adiabatic", "wall_heat_flux" or "wall_isothermal"?). Accepted values: ... See docs/input.md#boundaries.
+```
+
+A value of the wrong type is always an error, never replaced by the default.
+Errors during the run name the step, the time and the cells or faces involved
+(see [Divergence](running.md#divergence)).
 
 ## Checking an input
 

@@ -175,6 +175,10 @@ void Solver::diverged() {
         message += " The last valid state (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
                    ") is in " + file + ".";
     }
+    message += " Common causes: a time step too large for the scheme (lower run.cfl), an initial state or "
+               "boundary values far from the flow (check units and signs), or poor cells near the first one listed "
+               "(mallard check reports mesh quality); a more dissipative scheme (numerics.preset = \"robust\") "
+               "helps. See docs/guide/running.md#divergence.";
     for (auto & command : checkpoint_replies) run_control::reply(command, "error: " + message);
     for (auto & command : stop_replies) run_control::reply(command, "error: " + message);
     checkpoint_replies.clear();

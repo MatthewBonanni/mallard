@@ -12,6 +12,7 @@
 #include <sstream>
 
 #include "build_info.h"
+#include "input.h"
 
 namespace cli {
 
@@ -298,7 +299,18 @@ int main(int argc, char ** argv) {
         for (const Family & f : families()) {
             if (args[0] == f.name) return family_main(f, {args.begin() + 1, args.end()});
         }
-        std::cerr << "mallard: unknown command " << args[0] << " (see mallard --help)\n";
+        std::vector<std::string> names;
+        for (const Command & c : commands()) {
+            const std::string first(words(c.name).empty() ? "" : words(c.name)[0]);
+            if (!first.empty() && std::find(names.begin(), names.end(), first) == names.end()) names.push_back(first);
+        }
+        const std::string near = suggest_value(args[0], names);
+        if (!near.empty()) {
+            std::cerr << "mallard: unknown command " << args[0] << " (did you mean " << near << "?)\n";
+        } else {
+            std::cerr << "mallard: unknown command " << args[0] << "; to run an input file, give it with -i: mallard -i "
+                      << args[0] << " (see mallard --help)\n";
+        }
         return 2;
     }
     Args parsed;

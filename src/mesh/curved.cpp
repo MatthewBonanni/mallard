@@ -225,9 +225,8 @@ constexpr double FD_WEIGHT[4] = {1.0 / 12.0, -8.0 / 12.0, 8.0 / 12.0, -1.0 / 12.
  *        length; in 2D the shape is the z = 0 slice.
  */
 void closest_point(const Shape & s, const Vec3 & x, double length, Vec3 & p, double * J) {
-    const region::Region & r = *s.surface;
     auto phi = [&](const Vec3 & y) {
-        const double v = r.distance(y.data());
+        const double v = s.level_set(y.data());
         if (!std::isfinite(v)) {
             throw InputError("mesh.curved: the shape of zone " + s.zone + " is not finite near (" +
                              std::to_string(y[0]) + ", " + std::to_string(y[1]) + ", " + std::to_string(y[2]) + ").");
@@ -370,31 +369,34 @@ void Shape::project(const Vec3 & x, double length, Vec3 & p, double * J) const {
     }
 }
 
-Shape shape_of(const Input & entry, const std::string & where) {
+Shape shape_of(const Input & entry, const std::string & where, const Input * names) {
+    const std::string surface = N_DIM == 2 ? "a curve" : "a surface";
     if (!entry.contains("type")) {
-        throw InputError(where + " needs type, the region whose surface the zone lies on, e.g. type = \"" +
-                         (N_DIM == 2 ? "circle" : "sphere") + "\" with center and radius.");
-    }
-    const std::string type = find_value<std::string>(entry, "type");
-    const bool curve = type == "circle" || type == "ellipse";
-    if (curve && N_DIM == 3) {
-        throw InputError(where + ".type = \"" + type + "\" is a curve, and curved zones of 3D runs lie on surfaces: use " +
-                         (type == "circle" ? "the surface of a \"sphere\" or \"cylinder\"" : "that of an \"ellipsoid\"") +
-                         ".");
+        throw InputError(where + " needs type: the zone lies on " + surface + ", e.g. " +
+                         (N_DIM == 2 ? "type = \"circle\" with center and radius"
+                                     : "type = \"sphere\" with center, radius and filled = false") + ".");
     }
     if (entry.contains("edge")) throw InputError(where + ".edge: curved zones lie on sharp surfaces; remove edge.");
-    // A curve of a 2D run is the boundary of the area inside it
-    Input table = entry;
-    if (curve) table.as_table()["type"] = Input(type == "circle" ? "disk" : "ellipsoid");
-    auto region = std::make_shared<const region::Region>(table, where);
-    std::vector<std::string> options = region::types();
-    if (N_DIM == 2) options.insert(options.end(), {"circle", "ellipse"});
-    record_options(where + ".type", options);
+    auto region = std::make_shared<const region::Region>(entry, where, names);
+    if (region->dimension() == N_DIM) {
+        throw InputError(where + " is " + (N_DIM == 2 ? "an area" : "a volume") + ", and a curved zone lies on " +
+                         surface + ": add filled = false for its boundary.");
+    }
+    const auto & pieces = region->pieces();
+    if (region->dimension() != N_DIM - 1 || pieces.size() != 1 || pieces[0].carriers.size() != 1 ||
+        !pieces[0].inside.empty() || !pieces[0].outside.empty() ||
+        region->filled()[pieces[0].carriers[0]].kind != region::Filled::Kind::SHAPES) {
+        throw InputError(where + ": a curved zone lies on the whole boundary of a region of primitives, booleans "
+                         "or implicit functions (filled = false" + std::string(N_DIM == 2 ? ", or a circle or ellipse" : "") +
+                         "); this region is " + region->summary() + ".");
+    }
 
     Shape s;
     s.kind = Shape::Kind::SURFACE;
+    const std::string type = find_value<std::string>(entry, "type");
     const bool transformed = entry.contains("translate") || entry.contains("rotate") || entry.contains("scale");
-    const bool round = N_DIM == 2 ? type == "circle" || type == "disk" : type == "sphere" || type == "cylinder";
+    const bool round = N_DIM == 2 ? type == "circle" || type == "disk" || type == "sphere"
+                                  : type == "sphere" || type == "cylinder";
     if (round && !transformed && !entry.contains("length") && !entry.contains("inner_radius")) {
         const auto center = find_value<std::vector<Input>>(entry, "center");
         for (size_t i = 0; i < center.size(); i++) s.center[i] = double(as_real(center[i], where + ".center", dim::length));
@@ -410,6 +412,9 @@ Shape shape_of(const Input & entry, const std::string & where) {
         }
         s.center = {0.0, 0.0, 0.0};
     }
+    // Views made once here: closest points are also taken inside host kernels
+    const auto view = region->host(region->filled()[pieces[0].carriers[0]]);
+    s.level_set = [view](const double * x) { return view.distance(x); };
     s.surface = std::move(region);
     return s;
 }
@@ -440,7 +445,7 @@ std::vector<Shape> read_shapes(const Input & input) {
         const std::string where = "mesh.curved[" + std::to_string(i) + "]";
         const std::string zone = find_value<std::string>(entries[i], "zone");
         if (shape_of_zone(shapes, zone) >= 0) throw InputError("mesh.curved: zone " + zone + " is listed twice.");
-        shapes.push_back(shape_of(entries[i], where));
+        shapes.push_back(shape_of(entries[i], where, region::named_regions(input)));
         shapes.back().zone = zone;
     }
     return shapes;

@@ -43,12 +43,14 @@ const char * SHAPES = R"(
 [[mesh.curved]]
 zone = "inner"
 type = "sphere"
+filled = false
 center = [0.0, 0.0, 0.0]
 radius = 1.0
 
 [[mesh.curved]]
 zone = "outer"
 type = "sphere"
+filled = false
 center = [0.0, 0.0, 0.0]
 radius = 1.5
 )";
@@ -76,6 +78,7 @@ const Walls ELLIPSOIDS = {"ellipsoids",
 [[mesh.curved]]
 zone = "inner"
 type = "ellipsoid"
+filled = false
 center = [0.0, 0.0, 0.0]
 semi_axes = [1.0, 0.8, 0.6]
 rotate = {axis = [1, 1, 1], angle = 40}
@@ -83,6 +86,7 @@ rotate = {axis = [1, 1, 1], angle = 40}
 [[mesh.curved]]
 zone = "outer"
 type = "sphere"
+filled = false
 center = [0.0, 0.0, 0.0]
 radius = 1.5
 scale = [1.0, 0.8, 0.6]
@@ -473,7 +477,7 @@ TEST(Curved3DShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
         return curved::Vec3{std::sin(t) * std::cos(p), std::sin(t) * std::sin(p), std::cos(t)};
     };
     const std::vector<ExactSurface> surfaces = {
-        {"ellipsoid", "{type = \"ellipsoid\", center = [0.1, 0.0, -0.2], semi_axes = [1.0, 0.7, 0.5]}",
+        {"ellipsoid", "{type = \"ellipsoid\", center = [0.1, 0.0, -0.2], semi_axes = [1.0, 0.7, 0.5], filled = false}",
          [](const curved::Vec3 & x) {
              const double a = x[0] - 0.1, b = x[1] / 0.7, c = (x[2] + 0.2) / 0.5;
              return std::array<double, 4>{a * a + b * b + c * c - 1.0, 2.0 * a, 2.0 * b / 0.7, 2.0 * c / 0.5};
@@ -482,7 +486,7 @@ TEST(Curved3DShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
              const curved::Vec3 d = polar(u, v);
              return curved::Vec3{0.1 + d[0], 0.7 * d[1], -0.2 + 0.5 * d[2]};
          }},
-        {"torus", "{type = \"torus\", center = [0.0, 0.0, 0.0], axis = [0.0, 0.0, 1.0], major_radius = 1.0, minor_radius = 0.3}",
+        {"torus", "{type = \"torus\", center = [0.0, 0.0, 0.0], axis = [0.0, 0.0, 1.0], major_radius = 1.0, minor_radius = 0.3, filled = false}",
          [](const curved::Vec3 & x) {
              const double rho = std::hypot(x[0], x[1]), d = rho - 1.0;
              return std::array<double, 4>{d * d + x[2] * x[2] - 0.09, 2.0 * d * x[0] / rho, 2.0 * d * x[1] / rho, 2.0 * x[2]};
@@ -491,7 +495,7 @@ TEST(Curved3DShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
              const double a = 2.0 * M_PI * u, b = 2.0 * M_PI * v, rho = 1.0 + 0.3 * std::cos(b);
              return curved::Vec3{rho * std::cos(a), rho * std::sin(a), 0.3 * std::sin(b)};
          }},
-        {"cone", "{type = \"cone\", base = [0.0, 0.0, 0.0], axis = [0.0, 0.0, 1.0], length = 2.0, base_radius = 1.0}",
+        {"cone", "{type = \"cone\", base = [0.0, 0.0, 0.0], axis = [0.0, 0.0, 1.0], length = 2.0, base_radius = 1.0, filled = false}",
          [](const curved::Vec3 & x) {
              const double rho = std::hypot(x[0], x[1]);
              return std::array<double, 4>{rho - 1.0 + 0.5 * x[2], x[0] / rho, x[1] / rho, 0.5};
@@ -501,7 +505,7 @@ TEST(Curved3DShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
              return curved::Vec3{rho * std::cos(a), rho * std::sin(a), z};
          }},
         {"union", "{type = \"union\", regions = [{type = \"sphere\", center = [0.0, 0.0, 0.0], radius = 1.0}, "
-                  "{type = \"cylinder\", center = [0.0, 0.0, 0.0], axis = [1.0, 0.0, 0.0], radius = 0.4, length = 4.0}]}",
+                  "{type = \"cylinder\", center = [0.0, 0.0, 0.0], axis = [1.0, 0.0, 0.0], radius = 0.4, length = 4.0}], filled = false}",
          [](const curved::Vec3 & x) {
              return std::array<double, 4>{x[0] * x[0] + x[1] * x[1] + x[2] * x[2] - 1.0, 2.0 * x[0], 2.0 * x[1], 2.0 * x[2]};
          },
@@ -509,7 +513,7 @@ TEST(Curved3DShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
              const curved::Vec3 d = polar(u, v);
              return curved::Vec3{d[2], d[0], d[1]};
          }},
-        {"implicit", "{type = \"implicit\", f = \"x^4 + y^4 + z^4 - 1\"}",
+        {"implicit", "{type = \"implicit\", f = \"x^4 + y^4 + z^4 - 1\", filled = false}",
          [](const curved::Vec3 & x) {
              return std::array<double, 4>{std::pow(x[0], 4) + std::pow(x[1], 4) + std::pow(x[2], 4) - 1.0,
                                           4.0 * std::pow(x[0], 3), 4.0 * std::pow(x[1], 3), 4.0 * std::pow(x[2], 3)};
@@ -556,20 +560,22 @@ TEST(Curved3DShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
         EXPECT_LT(worst_normal, 1e-13) << c.name;
         EXPECT_LT(worst_J, 1e-8) << c.name;
     }
+    // Zones lie on surfaces: a volume needs filled = false
+    EXPECT_THROW(shape_of("{type = \"sphere\", center = [0.0, 0.5, 0.0], radius = 1.0}"), InputError);
     // Spheres and infinite cylinders without transforms keep their closed forms; an implicit
     // sphere goes where the closed form does, with its Jacobian
-    EXPECT_EQ(shape_of("{type = \"sphere\", center = [0.0, 0.5, 0.0], radius = 1.0}").kind, curved::Shape::Kind::SPHERE);
-    EXPECT_EQ(shape_of("{type = \"sphere\", center = [0.0, 0.5, 0.0], radius = 1.0, scale = 2}").kind,
+    EXPECT_EQ(shape_of("{type = \"sphere\", center = [0.0, 0.5, 0.0], radius = 1.0, filled = false}").kind, curved::Shape::Kind::SPHERE);
+    EXPECT_EQ(shape_of("{type = \"sphere\", center = [0.0, 0.5, 0.0], radius = 1.0, scale = 2, filled = false}").kind,
               curved::Shape::Kind::SURFACE);
-    const curved::Shape cylinder = shape_of("{type = \"cylinder\", center = [1.0, 0.0, 0.0], axis = [1.0, 1.0, 0.0], radius = 0.5}");
+    const curved::Shape cylinder = shape_of("{type = \"cylinder\", center = [1.0, 0.0, 0.0], axis = [1.0, 1.0, 0.0], radius = 0.5, filled = false}");
     ASSERT_EQ(cylinder.kind, curved::Shape::Kind::CYLINDER);
     EXPECT_NEAR(cylinder.axis[0], std::sqrt(0.5), 1e-15);
     EXPECT_NEAR(cylinder.axis[1], std::sqrt(0.5), 1e-15);
     EXPECT_EQ(cylinder.center[0], 1.0);
-    EXPECT_EQ(shape_of("{type = \"cylinder\", center = [1.0, 0.0, 0.0], axis = [1.0, 1.0, 0.0], radius = 0.5, length = 3.0}").kind,
+    EXPECT_EQ(shape_of("{type = \"cylinder\", center = [1.0, 0.0, 0.0], axis = [1.0, 1.0, 0.0], radius = 0.5, length = 3.0, filled = false}").kind,
               curved::Shape::Kind::SURFACE);
-    const curved::Shape exact = shape_of("{type = \"sphere\", center = [0.3, 0.1, -0.2], radius = 0.8}");
-    const curved::Shape implicit = shape_of("{type = \"implicit\", f = \"(x - 0.3)^2 + (y - 0.1)^2 + (z + 0.2)^2 - 0.64\"}");
+    const curved::Shape exact = shape_of("{type = \"sphere\", center = [0.3, 0.1, -0.2], radius = 0.8, filled = false}");
+    const curved::Shape implicit = shape_of("{type = \"implicit\", f = \"(x - 0.3)^2 + (y - 0.1)^2 + (z + 0.2)^2 - 0.64\", filled = false}");
     double worst_p = 0.0, worst_J = 0.0;
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < 8; j++) {

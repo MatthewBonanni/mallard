@@ -310,9 +310,16 @@ files ([compatibility](output.md#file-formats-and-compatibility)).
 ```toml
 [[mesh.curved]]
 zone = "cylinder"
-type = "circle"          # 2D; in 3D e.g. "sphere" or "cylinder" (with axis)
+type = "circle"          # a curve (2D)
 center = [0.0, 0.0]
 radius = 0.5
+
+[[mesh.curved]]           # 3D: the surface of a sphere
+zone = "ball"
+type = "sphere"
+center = [0.0, 0.0, 0.0]
+radius = 0.5
+filled = false
 ```
 
 *Used in:* the curved-boundary validation (`tools/dev/curved_convergence.py`).
@@ -331,22 +338,24 @@ The geometry comes from either
 - **high-order boundary elements** of a Gmsh file (`line3`, `line4` in 2D;
   `triangle6`, `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`,
   `quadrangle16` in 3D), e.g. `make_cylinder_mesh.py --order 3`; or
-- **a [region](geometry.md#regions)** whose surface a zone is projected onto,
-  on any mesh: a `[[mesh.curved]]` entry is the zone's name and a region,
-  with the region's `type` and keys beside `zone`.
+- **a surface [region](geometry.md#regions)** (2D: a curve) that a zone is
+  projected onto, on any mesh: a `[[mesh.curved]]` entry is the zone's name
+  and a region, with the region's `type` and keys beside `zone`.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `[mesh] curved_geometry` | `true` | `false` ignores high-order nodes and `[[mesh.curved]]` |
 | `zone` | required | Boundary zone to curve |
-| `type` | required | Any region type ([primitives](geometry.md#primitives), [booleans](geometry.md#booleans), [`implicit`](geometry.md#implicit-regions)); in 2D also the curves `circle` and `ellipse` |
+| `type` | required | A surface (2D: a curve) that bounds a region: a filled [primitive](geometry.md#primitives), [boolean](geometry.md#booleans) or [`implicit`](geometry.md#implicit-regions) region with `filled = false`, its `{type = "boundary", of = ...}`, or in 2D a `circle` or `ellipse` |
+| `filled` | `true` | `false` on a filled region: its [boundary](geometry.md#boundaries-and-interiors), which the zone lies on; required for filled types (a filled region is an error) |
 | the region's keys | | `center`, `radius`, `semi_axes`, `axis`, `regions`, `f`, ..., and the [transforms](geometry.md#transforms) `translate`, `rotate`, `scale`, `pivot` |
 
-The zone lies on the region's surface: the boundary of the area (2D) or
-volume (3D) it encloses, or in 2D the curve of a `circle` or `ellipse`, which
-are the boundaries of a `disk` and of an `ellipsoid`'s slice. A wing section,
-a body of revolution or a blended fillet becomes a boolean of primitives or an
-implicit function:
+The zone lies on a surface (2D: a curve): the whole boundary of a filled
+region of primitives, booleans or implicit functions, written with
+`filled = false`, or in 2D a `circle` or `ellipse`. Surfaces that only part of
+a boundary forms (flat surfaces of 3D, boundary zones, clipped surfaces) are
+an error. A wing section, a body of revolution or a blended fillet becomes a
+boolean of primitives or an implicit function:
 
 ```toml
 # An elliptic cylinder at 10 degrees of incidence (2D)
@@ -362,14 +371,15 @@ rotate = -10
 zone = "capsule"
 type = "implicit"
 f = "x^4 + y^4 + (z / 2)^4 - 1"
+filled = false
 ```
 
 ![Curved faces of a coarse mesh on a rotated ellipse, a union of two disks and an implicit curve, with their quadrature points and normals](../images/guide/curved_regions-light.svg#gh-light-mode-only)
 ![Curved faces of a coarse mesh on a rotated ellipse, a union of two disks and an implicit curve, with their quadrature points and normals](../images/guide/curved_regions-dark.svg#gh-dark-mode-only)
 
-Circles (`circle`, `disk`) in 2D, and spheres and infinite cylinders (no
-`length` or `inner_radius`) in 3D, without transforms, are projected in
-closed form, radially. Every other surface is projected by closest-point
+Circles in 2D (`circle`, or `disk` with `filled = false`), and the surfaces
+of spheres and infinite cylinders (no `length` or `inner_radius`) in 3D,
+without transforms, are projected in closed form, radially. Every other surface is projected by closest-point
 iterations on the region's function: Newton steps onto its zero level set
 along the gradient, then along the surface toward the point, with the
 gradient and curvature from fourth-order differences. They converge to round-off
@@ -391,9 +401,10 @@ Pitfalls:
 - At curved walls TENO-E uses one-sided stencils of limited degree
   (`curved_wall_degree`, default 3), so orders 5 and 6 are fourth order there;
   see [Numerics](numerics.md#teno-e-options).
-- Before 0.9.0 the key `type` was `shape`; it is read with a warning until
-  0.10.0, and `mallard input upgrade` renames it
-  ([inputs from older releases](input_files.md#inputs-from-older-releases)).
+- Before 0.9.0 the key `type` was `shape`, and `"sphere"` and `"cylinder"`
+  meant their surfaces. `shape` is read with a warning until 0.10.0 (adding
+  `filled = false` to spheres and cylinders), and `mallard input upgrade`
+  rewrites it ([inputs from older releases](input_files.md#inputs-from-older-releases)).
 
 ## Mesh quality
 

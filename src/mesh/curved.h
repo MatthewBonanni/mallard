@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -31,6 +32,7 @@ struct MeshBlock;
 namespace region {
 class Region;
 }
+
 
 namespace curved {
 
@@ -50,7 +52,8 @@ struct Shape {
     Vec3 center = {0.0, 0.0, 0.0};
     Vec3 axis = {0.0, 0.0, 1.0};  // cylinder: unit vector
     double radius = 1.0;
-    std::shared_ptr<const region::Region> surface;  // SURFACE: its zero level set
+    std::shared_ptr<const region::Region> surface;            // SURFACE: the region,
+    std::function<double(const double *)> level_set;          // and the function whose zero set it is
 
     /**
      * @brief Closest point p of x on the shape, and dp/dx (row-major 3 x 3).
@@ -61,11 +64,12 @@ struct Shape {
 };
 
 /**
- * @brief The shape of a [[mesh.curved]] entry (where: its place in the input):
- *        the surface of its region (type and the region's keys), the boundary
- *        of an area or volume, or in 2D the curve of a circle or ellipse.
+ * @brief The shape of a [[mesh.curved]] entry (where: its place in the input;
+ *        names: the input's [regions], or null): its region (type and the
+ *        region's keys), a surface (2D: a curve) that bounds a region of
+ *        primitives, booleans or implicit functions.
  */
-Shape shape_of(const Input & entry, const std::string & where);
+Shape shape_of(const Input & entry, const std::string & where, const Input * names = nullptr);
 
 /**
  * @brief A curved boundary face of the whole mesh: its corners (global node

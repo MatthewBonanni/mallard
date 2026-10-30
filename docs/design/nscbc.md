@@ -346,6 +346,8 @@ variables, and the matching term to each species partial density
 
 - `strength` (1/s) is an expression in `x`, `y`, `z`, zero outside the
   layer. A ramp such as `A ((x - x0)/d)^2` keeps its own reflections small.
+  With `region`, the strength is that expression times the cell's volume
+  fraction of the region, whose smooth `edge` gives the ramp.
 - The reference state is `u`, `p`, `T` (plus `X` or `Y`), each a number or
   an expression.
 - Strength and reference are evaluated once at cell centroids.
