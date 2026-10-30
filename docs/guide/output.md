@@ -133,7 +133,7 @@ Each record has a `type`:
 
 | `type` | When | Fields |
 |---|---|---|
-| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below) |
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks) |
 | `progress` | Every progress row | as below |
 | `event` | A file written, or a request acted on (the rows between progress rows) | `step`, `t`, `kind` (`vtkhdf`, `surface`, `vtu`, `hdf5`, `restart`, ...; `checkpoint`, `stop`, `set` and `diverged` from [run control](running.md)), `text` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |
@@ -155,6 +155,7 @@ Progress records:
 | `monitors` | The progress row's diagnostics: `min_rho`, `min_p`, `max_mach`; TENO: `troubled_cells` (fraction); mixtures: `min_T`, `max_T`, `max_sum_Y_error`; chemistry: `reacting_cells` (fraction), `max_chemistry_cost` |
 | `integrals` | The latest `[integrals]` (`step`, `t` and the columns of `integrals.csv`) |
 | `forces_<zone>` | The latest `[[forces]]` of each zone (`step`, `t` and the columns of its file) |
+| `health` | The [run health](#run-health) at this row (`[output] health`) |
 
 Numbers are in SI units (seconds, bytes) and read back exactly; unknown
 values are `null`. Within a `version`, records only gain fields; renaming,
@@ -175,8 +176,9 @@ the run log's `start` record.
 |---|---|
 | `schema`, `version` | `"mallard-provenance"`, 1 |
 | `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
+| `dependencies` | Versions of `compiler`, `kokkos`, `mpi` (the library's own string and the standard), `hdf5`, `cgns`, `zlib`, `nccl`, `gpu_runtime` and `gpu_driver` (CUDA or HIP); `null` for those not built in |
 | `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
-| `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory` |
+| `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run log's `placement`) |
 | `input` | `file`, `sha256` of its bytes, and its `text` |
 | `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
 | `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, resolved `value` and `from_preset` (`false` where the input overrides it) |
@@ -191,6 +193,86 @@ json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
 ```
 
 or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
+
+## Run health
+
+At every progress row Mallard also checks that the run is healthy, and
+writes what it finds into the progress record's `health` (and a short
+**Health** section at the end of the human log). Everything is computed at
+progress rows only, from the state of that step. Between rows the ledger
+adds a reduction over the boundary faces (and one over the cells where
+there are volume sources) per stage, chemistry two reductions of the
+element totals per call and a sub-step count per integrated cell; none of
+these waits for the device. `[output] health = false` turns
+it all off.
+
+| Field | Contents |
+|---|---|
+| `margins` | The smallest `rho`, `p`, `T` and, for mixtures, mass fraction (`Y_<species>`) over the domain: `value`, cell centroid `x` and `step` |
+| `margins_run` | The smallest of each at any progress row so far |
+| `activity` | Fractions of cells, over the domain (`all`) and the least and most active rank (`rank_min`, `rank_max`): `troubled_cells` (TENO's troubled-cell indicator), `limited_cells` (MUSCL cells whose limiter is below one in some variable), `upwind_fraction` (the hybrid flux's mean upwind fraction) |
+| `chemistry` | Since the previous row: `substeps` and `rejected_substeps` of the Rosenbrock integration, `failures`, `reacting_cells` (fraction of the last call), `wall` (seconds of the slowest rank) and `imbalance` (the slowest rank's chemistry time over the ranks' mean) |
+| `timing` | Per step since the previous row, `all` (mean), `rank_min`, `rank_max` over ranks: `output_sync` (the run's own output time) and `output_async` (time of the background writers). The step's own wall time and throughput are the row's `wall_per_step` and `cells_per_second` |
+| `repairs`, `repairs_run` | Each [numerical repair](#numerical-repairs), since the previous row and since the start: `activations`, `cells` (distinct owned cells) and `change`, the integrated change of each quantity it changes |
+| `balance`, `balance_run` | The [conservation ledger](#conservation-ledger), since the previous row and since the first row |
+| `element_drift` | Mixtures with chemistry: the largest change of a rank's element mass over one chemistry call, beyond the recorded repairs, relative to the rank's mass (round-off) |
+
+A breakdown of the step by phase is a profiling question, not a health check:
+timing phases needs a fence after each one, which a CUDA-graph step does not
+have; use a profiler (Nsight Systems, Kokkos Tools) for it.
+
+Mallard warns once per kind when the density or pressure falls below
+10<sup>-3</sup> of its domain mean, when a mass fraction is below
+-10<sup>-6</sup>, and when a checked balance has an unexplained relative
+change above 10<sup>5</sup> machine epsilons.
+
+### Conservation ledger
+
+The ledger is an independent account of the domain totals of mass,
+momentum, total energy and, for mixtures, each element's mass. It does not
+read the solver's face fluxes or residual: at each progress row it
+integrates the totals from the conservative variables, and compares their
+change with
+
+- `boundary`: the transfers through the boundary faces, which it evaluates
+  itself at every stage from the faces' states (the interior reconstruction
+  and the boundary condition's exterior state), normals and areas, with the
+  convective and viscous point fluxes of the scheme (wall models included),
+- `sources`: gravity, `[source]` fields, the mass flow forcing and the
+  sponges, re-evaluated from each stage's state,
+- `repairs`: the recorded changes of the [numerical repairs](#numerical-repairs),
+
+each stage weighted by the time integrator's weights b<sub>i</sub> and
+committed with its time step once the step is accepted. The fields of each
+quantity are `total`, `change`, `boundary`, `sources`, `repairs`,
+`residual` (the change none of these explain), `relative` (residual over
+the larger of the totals and their absolute integral; for momentum,
+sum |&rho;u| + (2 &rho; &rho;E)<sup>1/2</sup>), `checked` and, where the
+ledger cannot close a quantity, a `note` saying why. A conservative setup
+closes at round-off, in a periodic box as with inflow, outflow and walls;
+a missing factor or a wrong sign in the update shows as a residual many
+orders larger.
+
+Not closed (`checked = false`): boundary transfers of gas mixtures (their
+mass and element balances close where the boundaries are walls, symmetry
+planes or periodic), the energy with double flux (not conservative) or
+radiation, the radial momentum of axisymmetric runs, element masses with
+sponges, and every quantity with `coupling = "simpler"`.
+
+### Numerical repairs
+
+Every place that changes the state outside the discretized equations is
+audited:
+
+| Site | What it does | Recorded change |
+|---|---|---|
+| `composition_clip` | Chemistry: negative mass fractions are clipped to zero and the composition renormalized, before and after a cell's integration (the energy stays exact) | `species_<name>` and `element_<symbol>` masses |
+| `energy_reset` | Double flux: after each step, &rho;E is reset to the true equation of state at the pressure of the frozen one | `energy` |
+
+The temperature inversion (Newton from the cell's previous temperature,
+safeguarded by bisection within the thermodynamic fits' range) never
+changes the state, and a failed chemistry integration ends the run with an
+error, so neither is a repair.
 
 ## Units
 
