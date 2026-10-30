@@ -18,43 +18,142 @@
 #include <mutex>
 #include <sstream>
 
-// toml11 4.4's skip_array_like (error recovery in a malformed array) with one fix: a nested
-// array that stops at a `=` rewinds to the start of that line, which can be the nested array's
-// own `[` (as in `s=["",["",""[\n[=`), and the loop then skipped that array forever. A nested
-// array that made no progress now ends the skip. Drop this once toml11 has the fix.
+// toml11 4.4's skip_comment_block, with the advance its loop over the comment's characters lacks
+// (it never ended on a comment in a malformed array or inline table).
 template <>
-void toml::detail::skip_array_like<InputConfig>(location & loc, const context<InputConfig> & ctx) {
-    const auto & spec = ctx.toml_spec();
-    loc.advance();
+void toml::detail::skip_comment_block<InputConfig>(location & loc, const context<InputConfig> & ctx) {
     while (!loc.eof()) {
-        if (loc.current() == '\"' || loc.current() == '\'') {
+        skip_whitespace(loc, ctx);
+        if (loc.current() == '#') {
+            while (!loc.eof() && loc.current() != '\n') loc.advance();
+            if (!loc.eof()) loc.advance();
+        } else if (!syntax::newline(ctx.toml_spec()).scan(loc).is_ok()) {
+            return;
+        }
+    }
+}
+
+namespace {
+
+constexpr int max_nesting = 64;
+thread_local int nesting = 0;
+thread_local size_t outermost_value = 0;  // where the value of the key = value pair being parsed starts
+
+/** @brief "key" of the line "key = [[..." of this position. */
+std::string key_before(const toml::detail::location & loc, size_t position) {
+    const auto & text = *loc.source();
+    size_t begin = position;
+    while (begin > 0 && text[begin - 1] != '\n') begin--;
+    const std::string line(text.begin() + static_cast<std::ptrdiff_t>(begin),
+                           text.begin() + static_cast<std::ptrdiff_t>(position));
+    const size_t eq = line.find('=');
+    const size_t first = line.find_first_not_of(" \t");
+    if (eq == std::string::npos || first >= eq) return "";
+    return line.substr(first, line.find_last_not_of(" \t", eq - 1) - first + 1);
+}
+
+[[noreturn]] void too_deep(const std::string & key, size_t line) {
+    Diagnostic d;
+    d.key = key;
+    d.line = line;
+    d.message = "tables, arrays and inline tables are nested more than " + std::to_string(max_nesting) + " deep";
+    d.fix = "Close each [ with ] and each { with }; a deeper value needs a flatter layout";
+    d.docs = "docs/guide/input_files.md#anatomy-of-an-input";
+    throw InputError(d);
+}
+
+/**
+ * @brief toml11 4.4's skip_array_like and skip_inline_table_like (error recovery in a malformed
+ *        array or inline table), iterative: each level of the stack is one of their recursive calls.
+ *        A `=` ends the whole skip at the start of its line (toml11 ends only the innermost level,
+ *        and an enclosing level that rescans that line can re-enter the same `[` or `{` without end),
+ *        but not before the skip's own start: parse_array, which detects a skip that made no
+ *        progress, would otherwise parse the same elements again without end.
+ */
+void skip_nested(toml::detail::location & loc, const toml::detail::context<InputConfig> & ctx) {
+    using namespace toml::detail;
+    const auto & spec = ctx.toml_spec();
+    const size_t start = loc.get_location();
+    std::vector<bool> arrays{loc.current() == '['};  // the levels, innermost last: array or inline table
+    loc.advance();
+    while (!arrays.empty() && !loc.eof()) {
+        const auto c = loc.current();
+        const bool array = arrays.back();
+        if (c == '\"' || c == '\'') {
             skip_string_like(loc, ctx);
-        } else if (loc.current() == '#') {
+        } else if (c == '#') {
             skip_comment_block(loc, ctx);
-        } else if (loc.current() == '{') {
-            skip_inline_table_like(loc, ctx);
-        } else if (loc.current() == '[') {
+            if (!array && !spec.v1_1_0_allow_newlines_in_inline_tables) arrays.pop_back();
+        } else if (c == '{') {
+            arrays.push_back(false);
+            loc.advance();
+        } else if (c == '[') {
             const auto checkpoint = loc;
             if (syntax::std_table(spec).scan(loc).is_ok() || syntax::array_table(spec).scan(loc).is_ok()) {
                 loc = checkpoint;
-                break;
+                return;
             }
-            skip_array_like(loc, ctx);
-            if (loc.get_location() <= checkpoint.get_location()) break;
-        } else if (loc.current() == '=') {
-            while (loc.get_location() != 0) {
+            arrays.push_back(true);
+            loc.advance();
+        } else if (array && c == '=') {
+            while (loc.get_location() > start) {
                 loc.retrace();
                 if (loc.current() == '\n') {
                     loc.advance();
                     break;
                 }
             }
-            break;
-        } else if (loc.current() == ']') {
-            break;
+            return;
+        } else if (array ? c == ']' : c == '}' || (c == '\n' && !spec.v1_1_0_allow_newlines_in_inline_tables)) {
+            arrays.pop_back();
         } else {
             loc.advance();
         }
+    }
+}
+
+} // namespace
+
+template <>
+void toml::detail::skip_array_like<InputConfig>(location & loc, const context<InputConfig> & ctx) {
+    skip_nested(loc, ctx);
+}
+
+template <>
+void toml::detail::skip_inline_table_like<InputConfig>(location & loc, const context<InputConfig> & ctx) {
+    skip_nested(loc, ctx);
+}
+
+// toml11 4.4's parse_value, which parse_array and parse_inline_table call for each element: their
+// recursion has no depth limit, so deep nesting overflowed the stack. Here it ends at max_nesting
+// (check_nesting bounds the tables of dotted keys and [headers], which do not recurse here).
+template <>
+toml::result<toml::basic_value<InputConfig>, toml::error_info>
+toml::detail::parse_value<InputConfig>(location & loc, context<InputConfig> & ctx) {
+    struct Level {
+        Level() { nesting++; }
+        ~Level() { nesting--; }
+    } level;
+    if (nesting == 1) outermost_value = loc.get_location();
+    if (nesting > max_nesting) too_deep(key_before(loc, outermost_value), loc.line_number());
+    const auto type = guess_value_type(loc, ctx);
+    if (type.is_err()) return err(type.unwrap_err());
+    switch (type.unwrap()) {
+    case value_t::boolean: return parse_boolean(loc, ctx);
+    case value_t::integer: return parse_integer(loc, ctx);
+    case value_t::floating: return parse_floating(loc, ctx);
+    case value_t::string: return parse_string(loc, ctx);
+    case value_t::offset_datetime: return parse_offset_datetime(loc, ctx);
+    case value_t::local_datetime: return parse_local_datetime(loc, ctx);
+    case value_t::local_date: return parse_local_date(loc, ctx);
+    case value_t::local_time: return parse_local_time(loc, ctx);
+    case value_t::array: return parse_array(loc, ctx);
+    case value_t::table: return parse_inline_table(loc, ctx);
+    case value_t::empty:
+        if (ctx.toml_spec().ext_null_value) return parse_null(loc, ctx);
+        [[fallthrough]];
+    default:
+        return err(make_error_info("toml::parse_value: unknown value appeared", source_location(region(loc)), "here"));
     }
 }
 
@@ -278,6 +377,31 @@ namespace {
                             "docs/guide/input_files.md#anatomy-of-an-input.");
 }
 
+/** @brief Rejects values deeper than max_nesting (the root table is depth 0), before anything recurses. */
+void check_nesting(const Input & root) {
+    struct Node {
+        const Input * value;
+        int depth;
+        std::string path;
+    };
+    std::vector<Node> stack{{&root, 0, ""}};
+    while (!stack.empty()) {
+        const Node node = std::move(stack.back());
+        stack.pop_back();
+        if (node.depth > max_nesting) too_deep(without_indices(node.path), line_of(*node.value));
+        if (node.value->is_table()) {
+            for (const auto & [key, value] : node.value->as_table().entries()) {
+                stack.push_back({&value, node.depth + 1, join(node.path, key)});
+            }
+        } else if (node.value->is_array()) {
+            const auto & array = node.value->as_array();
+            for (size_t i = 0; i < array.size(); i++) {
+                stack.push_back({&array[i], node.depth + 1, node.path + "[" + std::to_string(i) + "]"});
+            }
+        }
+    }
+}
+
 } // namespace
 
 Input parse_input(const std::string & filename) {
@@ -288,6 +412,7 @@ Input parse_input(const std::string & filename) {
     } catch (const toml::syntax_error & e) {
         syntax_error(e);
     }
+    check_nesting(input);
     forget_lookups(input);
     return input;
 }
@@ -300,6 +425,7 @@ Input parse_input_string(const std::string & text, const std::string & name) {
     } catch (const toml::syntax_error & e) {
         syntax_error(e);
     }
+    check_nesting(input);
     forget_lookups(input);
     return input;
 }

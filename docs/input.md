@@ -75,7 +75,7 @@ Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an 
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
-| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, boundary expressions of `t`, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
+| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, `dirichlet` states of `t`, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
 
@@ -495,18 +495,18 @@ the zone's faces whose centers satisfy the expression.
 |---|---|---|
 | `extrapolation` | Transmissive: the exterior state is the solution translated from inside the domain | |
 | `symmetry` | Slip wall / symmetry plane | |
-| `wall_adiabatic` | Wall (no-slip for `navier_stokes`, slip for `euler`) with zero heat flux | `u` (wall velocity, optional) |
-| `wall_isothermal` | Wall at temperature `T` | `T`, `u` (optional) |
-| `wall_heat_flux` | Wall with heat flux `q` into the fluid | `q`, `u` (optional) |
-| `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (and `X` or `Y` for mixtures: numbers, or expressions in `x`, `y`, `z` evaluated at each face center for a composition that varies along the boundary, with an optional `balance` species as in `[initialize]`) |
+| `wall_adiabatic` | Wall (no-slip for `navier_stokes`, slip for `euler`) with zero heat flux | `u` (wall velocity, optional; numbers or expressions of `x`, `y`, `z`, `t`) |
+| `wall_isothermal` | Wall at temperature `T` | `T`, `u` (optional, as `wall_adiabatic`) |
+| `wall_heat_flux` | Wall with heat flux `q` into the fluid | `q`, `u` (optional, as `wall_adiabatic`) |
+| `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (numbers, or expressions of `x`, `y`, `z`, `t`; below) and `X` or `Y` for mixtures (numbers or expressions likewise, with an optional `balance` species as in `[initialize]`) |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
-| `stagnation_inlet` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [the guide](guide/boundary_conditions.md#stagnation-inlet) and [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `upt`) |
-| `mass_flow_inlet` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density. See [the guide](guide/boundary_conditions.md#mass-flow-inlet) | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)], a number or an expression of `x`, `y`, `z`) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]) with an optional `profile` (expression of `x`, `y`, `z`, default uniform) shaping it along the inlet; `direction` (default the inward normal of each face); `X` or `Y` for mixtures (as `upt`) |
+| `stagnation_inlet` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [the guide](guide/boundary_conditions.md#stagnation-inlet) and [docs/design/inlets.md](design/inlets.md) | `p0`, `T0` (numbers or expressions of `x`, `y`, `z`, `t`), `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `upt`) |
+| `mass_flow_inlet` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density. See [the guide](guide/boundary_conditions.md#mass-flow-inlet) | `T` (a number or an expression of `x`, `y`, `z`, `t`); `mass_flux` (`rho u` into the domain [kg/(m^2 s)], a number or an expression of `x`, `y`, `z`, `t`) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]) with an optional `profile` (expression of `x`, `y`, `z`, default uniform) shaping it along the inlet; `direction` (default the inward normal of each face); `X` or `Y` for mixtures (as `upt`) |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
 | `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
 | `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
 | `nscbc_outlet` | Partially non-reflecting characteristic outlet (Poinsot & Lele): outgoing waves leave, and each face's incoming acoustic wave relaxes its pressure toward `p` at the rate `K = sigma c (1 - M^2) / L`. Waves of frequency `omega` reflect by `1 / sqrt(1 + (2 omega / K)^2)` | `p`, `L` (a length of the domain), `sigma` (default 0.25; 0 is perfectly non-reflecting but lets the mean pressure drift, large values approach `p_out`), `beta` (the weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number, as Lodato et al.; 1 is Poinsot & Lele's original condition, 0 drops them. Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable) |
-| `nscbc_inlet` | Partially non-reflecting characteristic inlet: the incoming acoustic wave relaxes the normal velocity toward `u` as `nscbc_outlet` relaxes the pressure; temperature and tangential velocity are imposed, or relaxed with `sigma_T`, `sigma_t`; the composition is imposed. Supersonic inflow imposes `u`, `p`, `T` | `u` (numbers, or expressions in `x`, `y`, `z` evaluated at face centers), `p` (reference pressure, for supersonic inflow), `T`, `L`, `sigma` (default 0.25), `sigma_T`, `sigma_t` (optional), `beta` (default 0 with turbulence, whose own incoming wave carries the transverse terms), `X` or `Y` for mixtures (numbers or expressions, as `upt`), and an optional `[boundaries.turbulence]` table (below) |
+| `nscbc_inlet` | Partially non-reflecting characteristic inlet: the incoming acoustic wave relaxes the normal velocity toward `u` as `nscbc_outlet` relaxes the pressure; temperature and tangential velocity are imposed, or relaxed with `sigma_T`, `sigma_t`; the composition is imposed. Supersonic inflow imposes `u`, `p`, `T` | `u` (numbers, or expressions of `x`, `y`, `z`, `t`; with turbulence, of `x`, `y`, `z` only), `p` (reference pressure, for supersonic inflow), `T` (`p` and `T` numbers or expressions of `x`, `y`, `z`, `t`), `L`, `sigma` (default 0.25), `sigma_T`, `sigma_t` (optional), `beta` (default 0 with turbulence, whose own incoming wave carries the transverse terms), `X` or `Y` for mixtures (numbers or expressions, as `upt`), and an optional `[boundaries.turbulence]` table (below) |
 
 Characteristic conditions change only the exterior state of the convective
 flux; viscous terms treat them like `extrapolation` (image faces, or zero
@@ -516,6 +516,21 @@ normal velocity between steps, and restart files carry them, so a restarted
 run reproduces an uninterrupted one bitwise, also on a different number of
 ranks (restart files older than version 4 start them afresh from the
 solution). Guide: [characteristic boundaries](guide/boundary_conditions.md#characteristic-boundaries).
+
+The numbers of `upt`, `nscbc_inlet`, `stagnation_inlet`, `mass_flow_inlet`
+and the wall velocity marked above may be expressions of `x`, `y`, `z` and
+`t`. They are evaluated at each face center, so each face gets a condition of
+its own, and those of `t` at every Runge-Kutta stage time, as `dirichlet`'s:
+pulsed or acoustically forced inlets converge at the time integrator's order
+(`nscbc_inlet` at first order, since its boundary point advances once per step).
+Inputs that do not depend on `t` are evaluated once and cost nothing per
+stage; those that do are evaluated on the device at the stage time, inside the
+step's CUDA graph. A number of `t` that leaves its range (`p`, `T`, `p0`, `T0`
+not positive, `mass_flux` negative) stops the run at the next progress check
+with the face, time and value. A string
+with a unit (`"300 K"`) is a quantity, not an expression; expressions are in SI
+units. Guide:
+[time-dependent conditions](guide/boundary_conditions.md#time-dependent-conditions).
 
 ### Wall models (`wall_model`)
 
@@ -1188,6 +1203,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 |---|---|
 | `check_interval` | Print a progress row every this many steps (default 1) |
 | `run_log` | Machine-readable run log, one JSON record per line: a start record with the provenance, a progress record per progress row, file writes, warnings and errors, and an end record ([format](guide/output.md#the-run-log)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
+| `health` | Run health diagnostics at each progress row: admissibility margins, numerics and chemistry activity, output timings, the audit of numerical repairs and the conservation ledger, in the run log's progress records and a summary at the end of the human log ([details](guide/output.md#run-health)). Default `true` |
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the provenance; `false` skips reading it again for very large meshes. Default `true` |
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
