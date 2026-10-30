@@ -70,6 +70,5 @@ check_interval = 500
 
 [[write_data]]
 prefix = "./solut/sedov"
-format = "vtu"
 time_interval = 0.1
 variables = ["RHO", "P"]

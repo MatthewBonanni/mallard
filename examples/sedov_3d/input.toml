@@ -96,28 +96,24 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/sedov"
-format = "vtu"
 time_interval = 0.1
 variables = ["RHO", "P"]
 
 # Density on the three symmetry planes, for the animation
 [[write_data]]
 prefix = "./planes/x0"
-format = "vtu"
 geometry = "left"
 time_interval = 0.005
 variables = ["RHO"]
 
 [[write_data]]
 prefix = "./planes/y0"
-format = "vtu"
 geometry = "bottom"
 time_interval = 0.005
 variables = ["RHO"]
 
 [[write_data]]
 prefix = "./planes/z0"
-format = "vtu"
 geometry = "back"
 time_interval = 0.005
 variables = ["RHO"]

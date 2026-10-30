@@ -10,7 +10,7 @@ eta = r / R(t), mass, momentum and entropy conservation reduce to three ODEs,
 integrated from the Rankine-Hugoniot state at eta = 1 to the center. Energy
 conservation fixes xi0 (1.0328 for gamma = 1.4, 1.1517 for 5/3).
 
-With a series of VTU (or PVTU) snapshots of an octant run of
+With a series of snapshots (VTKHDF, VTU or PVTU) of an octant run of
 examples/sedov_3d (total blast energy E in the full sphere), prints the
 shock radius against R(t) for every snapshot and plots radial density
 scatter against the exact profile at the last one.
@@ -57,6 +57,11 @@ def exact_density(r, t, energy, rho0, gamma):
 
 
 def snapshots(solut):
+    index = glob.glob(os.path.join(solut, "*.vtkhdf.series"))
+    if index:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        from mallard.vtkhdf import read_series
+        return read_series(index[0])
     pvd = glob.glob(os.path.join(solut, "*.pvd"))[0]
     entries = re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', open(pvd).read())
     return [(float(t), os.path.join(solut, f)) for t, f in entries]

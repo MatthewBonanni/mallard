@@ -38,21 +38,6 @@
 
 namespace {
 
-/**
- * @brief VTK cell type of a cell or boundary face, by dimension and node count.
- */
-uint8_t vtk_type(uint32_t dim, uint32_t n_nodes) {
-    if (dim == 1 && n_nodes == 2) return 3;   // VTK_LINE
-    if (dim == 2 && n_nodes == 3) return 5;   // VTK_TRIANGLE
-    if (dim == 2 && n_nodes == 4) return 9;   // VTK_QUAD
-    if (dim == 3 && n_nodes == 4) return 10;  // VTK_TETRA
-    if (dim == 3 && n_nodes == 8) return 12;  // VTK_HEXAHEDRON
-    if (dim == 3 && n_nodes == 6) return 13;  // VTK_WEDGE
-    if (dim == 3 && n_nodes == 5) return 14;  // VTK_PYRAMID
-    throw std::runtime_error("DataWriter: no VTK cell type for a " + std::to_string(dim) + "D element with " +
-                             std::to_string(n_nodes) + " nodes.");
-}
-
 const std::unordered_map<std::string, Compression> COMPRESSION_TYPES = {
     {"none", Compression::NONE},
     {"zlib", Compression::ZLIB},
@@ -74,11 +59,7 @@ void DataWriter::init(const Input & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh_in,
                       const std::vector<std::string> & restart_variables) {
-    for (const char * key : {"prefix", "format"}) {
-        if (!input.contains(key)) {
-            throw std::runtime_error(std::string("DataWriter: ") + key + " not specified.");
-        }
-    }
+    if (!input.contains("prefix")) throw std::runtime_error("DataWriter: prefix not specified.");
     const bool has_interval = input.contains("interval");
     const bool has_time_interval = input.contains("time_interval");
     if (has_interval == has_time_interval) {
@@ -97,9 +78,23 @@ void DataWriter::init(const Input & input,
         }
     }
 
-    const std::string format_str = find_value<std::string>(input, "format");
-    auto it = find_option(FORMAT_TYPES, "write_data.format", format_str);
-    format = it->second;
+    this->mesh = mesh_in;
+    const bool many_writers = mesh->n_global_cells > 0 && comm::size() > 1;
+    if (input.contains("format")) {
+        format = find_option(FORMAT_TYPES, "write_data.format", find_value<std::string>(input, "format"))->second;
+    } else if (!have_hdf5() || (many_writers && !have_parallel_hdf5())) {
+        format = DataFormat::VTU;
+        static bool told = false;
+        if (!told && comm::is_root()) {
+            logging::warning(std::string("[[write_data]] writes VTU files: the default format, \"vtkhdf\", needs a build "
+                                         "with ") +
+                             (have_hdf5() ? "parallel HDF5 on several ranks" : "HDF5 (Mallard_ENABLE_HDF5=ON)") +
+                             "; set format = \"vtu\" to silence this.");
+        }
+        told = true;
+    } else {
+        format = DataFormat::VTKHDF;
+    }
 
     std::vector<std::string> variables;
     if (format == DataFormat::RESTART) {
@@ -158,22 +153,26 @@ void DataWriter::init(const Input & input,
         if (format != DataFormat::RESTART) field.description = field_units::describe(var);
         fields.push_back(field);
     }
-    this->mesh = mesh_in;
 
-    if (format == DataFormat::HDF5) {
+    if (format == DataFormat::HDF5 || format == DataFormat::VTKHDF) {
+        const std::string name = FORMAT_NAMES.at(format);
         if (!have_hdf5()) {
-            throw std::runtime_error(
-                "DataWriter: format = \"hdf5\" needs a build with HDF5 (configure with Mallard_ENABLE_HDF5=ON).");
+            throw std::runtime_error("DataWriter: format = \"" + name +
+                                     "\" needs a build with HDF5 (configure with Mallard_ENABLE_HDF5=ON).");
         }
-        if (mesh->n_global_cells > 0 && comm::size() > 1 && !have_parallel_hdf5()) {
-            throw std::runtime_error("DataWriter: format = \"hdf5\" on several ranks needs parallel HDF5.");
+        if (many_writers && !have_parallel_hdf5()) {
+            throw std::runtime_error("DataWriter: format = \"" + name + "\" on several ranks needs parallel HDF5.");
         }
+    }
+    if (input.contains("series")) {
+        if (format != DataFormat::VTKHDF) throw InputError("write_data.series is for format = \"vtkhdf\".");
+        one_file = find_value<bool>(input, "series");
     }
 
     geometry = find_value_or<std::string>(input, "geometry", "all");
     if (geometry != "all") {
-        if (format != DataFormat::VTU) {
-            throw std::runtime_error("DataWriter: geometry can only be set for vtu output.");
+        if (format != DataFormat::VTU && format != DataFormat::VTKHDF) {
+            throw std::runtime_error("DataWriter: geometry can only be set for vtkhdf and vtu output.");
         }
         FaceZone * zone = mesh->get_face_zone(geometry);
         if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
@@ -191,9 +190,12 @@ void DataWriter::init(const Input & input,
     const auto compression_it = find_option(COMPRESSION_TYPES, "write_data.compression", compression_str);
     compression = compression_it->second;
     if (compression != Compression::NONE) {
-        if (surface) throw InputError("write_data.compression: boundary-zone output is ASCII, which is not compressed.");
-        if (format == DataFormat::HDF5 ? !have_hdf5_deflate() : !compression::have_zlib()) {
-            throw std::runtime_error(format == DataFormat::HDF5
+        if (surface && format == DataFormat::VTU) {
+            throw InputError("write_data.compression: boundary-zone VTU output is ASCII, which is not compressed.");
+        }
+        const bool hdf5 = format == DataFormat::HDF5 || format == DataFormat::VTKHDF;
+        if (hdf5 ? !have_hdf5_deflate() : !compression::have_zlib()) {
+            throw std::runtime_error(hdf5
                                          ? "DataWriter: compression = \"zlib\" needs an HDF5 library with the deflate filter."
                                          : "DataWriter: compression = \"zlib\" needs a build with zlib (configure with "
                                            "Mallard_ENABLE_ZLIB=ON).");
@@ -226,9 +228,10 @@ void DataWriter::init(const Input & input,
 }
 
 std::pair<std::string, std::string> DataWriter::summary() const {
-    std::string text = prefix + (format == DataFormat::RESTART ? "_*.restart"
-                                 : format == DataFormat::HDF5  ? "_*.h5"
-                                                               : "_*.vtu");
+    std::string text = prefix + (format == DataFormat::RESTART  ? "_*.restart"
+                                 : format == DataFormat::HDF5   ? "_*.h5"
+                                 : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
+                                                                : "_*.vtu");
     if (geometry != "all") text += " (" + geometry + ")";
     if (compression == Compression::ZLIB) {
         text += relative_error > 0.0 ? ", zlib to relative error " + logging::real(relative_error) : ", zlib";
@@ -240,6 +243,15 @@ std::pair<std::string, std::string> DataWriter::summary() const {
         text += ": " + names;
     }
     return {FORMAT_NAMES.at(format), text};
+}
+
+std::string DataWriter::index_file() const {
+    switch (format) {
+        case DataFormat::VTKHDF: return prefix + (one_file ? ".vtkhdf" : ".vtkhdf.series");
+        case DataFormat::HDF5: return prefix + ".xmf";
+        case DataFormat::VTU: return prefix + ".pvd";
+        default: return last_file;
+    }
 }
 
 bool DataWriter::due(uint64_t step, rtype t) const {
@@ -360,6 +372,24 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             run(std::move(job), !collective);
         }
         logging::event(step, double(t), "hdf5", stem + ".h5");
+    } else if (format == DataFormat::VTKHDF) {
+        const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
+        last_file = filename;
+        history.emplace_back(t, filename);
+        const bool collective = distributed && comm::size() > 1;
+        if (distributed || root) {
+            auto job = [this, filename, t, root,
+                        values = surface ? capture_faces() : capture(mesh->n_owned()), list = history]() {
+                const uint64_t before = one_file ? file_bytes(filename) : 0;
+                write_vtkhdf(filename, t, values);
+                if (root) {
+                    n_bytes += file_bytes(filename) - std::min(before, file_bytes(filename));
+                    if (!one_file) write_vtkhdf_series(list);
+                }
+            };
+            run(std::move(job), !collective);
+        }
+        logging::event(step, double(t), surface ? "surface" : "vtkhdf", filename);
     } else {
         // Distributed runs: one piece per rank and a .pvtu index
         std::ostringstream piece;
@@ -427,6 +457,10 @@ void DataWriter::resume(uint64_t step, rtype t) {
     history.clear();
     if (format == DataFormat::HDF5) {
         resume_xdmf(t);
+        return;
+    }
+    if (format == DataFormat::VTKHDF) {
+        resume_vtkhdf(t);
         return;
     }
     // Keep the entries of the previous run's .pvd up to the restart time
@@ -1197,7 +1231,7 @@ void DataWriter::write_vtu_faces(const std::string & filename, rtype t, const Va
     }
     out << "\n        </DataArray>\n";
     out << "        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">\n";
-    for (uint32_t f : geometry_faces) out << static_cast<int>(vtk_type(N_DIM - 1, mesh->h_n_nodes_of_face(f))) << " ";
+    for (uint32_t f : geometry_faces) out << static_cast<int>(vtk_cell_type(N_DIM - 1, mesh->h_n_nodes_of_face(f))) << " ";
     out << "\n        </DataArray>\n";
     out << "      </Cells>\n";
     out << "    </Piece>\n";
@@ -1268,7 +1302,7 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
             }
             cell_offset += n_nodes;
             offsets.push_back(cell_offset);
-            types.push_back(vtk_type(N_DIM, n_nodes));
+            types.push_back(vtk_cell_type(N_DIM, n_nodes));
         }
         arrays = {as_bytes(points), as_bytes(connectivity), as_bytes(offsets), as_bytes(types)};
         if (zlib) {

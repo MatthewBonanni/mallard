@@ -6,7 +6,7 @@
         [--orbit 150] [--gif-width 720] [--compare CSV LABEL ...] [--hold 2]
         [--enstrophy]
 
-SOLUT_DIR holds the VTU (or PVTU) series of a run of
+SOLUT_DIR holds the snapshot series (VTKHDF, or VTU) of a run of
 examples/taylor_green_3d, with U on the periodic box [0, 2 pi]^3 of
 hexahedra; isosurfaces of Q = (|Omega|^2 - |S|^2) / 2 are
 colored by vorticity magnitude while the camera orbits the box, next to the
@@ -32,7 +32,7 @@ import pyvista as pv
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/post"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
 from animate import write_gif, write_mp4  # noqa: E402
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_vtu_cells, series  # noqa: E402
 from plot_taylor_green import load, load_reference  # noqa: E402
 
 BG = "#0d1117"
@@ -40,13 +40,16 @@ FG = "#e6edf3"
 
 
 def snapshot_files(solut):
+    index = glob.glob(os.path.join(solut, "*.vtkhdf.series"))
+    if index:
+        from mallard.vtkhdf import read_series
+        return read_series(index[0])
     pvd = glob.glob(os.path.join(solut, "*.pvd"))
     if pvd:
         text = open(pvd[0]).read()
         entries = re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)
         return [(float(t), os.path.join(os.path.dirname(pvd[0]), f)) for t, f in entries]
-    files = sorted(glob.glob(os.path.join(solut, "*.vtu")))
-    return [(None, f) for f in files]
+    return [(None, f) for f in series(solut)]
 
 
 def read_box(path, length=2 * np.pi):

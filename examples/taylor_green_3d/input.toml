@@ -83,6 +83,5 @@ interval = 2000
 
 [[write_data]]
 prefix = "./solut/tgv"
-format = "vtu"
 time_interval = 0.2
 variables = ["U"]

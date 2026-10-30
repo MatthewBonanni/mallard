@@ -179,7 +179,23 @@ std::string channel(const std::string & dir) {
           << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\"]\n"
           << "[[probes]]\nname = \"cut_h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/cut_probe.h5\"\n"
           << "shape = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
-          << "\nvariables = [\"MASS_FLUX\"]\n";
+          << "\nvariables = [\"MASS_FLUX\"]\n"
+          << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\ninterval = 2\n" << variables
+          << "[[write_data]]\nprefix = \"" << dir << "/ks\"\nformat = \"vtkhdf\"\nseries = true\ninterval = 2\n"
+          << variables << "[[write_data]]\nprefix = \"" << dir << "/kwall\"\nformat = \"vtkhdf\"\n"
+          << "geometry = \"bottom\"\ninterval = 2\nvariables = [\"P\", \"U\"]\n"
+          << "[[probes]]\nname = \"vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/probe.vtkhdf\"\nstart = "
+          << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
+          << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nvariables = [\"RHO\", \"U\"]\n"
+          << "[[probes]]\nname = \"wall_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/wall_probe.vtkhdf\"\n"
+          << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\"]\n"
+          << "[[probes]]\nname = \"cut_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/cut_probe.vtkhdf\"\n"
+          << "shape = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
+          << "\nvariables = [\"MASS_FLUX\"]\n"
+          << "[[probes]]\nname = \"surface_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/surface_probe.vtkhdf\"\n"
+          << (N_DIM == 3 ? "shape = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [8, 16]\n"
+                         : "shape = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n")
+          << "variables = [\"MASS_FLUX\"]\n";
     }
 #endif
     return s.str();
@@ -364,6 +380,59 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
         h5::Handle mesh(H5Fopen((dir + "/h_mesh.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "mesh");
         h5::Handle coordinates(H5Dopen2(mesh, "nodes/coordinates", H5P_DEFAULT), H5Dclose, "coordinates");
         EXPECT_EQ(h5::read_string_attribute(coordinates, "units"), "m");
+
+        // VTKHDF: the same CF attributes on the cell arrays, points and times
+        for (const char * k : {"/k_000002.vtkhdf", "/ks.vtkhdf"}) {
+            h5::Handle vtkhdf(H5Fopen((dir + k).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, k);
+            for (const auto & name : names) {
+                h5::Handle dset(H5Dopen2(vtkhdf, ("VTKHDF/CellData/" + name).c_str(), H5P_DEFAULT), H5Dclose, name);
+                EXPECT_EQ(h5::read_string_attribute(dset, "units"), units_of(name)) << k << " " << name;
+                EXPECT_EQ(h5::read_string_attribute(dset, "long_name"), field_units::describe(name).long_name)
+                    << k << " " << name;
+            }
+            h5::Handle points(H5Dopen2(vtkhdf, "VTKHDF/Points", H5P_DEFAULT), H5Dclose, "Points");
+            EXPECT_EQ(h5::read_string_attribute(points, "units"), "m") << k;
+            h5::Handle time(H5Dopen2(vtkhdf, std::string(k) == "/ks.vtkhdf" ? "VTKHDF/Steps/Values" : "VTKHDF/FieldData/TIME",
+                                     H5P_DEFAULT),
+                            H5Dclose, "time");
+            EXPECT_EQ(h5::read_string_attribute(time, "units"), "s") << k;
+        }
+        for (const auto & [path, name] : std::vector<std::pair<std::string, std::string>>{
+                 {"/kwall_000002.vtkhdf", "VTKHDF/CellData/P"}, {"/probe.vtkhdf", "VTKHDF/PointData/RHO"},
+                 {"/probe.vtkhdf", "VTKHDF/PointData/U_Y"}}) {
+            h5::Handle h5file(H5Fopen((dir + path).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, path);
+            h5::Handle dset(H5Dopen2(h5file, name.c_str(), H5P_DEFAULT), H5Dclose, name);
+            EXPECT_EQ(h5::read_string_attribute(dset, "units"), units_of(name.substr(name.rfind('/') + 1))) << path;
+        }
+
+        // A boundary probe's VTKHDF: polygons (3D) carry the samples as cell data, polylines (2D) as point data
+        {
+            h5::Handle h5file(H5Fopen((dir + "/wall_probe.vtkhdf").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "wall");
+            const std::string data = N_DIM == 3 ? "VTKHDF/CellData/" : "VTKHDF/PointData/";
+            for (const auto & [name, units] : std::map<std::string, std::string>{
+                     {"P", units_of("P")}, {"MASS_FLUX", units_of("MASS_FLUX")}, {"normal", "1"}, {"measure", area}}) {
+                h5::Handle dset(H5Dopen2(h5file, (data + name).c_str(), H5P_DEFAULT), H5Dclose, name);
+                EXPECT_EQ(h5::read_string_attribute(dset, "units"), units) << name;
+            }
+            h5::Handle cells(H5Dopen2(h5file, N_DIM == 3 ? "VTKHDF/Polygons/NumberOfCells" : "VTKHDF/Lines/NumberOfCells",
+                                      H5P_DEFAULT),
+                             H5Dclose, "NumberOfCells");
+            int64_t n_cells = 0;
+            h5::check(H5Dread(cells, H5T_NATIVE_INT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, &n_cells), "H5Dread");
+            EXPECT_EQ(n_cells, N_DIM == 3 ? 12 : 1) << "a polygon per face of the 4 x 3 bottom (3D), one polyline (2D)";
+        }
+
+        // Cut planes (cell data on their polygons or segments) and resampled surfaces (point data)
+        for (const auto & [path, data] : std::vector<std::pair<std::string, std::string>>{
+                 {"/cut_probe.vtkhdf", "VTKHDF/CellData/"}, {"/surface_probe.vtkhdf", "VTKHDF/PointData/"}}) {
+            h5::Handle h5file(H5Fopen((dir + path).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, path);
+            std::map<std::string, std::string> expected = {{"MASS_FLUX", units_of("MASS_FLUX")}, {"normal", "1"}};
+            if (path == "/cut_probe.vtkhdf") expected["measure"] = area;
+            for (const auto & [name, units] : expected) {
+                h5::Handle dset(H5Dopen2(h5file, (data + name).c_str(), H5P_DEFAULT), H5Dclose, path + " " + name);
+                EXPECT_EQ(h5::read_string_attribute(dset, "units"), units) << path << " " << name;
+            }
+        }
 
         h5::Handle probe(H5Fopen((dir + "/probe.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "probe");
         for (const auto & [name, units] : std::map<std::string, std::string>{

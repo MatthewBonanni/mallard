@@ -1,6 +1,6 @@
 """Animation of a 2D cellular detonation run (examples/detonation_2d).
 
-    python examples/detonation_2d/animate_detonation_2d.py SERIES.pvd OUT.mp4 [--window 0.16] [--fps 15]
+    python examples/detonation_2d/animate_detonation_2d.py SERIES OUT.mp4 [--window 0.16] [--fps 15]
         [--gif OUT.gif] [--png OUT.png] [--title TEXT]
 
 Each frame (1920x1080) shows, in a window that follows the front: the
@@ -25,7 +25,7 @@ import numpy as np  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import grid_fields  # noqa: E402
+from mallard.vtu import grid_fields, read_index  # noqa: E402
 from soot_foil import front_position  # noqa: E402
 
 BG = "#0d0f14"
@@ -90,7 +90,7 @@ def render(fig, t, x, y, p, foil, p0, x_front, x_lo_all, args, D):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("pvd")
+    ap.add_argument("series", help="PREFIX.vtkhdf.series, or PREFIX.pvd (VTU)")
     ap.add_argument("out")
     ap.add_argument("--window", type=float, default=0.16)
     ap.add_argument("--fps", type=float, default=15)
@@ -104,8 +104,6 @@ def main():
     ap.add_argument("--subtitle", default="Mallard: MUSCL-HLLC, finite-rate H2/O2 chemistry "
                                           "(10 species, 29 reactions), 1.6M cells")
     args = ap.parse_args()
-    base = os.path.dirname(args.pvd)
-    files = re.findall(r'file="([^"]+)"', open(args.pvd).read())
     fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
     writer = imageio.get_writer(args.out, fps=args.fps, codec="libx264", quality=None,
                                 ffmpeg_params=["-crf", "18", "-pix_fmt", "yuv420p", "-preset", "slow"],
@@ -113,8 +111,9 @@ def main():
     gif_frames = []
     p0, x_lo_all, prev = None, None, None
     frame = None
+    files = [f for _, f in read_index(args.series)]
     for k, f in enumerate(files):
-        t, x, y, fld = grid_fields(os.path.join(base, f), ["P", "P_MAX"])
+        t, x, y, fld = grid_fields(f, ["P", "P_MAX"])
         p = fld["P"]
         p0 = p.min() if p0 is None else p0
         xf = front_position(x, p, p0)

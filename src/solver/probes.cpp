@@ -203,6 +203,69 @@ std::vector<std::string> expand_variables(const std::vector<std::string> & liste
     return names;
 }
 
+/** @brief A probe's VTK PolyData: its points, cells and whether the samples are the cells. */
+struct PolyLayout {
+    std::vector<double> xyz;  // 3 per point
+    std::vector<int64_t> connectivity, offsets;  // offsets from 0
+    const char * cells;  // Verts, Lines or Polys
+    bool cell_data;
+    size_t n_points() const { return xyz.size() / 3; }
+};
+
+/**
+ * @brief Point sets as vertices, curves as polylines over the samples; polygons
+ *        (segments in 2D) over vertices each a sample (faces, cut planes), or
+ *        over the samples (resampled surfaces).
+ */
+PolyLayout poly_layout(const probe::Geometry & g) {
+    PolyLayout l;
+    const bool polygons = !g.polygon_offsets.empty();
+    l.cells = polygons ? (g.dim == 1 ? "Lines" : "Polys") : g.dim == 0 ? "Verts" : "Lines";
+    l.cell_data = polygons && !g.vertices.empty();
+    const std::vector<probe::Point> & points = l.cell_data ? g.vertices : g.nodes;
+    l.xyz.assign(3 * points.size(), 0.0);
+    for (size_t p = 0; p < points.size(); p++) {
+        for (size_t d = 0; d < N_DIM; d++) l.xyz[3 * p + d] = points[p][d];
+    }
+    l.offsets = {0};
+    if (polygons) {
+        l.connectivity.assign(g.polygon_vertices.begin(), g.polygon_vertices.end());
+        l.offsets.assign(g.polygon_offsets.begin(), g.polygon_offsets.end());
+    } else if (g.dim == 0) {
+        for (size_t p = 0; p < g.nodes.size(); p++) {
+            l.connectivity.push_back(static_cast<int64_t>(p));
+            l.offsets.push_back(static_cast<int64_t>(p + 1));
+        }
+    } else {
+        for (const auto & line : g.polylines) {
+            for (uint32_t p : line) l.connectivity.push_back(p);
+            l.offsets.push_back(static_cast<int64_t>(l.connectivity.size()));
+        }
+    }
+    return l;
+}
+
+struct GeometryArray {
+    std::string name;
+    int components;
+    std::vector<double> values;
+};
+
+/** @brief The per-sample geometry a probe writes beside its variables: arc_length, normal, measure. */
+std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
+    std::vector<GeometryArray> arrays;
+    if (!g.arc_length.empty()) arrays.push_back({"arc_length", 1, g.arc_length});
+    if (!g.normals.empty()) {
+        std::vector<double> normal(3 * g.normals.size(), 0.0);
+        for (size_t p = 0; p < g.normals.size(); p++) {
+            for (size_t d = 0; d < N_DIM; d++) normal[3 * p + d] = g.normals[p][d];
+        }
+        arrays.push_back({"normal", 3, normal});
+    }
+    if (!g.node_weights.empty()) arrays.push_back({"measure", 1, g.node_weights});
+    return arrays;
+}
+
 /**
  * @brief A VTK XML PolyData file with its arrays appended raw: the samples as
  *        vertices (point sets), polyline points (curves) or polygons (3D
@@ -225,46 +288,17 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
         std::memcpy(a.bytes.data(), v.data(), a.bytes.size());
         return a;
     };
-    // Polygons carry the samples as cell data; otherwise the samples are the points
-    const bool polygons = !g.polygon_offsets.empty();
-    const bool cell_data = polygons && !g.vertices.empty();
+    const PolyLayout layout = poly_layout(g);
     const size_t n = g.nodes.size();
-    const std::vector<probe::Point> & points = cell_data ? g.vertices : g.nodes;
-    std::vector<double> xyz(3 * points.size(), 0.0);
-    for (size_t p = 0; p < points.size(); p++) {
-        for (size_t d = 0; d < N_DIM; d++) xyz[3 * p + d] = points[p][d];
-    }
-    std::vector<int64_t> connectivity, offsets;
-    if (polygons) {
-        connectivity.assign(g.polygon_vertices.begin(), g.polygon_vertices.end());
-        offsets.assign(g.polygon_offsets.begin() + 1, g.polygon_offsets.end());
-    } else if (g.dim == 0) {
-        for (size_t p = 0; p < n; p++) {
-            connectivity.push_back(static_cast<int64_t>(p));
-            offsets.push_back(static_cast<int64_t>(p + 1));
-        }
-    } else {
-        for (const auto & line : g.polylines) {
-            for (uint32_t p : line) connectivity.push_back(p);
-            offsets.push_back(static_cast<int64_t>(connectivity.size()));
-        }
-    }
+    const std::vector<int64_t> offsets(layout.offsets.begin() + 1, layout.offsets.end());
     std::vector<Array> sample_data;
     for (size_t v = 0; v < names.size(); v++) {
         std::vector<double> column(n);
         for (size_t p = 0; p < n; p++) column[p] = values[p * n_columns + v];
         sample_data.push_back(doubles(names[v], 1, column));
     }
-    if (!g.arc_length.empty()) sample_data.push_back(doubles("arc_length", 1, g.arc_length));
-    if (!g.normals.empty()) {
-        std::vector<double> normal(3 * n, 0.0);
-        for (size_t p = 0; p < n; p++) {
-            for (size_t d = 0; d < N_DIM; d++) normal[3 * p + d] = g.normals[p][d];
-        }
-        sample_data.push_back(doubles("normal", 3, normal));
-    }
-    if (!g.node_weights.empty()) sample_data.push_back(doubles("measure", 1, g.node_weights));
-    std::vector<Array> arrays = {doubles("Points", 3, xyz), integers("connectivity", connectivity),
+    for (const auto & a : geometry_arrays(g)) sample_data.push_back(doubles(a.name, a.components, a.values));
+    std::vector<Array> arrays = {doubles("Points", 3, layout.xyz), integers("connectivity", layout.connectivity),
                                  integers("offsets", offsets)};
     for (auto & a : sample_data) arrays.push_back(std::move(a));
 
@@ -277,8 +311,8 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
             << a.components << "\" format=\"appended\" offset=\"" << offset << "\"/>\n";
         offset += sizeof(uint64_t) + a.bytes.size();
     };
-    const char * cells = polygons ? (g.dim == 1 ? "Lines" : "Polys") : g.dim == 0 ? "Verts" : "Lines";
-    const char * data = cell_data ? "CellData" : "PointData";
+    const std::string cells = layout.cells;
+    const char * data = layout.cell_data ? "CellData" : "PointData";
     const size_t n_cells = offsets.size();
     std::vector<std::string> sample_names;
     std::vector<FieldDescription> descriptions;
@@ -294,9 +328,9 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
         << file_format::PROBE_OUTPUT.version << "</DataArray>\n"
         << field_units::vtk_field_data(sample_names, descriptions, "      ") << "    </FieldData>\n";
     out << "    <Piece NumberOfPoints=\""
-        << points.size() << "\" NumberOfVerts=\"" << (std::string(cells) == "Verts" ? n_cells : 0) << "\" NumberOfLines=\""
-        << (std::string(cells) == "Lines" ? n_cells : 0) << "\" NumberOfStrips=\"0\" NumberOfPolys=\""
-        << (std::string(cells) == "Polys" ? n_cells : 0) << "\">\n";
+        << layout.n_points() << "\" NumberOfVerts=\"" << (cells == "Verts" ? n_cells : 0) << "\" NumberOfLines=\""
+        << (cells == "Lines" ? n_cells : 0) << "\" NumberOfStrips=\"0\" NumberOfPolys=\""
+        << (cells == "Polys" ? n_cells : 0) << "\">\n";
     out << "      <Points>\n";
     data_array(arrays[0]);
     out << "      </Points>\n      <" << cells << ">\n";
@@ -698,18 +732,21 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             throw InputError(key + ".sampling = \"" + sampling + "\" is not one of: cell, point.");
         }
         const std::string format = find_value_or<std::string>(entry, "format", "csv");
-        record_options(key + ".format", {"csv", "hdf5", "vtp"});
-        if (format == "hdf5") {
+        record_options(key + ".format", {"csv", "hdf5", "vtkhdf", "vtp"});
+        if (format == "hdf5" || format == "vtkhdf") {
 #ifndef Mallard_HAS_HDF5
-            throw InputError(key + ".format = \"hdf5\" needs a build with -DMallard_ENABLE_HDF5=ON.");
+            throw InputError(key + ".format = \"" + format + "\" needs a build with -DMallard_ENABLE_HDF5=ON.");
 #endif
-            p.format = Format::HDF5;
+            p.format = format == "hdf5" ? Format::HDF5 : Format::VTKHDF;
         } else if (format == "vtp") {
             p.format = Format::VTP;
         } else if (format != "csv") {
-            throw InputError(key + ".format = \"" + format + "\" is not one of: csv, hdf5, vtp.");
+            throw InputError(key + ".format = \"" + format + "\" is not one of: csv, hdf5, vtkhdf, vtp.");
         }
-        const char * extension = p.format == Format::CSV ? ".csv" : p.format == Format::HDF5 ? ".h5" : ".pvd";
+        const char * extension = p.format == Format::CSV      ? ".csv"
+                                 : p.format == Format::HDF5   ? ".h5"
+                                 : p.format == Format::VTKHDF ? ".vtkhdf"
+                                                              : ".pvd";
         p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
         p.write_samples = find_value_or<bool>(entry, "samples", true);
         for (const auto & r : find_value_or<std::vector<std::string>>(entry, "reductions", {})) {
@@ -1032,6 +1069,17 @@ void Probes::resume([[maybe_unused]] uint64_t step, rtype t) {
                 }
             }
 #ifdef Mallard_HAS_HDF5
+            if (p.format == Format::VTKHDF && std::filesystem::exists(p.file)) {
+                // Continue after the snapshots up to the restart time
+                const std::lock_guard<std::mutex> lock(h5::mutex());
+                h5::Handle file(H5Fopen(p.file.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + p.file);
+                h5::Handle steps(H5Gopen2(file, "VTKHDF/Steps", H5P_DEFAULT), H5Gclose, "opening VTKHDF/Steps");
+                const std::vector<double> times =
+                    h5::read_rows<double>(steps, "Values", 0, h5::n_rows(steps, "Values"), 1, H5P_DEFAULT);
+                while (p.vtkhdf_steps < times.size() && times[p.vtkhdf_steps] <= static_cast<double>(t) * (1.0 + 1e-12)) {
+                    p.vtkhdf_steps++;
+                }
+            }
             if (p.format == Format::HDF5 && std::filesystem::exists(p.file)) {
                 // Drop the rows after the restart step
                 const std::lock_guard<std::mutex> lock(h5::mutex());
@@ -1145,6 +1193,8 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields) {
                 out.flush();
             } else if (p.format == Format::HDF5) {
                 p.write_hdf5(step, t, nodes);
+            } else if (p.format == Format::VTKHDF) {
+                p.write_vtkhdf(t, nodes);
             } else {
                 p.write_vtp(step, t, nodes);
             }
@@ -1185,6 +1235,90 @@ void Probes::Probe::write_hdf5([[maybe_unused]] uint64_t step, [[maybe_unused]] 
         for (uint64_t i = 0; i < n; i++) column[i] = values[i * n_cols + v];
         append("fields/" + variables[v], H5T_NATIVE_DOUBLE, column.data(), n);
     }
+#endif
+}
+
+void Probes::Probe::write_vtkhdf([[maybe_unused]] rtype t, [[maybe_unused]] const std::vector<double> & values) {
+#ifdef Mallard_HAS_HDF5
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    const uint64_t k = vtkhdf_steps, n = geometry.nodes.size();
+    const size_t n_cols = n_evaluated();
+    const PolyLayout layout = poly_layout(geometry);
+    const std::string data = layout.cell_data ? "CellData" : "PointData";
+    const std::vector<GeometryArray> fixed = geometry_arrays(geometry);
+    if (k == 0) {
+        make_parent(file);
+        const std::string & provenance = provenance::json();
+        h5::Handle fapl(H5Pcreate(H5P_FILE_ACCESS), H5Pclose, "H5Pcreate");
+        h5::Handle fcpl(h5::file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
+        h5::Handle created(H5Fcreate(file.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + file);
+        {
+            h5::Handle root(H5Gopen2(created, "/", H5P_DEFAULT), H5Gclose, "opening /");
+            h5::write_strings_attribute(root, "provenance", {provenance});
+            h5::write_int_attribute(root, "version", static_cast<int>(file_format::PROBE_OUTPUT.version));
+        }
+        h5::Handle top(H5Gcreate2(created, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "VTKHDF");
+        h5::write_array_attribute(top, "Version", std::vector<int64_t>{2, 0});
+        h5::write_string_scalar_attribute(top, "Type", "PolyData");
+        const uint64_t n_points = layout.n_points();
+        const int64_t n_points_i = static_cast<int64_t>(n_points);
+        h5::write_rows<int64_t>(top, "NumberOfPoints", 1, 1, 0, 1, &n_points_i, H5P_DEFAULT);
+        h5::write_rows(top, "Points", n_points, 3, 0, n_points, layout.xyz.data(), H5P_DEFAULT);
+        const std::string mine = layout.cells == std::string("Verts")   ? "Vertices"
+                                 : layout.cells == std::string("Lines") ? "Lines"
+                                                                        : "Polygons";
+        for (const char * kind : {"Vertices", "Lines", "Polygons", "Strips"}) {
+            const std::vector<int64_t> none, zero = {0};
+            const auto & o = kind == mine ? layout.offsets : zero;
+            const auto & c = kind == mine ? layout.connectivity : none;
+            const int64_t counts[2] = {static_cast<int64_t>(o.size() - 1), static_cast<int64_t>(c.size())};
+            h5::Handle group(H5Gcreate2(top, kind, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, kind);
+            h5::write_rows<int64_t>(group, "NumberOfCells", 1, 1, 0, 1, &counts[0], H5P_DEFAULT);
+            h5::write_rows<int64_t>(group, "NumberOfConnectivityIds", 1, 1, 0, 1, &counts[1], H5P_DEFAULT);
+            h5::write_rows(group, "Offsets", o.size(), 1, 0, o.size(), o.data(), H5P_DEFAULT);
+            h5::write_rows(group, "Connectivity", c.size(), 1, 0, c.size(), c.data(), H5P_DEFAULT);
+        }
+        for (const char * group_name : {"CellData", "PointData", "FieldData"}) {
+            h5::Handle group(H5Gcreate2(top, group_name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, group_name);
+        }
+        h5::Handle samples(H5Gopen2(top, data.c_str(), H5P_DEFAULT), H5Gclose, "opening " + data);
+        for (const auto & a : fixed) {
+            const uint64_t rows = a.values.size() / static_cast<size_t>(a.components);
+            h5::write_rows(samples, a.name.c_str(), rows, a.components, 0, rows, a.values.data(),
+                           H5P_DEFAULT);
+            h5::annotate(samples, a.name, geometry_field(a.name, geometry));
+        }
+        h5::annotate(top, "Points", FieldDescription{dim::length, "sample coordinates", "", ""});
+        h5::Handle steps(H5Gcreate2(top, "Steps", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "Steps");
+        for (const char * group_name : {"CellDataOffsets", "PointDataOffsets", "FieldDataOffsets"}) {
+            h5::Handle group(H5Gcreate2(steps, group_name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, group_name);
+        }
+    }
+    h5::Handle h5file(H5Fopen(file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + file);
+    h5::Handle samples(H5Gopen2(h5file, ("VTKHDF/" + data).c_str(), H5P_DEFAULT), H5Gclose, "opening " + data);
+    std::vector<double> column(n);
+    for (size_t v = 0; v < variables.size(); v++) {
+        for (uint64_t i = 0; i < n; i++) column[i] = values[i * n_cols + v];
+        h5::put_rows(samples, variables[v].c_str(), (k + 1) * n, 1, k * n, n, column.data(), H5P_DEFAULT);
+        if (k == 0) h5::annotate(samples, variables[v], field_units::describe(variables[v]));
+    }
+    // The geometry is the same at every snapshot: its offsets all stay 0
+    h5::Handle steps(H5Gopen2(h5file, "VTKHDF/Steps", H5P_DEFAULT), H5Gclose, "opening Steps");
+    h5::set_attribute<int64_t>(steps, "NSteps", static_cast<int64_t>(k + 1));
+    const double time = static_cast<double>(t);
+    const int64_t zeros[4] = {0, 0, 0, 0}, one = 1, offset = static_cast<int64_t>(k * n);
+    h5::put_rows(steps, "Values", k + 1, 1, k, 1, &time, H5P_DEFAULT);
+    if (k == 0) h5::annotate(steps, "Values", FieldDescription{dim::time, "time", "time", ""});
+    h5::put_rows(steps, "PartOffsets", k + 1, 1, k, 1, zeros, H5P_DEFAULT);
+    h5::put_rows(steps, "NumberOfParts", k + 1, 1, k, 1, &one, H5P_DEFAULT);
+    h5::put_rows(steps, "PointOffsets", k + 1, 1, k, 1, zeros, H5P_DEFAULT);
+    h5::put_rows(steps, "CellOffsets", k + 1, 4, k, 1, zeros, H5P_DEFAULT);
+    h5::put_rows(steps, "ConnectivityIdOffsets", k + 1, 4, k, 1, zeros, H5P_DEFAULT);
+    h5::Handle data_offsets(H5Gopen2(steps, (data + "Offsets").c_str(), H5P_DEFAULT), H5Gclose,
+                            "opening " + data + "Offsets");
+    for (const auto & v : variables) h5::put_rows(data_offsets, v.c_str(), k + 1, 1, k, 1, &offset, H5P_DEFAULT);
+    for (const auto & a : fixed) h5::put_rows(data_offsets, a.name.c_str(), k + 1, 1, k, 1, zeros, H5P_DEFAULT);
+    vtkhdf_steps = k + 1;
 #endif
 }
 

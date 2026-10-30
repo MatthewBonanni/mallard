@@ -282,6 +282,30 @@ TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
 #endif
 }
 
+TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
+    // Tetrahedra, pyramids, prisms and hexahedra, and the quadratic cells of
+    // a curved shell, at their global places
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_vtkhdf").string();
+    expect_vtkhdf_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
+                                        "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir,
+                                        {"_000000", "_000004", "_000008"});
+    const std::string file = write_temp_shared("mallard_mpi_vtkhdf_shell.msh", shell_gmsh(4, 3, true, false));
+    expect_vtkhdf_output_matches_serial(
+        "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+        "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
+        "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n"
+        "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n[[boundaries]]\nname = \"outer\"\n"
+        "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
+        "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n",
+        "interval = 2\nseries = true\nvariables = [\"RHO\", \"U\"]\n", dir + "_curved", {""});
+#endif
+}
+
 TEST(MPI3DTest, CurvedWallsMatchSerial) {
     // A spherical shell of prisms: walls projected onto the spheres, or from
     // triangle6 faces of the file

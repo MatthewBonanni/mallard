@@ -3,7 +3,7 @@
 
     python plot_results.py RUN_DIR [RUN_DIR ...] [--labels A B ...] [--out DIR]
 
-Each RUN_DIR holds a finished run of input.toml (solut/wedge.pvd,
+Each RUN_DIR holds a finished run of input.toml (solut/wedge.vtkhdf.series,
 probe_line.csv); the last one is drawn in the field plot. Prints, per run, the
 shock angle (fitted through the corner to where the pressure crosses halfway
 up the theoretical jump along horizontal lines) and the mean pressure ratio
@@ -31,7 +31,7 @@ CORNER, RAMP = 0.5, 8.0
 
 
 def load(run):
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(run, "solut", "wedge.pvd")))
+    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(run, "solut", "wedge")))
     polys, c = snapshots.cells(pts, conn, offs)
     return [p[:, :2] for p in polys], c[:, :2], a
 

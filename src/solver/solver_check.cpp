@@ -117,7 +117,6 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) c
     }
     Input writer_input(Input::table_type{});
     writer_input.as_table()["prefix"] = options.quality_file;
-    writer_input.as_table()["format"] = "vtu";
     writer_input.as_table()["interval"] = 1;
     writer_input.as_table()["variables"] = names;
     set_output_files_enabled(true);
