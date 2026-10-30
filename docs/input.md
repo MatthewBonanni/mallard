@@ -33,7 +33,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
@@ -860,7 +860,7 @@ weights and the trigger state.
 
 ## `[[probes]]`
 
-Samples of the solution on a geometry (points, curves or boundary zones;
+Samples of the solution on a geometry (points, curves, surfaces, exact cut planes or boundary zones;
 [geometry guide](guide/geometry.md#point-sets-and-curves)), every `interval`
 steps or `time_interval` of simulation time, written raw and/or reduced. Setup
 locates the samples in the cells of each rank; a write evaluates them on the
@@ -872,7 +872,7 @@ ranks. A probe that is not due costs nothing.
 |---|---|
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
-| `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc` or `curve` (below); without it, `point` or `start`/`end` select a point or a line |
+| `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (below); without it, `point` or `start`/`end` select a point or a line |
 | `boundary` | Instead of a shape: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
 | `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
@@ -896,6 +896,13 @@ Shapes (`[x, y(, z)]` points):
 | `circle` | `center`, `radius`, `n_points` (at least 3); 3D: `normal`, and optionally `reference`, the direction of the first point (default: the axis least aligned with the normal, projected) |
 | `arc` | as `circle`, with `angles = [start, end]` in degrees from the x axis (3D: from `reference`) and `n_points` from start to end, ends included |
 | `curve` | `x`, `y`(, `z`): expressions of the parameter `s` over `s_range = [s0, s1]` (default `[0, 1]`), `n_points` evenly spaced in `s` |
+| `cut_plane` | `point`, `normal`: the exact intersection of the plane (a line in 2D) with the mesh, one sample per cut cell; optional `bounds = [[lo...], [hi...]]` keeps the part inside that box |
+| `rectangle` (3D) | `center`, `normal`, `size = [a, b]` (along `reference` and normal x `reference`), `n_points = [n_a, n_b]` |
+| `disk` (3D) | `center`, `normal`, `radius`, `inner_radius` (default 0: an annulus otherwise), `n_points = [n_radial, n_around]` |
+| `sphere` (3D) | `center`, `radius`, `n_points = [n_polar, n_around]` |
+| `cylinder` (3D) | `center` (of the axis), `axis`, `radius`, `length`, `n_points = [n_axial, n_around]` |
+| `cone` (3D) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0), `n_points = [n_axial, n_around]` |
+| `surface` (3D) | `x`, `y`, `z`: expressions of `u` and `v` over `u_range`, `v_range` (default `[0, 1]`), `n_points = [n_u, n_v]` |
 
 **Point values.** With TENO, `sampling = "point"` evaluates each cell's
 central reconstruction polynomial at the sample (order-consistent: the error
@@ -908,6 +915,40 @@ at the cell's composition (exact for a perfect gas), and mass fractions are
 cell averages. A sample on a face between cells belongs to the cell with the lowest global
 id, so any number of ranks pick the same cell; samples outside the domain take
 the nearest cell's average in both modes.
+
+**Surfaces.** Resampled surfaces (3D) sample a grid of points (`n_points`)
+joined into quadrilaterals, and integrate with 3 x 3 Gauss points per
+quadrilateral of the parameters; spheres, cylinders and cones have outward
+normals, flat shapes `normal`, parametric surfaces `x_u x x_v`. A cut plane
+samples one point per cut cell, at the centroid of its cut, weighing the cut's
+area, and integrates with a degree-5 rule on the triangles where the plane cuts
+the cell's tetrahedra (three Gauss points per cut segment in 2D), so its
+integrals are exact for the reconstruction polynomials up to degree 5 (and its
+area exact); a plane through mesh faces takes each face once. Its normal is
+`normal`. In 2D, curves are the surfaces: their normal points to the right of
+the direction of travel (outward for a counterclockwise `circle`). Surfaces,
+cut planes and 2D curves have the flux variables of boundary probes
+(`MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*`) along their
+normal; the wall variables are for boundaries only. With
+`physics.axisymmetric`, where only boundary probes integrate over the
+revolved surface (per radian), cut planes and curves take no flux variables
+and cut planes no `reductions`. CSV rows of cut planes are
+`step, t, cell, x, y(, z), nx, ny(, nz), area, <variables>`; VTP and VTKHDF files are
+their polygons (segments in 2D) with cell data, and grids of resampled
+surfaces with point data.
+
+```toml
+# Mass flow through a tilted section of a duct, and its pressure for ParaView
+[[probes]]
+name = "section"
+shape = "cut_plane"
+point = [0.5, 0.0, 0.0]
+normal = [1.0, 0.2, 0.0]
+variables = ["P", "MASS_FLUX"]
+sampling = "point"
+format = "vtp"
+reductions = ["integral", "mean"]
+```
 
 **Boundary probes.** `boundary = "wall"` samples the zone's faces of every
 rank: one sample per face, at its centroid, with the face measure as its weight
