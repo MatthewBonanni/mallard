@@ -1,6 +1,6 @@
 """Read Mallard's output for the tutorial scripts: the snapshots of a series
 PREFIX (indexed by PREFIX.vtkhdf.series, or PREFIX.pvd in builds without
-HDF5) and their cells."""
+HDF5; a boundary zone's snapshots are all in PREFIX.vtkhdf) and their cells."""
 import os
 import re
 import sys
@@ -16,6 +16,10 @@ def series(prefix):
     if os.path.exists(prefix + ".vtkhdf.series"):
         from mallard.vtkhdf import read_series
         out = read_series(prefix + ".vtkhdf.series")
+    elif os.path.exists(prefix + ".vtkhdf"):
+        # One file of every snapshot: read() reads its last
+        from mallard.vtkhdf import times
+        out = [(t, prefix + ".vtkhdf") for t in times(prefix + ".vtkhdf")]
     elif os.path.exists(prefix + ".pvd"):
         text = open(prefix + ".pvd").read()
         out = [(float(t), os.path.join(os.path.dirname(prefix), f))

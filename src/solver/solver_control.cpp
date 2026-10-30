@@ -286,11 +286,13 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         for (const auto & w : data_writers) {
             if (!writer && w->get_prefix() == name) writer = w.get();
         }
-        if (!writer) return rejected("no [[write_data]] with prefix or index " + name);
         if (field == "interval" && !is_uint) return rejected("expected a positive integer");
         if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
-        const std::string error = field == "interval" ? writer->set_interval(n)
-                                                      : writer->set_time_interval(static_cast<rtype>(x), t);
+        // Surfaces, curves and points of a [[write_data]] are written as probes, by their prefix
+        const std::string error = writer ? (field == "interval" ? writer->set_interval(n)
+                                                                : writer->set_time_interval(static_cast<rtype>(x), t))
+                                         : field == "interval" ? probes.set_interval(name, n, true)
+                                                               : probes.set_time_interval(name, static_cast<rtype>(x), t, true);
         if (!error.empty()) return rejected(error);
         return {true, key + " = " + value};
     }

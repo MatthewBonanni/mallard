@@ -83,7 +83,7 @@ solut/r_000100_p0001.vtu
 solut/r_000100_p0002.vtu
 ```
 
-Boundary-zone output (`geometry = "<zone>"`) likewise holds each rank's own faces. Force monitors are summed over the ranks and written by rank 0.
+Boundary-zone output (`region = "<zone>"`) likewise holds each rank's own faces. Force monitors are summed over the ranks and written by rank 0.
 
 ### Restarts
 

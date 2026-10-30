@@ -1,6 +1,7 @@
-"""Figures of the probes section of the user guide, from short Mallard runs
-(seconds each on a CPU build): probe shapes over a 2D mesh, boundary probes on
-curved walls (polylines with arc length), and a 3D wall's heat flux.
+"""Figures of the probes and region snapshots sections of the user guide, from
+short Mallard runs (seconds each on a CPU build): probe shapes over a 2D mesh,
+boundary probes on curved walls (polylines with arc length), a 3D wall's heat
+flux, and the snapshots of a disk's cells and of three slices.
 
     python tools/docs/probes.py --mallard build/src/mallard [--mallard3d build-3d/src/mallard] [names...]
 """
@@ -463,7 +464,108 @@ class Args(tuple):
     mallard3d = property(lambda self: self[1])
 
 
-FIGURES = {"probe_shapes": (probe_shapes, False), "probe_walls": (wall_polylines, False),
+# ------------------------------------------------- snapshots of regions
+
+
+@functools.cache
+def snapshot_data(mallard):
+    work = Path(tempfile.mkdtemp())
+    disk = "{type = \"disk\", center = [0.5, 0.55], radius = 0.3}"
+    cuts = ", ".join(f'{{type = "cut_plane", point = [{x}, 0.5], normal = [1.0, 0.25]}}' for x in (0.95, 1.15, 1.35))
+    toml = f"""
+[run]
+n_steps = 1
+dt = 1.0e-9
+[mesh]
+type = "cartesian_tri"
+Nx = 24
+Ny = 16
+Lx = 1.5
+Ly = 1.0
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["0.0", "0.0"]
+p = "{FIELD}"
+[[boundaries]]
+name = "left"
+type = "symmetry"
+[[boundaries]]
+name = "right"
+type = "symmetry"
+[[boundaries]]
+name = "top"
+type = "symmetry"
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+[numerics.face_reconstruction]
+type = "TENO"
+order = 4
+troubled_threshold = 1.0
+[[write_data]]
+prefix = "mesh"
+format = "vtu"
+interval = 1
+variables = ["P"]
+[[write_data]]
+prefix = "near"
+format = "vtu"
+interval = 1
+variables = ["P"]
+region = {disk}
+[[write_data]]
+prefix = "cut"
+format = "vtu"
+interval = 1
+variables = ["P"]
+regions = [{cuts}]
+{PHYSICS}"""
+    run(mallard, toml, work)
+    mesh, _ = polygons(work / "mesh_000000.vtu")
+    near, near_data = polygons(work / "near_000000.vtu")
+    slices = []
+    for k in range(3):
+        a = read_vtp(work / f"cut_{k}_000000.vtp")
+        xy, conn = a["Points"][:, :2], a["connectivity"].ravel()
+        slices.append((np.stack([xy[conn[0::2]], xy[conn[1::2]]], axis=1), a["P"].ravel()))
+    return mesh, near, near_data, slices
+
+
+def region_snapshots(P, args):
+    mesh, near, near_data, slices = snapshot_data(args.mallard)
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    lo, hi = 0.8, 1.4
+    cmap = plt.get_cmap(P["cmap"])
+    for ax in axes:
+        ax.add_collection(PolyCollection(mesh, facecolor="none", edgecolor=P["mesh"], lw=0.4, alpha=0.6))
+        ax.add_patch(plt.Circle((0.5, 0.55), 0.3, fill=False, ls="--", lw=1.2, color=P["fg"], zorder=4))
+        ax.set_xlim(0, 1.5)
+        ax.set_ylim(0, 1.0)
+        bare(ax)
+    frac = PolyCollection(near, cmap=plt.get_cmap(P["cmap"]), edgecolor=P["mesh"], lw=0.4)
+    frac.set_array(near_data["REGION_FRACTION"].ravel())
+    frac.set_clim(0.0, 1.0)
+    axes[0].add_collection(frac)
+    label(axes[0], 0.5, 0.94, "the disk's cells: REGION_FRACTION", P, size=12, box=True)
+    cells = PolyCollection(near, cmap=cmap, edgecolor=P["mesh"], lw=0.4)
+    cells.set_array(near_data["P"].ravel())
+    cells.set_clim(lo, hi)
+    axes[1].add_collection(cells)
+    for segs, values in slices:
+        lc = LineCollection(segs, cmap=cmap, linewidths=5.0, zorder=3)
+        lc.set_array(values)
+        lc.set_clim(lo, hi)
+        axes[1].add_collection(lc)
+    label(axes[1], 0.5, 0.94, "their pressure, and three slices", P, size=12, box=True)
+    for ax, (m, lab) in zip(axes, ((plt.Normalize(0.0, 1.0), "cell fraction"), (plt.Normalize(lo, hi), "pressure"))):
+        cb = fig.colorbar(plt.cm.ScalarMappable(cmap=cmap, norm=m), ax=ax, fraction=0.03, pad=0.02)
+        cb.set_label(lab)
+        cb.outline.set_visible(False)
+    return fig
+
+
+FIGURES = {"region_snapshots": (region_snapshots, False), "probe_shapes": (probe_shapes, False), "probe_walls": (wall_polylines, False),
            "probe_wall_3d": (wall_heat_flux, True), "probe_cut_3d": (cut_and_sphere, True)}
 
 

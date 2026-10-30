@@ -10,7 +10,8 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | Feature | Geometry | Guide |
 |---|---|---|
 | `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone) | [Sources](sources.md#regions) |
-| `[[probes]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes | [Output](output.md#region-probes) |
+| `[[probes]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes; a boundary zone or a [probe shape as a region](#probe-shapes-as-regions): its samples |
+| `[[write_data]]` `region`, `regions` | a filled region (its cells), `domain`, a boundary zone or a [probe shape as a region](#probe-shapes-as-regions) | [Output](output.md#snapshots-of-regions) | [Output](output.md#region-probes) |
 | `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength` | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
@@ -363,6 +364,23 @@ region = {type = "union", regions = [
 
 In axisymmetric runs the fractions are weighted by the radius, so they are true
 volume fractions of the revolved cells.
+
+### Probe shapes as regions
+
+```toml
+[regions]
+mid_plane = {type = "cut_plane", point = [0.5, 0, 0], normal = [1, 0, 0]}
+wake_line = {type = "line", start = [1, -0.5, 0], end = [1, 0.5, 0], n_points = 101}
+```
+
+A table whose `type` is one of the [probe types](#points-and-curves) `point`,
+`points`, `line`, `polyline`, `arc`, `curve`, `cut_plane` or `surface` is a
+region of lower dimension: points, a curve, or a surface (a curve in 2D, for
+`cut_plane`). It takes that probe type's keys, below and in
+[`[[probes]]`](../input.md#probes), and its samples go where the probe puts
+them. Given inline or by name in `[regions]`, it is what `[[probes]]` and
+`[[write_data]]` sample; it cannot be a part of a boolean, takes no `edge`, and
+transforms as probes do (`scale`, `rotate`, `translate`, about the origin).
 
 ## Points and curves
 

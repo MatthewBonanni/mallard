@@ -253,3 +253,20 @@ TEST(InputUpgradeTest, KeptOptionsWorkAsBeforeButAreRewritten) {
     Input later = parse_input_string(text);
     EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
 }
+
+TEST(InputUpgradeTest, GeometryOfWriteDataBecomesRegion) {
+    const std::string text = "[[write_data]]\nprefix = 'w'\ngeometry = \"wall\"  # a zone\n"
+                             "[[write_data]]\nprefix = 'f'\ngeometry = 'all'\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted),
+              "[[write_data]]\nprefix = 'w'\nregion = \"wall\"  # a zone\n"
+              "[[write_data]]\nprefix = 'f'\nregion = \"domain\"\n");
+    EXPECT_FALSE(reformatted);
+    Input input = parse_input_string(text);
+    ASSERT_EQ(input_upgrade::apply(input, "0.9.0").size(), 2u);
+    EXPECT_EQ(input.at("write_data").at(0).at("region").as_string(), "wall");
+    EXPECT_EQ(input.at("write_data").at(1).at("region").as_string(), "domain");
+    Input later = parse_input_string(text);
+    EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
+}

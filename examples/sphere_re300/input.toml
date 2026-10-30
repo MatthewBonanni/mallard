@@ -112,7 +112,7 @@ variables = ["RHO", "U", "P", "Q"]
 
 [[write_data]]
 prefix = "./solut/wall"
-geometry = "sphere"
+region = "sphere"
 time_interval = 5.0
 variables = ["P"]
 

@@ -29,6 +29,9 @@ namespace {
 
 std::string plus_one(const std::string & text) { return std::to_string(std::stoll(text) + 1); }
 
+// geometry = "all" wrote the whole mesh, which region calls "domain"
+std::string all_to_domain(const std::string & text) { return text == "\"all\"" || text == "'all'" ? "\"domain\"" : text; }
+
 } // namespace
 
 const Rules & rules() {
@@ -49,6 +52,9 @@ const Rules & rules() {
             {"numerics.face_reconstruction.quadrature_order", "", "0.2.0", "0.2.0", "never read"},
             {"physics.p_min", "", "0.2.0", "0.2.0", "pressures are not clipped"},
             {"physics.p_max", "", "0.2.0", "0.2.0", "pressures are not clipped"},
+            {"write_data[].geometry", "write_data[].region", "0.9.0", "0.10.0",
+             "region takes any region: a boundary zone by name, a named or inline region, or \"domain\"",
+             all_to_domain},
             {"probes[].shape", "probes[].type", "0.9.0", "0.10.0", "type selects the kind of every region"},
         },
         {

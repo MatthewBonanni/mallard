@@ -874,8 +874,8 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
 
 TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     // Every rank writes its cells and zone faces at their global places:
-    // triangles and quads, a boundary zone, a series of one file,
-    // compression, and curved cells with their quadratic nodes
+    // triangles and quads, a region's cells, a boundary zone, a cut plane, a
+    // series of one file, compression, and curved cells with their quadratic nodes
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
 #ifdef Mallard_HAS_HDF5
@@ -891,8 +891,11 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
                                         io_dir() + "_vtkhdf", {"_000000", "_000003", "_000006"});
     expect_vtkhdf_output_matches_serial(input, "interval = 3\nseries = true\nvariables = [\"RHO\", \"U\"]\n",
                                         io_dir() + "_vtkhdf_series", {""});
-    expect_vtkhdf_output_matches_serial(input, "interval = 3\ngeometry = \"bottom\"\nvariables = [\"P\", \"U\"]\n" + zlib,
-                                        io_dir() + "_vtkhdf_zone", {"_000000", "_000006"});
+    expect_vtkhdf_output_matches_serial(input,
+                                        "interval = 3\nvariables = [\"P\", \"U\"]\n" + zlib +
+                                            "regions = [{type = \"disk\", center = [0.5, 0.4], radius = 0.25}, \"bottom\", "
+                                            "{type = \"cut_plane\", point = [0.45, 0.4], normal = [1.0, 0.3]}]\n",
+                                        io_dir() + "_vtkhdf_regions", {"_0_000000", "_0_000006", "_bottom", "_2"});
     const std::string annulus = write_temp_shared("mallard_mpi_vtkhdf_annulus.msh", annulus_gmsh(3, 40, 1, true));
     expect_vtkhdf_output_matches_serial(
         "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + annulus + "\"\n"

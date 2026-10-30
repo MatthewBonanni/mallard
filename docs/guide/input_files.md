@@ -329,6 +329,7 @@ Keys and options changed so far:
 | `[[sources]]` `region` `type = "disk"`, `"rectangle"` in 3D | `"sphere"`, `"box"`: disks and rectangles are flat | 0.9.0 | 0.10.0 |
 | `[[sources]]` `region` `type = "annulus"` in 3D | `"cylinder"` with `axis = [0, 0, 1]` (added): annuli are flat | 0.9.0 | 0.10.0 |
 | `[[sources]]` `region` `type = "box"` in 2D | `"rectangle"`: boxes are 3D solids | 0.9.0 | 0.10.0 |
+| `[[write_data]]` `geometry = "<zone>"` | `region = "<zone>"`, and `geometry = "all"` becomes `region = "domain"` ([any region](output.md#snapshots-of-regions)) | 0.9.0 | 0.10.0 |
 
 Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
 appears in this table and in `src/common/input_upgrade.cpp`, which is the
