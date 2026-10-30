@@ -15,10 +15,13 @@
 #define REGION_H
 
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
+#include "common_typedef.h"
 #include "compiled_expression.h"
 #include "input.h"
 
@@ -207,22 +210,46 @@ struct RegionView {
 };
 
 /**
+ * @brief The [regions] table of an input (named regions), or null without one.
+ */
+const Input * named_regions(const Input & input);
+
+/**
+ * @brief The table of the region of that name in names (a [regions] table,
+ *        or null); an error listing the defined names if there is none.
+ * @param where The key that gives the name, for error messages.
+ */
+const Input & lookup(const Input * names, const std::string & name, const std::string & where);
+
+/**
  * @brief A region from its input table: a primitive or a boolean of
  *        regions, each with optional transforms. See docs/input.md.
  */
 class Region {
     public:
         /**
-         * @param table The region's table.
+         * @param value The region's table, or the name of one in names; the
+         *        parts of booleans may be names too.
          * @param where Its place in the input, for error messages.
+         * @param names The named regions (named_regions of the input), or null.
          */
-        Region(const Input & table, const std::string & where);
+        Region(const Input & value, const std::string & where, const Input * names = nullptr);
 
         // host() views the node vectors, which moves keep and copies would not
         Region(const Region &) = delete;
         Region & operator=(const Region &) = delete;
         Region(Region &&) = default;
         Region & operator=(Region &&) = default;
+
+        /**
+         * @brief Number of dimensions, fixed by the type of its primitives:
+         *        N_DIM for the solid shapes (volumes, areas in 2D); points,
+         *        curves and surfaces are to have fewer.
+         */
+        int dimension() const { return m_dimension; }
+
+        /** @brief Its name in [regions], or empty if given inline. */
+        const std::string & name() const { return m_name; }
 
         /** @brief Width of the smooth edge (0: sharp). */
         double edge() const { return m_host.edge; }
@@ -249,8 +276,13 @@ class Region {
         std::vector<expr::Program> m_programs;
         RegionView<Kokkos::HostSpace> m_host;
         bool m_bounded = true;
+        int m_dimension = N_DIM;
+        std::string m_name;
         std::string m_summary;
 };
+
+/** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
+void require_full_dimension(const Region & region, const std::string & where);
 
 /**
  * @brief Fraction of every cell of the mesh (owned and halo) inside the
@@ -260,6 +292,35 @@ class Region {
  *        runs). Exactly 1 in cells entirely inside, 0 in cells entirely outside.
  */
 std::vector<double> cell_fractions(const Mesh & mesh, const Region & region);
+
+/**
+ * @brief The regions that the region keys of a run give on its mesh. A named
+ *        region is parsed, and its volume fractions computed, once for all
+ *        the keys that name it.
+ */
+class Regions {
+    public:
+        /** @brief Reads [regions] of input lazily: names nothing refers to stay unused keys. */
+        Regions(const Input & input, const Mesh & mesh);
+
+        /** @brief The region a key gives: an inline table or a name. */
+        const Region & get(const Input & value, const std::string & where);
+
+        /** @brief Its volume fractions in every cell of the mesh (see cell_fractions). */
+        const std::vector<double> & fractions(const Input & value, const std::string & where);
+
+    private:
+        struct Entry {
+            Region region;
+            std::vector<double> fractions;  // empty until asked for
+        };
+        Entry & entry(const Input & value, const std::string & where);
+
+        const Input * m_names;
+        const Mesh & m_mesh;
+        std::vector<std::unique_ptr<Entry>> m_entries;
+        std::map<std::string, size_t> m_by_name;
+};
 
 } // namespace region
 

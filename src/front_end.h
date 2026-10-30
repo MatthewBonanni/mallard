@@ -20,11 +20,13 @@
 namespace front_end {
 
 /**
- * @brief A case's dimension: 2 or 3, or 0 with why it cannot be told.
+ * @brief A case's dimension: 2 or 3, or 0 with why it cannot be told; unreadable
+ *        if a file is missing or invalid, which either solver reports in full.
  */
 struct Dimension {
     int dim = 0;
     std::string why;
+    bool unreadable = false;
 };
 
 /**

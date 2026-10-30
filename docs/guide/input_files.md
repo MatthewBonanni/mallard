@@ -77,11 +77,12 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[chemistry]`, `[radiation]` | no | [Thermochemistry](thermochemistry.md) |
 | `[les]`, `[les.combustion]` | no | [Large-eddy simulation](les.md) |
 | `[source]`, `[[sponges]]` | no | [Sources and sponges](sources.md) |
+| `[regions]` | no | [Named regions](geometry.md#named-regions), used by `[[sources]]`, `[[sponges]]` and `[[probes]]` |
 | `[[write_data]]`, `[output]`, `[[forces]]`, `[integrals]`, `[statistics]`, `[[probes]]` | no | [Output and diagnostics](output.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
-Regions that several tables use (sources' regions, probe points and curves) are on
-[Geometry](geometry.md).
+Regions that several tables use (inline, or named once in `[regions]`), and
+probe points and curves, are on [Geometry](geometry.md).
 
 Double brackets (`[[boundaries]]`) are TOML arrays of tables: repeat them, one
 entry each. Every key, with its default, is in the
@@ -349,6 +350,21 @@ error: input.toml: keys that are unknown or unused with these settings (mallard 
 
 When another error stops the setup first, the keys with a suggestion are
 listed under it as possible misspellings.
+
+## Error messages
+
+An error in the input names the file, the line and the key, says what is
+wrong, lists the accepted values or the closest one, says what to do, and
+links the docs that explain the key; `mallard check` reports it the same way:
+
+```text
+error: input.toml: line 6: mesh.Nx: is 16 (a float), but must be a non-negative integer. Write it without a decimal point: 16. See docs/input.md#mesh.
+error: input.toml: line 20: boundaries[name = "inlet"].type: "wall" is not accepted (did you mean "wall_adiabatic", "wall_heat_flux" or "wall_isothermal"?). Accepted values: ... See docs/input.md#boundaries.
+```
+
+A value of the wrong type is always an error, never replaced by the default.
+Errors during the run name the step, the time and the cells or faces involved
+(see [Divergence](running.md#divergence)).
 
 ## Checking an input
 
