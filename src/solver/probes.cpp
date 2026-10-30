@@ -30,6 +30,7 @@
 #include "input.h"
 #include "log.h"
 #include "provenance.h"
+#include "region.h"
 #include "viscous_flux.h"
 
 #ifdef Mallard_HAS_HDF5
@@ -384,6 +385,31 @@ void allocate_samples(Probes::Samples & s, const std::vector<uint32_t> & h_cells
 
 } // namespace
 
+void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
+                           const std::vector<double> & fractions, uint32_t n_variables) {
+    std::vector<uint32_t> cells;
+    std::vector<uint64_t> global;
+    std::vector<double> weights;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        if (fractions[c] == 0.0) continue;
+        cells.push_back(c);
+        global.push_back(mesh.h_global_cell(c));
+        weights.push_back(fractions[c] * double(mesh.h_cell_measure(c)));
+    }
+    p.quadrature.select(mesh, cells, n_variables);
+    if (mesh.n_global_cells > 0) {
+        global = comm::allgatherv(global);
+        weights = comm::allgatherv(weights);
+    }
+    std::vector<size_t> by_id(global.size());
+    for (size_t i = 0; i < by_id.size(); i++) by_id[i] = i;
+    std::sort(by_id.begin(), by_id.end(), [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
+    p.geometry.dim = static_cast<uint8_t>(r.dimension());
+    p.geometry.revolved = mesh.axisymmetric;
+    p.geometry.shape = "region " + r.summary();
+    for (const size_t i : by_id) p.geometry.quad_weights.push_back(weights[i]);
+}
+
 void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables,
                              const std::vector<probe::Point> & point_normals) {
     n_global = points.size();
@@ -417,6 +443,25 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
         if (all.size() != n_global) throw std::logic_error("probe samples held by no rank or by several");
         gathered_row.assign(n_global, 0);
         for (uint64_t r = 0; r < all.size(); r++) gathered_row[all[r]] = r;
+    }
+}
+
+void Probes::Samples::select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables) {
+    distributed = mesh.n_global_cells > 0;
+    std::vector<uint64_t> global(owned_cells.size());
+    for (size_t i = 0; i < owned_cells.size(); i++) global[i] = mesh.h_global_cell(owned_cells[i]);
+    std::vector<uint64_t> all = distributed ? comm::allgatherv(global) : global;
+    std::sort(all.begin(), all.end());
+    n_global = all.size();
+    std::vector<uint64_t> ids;
+    for (const uint64_t g : global) {
+        ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
+    }
+    allocate_samples(*this, owned_cells, {}, {}, n_variables);
+    const std::vector<uint64_t> gathered = distributed ? comm::gatherv(ids) : ids;
+    if (comm::is_root() || !distributed) {
+        gathered_row.assign(n_global, 0);
+        for (uint64_t r = 0; r < gathered.size(); r++) gathered_row[gathered[r]] = r;
     }
 }
 
@@ -697,8 +742,8 @@ std::vector<double> Probes::Samples::gather() const {
     return ordered;
 }
 
-void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
-                  bool resume, bool viscous) {
+void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regions,
+                  const std::vector<std::string> & species_names, bool resume, bool viscous) {
     resumed = resume;
     distributed = mesh.n_global_cells > 0;
     if (!input.contains("probes")) return;
@@ -723,6 +768,19 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             if (p.interval == 0) throw InputError(key + ".interval must be positive.");
         }
 
+        p.from_region = entry.contains("region");
+        for (const char * k : {"shape", "boundary", "boundary_type", "sampling", "format", "file", "samples"}) {
+            if (p.from_region && entry.contains(k)) {
+                throw InputError(Diagnostic{.key = key + "." + k,
+                                            .line = line_of(entry, k),
+                                            .message = std::string("applies to probes of points and curves, but a "
+                                                                   "region probe writes only its reductions, to "
+                                                                   "reductions_file"),
+                                            .fix = std::string("Remove ") + k + ", or give the probe a shape instead "
+                                                   "of a region",
+                                            .docs = "docs/guide/output.md#region-probes"});
+            }
+        }
         const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
         record_options(key + ".sampling", {"cell", "point"});
         if (sampling == "point") {
@@ -747,8 +805,10 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
                                  : p.format == Format::VTKHDF ? ".vtkhdf"
                                                               : ".pvd";
         p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
-        p.write_samples = find_value_or<bool>(entry, "samples", true);
-        for (const auto & r : find_value_or<std::vector<std::string>>(entry, "reductions", {})) {
+        p.write_samples = !p.from_region && find_value_or<bool>(entry, "samples", true);
+        std::vector<std::string> reductions = find_value_or<std::vector<std::string>>(entry, "reductions", {});
+        if (p.from_region && reductions.empty()) reductions = {"integral", "mean", "min", "max"};
+        for (const auto & r : reductions) {
             const auto it = find_option(REDUCTIONS, key + ".reductions", r, line_of(entry, "reductions"));
             if (std::find(p.reductions.begin(), p.reductions.end(), it->second) != p.reductions.end()) {
                 throw InputError(key + ".reductions: \"" + r + "\" is listed twice.");
@@ -821,7 +881,19 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
             p.reference.p = find_real(ref, "p", dim::pressure);
         }
 
-        if (boundary) {
+        if (p.from_region) {
+            const region::Region & r = regions.get(entry.at("region"), key + ".region");
+            region::require_full_dimension(r, entry.at("region"), key + ".region");
+            select_region(p, mesh, r, regions.fractions(entry.at("region"), key + ".region"),
+                          static_cast<uint32_t>(h_codes.size()));
+            if (p.quadrature.n_global == 0) {
+                throw InputError(Diagnostic{.key = key + ".region",
+                                            .line = line_of(entry, "region"),
+                                            .message = "covers no part of any cell of the mesh",
+                                            .fix = "Move or enlarge the region so that it overlaps the domain",
+                                            .docs = "docs/guide/output.md#region-probes"});
+            }
+        } else if (boundary) {
             for (const char * k : {"shape", "point", "start", "end"}) {
                 if (entry.contains(k)) throw InputError(key + ": boundary probes take no " + k + ".");
             }
@@ -1161,7 +1233,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields) {
         std::vector<double> nodes, quad;
         // Collective on every rank (the geometry lives on rank 0 for some shapes)
         const bool own_quadrature = p.quadrature.n_global == 0;
-        if (p.write_samples || extrema || own_quadrature) {
+        if (!p.from_region && (p.write_samples || extrema || own_quadrature)) {
             p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
             nodes = p.nodes.gather();
         }
@@ -1336,7 +1408,7 @@ void Probes::Probe::write_reductions(uint64_t step, rtype t, const std::vector<d
     const bool points = quadrature.n_global == 0;
     const std::vector<double> & q = points ? node_values : quad;
     const size_t n_cols = n_evaluated();
-    const size_t n_q = points ? geometry.nodes.size() : geometry.quad_points.size();
+    const size_t n_q = points ? geometry.nodes.size() : geometry.quad_weights.size();
     auto weight = [&](size_t i) {
         return points ? (geometry.node_weights.empty() ? 1.0 : geometry.node_weights[i]) : geometry.quad_weights[i];
     };
@@ -1391,9 +1463,10 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         const Probe & p = *pp;
         std::string vars;
         for (const auto & v : p.variables) vars += (vars.empty() ? "" : ", ") + v;
-        const size_t n = p.geometry.nodes.size();
-        std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.shape + " of " +
-                           logging::count(n) + (n == 1 ? " point" : " points") +
+        const size_t n = p.from_region ? p.quadrature.n_global : p.geometry.nodes.size();
+        const char * unit = p.from_region ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
+        std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.shape + (p.from_region ? " over " : " of ") +
+                           logging::count(n) + unit +
                            (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
                                            : " every t = " + logging::real(double(p.time_interval))) +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;

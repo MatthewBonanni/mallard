@@ -37,6 +37,7 @@
 #include "field_units.h"
 #include "log.h"
 #include "mesh_block.h"
+#include "region.h"
 #include "partition.h"
 #include "provenance.h"
 #include "run_log.h"
@@ -173,10 +174,11 @@ void Solver::setup_from_input() {
         init_les();
         statistics.init(input, species_names, *mesh);
         init_rhs_split();
-        init_sources();
-        init_sponges();
+        region::Regions regions(input, *mesh);
+        init_sources(regions);
+        init_sponges(regions);
         register_data();
-        init_output();
+        init_output(regions);
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
@@ -932,7 +934,7 @@ void Solver::init_boundaries() {
     init_inlets(input_boundaries, inlets);
 }
 
-void Solver::init_sources() {
+void Solver::init_sources(region::Regions & regions) {
     sources::CellFields fields;
     fields.coords = mesh->cell_coords;
     fields.W = W_cells;
@@ -943,7 +945,7 @@ void Solver::init_sources() {
     } else {
         fields.R = double(physics.R);
     }
-    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields);
+    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields, regions);
     if (!terms->empty()) {
         for (const auto & item : terms->summary()) source_summary.push_back(item);
         source_terms = std::move(terms);
@@ -1393,7 +1395,7 @@ void Solver::init_run_parameters() {
     control_file_interval = find_value_or<uint64_t>(input, "run", "control_file_interval", 0);
 }
 
-void Solver::init_output() {
+void Solver::init_output(region::Regions & regions) {
     check_interval = find_value_or<uint32_t>(input, "output", "check_interval", 1);
     if (check_interval == 0) {
         throw InputError({.key = "output.check_interval",
@@ -1519,8 +1521,8 @@ void Solver::init_output() {
             }
         }
     }
-    probes.init(input, *mesh, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart",
-                is_viscous());
+    probes.init(input, *mesh, regions, species_names,
+                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous());
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     if (run_log_on) {

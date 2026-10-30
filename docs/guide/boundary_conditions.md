@@ -589,7 +589,7 @@ name = "outlet"
 type = "outlet_extrapolation"
 ```
 
-*Used in:* [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 6 more.
+*Used in:* [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 7 more.
 
 **Imposes** nothing: the exterior state is the solution translated from
 inside the domain (the reconstructed state on the image face one cell

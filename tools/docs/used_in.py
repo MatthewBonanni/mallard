@@ -103,6 +103,7 @@ RULES = {
         (lambda t: "spectra" in t.get("statistics", {}), "the in-situ statistics tests"),
     ("output.md", "### Phase averages: `[statistics.phase]`"): (lambda t: "phase" in t.get("statistics", {}), None),
     ("output.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
+    ("output.md", "### Region probes"): (lambda t: any("region" in p for p in t.get("probes", [])), None),
     ("physics.md", "## Euler and Navier–Stokes"): (lambda t: "type" in t.get("physics", {}), None),
     ("physics.md", "### Viscosity laws"): (lambda t: "viscosity_model" in t.get("physics", {}), None),
     ("physics.md", "## Gas mixtures"): (lambda t: t.get("physics", {}).get("gas") == "mixture", None),
