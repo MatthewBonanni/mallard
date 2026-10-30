@@ -36,6 +36,20 @@ homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of 
 channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence)).
 
+**Favre averages** are not computed directly. Favre means follow exactly from
+Reynolds statistics that include `RHO`: with `fields = ["RHO", "U_X", "U_Y", ...]`
+and `products = ["RHO*U_X", "RHO*U_Y", "U_X*U_Y", ...]`,
+
+```text
+Favre mean        ũ = <ρu> / <ρ> = MEAN_U_X + COV_RHO_U_X / MEAN_RHO
+Favre covariance  ũ''v'' = COV_U_X_U_Y - COV_RHO_U_X * COV_RHO_U_Y / MEAN_RHO^2 + <ρ'u'v'> / MEAN_RHO
+```
+
+The triple correlation `<ρ'u'v'>` is not kept, so a Favre covariance computed
+from these fields leaves it out. That is a good approximation where density
+fluctuations are small (low Mach number, no heat release), but not in flames
+or across strong shocks.
+
 ## Spectra and two-point correlations: `[statistics.spectra]`
 
 ```toml
