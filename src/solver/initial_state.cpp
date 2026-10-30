@@ -895,6 +895,31 @@ std::vector<std::array<std::array<double, N_VERTICES>, N_VERTICES>> subdivision(
     return out;
 }
 
+const std::string REGIONS_DOCS = "docs/guide/initialization.md#regions";
+const std::string DATA_DOCS = "docs/guide/initialization.md#tabulated-data-and-point-clouds";
+
+/** @brief An invalid value of table.leaf (key: its full path). */
+InputError invalid(const Input & table, const std::string & key, const std::string & leaf, const std::string & message,
+                   const std::string & fix, const std::string & docs) {
+    return InputError({.key = key, .line = line_of(table, leaf), .message = message, .fix = fix, .docs = docs});
+}
+
+/** @brief u of an analytical state or a region that is not N_DIM expressions. */
+InputError u_error(const Input & t, const std::string & where) {
+    return InputError({.key = where + ".u",
+                       .line = line_of(t, "u"),
+                       .message = "must be an array of " + std::to_string(N_DIM) + " components",
+                       .fix = N_DIM == 3 ? "Write u = [\"ux\", \"uy\", \"uz\"], each a number or an expression"
+                                         : "Write u = [\"ux\", \"uy\"], each a number or an expression"});
+}
+
+/** @brief A key a uniform initial state needs. */
+InputError constant_missing(const Input & init, const std::string & key) {
+    Diagnostic d = missing_key(init, "initialize." + key).diagnostic;
+    d.message = "missing; a uniform initial state (type = \"constant\") needs u, p and T";
+    return InputError(d);
+}
+
 } // namespace
 
 struct InitialState::Impl {
@@ -944,18 +969,22 @@ struct InitialState::Impl {
     }
 
     std::string add_data(const Input & e, const std::string & where) {
-        if (!e.is_table()) throw InputError(where + " must be a table.");
-        if (!e.contains("name") || !e.contains("file")) throw InputError(where + " needs name and file.");
+        if (!e.is_table()) {
+            throw InputError({.key = where, .line = line_of(e), .message = "must be a table",
+                              .fix = "Write [[initialize.data]] with name and file", .docs = DATA_DOCS});
+        }
+        if (!e.contains("name")) throw missing_key(e, where + ".name", "Add name = \"...\": the prefix of the variables");
+        if (!e.contains("file")) throw missing_key(e, where + ".file", "Add file = \"...\": a CSV file");
         const std::string name = find_value<std::string>(e, "name");
         if (name.empty() || identifier(name) != name || std::isdigit(static_cast<unsigned char>(name[0]))) {
-            throw InputError(where + ".name = \"" + name + "\" must be an identifier (letters, digits, _).");
+            throw invalid(e, where + ".name", "name", "\"" + name + "\" is not an identifier",
+                          "Use letters, digits and _, starting with a letter: the variables are <name>_<column>",
+                          DATA_DOCS);
         }
         const std::string file = find_value<std::string>(e, "file");
         const std::string type = find_value_or<std::string>(e, "type", "table");
         record_options(where + ".type", {"table", "points"});
-        if (type != "table" && type != "points") {
-            throw InputError(where + ".type = \"" + type + "\" is not one of: table, points.");
-        }
+        if (type != "table" && type != "points") throw not_accepted(e, where + ".type", type, {"points", "table"});
         const bool points = type == "points";
         const tabulated::Csv csv = tabulated::read_csv(file);
         std::vector<std::string> coordinates;
@@ -967,29 +996,50 @@ struct InitialState::Impl {
             coordinates = {csv.names[0]};
         }
         if (coordinates.empty() || coordinates.size() > tabulated::MAX_DIMS) {
-            throw InputError(where + ".coordinates must name 1 to 3 columns of " + file + ".");
+            throw invalid(e, where + ".coordinates", "coordinates",
+                          "names " + std::to_string(coordinates.size()) + " columns", "Name 1 to 3 columns of " + file,
+                          DATA_DOCS);
         }
         std::vector<int32_t> coordinate_columns;
         for (const auto & c : coordinates) {
             const int32_t i = csv.column(c);
-            if (i < 0) throw InputError(where + ": " + file + " has no column " + c + ".");
+            if (i < 0) {
+                throw InputError({.key = where + ".coordinates",
+                                  .line = line_of(e, e.contains("coordinates") ? "coordinates" : "file"),
+                                  .message = file + " has no column " + c,
+                                  .valid = csv.names,
+                                  .suggestion = suggest_value(c, csv.names),
+                                  .fix = "Name the coordinate columns with coordinates = [...]",
+                                  .docs = DATA_DOCS});
+            }
             coordinate_columns.push_back(i);
         }
         // Units of columns, as affine maps to SI (a + b v)
         std::vector<double> offset(csv.names.size(), 0.0), factor(csv.names.size(), 1.0);
         if (e.contains("units")) {
             const Input & units = e.at("units");
-            if (!units.is_table()) throw InputError(where + ".units must be a table of columns and units, e.g. {x = \"mm\"}.");
+            if (!units.is_table()) {
+                throw invalid(e, where + ".units", "units", "must be a table of columns and their units",
+                              "Write units = {x = \"mm\", T = \"degC\"}", DATA_DOCS);
+            }
             for (const auto & [column, unit] : units.as_table()) {
                 const int32_t i = csv.column(column);
-                if (i < 0) throw InputError(where + ".units: " + file + " has no column " + column + ".");
+                if (i < 0) {
+                    throw InputError({.key = where + ".units." + column,
+                                      .line = line_of(units, column),
+                                      .message = file + " has no column " + column,
+                                      .valid = csv.names,
+                                      .suggestion = suggest_value(column, csv.names),
+                                      .docs = DATA_DOCS});
+                }
                 const std::string text = find_value<std::string>(units, column);
                 try {
                     const Quantity q0 = parse_quantity("0 " + text), q1 = parse_quantity("1 " + text);
                     offset[size_t(i)] = q0.value;
                     factor[size_t(i)] = q1.value - q0.value;
                 } catch (const UnitError & err) {
-                    throw InputError(where + ".units." + column + ": " + err.what());
+                    throw invalid(units, where + ".units." + column, column, err.what(),
+                                  "Give a unit such as \"mm\", \"bar\" or \"degC\"", DATA_DOCS);
                 }
             }
         }
@@ -1006,21 +1056,30 @@ struct InitialState::Impl {
             fields.push_back(column(i));
             field_names.push_back(csv.names[i]);
         }
-        if (fields.empty()) throw InputError(where + ": " + file + " has no columns besides the coordinates.");
+        if (fields.empty()) {
+            throw invalid(e, where + ".file", "file", file + " has no columns besides the coordinates",
+                          "Add value columns to the file, or name fewer coordinates", DATA_DOCS);
+        }
         uint32_t set;
         std::string kind;
         if (points) {
-            if (e.contains("interpolation")) throw InputError(where + ".interpolation is for tables; points take neighbors.");
+            if (e.contains("interpolation")) {
+                throw invalid(e, where + ".interpolation", "interpolation", "is for tables (type = \"table\")",
+                              "Remove it; point clouds take neighbors = k", DATA_DOCS);
+            }
             const uint32_t neighbors = find_value_or<uint32_t>(e, "neighbors", 1);
             set = data.add_points(coords, fields, neighbors, where);
             kind = std::to_string(coords[0].size()) + " points, " +
                    (neighbors == 1 ? "nearest" : std::to_string(neighbors) + " nearest by inverse distance");
         } else {
-            if (e.contains("neighbors")) throw InputError(where + ".neighbors is for points; tables take interpolation.");
+            if (e.contains("neighbors")) {
+                throw invalid(e, where + ".neighbors", "neighbors", "is for point clouds (type = \"points\")",
+                              "Remove it; tables take interpolation = \"linear\" or \"cubic\"", DATA_DOCS);
+            }
             const std::string interpolation = find_value_or<std::string>(e, "interpolation", "linear");
             record_options(where + ".interpolation", {"linear", "cubic"});
             if (interpolation != "linear" && interpolation != "cubic") {
-                throw InputError(where + ".interpolation = \"" + interpolation + "\" is not one of: linear, cubic.");
+                throw not_accepted(e, where + ".interpolation", interpolation, {"cubic", "linear"});
             }
             set = data.add_table(coords, fields, interpolation == "cubic", where);
             const tabulated::Set & s = data.set(set);
@@ -1032,12 +1091,23 @@ struct InitialState::Impl {
         m.dims = static_cast<uint32_t>(coordinates.size());
         std::string at_text;
         if (e.contains("region")) {
-            if (e.contains("at")) throw InputError(where + ": give at or region, not both.");
-            if (m.dims != 1) throw InputError(where + ".region gives one coordinate (the signed distance to it).");
+            if (e.contains("at")) {
+                throw invalid(e, where + ".region", "region", "is given with at", "Give at or region, not both",
+                              DATA_DOCS);
+            }
+            if (m.dims != 1) {
+                throw invalid(e, where + ".region", "region",
+                              "gives one coordinate (the signed distance to it), but the table has " +
+                                  std::to_string(m.dims),
+                              "Use at = [...] for tables of several coordinates", DATA_DOCS);
+            }
             double edge;
             bool bounded;
             at_text = "distance to " + add_region(e.at("region"), where + ".region", m.nodes, m.n_nodes, edge, bounded);
-            if (edge > 0.0) throw InputError(where + ".region: edge has no meaning for a distance.");
+            if (edge > 0.0) {
+                throw invalid(e, where + ".region", "region", "has an edge, which a distance does not use",
+                              "Remove edge from the region", DATA_DOCS);
+            }
         } else {
             std::vector<std::string> at;
             if (e.contains("at")) {
@@ -1045,14 +1115,20 @@ struct InitialState::Impl {
             } else {
                 for (const auto & c : coordinates) {
                     if (c != "x" && c != "y" && c != "z") {
-                        throw InputError(where + " needs at = [...], an expression of x, y, z for each coordinate (" +
-                                         c + " is not x, y or z), or region.");
+                        throw invalid(e, where + ".at", "at",
+                                      "is missing, and the coordinate " + c + " is not x, y or z",
+                                      "Add at = [...], an expression of x, y, z for each coordinate, or region = {...} "
+                                      "for the distance to a region",
+                                      DATA_DOCS);
                     }
                 }
                 at = coordinates;
             }
             if (at.size() != coordinates.size()) {
-                throw InputError(where + ".at needs one expression per coordinate (" + std::to_string(coordinates.size()) + ").");
+                throw invalid(e, where + ".at", "at",
+                              "has " + std::to_string(at.size()) + " expressions for " +
+                                  std::to_string(coordinates.size()) + " coordinates",
+                              "Give one expression of x, y, z per coordinate", DATA_DOCS);
             }
             for (size_t d = 0; d < at.size(); d++) {
                 m.at[d] = add_program(where + ".at[" + std::to_string(d) + "]", at[d], {"x", "y", "z"});
@@ -1064,7 +1140,8 @@ struct InitialState::Impl {
         for (uint32_t f = 0; f < field_names.size(); f++) {
             const std::string var = name + "_" + identifier(field_names[f]);
             if (std::find(names.begin(), names.end(), var) != names.end()) {
-                throw InputError(where + ": variable " + var + " is defined twice.");
+                throw invalid(e, where + ".name", "name", "makes the variable " + var + ", which is already defined",
+                              "Give each [[initialize.data]] entry its own name", DATA_DOCS);
             }
             names.push_back(var);
             variables.push_back({set, f});
@@ -1081,23 +1158,25 @@ struct InitialState::Impl {
             if (constant) {
                 const std::vector<rtype> u = find_real_vector(t, "u", dim::velocity);
                 if (u.size() != N_DIM) {
-                    throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: constant.");
+                    throw InputError({.key = where + ".u",
+                                      .line = line_of(t, "u"),
+                                      .message = "has " + std::to_string(u.size()) + " components, but this build is " +
+                                                 std::to_string(N_DIM) + "D",
+                                      .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
                 }
                 FOR_I_DIM L.u[i] = add_program(where + ".u", number(double(u[i])), names);
             } else {
-                if (!t.at("u").is_array() || t.at("u").as_array().size() != N_DIM) {
-                    throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for " +
-                                             (base ? "initialization: analytical." : where + "."));
-                }
+                if (!t.at("u").is_array() || t.at("u").as_array().size() != N_DIM) throw u_error(t, where);
                 const auto & u = t.at("u").as_array();
                 for (size_t i = 0; i < N_DIM; i++) {
                     L.u[i] = add_program(where + ".u[" + std::to_string(i) + "]",
                                          quantity_or_expression(u[i], where + ".u", dim::velocity), names);
                 }
             }
+        } else if (constant) {
+            throw constant_missing(t, "u");
         } else if (base) {
-            throw std::runtime_error(constant ? "Missing u for initialization: constant."
-                                              : "u must be a " + std::to_string(N_DIM) + "-element array for initialization: analytical.");
+            throw u_error(t, where);
         }
         const std::array<std::pair<const char *, Dimension>, 3> thermo = {
             {{"rho", dim::density}, {"p", dim::pressure}, {"T", dim::temperature}}};
@@ -1107,7 +1186,7 @@ struct InitialState::Impl {
             const auto & [key, dimension] = thermo[i];
             if (constant && i == 0) continue;
             if (!t.contains(key)) {
-                if (constant) throw std::runtime_error(std::string("Missing ") + key + " for initialization: constant.");
+                if (constant) throw constant_missing(t, key);
                 continue;
             }
             n_thermo++;
@@ -1116,12 +1195,24 @@ struct InitialState::Impl {
             *slots[i] = add_program(where + "." + key, text, names);
         }
         if (type == "analytical" && n_thermo != 2) {
-            throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
+            throw InputError({.key = "initialize",
+                              .line = line_of(t),
+                              .message = std::string("sets ") + std::to_string(n_thermo) +
+                                         " of rho, p and T; type = \"analytical\" needs exactly two (the gas law gives "
+                                         "the third)",
+                              .fix = "Give two of rho, p and T"});
         }
-        if (!base && n_thermo > 2) throw InputError(where + " sets rho, p and T: give at most two.");
+        if (!base && n_thermo > 2) {
+            throw InputError({.key = where, .line = line_of(t), .message = "sets rho, p and T",
+                              .fix = "Give at most two; one alone keeps the pressure of the state below",
+                              .docs = REGIONS_DOCS});
+        }
         if (!mixture) {
             for (const char * key : {"X", "Y", "balance"}) {
-                if (t.contains(key)) throw InputError(where + "." + key + " needs a gas mixture.");
+                if (t.contains(key)) {
+                    throw invalid(t, where + "." + key, key, "sets a composition, but the gas is a single species",
+                                  "Remove it, or give the run a gas mixture ([physics] mechanism)", REGIONS_DOCS);
+                }
             }
             return;
         }
@@ -1135,17 +1226,28 @@ struct InitialState::Impl {
             return;
         }
         if (!t.contains("X") && !t.contains("Y")) {
-            if (base) throw InputError(where + ": give the composition as exactly one of X and Y.");
-            if (t.contains("balance")) throw InputError(where + ".balance needs X or Y.");
+            if (base) {
+                throw InputError({.key = where, .line = line_of(t), .message = "has no composition",
+                                  .fix = "Give it as X = {...} (mole fractions) or Y = {...} (mass fractions)"});
+            }
+            if (t.contains("balance")) {
+                throw invalid(t, where + ".balance", "balance", "is given without X or Y",
+                              "Give the composition as X = {...} or Y = {...}", REGIONS_DOCS);
+            }
             return;
         }
-        if (t.contains("X") && t.contains("Y")) throw InputError(where + ": give the composition as exactly one of X and Y.");
+        if (t.contains("X") && t.contains("Y")) {
+            throw invalid(t, where + ".Y", "Y", "is given with X", "Give the composition as one of X and Y", "");
+        }
         L.mole = t.contains("X") ? 1 : 0;
         const std::string key = L.mole ? "X" : "Y";
-        if (!t.at(key).is_table()) throw InputError(where + "." + key + " must be a table of species.");
+        if (!t.at(key).is_table()) {
+            throw invalid(t, where + "." + key, key, "must be a table of species", "Write " + key + " = {O2 = 1, N2 = 3.76}",
+                          "");
+        }
         for (const auto & [name, value] : t.at(key).as_table()) {
             const int32_t k = mixture->mechanism().species_index(name);
-            if (k < 0) throw InputError(where + "." + key + ": no species " + name + " in the mechanism.");
+            if (k < 0) throw mixture->unknown_species(t.at(key), where + "." + key + "." + name, name);
             const int32_t p = add_program(where + "." + key + "." + name, quantity_or_expression(value, name, dim::none), names);
             fractions.push_back({static_cast<uint32_t>(k), static_cast<uint32_t>(p)});
         }
@@ -1153,7 +1255,7 @@ struct InitialState::Impl {
         if (t.contains("balance")) {
             const std::string name = find_value<std::string>(t, "balance");
             L.balance = mixture->mechanism().species_index(name);
-            if (L.balance < 0) throw InputError(where + ".balance: no species " + name + " in the mechanism.");
+            if (L.balance < 0) throw mixture->unknown_species(t, where + ".balance", name);
         }
     }
 };
@@ -1171,14 +1273,19 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
     const std::string type = find_value_or<std::string>(input, "initialize", "type", "constant");
     if (!base_from_cells) {
         impl->n_sub = find_value_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
-        if (impl->n_sub < 1) throw InputError("initialize.n_subdivisions must be at least 1.");
+        if (impl->n_sub < 1) {
+            throw invalid(init, "initialize.n_subdivisions", "n_subdivisions", "is 0", "Give 1 or more", "");
+        }
     }
     std::ostringstream summary;
     if (!base_from_cells) summary << type;
 
     std::vector<std::string> data_text;
     if (init.contains("data")) {
-        if (!init.at("data").is_array()) throw InputError("initialize.data must be an array of tables: [[initialize.data]].");
+        if (!init.at("data").is_array()) {
+            throw invalid(init, "initialize.data", "data", "must be an array of tables",
+                          "Write each entry as [[initialize.data]]", DATA_DOCS);
+        }
         const auto & list = init.at("data").as_array();
         for (size_t i = 0; i < list.size(); i++) {
             data_text.push_back(impl->add_data(list[i], "initialize.data[" + std::to_string(i) + "]"));
@@ -1197,14 +1304,21 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
     std::vector<Entry> entries;
     if (init.contains("regions")) {
         if (!init.at("regions").is_array()) {
-            throw InputError("initialize.regions must be an array of tables: [[initialize.regions]].");
+            throw invalid(init, "initialize.regions", "regions", "must be an array of tables",
+                          "Write each entry as [[initialize.regions]]", REGIONS_DOCS);
         }
         const auto & list = init.at("regions").as_array();
         for (size_t i = 0; i < list.size(); i++) {
             const Input & e = list[i];
             const std::string where = "initialize.regions[" + std::to_string(i) + "]";
-            if (!e.is_table()) throw InputError(where + " must be a table.");
-            if (!e.contains("region")) throw InputError(where + " needs region = {type = ..., ...}.");
+            if (!e.is_table()) {
+                throw InputError({.key = where, .line = line_of(e), .message = "must be a table",
+                                  .fix = "Write [[initialize.regions]] with region and the values inside it",
+                                  .docs = REGIONS_DOCS});
+            }
+            if (!e.contains("region")) {
+                throw missing_key(e, where + ".region", "Add region = {type = \"sphere\", ...}: where the values apply");
+            }
             Entry entry;
             Layer & L = entry.layer;
             bool bounded = true;
@@ -1213,7 +1327,7 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
             const std::string cells = find_value_or<std::string>(e, "cells", "volume_fraction");
             record_options(where + ".cells", {"volume_fraction", "center"});
             if (cells != "volume_fraction" && cells != "center") {
-                throw InputError(where + ".cells = \"" + cells + "\" is not one of: volume_fraction, center.");
+                throw not_accepted(e, where + ".cells", cells, {"center", "volume_fraction"});
             }
             L.center = cells == "center" ? 1 : 0;
             entry.priority = find_value_or<int64_t>(e, "priority", 0);
@@ -1223,13 +1337,21 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
             for (const char * key : {"u", "rho", "p", "T", "X", "Y"}) {
                 if (e.contains(key)) fields += (fields.empty() ? "" : ", ") + std::string(key);
             }
-            if (fields.empty()) throw InputError(where + " sets none of u, rho, p, T, X, Y.");
+            if (fields.empty()) {
+                throw InputError({.key = where, .line = line_of(e), .message = "sets none of u, rho, p, T, X, Y",
+                                  .fix = "Give the values inside the region, e.g. T = 2000", .docs = REGIONS_DOCS});
+            }
             entry.text = name + ": " + fields + " in " + described + (L.center ? ", whole cells by their centers" : "");
             entries.push_back(std::move(entry));
         }
     }
     if (entries.size() + 1 > MAX_LAYERS) {
-        throw InputError("initialize.regions: at most " + std::to_string(MAX_LAYERS - 1) + " regions.");
+        throw InputError({.key = "initialize.regions",
+                          .line = line_of(init, "regions"),
+                          .message = "has " + std::to_string(entries.size()) + " entries, more than " +
+                                     std::to_string(MAX_LAYERS - 1),
+                          .fix = "Combine regions that set the same values with {type = \"union\", regions = [...]}",
+                          .docs = REGIONS_DOCS});
     }
     std::stable_sort(entries.begin(), entries.end(), [](const Entry & a, const Entry & b) { return a.priority < b.priority; });
     for (const auto & e : entries) {
@@ -1247,8 +1369,10 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
             for (const auto & p : impl->programs) used = used || p.uses(static_cast<uint16_t>(n_fixed + v));
         }
         if (!used) {
-            throw InputError("initialize.data[" + std::to_string(s) + "]: no expression of [initialize] or its "
-                             "regions reads its variables.");
+            const Input & entry = init.at("data").as_array()[s];
+            throw invalid(entry, "initialize.data[" + std::to_string(s) + "].name", "name",
+                          "no expression of [initialize] or its regions reads its variables",
+                          "Read them as <name>_<column> in an expression, or remove the entry", DATA_DOCS);
         }
     }
     m_summary = summary.str();
@@ -1440,7 +1564,8 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
     int error = 0;
     Kokkos::deep_copy(error, e.error);
     if (comm::allreduce(static_cast<uint32_t>(error), comm::Op::MAX) > 0) {
-        throw InputError("initialize: the composition is zero at a point.");
+        throw InputError("initialize: the composition is zero at a point. Give at least one species a positive fraction "
+                         "everywhere, or name a balance species (initialize.balance).");
     }
     const uint32_t stopped = comm::allreduce(e.programs.stopped(), comm::Op::MAX);
     if (stopped > 0) throw InputError(impl->programs[stopped - 1].runaway_error());
