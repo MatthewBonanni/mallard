@@ -223,7 +223,10 @@ TEST(Curved3DGeometry, FaceQuadratureClosesEveryCell) {
                 }
                 scale = std::max(scale, double(mesh->h_face_area(f)));
             }
-            for (double s : sum) EXPECT_NEAR(s, 0.0, roundoff(1e-13) * scale) << prisms << " " << geometry << " " << walls->name;
+            // Closest-point projections are smooth to round-off only, so the two faces of an edge, which
+            // evaluate it from opposite ends, agree to a few ulps of their points
+            const double tol = walls == &SPHERES ? 1e-13 : 1e-12;
+            for (double s : sum) EXPECT_NEAR(s, 0.0, roundoff(tol) * scale) << prisms << " " << geometry << " " << walls->name;
         }
     }
 }
