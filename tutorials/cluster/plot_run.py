@@ -59,7 +59,7 @@ def main():
     ap.add_argument("run")
     ap.add_argument("--out", help="output directory (default: docs/images/tutorials)")
     args = ap.parse_args()
-    polys, c, rho, rank, n_ranks = load_pieces(snapshots.last(os.path.join(args.run, "solut", "dmr.pvd")))
+    polys, c, rho, rank, n_ranks = load_pieces(snapshots.last(os.path.join(args.run, "solut", "dmr")))
     jobs = load_jobs(os.path.join(args.run, "mallard.jsonl"))
     for k, j in enumerate(jobs):
         e = j["end"] or {}

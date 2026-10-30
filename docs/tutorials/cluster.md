@@ -12,7 +12,7 @@ You will use: `mallard check` to size a run, the job scripts of
 [`tools/jobs/`](../../tools/jobs), the rank report and automatic GPU and core
 binding, `mallard ctl` (`status`, `checkpoint`, `stop`), stopping a run as a
 scheduler does and resuming it from its newest restart file, the progress rows
-of the log and the run log `mallard.jsonl`. Files:
+of the log, the run health and the run log `mallard.jsonl`. Files:
 [`tutorials/cluster/`](../../tutorials/cluster). Setup: [Tutorials](index.md),
 with an MPI build, and the `mallard` of that build on the `PATH`:
 
@@ -257,6 +257,61 @@ started from (or with its path): on a cluster, log in to the job's first node
 intervals of the running job; [Running and controlling jobs](../guide/running.md)
 lists what it accepts.
 
+### Run health
+
+The progress rows say how fast the run goes; the run health says whether it
+is still right. At each progress row Mallard also records, in the row's
+`health` in `mallard.jsonl`, the smallest density, pressure and temperature
+with the cell and step where they occurred, the troubled cells per rank, the
+output time per step, and a conservation ledger: the change of the total
+mass, momentum and energy against what crossed the boundaries. The log ends
+with a summary of it, here at the end of the third job of section 5:
+
+```text
+== Health =================================================================================
+  Lowest             rho 1.39 (step 461), p 0.982 (step 800), T 0.703 (step 1000)
+  Activity           troubled_cells 5.36% (ranks 3.97-6.74%) at the last report
+  Conservation       unexplained change mass -1.1e-14, momentum_x 9.9e-15, momentum_y 6.7e-15, energy 1.4e-13
+  Output             output_sync 569 us, output_async 177 us per step (slowest rank)
+```
+
+- **`Lowest`:** the smallest value over the job and when; each row's
+  `margins` also gives the cell centroid `x`, where to look in the next
+  snapshot. Mallard warns once in the log when the density or pressure falls
+  below 10<sup>-3</sup> of its domain mean, before it reaches zero.
+- **`Activity`:** the share of troubled cells over the domain, then on the
+  least and the most active rank. With MUSCL it is `limited_cells`.
+- **`Conservation`:** the change of each total that the boundaries, sources
+  and repairs do not explain, relative to the total. Round-off, as here, is a
+  healthy run; Mallard warns above 10<sup>5</sup> machine epsilons, and
+  anything near that is a bug to report, not a setting to tune.
+- **`Output`:** the time per step spent writing files, by the time loop
+  (`output_sync`) and by the background writers (`output_async`), on the
+  slowest rank. Next to `wall/step` it should stay small; when it grows on a
+  cluster, the shared file system is the bottleneck.
+
+Mixtures add `Repairs` (the composition clips of the chemistry) and
+`Elements`; [Run health](../guide/output.md#run-health) has every field.
+`mallard.jsonl` is flushed at each row, so a script can follow the health
+while the job runs, from any node that sees the case directory:
+
+```python
+import json
+for line in open("mallard.jsonl"):
+    r = json.loads(line)
+    if r["type"] == "progress" and "health" in r:
+        h = r["health"]
+        print(r["step"], h["margins"]["p"]["value"], h["activity"]["troubled_cells"]["rank_max"],
+              max(abs(b["relative"]) for b in h["balance_run"].values() if b["checked"]))
+```
+
+```text
+461 0.9873881089968589 0 0
+500 0.989614939736035 0.05876736111111111 2.115455742435417e-13
+...
+1167 0.9874959351011933 0.06744791666666666 1.3776078206902286e-13
+```
+
 ## 5. Stop, and resume from the newest restart
 
 A scheduler ends a job with a signal: Slurm with `SIGUSR2` five minutes before
@@ -408,7 +463,8 @@ and add a `[[write_data]]` restart writer to the input as in section 1. Then:
   describes them.
 
 In each, check the rank report in the first minute (one rank per GPU, no
-warnings), then follow the progress rows or `mallard ctl status` as above.
+warnings), then follow the progress rows or `mallard ctl status` as above, and
+read the run health at the end of each job.
 [Running on clusters](../guide/parallel.md#running-on-clusters) has the
 scripts' details: signals, grace periods and binding with other MPIs.
 
