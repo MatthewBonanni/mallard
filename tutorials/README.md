@@ -9,6 +9,7 @@ input file and the Python scripts that set it up and draw its figures, and
 |---|---|
 | `wedge/` | [Oblique shock on a ramp](../docs/tutorials/wedge.md) (2D, generated mesh) against the θ-β-M relation |
 | `cylinder/` | [Vortex shedding behind a cylinder](../docs/tutorials/cylinder.md) (2D, Gmsh) at Re = 100 against reference computations |
+| `airfoil/` | [Laminar airfoil](../docs/tutorials/airfoil.md): NACA 0012 drag and lift against the High-Order CFD Workshop |
 | `cone/` | [Supersonic flow over a cone](../docs/tutorials/cone.md) (3D) against the Taylor-Maccoll solution |
 | `channel_les/` | [Channel LES](../docs/tutorials/channel_les.md): turbulent channel at Re_τ = 180 against DNS |
 
