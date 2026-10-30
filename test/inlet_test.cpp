@@ -814,6 +814,9 @@ TEST(ForcedInletTest, TimeDependentConditionsConvergeAtTheIntegratorsOrder) {
          {"", "type = \"mass_flow_inlet\"\nmass_flux = 0.5\nT = 1.0\n", "", UNIT_GAS}, 2.6},
         {{"moving wall u(t)", "", "type = \"wall_adiabatic\"\nu = " + wall_u + "\n", viscous},
          {"", "", "type = \"wall_adiabatic\"\nu = " + wall_0 + "\n", viscous}, 2.6},
+        {{"dirichlet rho(t)", "type = \"dirichlet\"\nrho = \"1 + 0.1 * sin(40 * t)\"\nu = " + u0 + "\np = 1.0\n", "",
+          UNIT_GAS},
+         {"", "type = \"dirichlet\"\nrho = 1.0\nu = " + u0 + "\np = 1.0\n", "", UNIT_GAS}, 2.6},
     };
     for (const Case & c : cases) {
         const std::vector<double> reference = forced_run(c.forced, c.dt / 8);
@@ -869,10 +872,10 @@ TEST(ForcedInletTest, NumberOfTThatTurnsNegativeIsAnInputErrorWithFaceAndTime) {
 }
 
 TEST(ForcedInletTest, ConditionsOfTKeepTheStepGraph) {
-    // Single-gas conditions of t (an upt inlet, a moving wall) run as one
-    // CUDA graph per step, which replays their device evaluation at each
-    // stage time and, for the CFL time step, at the step's start: the same
-    // solution as stepping kernel by kernel
+    // Single-gas conditions of t (an upt inlet, a moving wall, a dirichlet
+    // state) run as one CUDA graph per step, which replays their device
+    // evaluation at each stage time and, for the CFL time step, at the step's
+    // start: the same solution as stepping kernel by kernel
 #ifndef KOKKOS_ENABLE_CUDA
     GTEST_SKIP() << "CUDA builds only";
 #else
@@ -883,6 +886,8 @@ TEST(ForcedInletTest, ConditionsOfTKeepTheStepGraph) {
     const ForcedCase cases[] = {
         {"upt u(t), T(t)", "type = \"upt\"\nu = " + u + "\np = 1.0\nT = \"1 + 0.2 * sin(20 * t)\"\n", "", UNIT_GAS},
         {"moving wall u(t)", "", "type = \"wall_adiabatic\"\nu = " + wall_u + "\n", viscous},
+        {"dirichlet rho(t)", "type = \"dirichlet\"\nrho = \"1 + 0.1 * sin(20 * t)\"\nu = " + u + "\np = 1.0\n", "",
+         UNIT_GAS},
     };
     for (const ForcedCase & c : cases) {
         auto run = [&](const bool graphs) {
@@ -909,13 +914,15 @@ TEST(ForcedInletTest, ConditionsOfTKeepTheStepGraph) {
 TEST(ForcedInletTest, ExpressionThatLoopsForeverIsAnInputError) {
     // Evaluated on the device at the stage times, a loop that never ends past
     // t = 0.01 stops at the iteration limit and the run reports it
-    try {
-        forced_run({"T(t) loops", "type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") +
-                                      "\np = 1.0\nT = \"var i := 0; while (t > 0.01 and i >= 0) { i += 1 }; 1 + t\"\n",
-                    "", UNIT_GAS},
-                   0.004);
-        FAIL() << "no error";
-    } catch (const InputError & e) {
-        EXPECT_NE(std::string(e.what()).find("loop iterations"), std::string::npos) << e.what();
+    const std::string u = N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]";
+    const std::string loops = "\"var i := 0; while (t > 0.01 and i >= 0) { i += 1 }; 1 + t\"";
+    for (const std::string & left : {"type = \"upt\"\nu = " + u + "\np = 1.0\nT = " + loops + "\n",
+                                     "type = \"dirichlet\"\nrho = " + loops + "\nu = " + u + "\np = 1.0\n"}) {
+        try {
+            forced_run({"loops", left, "", UNIT_GAS}, 0.004);
+            ADD_FAILURE() << "no error: " << left;
+        } catch (const InputError & e) {
+            EXPECT_NE(std::string(e.what()).find("loop iterations"), std::string::npos) << e.what();
+        }
     }
 }
