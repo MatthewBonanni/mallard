@@ -257,6 +257,7 @@ TEST(ErrorMessages, BoundaryOptionsThatDontComposeNameBoth) {
                  {".p: with average = true is one area-averaged pressure: it may depend on t, not on x, y or z"});
     expect_parts(error("type = \"outlet_pressure\"\np = 1.0\nnscbc = { L = 1.0, sigma_T = 1.0 }\n"),
                  {".nscbc.sigma_T: doesn't apply to an outlet's nscbc"});
+}
 
 TEST(ErrorMessages, InitialRegionsAndDataNameTheEntryAndTheColumns) {
     const std::string region = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.2}"
