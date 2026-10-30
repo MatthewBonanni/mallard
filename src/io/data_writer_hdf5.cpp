@@ -66,6 +66,10 @@ std::string DataWriter::xdmf_grid(const std::string & stem, double t, const std:
         const bool is_vector = field.n_vtk_components() > 1;
         out << indent << "  <Attribute Name=\"" << field.name << "\" AttributeType=\""
             << (is_vector ? "Vector" : "Scalar") << "\" Center=\"Cell\">\n"
+            << indent << "    <Information Name=\"units\" Value=\"" << field_units::xml_escape(field.description.units())
+            << "\"/>\n"
+            << indent << "    <Information Name=\"long_name\" Value=\""
+            << field_units::xml_escape(field.description.long_name) << "\"/>\n"
             << indent << "    <DataItem Dimensions=\"" << n_cells << (is_vector ? " 3" : "") << "\" " << real << ">"
             << data_h5 << ":/fields/" << field.name << "</DataItem>\n"
             << indent << "  </Attribute>\n";
@@ -126,45 +130,6 @@ uint64_t xdmf_type(uint32_t n_nodes) {
     if (N_DIM == 3 && n_nodes == 8) return 9;  // Hexahedron
     throw std::runtime_error("DataWriter: no XDMF cell type for a " + std::to_string(N_DIM) + "D cell with " +
                              std::to_string(n_nodes) + " nodes.");
-}
-
-/**
- * @brief write_rows: compressed with HDF5's shuffle and deflate filters, which
- *        compress on one thread, or, in a file of this rank alone (serial),
- *        with the same chunks compressed on n_threads threads and written
- *        directly.
- */
-template <typename T>
-void write_dataset(hid_t parent, const char * name, uint64_t n_rows, int cols, uint64_t first, uint64_t n,
-                   const T * data, hid_t dxpl, bool deflate, bool serial, unsigned n_threads) {
-    if (!(deflate && serial && compression::have_zlib() && n_rows > 0 && first == 0 && n == n_rows)) {
-        write_rows(parent, name, n_rows, cols, first, n, data, dxpl, deflate);
-        return;
-    }
-    const int rank = cols > 1 ? 2 : 1;
-    const hsize_t dims[2] = {n_rows, hsize_t(cols)};
-    const hsize_t chunk_rows = std::min<hsize_t>(n_rows, CHUNK_ROWS);
-    const hsize_t chunk[2] = {chunk_rows, hsize_t(cols)};
-    Handle space(H5Screate_simple(rank, dims, nullptr), H5Sclose, "H5Screate_simple");
-    Handle dcpl(H5Pcreate(H5P_DATASET_CREATE), H5Pclose, "H5Pcreate");
-    check(H5Pset_chunk(dcpl, rank, chunk), "H5Pset_chunk");
-    check(H5Pset_shuffle(dcpl), "H5Pset_shuffle");
-    check(H5Pset_deflate(dcpl, 1), "H5Pset_deflate");
-    Handle dset(H5Dcreate2(parent, name, file_type<T>(), space, H5P_DEFAULT, dcpl, H5P_DEFAULT), H5Dclose,
-                std::string("creating ") + name);
-    // Chunks are stored whole: the last one is padded with zeros (HDF5's fill value)
-    const size_t chunk_values = size_t(chunk_rows) * size_t(cols);
-    std::vector<std::vector<char>> chunks((n_rows + chunk_rows - 1) / chunk_rows);
-    compression::parallel_for(chunks.size(), n_threads, [&](size_t c) {
-        std::vector<T> values(chunk_values, T(0));
-        const size_t at = c * chunk_values;
-        std::copy(data + at, data + std::min(at + chunk_values, size_t(n_rows) * size_t(cols)), values.begin());
-        chunks[c] = compression::deflate(values.data(), values.size() * sizeof(T), sizeof(T));
-    });
-    for (size_t c = 0; c < chunks.size(); c++) {
-        const hsize_t offset[2] = {c * chunk_rows, 0};
-        check(H5Dwrite_chunk(dset, dxpl, 0, offset, chunks[c].size(), chunks[c].data()), std::string("writing ") + name);
-    }
 }
 
 } // namespace
@@ -247,6 +212,7 @@ void DataWriter::write_hdf5_mesh() {
         Handle group(H5Gcreate2(file, "nodes", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
         write_dataset(group, "coordinates", n_nodes, N_DIM, node_order.first(), node_order.size(), block_coords.data(),
                       dxpl, deflate, !distributed, io_threads);
+        annotate(group, "coordinates", FieldDescription{dim::length, "node coordinates", "", ""});
     }
     {
         Handle group(H5Gcreate2(file, "cells", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
@@ -303,6 +269,7 @@ void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t, co
         }
         write_dataset(group, field.name.c_str(), cell_order.n_global(), int(n_comp), cell_order.first(), n,
                       column.data(), dxpl, deflate, !distributed, io_threads);
+        annotate(group, field.name, field.description);
         c0 += n_comp;
     }
 }

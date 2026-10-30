@@ -9,7 +9,7 @@ set(MALLARD_TEST_SOURCES
     source_terms_test.cpp
     case_template_test.cpp
     front_end_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/front_end.cpp
+    cli_test.cpp
     time_integrator_test.cpp
     binding_test.cpp
     comm_test.cpp
@@ -35,6 +35,7 @@ set(MALLARD_TEST_SOURCES
     synthetic_inflow_test.cpp
     provenance_test.cpp
     input_upgrade_test.cpp
+    field_units_test.cpp
     format_compat_test.cpp
     wall_model_test.cpp
     units_test.cpp
@@ -114,7 +115,7 @@ FetchContent_MakeAvailable(googletest)
 
 target_link_libraries(mallard-test PRIVATE gtest)
 
-target_link_libraries(mallard-test PRIVATE MallardCore)
+target_link_libraries(mallard-test PRIVATE MallardCommands)
 # Malformed CGNS files written by the tests
 if(Mallard_ENABLE_CGNS)
     target_link_libraries(mallard-test PRIVATE ${MALLARD_CGNS_LIBRARY})

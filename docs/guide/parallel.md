@@ -66,7 +66,14 @@ With generated meshes, and with meshes converted to Mallard's HDF5 format (`mall
 
 ### Output
 
-Each rank writes the cells it owns as a piece, `<prefix>_<step>_p<rank>.vtu`, and rank 0 writes a `<prefix>_<step>.pvtu` that assembles them; the `.pvd` series points at the `.pvtu` files, so ParaView opens a parallel run exactly like a serial one:
+With the default VTKHDF output every rank writes the cells it owns into one shared file per snapshot, at their global places (parallel HDF5), so the files of a run are the same on any number of ranks:
+
+```text
+solut/r.vtkhdf.series
+solut/r_000100.vtkhdf
+```
+
+With `format = "vtu"` (and in builds without parallel HDF5) each rank writes the cells it owns as a piece, `<prefix>_<step>_p<rank>.vtu`, and rank 0 writes a `<prefix>_<step>.pvtu` that assembles them; the `.pvd` series points at the `.pvtu` files, so ParaView opens a parallel run exactly like a serial one:
 
 ```text
 solut/r.pvd

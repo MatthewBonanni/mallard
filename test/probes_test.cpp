@@ -32,6 +32,7 @@
 #include "test_utils.h"
 
 #ifdef Mallard_HAS_HDF5
+#include "hdf5_output.h"
 #include "hdf5_util.h"
 #endif
 
@@ -390,6 +391,8 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
                            geometry;
 #ifdef Mallard_HAS_HDF5
         text += "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" + dir + "/" + sub + "/h.h5\"\n" + geometry;
+        text += "[[probes]]\nname = \"vk\"\nformat = \"vtkhdf\"\nfile = \"" + dir + "/" + sub + "/k.vtkhdf\"\n" +
+                geometry;
 #endif
         return text + "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/r\"\nformat = \"restart\"\ninterval = 4\n";
     };
@@ -441,6 +444,18 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
         for (size_t k = 0; k < 4; k++) {
             for (size_t p = 0; p < 12; p++) EXPECT_EQ(rtype(rho[k * 12 + p]), rtype(csv[k * 12 + p].at("RHO")));
         }
+    }
+    // VTKHDF: one PolyData of the curve, its point values at each of the 4 snapshots
+    if (comm::is_root()) {
+        EXPECT_EQ(h5_all_datasets(dir + "/b/k.vtkhdf"), h5_all_datasets(dir + "/a/k.vtkhdf"));
+        const std::string k = dir + "/a/k.vtkhdf";
+        EXPECT_EQ(h5_values<int64_t>(k, "VTKHDF/Lines/NumberOfCells"), std::vector<int64_t>{1});
+        EXPECT_EQ(h5_values<int64_t>(k, "VTKHDF/NumberOfPoints"), std::vector<int64_t>{12});
+        EXPECT_EQ(h5_values<double>(k, "VTKHDF/Steps/Values").size(), 4u);
+        EXPECT_EQ(h5_values<int64_t>(k, "VTKHDF/Steps/PointDataOffsets/RHO"), (std::vector<int64_t>{0, 12, 24, 36}));
+        const auto rho = h5_values<double>(k, "VTKHDF/PointData/RHO");
+        ASSERT_EQ(rho.size(), 48u);
+        for (size_t i = 0; i < rho.size(); i++) EXPECT_EQ(rtype(rho[i]), rtype(csv[i].at("RHO")));
     }
     if (comm::is_root()) {
         h5::Handle file(H5Fopen((dir + "/b/h.h5").c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening");

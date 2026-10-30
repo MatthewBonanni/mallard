@@ -90,7 +90,7 @@ class Probes {
         void annotate(const std::string & csv_line);
 
         enum class Sampling { CELL, POINT };
-        enum class Format { CSV, HDF5, VTP };
+        enum class Format { CSV, HDF5, VTP, VTKHDF };
         enum class Reduction { INTEGRAL, MEAN, FAVRE, MIN, MAX, RMS };
 
         /** @brief This rank's share of a set of samples, and their values on the device. */
@@ -142,11 +142,13 @@ class Probes {
             Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
             std::vector<std::pair<double, std::string>> series;  // vtp: (t, file) of the .pvd
+            uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
 
             bool due(uint64_t step, rtype t) const;
             uint64_t n_evaluated() const { return codes.extent(0); }
             void write_hdf5(uint64_t step, rtype t, const std::vector<double> & values) const;
             void write_vtp(uint64_t step, rtype t, const std::vector<double> & values);
+            void write_vtkhdf(rtype t, const std::vector<double> & values);
             void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
                                   const std::vector<double> & quad) const;
         };

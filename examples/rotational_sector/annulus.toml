@@ -49,6 +49,5 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/annulus"
-format = "vtu"
 time_interval = 0.5
 variables = ["RHO", "RHOU", "RHOE", "P"]
