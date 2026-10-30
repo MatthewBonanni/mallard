@@ -1464,6 +1464,12 @@
   ],
   "set_in": []
  },
+ "initialize.regions.region.flip": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "initialize.regions.region.normal": {
   "dims": [
    2
@@ -1487,6 +1493,12 @@
   "set_in": [
    "examples/shock_bubble_2d/input.toml"
   ]
+ },
+ "initialize.regions.region.resolution": {
+  "dims": [
+   2
+  ],
+  "set_in": []
  },
  "initialize.regions.region.rotate": {
   "dims": [
