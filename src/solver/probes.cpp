@@ -863,7 +863,7 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
             }
         }
     }
-    for (const char * k : {"type", "sampling", "format", "file", "samples"}) {
+    for (const char * k : {"type", "boundary", "boundary_type", "sampling", "format", "file", "samples"}) {
         if (p.from_region && entry.contains(k)) {
             throw InputError(key + "." + k + ": a region probe writes only its reductions, to reductions_file; " +
                              k + " applies to points and curves.");

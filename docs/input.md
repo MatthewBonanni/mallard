@@ -943,6 +943,7 @@ ranks. A probe that is not due costs nothing.
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions). A volume (an area in 2D) is reduced over its cells (below); a region of lower dimension or a boundary zone (by name) is sampled as the `type` keys or `boundary` of it would. Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
+| `region` | Instead of `shape`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
 | `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
@@ -1111,8 +1112,8 @@ fraction `f`: `integral` is `sum f V q`, `mean` `sum f V q / sum f V`, `favre`
 rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
 radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
 in global cell order, so they are the same bit for bit on any number of ranks.
-A region probe has no samples: `type`, `sampling`, `format`, `file` and
-`samples` do not apply. The region must cover part of some cell.
+A region probe has no samples: `type`, `boundary`, `boundary_type`,
+`sampling`, `format`, `file` and `samples` do not apply. The region must cover part of some cell.
 
 ```toml
 # Fuel mass and the extreme temperatures in the combustor
@@ -1205,7 +1206,7 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 ## Regions
 
 Regions select parts of space in `[[sources]]`, `[[sponges]]`, `[[probes]]`,
-`[[write_data]]` and `[[initialize.regions]]` (explained with figures in the
+`[[write_data]]`, `[[initialize.regions]]` and `[[initialize.data]]` (explained with figures in the
 [geometry guide](guide/geometry.md#regions)). Each `region` key takes a table,
 or the name of a region defined once in [`[regions]`](#named-regions-regions)
 or of a [region of the mesh](#regions-of-the-mesh). A region is a primitive, a
@@ -1257,6 +1258,9 @@ least aligned with `normal`).
 
 The parts of a boolean (the entries of `regions`, `a` and `b`) and `of` may be
 names of `[regions]` or of the mesh too.
+
+The parts of a boolean (the entries of `regions`, `a` and `b`) may be names of
+`[regions]` too.
 
 Any region, primitive or boolean, may also have, applied in this order:
 

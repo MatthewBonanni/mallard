@@ -19,7 +19,7 @@ region = "cylinder"           # a boundary zone, a slice, a volume: any region (
 variables = ["P", "T"]
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 42 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -170,7 +170,7 @@ Pitfalls:
 check_interval = 100   # a progress row every 100 steps
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 42 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, summaries of mesh, physics, numerics, boundaries and output, then one
@@ -409,10 +409,10 @@ CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
 volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
 variable's units, `integral` times those of the measure (`m` along a curve,
 `m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`;
-over a region its `volume`, `m3`, or `area`, `m2` per unit depth in 2D). In axisymmetric runs,
+over a region its `volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
 forces, integrals and region probes are per radian of the revolved domain, and their units
 say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
-(`m2 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
+(`m2 rad-1`), region probes' `volume` (`m3 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
 field's units, `spectrum`, `correlation` and `shell` (sums, not densities)
 the product of their pair's (`U_X*U_Y`: `m2 s-2`); the `abscissa` is a
 wavenumber in `m-1` (spectra, shells) or a separation in `m` (correlations).
@@ -564,6 +564,16 @@ A probe samples the solution on a geometry every `interval` steps (or
 `time_interval` of simulation time) and writes the samples, reductions over
 them, or both; a probe of a [region](#region-probes) writes integrals, means and
 extrema over it. The files are the same bit for bit on any number of ranks.
+
+On a GPU the files have the CPU's rows, in the same order, with the same steps,
+times, coordinates, normals and areas: the geometry is set up on the host, and
+rank 0 reduces the gathered samples on the host in sample order. The values agree
+with a CPU run to rounding, not bit for bit, since the device rounds the solution
+and its point values differently (fused multiply-adds, its own math functions).
+The test suite checks every backend against a CPU reference (`test/data/probes`):
+indices, steps and times exactly, geometry to 1e-14 and values to 1e-10 of each
+column's largest magnitude. The geometry tolerance covers other CPUs and
+compilers only; on one host the geometry of every backend is the same bit for bit.
 
 ```toml
 [[probes]]
@@ -760,8 +770,8 @@ Pitfalls:
 
 - Values are cell averages, so `min` and `max` are those of the cells, not of
   the field inside them, and include cells the region only touches.
-- A region probe has no samples: `type`, `sampling`, `format`, `file` and
-  `samples` do not apply to it.
+- A region probe has no samples: `type`, `boundary`, `boundary_type`,
+  `sampling`, `format`, `file` and `samples` do not apply to it.
 
 ## Post-processing
 

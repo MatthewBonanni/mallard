@@ -134,7 +134,7 @@ class Parser {
         int max_depth = 0;
 
         Parsed parse(const Input & value, const std::string & where, const Frame & parent, const bool top = false) {
-            if (value.is_string()) return named(value.as_string(), where, parent, top);
+            if (value.is_string()) return named(value, where, parent, top);
             return parse_table(value, where, parent);
         }
 
@@ -211,7 +211,8 @@ class Parser {
             return zones && mesh ? mesh->closed(*zones) : p.closed;
         }
 
-        Parsed named(const std::string & name, const std::string & where, const Frame & parent, const bool top) {
+        Parsed named(const Input & value, const std::string & where, const Frame & parent, const bool top) {
+            const std::string name = value.as_string();
             if (!(names && names->as_table().entries().contains(name))) {
                 std::vector<std::string> automatic;
                 if (mesh) automatic = mesh->names();
@@ -224,14 +225,21 @@ class Parser {
                 }
                 std::vector<std::string> defined;
                 if (names) {
-                    for (const auto & [key, value] : names->as_table().entries()) defined.push_back(key);
+                    for (const auto & entry : names->as_table().entries()) defined.push_back(entry.first);
                 }
                 std::sort(defined.begin(), defined.end());
-                throw InputError(where + ": no region named \"" + name + "\" in [regions] (" +
-                                 (defined.empty() ? std::string("none defined") : "defined: " + join(defined)) +
-                                 ") or of the mesh (" +
-                                 (automatic.empty() ? std::string("none here") : join(automatic)) +
-                                 "). See docs/guide/geometry.md#named-regions.");
+                std::vector<std::string> valid = defined;
+                valid.insert(valid.end(), automatic.begin(), automatic.end());
+                throw InputError(Diagnostic{.key = where,
+                                            .line = line_of(value),
+                                            .message = "no region named \"" + name + "\" in [regions] (" +
+                                                       (defined.empty() ? std::string("none defined")
+                                                                        : "defined: " + join(defined)) +
+                                                       ") or of the mesh (" +
+                                                       (automatic.empty() ? std::string("none here") : join(automatic)) + ")",
+                                            .suggestion = suggest_value(name, valid),
+                                            .fix = "Define it as [regions." + name + "], or give the region as a table",
+                                            .docs = "docs/guide/geometry.md#named-regions"});
             }
             const Input & t = names->at(name);
             const auto repeat = std::find(resolving.begin(), resolving.end(), name);
