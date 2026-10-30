@@ -114,10 +114,10 @@ class Server {
 };
 
 /**
- * @brief `mallard ctl <run-dir> <command>`: sends the command to the run's
- *        socket and prints the reply. Returns the exit status.
+ * @brief `mallard ctl <run-dir> <command>`: sends the command to the socket of
+ *        the run in run_dir and prints the reply. Returns the exit status.
  */
-int ctl_main(int argc, char ** argv);
+int ctl(const std::string & run_dir, const std::string & command);
 
 /** @brief Sends one command line to the socket in run_dir; the reply, or throws. */
 std::string send(const std::string & run_dir, const std::string & command);

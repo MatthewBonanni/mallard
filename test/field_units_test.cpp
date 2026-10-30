@@ -131,6 +131,7 @@ std::string channel(const std::string & dir) {
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\nrun_log = \"\"\n"
       << "[statistics]\nfields = [\"RHO\", \"U_X\", \"P\"]\nproducts = [\"U_X*P\", \"RHO*RHO\"]\n"
+      << "[statistics.spectra]\nfields = [\"U_X\", \"P\"]\nproducts = [\"U_X*P\"]\nfile = \"" << dir << "/spectra.csv\"\n"
       << "[integrals]\nfile = \"" << dir << "/integrals.csv\"\n"
       << "[[forces]]\nzone = \"bottom\"\nfile = \"" << dir << "/forces.csv\"\n"
       << "[[probes]]\nname = \"point\"\nfile = \"" << dir << "/point.csv\"\npoint = " << SIDE_POINT
@@ -289,6 +290,27 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
     EXPECT_EQ(integrals["kinetic_energy"], N_DIM == 3 ? "kg m2 s-2" : "kg m s-2");
     EXPECT_EQ(integrals["temperature"], N_DIM == 3 ? "m3 K" : "m2 K");
     EXPECT_EQ(integrals["dilatation_squared"], measure + " s-2");
+    // Spectra: each row's value has its quantity's units (sums, not densities: the product's)
+    {
+        std::ifstream spectra(dir + "/spectra.csv");
+        std::vector<std::string> header;
+        std::map<std::string, std::string> seen;
+        for (std::string row; std::getline(spectra, row);) {
+            if (row.empty() || row[0] == '#') continue;
+            const auto cells = split(row, ',');
+            if (header.empty()) {
+                header = cells;
+                ASSERT_EQ(header.back(), "units");
+                continue;
+            }
+            ASSERT_EQ(cells.size(), header.size()) << row;
+            seen[cells[0] + " " + cells[1] + (cells[0] == "mean" ? "" : "*" + cells[2])] = cells.back();
+        }
+        EXPECT_EQ(seen["mean U_X"], "m s-1");
+        EXPECT_EQ(seen["mean P"], "kg m-1 s-2");
+        EXPECT_EQ(seen["spectrum U_X*P"], units_of("COV_U_X_P"));
+        EXPECT_EQ(seen["correlation U_X*P"], units_of("COV_U_X_P"));
+    }
     // The provenance follows the units
     std::ifstream in(dir + "/integrals.csv");
     std::string line;
@@ -351,5 +373,36 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
         }
     }
 #endif
+    if (!::testing::Test::HasFailure()) std::filesystem::remove_all(dir);
+}
+
+TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
+    if (N_DIM != 2) GTEST_SKIP() << "axisymmetric runs are 2D";
+    const std::string dir = (scratch_dir() / "mallard_field_units_axisymmetric").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    std::ostringstream s;
+    s << "[run]\nn_steps = 1\ncfl = 0.25\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\nperiodic = [\"x\"]\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"1.0\"\nu = [\"0.5\", \"0.0\"]\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\naxisymmetric = true\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\nrun_log = \"\"\n"
+      << "[integrals]\nfile = \"" << dir << "/integrals.csv\"\n"
+      << "[[forces]]\nzone = \"top\"\nfile = \"" << dir << "/forces.csv\"\n";
+    {
+        Solver solver;
+        solver.init(parse_toml(s.str()));
+        solver.run();
+    }
+    comm::barrier();
+    if (!comm::is_root()) return;
+    // Forces and volume integrals over a radian of the revolved domain
+    EXPECT_EQ(csv_units(dir + "/forces.csv")["Fx_pressure"], "kg m s-2 rad-1");
+    auto integrals = csv_units(dir + "/integrals.csv");
+    EXPECT_EQ(integrals["kinetic_energy"], "kg m2 s-2 rad-1");
+    EXPECT_EQ(integrals["temperature"], "m3 K rad-1");
     if (!::testing::Test::HasFailure()) std::filesystem::remove_all(dir);
 }
