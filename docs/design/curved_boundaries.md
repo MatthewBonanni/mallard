@@ -172,6 +172,16 @@ node and do not converge (L1 0.05 to 0.26). Curved: L1 rates 3.64, 4.86, 5.00,
 5.57 for orders 3-6 (Linf 2.80, 3.99, 4.07, 4.18), L1 at `n_r = 64` 7.7e-6,
 1.5e-7, 1.0e-7, 1.0e-7.
 
+The same circles projected by closest-point iterations (`--geometry
+curved_general`: the inner wall an `implicit` circle, the outer one an
+`ellipse` of equal semi-axes) give the closed form's errors to 3e-10 relative
+(L1, orders 3-6, `n_r` = 4, 8, 16, `M = 2.25`), and the closed form itself
+is bitwise unchanged by #407. Ellipses, ellipsoids, tori, cones, unions and
+implicit surfaces are checked in `test/curved_test.cpp` and
+`test/curved3d_test.cpp`: closest points and their Jacobians, exact areas,
+volumes and centroids of the curved cells, and TENO wall values at the design
+order on ellipses (2D) and ellipsoids (3D) as on circles and spheres.
+
 P3 walls from the Gmsh file (`line4`) match the projected walls to three
 digits at every level. With mirror images across the curved walls
 (`curved_mirrors = true`), orders 3-6 do not converge (L1 1e-2 to 1e-1).
