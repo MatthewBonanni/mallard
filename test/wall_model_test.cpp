@@ -478,7 +478,6 @@ TEST(WallModel3D, RestartIsExact) {
     std::filesystem::remove_all(dir);
 }
 
-#endif
 
 // Each wall takes its own model and parameters: in one run, a gfm wall and an
 // equilibrium wall at different exchange heights each carry the stress they
@@ -516,3 +515,5 @@ TEST(WallModel3D, EachWallTakesItsOwnModel) {
     EXPECT_NE(mixed.second, other_height.second);
     EXPECT_NE(mixed.first, both_ode.first);
 }
+
+#endif
