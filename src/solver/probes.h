@@ -28,7 +28,10 @@
 #include "face_reconstruction.h"
 #include "gradient.h"
 #include "mesh.h"
+#include "physics.h"
+#include "boundary.h"
 #include "probe_geometry.h"
+#include "probe_surface.h"
 #include "statistics.h"
 
 /**
@@ -36,6 +39,8 @@
  *        (halo included, with current boundary states), the least-squares
  *        gradient functor that fills `gradients` from W, and the face
  *        reconstruction, whose polynomials (if any) give the point values.
+ *        Wall quantities need the gradients too, and for mixtures the cell
+ *        transport properties.
  */
 struct ProbeFields {
     CellSampler cells;
@@ -43,8 +48,20 @@ struct ProbeFields {
     LSQVertexGradientFunctor gradient;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
     FaceReconstruction * reconstruction = nullptr;
-    rtype gamma = 1.4_r;
+    Euler physics;
+    BoundaryData boundaries;
+    bool viscous = false;
+    bool axisymmetric = false;
+    Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;  // mixtures: frozen gamma per cell, else empty
+    Kokkos::View<rtype *[3]> transport;                      // viscous mixtures: (cell, [mu, lambda, ...]), else empty
+};
+
+/** @brief Reference state of C_f and C_p: dynamic pressure, pressure and flow direction. */
+struct ProbeReference {
+    rtype q = 0.0;
+    rtype p = 0.0;
+    rtype e[N_DIM] = {};
 };
 
 /**
@@ -59,7 +76,7 @@ class Probes {
     public:
         /** @brief Read [[probes]] and locate the samples; resume appends to existing files. */
         void init(const Input & input, const Mesh & mesh, const std::vector<std::string> & species_names,
-                  bool resume);
+                  bool resume, bool viscous);
         /** @brief A restarted run at (step, t): next output times, and series cut back to t. */
         void resume(uint64_t step, rtype t);
 
@@ -67,6 +84,10 @@ class Probes {
         /** @brief Whether a probe due now samples point values (ProbeFields::W must then be current). */
         bool point_values_due(uint64_t step, rtype t) const;
         bool any_point_values() const;
+        /** @brief Whether a probe due now needs the gradients (ProbeFields::W current) / mixture transport properties. */
+        bool gradients_due(uint64_t step, rtype t) const;
+        bool transport_due(uint64_t step, rtype t) const;
+        bool any_gradients() const;
         /** @brief Earliest output time of the time-based probes (infinity if none). */
         rtype next_time() const;
         void write(uint64_t step, rtype t, const ProbeFields & fields);
@@ -92,9 +113,14 @@ class Probes {
         struct Samples {
             uint64_t n_global = 0;
             bool distributed = false;               // samples split over the ranks (else each holds them all)
-            std::vector<uint64_t> ids;              // global index of each local sample
             std::vector<uint64_t> gathered_row;     // rank 0: row in the gathered values of each global sample
             Kokkos::View<uint32_t *> cells;
+            // Samples of surfaces (and 2D curves): their unit normals; samples
+            // on boundary faces: the face and its normal distance from the
+            // cell centroid (empty otherwise)
+            Kokkos::View<rtype *[N_DIM]> normals;
+            Kokkos::View<uint32_t *> faces;
+            Kokkos::View<rtype *> distance;
             Kokkos::View<uint32_t *> inside;        // local samples inside their cell (point values)
             Kokkos::View<uint32_t *> inside_cells;
             Kokkos::View<rtype *[N_DIM]> inside_offsets;  // from the cell centroid
@@ -104,8 +130,16 @@ class Probes {
             Kokkos::View<rtype **, Kokkos::LayoutRight> values;  // (local sample, variable)
 
             /** @brief Locate points (the same on every rank) in the owned cells. */
-            void locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables);
-            void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields);
+            void locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables,
+                        const std::vector<probe::Point> & point_normals = {});
+            /** @brief Points of known cells, all with the normal n (if given). */
+            void in_cells(const Mesh & mesh, const probe::CellPoints & set, const std::vector<probe::Point> & n,
+                          uint32_t n_variables);
+            void set_normals(const std::vector<probe::Point> & n);
+            /** @brief The faces of a face set, sampled on their cell side. */
+            void on_faces(const Mesh & mesh, const probe::FaceSet & set, uint32_t n_variables);
+            void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
+                          const ProbeReference & reference, bool gradients);
             /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
             std::vector<double> gather() const;
         };
@@ -126,6 +160,9 @@ class Probes {
             std::vector<std::string> variables;  // written
             uint32_t rho_column = 0;             // of RHO among the evaluated variables (favre)
             Kokkos::View<int32_t *> codes;       // evaluated: the written ones, then RHO if favre needs it
+            bool gradients = false;              // some variable needs velocity or temperature gradients
+            bool transport = false;              // some variable needs the viscosity or conductivity
+            ProbeReference reference;
             probe::Geometry geometry;
             Samples nodes;
             Samples quadrature;  // curves with reductions

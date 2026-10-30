@@ -15,6 +15,7 @@
 #include <iostream>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -92,6 +93,14 @@ class Watchdog : public ::testing::EmptyTestEventListener {
 } // namespace
 
 int main(int argc, char** argv) {
+    // The help page starts neither MPI nor the device: MPI without its launcher (a singleton) can hang
+    for (int i = 1; i < argc; i++) {
+        const std::string_view arg = argv[i];
+        if (arg == "--help" || arg == "--gtest_help") {
+            ::testing::InitGoogleTest(&argc, argv);
+            return 0;
+        }
+    }
     comm::Session session(argc, argv);
     // Tests run in their own directories, so tests that rerun this binary need its absolute path
     std::string self = argv[0];
