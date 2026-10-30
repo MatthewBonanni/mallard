@@ -6,8 +6,8 @@
         [--launcher 'mpirun -n 2'] [-o ellipsoid.png]
 
 For each mesh scale (make_ellipsoid_mesh.py --scale) and geometry, runs
-examples/ellipsoid/input.toml as it is (curved) or without its [[mesh.curved]]
-entry (flat faces), in RUN_DIR/<geometry>_s<scale> unless that run finished,
+examples/ellipsoid/input.toml as it is (curved) or with [mesh] curved_geometry
+= false (flat faces), in RUN_DIR/<geometry>_s<scale> unless that run finished,
 and reports the drag coefficient (exact: 0), averaged over the last quarter of
 the run and based on the frontal area pi b^2; the entropy error s / s_inf - 1
 (s = p / rho^gamma; exact: 0) at the end, its volume-weighted RMS and maximum
@@ -75,7 +75,7 @@ def run_case(case_dir, args, scale, geometry):
     text = open(os.path.join(HERE, "input.toml")).read()
     text = re.sub(r'(?m)^filename = "ellipsoid.msh"$', f'filename = "{os.path.abspath(mesh)}"', text)
     if geometry == "straight":
-        text = re.sub(r"\[\[mesh\.curved\]\]\n(.+\n)+", "", text)
+        text = text.replace("\n[mesh]\n", "\n[mesh]\ncurved_geometry = false\n", 1)
     text = re.sub(r"(?m)^t_stop = .*$", f"t_stop = {args.t_stop}", text)
     text = re.sub(r"(?m)^order = .*$", f"order = {args.order}", text)
     text = re.sub(r"(?m)^time_interval = .*$", f"time_interval = {args.t_stop / 4}", text)

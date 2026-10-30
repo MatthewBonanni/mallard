@@ -1,22 +1,42 @@
 # Inviscid flow past a prolate spheroid at Mach 0.3 (3D build), with the wall
 # faces curved onto the analytic ellipsoid, against the same mesh with flat
-# faces (without the [[mesh.curved]] entry). The exact steady solution has no
+# faces ([mesh] curved_geometry = false). The exact steady solution has no
 # drag (d'Alembert) and uniform entropy, and its surface pressure is close to
 # incompressible potential flow, Cp = 1 - (1 + k)^2 (1 - n_x^2) with
 # k = 0.2100 for a 2:1 spheroid (Lamb, Hydrodynamics, ch. V; n is the wall
 # normal): any drag and entropy rise are numerical errors, which flat facets
 # make at the wall and the curved faces remove.
 #
-# Mesh: tetrahedra of the quarter domain y >= 0, z >= 0 (y = 0 and z = 0 are
-# symmetry planes), spheroid of length 2 and diameter 1. Generate it first:
+# At reduced size (compare_ellipsoid.py --scales 0.7 1 --t-stop 10), cells
+# near the body:
+#
+#                         tetrahedra     Cd     entropy error   Cp error
+#   curved faces            4,223     -0.0046     5.0e-4          0.044
+#                          11,215     -0.0032     1.4e-4          0.025
+#   flat faces              4,223      0.51       1.3e-2          1.96
+#                          11,215      0.53       7.5e-3          1.75
+#
+# (entropy error: volume-weighted RMS of s / s_inf - 1 within the spheroid
+# scaled by 3; Cp error: RMS against potential flow over the wall faces).
+# Flat facets are corners for the inviscid flow: it turns unsteady, with local
+# Mach numbers up to 0.9 and a quarter of the cells troubled; on the curved
+# faces it stays steady, with the potential-flow peak Mach number 0.367.
+#
+# Mesh: tetrahedra of the quarter y >= 0, z >= 0 of the box [-6, 8] x [-6, 6]^2
+# (y = 0 and z = 0 are symmetry planes), spheroid of length 2 and diameter 1,
+# 627,507 tetrahedra at --scale 4. Generate it first:
 #   python make_ellipsoid_mesh.py ellipsoid.msh --scale 4
 # Nondimensionalization: free-stream density and sound speed 1, so U = M = 0.3.
 #
 # Run, then compare with the flat faces:
 #   ../../build3d/src/mallard -i input.toml
-#   python compare_ellipsoid.py runs --mallard ../../build3d/src/mallard
+#   python compare_ellipsoid.py runs --mallard ../../build3d/src/mallard -o ellipsoid.png
 # (compare_ellipsoid.py runs both geometries on meshes of the given scales and
 # plots the drag, entropy error and wall pressure).
+#
+# Cost: on two loaded CPU threads, 15 us per cell and step; t = 10 on 11,215
+# tetrahedra took 24 minutes (7,960 steps). Not yet run at full size: about
+# 120,000 steps, estimated at 4-5 hours per geometry on one A100.
 
 [run]
 t_stop = 40.0
