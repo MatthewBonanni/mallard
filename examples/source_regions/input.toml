@@ -9,7 +9,7 @@
 #   volume along its long side; its work f . u, an expression of the local
 #   velocity, goes into the energy.
 #
-# The run log lists each source with its region and measure. SOURCE_RHOE and
+# The terminal output lists each source with its region and measure. SOURCE_RHOE and
 # SOURCE_RHOU_X/Y in the snapshots show where they act. The total energy
 # rises by the integral of Q, 10 sqrt(pi) 0.02 = 0.3545, plus the fan's work.
 

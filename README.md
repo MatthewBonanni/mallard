@@ -70,7 +70,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - VTKHDF output for ParaView (default; one file per snapshot written by all ranks in parallel, or one file for the whole series; curved cells as quadratic cells), or VTU; surface output of boundary zones
 - Running means and covariances; probes on points, curves, surfaces, exact cut planes and boundary zones (cell averages or high-order point values; wall shear, C_f, C_p, heat flux, y+ and fluxes through any surface; CSV, HDF5 or VTK, with integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces
 - Heat release, species production rates and detonation soot foils (`P_MAX`)
-- A machine-readable JSON-lines run log, and provenance (code version, build, input and mesh hashes, resolved setup) and units (CF attributes in VTKHDF and HDF5, XDMF information, VTK field data, a CSV units line) in every output file
+- A machine-readable JSON-lines run record (`mallard.jsonl`), and provenance (code version, build, input and mesh hashes, resolved setup) and units (CF attributes in VTKHDF and HDF5, XDMF information, VTK field data, a CSV units line) in every output file
 - `mallard reactor`, a 0D reactor, and Python tools for plotting, animation and VTKHDF and HDF5 output
 
 **Run control** ([docs](docs/guide/running.md))

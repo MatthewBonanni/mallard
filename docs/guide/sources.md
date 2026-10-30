@@ -66,7 +66,7 @@ region = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.01
 
 | Key | Default | Meaning |
 |---|---|---|
-| `name` | `sources[i]` | Name in the run log |
+| `name` | `sources[i]` | Name in the terminal output |
 | `region` | everywhere | Where the source acts (below); values are multiplied by each cell's volume fraction |
 | `total` | `false` | Values are integrated rates over the region (kg/s, N, W) instead of densities; they may depend on `t` only |
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`"5 MW/m^3"`; with `total`, `"50 W"`) or expressions in SI units |

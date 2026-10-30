@@ -77,7 +77,9 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[chemistry]`, `[radiation]` | no | [Thermochemistry](thermochemistry.md) |
 | `[les]`, `[les.combustion]` | no | [Large-eddy simulation](les.md) |
 | `[source]`, `[[sponges]]` | no | [Sources and sponges](sources.md) |
-| `[[write_data]]`, `[output]`, `[[forces]]`, `[integrals]`, `[statistics]`, `[[probes]]` | no | [Output and diagnostics](output.md) |
+| `[[write_data]]`, `[output]` | no | [Output](output.md) |
+| `[[probes]]`, `[[forces]]`, `[integrals]` | no | [Probes and monitors](probes.md) |
+| `[statistics]` and its subtables | no | [Statistics](statistics.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
 Shapes that several tables use (regions, probe points and curves) are on

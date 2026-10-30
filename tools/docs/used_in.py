@@ -78,15 +78,15 @@ RULES = {
     ("numerics.md", "## Time integration and other options"):
         (lambda t: num(t).get("time_integrator", "SSPRK3") != "SSPRK3",
          "every example keeps the default, `SSPRK3`; the others are in the time-integration tests"),
-    ("output.md", "## Snapshots: `[[write_data]]`"): (lambda t: "write_data" in t, None),
-    ("output.md", "## The log"): (lambda t: "check_interval" in t.get("output", {}), None),
-    ("output.md", "## Wall forces: `[[forces]]`"): (lambda t: "forces" in t, None),
-    ("output.md", "## Domain integrals: `[integrals]`"): (lambda t: "integrals" in t, None),
-    ("output.md", "## Statistics"): (lambda t: "statistics" in t, None),
-    ("output.md", "### Spectra and two-point correlations: `[statistics.spectra]`"):
+    ("output.md", "## Solution snapshots: `[[write_data]]`"): (lambda t: "write_data" in t, None),
+    ("output.md", "### Terminal output"): (lambda t: "check_interval" in t.get("output", {}), None),
+    ("probes.md", "## Wall forces: `[[forces]]`"): (lambda t: "forces" in t, None),
+    ("probes.md", "## Domain integrals: `[integrals]`"): (lambda t: "integrals" in t, None),
+    ("statistics.md", "## Time averages: `[statistics]`"): (lambda t: "statistics" in t, None),
+    ("statistics.md", "## Spectra and two-point correlations: `[statistics.spectra]`"):
         (lambda t: "spectra" in t.get("statistics", {}), "the in-situ statistics tests"),
-    ("output.md", "### Phase averages: `[statistics.phase]`"): (lambda t: "phase" in t.get("statistics", {}), None),
-    ("output.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
+    ("statistics.md", "## Phase averages: `[statistics.phase]`"): (lambda t: "phase" in t.get("statistics", {}), None),
+    ("probes.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
     ("physics.md", "## Euler and Navier–Stokes"): (lambda t: "type" in t.get("physics", {}), None),
     ("physics.md", "### Viscosity laws"): (lambda t: "viscosity_model" in t.get("physics", {}), None),
     ("physics.md", "## Gas mixtures"): (lambda t: t.get("physics", {}).get("gas") == "mixture", None),

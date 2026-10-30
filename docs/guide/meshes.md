@@ -303,7 +303,7 @@ mpirun -n 8 mallard mesh convert input.toml mesh.h5  # the mesh of an input, wri
 and then `filename = "mesh.h5"`. Generated meshes are always produced per
 rank, so no rank ever holds a whole generated or HDF5 mesh. The file layout is
 in the [input reference](../input.md#mesh). Later releases keep reading these
-files ([compatibility](output.md#file-formats-and-compatibility)).
+files ([compatibility](output.md#formats-and-compatibility)).
 
 ## Curved boundaries
 

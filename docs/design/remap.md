@@ -113,7 +113,7 @@ Where the meshes cover different domains (a curved wall discretized
 differently, a shorter source box), a target cell's average is over the part
 the source covers; cells the source misses entirely take the average of the
 source cell with the nearest centroid (found through the same trees, ties to
-the lower id). The run log reports how many cells were partly or wholly
+the lower id). The terminal output reports how many cells were partly or wholly
 uncovered. Conservation then holds only over the common part. Curved
 boundary geometry (`apply_curved`) is not used: cells are their straight
 sided polytopes.

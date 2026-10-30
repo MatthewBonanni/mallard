@@ -280,7 +280,7 @@ fan from the face's first vertex. The stencil has $n_s$ entries
 (`small_stencil_size`: 10 in 2D, $2N_2 = 18$ in 3D), up to $2n_s$ so as not to
 split a tie. A face whose cone holds fewer than $n_s$ candidates, whose tie
 cannot be resolved within $2n_s$, or whose fit is rejected has no sector
-stencil; the log counts these ("sector stencils cut by boundaries"), which
+stencil; the terminal output counts these ("sector stencils cut by boundaries"), which
 occur at corners of the domain. A troubled cell then chooses among the
 stencils it has.
 
@@ -493,7 +493,7 @@ device memory, a team of threads per cell on GPUs. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
 and on the host, so it is independent of the batch, the thread count and
-where it ran. The log's "TENO setup" row gives the execution space and the
+where it ran. The terminal output's "TENO setup" row gives the execution space and the
 time of each phase.
 
 The tables are packed without padding to the largest stencil: per cell, the

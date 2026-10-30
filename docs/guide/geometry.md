@@ -10,8 +10,8 @@ and how Mallard puts them on a mesh. Every key, with its default, is in the
 | Feature | Geometry | Guide |
 |---|---|---|
 | `[[sources]]` `region` | a [region](#regions) | [Sources](sources.md#regions) |
-| `[[probes]]` | a [point set or curve](#point-sets-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
-| `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
+| `[[probes]]` | a [point set or curve](#point-sets-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
+| `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `[[mesh.curved]]` | `circle`, `sphere` or `cylinder` of its own keys (to move onto regions: [#407](https://github.com/MatthewBonanni/mallard/issues/407)) | [Curved boundaries](meshes.md#curved-boundaries) |
@@ -261,7 +261,7 @@ TENO converges at the scheme's order:
 
 Use `point` to compare with references or to measure orders of accuracy, and
 `cell` for robust values across shocks. Details and pitfalls:
-[Output](output.md#probes-probes).
+[Probes and monitors](probes.md#accuracy-and-pitfalls).
 
 ## Boundary zones
 
@@ -311,5 +311,5 @@ with h5py.File("probe_wake.h5") as f:
 ## See also
 
 - [Input reference: regions](../input.md#regions), [`[[sources]]`](../input.md#sources), [`[[probes]]`](../input.md#probes), [`[mesh]`](../input.md#mesh)
-- [Sources and sponges](sources.md), [Output and diagnostics](output.md#probes-probes), [Meshes](meshes.md#curved-boundaries)
+- [Sources and sponges](sources.md), [Probes and monitors](probes.md), [Meshes](meshes.md#curved-boundaries)
 - Figures: [`tools/docs/geometry.py`](../../tools/docs/geometry.py), [`tools/docs/regions.py`](../../tools/docs/regions.py)
