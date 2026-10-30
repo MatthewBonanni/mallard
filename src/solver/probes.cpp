@@ -46,10 +46,7 @@ Kokkos::View<T *> to_device(const std::vector<T> & v, const char * label) {
     return d;
 }
 
-void make_parent(const std::string & file) {
-    const std::filesystem::path parent = std::filesystem::path(file).parent_path();
-    if (!parent.empty()) std::filesystem::create_directories(parent);
-}
+void make_parent(const std::string & file) { create_parent_directories("the probe file", file); }
 
 /** @brief A CSV file with a header of columns and their units, or the end of an existing one (resume). */
 std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume,
@@ -57,7 +54,7 @@ std::shared_ptr<std::ofstream> open_csv(const std::string & file, bool resume,
     if (!output_files_enabled()) return std::make_shared<std::ofstream>();
     make_parent(file);
     auto out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
-    if (!out->good()) throw std::runtime_error("Could not open " + file + ".");
+    if (!out->good()) throw cannot_write("the probe file", file);
     if (!resume) {
         std::vector<Dimension> units;
         for (size_t i = 0; i < columns.size(); i++) {
@@ -174,7 +171,7 @@ void write_vtp_file(const std::string & file, const probe::Geometry & g, const s
 
     make_parent(file);
     std::ofstream out(file, std::ios::binary | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("Could not open " + file + ".");
+    if (!out.good()) throw cannot_write("the probe file", file);
     uint64_t offset = 0;
     auto data_array = [&](const Array & a) {
         out << "        <DataArray type=\"" << a.type << "\" Name=\"" << a.name << "\" NumberOfComponents=\""
@@ -400,7 +397,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
         } else if (format == "vtp") {
             p.format = Format::VTP;
         } else if (format != "csv") {
-            throw InputError(key + ".format = \"" + format + "\" is not one of: csv, hdf5, vtkhdf, vtp.");
+            throw not_accepted(entry, key + ".format", format, {"csv", "hdf5", "vtkhdf", "vtp"});
         }
         const char * extension = p.format == Format::CSV      ? ".csv"
                                  : p.format == Format::HDF5   ? ".h5"
@@ -409,7 +406,7 @@ void Probes::init(const Input & input, const Mesh & mesh, const std::vector<std:
         p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
         p.write_samples = find_value_or<bool>(entry, "samples", true);
         for (const auto & r : find_value_or<std::vector<std::string>>(entry, "reductions", {})) {
-            const auto it = find_option(REDUCTIONS, key + ".reductions", r);
+            const auto it = find_option(REDUCTIONS, key + ".reductions", r, line_of(entry, "reductions"));
             if (std::find(p.reductions.begin(), p.reductions.end(), it->second) != p.reductions.end()) {
                 throw InputError(key + ".reductions: \"" + r + "\" is listed twice.");
             }

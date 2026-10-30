@@ -45,8 +45,16 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
 };
 
 void Solver::init_solution() {
+    if (!input.contains("initialize")) {
+        throw InputError({.key = "initialize",
+                          .message = "the [initialize] table is missing; it sets the initial flow",
+                          .fix = N_DIM == 3 ? "Add [initialize] with u = [ux, uy, uz], p and T (a uniform flow), or "
+                                              "type = \"analytical\" for expressions of x, y, z"
+                                            : "Add [initialize] with u = [ux, uy], p and T (a uniform flow), or "
+                                              "type = \"analytical\" for expressions of x, y"});
+    }
     const std::string type_str = find_value_or<std::string>(input, "initialize", "type", "constant");
-    auto it = find_option(INIT_TYPES, "initialize.type", type_str);
+    auto it = find_option(INIT_TYPES, "initialize.type", type_str, line_of(input.at("initialize"), "type"));
     initial_state = type_str;
     if (it->second == InitType::CONSTANT) {
         init_solution_constant();
@@ -67,7 +75,8 @@ void Solver::init_solution() {
 
 void Solver::init_solution_restart() {
     if (!input.at("initialize").contains("file")) {
-        throw std::runtime_error("Missing file for initialization: restart.");
+        throw missing_key(input.at("initialize"), "initialize.file",
+                          "Add file = \"...\": a restart file written by [[write_data]] with format = \"restart\"");
     }
     const std::string file = find_value<std::string>(input, "initialize", "file");
     // Restart files hold cells in global order, so any number of ranks can read
@@ -76,7 +85,13 @@ void Solver::init_solution_restart() {
     RestartData restart = read_restart(file, distributed ? &mesh->h_global_cell_id : nullptr);
     const uint64_t n_expected = distributed ? mesh->n_global_cells : mesh->n_cells;
     if (restart.n_cells != n_expected) {
-        throw std::runtime_error("Restart file " + file + " does not match the mesh.");
+        throw InputError({.key = "initialize.file",
+                          .line = line_of(input.at("initialize"), "file"),
+                          .message = "restart file " + file + " has " + std::to_string(restart.n_cells) +
+                                     " cells, but the mesh has " + std::to_string(n_expected),
+                          .fix = "Restart on the mesh that wrote the file; to start from a solution on another mesh, "
+                                 "use type = \"remap\"",
+                          .docs = "docs/input.md#type--remap"});
     }
     apply_restart(restart, file, true);
     initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
@@ -155,12 +170,18 @@ void Solver::init_solution_constant() {
     const Input & init = input.at("initialize");
     for (const char * key : {"u", "p", "T"}) {
         if (!init.contains(key)) {
-            throw std::runtime_error(std::string("Missing ") + key + " for initialization: constant.");
+            Diagnostic d = missing_key(init, std::string("initialize.") + key).diagnostic;
+            d.message = "missing; a uniform initial state (type = \"constant\") needs u, p and T";
+            throw InputError(d);
         }
     }
     std::vector<rtype> u = find_real_vector(input, "initialize", "u", dim::velocity);
     if (u.size() != N_DIM) {
-        throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: constant.");
+        throw InputError({.key = "initialize.u",
+                          .line = line_of(init, "u"),
+                          .message = "has " + std::to_string(u.size()) + " components, but this build is " +
+                                     std::to_string(N_DIM) + "D",
+                          .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
     }
     const rtype p = find_real(input, "initialize", "p", dim::pressure);
     const rtype T = find_real(input, "initialize", "T", dim::temperature);
@@ -420,14 +441,23 @@ void cell_average_curved(const curved::Geometry & geometry, uint32_t i_cell, Poi
  */
 void Solver::init_solution_analytical() {
     const Input & init = input.at("initialize");
-    if (!init.contains("u") || init.at("u").as_array().size() != N_DIM) {
-        throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: analytical.");
+    if (!init.contains("u") || !init.at("u").is_array() || init.at("u").as_array().size() != N_DIM) {
+        throw InputError({.key = "initialize.u",
+                          .line = line_of(init, "u"),
+                          .message = "must be an array of " + std::to_string(N_DIM) + " components",
+                          .fix = N_DIM == 3 ? "Write u = [\"ux\", \"uy\", \"uz\"], each a number or an expression"
+                                            : "Write u = [\"ux\", \"uy\"], each a number or an expression"});
     }
     const bool rho_in = init.contains("rho");
     const bool p_in = init.contains("p");
     const bool T_in = init.contains("T");
     if (rho_in + p_in + T_in != 2) {
-        throw std::runtime_error("Exactly two of rho, p, and T must be specified for initialization: analytical.");
+        throw InputError({.key = "initialize",
+                          .line = line_of(init),
+                          .message = std::string("sets ") + std::to_string(rho_in + p_in + T_in) +
+                                     " of rho, p and T; type = \"analytical\" needs exactly two (the gas law gives "
+                                     "the third)",
+                          .fix = "Give two of rho, p and T"});
     }
     const uint32_t n_sub = find_value_or<uint32_t>(input, "initialize", "n_subdivisions", (N_DIM == 2) ? 4 : 1);
 
@@ -451,7 +481,7 @@ void Solver::init_solution_analytical() {
         if (!init.at(key).is_table()) throw InputError("initialize." + key + " must be a table of species.");
         for (const auto & [name, value] : init.at(key).as_table()) {
             const int32_t k = mixture_model->mechanism().species_index(name);
-            if (k < 0) throw InputError("initialize." + key + ": no species " + name + " in the mechanism.");
+            if (k < 0) throw mixture_model->unknown_species(init.at(key), "initialize." + key + "." + name, name);
             listed.push_back(k);
             text.fractions.emplace_back(key + "." + name, quantity_or_expression(value, name, dim::none));
         }
@@ -482,7 +512,12 @@ void Solver::init_solution_analytical() {
                 fractions[static_cast<size_t>(balance)] = std::max(1.0 - sum, 0.0);
                 sum += fractions[static_cast<size_t>(balance)];
             }
-            if (!(sum > 0.0)) throw InputError("initialize: the composition is zero at a point.");
+            if (!(sum > 0.0)) {
+                throw InputError("initialize: the composition is zero at (" + std::to_string(px) + ", " +
+                                 std::to_string(py) + (N_DIM == 3 ? ", " + std::to_string(pz) : std::string()) +
+                                 "). Give at least one species a positive fraction everywhere, or name a balance "
+                                 "species (initialize.balance).");
+            }
             for (double & f : fractions) f /= sum;
             const std::vector<double> Y = mole ? mixture_model->mass_fractions_from_mole(fractions) : fractions;
             const double R = mixture_model->gas_constant(Y);

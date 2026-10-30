@@ -89,7 +89,7 @@ TEST(CheckKeys, MisspelledKeysAreReportedWithLineAndSuggestion) {
 
 TEST(CheckKeys, UnclosedNestedArrayBeforeAKeyIsASyntaxError) {
     // Once an endless loop in toml11's error recovery (test/fuzz/corpus/input/unclosed_nested_array)
-    EXPECT_THROW(parse_input_string("s=[\"\",[\"\",\"\"[\n[="), toml::syntax_error);
+    EXPECT_THROW(parse_input_string("s=[\"\",[\"\",\"\"[\n[="), InputError);
 }
 
 TEST(CheckKeys, RemovedKeysNameWhatReplacedThem) {
