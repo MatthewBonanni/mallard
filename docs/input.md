@@ -915,8 +915,8 @@ Types (`[x, y(, z)]` points):
 | `rectangle` (3D) | `center`, `normal`, `size = [a, b]` (along `reference` and normal x `reference`), `n_points = [n_a, n_b]` |
 | `disk` (3D) | `center`, `normal`, `radius`, `inner_radius` (default 0: an annulus otherwise), `n_points = [n_radial, n_around]` |
 | `sphere` (3D) | `center`, `radius`, `n_points = [n_polar, n_around]` |
-| `cylinder` (3D) | `center` (of the axis), `axis`, `radius`, `length`, `n_points = [n_axial, n_around]` |
-| `cone` (3D) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0), `n_points = [n_axial, n_around]` |
+| `cylinder` (3D) | `center` (of the axis), `axis`, `radius`, `length`, `n_points = [n_around, n_axial]`: its side, without the ends |
+| `cone` (3D) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0), `n_points = [n_around, n_axial]`: its side, without the ends |
 | `surface` (3D) | `x`, `y`, `z`: expressions of `u` and `v` over `u_range`, `v_range` (default `[0, 1]`), `n_points = [n_u, n_v]` |
 
 **Point values.** With TENO, `sampling = "point"` evaluates each cell's

@@ -949,10 +949,10 @@ TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
          pi * (0.25 - 0.04), true, 0},
         {"type = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 0.5\nn_points = [16, 32]\n", pi, false, 3},
         {"type = \"cylinder\"\ncenter = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nradius = 0.3\nlength = 2.0\n"
-         "n_points = [5, 32]\n",
+         "n_points = [32, 5]\n",
          2.0 * pi * 0.3 * 2.0, false, 2},
         {"type = \"cone\"\nbase = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nlength = 1.0\nbase_radius = 0.5\n"
-         "top_radius = 0.2\nn_points = [5, 32]\n",
+         "top_radius = 0.2\nn_points = [32, 5]\n",
          pi * 0.7 * std::hypot(1.0, 0.3), false, 2},
     };
     for (const auto & c : cases) {
