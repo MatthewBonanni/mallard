@@ -9,10 +9,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <fcntl.h>
@@ -49,7 +52,7 @@ std::string mallard() {
     return fs::exists(front_end) ? front_end.string() : solver.string();
 }
 
-/** @brief Runs mallard with these arguments, outside any MPI launcher this test runs under. */
+/** @brief Runs mallard with these arguments, outside any MPI launcher this test runs under; killed after a minute. */
 Result run(const std::vector<std::string> & args) {
     std::vector<std::string> command = {mallard()};
     command.insert(command.end(), args.begin(), args.end());
@@ -69,6 +72,7 @@ Result run(const std::vector<std::string> & args) {
     envp.push_back(nullptr);
     const pid_t pid = fork();
     if (pid == 0) {
+        setpgid(0, 0);
         const int out = open("out.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
         const int err = open("err.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (out < 0 || err < 0) _exit(126);
@@ -78,10 +82,23 @@ Result run(const std::vector<std::string> & args) {
         _exit(127);
     }
     Result r;
+    if (pid < 0) return r;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(1);
     int wstatus = 0;
-    if (pid > 0 && waitpid(pid, &wstatus, 0) == pid && WIFEXITED(wstatus)) r.status = WEXITSTATUS(wstatus);
+    bool hung = false;
+    while (waitpid(pid, &wstatus, WNOHANG) == 0) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            hung = true;
+            kill(-pid, SIGKILL);
+            waitpid(pid, &wstatus, 0);
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (!hung && WIFEXITED(wstatus)) r.status = WEXITSTATUS(wstatus);
     r.out = read_file("out.txt");
     r.err = read_file("err.txt");
+    if (hung) r.err += "\n(killed: no exit within a minute)";
     return r;
 }
 
