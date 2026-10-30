@@ -204,6 +204,29 @@ TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
     EXPECT_NO_THROW(input_upgrade::upgrade_text(probe, findings, reformatted, input_upgrade::rules(), 0));
 }
 
+TEST(InputUpgradeTest, CurvedZonesTakeTheTypeOfTheirRegionAndItsSurface) {
+    // A 2D circle is the curve; a 3D sphere or cylinder is a volume, whose surface filled = false is
+    const std::string shape = N_DIM == 2 ? "circle" : "sphere";
+    const std::string text = "[mesh]\ntype = \"file\"\n[[mesh.curved]]\nzone = \"wall\"\nshape = \"" + shape +
+                             "\"  # the body\ncenter = [0, 0]\nradius = 1\n";
+    std::vector<Finding> findings;
+    bool reformatted = false;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted),
+              "[mesh]\ntype = \"file\"\n[[mesh.curved]]\nzone = \"wall\"\ntype = \"" + shape + "\"  # the body\n" +
+                  (N_DIM == 3 ? "filled = false\n" : "") + "center = [0, 0]\nradius = 1\n");
+    EXPECT_FALSE(reformatted);
+    EXPECT_EQ(findings.size(), N_DIM == 3 ? 2u : 1u);
+    Input input = parse_input_string(text);
+    input_upgrade::apply(input, "0.9.0");
+    const Input & entry = input.at("mesh").at("curved").at(0);
+    EXPECT_EQ(entry.at("type").as_string(), shape);
+    EXPECT_EQ(entry.contains("filled"), N_DIM == 3);
+    // Inputs of this release are left alone
+    const std::string upgraded = input_upgrade::upgrade_text(text, findings, reformatted);
+    input_upgrade::upgrade_text(upgraded, findings, reformatted);
+    EXPECT_TRUE(findings.empty());
+}
+
 TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
     const Rules rules = {{}, {{"s[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0", "hollow", false,
                                0, "axis = [0, 0, 1]"}}};

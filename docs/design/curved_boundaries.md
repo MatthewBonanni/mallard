@@ -30,14 +30,50 @@ DG).
    curved edge. High-order edges whose nodes lie on their chord stay straight
    (Gmsh writes planes at the mesh's order too). `mallard mesh convert` keeps
    the high-order boundary faces in the HDF5 file (`boundary/high_order`).
-2. **Analytic projection** for meshes without high-order nodes (generated, P1
-   Gmsh, HDF5): `[[mesh.curved]]` names a zone and a shape (`circle` in 2D;
-   `sphere` or `cylinder` with an axis in 3D). A point of the straight face is
-   projected radially onto the shape, minus the linear interpolant of the
-   corners' own projection offsets, so faces still meet at the mesh nodes.
+2. **Projection onto a region's surface** for meshes without high-order nodes
+   (generated, P1 Gmsh, HDF5): `[[mesh.curved]]` names a zone and a surface
+   [region](../guide/geometry.md#regions) (#407; 2D: a curve), the boundary
+   of a filled region of primitives, booleans or implicit functions
+   (`filled = false`), or in 2D a `circle` or `ellipse`.
+   A point of the straight face is projected onto the surface, minus the
+   linear interpolant of the corners' own projection offsets, so faces still
+   meet at the mesh nodes.
 
 `[mesh] curved_geometry = false` ignores both, for straight-versus-curved
 comparisons on the same file.
+
+## Projection onto region surfaces
+
+The filled region that the surface bounds is known by its signed distance,
+or for `implicit` regions by any function `phi` negative inside
+(`src/common/region.h`), on the host; the zone lies on `phi = 0`. The
+projection of a point `x` is its closest point `p` on `phi = 0`, with the
+Jacobian `dp/dx` that the face map's derivatives need:
+
+- **Closed forms.** `circle` and `disk` (2D), `sphere` and `cylinder`
+  without `length` or `inner_radius` (3D), with `filled = false` where they
+  are filled and no transforms, are projected
+  radially as before regions existed: the same operations on the same
+  numbers, so these walls are bitwise unchanged. Everything else, including
+  a transformed sphere, takes the general path.
+- **Closest-point iterations.** From `p = x`: a Newton step onto the level
+  set along the gradient, `-phi g / |g|^2`, plus the tangential part of the
+  remaining offset toward `x`. The fixed point is the foot of the normal
+  through `x`. The steps stop at round-off (`4 eps (|x| + h)`, `h` the
+  face's longest side) or, below `1e-10 h`, once they stop halving, so `p`
+  is a smooth function of `x` to round-off; 100 steps or a point farther than
+  `h` from `x` is an error naming the zone and the point.
+- **Derivatives.** Gradient and Hessian by fourth-order central differences
+  of step `1e-2 h`, divided by 4 (up to 4 times) until two gradients agree to
+  1e-8, so that stencils do not straddle the creases of booleans and
+  polygons. Then `dp/dx = (I + lambda K)^-1 (I - n n^T)`, with `n` the unit
+  normal, `lambda = (x - p) . n` and `K = T H T / |g|` the shape operator
+  (`T = I - n n^T`). A root where `phi` does not change sign at about
+  `|g| h` across `p` (a double root such as `(x^2 + y^2 - 1)^2`) is an error.
+- **Corner offsets** of a face and the end offsets of its curved edges are
+  projected once, when the face is set up, instead of at every evaluation.
+
+In 2D the surface is the slice `z = 0`, and only `x`, `y` are differenced.
 
 ## Representation
 
@@ -139,6 +175,16 @@ node and do not converge (L1 0.05 to 0.26). Curved: L1 rates 3.64, 4.86, 5.00,
 5.57 for orders 3-6 (Linf 2.80, 3.99, 4.07, 4.18), L1 at `n_r = 64` 7.7e-6,
 1.5e-7, 1.0e-7, 1.0e-7.
 
+The same circles projected by closest-point iterations (`--geometry
+curved_general`: the inner wall an `implicit` circle, the outer one an
+`ellipse` of equal semi-axes) give the closed form's errors to 3e-10 relative
+(L1, orders 3-6, `n_r` = 4, 8, 16, `M = 2.25`), and the closed form itself
+is bitwise unchanged by #407. Ellipses, ellipsoids, tori, cones, unions and
+implicit surfaces are checked in `test/curved_test.cpp` and
+`test/curved3d_test.cpp`: closest points and their Jacobians, exact areas,
+volumes and centroids of the curved cells, and TENO wall values at the design
+order on ellipses (2D) and ellipsoids (3D) as on circles and spheres.
+
 P3 walls from the Gmsh file (`line4`) match the projected walls to three
 digits at every level. With mirror images across the curved walls
 (`curved_mirrors = true`), orders 3-6 do not converge (L1 1e-2 to 1e-1).
@@ -202,6 +248,9 @@ the sphere's facets are mirror planes of their own, beyond that limit.
 
 - Orders 5 and 6 are fourth order at curved walls (degree cap, above).
 - Axisymmetric runs reject curved boundaries.
+- A face that spans a crease of a region's surface (a box's edge, where the
+  members of a union meet) is curved onto one side of it; zones should meet
+  at creases.
 - An edge shared by two different analytic shapes takes the first shape's
   curve; the other face's own projection then differs along that edge (the
   closure shift keeps every cell closed).
