@@ -199,7 +199,7 @@ TEST(Boundary3DTest, HydrostaticGhostPressureFollowsGravityAlongTheNormal) {
 
 TEST(Boundary3DTest, TransmissiveImageFaceIsTheOppositeFaceOfAHexCell) {
     auto mesh = make_mesh_3d("cartesian", 3, 4, 5, 1.5, 1.0, 2.0);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
     auto h_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image);
     auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
     auto h_side = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_side);
@@ -229,7 +229,7 @@ TEST(Boundary3DTest, CharacteristicNeighborsContinueAcrossPeriodicSeams) {
     mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 4\nNz = 5\nLx = 1.5\nLy = 1.0\nLz = 2.0\n"
                           "periodic = [\"y\", \"z\"]\n"));
     mesh->copy_host_to_device();
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::NSCBC_OUTLET);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_PRESSURE, 1.4_r, BoundaryCondition::NSCBC);
     auto h_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_faces);
     auto h_offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_offsets);
     auto h_dx = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_neighbor_dx);
@@ -251,7 +251,7 @@ TEST(Boundary3DTest, CharacteristicNeighborsContinueAcrossPeriodicSeams) {
 TEST(Boundary3DTest, TransmissiveImageCellContainsTheImagePoint) {
     for (const char * type : {"cartesian_tet", "cartesian_prism", "cartesian_pyramid", "cartesian_mixed"}) {
         auto mesh = make_mesh_3d(type, 3, 3, 3);
-        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
         auto h_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image);
         auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_image_face);
         uint32_t n_moved = 0;

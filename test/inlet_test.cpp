@@ -73,7 +73,7 @@ std::array<rtype, N_CONSERVATIVE> isentropic_state(double gamma, double R, doubl
 std::array<rtype, N_CONSERVATIVE> perfect_ghost(double gamma, double R, double T0, double p0, const Vec & d,
                                                 const std::array<rtype, N_CONSERVATIVE> & W_i, const Vec & n) {
     BoundaryCondition bc;
-    bc.type = BoundaryType::STAGNATION_INLET;
+    bc.type = BoundaryType::INLET_STAGNATION;
     bc.data[0] = rtype(T0);
     FOR_I_DIM bc.data[1 + i] = d[i];
     bc.data[N_DIM + 1] = rtype(p0);
@@ -542,7 +542,7 @@ TEST(MassFlowInletTest, GhostCarriesTheMassFluxAndTheOutgoingWave) {
             W_i[2] = -4.0_r;
             W_i[N_DIM + 1] = rtype(1.0e5 * rho_i);
             BoundaryCondition bc;
-            bc.type = BoundaryType::MASS_FLOW_INLET;
+            bc.type = BoundaryType::INLET_MASS_FLOW;
             bc.data[0] = rtype(T);
             FOR_I_DIM bc.data[1 + i] = d[i];
             bc.data[N_DIM + 1] = rtype(G);
@@ -836,18 +836,24 @@ TEST(ForcedInletTest, TimeDependentConditionsConvergeAtTheIntegratorsOrder) {
     }
 }
 
+static BoundaryCondition inlet_state() {
+    BoundaryCondition bc;
+    bc.type = BoundaryType::INLET_STATE;
+    return bc;
+}
+
 TEST(ForcedInletTest, QuantitiesWithUnitsAreNumbersNotExpressions) {
     // "1 bar" and "300 K" are the numbers 1e5 and 300, uniform along the inlet;
     // the expression of y varies along it
     const std::string u = N_DIM == 2 ? "u = [\"10 m/s\", 0.0]\n" : "u = [\"10 m/s\", 0.0, 0.0]\n";
-    const BoundaryFields with_units(parse_toml("p = \"1 bar\"\nT = \"300 K\"\n" + u), BoundaryType::UPT, "b");
+    const BoundaryFields with_units(parse_toml("p = \"1 bar\"\nT = \"300 K\"\n" + u), inlet_state(), "b");
     EXPECT_FALSE(with_units.varies());
     BoundaryCondition bc;
-    with_units.apply(bc, Point{}, 0.0, 287.0);
+    with_units.apply(bc, Point{}, 0.0, 287.0, Point{});
     EXPECT_DOUBLE_EQ(double(bc.data[N_DIM + 1]), double(rtype(1e5)));
     EXPECT_DOUBLE_EQ(double(bc.data[1]), 10.0);
     EXPECT_DOUBLE_EQ(with_units.temperature(Point{}, 0.0), 300.0);
-    const BoundaryFields expression(parse_toml("p = 1.0e5\nT = \"300 + y\"\n" + u), BoundaryType::UPT, "b");
+    const BoundaryFields expression(parse_toml("p = 1.0e5\nT = \"300 + y\"\n" + u), inlet_state(), "b");
     EXPECT_TRUE(expression.varies());
     EXPECT_FALSE(expression.depends_on_time());
 }

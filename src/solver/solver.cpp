@@ -664,15 +664,17 @@ void Solver::init_boundaries() {
             }
             dirichlet.W.emplace_back(name + ".p", quantity_or_expression(bound.at("p"), name + ".p", dim::pressure));
         }
-        auto fields = std::make_shared<BoundaryFields>(bound, bcs.back().type, "boundaries[name = \"" + name + "\"]");
+        auto fields = std::make_shared<BoundaryFields>(bound, bcs.back(), "boundaries[name = \"" + name + "\"]");
         boundary_fields[i_bc] = fields;
         const bool composition = is_mixture() && bcs.back().prescribes_composition() &&
                                  MixtureModel::composition_varies(bound);
-        const bool profiled = composition || fields->varies();
+        // The target of an average-pressure outlet is one number, of t at most: update_average_pressure_outlets
+        const bool average = bcs.back().has(BoundaryCondition::AVERAGE);
+        const bool profiled = composition || (!average && (fields->varies() || fields->per_face()));
         rtype direction[N_DIM];
         FOR_I_DIM direction[i] = bcs.back().data[1 + i];
-        const bool directed = (bcs.back().type == BoundaryType::STAGNATION_INLET ||
-                               bcs.back().type == BoundaryType::MASS_FLOW_INLET) &&
+        const bool directed = (bcs.back().type == BoundaryType::INLET_STAGNATION ||
+                               bcs.back().type == BoundaryType::INLET_MASS_FLOW) &&
                               dot<N_DIM>(direction, direction) > 0.0_r;
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
@@ -707,10 +709,10 @@ void Solver::init_boundaries() {
             profiled_faces.push_back({static_cast<uint32_t>(i_bc), dirichlet.faces[k]});
             profiled_flux.push_back(flux.empty() ? std::nan("") : flux[k]);
         }
-        if (bcs.back().type == BoundaryType::NSCBC_INLET) inlets.emplace_back(i_bc, dirichlet.faces);
+        if (bcs.back().type == BoundaryType::INLET_STATE && bcs.back().is_characteristic()) inlets.emplace_back(i_bc, dirichlet.faces);
         if (bcs.back().type == BoundaryType::DIRICHLET) {
             dirichlet_boundaries.push_back(std::move(dirichlet));
-        } else if (bcs.back().type == BoundaryType::P_OUT_AVERAGE) {
+        } else if (bcs.back().type == BoundaryType::OUTLET_PRESSURE && bcs.back().has(BoundaryCondition::AVERAGE)) {
             // The area average runs over faces of owned cells only, so no face counts twice
             std::vector<uint32_t> owned;
             for (uint32_t f : dirichlet.faces) {
@@ -733,7 +735,7 @@ void Solver::init_boundaries() {
             std::vector<uint32_t> order(keys.size());
             std::iota(order.begin(), order.end(), 0u);
             std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return keys[a] < keys[b]; });
-            average_pressure_outlets.push_back({static_cast<int32_t>(i_bc), faces, std::move(order)});
+            average_pressure_outlets.push_back({static_cast<int32_t>(i_bc), faces, std::move(order), fields});
         }
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
         std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
@@ -747,10 +749,14 @@ void Solver::init_boundaries() {
         const auto [i_bc, i_face] = profiled_faces[k];
         BoundaryCondition copy = bcs[i_bc];
         if (!std::isnan(profiled_flux[k])) copy.data[N_DIM + 1] = static_cast<rtype>(profiled_flux[k]);
-        Point x{};
-        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+        Point x{}, n_in{};
+        FOR_I_DIM {
+            x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+            n_in[i] = -static_cast<double>(mesh->h_face_normals(i_face, i)) / static_cast<double>(mesh->h_face_area(i_face));
+        }
         // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
-        if (boundary_fields[i_bc]->varies()) boundary_fields[i_bc]->apply(copy, x, 0.0, double(physics.R));
+        const BoundaryFields & fields = *boundary_fields[i_bc];
+        if (fields.varies() || fields.per_face()) fields.apply(copy, x, 0.0, double(physics.R), n_in);
         face_bc[i_face] = static_cast<int32_t>(bcs.size());
         field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
         bcs.push_back(copy);
@@ -800,9 +806,12 @@ void Solver::init_boundaries() {
     for (const auto & [base, i_face, i_bc] : field_faces) {
         const auto & composition = boundary_composition[base];
         if (!boundary_fields[base]->depends_on_time() && !composition) continue;
-        Point x{};
-        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
-        timed_fields.add(i_bc, x, boundary_fields[base], composition);
+        Point x{}, n_in{};
+        FOR_I_DIM {
+            x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+            n_in[i] = -static_cast<double>(mesh->h_face_normals(i_face, i)) / static_cast<double>(mesh->h_face_area(i_face));
+        }
+        timed_fields.add(i_bc, x, n_in, boundary_fields[base], composition);
     }
     if (!timed_fields.empty()) {
         timed_fields.finish();
@@ -979,7 +988,7 @@ double Solver::get_mass_flow_force() const {
     return force;
 }
 
-void Solver::update_average_pressure_outlets(StateView solution) {
+void Solver::update_average_pressure_outlets(StateView solution, const rtype t_eval) {
     const Euler phys = physics;
     for (const auto & outlet : average_pressure_outlets) {
         Kokkos::View<uint32_t *> faces = outlet.faces;
@@ -1005,6 +1014,11 @@ void Solver::update_average_pressure_outlets(StateView solution) {
         }
         auto bc = Kokkos::subview(boundary_data.bcs, outlet.i_bc);
         auto h_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bc);
+        if (outlet.fields->depends_on_time()) {
+            BoundaryCondition target = h_bc();
+            outlet.fields->apply(target, Point{}, double(t_eval), double(physics.R), Point{});
+            h_bc().data[N_DIM + 1] = target.data[N_DIM + 1];
+        }
         h_bc().data[0] = h_bc().data[N_DIM + 1] - pA / A;
         Kokkos::deep_copy(bc, h_bc);
     }

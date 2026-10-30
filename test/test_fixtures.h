@@ -108,13 +108,14 @@ Kokkos::View<rtype *[N_CONSERVATIVE]>::host_mirror_type cell_averages_3d(const M
  * @brief Boundary data assigning the same condition to every boundary face.
  */
 inline BoundaryData make_uniform_boundaries(const Mesh & mesh, BoundaryType type,
-                                            rtype gamma = 1.4_r) {
+                                            rtype gamma = 1.4_r, uint8_t options = 0) {
     std::vector<int32_t> face_bc(mesh.n_faces);
     for (uint32_t i_face = 0; i_face < mesh.n_faces; i_face++) {
         face_bc[i_face] = (mesh.h_cells_of_face(i_face, 1) < 0) ? 0 : -1;
     }
     BoundaryCondition bc;
     bc.type = type;
+    bc.options = options;
     return make_boundary_data(mesh, face_bc, {bc}, gamma);
 }
 

@@ -89,7 +89,7 @@ class ExtrapolationColumn3D : public ::testing::TestWithParam<std::string> {};
 
 TEST_P(MeshTypes3D, LSQGradientExactForLinearFieldInInterior) {
     auto mesh = make_mesh_3d(GetParam(), 4, 3, 4);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
     auto W = linear_cell_field(*mesh);
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> grad("grad", mesh->n_cells);
     LSQGradientFunctor functor = make_gradient(*mesh, bd, W, grad);
@@ -115,7 +115,7 @@ TEST_P(MeshTypes3D, LSQGradientsExactForLinearFieldWithDirichletBoundaries) {
 
 TEST_P(MeshTypes3D, UnlimitedMUSCLReproducesLinearFieldAtInteriorFaces) {
     auto mesh = make_mesh_3d(GetParam(), 4, 3, 4);
-    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::EXTRAPOLATION);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::OUTLET_EXTRAPOLATION);
     auto W = linear_cell_field(*mesh);
     auto muscl = std::make_unique<MUSCL>();
     muscl->set_mesh(mesh);
@@ -170,7 +170,7 @@ TEST_P(ExtrapolationColumn3D, GradientsMatchThoseOfAPeriodicColumn) {
             face_bc[f] = std::abs(mesh.h_face_normals(f, 2)) > 0.5_r * mesh.h_face_area(f) ? 1 : 0;
         }
         BoundaryCondition extrapolation, dirichlet;
-        extrapolation.type = BoundaryType::EXTRAPOLATION;
+        extrapolation.type = BoundaryType::OUTLET_EXTRAPOLATION;
         dirichlet.type = BoundaryType::DIRICHLET;
         BoundaryData bd = make_boundary_data(mesh, face_bc, {extrapolation, dirichlet}, 1.4_r);
         auto h_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.face_state_index);

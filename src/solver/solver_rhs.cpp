@@ -101,7 +101,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     halo_current = false;
     update_boundary_states(t_stage, c);
     if (!average_pressure_outlets.empty()) {
-        update_average_pressure_outlets(solution);
+        update_average_pressure_outlets(solution, t_stage);
     }
 
     const uint32_t n_owned = mesh->n_owned();

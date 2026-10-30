@@ -244,7 +244,7 @@ class Solver {
         void record_stage_time(rtype c);
         /** @brief Inside a captured step: the step's dt on the device. */
         const rtype * step_dt_device() const;
-        void update_average_pressure_outlets(StateView solution);
+        void update_average_pressure_outlets(StateView solution, rtype t_eval);
         /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
         void set_stage_time(rtype t_stage, rtype c);
         /**
@@ -701,6 +701,7 @@ class Solver {
             int32_t i_bc;
             Kokkos::View<uint32_t *> faces;   // Faces of owned cells
             std::vector<uint32_t> sum_order;  // Order of the gathered faces of all ranks by global key
+            std::shared_ptr<const BoundaryFields> fields;  // the target p, a number or an expression of t
         };
         std::vector<AveragePressureOutlet> average_pressure_outlets;
         Kokkos::View<rtype *[N_DIM + 2]>::host_mirror_type h_face_state;

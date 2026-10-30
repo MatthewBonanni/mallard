@@ -165,7 +165,7 @@ struct MixtureGradientFunctor {
                 FOR_I_DIM gradients(c, N_DIM, i) += stencil.weights.faces(k, i) * dT;
                 continue;
             }
-            if (bc.type != BoundaryType::UPT) continue;
+            if (bc.type != BoundaryType::INLET_STATE || bc.is_characteristic()) continue;
             for (uint32_t v = N_DIM; v < n_vars; v++) {
                 const rtype dq = bc_values(i_bc, v - N_DIM) - values(c, v);
                 FOR_I_DIM gradients(c, v, i) += stencil.weights.faces(k, i) * dq;
@@ -330,7 +330,7 @@ struct MixtureViscousFluxFunctor {
                 mode = Mode::NONE;
             } else if (boundaries.face_image_face(i_face) >= 0) {
                 f_src = static_cast<uint32_t>(boundaries.face_image_face(i_face));
-            } else if (bc->type == BoundaryType::UPT) {
+            } else if (bc->type == BoundaryType::INLET_STATE && !bc->is_characteristic()) {
                 mode = Mode::CELL;
             } else {
                 mode = Mode::ZERO_NORMAL;

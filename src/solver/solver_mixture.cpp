@@ -652,7 +652,7 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
     // Prescribed state of condition i_bc
     auto prescribe = [&](size_t i_bc, const std::vector<double> & Y, double T) {
         BoundaryCondition & bc = bcs[i_bc];
-        if (bc.type == BoundaryType::UPT || bc.type == BoundaryType::NSCBC_INLET) {
+        if (bc.type == BoundaryType::INLET_STATE) {
             const double p = static_cast<double>(bc.data[N_DIM + 1]);
             bc.data[0] = static_cast<rtype>(p / (mixture_model->gas_constant(Y) * T));
         }
@@ -664,20 +664,24 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
         const Input & bound = input_boundaries[i_bc];
         const std::string name = find_value<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
+        auto unsupported = [&](const std::string & what) {
+            throw InputError(where + ": " + what + " is not yet supported with gas = \"mixture\" (it is with "
+                             "outlet_extrapolation, symmetry, the wall_* types, inlet_state, inlet_stagnation, "
+                             "inlet_mass_flow and outlet_pressure without average).");
+        };
         switch (bcs[i_bc].type) {
-            case BoundaryType::EXTRAPOLATION:
+            case BoundaryType::OUTLET_EXTRAPOLATION:
             case BoundaryType::SYMMETRY:
             case BoundaryType::WALL_ADIABATIC:
             case BoundaryType::WALL_ISOTHERMAL:
             case BoundaryType::WALL_HEAT_FLUX:
-            case BoundaryType::P_OUT:
-            case BoundaryType::NSCBC_OUTLET:
+            case BoundaryType::OUTLET_PRESSURE:
+                if (bcs[i_bc].has(BoundaryCondition::AVERAGE)) unsupported("average = true");
                 break;
-            case BoundaryType::UPT:
-            case BoundaryType::NSCBC_INLET:
-            case BoundaryType::STAGNATION_INLET:
-            case BoundaryType::MASS_FLOW_INLET: {
-                const char * T_key = bcs[i_bc].type == BoundaryType::STAGNATION_INLET ? "T0" : "T";
+            case BoundaryType::INLET_STATE:
+            case BoundaryType::INLET_STAGNATION:
+            case BoundaryType::INLET_MASS_FLOW: {
+                const char * T_key = bcs[i_bc].type == BoundaryType::INLET_STAGNATION ? "T0" : "T";
                 // The temperature and composition of the condition, or of each face where they are expressions
                 const bool T_varies = BoundaryValue::is_expression(bound.at(T_key));
                 const BoundaryFields * fields = boundary_fields[i_bc].get();
@@ -703,10 +707,7 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                 break;
             }
             default:
-                throw InputError(where + ": type \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) +
-                                 "\" is not yet supported with gas = \"mixture\" (extrapolation, symmetry, "
-                                 "wall_adiabatic, wall_isothermal, wall_heat_flux, upt, p_out, nscbc_outlet, "
-                                 "nscbc_inlet, stagnation_inlet, mass_flow_inlet).");
+                unsupported("type = \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) + "\"");
         }
     }
 }

@@ -39,13 +39,16 @@ struct KeyRule {
 /**
  * @brief A string option renamed: `key = "from"` becomes `key = "to"`. A kept
  *        option still does what it did while deprecated (the setup reads it
- *        unchanged); only the rewritten file switches to `to`.
+ *        unchanged); only the rewritten file switches to `to`. `adds` are keys
+ *        of the same table, set with the new option if absent: (key, TOML value),
+ *        e.g. ("average", "true").
  */
 struct OptionRule {
     std::string key;
     std::string from, to;
     std::string since, removed, note;
     bool kept = false;
+    std::vector<std::pair<std::string, std::string>> adds = {};
 };
 
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */
