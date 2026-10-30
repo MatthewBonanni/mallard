@@ -1,6 +1,8 @@
 """Figures of the probes section of the user guide, from short Mallard runs
 (seconds each on a CPU build): probes of every type over a 2D mesh, boundary probes on
-curved walls (polylines with arc length), and a 3D wall's heat flux.
+curved walls (polylines with arc length), a 3D wall's heat flux, an exact
+cut plane and a sphere, and measurements around a cylinder at Re = 40 (wall
+CP, CF and y+, fluxes through a closed circle and a cut, reductions).
 
     python tools/docs/probes.py --mallard build/src/mallard [--mallard3d build-3d/src/mallard] [names...]
 """
@@ -27,7 +29,7 @@ from runs import PHYSICS, polygons, run
 def read_csv(path, step=None):
     """Rows of a probe CSV as a dict of arrays (only the given step, if any)."""
     with open(path) as f:
-        rows = list(csv.DictReader(f))
+        rows = [r for r in csv.DictReader(f) if not r["step"].startswith("#")]
     if step is not None:
         rows = [r for r in rows if int(float(r["step"])) == step]
     return {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
@@ -148,11 +150,14 @@ def probe_shapes(P, args):
 R_IN, R_OUT, MACH = 1.0, 1.4, 0.8
 
 
-def annulus_msh(path, n_r=6, n_t=72):
-    """Gmsh 2.2 O-grid of the annulus R_IN < r < R_OUT, zones "inner" and "outer"."""
+def annulus_msh(path, n_r=6, n_t=72, r_in=R_IN, r_out=R_OUT, ratio=1.0):
+    """Gmsh 2.2 O-grid of the annulus r_in < r < r_out, zones "inner" and "outer"; ratio
+    is the growth of the radial spacing from cell to cell."""
     nodes, elements = [], []
+    w = ratio ** np.arange(n_r)
+    radii = r_in + (r_out - r_in) * np.concatenate([[0.0], np.cumsum(w) / w.sum()])
     for j in range(n_r + 1):
-        r = R_IN + (R_OUT - R_IN) * j / n_r
+        r = radii[j]
         for i in range(n_t):
             t = 2 * math.pi * i / n_t
             nodes.append((r * math.cos(t), r * math.sin(t)))
@@ -453,6 +458,178 @@ def cut_and_sphere(P, args):
     return fig
 
 
+# ------------------------------------------ measurements around a cylinder
+
+D, U_INF, RE, T_MEAS = 1.0, 0.3, 40.0, 20.0
+CUT_X, CUT_H = 3.0, 4.0
+
+
+@functools.cache
+def measure_data(mallard):
+    """Re = 40 flow past a cylinder: wall coefficients, fluxes through a closed circle and a cut, reductions."""
+    work = Path(tempfile.mkdtemp())
+    annulus_msh(work / "cylinder.msh", n_r=40, n_t=96, r_in=0.5 * D, r_out=15.0, ratio=1.1)
+    p_inf, T_inf = 1 / 1.4, 1 / 1.4
+    toml = f"""
+[run]
+t_stop = {T_MEAS}
+cfl = 1.0
+[mesh]
+type = "file"
+filename = "cylinder.msh"
+[[mesh.curved]]
+zone = "inner"
+shape = "circle"
+center = [0.0, 0.0]
+radius = {0.5 * D}
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["{U_INF} * (1 - exp(-(x^2 + y^2 - 0.25) / 0.5))", "0.0"]
+p = "{p_inf}"
+[[boundaries]]
+name = "inner"
+type = "wall_adiabatic"
+[[boundaries]]
+name = "outer"
+type = "farfield"
+u = [{U_INF}, 0.0]
+p = {p_inf}
+T = {T_inf}
+[numerics.face_reconstruction]
+type = "MUSCL"
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+mu = {U_INF * D / RE}
+Pr = 0.72
+[[write_data]]
+prefix = "mesh"
+format = "vtu"
+time_interval = {T_MEAS}
+variables = ["U_X"]
+[[probes]]
+name = "wall"
+boundary = "inner"
+variables = ["CP", "CF", "Y_PLUS", "TRACTION_PRESSURE", "TRACTION_VISCOUS"]
+reference = {{rho = 1.0, u = [{U_INF}, 0.0], p = {p_inf}}}
+reductions = ["integral", "mean", "max"]
+time_interval = 0.5
+[[probes]]
+name = "circle"
+shape = "circle"
+center = [0.0, 0.0]
+radius = 1.5
+n_points = 120
+variables = ["MASS_FLUX"]
+reductions = ["integral"]
+time_interval = 0.5
+[[probes]]
+name = "cut"
+shape = "cut_plane"
+point = [{CUT_X}, 0.0]
+normal = [1.0, 0.0]
+bounds = [[{CUT_X - 1}, {-CUT_H}], [{CUT_X + 1}, {CUT_H}]]
+variables = ["MASS_FLUX"]
+reductions = ["integral"]
+time_interval = 0.5
+"""
+    run(mallard, toml, work)
+    polys, _ = polygons(sorted(work.glob("mesh_*.vtu"))[-1])
+    out = {name: read_csv(work / f"probe_{name}.csv") for name in ("wall", "circle", "cut")}
+    red = {name: read_csv(work / f"probe_{name}_reductions.csv") for name in ("wall", "circle", "cut")}
+    return polys, out, red
+
+
+def last(d):
+    """The rows of a probe CSV at its last output."""
+    keep = d["step"] == d["step"].max()
+    return {k: v[keep] for k, v in d.items()}
+
+
+def measurements(P, args):
+    polys, out, red = measure_data(args.mallard)
+    wall, circle, cut = (last(out[k]) for k in ("wall", "circle", "cut"))
+    fig, axes = plt.subplots(2, 2, figsize=(10.4, 7.6), gridspec_kw=dict(hspace=0.42, wspace=0.32))
+    (ax, ax_c), (ax_y, ax_t) = axes
+
+    # The mesh, the closed circle and the cut, colored by their mass flux samples
+    window = [q for q in polys if q[:, 0].min() < 5.2 and q[:, 0].max() > -2.2 and np.abs(q[:, 1]).min() < CUT_H + 0.9]
+    ax.add_collection(PolyCollection(window, facecolor="none", edgecolor=P["mesh"], lw=0.3))
+    ax.add_patch(Polygon(np.column_stack([0.5 * np.cos(np.linspace(0, 2 * np.pi, 97)),
+                                          0.5 * np.sin(np.linspace(0, 2 * np.pi, 97))]),
+                         facecolor=P["bg"], edgecolor=P["fg"], lw=1.2))
+    for d in (circle, cut):
+        order = np.argsort(d["y"]) if d is cut else np.arange(len(d["x"]))
+        xy = np.column_stack([d["x"][order], d["y"][order]])
+        if d is circle:
+            xy = np.vstack([xy, xy[:1]])
+        f = d["MASS_FLUX"][order] / U_INF
+        f = np.concatenate([f, f[:1]]) if d is circle else f
+        lc = LineCollection(np.stack([xy[:-1], xy[1:]], axis=1), cmap="coolwarm", linewidths=4.5, zorder=3)
+        lc.set_array(0.5 * (f[:-1] + f[1:]))
+        lc.set_clim(-1.2, 1.2)
+        ax.add_collection(lc)
+    label(ax, 0.0, 1.95, "closed circle", P, size=11, box=True)
+    label(ax, CUT_X, CUT_H + 0.4, "cut_plane", P, size=11, box=True)
+    ax.set_xlim(-2.2, 5.2)
+    ax.set_ylim(-CUT_H - 0.4, CUT_H + 0.9)
+    ax.set_title("mass flux through a circle and a cut", fontsize=12)
+    bare(ax)
+    sm = plt.cm.ScalarMappable(cmap="coolwarm", norm=plt.Normalize(-1.2, 1.2))
+    cb = fig.colorbar(sm, ax=ax, orientation="horizontal", fraction=0.05, pad=0.04)
+    cb.set_label(r"MASS_FLUX / $\rho_\infty U_\infty$")
+    cb.outline.set_visible(False)
+
+    # Wall coefficients against the angle from the front stagnation point (upper half)
+    theta = np.degrees(np.arctan2(wall["y"], -wall["x"]))
+    upper = np.argsort(theta)[theta[np.argsort(theta)] >= 0]
+    th = theta[upper]
+    ax_c.plot(th, wall["CP"][upper], color=P["teal"], label="CP")
+    ax_c.set_ylabel("CP", color=P["teal"])
+    ax_f = ax_c.twinx()
+    ax_f.spines["right"].set_visible(True)
+    ax_f.plot(th, wall["CF"][upper], color=P["flame"], label="CF")
+    ax_f.axhline(0.0, color=P["muted"], lw=0.8, ls=":")
+    ax_f.set_ylabel("CF", color=P["flame"])
+    ax_c.set_xlabel("angle from the front stagnation point (deg)")
+    ax_c.set_xlim(0, 180)
+    ax_c.set_title("wall probe: CP and CF", fontsize=12)
+
+    # y+ samples, with the probe's mean and max reductions
+    r = red["wall"]
+    k = np.argmax(r["step"])
+    ax_y.plot(th, wall["Y_PLUS"][upper], "o", color=P["plum"], ms=3.5, label="samples")
+    ax_y.axhline(r["max_Y_PLUS"][k], color=P["flame"], ls="--", lw=1.2, label="max")
+    ax_y.axhline(r["mean_Y_PLUS"][k], color=P["teal"], ls="--", lw=1.2, label="mean")
+    ax_y.set_xlabel("angle from the front stagnation point (deg)")
+    ax_y.set_ylabel("first-cell y+")
+    ax_y.set_xlim(0, 180)
+    ax_y.set_ylim(0, 1.3 * r["max_Y_PLUS"][k])
+    ax_y.legend(loc="upper right", ncols=3, fontsize=11)
+    ax_y.set_title("Y_PLUS and its reductions", fontsize=12)
+
+    # Integrals over time: drag from the wall tractions, net outflow through the closed circle
+    q = 0.5 * U_INF**2 * D
+    t = r["t"]
+    ax_t.plot(t, r["integral_TRACTION_PRESSURE_X"] / q, color=P["teal"], label="wall: pressure drag, C$_D$")
+    ax_t.plot(t, r["integral_TRACTION_VISCOUS_X"] / q, color=P["flame"], label="wall: viscous drag, C$_D$")
+    rc = red["circle"]
+    ax_t.plot(rc["t"], rc["integral_MASS_FLUX"] / (U_INF * D), color=P["plum"],
+              label=r"circle: net outflow / $\rho_\infty U_\infty D$")
+    ax_t.axhline(0.0, color=P["muted"], lw=0.8, ls=":")
+    ax_t.set_xlabel("time")
+    ax_t.set_ylabel("integral, normalized")
+    ax_t.set_xlim(0, T_MEAS)
+    ax_t.set_ylim(-0.6, 2.4)
+    ax_t.legend(loc="upper right", fontsize=10.5)
+    ax_t.set_title("integral reductions over time", fontsize=12)
+    return fig
+
+
 class Args(tuple):
     def __new__(cls, mallard, mallard3d):
         return super().__new__(cls, (mallard, mallard3d))
@@ -462,7 +639,8 @@ class Args(tuple):
 
 
 FIGURES = {"probe_shapes": (probe_shapes, False), "probe_walls": (wall_polylines, False),
-           "probe_wall_3d": (wall_heat_flux, True), "probe_cut_3d": (cut_and_sphere, True)}
+           "probe_wall_3d": (wall_heat_flux, True), "probe_cut_3d": (cut_and_sphere, True),
+           "probe_measurements": (measurements, False)}
 
 
 def main():

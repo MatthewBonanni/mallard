@@ -1140,7 +1140,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                     h5::write_rows(file, "polygons/offsets", g.polygon_offsets.size(), 1, 0, g.polygon_offsets.size(),
                                    g.polygon_offsets.data(), H5P_DEFAULT);
                 }
-                auto extensible = [&](const std::string & name, hid_t type, uint64_t cols) {
+                auto extensible = [&](const std::string & name, hid_t dtype, uint64_t cols) {
                     const int rank = cols > 0 ? 2 : 1;
                     const hsize_t dims[2] = {0, cols}, max[2] = {H5S_UNLIMITED, cols};
                     const hsize_t chunk[2] = {cols > 0 ? hsize_t(1) : hsize_t(256), std::max<hsize_t>(cols, 1)};
@@ -1149,7 +1149,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                     h5::check(H5Pset_chunk(plist, rank, chunk), "H5Pset_chunk");
                     h5::Handle lcpl(H5Pcreate(H5P_LINK_CREATE), H5Pclose, "H5Pcreate");
                     h5::check(H5Pset_create_intermediate_group(lcpl, 1), "H5Pset_create_intermediate_group");
-                    h5::Handle dset(H5Dcreate2(file, name.c_str(), type, space, lcpl, plist, H5P_DEFAULT), H5Dclose,
+                    h5::Handle dset(H5Dcreate2(file, name.c_str(), dtype, space, lcpl, plist, H5P_DEFAULT), H5Dclose,
                                     "creating " + name);
                 };
                 extensible("step", H5T_STD_U64LE, 0);
