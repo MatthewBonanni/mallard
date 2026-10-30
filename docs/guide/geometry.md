@@ -315,9 +315,14 @@ or 1 for a point) and orientation. They are made in one of two ways, and
   cross them (default 3 in 2D, 2 in 3D): second-order accurate in the
   subdivided size.
 
-Clipping regions cut elements along their surface (exactly along planes and
-mesh-aligned boxes) where the elements are extracted or mesh faces, and keep
-the Gauss points inside them on exact surfaces. Only the parts inside the
+Clipping regions cut exact surfaces where their own surface crosses them:
+along lines of the surface's parameters, the Gauss points fill the kept
+intervals between the clipping region's roots, found to round-off, so a clipped
+area or flux converges at high order (in the tests, errors fall by over 8 per
+halving of the cells, to round-off); patches where the clipping boundary is not
+a graph over one parameter, or that several clipping regions cross, are
+subdivided. Extracted elements and mesh faces are cut linearly between their
+vertices: exactly along planes and mesh-aligned boxes. Only the parts inside the
 domain count. In axisymmetric runs measures are those of the r-z plane, not
 of the revolved surface.
 

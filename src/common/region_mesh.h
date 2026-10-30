@@ -38,6 +38,12 @@ struct Elements {
     std::vector<uint32_t> offsets{0};              // its vertices: polygons counterclockwise about the normal,
     std::vector<std::array<double, 3>> vertices;   // segments along the tangent (2D: normal to the right)
     bool exact = true;                             // primitives' own surfaces and curves, or mesh faces, throughout
+    // Quadrature of each element: points with weights summing to its measure, and normals (tangents);
+    // primitives' surfaces at Gauss points of their parameters, flat elements degree 5 (3 Gauss points per segment)
+    std::vector<uint32_t> quad_offsets{0};
+    std::vector<std::array<double, 3>> quad_points;
+    std::vector<double> quad_weights;
+    std::vector<std::array<double, 3>> quad_normals;
 
     size_t size() const { return cell.size(); }
 };
@@ -50,8 +56,9 @@ struct Elements {
  *        faces; the rest is cut from each cell's simplices, subdivided
  *        region.resolution() times, as the zero set of the linear interpolant.
  *        Clipping regions keep the parts inside them (outside subtracted
- *        ones): cut exactly along planes, at Gauss points on primitives' own
- *        surfaces. Collective.
+ *        ones): on primitives' own surfaces at the roots of their distance
+ *        along the parameters (high order), elsewhere linearly between
+ *        vertices (exact for planes). Collective.
  */
 Elements elements(const Mesh & mesh, const Region & region);
 

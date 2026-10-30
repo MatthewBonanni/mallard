@@ -1146,8 +1146,10 @@ parameters cut into patches about half a cell wide with Gauss points; planes,
 boundary zones and the faces around regions of the mesh are cut or taken
 exactly from the cells; boundaries of booleans and `implicit` regions are
 extracted as the zero set of the signed distance, linear on the subdivided
-simplices. Clipping regions cut along their surface, linearly between vertices
-(exact for planes), and on exact surfaces keep the Gauss points inside them.
+simplices. Clipping regions cut exact surfaces at the roots of their signed
+distance along the surface's parameters (high order: the Gauss points fill the
+kept intervals), and other elements linearly between vertices (exact for
+planes).
 
 `interior` and `boundary` are inverses: the interior of a region's boundary is
 the region. The boundary of a boolean with regions of the mesh is assembled
