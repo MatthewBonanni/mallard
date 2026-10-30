@@ -595,12 +595,12 @@ void Solver::init_boundaries() {
     wall_model_specs.clear();
     dirichlet_boundaries.clear();
     average_pressure_outlets.clear();
-    // Faces of upt boundaries whose composition varies along them, as (boundary, face):
+    // Faces of inlet_state boundaries whose composition varies along them, as (boundary, face):
     // each face gets its own copy of the condition, appended after the input's
     std::vector<std::array<uint32_t, 2>> profiled_faces;
     // Mass-flow inlets with a mass flux varying along them: the flux of each profiled face, else NaN
     std::vector<double> profiled_flux;
-    // Faces of each nscbc_inlet on this rank, by input boundary
+    // Faces of each inlet_state with nscbc on this rank, by input boundary
     std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
     boundary_fields.assign(input_boundaries.size(), nullptr);
     boundary_composition.assign(input_boundaries.size(), nullptr);

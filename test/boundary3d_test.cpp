@@ -94,11 +94,11 @@ TEST(Boundary3DTest, HeatFluxIsStoredAfterTheVelocity) {
 }
 
 TEST(Boundary3DTest, TwoComponentVelocityIsRejected) {
-    EXPECT_THROW(parse("type = \"upt\"\nu = [1.0, 0.0]\np = 1.0\nT = 1.0\n"), std::runtime_error);
+    EXPECT_THROW(parse("type = \"inlet_state\"\nu = [1.0, 0.0]\np = 1.0\nT = 1.0\n"), std::runtime_error);
 }
 
 TEST(Boundary3DTest, UPTImposesTheInflowState) {
-    BoundaryCondition bc = parse("type = \"upt\"\nu = [0.5, 0.25, -0.125]\np = 2.0\nT = 1.5\n");
+    BoundaryCondition bc = parse("type = \"inlet_state\"\nu = [0.5, 0.25, -0.125]\np = 2.0\nT = 1.5\n");
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, false, W_g);
     EXPECT_NEAR(W_g[0], 2.0_r / (R_GAS * 1.5_r), roundoff(1e-12));
@@ -109,7 +109,7 @@ TEST(Boundary3DTest, UPTImposesTheInflowState) {
 }
 
 TEST(Boundary3DTest, PressureOutletImposesSubsonicBackPressureAtFixedTemperature) {
-    BoundaryCondition bc = parse("type = \"p_out\"\np = 0.6\n");
+    BoundaryCondition bc = parse("type = \"outlet_pressure\"\np = 0.6\n");
     rtype W_g[N_CONSERVATIVE];
     bc.ghost_W(W_I, N, GAMMA, R_GAS, false, W_g);
     EXPECT_RTYPE_EQ(W_g[4], 0.6_r);
@@ -316,7 +316,7 @@ double reflection_3d(const std::string & mesh, const std::string & right) {
                         "\"\nNx = 200\nNy = 2\nNz = 2\nLx = 1.0\nLy = 0.01\nLz = 0.01\n"
                         "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + " + pulse + "\"\nu = [\"" + pulse +
                         "\", \"0.0\", \"0.0\"]\np = \"" + p0 + " + " + pulse + "\"\n"
-                        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+                        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
                         "[[boundaries]]\nname = \"right\"\n" + right;
     for (const char * side : {"bottom", "top", "back", "front"}) {
         input += std::string("[[boundaries]]\nname = \"") + side + "\"\ntype = \"symmetry\"\n";
@@ -345,9 +345,9 @@ TEST(Boundary3DTest, CharacteristicOutletLetsAPlaneWaveLeave) {
     // With the transverse terms, on hexahedra and on tetrahedra
     for (const std::string mesh : {"cartesian", "cartesian_tet"}) {
         SCOPED_TRACE(mesh);
-        EXPECT_LT(reflection_3d(mesh, "type = \"nscbc_outlet\"\np = 0.7142857142857143\nL = 1.0\nsigma = 0.0\n"),
+        EXPECT_LT(reflection_3d(mesh, "type = \"outlet_pressure\"\np = 0.7142857142857143\nnscbc.L = 1.0\nnscbc.sigma = 0.0\n"),
                   0.03);
-        EXPECT_GT(reflection_3d(mesh, "type = \"p_out\"\np = 0.7142857142857143\n"), 0.9);
+        EXPECT_GT(reflection_3d(mesh, "type = \"outlet_pressure\"\np = 0.7142857142857143\n"), 0.9);
     }
 }
 
@@ -366,9 +366,9 @@ TEST(Boundary3DTest, CharacteristicOutletSurvivesEddiesThatReverseTheFlow) {
     std::string input = "[run]\nt_stop = 12.0\ncfl = 0.4\n[mesh]\ntype = \"cartesian\"\nNx = 24\nNy = 12\nNz = 12\n"
                         "Lx = 2.0\nLy = 1.0\nLz = 1.0\n[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
                         "u = [\"" + u + "\", \"" + v + "\", \"" + w + "\"]\np = \"" + p0 + "\"\n"
-                        "[[boundaries]]\nname = \"left\"\ntype = \"nscbc_inlet\"\nu = [0.2, 0.0, 0.0]\np = " + p0 +
-                        "\nT = " + p0 + "\nL = 1.0\n"
-                        "[[boundaries]]\nname = \"right\"\ntype = \"nscbc_outlet\"\np = " + p0 + "\nL = 12.0\n";
+                        "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [0.2, 0.0, 0.0]\np = " + p0 +
+                        "\nT = " + p0 + "\nnscbc.L = 1.0\n"
+                        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = " + p0 + "\nnscbc.L = 12.0\n";
     for (const char * side : {"bottom", "top", "back", "front"}) {
         input += std::string("[[boundaries]]\nname = \"") + side + "\"\ntype = \"symmetry\"\n";
     }

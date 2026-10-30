@@ -74,7 +74,7 @@ file = "init.restart"
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [129.682, 0.0, 0.0]
 p = 167966.887
 T = 341.939
@@ -82,7 +82,7 @@ Y = { N2 = 0.767, O2 = 0.233 }
 
 [[boundaries]]
 name = "right"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "bottom"

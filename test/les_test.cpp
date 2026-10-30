@@ -291,7 +291,7 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
       << "[output]\ncheck_interval = 1000000\n[les]\nmodel = \"wale\"\nC = 0.4\nPr_t = 0.6\nfilter_width = \"volume\"\n";
     for (const char * side : {"left", "right", "bottom", "top", "back", "front"}) {
         if (N_DIM == 2 && (std::string(side) == "back" || std::string(side) == "front")) continue;
-        s << "[[boundaries]]\nname = \"" << side << "\"\ntype = \"extrapolation\"\n";
+        s << "[[boundaries]]\nname = \"" << side << "\"\ntype = \"outlet_extrapolation\"\n";
     }
     auto solver = make_solver(s.str());
     solver->copy_device_to_host();
@@ -675,7 +675,7 @@ TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
       << (N_DIM == 3 ? "u = [\"-20.0 * x * x + 0.3 * sin(6.283185307179586 * y)\", \"0.2 * cos(6.283185307179586 * (x + z))\", "
                        "\"0.1 * sin(6.283185307179586 * y)\"]\n"
                      : "u = [\"-20.0 * x * x + 0.3 * sin(6.283185307179586 * y)\", \"0.2 * cos(6.283185307179586 * x)\"]\n")
-      << "[[boundaries]]\nname = \"left\"\ntype = \"p_out\"\np = 1000.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_pressure\"\np = 1000.0\n"
       << "[[boundaries]]\nname = \"right\"\ntype = \"symmetry\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\nconvective_flux = \"hybrid\"\n[numerics.hybrid]\nsensor_threshold = 1.0\n"
       << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
@@ -706,8 +706,8 @@ std::pair<double, double> sod(const std::string & numerics) {
     std::string input = "[run]\nt_stop = 0.2\ncfl = 0.5\n[mesh]\ntype = \"cartesian_tri\"\nNx = 200\nNy = 2\nLx = 1.0\n"
                         "Ly = 0.01\n[initialize]\ntype = \"analytical\"\nrho = \"x < 0.5 ? 1.0 : 0.125\"\n"
                         "u = [\"0.0\", \"0.0\"]\np = \"x < 0.5 ? 1.0 : 0.1\"\n"
-                        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-                        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+                        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+                        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
                         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
                         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
                         "[numerics]\nriemann_solver = \"HLLC\"\n" + numerics +

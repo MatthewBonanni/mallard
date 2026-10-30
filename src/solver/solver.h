@@ -530,7 +530,7 @@ class Solver {
         /** @brief The faces' own conditions that depend on t, at the time in stage_time. */
         void apply_boundary_fields();
         /**
-         * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
+         * @brief Mass fluxes of the faces of an inlet_mass_flow entry: per
          *        face for a mass_flux expression or an mdot with a profile,
          *        else empty (an mdot without profile sets bc's uniform flux).
          */
@@ -799,7 +799,7 @@ class Solver {
         Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W, then D^T_k (Soret)
         Kokkos::View<rtype **, Kokkos::LayoutRight> transport_values;      // (cell, [u, T, X_1 .. X_Ns])
         Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
-        Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of UPT
+        Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of inlet_state
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k, then D^T_k (Soret)
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
 
@@ -864,7 +864,7 @@ class Solver {
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
         // Synthetic turbulence of inlets, and the time of the targets in char_target
         std::vector<std::unique_ptr<SyntheticInflow>> inflows;
-        // nscbc_inlet velocities depending on t
+        // Velocities of inlet_state with nscbc depending on t
         TimedInletTargets timed_inlets;
         rtype t_inflow = -1.0;
 

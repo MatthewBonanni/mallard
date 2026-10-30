@@ -26,7 +26,7 @@ rhoE = "x > 0.4 and x < 0.6 ? 3.0e7 : 0.0"
 
 [[boundaries]]
 name = "left"
-type = "mass_flow_inlet"
+type = "inlet_mass_flow"
 mdot = 2.0           # kg/s per unit depth through the 0.1 m inlet: 20 kg/(m^2 s)
 T = 300.0
 

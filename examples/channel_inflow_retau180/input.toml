@@ -50,9 +50,11 @@ file = "init.restart"
 
 [[boundaries]]
 name = "left"
-type = "nscbc_inlet"
+type = "inlet_state"
 p = 17.857142857142858
 T = 1.0
+
+[boundaries.nscbc]
 L = 25.132741228718345
 
 [boundaries.turbulence]
@@ -61,10 +63,12 @@ length_scale = [[0.5, 0.15, 0.15], [0.2, 0.15, 0.1], [0.2, 0.1, 0.15]]
 
 [[boundaries]]
 name = "right"
-type = "nscbc_outlet"
-beta = 0.0
+type = "outlet_pressure"
 p = 17.857142857142858
+
+[boundaries.nscbc]
 L = 25.132741228718345
+beta = 0.0
 
 [[boundaries]]
 name = "bottom"

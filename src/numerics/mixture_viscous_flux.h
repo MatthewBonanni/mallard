@@ -83,7 +83,7 @@ struct MixtureTransportFunctor {
  * @brief Gradients of [u, T, X_1 .. X_Ns] with the weights and stencil of
  *        the viscous gradient (LSQVertexGradientFunctor). Boundary ghosts
  *        take the velocity of the ghost state W (no-slip at viscous walls),
- *        and the prescribed T and X at UPT boundaries, the cell's own
+ *        and the prescribed T and X at inlet_state boundaries, the cell's own
  *        elsewhere (adiabatic walls, symmetry, zero-gradient outflow). At the
  *        mirror image of the centroid across isothermal walls the ghost
  *        temperature is 2 T_w - T, across heat-flux walls T + 2 d q / lambda
@@ -93,7 +93,7 @@ struct MixtureGradientFunctor {
     LSQVertexGradientFunctor stencil;
     Kokkos::View<rtype **, Kokkos::LayoutRight> values;
     Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;  // (cell, variable, dimension)
-    Kokkos::View<rtype **, Kokkos::LayoutRight> bc_values;    // (condition, [T, X_1 .. X_Ns]) of UPT
+    Kokkos::View<rtype **, Kokkos::LayoutRight> bc_values;    // (condition, [T, X_1 .. X_Ns]) of inlet_state
     uint32_t n_species;
     Kokkos::View<rtype *[3]> coefficients;  // (cell, [mu, lambda, -]), for heat-flux walls
 
@@ -199,7 +199,7 @@ struct MixtureGradientFunctor {
  * the enthalpy and Soret fluxes vanish there;
  * transmissive faces take their image face's values, gradients and
  * coefficients; outflow faces and transmissive faces without an image have
- * zero normal derivatives; UPT faces take the cell's values and gradients.
+ * zero normal derivatives; inlet_state faces take the cell's values and gradients.
  */
 struct MixtureViscousFluxFunctor {
     Kokkos::View<rtype *[N_DIM]> normals;
