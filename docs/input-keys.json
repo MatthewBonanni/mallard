@@ -3598,6 +3598,20 @@
   ],
   "type": "array"
  },
+ "probes.boundary": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "probes.boundary_type": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "probes.end": {
   "dims": [
    2,
@@ -3685,6 +3699,13 @@
    "tutorials/wedge/input.toml"
   ],
   "type": "string"
+ },
+ "probes.pivot": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
  },
  "probes.point": {
   "dims": [
