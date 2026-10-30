@@ -45,14 +45,13 @@ RULES = {
     ("boundary_conditions.md", "# Boundary conditions"): (lambda t: bool(boundaries(t)), None),
     **{("boundary_conditions.md", f"### `{name}`"): (bc_type(name), fallback) for name, fallback in [
         ("wall_adiabatic", None), ("wall_isothermal", None),
-        ("wall_heat_flux", "no example yet; see `test/viscous_test.cpp` and `test/mixture_transport_test.cpp`"),
+        ("wall_heat_flux", None),
         ("inlet_state", None), ("inlet_stagnation", None), ("inlet_mass_flow", None), ("outlet_pressure", None),
         ("outlet_extrapolation", None), ("farfield", None), ("symmetry", None), ("dirichlet", None)]},
     ("boundary_conditions.md", "### Wall models (`wall_model`)"):
         (lambda t: any("wall_model" in b for b in boundaries(t)), None),
     ("boundary_conditions.md", "#### `average`: area-averaged pressure"):
-        (lambda t: any(b.get("average") for b in boundaries(t)),
-         "no example yet; see `test/boundary_test.cpp` and `test/mpi_test.cpp`"),
+        (lambda t: any(b.get("average") for b in boundaries(t)), None),
     ("boundary_conditions.md", "### Periodic"): (lambda t: "periodic" in t, None),
     ("boundary_conditions.md", "### `nscbc`: characteristic boundaries"):
         (lambda t: any("nscbc" in b for b in boundaries(t)), None),

@@ -209,8 +209,8 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
 
     // Options
     if (present("nscbc")) bc.options = static_cast<uint8_t>(bc.options | NSCBC);
-    if (present("average")) {
-        if (find_value<bool>(input, "average")) bc.options = static_cast<uint8_t>(bc.options | AVERAGE);
+    if (bc.type == BoundaryType::OUTLET_PRESSURE && find_value_or<bool>(input, "average", false)) {
+        bc.options = static_cast<uint8_t>(bc.options | AVERAGE);
     }
     if (bc.has(NSCBC) && bc.has(AVERAGE)) {
         fail(input, where, "average", "`average` and `nscbc` don't combine on `outlet_pressure` (" + PLANNED + ")",

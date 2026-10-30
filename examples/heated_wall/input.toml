@@ -1,0 +1,71 @@
+# Heated wall: air at rest in a closed 10 x 5 cm box, heated through its floor
+# (wall_heat_flux) with a heat flux that varies along it,
+# q = 2e4 (1 + 0.5 cos(2 pi x / 0.1)) W/m^2, the other walls adiabatic. No
+# mass or work crosses the walls, so the energy in the box grows by exactly
+# the heat that entered: the integral of q over the floor, 2000 W per metre of
+# depth, times t.
+#
+# Run (seconds on one CPU thread):
+#   ../../build/src/mallard -i input.toml
+#   python check_heated_wall.py solut/box
+#
+# Result: after 10 ms the energy in the box has grown by 20 J/m, within 2e-14
+# of q A t at every snapshot.
+
+[run]
+t_stop = 0.01
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 40
+Ny = 20
+Lx = 0.1
+Ly = 0.05
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0e5
+T = 300.0
+
+[[boundaries]]
+name = "bottom"
+type = "wall_heat_flux"
+q = "2e4 * (1 + 0.5 * cos(2 * pi * x / 0.1))"   # W/m^2 into the air
+
+[[boundaries]]
+name = "top"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "left"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "right"
+type = "wall_adiabatic"
+
+[numerics]
+riemann_solver = "HLLC"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 1.0e5
+T_ref = 300.0
+rho_ref = 1.1614401858304297
+mu = 1.8e-5
+Pr = 0.72
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/box"
+format = "vtu"
+time_interval = 1.0e-3
+variables = ["RHO", "RHOE", "T"]

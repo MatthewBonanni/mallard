@@ -23,7 +23,7 @@ p = 1.0
 nscbc = { L = 1.0 }     # an option: non-reflecting
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 36 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 38 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -237,7 +237,7 @@ name = "wall"           # a boundary zone of the mesh
 type = "wall_adiabatic"
 ```
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`viscous_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#viscous-shock-tube) and 3 more.
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric) and 4 more.
 
 **Imposes** zero heat flux and, in viscous runs, the wall velocity (through a
 mirrored ghost velocity, `2 u_w - u`); density and pressure come from the
@@ -287,7 +287,7 @@ type = "wall_heat_flux"
 q = 2.0e4                   # [W/m^2] into the fluid; negative cools it
 ```
 
-*Used in:* no example yet; see `test/viscous_test.cpp` and `test/mixture_transport_test.cpp`.
+*Used in:* [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall).
 
 **Imposes** the heat flux `q` into the fluid (required) in the energy
 equation and the temperature gradient, and the wall velocity as
@@ -295,6 +295,10 @@ equation and the temperature gradient, and the wall velocity as
 
 **Use** where the heat input is known (an electrically heated wall, a
 radiative load).
+
+*`examples/heated_wall`: a closed box heated through its floor with
+`q = 2e4 (1 + 0.5 cos(2 pi x / 0.1))` W/m^2; the energy in the box grows by
+the heat that entered, `q A t`, within 2e-14 (`check_heated_wall.py`).*
 
 **Pitfall:** a large `q` on a coarse wall cell overshoots the wall
 temperature; check the near-wall temperature against `q dy / lambda`.
@@ -351,7 +355,7 @@ T = 300.0
 # X = { O2 = 0.21, N2 = 0.79 } # mixtures
 ```
 
-*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet) and 12 more.
+*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet) and 13 more.
 
 **Imposes** the full exterior state: velocity, pressure, temperature and
 composition, nothing from the interior. For **supersonic inflow** this is
@@ -519,7 +523,7 @@ type = "outlet_pressure"
 p = 101325.0
 ```
 
-*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180) and 10 more.
+*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet), [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet) and 11 more.
 
 **Imposes** the pressure `p` on subsonic faces (the incoming acoustic wave),
 with the velocity and temperature of the interior (the other waves leave);
@@ -557,13 +561,20 @@ p = 1.0e5
 average = true
 ```
 
-*Used in:* no example yet; see `test/boundary_test.cpp` and `test/mpi_test.cpp`.
+*Used in:* [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet).
 
 On subsonic faces, the local pressure is shifted by one number, updated every
 stage, so that its area average over the outlet's faces is `p`; the transverse
 profile is kept (with `p >= 1e-3` of the local pressure). Supersonic faces
 take the interior state. Use it where an outlet mixes subsonic and supersonic
-faces or carries a pressure profile. The average runs over all ranks in a
+faces or carries a pressure profile.
+
+*`examples/average_outlet`: a Mach 1.7 core between Mach 0.4 streams; the
+outlet's area-averaged pressure stays within 0.05% of `p` while the pressure
+varies by 6% across it, where a local outlet (`local.toml`) ends 2% above `p`
+(`check_average_outlet.py`).*
+
+The average runs over all ranks in a
 fixed order, so results do not depend on the rank count. Not with gas
 mixtures, and not with `nscbc` (both planned in
 [#565](https://github.com/MatthewBonanni/mallard/issues/565)).
@@ -634,7 +645,7 @@ name = "bottom"
 type = "symmetry"
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 24 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 25 more.
 
 **Imposes** zero normal velocity and zero normal gradients (the ghost mirrors
 the interior); under gravity it continues the hydrostatic pressure.

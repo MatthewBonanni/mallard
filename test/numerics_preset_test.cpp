@@ -148,6 +148,8 @@ const std::string H2_AIR_INIT = "type = \"constant\"\np = 101325.0\nT = 300.0\nu
 
 /** @brief Every solver example, with the preset closest to its numerics and purpose. */
 const std::vector<ExampleCase> EXAMPLES = {
+    {"average_outlet/input.toml", "robust", 2, "", {}, ""},
+    {"average_outlet/local.toml", "robust", 2, "", {}, ""},
     {"autoignition_2d/input.toml", "reacting", 2,
      "type = \"constant\"\np = 4.154e6\nT = 1070.0\nu = [0.0, 0.0]\nX = { H2 = 0.04, O2 = 0.2, N2 = 0.76 }\n", {}, ""},
     {"cylinder/input.toml", "accurate", 2, "",
@@ -165,6 +167,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"heated_duct/closed.toml", "robust", 2, "", {}, ""},
     {"heated_duct/closed_upt.toml", "robust", 2, "", {}, ""},
     {"heated_duct/input.toml", "robust", 2, "", {}, ""},
+    {"heated_wall/input.toml", "robust", 2, "", {}, ""},
     {"mallard/input.toml", "robust", 2, "",
      {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "top"}, {"cylinder", "duck"}}, ""},
     {"noh_axisymmetric/input.toml", "robust", 2, "", {}, ""},
