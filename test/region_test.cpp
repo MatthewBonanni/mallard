@@ -532,7 +532,7 @@ TEST(RegionTest, CellZonesOfMeshFilesAreRegions) {
     std::vector<std::string> names = {"left_half", "right_half"};
     mesh->cell_zone_names = names;
     mesh->h_cell_zone.resize(mesh->n_cells);
-    for (uint32_t c = 0; c < mesh->n_cells; c++) mesh->h_cell_zone[c] = mesh->h_cell_coords(c, 0) < 0.5 ? 0 : 1;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) mesh->h_cell_zone[c] = mesh->h_cell_coords(c, 0) < 0.5_r ? 0 : 1;
     const region::MeshRegions automatic(*mesh);
     auto fractions = [&](const std::string & table) {
         return region::cell_fractions(*mesh, region::Region(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic));
