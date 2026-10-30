@@ -74,6 +74,11 @@ cmake --build build -j
   `toml::value` or `toml::table` directly (configuration fails if you do). Every
   key setup reads is then validated automatically: misspelled or unused keys are
   errors, with suggestions.
+- **Error messages** teach: an invalid value throws an `InputError` built from a
+  `Diagnostic` (key, line from `line_of`, what is wrong, the accepted values, the
+  fix and the docs page); `missing_key`, `not_accepted` and `cannot_read` cover the
+  common cases. A run and `mallard check` report it the same way, and
+  `test/error_messages_test.cpp` holds an example of each kind.
 - **Kokkos device code** must run on CUDA and HIP, not only on the CPU backends:
   - Kernels (`KOKKOS_LAMBDA`, functors) capture by value; never capture `this` or
     references to host objects. Copy the members a kernel needs into locals first.

@@ -133,7 +133,8 @@ TEST(NumericsPreset, InvalidPresetsAreInputErrors) {
         FAIL() << "no error for an unknown preset";
     } catch (const InputError & e) {
         EXPECT_EQ(std::string(e.what()),
-                  "numerics.preset = \"fast\" is not one of: accurate, les, reacting, robust.");
+                  "line 2: numerics.preset: \"fast\" is not accepted. Accepted values: accurate, les, reacting, robust. "
+                  "See docs/input.md#numerics.");
     }
     EXPECT_THROW(resolve("[numerics]\npreset = 1\n"), InputError);
 }

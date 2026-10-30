@@ -47,7 +47,7 @@ LES LES::from_input(const Input & input) {
     }
     LES les;
     const std::string name = find_value_or<std::string>(table, "model", N_DIM == 3 ? "sigma" : "wale");
-    const auto it = find_option(SGS_MODELS, "les.model", name);
+    const auto it = find_option(SGS_MODELS, "les.model", name, line_of(table, "model"));
     les.model = it->second;
     if (N_DIM == 2 && les.model == SGSModel::SIGMA) {
         throw InputError("les.model = \"sigma\" vanishes for every two-dimensional flow; use \"wale\" or \"vreman\" in "

@@ -34,7 +34,10 @@ ncclComm_t nccl() {
     const ncclResult_t err = ncclCommInitRank(&nccl_comm, size(), id, rank());
     if (err != ncclSuccess) {
         nccl_comm = nullptr;
-        throw std::runtime_error(std::string("NCCL: ncclCommInitRank failed: ") + ncclGetErrorString(err));
+        throw std::runtime_error(std::string("NCCL: ncclCommInitRank failed: ") + ncclGetErrorString(err) +
+                                 ". Check that each rank has its own GPU (one rank per GPU; NCCL_DEBUG=INFO tells "
+                                 "more), or set parallel.halo_exchange = \"mpi\" to exchange halos without NCCL. "
+                                 "See docs/guide/parallel.md#mpi.");
     }
     // NCCL connects at the first operation of each kind: do that now, not in the time loop
     Kokkos::View<double> x("nccl_warm_up");

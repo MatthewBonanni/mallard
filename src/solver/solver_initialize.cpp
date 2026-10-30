@@ -38,8 +38,16 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
 };
 
 void Solver::init_solution() {
+    if (!input.contains("initialize")) {
+        throw InputError({.key = "initialize",
+                          .message = "the [initialize] table is missing; it sets the initial flow",
+                          .fix = N_DIM == 3 ? "Add [initialize] with u = [ux, uy, uz], p and T (a uniform flow), or "
+                                              "type = \"analytical\" for expressions of x, y, z"
+                                            : "Add [initialize] with u = [ux, uy], p and T (a uniform flow), or "
+                                              "type = \"analytical\" for expressions of x, y"});
+    }
     const std::string type_str = find_value_or<std::string>(input, "initialize", "type", "constant");
-    auto it = find_option(INIT_TYPES, "initialize.type", type_str);
+    auto it = find_option(INIT_TYPES, "initialize.type", type_str, line_of(input.at("initialize"), "type"));
     initial_state = type_str;
     const bool from_file = it->second == InitType::RESTART || it->second == InitType::REMAP;
     const bool layered = InitialState::layered(input);
@@ -68,7 +76,8 @@ void Solver::init_solution() {
 
 void Solver::init_solution_restart() {
     if (!input.at("initialize").contains("file")) {
-        throw std::runtime_error("Missing file for initialization: restart.");
+        throw missing_key(input.at("initialize"), "initialize.file",
+                          "Add file = \"...\": a restart file written by [[write_data]] with format = \"restart\"");
     }
     const std::string file = find_value<std::string>(input, "initialize", "file");
     // Restart files hold cells in global order, so any number of ranks can read
@@ -77,7 +86,13 @@ void Solver::init_solution_restart() {
     RestartData restart = read_restart(file, distributed ? &mesh->h_global_cell_id : nullptr);
     const uint64_t n_expected = distributed ? mesh->n_global_cells : mesh->n_cells;
     if (restart.n_cells != n_expected) {
-        throw std::runtime_error("Restart file " + file + " does not match the mesh.");
+        throw InputError({.key = "initialize.file",
+                          .line = line_of(input.at("initialize"), "file"),
+                          .message = "restart file " + file + " has " + std::to_string(restart.n_cells) +
+                                     " cells, but the mesh has " + std::to_string(n_expected),
+                          .fix = "Restart on the mesh that wrote the file; to start from a solution on another mesh, "
+                                 "use type = \"remap\"",
+                          .docs = "docs/input.md#type--remap"});
     }
     apply_restart(restart, file, true);
     initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
@@ -156,12 +171,18 @@ void Solver::init_solution_constant() {
     const Input & init = input.at("initialize");
     for (const char * key : {"u", "p", "T"}) {
         if (!init.contains(key)) {
-            throw std::runtime_error(std::string("Missing ") + key + " for initialization: constant.");
+            Diagnostic d = missing_key(init, std::string("initialize.") + key).diagnostic;
+            d.message = "missing; a uniform initial state (type = \"constant\") needs u, p and T";
+            throw InputError(d);
         }
     }
     std::vector<rtype> u = find_real_vector(input, "initialize", "u", dim::velocity);
     if (u.size() != N_DIM) {
-        throw std::runtime_error("u must be a " + std::to_string(N_DIM) + "-element array for initialization: constant.");
+        throw InputError({.key = "initialize.u",
+                          .line = line_of(init, "u"),
+                          .message = "has " + std::to_string(u.size()) + " components, but this build is " +
+                                     std::to_string(N_DIM) + "D",
+                          .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
     }
     const rtype p = find_real(input, "initialize", "p", dim::pressure);
     const rtype T = find_real(input, "initialize", "T", dim::temperature);
