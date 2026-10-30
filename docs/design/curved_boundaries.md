@@ -30,14 +30,47 @@ DG).
    curved edge. High-order edges whose nodes lie on their chord stay straight
    (Gmsh writes planes at the mesh's order too). `mallard mesh convert` keeps
    the high-order boundary faces in the HDF5 file (`boundary/high_order`).
-2. **Analytic projection** for meshes without high-order nodes (generated, P1
-   Gmsh, HDF5): `[[mesh.curved]]` names a zone and a shape (`circle` in 2D;
-   `sphere` or `cylinder` with an axis in 3D). A point of the straight face is
-   projected radially onto the shape, minus the linear interpolant of the
-   corners' own projection offsets, so faces still meet at the mesh nodes.
+2. **Projection onto a region's surface** for meshes without high-order nodes
+   (generated, P1 Gmsh, HDF5): `[[mesh.curved]]` names a zone and a
+   [region](../guide/geometry.md#regions) (#407), whose surface (in 2D: the
+   boundary curve of its area, or a `circle` or `ellipse`) the zone lies on.
+   A point of the straight face is projected onto the surface, minus the
+   linear interpolant of the corners' own projection offsets, so faces still
+   meet at the mesh nodes.
 
 `[mesh] curved_geometry = false` ignores both, for straight-versus-curved
 comparisons on the same file.
+
+## Projection onto region surfaces
+
+A region is known by its signed distance, or for `implicit` regions by any
+function `phi` negative inside (`src/common/region.h`), on the host. The
+projection of a point `x` is its closest point `p` on `phi = 0`, with the
+Jacobian `dp/dx` that the face map's derivatives need:
+
+- **Closed forms.** `circle` and `disk` (2D), `sphere` and `cylinder`
+  without `length` or `inner_radius` (3D), with no transforms, are projected
+  radially as before regions existed: the same operations on the same
+  numbers, so these walls are bitwise unchanged. Everything else, including
+  a transformed sphere, takes the general path.
+- **Closest-point iterations.** From `p = x`: a Newton step onto the level
+  set along the gradient, `-phi g / |g|^2`, plus the tangential part of the
+  remaining offset toward `x`. The fixed point is the foot of the normal
+  through `x`. The steps stop at round-off (`4 eps (|x| + h)`, `h` the
+  face's longest side) or, below `1e-10 h`, once they stop halving, so `p`
+  is a smooth function of `x` to round-off; 100 steps or a point farther than
+  `h` from `x` is an error naming the zone and the point.
+- **Derivatives.** Gradient and Hessian by fourth-order central differences
+  of step `1e-2 h`, divided by 4 (up to 4 times) until two gradients agree to
+  1e-8, so that stencils do not straddle the creases of booleans and
+  polygons. Then `dp/dx = (I + lambda K)^-1 (I - n n^T)`, with `n` the unit
+  normal, `lambda = (x - p) . n` and `K = T H T / |g|` the shape operator
+  (`T = I - n n^T`). A root where `phi` does not change sign at about
+  `|g| h` across `p` (a double root such as `(x^2 + y^2 - 1)^2`) is an error.
+- **Corner offsets** of a face and the end offsets of its curved edges are
+  projected once, when the face is set up, instead of at every evaluation.
+
+In 2D the surface is the slice `z = 0`, and only `x`, `y` are differenced.
 
 ## Representation
 
@@ -202,6 +235,9 @@ the sphere's facets are mirror planes of their own, beyond that limit.
 
 - Orders 5 and 6 are fourth order at curved walls (degree cap, above).
 - Axisymmetric runs reject curved boundaries.
+- A face that spans a crease of a region's surface (a box's edge, where the
+  members of a union meet) is curved onto one side of it; zones should meet
+  at creases.
 - An edge shared by two different analytic shapes takes the first shape's
   curve; the other face's own projection then differs along that edge (the
   closure shift keeps every cell closed).

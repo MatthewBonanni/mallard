@@ -848,8 +848,8 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     const std::string annulus = write_temp_shared("mallard_mpi_vtkhdf_annulus.msh", annulus_gmsh(3, 40, 1, true));
     expect_vtkhdf_output_matches_serial(
         "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + annulus + "\"\n"
-        "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
-        "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+        "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
         "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"
         "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n[[boundaries]]\nname = \"outer\"\n"
         "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
@@ -975,11 +975,11 @@ TEST(MPITest, CurvedWallsMatchSerial) {
     // Walls from P3 lines of the file, or projected onto circles (in closed
     // form, and by closest points on an implicit circle and an ellipse of
     // equal axes); the HDF5 copy of the file keeps the P3 lines
-    const std::string closed = "[[mesh.curved]]\nzone = \"inner\"\nshape = {type = \"circle\", center = [0.0, 0.0], radius = 1.0}\n"
-                               "[[mesh.curved]]\nzone = \"outer\"\nshape = {type = \"circle\", center = [0.0, 0.0], radius = 1.384}\n";
-    const std::string general = "[[mesh.curved]]\nzone = \"inner\"\nshape = {type = \"implicit\", f = \"x^2 + y^2 - 1\"}\n"
+    const std::string closed = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                               "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n";
+    const std::string general = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"implicit\"\nf = \"x^2 + y^2 - 1\"\n"
                                 "[[mesh.curved]]\nzone = \"outer\"\n"
-                                "shape = {type = \"ellipse\", center = [0.0, 0.0], semi_axes = [1.384, 1.384]}\n";
+                                "type = \"ellipse\"\ncenter = [0.0, 0.0]\nsemi_axes = [1.384, 1.384]\n";
     for (const auto & [order, shapes] : {std::pair{1, closed}, std::pair{1, general}, std::pair{3, std::string()}}) {
         const std::string file =
             write_temp_shared("mallard_mpi_annulus_" + std::to_string(order) + ".msh", annulus_gmsh(5, 60, order, order == 3));

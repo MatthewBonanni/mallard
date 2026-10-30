@@ -14,6 +14,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -44,11 +45,15 @@ constexpr rtype GAMMA = 1.4_r;
 const char * SHAPES = R"(
 [[mesh.curved]]
 zone = "inner"
-shape = {type = "circle", center = [0.0, 0.0], radius = 1.0}
+type = "circle"
+center = [0.0, 0.0]
+radius = 1.0
 
 [[mesh.curved]]
 zone = "outer"
-shape = {type = "circle", center = [0.0, 0.0], radius = 1.384}
+type = "circle"
+center = [0.0, 0.0]
+radius = 1.384
 )";
 
 /**
@@ -75,11 +80,16 @@ const Walls ELLIPSES = {"ellipses",
                         R"(
 [[mesh.curved]]
 zone = "inner"
-shape = {type = "ellipse", center = [0.0, 0.0], semi_axes = [1.0, 0.75], rotate = 30}
+type = "ellipse"
+center = [0.0, 0.0]
+semi_axes = [1.0, 0.75]
+rotate = 30
 
 [[mesh.curved]]
 zone = "outer"
-shape = {type = "implicit", f = "(x / 1.384)^2 + (y / 1.038)^2 - 1", rotate = 30}
+type = "implicit"
+f = "(x / 1.384)^2 + (y / 1.038)^2 - 1"
+rotate = 30
 )"};
 
 /** @brief Nodes and cells of an O-grid of the annulus (n_r rings of n_t cells), nodes on the circles. */
@@ -322,26 +332,6 @@ TEST(CurvedGeometry, CellAreasAndCentroidsMatchTheExactRegions) {
     }
 }
 
-TEST(CurvedGeometry, LegacyShapeKeysGiveTheSameGeometry) {
-    // shape = "circle" with center and radius beside it (before 0.9) is the
-    // circle region, bit for bit
-    const std::string legacy = "[mesh]\n[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\n"
-                               "radius = 1.0\n[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\n"
-                               "center = [0.0, 0.0]\nradius = 1.384\n";
-    const Annulus a = annulus(3, 24, true);
-    auto old = std::make_shared<Mesh>();
-    old->init_from_connectivity(a.nodes, a.cells, a.faces);
-    const Input input = parse_toml(legacy);
-    old->apply_curved(curved::surfaces_of_mesh(*old, input));
-    EXPECT_TRUE(unused_keys(input).empty());
-    auto mesh = annulus_mesh(3, 24, "curved", true);
-    for (uint32_t c = 0; c < mesh->n_cells; c++) {
-        EXPECT_EQ(old->h_cell_volume(c), mesh->h_cell_volume(c));
-        EXPECT_EQ(old->h_cell_coords(c, 0), mesh->h_cell_coords(c, 0));
-        EXPECT_EQ(old->h_cell_coords(c, 1), mesh->h_cell_coords(c, 1));
-    }
-}
-
 TEST(CurvedGeometry, StraightWallsAreSecondOrderAndHighOrderLinesConverge) {
     // Total area error: the polygon's falls as h^2; Lagrange lines on the
     // circle (P2, P3) as h^4 (even orders superconverge)
@@ -417,8 +407,8 @@ TEST(CurvedGeometry, MeshesWithoutCurvedDataAreUnchanged) {
     auto bad = std::make_shared<Mesh>();
     bad->init_from_connectivity(a.nodes, a.cells, a.faces);
     auto curve = [&](const std::string & zone, const std::string & shape) {
-        bad->apply_curved(curved::surfaces_of_mesh(*bad, parse_toml("[mesh]\n[[mesh.curved]]\nzone = \"" + zone +
-                                                                    "\"\nshape = " + shape + "\n")));
+        bad->apply_curved(curved::surfaces_of_mesh(
+            *bad, parse_toml("[mesh]\ncurved = [{zone = \"" + zone + "\", " + shape.substr(1) + "]\n")));
     };
     EXPECT_THROW(curve("wall", "{type = \"circle\", center = [0.0, 0.0], radius = 1.0}"), InputError);
     // So are shapes that miss the zone's nodes, in closed form or not
@@ -539,7 +529,7 @@ namespace {
 /** @brief The shape of a region table, as [[mesh.curved]] reads it. */
 curved::Shape shape_of(const std::string & table) {
     const Input input = parse_toml("shape = " + table + "\n");
-    return curved::shape_of(std::make_shared<const region::Region>(input.at("shape"), "shape"), "wall");
+    return curved::shape_of(input.at("shape"), "shape");
 }
 
 /** @brief dp/dx of a projection by fourth-order differences of step e. */
@@ -585,8 +575,8 @@ TEST(CurvedShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
          [](double x, double y) {
              return std::array<double, 3>{std::pow(x, 4) + 2.0 * std::pow(y, 4) - 1.0, 4.0 * std::pow(x, 3), 8.0 * std::pow(y, 3)};
          }, 0.0, 2.0 * M_PI},
-        {"union", "{type = \"union\", regions = [{type = \"circle\", center = [0.0, 0.0], radius = 1.0}, "
-                  "{type = \"circle\", center = [1.5, 0.0], radius = 1.0}]}",
+        {"union", "{type = \"union\", regions = [{type = \"disk\", center = [0.0, 0.0], radius = 1.0}, "
+                  "{type = \"disk\", center = [1.5, 0.0], radius = 1.0}]}",
          [](double x, double y) { return std::array<double, 3>{x * x + y * y - 1.0, 2.0 * x, 2.0 * y}; }, 1.0, 2.0 * M_PI - 1.0},
     };
     std::mt19937 rng(7);
@@ -640,11 +630,11 @@ TEST(CurvedShapes, ProjectionsAreClosestPointsWithTheirDerivatives) {
         EXPECT_LT(worst_p, 1e-14);
         EXPECT_LT(worst_J, 1e-11);
     }
-    // Circles, alone and turned or scaled uniformly, keep their closed form
+    // Circles and disks without transforms keep the closed form
     EXPECT_EQ(shape_of("{type = \"circle\", center = [0.5, 0.0], radius = 1.0}").kind, curved::Shape::Kind::CIRCLE);
-    const curved::Shape turned = shape_of("{type = \"cylinder\", center = [0.0, 0.0], radius = 1.0, scale = 2, rotate = 40}");
-    EXPECT_EQ(turned.kind, curved::Shape::Kind::CIRCLE);
-    EXPECT_DOUBLE_EQ(turned.radius, 2.0);
+    EXPECT_EQ(shape_of("{type = \"disk\", center = [0.5, 0.0], radius = 1.0}").kind, curved::Shape::Kind::CIRCLE);
+    EXPECT_EQ(shape_of("{type = \"circle\", center = [0.5, 0.0], radius = 1.0, rotate = 40}").kind,
+              curved::Shape::Kind::SURFACE);
 }
 
 namespace {
@@ -765,3 +755,16 @@ TEST(CurvedTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {
                                 "max wall-value error", {4, 8}, {f1, f2}, 5.0, 4.5});
     EXPECT_THROW(curved_reconstruction_error(4, "curved", 5, false, "curved_wall_degree = 1\n"), std::runtime_error);
 }
+
+TEST(ZZBitwise, Dump) {
+    uint64_t h = 1469598103934665603ull;
+    auto mix = [&](double v) { uint64_t b; std::memcpy(&b, &v, 8); h = (h ^ b) * 1099511628211ull; };
+    for (bool tri : {false, true}) {
+        auto mesh = annulus_mesh(3, 24, "curved", tri);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) { mix(double(mesh->h_cell_volume(c))); mix(double(mesh->h_cell_coords(c, 0))); }
+        std::vector<curved::Vec3> x; std::vector<double> w;
+        for (uint32_t c = 0; c < mesh->n_cells; c++) { mesh->curved_geometry->cell_rule(c, 6, x, w); for (size_t q = 0; q < w.size(); q++) { mix(w[q]); mix(x[q][0]); mix(x[q][1]); } }
+    }
+    printf("BITWISE %016llx\n", static_cast<unsigned long long>(h));
+}
+

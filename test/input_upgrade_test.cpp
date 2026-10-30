@@ -199,6 +199,21 @@ TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
     EXPECT_NO_THROW(input_upgrade::upgrade_text(probe, findings, reformatted, input_upgrade::rules(), 0));
 }
 
+TEST(InputUpgradeTest, CurvedZonesTakeTheTypeOfTheirRegion) {
+    const std::string text = "[mesh]\ntype = \"file\"\n[[mesh.curved]]\nzone = \"wall\"\nshape = \"circle\"  # the body\n"
+                             "center = [0, 0]\nradius = 1\n";
+    std::vector<Finding> findings;
+    bool reformatted = false;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted),
+              "[mesh]\ntype = \"file\"\n[[mesh.curved]]\nzone = \"wall\"\ntype = \"circle\"  # the body\n"
+              "center = [0, 0]\nradius = 1\n");
+    EXPECT_FALSE(reformatted);
+    ASSERT_EQ(findings.size(), 1u);
+    Input input = parse_input_string(text);
+    input_upgrade::apply(input, "0.9.0");
+    EXPECT_EQ(input.at("mesh").at("curved").at(0).at("type").as_string(), "circle");
+}
+
 TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
     const Rules rules = {{}, {{"s[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0", "hollow", false,
                                0, "axis = [0, 0, 1]"}}};

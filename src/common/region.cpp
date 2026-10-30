@@ -26,6 +26,17 @@
 
 namespace region {
 
+std::vector<std::string> types() {
+    std::vector<std::string> out = {"sphere", "ellipsoid", "cylinder", "cone", "frustum", "torus",
+                                    "half_space", "implicit", "union", "intersection", "difference"};
+    if (N_DIM == 2) {
+        out.insert(out.end(), {"disk", "annulus", "rectangle", "polygon"});
+    } else {
+        out.push_back("box");
+    }
+    return out;
+}
+
 namespace {
 
 using Vec = std::array<double, 3>;
@@ -95,17 +106,6 @@ class Parser {
         }
 
     private:
-        static std::vector<std::string> types() {
-            std::vector<std::string> out = {"sphere", "ellipsoid", "cylinder", "cone", "frustum", "torus",
-                                            "half_space", "implicit", "union", "intersection", "difference"};
-            if (N_DIM == 2) {
-                out.insert(out.end(), {"disk", "annulus", "rectangle", "polygon"});
-            } else {
-                out.push_back("box");
-            }
-            return out;
-        }
-
         /** @brief For a type of another dimension than the run's regions: what it is, and the type to use instead. */
         static std::optional<std::pair<std::string, std::string>> other_dimension(const std::string & type) {
             if (type == "circle") return {{"a curve", N_DIM == 2 ? "\"disk\", the area inside a circle" : "\"sphere\""}};

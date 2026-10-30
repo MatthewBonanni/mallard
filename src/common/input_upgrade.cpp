@@ -50,6 +50,8 @@ const Rules & rules() {
             {"physics.p_min", "", "0.2.0", "0.2.0", "pressures are not clipped"},
             {"physics.p_max", "", "0.2.0", "0.2.0", "pressures are not clipped"},
             {"probes[].shape", "probes[].type", "0.9.0", "0.10.0", "type selects the kind of every region"},
+            {"mesh.curved[].shape", "mesh.curved[].type", "0.9.0", "0.10.0",
+             "type selects the kind of every region; a curved zone lies on its region's surface"},
         },
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},

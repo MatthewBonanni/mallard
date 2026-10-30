@@ -14,7 +14,7 @@ and how Mallard puts them on a mesh. Every key, with its default, is in the
 | `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
-| `[[mesh.curved]]` | `circle`, `sphere` or `cylinder` of its own keys (to move onto regions: [#407](https://github.com/MatthewBonanni/mallard/issues/407)) | [Curved boundaries](meshes.md#curved-boundaries) |
+| `[[mesh.curved]]` | the surface of a [region](#regions) (2D: its boundary curve, or a `circle` or `ellipse`) | [Curved boundaries](meshes.md#curved-boundaries) |
 
 Initial states and sponges take expressions rather than regions; a comparison
 such as `"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp region there, which the

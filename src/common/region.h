@@ -206,6 +206,9 @@ struct RegionView {
     KOKKOS_INLINE_FUNCTION double weight(const double x[3]) const { return indicator(distance(x), edge); }
 };
 
+/** @brief The region types of this run's dimension (areas in 2D, volumes in 3D), as type = takes them. */
+std::vector<std::string> types();
+
 /**
  * @brief A region from its input table: a primitive or a boolean of
  *        regions, each with optional transforms. See docs/input.md.
