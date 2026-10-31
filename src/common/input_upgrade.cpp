@@ -153,6 +153,8 @@ void find_keys(V & node, const Path & path, size_t k, Concrete & at, std::vector
         find_keys(node, path, k + 1, at, out);
         if (!node.is_table()) return;
         for (auto & [name, child] : entries_of(node)) {
+            // The region of a boundary or interior (new in 0.9.0) has the current types
+            if (name == "of") continue;
             if (child.is_table()) {
                 at.emplace_back(name, -1);
                 find_keys(child, path, k, at, out);

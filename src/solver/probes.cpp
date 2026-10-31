@@ -358,6 +358,31 @@ void write_pvd_file(const std::string & file, const std::vector<std::pair<double
 
 } // namespace
 
+void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
+                           const std::vector<double> & fractions, uint32_t n_variables) {
+    std::vector<uint32_t> cells;
+    std::vector<uint64_t> global;
+    std::vector<double> weights;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        if (fractions[c] == 0.0) continue;
+        cells.push_back(c);
+        global.push_back(mesh.h_global_cell(c));
+        weights.push_back(fractions[c] * double(mesh.h_cell_measure(c)));
+    }
+    p.quadrature.select(mesh, cells, n_variables);
+    if (mesh.n_global_cells > 0) {
+        global = comm::allgatherv(global);
+        weights = comm::allgatherv(weights);
+    }
+    std::vector<size_t> by_id(global.size());
+    for (size_t i = 0; i < by_id.size(); i++) by_id[i] = i;
+    std::sort(by_id.begin(), by_id.end(), [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
+    p.geometry.dim = static_cast<uint8_t>(r.dimension());
+    p.geometry.revolved = mesh.axisymmetric;  // per radian
+    p.geometry.type = "region " + r.summary();
+    for (const size_t i : by_id) p.geometry.quad_weights.push_back(weights[i]);
+}
+
 namespace {
 
 /** @brief Device views of samples in cells (inside: index into cells of those with an offset). */
@@ -385,37 +410,12 @@ void allocate_samples(Probes::Samples & s, const std::vector<uint32_t> & h_cells
 
 } // namespace
 
-void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
-                           const std::vector<double> & fractions, uint32_t n_variables) {
-    std::vector<uint32_t> cells;
-    std::vector<uint64_t> global;
-    std::vector<double> weights;
-    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
-        if (fractions[c] == 0.0) continue;
-        cells.push_back(c);
-        global.push_back(mesh.h_global_cell(c));
-        weights.push_back(fractions[c] * double(mesh.h_cell_measure(c)));
-    }
-    p.quadrature.select(mesh, cells, n_variables);
-    if (mesh.n_global_cells > 0) {
-        global = comm::allgatherv(global);
-        weights = comm::allgatherv(weights);
-    }
-    std::vector<size_t> by_id(global.size());
-    for (size_t i = 0; i < by_id.size(); i++) by_id[i] = i;
-    std::sort(by_id.begin(), by_id.end(), [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
-    p.geometry.dim = static_cast<uint8_t>(r.dimension());
-    p.geometry.revolved = mesh.axisymmetric;
-    p.geometry.type = "region " + r.summary();
-    for (const size_t i : by_id) p.geometry.quad_weights.push_back(weights[i]);
-}
-
 void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables,
                              const std::vector<probe::Point> & point_normals) {
     n_global = points.size();
     std::vector<uint8_t> contained;
     const std::vector<int32_t> located = locate_points(mesh, points, &contained);
-    std::vector<uint64_t> ids;
+    ids.clear();
     std::vector<uint32_t> h_cells, h_inside;
     std::vector<rtype> h_offsets;
     for (uint64_t p = 0; p < points.size(); p++) {
@@ -436,32 +436,31 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
         for (uint64_t id : ids) local.push_back(point_normals[id]);
         set_normals(local);
     }
+    order(mesh);
+}
 
+void Probes::Samples::select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables) {
+    std::vector<uint64_t> global(owned_cells.size());
+    for (size_t i = 0; i < owned_cells.size(); i++) global[i] = mesh.h_global_cell(owned_cells[i]);
+    std::vector<uint64_t> all = mesh.n_global_cells > 0 ? comm::allgatherv(global) : global;
+    std::sort(all.begin(), all.end());
+    n_global = all.size();
+    for (const uint64_t g : global) {
+        ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
+    }
+    cells = to_device(owned_cells, "probe_cells");
+    W = Kokkos::View<rtype *[N_CONSERVATIVE]>("probe_W", owned_cells.size());
+    values = Kokkos::View<rtype **, Kokkos::LayoutRight>("probe_values", owned_cells.size(), n_variables);
+    order(mesh);
+}
+
+void Probes::Samples::order(const Mesh & mesh) {
     distributed = mesh.n_global_cells > 0;
     const std::vector<uint64_t> all = distributed ? comm::gatherv(ids) : ids;
     if (comm::is_root() || !distributed) {
         if (all.size() != n_global) throw std::logic_error("probe samples held by no rank or by several");
         gathered_row.assign(n_global, 0);
         for (uint64_t r = 0; r < all.size(); r++) gathered_row[all[r]] = r;
-    }
-}
-
-void Probes::Samples::select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables) {
-    distributed = mesh.n_global_cells > 0;
-    std::vector<uint64_t> global(owned_cells.size());
-    for (size_t i = 0; i < owned_cells.size(); i++) global[i] = mesh.h_global_cell(owned_cells[i]);
-    std::vector<uint64_t> all = distributed ? comm::allgatherv(global) : global;
-    std::sort(all.begin(), all.end());
-    n_global = all.size();
-    std::vector<uint64_t> ids;
-    for (const uint64_t g : global) {
-        ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
-    }
-    allocate_samples(*this, owned_cells, {}, {}, n_variables);
-    const std::vector<uint64_t> gathered = distributed ? comm::gatherv(ids) : ids;
-    if (comm::is_root() || !distributed) {
-        gathered_row.assign(n_global, 0);
-        for (uint64_t r = 0; r < gathered.size(); r++) gathered_row[gathered[r]] = r;
     }
 }
 
@@ -832,10 +831,11 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         const bool boundary = entry.contains("boundary") || entry.contains("boundary_type");
         const std::string type = find_value_or<std::string>(entry, "type", "");
         const bool cut = type == "cut_plane";
-        const bool oriented = cut || (N_DIM == 2 && entry.contains("type") && type != "point" && type != "points") ||
-                              (N_DIM == 2 && !entry.contains("type") && !entry.contains("point")) ||
-                              (N_DIM == 3 && (type == "rectangle" || type == "disk" || type == "sphere" ||
-                                              type == "cylinder" || type == "cone" || type == "surface"));
+        const bool oriented = !p.from_region &&
+                              (cut || (N_DIM == 2 && entry.contains("type") && type != "point" && type != "points") ||
+                               (N_DIM == 2 && !entry.contains("type") && !entry.contains("point")) ||
+                               (N_DIM == 3 && (type == "rectangle" || type == "disk" || type == "sphere" ||
+                                               type == "cylinder" || type == "cone" || type == "surface")));
         if (cut && mesh.axisymmetric && !p.reductions.empty()) {
             throw InputError(key + ".reductions: cut planes take no reductions with physics.axisymmetric.");
         }

@@ -193,6 +193,35 @@ TEST(MeshFileTest, HDF5ConversionKeepsCellsNodesAndZones) {
         ASSERT_EQ(other->n_faces(), zone.n_faces()) << zone.get_name();
         for (uint32_t i = 0; i < zone.n_faces(); i++) EXPECT_EQ(other->h_faces(i), zone.h_faces(i));
     }
+    // Cell zones too
+    const std::string zoned = write_temp("mallard_convert_zones.msh", jittered_mixed_mesh(6, true));
+    write_mesh_h5(h5, read_file_block(zoned));
+    Mesh zoned_gmsh, zoned_hdf5;
+    zoned_gmsh.init_file(zoned);
+    zoned_hdf5.init_file(h5);
+    EXPECT_EQ(zoned_hdf5.cell_zone_names, zoned_gmsh.cell_zone_names);
+    EXPECT_EQ(zoned_hdf5.h_cell_zone, zoned_gmsh.h_cell_zone);
+}
+
+TEST(MeshFileTest, ReadsCellZones) {
+    // Gmsh 2.2: physical groups of cells; Gmsh 4.1: the physical group of the surface entity
+    Mesh halves;
+    halves.init_file(write_temp("mallard_cell_zones.msh", jittered_mixed_mesh(6, true)));
+    EXPECT_EQ(halves.cell_zone_names, (std::vector<std::string>{"left_half", "right_half"}));
+    for (uint32_t c = 0; c < halves.n_cells; c++) {
+        EXPECT_EQ(halves.h_cell_zone[c], halves.h_cell_coords(c, 0) < 0.5_r ? 0u : 1u) << c;
+    }
+    std::string msh = MSH41;
+    msh.replace(msh.find("$PhysicalNames\n4\n"), 17, "$PhysicalNames\n5\n2 5 \"fluid\"\n");
+    msh.replace(msh.find("1 0 0 0 2 1 0 0 0"), 17, "1 0 0 0 2 1 0 1 5 0");
+    Mesh fluid;
+    fluid.init_file(write_temp("mallard_cell_zones_41.msh", msh));
+    EXPECT_EQ(fluid.cell_zone_names, std::vector<std::string>{"fluid"});
+    EXPECT_EQ(fluid.h_cell_zone, std::vector<uint32_t>(3, 0));
+    Mesh none;
+    none.init_file(write_temp("mallard_small_22.msh", MSH22));
+    EXPECT_TRUE(none.cell_zone_names.empty());
+    EXPECT_TRUE(none.h_cell_zone.empty());
 }
 
 TEST(MeshFileTest, JitteredMixedMeshSatisfiesInvariants) {

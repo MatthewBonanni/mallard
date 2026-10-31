@@ -428,7 +428,9 @@ MeshFileData read_gmsh(const std::string & filename) {
     }
 
     std::map<int, std::string> physical_names;                  // Boundary-dimension groups only
+    std::map<int, std::string> cell_physical_names;             // Cell-dimension groups
     std::map<int, std::vector<int>> boundary_entity_physicals;  // 4.x: entity -> physical tags
+    std::map<int, std::vector<int>> cell_entity_physicals;
     std::map<size_t, uint32_t> node_index;                      // Gmsh node tag -> index
     std::vector<curved::Vec3> coords;                           // every node, for high-order faces
     bool high_order = false;
@@ -448,6 +450,11 @@ MeshFileData read_gmsh(const std::string & filename) {
         std::vector<uint32_t> idx;
         for (size_t k = 0; k < size_t(et.n_corners); k++) idx.push_back(node_index.at(tags[k]));
         if (et.dim == N_DIM) {
+            if (physical != 0) {
+                auto it = cell_physical_names.find(physical);
+                data.set_cell_zone(data.cells.size(), it != cell_physical_names.end() ? it->second
+                                                                                     : "physical_" + std::to_string(physical));
+            }
             data.cells.push_back(idx);
         } else {
             auto it = physical_names.find(physical);
@@ -472,9 +479,9 @@ MeshFileData read_gmsh(const std::string & filename) {
                 read_values(in, filename, dim, tag);
                 std::getline(in, name);
                 const size_t a = name.find('"'), b = name.rfind('"');
-                if (dim == BOUNDARY_DIM) {
-                    physical_names[tag] = (a != std::string::npos && b > a) ? name.substr(a + 1, b - a - 1) : name;
-                }
+                const std::string unquoted = (a != std::string::npos && b > a) ? name.substr(a + 1, b - a - 1) : name;
+                if (dim == BOUNDARY_DIM) physical_names[tag] = unquoted;
+                if (dim == N_DIM) cell_physical_names[tag] = unquoted;
             }
         } else if (token == "$Entities") {
             size_t n_entities[4];
@@ -484,7 +491,7 @@ MeshFileData read_gmsh(const std::string & filename) {
             for (int dim = 0; dim < 4; dim++) {
                 for (size_t i = 0; i < n_entities[dim]; i++) {
                     std::getline(in, line);
-                    if (dim != BOUNDARY_DIM) continue;
+                    if (dim != BOUNDARY_DIM && dim != N_DIM) continue;
                     std::istringstream ls(line);
                     int tag;
                     double bounds[6];
@@ -494,7 +501,7 @@ MeshFileData read_gmsh(const std::string & filename) {
                     for (size_t k = 0; k < n_phys; k++) {
                         int p;
                         read_values(ls, filename, p);
-                        boundary_entity_physicals[tag].push_back(std::abs(p));
+                        (dim == N_DIM ? cell_entity_physicals : boundary_entity_physicals)[tag].push_back(std::abs(p));
                     }
                 }
             }
@@ -558,9 +565,10 @@ MeshFileData read_gmsh(const std::string & filename) {
                     read_values(in, filename, dim, entity, type);
                     read_count(n_in_block);
                     int physical = 0;
-                    if (dim == BOUNDARY_DIM) {
-                        auto it = boundary_entity_physicals.find(entity);
-                        if (it != boundary_entity_physicals.end() && !it->second.empty()) physical = it->second[0];
+                    if (dim == BOUNDARY_DIM || dim == N_DIM) {
+                        const auto & physicals = dim == N_DIM ? cell_entity_physicals : boundary_entity_physicals;
+                        auto it = physicals.find(entity);
+                        if (it != physicals.end() && !it->second.empty()) physical = it->second[0];
                     }
                     const int n_nodes_per_element = gmsh_element_type(type, filename).n_nodes;
                     for (size_t i = 0; i < n_in_block; i++) {
@@ -609,6 +617,13 @@ void drop_unused_nodes(MeshFileData & data) {
     }
 }
 
+void MeshFileData::set_cell_zone(const size_t c, const std::string & name) {
+    auto it = std::find(cell_zone_names.begin(), cell_zone_names.end(), name);
+    if (it == cell_zone_names.end()) it = cell_zone_names.insert(cell_zone_names.end(), name);
+    if (cell_zone.size() <= c) cell_zone.resize(c + 1, Mesh::NO_CELL_ZONE);
+    cell_zone[c] = static_cast<uint32_t>(it - cell_zone_names.begin());
+}
+
 MeshFileData read_mesh_file(const std::string & filename) {
     if (std::filesystem::is_directory(filename)) return read_openfoam(filename);
     const std::string ext = std::filesystem::path(filename).extension().string();
@@ -629,7 +644,11 @@ MeshBlock file_block(const MeshFileData & data, int r, int p) {
     block.first_node = block_begin(data.nodes.size(), r, p);
     for (uint64_t c = block.first_cell; c < block_begin(data.cells.size(), r + 1, p); c++) {
         block.add_cell(data.cells[c]);
+        if (!data.cell_zone_names.empty()) {
+            block.cell_zone.push_back(c < data.cell_zone.size() ? data.cell_zone[c] : Mesh::NO_CELL_ZONE);
+        }
     }
+    block.cell_zone_names = data.cell_zone_names;
     for (uint64_t n = block.first_node; n < block_begin(data.nodes.size(), r + 1, p); n++) {
         std::array<double, N_DIM> x;
         FOR_I_DIM x[i] = double(data.nodes[n][i]);
@@ -686,6 +705,8 @@ void Mesh::init_from_block(const MeshBlock & block, const std::vector<PeriodicPa
         boundary_faces[f].zone = block.zone_names[block.face_zone[f]];
     }
     init_from_connectivity(nodes, cells, boundary_faces, "unassigned", periodic);
+    cell_zone_names = block.cell_zone_names;
+    h_cell_zone = block.cell_zone;
     high_order_faces.clear();
     if (block.face_high_order_offsets.size() == block.n_faces() + 1) {
         for (uint64_t f = 0; f < block.n_faces(); f++) {

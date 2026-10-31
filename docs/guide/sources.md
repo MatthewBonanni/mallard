@@ -114,7 +114,11 @@ rhoE = "50 W"
 region = "igniter"
 ```
 
-See [named regions](geometry.md#named-regions).
+See [named regions](geometry.md#named-regions). The mesh's own regions need
+no definition: `region = "domain"` is every cell, and a cell zone of the mesh
+file (a Gmsh physical group of cells, a Fluent cell zone, ...) is a region by
+its name, e.g. `region = "flame_holder"`
+([regions of the mesh](geometry.md#regions-of-the-mesh)).
 
 ### Exact totals
 
