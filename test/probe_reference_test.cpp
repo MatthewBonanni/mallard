@@ -56,7 +56,7 @@ std::string reference_case(const std::string & dir) {
     std::ostringstream s;
     s << "[run]\nn_steps = 6\ndt = 4.0e-3\n[mesh]\n";
     if (N_DIM == 2) s << "type = \"cartesian_tri\"\nNx = 16\nNy = 12\nLx = 1.0\nLy = 0.8\n";
-    else s << "type = \"cartesian_tet\"\nNx = 6\nNy = 5\nNz = 4\nLx = 1.0\nLy = 0.8\nLz = 0.6\nperiodic = [\"z\"]\n";
+    else s << "type = \"cartesian_tet\"\nNx = 6\nNy = 5\nNz = 4\nLx = 1.0\nLy = 0.8\nLz = 0.6\n" << periodic_sides("z");
     s << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * sin(2 * pi * x) * cos(pi * y)\"\nu = "
       << vector3("0.3 + 0.1 * cos(2 * pi * y)", "0.05 * sin(2 * pi * x)", "0.04 * cos(2 * pi * x)")
       << "\np = \"1.0 + 0.1 * cos(2 * pi * x) * sin(pi * y)\"\n"
