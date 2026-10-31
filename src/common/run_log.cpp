@@ -25,9 +25,9 @@ std::ofstream out;
 void open(const std::string & file, bool append) {
     close();
     if (!comm::is_root()) return;
-    create_parent_directories("the run log", file);
+    create_parent_directories("the run record", file);
     out.open(file, append ? std::ios::app : std::ios::trunc);
-    if (!out.good()) throw cannot_write("the run log", file);
+    if (!out.good()) throw cannot_write("the run record", file);
 }
 
 void close() {

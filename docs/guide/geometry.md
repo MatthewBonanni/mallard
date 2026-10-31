@@ -10,14 +10,14 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | Feature | Geometry | Guide |
 |---|---|---|
 | `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone) | [Sources](sources.md#regions) |
-| `[[probes]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes | [Output](output.md#region-probes) |
-| `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
+| `[[probes]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes | [Probes](probes.md#region-probes) |
+| `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength` | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
-| `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
+| `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
-| `[[initialize.regions]]` `region` | a [region](#regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
-| `[[initialize.data]]` `region` | a [region](#regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
+| `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
+| `[[initialize.data]]` `region` | a [region](#regions) or its [name](#named-regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
 | `[[mesh.curved]]` | `circle`, `sphere` or `cylinder` of its own keys (to move onto regions: [#407](https://github.com/MatthewBonanni/mallard/issues/407)) | [Curved boundaries](meshes.md#curved-boundaries) |
 
 Filled regions are volumes (areas in 2D runs). Surfaces and curves, such as
@@ -421,7 +421,7 @@ TENO converges at the scheme's order:
 
 Use `point` to compare with references or to measure orders of accuracy, and
 `cell` for robust values across shocks. Details and pitfalls:
-[Output](output.md#probes-probes).
+[Probes and monitors](probes.md#accuracy-and-pitfalls).
 
 ## Boundary zones
 
@@ -471,5 +471,5 @@ with h5py.File("probe_wake.h5") as f:
 ## See also
 
 - [Input reference: regions](../input.md#regions), [regions of the mesh](../input.md#regions-of-the-mesh), [`[regions]`](../input.md#named-regions-regions), [`[[sources]]`](../input.md#sources), [`[[sponges]]`](../input.md#sponges), [`[[probes]]`](../input.md#probes), [`[mesh]`](../input.md#mesh)
-- [Sources and sponges](sources.md), [Output and diagnostics](output.md#probes-probes), [Meshes](meshes.md#curved-boundaries)
+- [Sources and sponges](sources.md), [Probes and monitors](probes.md), [Meshes](meshes.md#curved-boundaries)
 - Figures: [`tools/docs/geometry.py`](../../tools/docs/geometry.py), [`tools/docs/regions.py`](../../tools/docs/regions.py)

@@ -241,7 +241,7 @@ _PROVENANCE_MAGIC = b"MLRD-PROVENANCE\0"
 
 def provenance(path):
     """The provenance block (docs/guide/output.md) of any Mallard output file,
-    as a dict: of the first run that wrote to it for CSV files and run logs,
+    as a dict: of the first run that wrote to it for CSV files and run records,
     None if the file has none."""
     if path.endswith(".h5") or path.endswith(".vtkhdf"):
         from .h5 import provenance as h5_provenance
