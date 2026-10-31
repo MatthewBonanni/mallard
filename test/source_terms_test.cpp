@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cmath>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -22,8 +23,10 @@
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "region.h"
+#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "test_utils.h"
 
 namespace {
 
@@ -134,6 +137,109 @@ TEST(SourceTermsTest, TotalsAreExactOverRegionsOfCoarseUnstructuredMeshes) {
     EXPECT_GT(n_partial, 10);
 }
 
+namespace {
+
+/** @brief The sources, sponge and probe of the named-region tests, each region a name or the table it names. */
+std::string shared_regions(const bool named, const std::string & dir) {
+    const std::string ring = named ? "\"ring\"" : ANNULUS, box = named ? "\"box\"" : ROTATED_BOX;
+    const std::string both = named ? "\"both\"" : "{type = \"union\", regions = [" + ANNULUS + ", " + ROTATED_BOX + "]}";
+    std::string text = named ? "[regions]\nring = " + ANNULUS + "\nbox = " + ROTATED_BOX +
+                                   "\nboth = {type = \"union\", regions = [\"ring\", \"box\"]}\n"
+                             : "";
+    text += "[[sources]]\ntotal = true\nrhoE = 0.5\nregion = " + both + "\n[[sources]]\nrho = 0.1\nregion = " + ring +
+            "\n[[sponges]]\nstrength = \"2 + x\"\nu = " + vector_of("0") + "\np = 1.3\nT = 1.0\nregion = " + box +
+            "\n[[probes]]\nname = \"ring\"\nvariables = [\"RHO\", \"P\"]\nregion = " + ring + "\nreductions_file = \"" +
+            dir + "/" + (named ? "named" : "inline") + ".csv\"\n";
+    return text;
+}
+
+std::string read_text(const std::string & file) {
+    std::ifstream in(file);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+std::string error_of(const std::string & input) {
+    try {
+        Solver solver;
+        solver.init(parse_toml(input));
+    } catch (const std::exception & e) {
+        return e.what();
+    }
+    return "";
+}
+
+} // namespace
+
+TEST(SourceTermsTest, NamedRegionsActAsTheTablesTheyName) {
+    const std::string dir = (scratch_dir() / "sources_named_regions").string();
+    Rates r[2];
+    for (const bool named : {false, true}) {
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(closed_box(shared_regions(named, dir))));
+        r[named] = rates(solver, 0.0_r);
+        solver.run();
+    }
+    for (size_t i = 0; i < r[0].values.size(); i++) EXPECT_EQ(r[0].values[i], r[1].values[i]) << "column " << i;
+    EXPECT_NE(r[0].values[0], std::vector<double>(r[0].measure.size(), 0.0));
+    const std::string named = read_text(dir + "/named.csv");
+    EXPECT_EQ(without_provenance(named), without_provenance(read_text(dir + "/inline.csv")));
+    EXPECT_NE(named.find("integral_RHO"), std::string::npos);
+}
+
+TEST(SourceTermsTest, SpongeRegionsScaleTheStrengthByTheirFractions) {
+    // At rest in a closed box the RHS is the sponge's alone: sigma f (U_ref - U)
+    std::string edged = ROTATED_BOX;
+    edged.replace(edged.size() - 1, 1, ", edge = 0.08}");
+    const std::string sponge = "[[sponges]]\nstrength = \"2 + x\"\nu = " + vector_of("0") + "\np = 1.3\nT = 1.0\n";
+    Solver with, without;
+    with.set_distributed(false);
+    without.set_distributed(false);
+    with.init(parse_toml(closed_box(sponge + "region = " + edged + "\n")));
+    without.init(parse_toml(closed_box(sponge)));
+    const Rates a = rates(with, 0.0_r), b = rates(without, 0.0_r);
+    const auto & mesh = *with.get_mesh();
+    const std::vector<double> f =
+        region::volume_fractions(mesh, region::Region(parse_toml("r = " + edged).at("r"), "r"));
+    int n_partial = 0;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        for (const size_t i : {size_t(0), size_t(N_DIM + 1)}) {
+            const double expected = f[c] * b.values[i][c];
+            EXPECT_NEAR(a.values[i][c], expected, precision_tol<double>(1e-12, 1e-5) * (std::abs(b.values[i][c]) + 1e-12))
+                << "cell " << c;
+        }
+        n_partial += (f[c] > 0.0 && f[c] < 1.0);
+    }
+    EXPECT_GT(n_partial, 10);
+}
+
+TEST(SourceTermsTest, RegionNamesMustExistWithoutCyclesAndBeUsed) {
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.4, 0.6], radius = 0.2}"
+                                        : "{type = \"sphere\", center = [0.4, 0.6, 0.5], radius = 0.2}";
+    const std::string source = "[[sources]]\nrhoE = 1.0\nregion = ";
+    const std::string unknown = error_of(closed_box("[regions]\nb = " + ball + "\na = " + ball + "\n" + source +
+                                                    "\"nope\"\n"));
+    EXPECT_NE(unknown.find("no region named \"nope\" in [regions] (defined: a, b)"), std::string::npos) << unknown;
+    EXPECT_NE(unknown.find("named-regions"), std::string::npos) << unknown;
+    const std::string typo = error_of(closed_box("[regions]\nflame = " + ball + "\n" + source + "\"flme\"\n"));
+    EXPECT_NE(typo.find("did you mean \"flame\"?"), std::string::npos) << typo;
+    EXPECT_NE(typo.find("line "), std::string::npos) << typo;
+    const std::string cycle = error_of(closed_box(
+        "[regions]\na = {type = \"union\", regions = [\"b\", " + ball + "]}\nb = {type = \"difference\", regions = [" +
+        ball + ", \"a\"]}\n" + source + "\"a\"\n"));
+    EXPECT_NE(cycle.find("a -> b -> a"), std::string::npos) << cycle;
+    const std::string unused = error_of(closed_box("[regions]\nused = " + ball + "\nspare = " + ball + "\n" + source +
+                                                   "\"used\"\n"));
+    EXPECT_NE(unused.find("regions.spare"), std::string::npos) << unused;
+    std::string edged = ball;
+    edged.replace(edged.size() - 1, 1, ", edge = 0.05}");
+    const std::string nested = error_of(closed_box("[regions]\na = " + edged + "\n" + source +
+                                                   "{type = \"union\", regions = [\"a\", " + ball + "]}\n"));
+    EXPECT_NE(nested.find("regions.a.edge"), std::string::npos) << nested;
+}
+
 TEST(SourceTermsTest, SpeciesSourcesAddTheirMass) {
     const std::string physics = "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + SOURCE_DIR +
                                 "/mechanisms/h2o2.yaml\"\n";
@@ -171,7 +277,7 @@ double relaxation_error(const uint32_t n, const bool with_source) {
     std::ostringstream s;
     s << "[run]\nt_stop = 0.5\ncfl = 0.5\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = 4\nLx = 1.0\nLy = " << 4.0 / n
-      << "\nperiodic = [\"x\", \"y\"]\n"
+      << "\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1 + 0.2 * cos(2 * pi * x)\"\nu = [\"0.5\", \"0\"]\np = \"1\"\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -218,7 +324,7 @@ double forced_kinetic_energy(const bool forced) {
     std::ostringstream s;
     s << "[run]\nt_stop = 2.0\ncfl = 0.8\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 16\nNz = 16\nLx = 6.283185307179586\nLy = 6.283185307179586\n"
-      << "Lz = 6.283185307179586\nperiodic = [\"x\", \"y\", \"z\"]\n"
+      << "Lz = 6.283185307179586\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1\"\np = \"71.42857142857143\"\n"
       << "u = [\"sin(x) * cos(y) * cos(z)\", \"-cos(x) * sin(y) * cos(z)\", \"0\"]\n"
       << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 71.42857142857143\nT_ref = 1.0\nrho_ref = 1.0\n"

@@ -77,11 +77,12 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[chemistry]`, `[radiation]` | no | [Thermochemistry](thermochemistry.md) |
 | `[les]`, `[les.combustion]` | no | [Large-eddy simulation](les.md) |
 | `[source]`, `[[sponges]]` | no | [Sources and sponges](sources.md) |
+| `[regions]` | no | [Named regions](geometry.md#named-regions), used by `[[sources]]`, `[[sponges]]` and `[[probes]]` |
 | `[[write_data]]`, `[output]`, `[[forces]]`, `[integrals]`, `[statistics]`, `[[probes]]` | no | [Output and diagnostics](output.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
-Shapes that several tables use (regions, probe points and curves) are on
-[Geometry](geometry.md).
+Regions that several tables use (inline, or named once in `[regions]`), and
+probe points and curves, are on [Geometry](geometry.md).
 
 Double brackets (`[[boundaries]]`) are TOML arrays of tables: repeat them, one
 entry each. Every key, with its default, is in the
@@ -320,6 +321,7 @@ Keys and options changed so far:
 | `[physics]` `p_min`, `p_max` | none: pressures are not clipped | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; until removed, `"hdf5"` still writes XDMF and HDF5 files | 0.9.0 | 0.10.0 |
+| `[mesh]` `periodic = ["x", "z"]` | `[[periodic]]` `zones = ["left", "right"]` and `zones = ["back", "front"]` (`y`: `bottom`/`top`, `theta`: `start`/`end`); `[initialize.mesh]` `periodic` likewise becomes `[[initialize.periodic]]` | 0.9.0 | 0.10.0 |
 
 Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
 appears in this table and in `src/common/input_upgrade.cpp`, which is the

@@ -208,13 +208,13 @@ std::string periodic_box(const std::string & mesh, uint32_t n, const std::string
     std::ostringstream s;
     s << "[run]\n" << run << "[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n << "\nLx = 1.0\nLy = 1.0\n";
     if constexpr (N_DIM == 3) {
-        s << "Nz = " << n << "\nLz = 1.0\nperiodic = [\"x\", \"y\", \"z\"]\n";
+        s << "Nz = " << n << "\nLz = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
         s << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283185307179586 * (x + y + z))\"\n"
              "p = \"10.0\"\nu = [\"sin(6.283185307179586 * x) * cos(6.283185307179586 * y) * cos(6.283185307179586 * z)\", "
              "\"-cos(6.283185307179586 * x) * sin(6.283185307179586 * y) * cos(6.283185307179586 * z)\", "
              "\"0.5 * sin(6.283185307179586 * x)\"]\n";
     } else {
-        s << "periodic = [\"x\", \"y\"]\n";
+        s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
         s << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283185307179586 * (x + y))\"\np = \"10.0\"\n"
              "u = [\"sin(6.283185307179586 * x) * cos(6.283185307179586 * y) + 0.3 * sin(12.566370614359172 * y + 1)\", "
              "\"-cos(6.283185307179586 * x) * sin(6.283185307179586 * y) + 0.2 * cos(12.566370614359172 * x)\"]\n";
@@ -304,7 +304,7 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
     const auto & sgs = solver->get_les_coefficients();
     const double h = 0.6 / ny;
     uint32_t checked = 0;
-    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
         const double x = double(mesh->h_cell_coords(c, 0)), y = double(mesh->h_cell_coords(c, 1));
         bool interior = x > 2 * h && x < 1.3 - 2 * h && y > 2 * h && y < 0.6 - 2 * h;
         if constexpr (N_DIM == 3) interior = interior && double(mesh->h_cell_coords(c, 2)) > 2 * h && double(mesh->h_cell_coords(c, 2)) < 0.45 - 2 * h;
@@ -315,7 +315,7 @@ TEST(LESSolver, EddyViscosityUsesTheCellVolumeAsFilterWidth) {
         EXPECT_NEAR(sgs(c, 1), 3.5 * mu_t / 0.6, precision_tol<double>(1e-9, 1e-4) * 3.5 * mu_t / 0.6);
         checked++;
     }
-    EXPECT_GT(checked, 10u);
+    EXPECT_GT(comm::allreduce(checked, comm::Op::SUM), 10u);
 }
 
 TEST(LESModels, ScottiFactorOfTheAspectRatios) {
@@ -335,7 +335,7 @@ TEST(LESSolver, ScottiWidthUsesTheExtentsOfEachCell) {
     auto input = [](const std::string & width) {
         std::ostringstream s;
         s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 20\nNz = 10\n"
-          << "Lx = 0.8\nLy = 0.4\nLz = 0.5\nperiodic = [\"x\", \"y\", \"z\"]\n"
+          << "Lx = 0.8\nLy = 0.4\nLz = 0.5\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
           << "[initialize]\ntype = \"analytical\"\nrho = \"2.0\"\np = \"10.0\"\n"
           << "u = [\"0.4 * sin(7.853981633974483 * y)\", \"0.3 * sin(12.566370614359172 * z)\", "
              "\"0.2 * sin(7.853981633974483 * x)\"]\n"
@@ -383,8 +383,8 @@ double dynamic_constant(const std::string & model, double length, double u0, dou
     };
     s << std::setprecision(17) << "[run]\nn_steps = 1\ncfl = 0.1\n[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\n"
       << "Lx = " << length << "\nLy = " << length << "\n"
-      << (N_DIM == 3 ? "Nz = 12\nLz = " + std::to_string(length) + "\nperiodic = [\"x\", \"y\", \"z\"]\n"
-                     : std::string("periodic = [\"x\", \"y\"]\n"))
+      << (N_DIM == 3 ? "Nz = 12\nLz = " + std::to_string(length) + "\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
+                     : std::string("[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"))
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"100.0\"\n";
     if constexpr (N_DIM == 3) {
         s << "u = [\"" << component(0) << "\", \"" << component(1) << "\", \"" << component(2) << "\"]\n";
@@ -440,6 +440,11 @@ TEST(LESSolver, BudgetSplitsTheKineticEnergyRateOfTheRightHandSide) {
         sgs -= double(coefficients(c, 0)) * phi;
         scale += std::abs(work * V);
     }
+    const auto sums = comm::allreduce(std::array<double, 4>{total, viscous, sgs, scale}, comm::Op::SUM);
+    total = sums[0];
+    viscous = sums[1];
+    sgs = sums[2];
+    scale = sums[3];
     // The three parts add up to the whole convective and diffusive rate
     EXPECT_NEAR(b.convective + b.viscous + b.sgs, total, precision_tol<double>(1e-10, 1e-4) * scale);
     // Each diffusive part is the dissipation of its own stress, -int tau : grad u dV
@@ -505,7 +510,7 @@ namespace {
 
 std::string couette(const std::string & les) {
     return "[run]\nt_stop = 6.0\ncfl = 0.8\n"
-           "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 12\nLx = 0.5\nLy = 1.0\nperiodic = [\"x\"]\n"
+           "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 12\nLx = 0.5\nLy = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n"
            "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"
            "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
            "[[boundaries]]\nname = \"top\"\ntype = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0]\n"
@@ -525,9 +530,10 @@ TEST(LESSolver, PureShearIsUnchangedByWALEAndVremanButNotBySmagorinsky) {
         les->run();
         les->copy_device_to_host();
         double diff = 0.0;
-        for (uint32_t c = 0; c < les->get_mesh()->n_cells; c++) {
+        for (uint32_t c = 0; c < les->get_mesh()->n_owned(); c++) {
             diff = std::max(diff, std::abs(double(les->h_conservatives(c, 1) - reference->h_conservatives(c, 1))));
         }
+        diff = comm::allreduce(diff, comm::Op::MAX);
         if (std::string(model) == "smagorinsky") {
             EXPECT_GT(diff, 1e-7) << model;
         } else {
@@ -544,7 +550,7 @@ std::string mixture_box(const std::string & les, const std::string & composition
     std::ostringstream s;
     // A fixed time step: the time step's diffusivity grows with nu_t / Sc_t
     s << "[run]\nn_steps = 8\ndt = 2e-7\n[mesh]\ntype = \"" << MESH << "\"\nNx = 8\nNy = 8\nLx = 0.01\nLy = 0.01\n"
-      << (N_DIM == 3 ? "Nz = 4\nLz = 0.005\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
+      << (N_DIM == 3 ? "Nz = 4\nLz = 0.005\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
       << "[initialize]\ntype = \"analytical\"\np = \"1.0e5\"\nT = \"600 + 200 * sin(628.3185307179586 * x)\"\n"
       << "u = [\"30 * sin(628.3185307179586 * y)\", \"-20 * sin(628.3185307179586 * x)\""
       << (N_DIM == 3 ? ", \"10 * cos(628.3185307179586 * (x + y))\"]\n" : "]\n")
@@ -617,6 +623,7 @@ double pressure_work(const Solver & solver, const double gamma) {
     };
     double sum = 0.0;
     for (uint32_t f = 0; f < m->n_faces; f++) {
+        if (static_cast<uint32_t>(m->h_cells_of_face(f, 0)) >= m->n_owned()) continue;  // Another rank's face
         double u0[N_DIM], u1[N_DIM], p0, p1, n2 = 0.0, du_n = 0.0;
         state(m->h_cells_of_face(f, 0), u0, p0);
         state(m->h_cells_of_face(f, 1), u1, p1);
@@ -626,7 +633,7 @@ double pressure_work(const Solver & solver, const double gamma) {
         }
         sum += double(m->h_face_area(f)) * 0.5 * (p0 + p1) * du_n / std::sqrt(n2);
     }
-    return sum;
+    return comm::allreduce(sum, comm::Op::SUM);
 }
 
 std::string with_flux(std::string input, const std::string & numerics, const std::string & reconstruction) {
@@ -654,6 +661,7 @@ TEST(HybridFlux, CentralFluxChangesKineticEnergyOnlyByThePressureWork) {
     for (uint32_t c = 0; c < central->get_mesh()->n_owned(); c++) {
         scale += double(std::abs(central->h_conservatives(c, 1)) * central->get_mesh()->h_cell_measure(c));
     }
+    scale = comm::allreduce(scale, comm::Op::SUM);
     EXPECT_NEAR(central->kinetic_energy_budget().convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
     EXPECT_NEAR(central->kinetic_energy_budget().pressure_work, work, precision_tol<double>(1e-12, 1e-5) * scale);
     // The Riemann solver dissipates on top of it
@@ -669,8 +677,8 @@ TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
     std::ostringstream s;
     const uint32_t n = N_DIM == 2 ? 16 : 8;
     s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"" << MESH << "\"\nNx = " << n << "\nNy = " << n
-      << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\nperiodic = [\"y\", \"z\"]\n"
-                                                : std::string("periodic = [\"y\"]\n"))
+      << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
+                                                : std::string("[[periodic]]\nzones = [\"bottom\", \"top\"]\n"))
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.5 * x\"\np = \"1000.0\"\n"
       << (N_DIM == 3 ? "u = [\"-20.0 * x * x + 0.3 * sin(6.283185307179586 * y)\", \"0.2 * cos(6.283185307179586 * (x + z))\", "
                        "\"0.1 * sin(6.283185307179586 * y)\"]\n"
@@ -720,14 +728,15 @@ std::pair<double, double> sod(const std::string & numerics) {
     ExactRiemann exact(1.0, 0.0, 1.0, 0.125, 0.0, 0.1, 1.4);
     const auto m = solver->get_mesh();
     double err = 0.0, vol = 0.0, rho_max = 0.0;
-    for (uint32_t c = 0; c < m->n_cells; c++) {
+    for (uint32_t c = 0; c < m->n_owned(); c++) {
         double rho, u, p;
         exact.sample((double(m->h_cell_coords(c, 0)) - 0.5) / double(solver->get_time()), rho, u, p);
         err += std::abs(double(solver->h_conservatives(c, 0)) - rho) * double(m->h_cell_volume(c));
         vol += double(m->h_cell_volume(c));
         rho_max = std::max(rho_max, double(solver->h_conservatives(c, 0)));
     }
-    return {err / vol, rho_max};
+    const auto sums = comm::allreduce(std::array<double, 2>{err, vol}, comm::Op::SUM);
+    return {sums[0] / sums[1], comm::allreduce(rho_max, comm::Op::MAX)};
 }
 
 } // namespace

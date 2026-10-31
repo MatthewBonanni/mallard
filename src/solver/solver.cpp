@@ -37,6 +37,7 @@
 #include "field_units.h"
 #include "log.h"
 #include "mesh_block.h"
+#include "region.h"
 #include "partition.h"
 #include "provenance.h"
 #include "run_log.h"
@@ -65,6 +66,25 @@ Input unrecorded(Input value) {
         for (auto & element : value.as_array()) element = unrecorded(element);
     }
     return value;
+}
+
+/**
+ * @brief The names of the mesh's boundary zones, sorted, on every rank (collective if
+ *        distributed): a rank's part of the mesh may not touch every zone.
+ */
+std::vector<std::string> boundary_zone_names(Mesh & mesh, const bool distributed) {
+    std::string local;
+    for (const FaceZone & z : *mesh.face_zones()) {
+        if (z.get_type() == FaceZoneType::BOUNDARY && z.get_name() != PARTITION_ZONE) local += z.get_name() + '\n';
+    }
+    std::vector<std::string> names;
+    for (const std::string & part : distributed ? comm::allgather(local) : std::vector<std::string>{local}) {
+        std::istringstream lines(part);
+        for (std::string name; std::getline(lines, name);) names.push_back(name);
+    }
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    return names;
 }
 
 } // namespace
@@ -173,10 +193,11 @@ void Solver::setup_from_input() {
         init_les();
         statistics.init(input, species_names, *mesh);
         init_rhs_split();
-        init_sources();
-        init_sponges();
+        region::Regions regions(input, *mesh);
+        init_sources(regions);
+        init_sponges(regions);
         register_data();
-        init_output();
+        init_output(regions);
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
@@ -687,13 +708,7 @@ void Solver::init_boundaries() {
         if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
         // A rank's part of the mesh may not touch every zone
         if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-            std::vector<std::string> names;
-            for (const FaceZone & z : *mesh->face_zones()) {
-                if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
-            }
-            std::sort(names.begin(), names.end());
-            std::string zones;
-            for (const auto & z : names) zones += (zones.empty() ? "" : ", ") + z;
+            const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
             throw InputError({.key = where_name + ".name",
                               .line = line_of(bound, "name"),
                               .message = "the mesh has no boundary zone \"" + name + "\"",
@@ -747,47 +762,56 @@ void Solver::init_boundaries() {
                               dot<N_DIM>(direction, direction) > 0.0_r;
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
+        std::string twice, outward;
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
             if (where && where->at(Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL()), N_DIM) == 0.0) {
                 continue;
             }
-            if (face_bc[i_face] != -1) {
+            if (face_bc[i_face] != -1 && twice.empty()) {
                 const auto & first = input_boundaries[static_cast<size_t>(face_bc[i_face])];
                 std::string at;
                 for (uint8_t d = 0; d < N_DIM; d++) {
                     at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
                 }
-                throw InputError({.key = where_name,
-                                  .line = line_of(bound),
-                                  .message = "the face at " + at + ") already has a condition, from the entry on "
-                                             "line " + std::to_string(line_of(first)) + " (name = \"" +
-                                             find_value<std::string>(first, "name") + "\")",
-                                  .fix = "Give each face one condition: one entry per zone, or where = \"...\" "
-                                         "filters that do not overlap",
-                                  .docs = "docs/guide/boundary_conditions.md"});
+                twice = "the face at " + at + ") already has a condition, from the entry on line " +
+                        std::to_string(line_of(first)) + " (name = \"" + find_value<std::string>(first, "name") + "\")";
             }
             face_bc[i_face] = static_cast<int>(i_bc);
             if (directed) {
                 rtype inward = 0.0_r;
                 for (uint8_t k = 0; k < N_DIM; k++) inward -= direction[k] * mesh->h_face_normals(i_face, k);
                 if (!(inward > 0.0_r)) {
-                    std::string at;
-                    for (uint8_t d = 0; d < N_DIM; d++) {
-                        at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
+                    if (outward.empty()) {
+                        std::string at;
+                        for (uint8_t d = 0; d < N_DIM; d++) {
+                            at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
+                        }
+                        outward = "points out of the domain at the face at " + at + ")";
                     }
-                    throw InputError({.key = where_name + ".direction",
-                                      .line = line_of(bound, "direction"),
-                                      .message = "points out of the domain at the face at " + at + ")",
-                                      .fix = "Give a direction into the domain at every face of the zone, or "
-                                             "remove it to use each face's inward normal",
-                                      .docs = "docs/guide/boundary_conditions.md#stagnation-inlet"});
                 }
             }
 
             dirichlet.faces.push_back(i_face);
             n_selected++;
             n_owned_selected += static_cast<uint32_t>(mesh->h_cells_of_face(i_face, 0)) < mesh->n_owned();
+        }
+        // Faces are checked where they are, so every rank throws what the first one found
+        if (const std::string message = comm::first_error(twice); !message.empty()) {
+            throw InputError({.key = where_name,
+                              .line = line_of(bound),
+                              .message = message,
+                              .fix = "Give each face one condition: one entry per zone, or where = \"...\" "
+                                     "filters that do not overlap",
+                              .docs = "docs/guide/boundary_conditions.md"});
+        }
+        if (const std::string message = comm::first_error(outward); !message.empty()) {
+            throw InputError({.key = where_name + ".direction",
+                              .line = line_of(bound, "direction"),
+                              .message = message,
+                              .fix = "Give a direction into the domain at every face of the zone, or "
+                                     "remove it to use each face's inward normal",
+                              .docs = "docs/guide/boundary_conditions.md#stagnation-inlet"});
         }
         if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
             throw InputError({.key = where ? where_name + ".where" : where_name,
@@ -841,19 +865,21 @@ void Solver::init_boundaries() {
         if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
         boundary_summary.emplace_back(name, text);
     }
-    for (size_t k = 0; k < profiled_faces.size(); k++) {
-        const auto [i_bc, i_face] = profiled_faces[k];
-        BoundaryCondition copy = bcs[i_bc];
-        if (!std::isnan(profiled_flux[k])) copy.data[N_DIM + 1] = static_cast<rtype>(profiled_flux[k]);
-        Point x{};
-        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
-        // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
-        if (boundary_fields[i_bc]->varies()) boundary_fields[i_bc]->apply(copy, x, 0.0, double(physics.R));
-        face_bc[i_face] = static_cast<int32_t>(bcs.size());
-        field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
-        bcs.push_back(copy);
-        wall_model_specs.push_back(wall_model_specs[i_bc]);
-    }
+    on_every_rank([&] {
+        for (size_t k = 0; k < profiled_faces.size(); k++) {
+            const auto [i_bc, i_face] = profiled_faces[k];
+            BoundaryCondition copy = bcs[i_bc];
+            if (!std::isnan(profiled_flux[k])) copy.data[N_DIM + 1] = static_cast<rtype>(profiled_flux[k]);
+            Point x{};
+            FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+            // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
+            if (boundary_fields[i_bc]->varies()) boundary_fields[i_bc]->apply(copy, x, 0.0, double(physics.R));
+            face_bc[i_face] = static_cast<int32_t>(bcs.size());
+            field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
+            bcs.push_back(copy);
+            wall_model_specs.push_back(wall_model_specs[i_bc]);
+        }
+    });
 
     if (FaceZone * partition = mesh->get_face_zone(PARTITION_ZONE)) {
         BoundaryCondition bc;
@@ -923,7 +949,7 @@ void Solver::init_boundaries() {
     init_inlets(input_boundaries, inlets);
 }
 
-void Solver::init_sources() {
+void Solver::init_sources(region::Regions & regions) {
     sources::CellFields fields;
     fields.coords = mesh->cell_coords;
     fields.W = W_cells;
@@ -934,7 +960,7 @@ void Solver::init_sources() {
     } else {
         fields.R = double(physics.R);
     }
-    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields);
+    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields, regions);
     if (!terms->empty()) {
         for (const auto & item : terms->summary()) source_summary.push_back(item);
         source_terms = std::move(terms);
@@ -1381,7 +1407,7 @@ void Solver::init_run_parameters() {
     control_file_interval = find_value_or<uint64_t>(input, "run", "control_file_interval", 0);
 }
 
-void Solver::init_output() {
+void Solver::init_output(region::Regions & regions) {
     check_interval = find_value_or<uint32_t>(input, "output", "check_interval", 1);
     if (check_interval == 0) {
         throw InputError({.key = "output.check_interval",
@@ -1404,11 +1430,7 @@ void Solver::init_output() {
             FaceZone * zone = mesh->get_face_zone(monitor.zone);
             if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
             if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-                std::vector<std::string> names;
-                for (const FaceZone & z : *mesh->face_zones()) {
-                    if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
-                }
-                std::sort(names.begin(), names.end());
+                const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
                 throw InputError({.key = "forces.zone",
                                   .line = line_of(entry, "zone"),
                                   .message = "the mesh has no boundary zone \"" + monitor.zone + "\"",
@@ -1507,8 +1529,8 @@ void Solver::init_output() {
             }
         }
     }
-    probes.init(input, *mesh, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart",
-                is_viscous());
+    probes.init(input, *mesh, regions, species_names,
+                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous());
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     if (run_log_on) {
@@ -1921,8 +1943,7 @@ int Solver::run() {
             t_wall_output += output_timer.seconds();
             if (step % check_interval == 0) {
                 Kokkos::Timer check_timer;
-                timed_fields.check();
-                timed_inlets.check();
+                check_timed_boundaries();
                 print_progress();
                 t_wall_checks += check_timer.seconds();
             }
@@ -1937,14 +1958,12 @@ int Solver::run() {
     } catch (const DivergedError &) {
         defer_chemistry = false;
         destroy_step_graph();
-        timed_fields.check();
-        timed_inlets.check();
+        check_timed_boundaries();
         diverged();
     }
     defer_chemistry = false;
     destroy_step_graph();
-    timed_fields.check();
-    timed_inlets.check();
+    check_timed_boundaries();
     if (step != step_last_check) print_progress();
     Kokkos::Timer output_timer;
     copy_device_to_host();
@@ -2396,6 +2415,13 @@ void Solver::update_primitives() {
     });
 }
 
+void Solver::check_timed_boundaries() const {
+    on_every_rank([&] {
+        timed_fields.check();
+        timed_inlets.check();
+    });
+}
+
 void Solver::update_p_max() {
     update_primitives();
     Kokkos::View<rtype *> peak = p_max;
@@ -2698,7 +2724,7 @@ std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t 
     Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
     std::array<rtype, 2 * N_DIM + 1> F;
     for (size_t i = 0; i < 2 * N_DIM + 1; i++) F[i] = result.v[i];
-    return comm::allreduce(F, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(F, comm::Op::SUM) : F;
 }
 
 void Solver::write_forces() {
@@ -2731,7 +2757,7 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
         }, sum);
         total[i_var] = sum;
     }
-    return comm::allreduce(total, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(total, comm::Op::SUM) : total;
 }
 
 /**
@@ -2825,7 +2851,7 @@ std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
     Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);
     std::array<rtype, N_FLOW_STATISTICS> sums;
     for (size_t i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = result.v[i];
-    return comm::allreduce(sums, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(sums, comm::Op::SUM) : sums;
 }
 
 void Solver::update_vortex_fields() {

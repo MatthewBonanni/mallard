@@ -30,7 +30,7 @@ std::string vortex_input(const std::string & integrator, const std::string & sto
                          const std::string & extra = "") {
     std::ostringstream s;
     s << "[run]\n" << stop << "\ncfl = " << cfl << "\n"
-      << "[mesh]\ntype = \"cartesian\"\nNx = 24\nNy = 24\nLx = 10.0\nLy = 10.0\nperiodic = [\"x\", \"y\"]\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 24\nNy = 24\nLx = 10.0\nLy = 10.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
       << "[initialize]\ntype = \"analytical\"\n"
       << "u = [\"1 - 0.7957747154594767 * exp(0.5 * (1 - (x - 5)^2 - (y - 5)^2)) * (y - 5)\", "
          "\"1 + 0.7957747154594767 * exp(0.5 * (1 - (x - 5)^2 - (y - 5)^2)) * (x - 5)\"]\n"
