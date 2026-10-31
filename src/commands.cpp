@@ -63,6 +63,8 @@ constexpr Option NEW_OPTIONS[] = {
 
 constexpr Option UPGRADE_OPTIONS[] = {
     {"--check", "", "", "Write nothing: list the changes, with exit status 1 if there are any."},
+    {"--dim", "", "2|3",
+     "The case's dimension, for renames that depend on it. Default: from the input's mesh, as a run finds it."},
 };
 
 constexpr Option REACTOR_OPTIONS[] = {
@@ -112,7 +114,15 @@ int ctl_main(const Args & args) {
     return run_control::ctl(args.positional[0], request);
 }
 
-int upgrade_main(const Args & args) { return input_upgrade::upgrade_file(args.positional[0], args.has("--check")); }
+int upgrade_main(const Args & args) {
+    const std::string & file = args.positional[0];
+    const std::string dim = args.value_or("--dim", "");
+    if (!dim.empty() && dim != "2" && dim != "3") {
+        return cli::usage_error(*cli::command("input upgrade"), "--dim takes 2 or 3, not " + dim);
+    }
+    return input_upgrade::upgrade_file(file, args.has("--check"),
+                                       dim.empty() ? front_end::input_dimension(file).dim : dim[0] - '0');
+}
 
 int version_main(const Args &) {
     std::cout << "Mallard " << mallard_version() << std::endl;
@@ -229,17 +239,23 @@ constexpr Command COMMANDS[] = {
             "keeping its comments and layout, and writes it to standard output; the changes go to standard "
             "error. A renamed key keeps its value and comment, a moved key goes to the end of its new table, "
             "and a removed key is commented out with a note. A file with nothing to change comes back byte for "
-            "byte; one with a changed dotted key or inline table is reformatted, comments kept.\n"
+            "byte; one with a renamed, moved or removed dotted key or key of an inline table is reformatted, "
+            "comments kept; a renamed option changes in place, also inside inline tables.\n"
+            "\n"
+            "Some renames depend on the case's dimension, which the command reads from the input's mesh as a run "
+            "does; when the mesh is not at hand, --dim states it.\n"
             "\n"
             "Renamed keys still work, with a warning, for at least one minor release before they are removed. "
             "mallard check lists deprecated keys as warnings and removed ones as errors.",
         .options = UPGRADE_OPTIONS,
         .arguments = FILE_ARGUMENTS,
         .examples = "$ mallard input upgrade old.toml > new.toml\n"
-                    "$ mallard input upgrade --check input.toml",
+                    "$ mallard input upgrade --check input.toml\n"
+                    "$ mallard input upgrade --dim 3 old.toml > new.toml",
         .exit_status = "0  the file was written (with --check: it is up to date)\n"
                        "1  the file cannot be read or parsed (with --check: or it is out of date)\n"
                        "2  usage error",
+        .dim = Case::front_end,
         .run = upgrade_main,
     },
     {

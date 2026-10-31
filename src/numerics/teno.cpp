@@ -2203,19 +2203,19 @@ struct TENOFunctor {
         }
     }
 
-    // PointPass (probes)
+    // PointPass (probes, transmissive boundaries)
     struct PointPass {};
     Kokkos::View<uint32_t *> point_cells{};
-    Kokkos::View<rtype *[N_DIM]> point_offsets{};  // from the cell centroid
+    Kokkos::View<rtype *[N_DIM]> point_offsets{};  // from the cell centroid, point_cells.extent(0) groups
     Kokkos::View<rtype *[N_CONSERVATIVE]> point_W{};
 
     /**
-     * @brief W at a point of a cell from its central polynomial, if the cell
-     *        is smooth by SmoothPass's measure and the value admissible.
+     * @brief W at the points of a cell from its central polynomial, if the
+     *        cell is smooth by SmoothPass's measure and the value admissible.
      */
     KOKKOS_INLINE_FUNCTION
-    void operator()(PointPass, const uint32_t p) const {
-        const uint32_t i_cell = point_cells(p);
+    void operator()(PointPass, const uint32_t k) const {
+        const uint32_t i_cell = point_cells(k);
         rtype U0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
         const rtype rho0 = W(i_cell, 0);
@@ -2245,19 +2245,22 @@ struct TENOFunctor {
         const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
         if (sigma >= sigma_threshold) return;
         const rtype h = scale(i_cell);
-        rtype xi[N_DIM];
-        FOR_I_DIM xi[i] = point_offsets(p, i) / h;
-        rtype psi[NK];
-        teno::monomials(DEG, xi, psi);
-        rtype U[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE U[i] = U0[i];
-        for (uint8_t l = 0; l < NK; l++) {
-            FOR_I_CONSERVATIVE U[i] += aK[l][i] * (psi[l] - basis_mean(i_cell, l));
+        const uint32_t m = static_cast<uint32_t>(point_offsets.extent(0) / point_cells.extent(0));
+        for (uint32_t p = k * m; p < (k + 1) * m; p++) {
+            rtype xi[N_DIM];
+            FOR_I_DIM xi[i] = point_offsets(p, i) / h;
+            rtype psi[NK];
+            teno::monomials(DEG, xi, psi);
+            rtype U[N_CONSERVATIVE];
+            FOR_I_CONSERVATIVE U[i] = U0[i];
+            for (uint8_t l = 0; l < NK; l++) {
+                FOR_I_CONSERVATIVE U[i] += aK[l][i] * (psi[l] - basis_mean(i_cell, l));
+            }
+            rtype Wq[N_CONSERVATIVE];
+            to_primitives(U, Wq);
+            if (!(Wq[0] > 0.0_r && Wq[N_DIM + 1] > 0.0_r && Kokkos::isfinite(Wq[N_DIM + 1]))) continue;
+            FOR_I_CONSERVATIVE point_W(p, i) = Wq[i];
         }
-        rtype Wq[N_CONSERVATIVE];
-        to_primitives(U, Wq);
-        if (!(Wq[0] > 0.0_r && Wq[N_DIM + 1] > 0.0_r && Kokkos::isfinite(Wq[N_DIM + 1]))) return;
-        FOR_I_CONSERVATIVE point_W(p, i) = Wq[i];
     }
 
     KOKKOS_INLINE_FUNCTION

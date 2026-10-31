@@ -269,7 +269,9 @@ p = """\
 
 # Layers by height
 T = "switch { case y < 0.1 : 300; case y < 0.2 : 600; default : 900; }"
+```
 
+```toml
 # The root of s^3 + s = x by Newton's method
 T = """\
     var s := x; var ds := 1; \
@@ -305,11 +307,14 @@ mallard input upgrade --check old.toml        # exit status 1 if anything is out
 ```
 
 It changes only the lines of those keys. A renamed key keeps its value and its
-comment, a moved key goes to the end of its new table, and a removed key is
-commented out with a note. A file with nothing to change comes back
-unchanged, byte for byte. When a changed key is written as a dotted key
+comment, a moved key goes to the end of its new table, a removed key is
+commented out with a note, and a renamed option changes in place, also inside
+inline tables. A file with nothing to change comes back unchanged, byte for
+byte. When a renamed, moved or removed key is written as a dotted key
 (`run.cfl = 1`) or in an inline table, the file is reformatted instead: its
-comments are kept, its layout is not. The command is tested on the input
+comments are kept, its layout is not. Some renames depend on the case's
+dimension, which the command reads from the mesh as a run does; when the mesh
+is not at hand, state it: `mallard input upgrade --dim 3 old.toml`. The command is tested on the input
 files of every release (`tools/dev/check_upgrade_input.py`).
 
 Keys and options changed so far:
@@ -321,6 +326,12 @@ Keys and options changed so far:
 | `[physics]` `p_min`, `p_max` | none: pressures are not clipped | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; until removed, `"hdf5"` still writes XDMF and HDF5 files | 0.9.0 | 0.10.0 |
+| `[[probes]]` `shape` | `type` | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "circle"` (a filled circle) | 2D `"disk"`, 3D `"sphere"`: `circle` is the curve | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "ellipse"` (a filled ellipse) | `"ellipsoid"`: `ellipse` is the curve | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "disk"`, `"rectangle"` in 3D | `"sphere"`, `"box"`: disks and rectangles are flat | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "annulus"` in 3D | `"cylinder"` with `axis = [0, 0, 1]` (added): annuli are flat | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "box"` in 2D | `"rectangle"`: boxes are 3D solids | 0.9.0 | 0.10.0 |
 | `[mesh]` `periodic = ["x", "z"]` | `[[periodic]]` `zones = ["left", "right"]` and `zones = ["back", "front"]` (`y`: `bottom`/`top`, `theta`: `start`/`end`); `[initialize.mesh]` `periodic` likewise becomes `[[initialize.periodic]]` | 0.9.0 | 0.10.0 |
 
 Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
@@ -372,27 +383,27 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --quality quality
 == Check ==================================================================================
   Input keys         all used
   Boundaries         every boundary face has a condition (5 conditions)
-  non-orthogonality  max 23.4, mean 4.66
-                     worst 23.4 at (1.428, 0.09977), 23.4 at (1.448, 0.09361)
-  skewness           max 0.374, mean 0.0489
-                     worst 0.374 at (1.025, -0.6632), 0.374 at (1.022, -0.6803)
-  aspect ratio       max 1.96, mean 1.12
-  volume ratio       max 2.21, mean 1.16
-                     worst 2.21 at (1.095, 0.8271), 2.21 at (1.099, 0.8141)
-  Time step          8.771e-05 (from run.cfl), CFL 0.25 at the initial state
-  CFL-limiting       cell 13,165 at (0.2704, -0.07489)
-                     4 cells within 10% of it, in (0.2617, -0.07529) to (0.9787, 0.5039)
-  Memory             133MB per rank after setup (peak 133MB), 17,297 cells, 1 rank
-                     on 4 ranks: about 46.6MB per rank (peak 46.6MB), largest part 4,325 + 1,729 halo cells
+  non-orthogonality  max 27.7, mean 4.87
+                     worst 27.7 at (1.222, 0.3962), 27.7 at (1.209, 0.389)
+  skewness           max 0.363, mean 0.0545
+                     worst 0.363 at (0.8478, 0.4729), 0.363 at (0.8561, 0.4827)
+  aspect ratio       max 1.95, mean 1.13
+  volume ratio       max 2.26, mean 1.18
+                     worst 2.26 at (0.8694, 0.488), 2.26 at (0.8561, 0.4827)
+  Time step          0.0001416 (from run.cfl), CFL 0.25 at the initial state
+  CFL-limiting       cell 9,273 at (0.468, 0.05182)
+                     2 cells within 10% of it, in (0.4556, 0.05182) to (0.468, 0.05629)
+  Memory             72.2MB per rank after setup (peak 72.2MB), 9,385 cells, 1 rank
+                     on 4 ranks: about 26.7MB per rank (peak 26.7MB), largest part 2,347 + 1,119 halo cells
   Throughput         50.0M cells/s per rank
-  Cost               1.14e+04 steps per unit simulated time
-                     per unit time: 986 ms wall on 4 ranks, 0.0011 rank-hours
-                     per flow-through (0.4375): 431 ms wall on 4 ranks, 0.000479 rank-hours
-                     to t_stop = 0.75: 740 ms wall on 4 ranks, 0.000822 rank-hours
+  Cost               7060 steps per unit simulated time
+                     per unit time: 331 ms wall on 4 ranks, 0.000368 rank-hours
+                     per flow-through (0.4375): 145 ms wall on 4 ranks, 0.000161 rank-hours
+                     to t_stop = 0.75: 248 ms wall on 4 ranks, 0.000276 rank-hours
   Result             ok
 ```
 
-(`examples/mallard` on a coarse mesh of 17k triangles, on a CPU.) The report covers:
+(`examples/mallard` on a coarse mesh of 9k triangles, on a CPU.) The report covers:
 
 | Line | What it is |
 |---|---|

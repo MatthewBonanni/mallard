@@ -153,13 +153,13 @@ std::string channel(const std::string & dir) {
     for (const std::string format : {"csv", "vtp"}) {
         const std::string suffix = format == "vtp" ? "_vtp.pvd" : ".csv";
         s << "[[probes]]\nname = \"cut_" << format << "\"\nformat = \"" << format << "\"\nfile = \"" << dir << "/cut"
-          << suffix << "\"\nshape = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = "
+          << suffix << "\"\ntype = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = "
           << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]") << "\nvariables = [\"P\", \"MASS_FLUX\"]\n"
           << "reductions = [\"integral\"]\nreductions_file = \"" << dir << "/cut_" << format << "_reductions.csv\"\n"
           << "[[probes]]\nname = \"surface_" << format << "\"\nformat = \"" << format << "\"\nfile = \"" << dir
           << "/surface" << suffix << "\"\n"
-          << (N_DIM == 3 ? "shape = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [8, 16]\n"
-                         : "shape = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n")
+          << (N_DIM == 3 ? "type = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [8, 16]\n"
+                         : "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n")
           << "variables = [\"MASS_FLUX\"]\nreductions = [\"integral\"]\nreductions_file = \"" << dir << "/surface_"
           << format << "_reductions.csv\"\n";
     }
@@ -178,7 +178,7 @@ std::string channel(const std::string & dir) {
           << "[[probes]]\nname = \"wall_h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/wall_probe.h5\"\n"
           << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\"]\n"
           << "[[probes]]\nname = \"cut_h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/cut_probe.h5\"\n"
-          << "shape = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
+          << "type = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
           << "\nvariables = [\"MASS_FLUX\"]\n"
           << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\ninterval = 2\n" << variables
           << "[[write_data]]\nprefix = \"" << dir << "/ks\"\nformat = \"vtkhdf\"\nseries = true\ninterval = 2\n"
@@ -190,11 +190,11 @@ std::string channel(const std::string & dir) {
           << "[[probes]]\nname = \"wall_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/wall_probe.vtkhdf\"\n"
           << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\"]\n"
           << "[[probes]]\nname = \"cut_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/cut_probe.vtkhdf\"\n"
-          << "shape = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
+          << "type = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
           << "\nvariables = [\"MASS_FLUX\"]\n"
           << "[[probes]]\nname = \"surface_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/surface_probe.vtkhdf\"\n"
-          << (N_DIM == 3 ? "shape = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [8, 16]\n"
-                         : "shape = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n")
+          << (N_DIM == 3 ? "type = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [8, 16]\n"
+                         : "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n")
           << "variables = [\"MASS_FLUX\"]\n";
     }
 #endif
