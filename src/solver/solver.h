@@ -94,7 +94,7 @@ struct KineticEnergyBudget {
  */
 struct DirichletBoundary {
     std::vector<uint32_t> faces;
-    std::vector<Expression> W;
+    std::vector<std::shared_ptr<const expr::Program>> W;
 };
 
 /** @brief Thrown inside the time loop when the state stops being valid; run() handles it. */
@@ -536,9 +536,9 @@ class Solver {
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
-        /** @brief The faces' own conditions whose numbers depend on t, on the device at the stage time. */
+        /** @brief The faces' own conditions and dirichlet states that depend on t, on the device at the stage time. */
         void update_boundary_fields(rtype t_eval, rtype c);
-        /** @brief The faces' own conditions that depend on t, at the time in stage_time. */
+        /** @brief The faces' own conditions and dirichlet states that depend on t, at the time in stage_time. */
         void apply_boundary_fields();
         /**
          * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
@@ -667,6 +667,12 @@ class Solver {
         ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
         template <typename T_riemann_solver>
         void launch_flux_functor();
+        /**
+         * @brief Blend the convective face fluxes toward first order where the
+         *        update would leave a cell without positive density or pressure
+         *        (bound-preserving TENO; see PositivityFluxFunctor).
+         */
+        void limit_flux_positivity(StateView solution);
         template <typename T_riemann_solver>
         void launch_mixture_flux_functor();
         template <typename T_riemann_solver>
@@ -732,17 +738,13 @@ class Solver {
         std::vector<double> bc_temperatures;                  // T of prescribed states
         BoundaryData boundary_data;
         std::vector<uint8_t> image_reach;  // Halo depth each cell's image neighbors need (make_boundary_data)
-        std::vector<DirichletBoundary> dirichlet_boundaries;
+        DirichletStates dirichlet_states;
         struct AveragePressureOutlet {
             int32_t i_bc;
             Kokkos::View<uint32_t *> faces;   // Faces of owned cells
             std::vector<uint32_t> sum_order;  // Order of the gathered faces of all ranks by global key
         };
         std::vector<AveragePressureOutlet> average_pressure_outlets;
-        Kokkos::View<rtype *[N_DIM + 2]>::host_mirror_type h_face_state;
-        Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
-        rtype t_boundary_states;
-        bool boundary_states_steady = false;  // evaluated, and no expression depends on t
         // The numbers of each input boundary, per face where they vary; for mixtures, the composition per input
         // boundary where it depends on t; the faces' own conditions that depend on t, evaluated on the device
         std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
@@ -756,6 +758,8 @@ class Solver {
         rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
+        bool positivity_limiter = false;         // bound-preserving TENO, planar single gas: limit_flux_positivity
+        Kokkos::View<rtype *> positivity_kappa;  // (cell): dt sum_f A_f alpha_f / V
         std::unique_ptr<TimeIntegrator> time_integrator;
         StepController step_controller;  // [numerics.error_control], else not enabled
         uint64_t n_rejected = 0;         // steps rejected by step_controller in this run

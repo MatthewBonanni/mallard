@@ -44,7 +44,7 @@ interval = 10
 name = "wake"
 variables = ["U", "P"]
 sampling = "point"
-shape = "arc"
+type = "arc"
 center = [0.0, 0.0]
 radius = 5.0
 angles = [-45.0, 45.0]
@@ -54,15 +54,15 @@ format = "vtp"
 reductions = ["mean", "rms"]
 ```
 
-![Probe shapes over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-light.svg#gh-light-mode-only)
-![Probe shapes over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-dark.svg#gh-dark-mode-only)
+![Probes of every type over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-light.svg#gh-light-mode-only)
+![Probes of every type over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-dark.svg#gh-dark-mode-only)
 
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | required | Names the files |
 | `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
-| `shape` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D surfaces `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (`x`, `y`, `z` of `u`, `v`) |
-| `region` | none | Instead of `shape`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
+| `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D surfaces `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (`x`, `y`, `z` of `u`, `v`) |
+| `region` | none | Instead of `type`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
 | `format` | `csv` | `csv`, `hdf5` (one extensible file), `vtkhdf` (one VTKHDF file of every output, which ParaView opens as a time series) or `vtp` (one file per output and a `.pvd` series) |
@@ -72,7 +72,7 @@ reductions = ["mean", "rms"]
 
 ### Cut planes and surfaces
 
-`shape = "cut_plane"` intersects the mesh exactly with a plane: one sample per
+`type = "cut_plane"` intersects the mesh exactly with a plane: one sample per
 cut cell, and integrals exact for the reconstruction polynomials. Surfaces
 (`sphere`, `cylinder`, ...) are resampled on a grid instead. Both have normals,
 so fluxes through them are variables: a closed sphere's `integral` of
@@ -84,7 +84,7 @@ so fluxes through them are variables: a closed sphere's `integral` of
 ```toml
 [[probes]]
 name = "midplane"
-shape = "cut_plane"
+type = "cut_plane"
 point = [0.0, 0.0, 0.5]
 normal = [0.0, 0.0, 1.0]
 variables = ["U", "P", "MASS_FLUX"]
@@ -149,8 +149,8 @@ the sample, so a probe converges at the scheme's order (fifth order for
 `order = 5`) instead of the first order of cell averages at points off the
 centroids. The [Sod comparison](numerics.md#reconstruction) on the Numerics
 page was read from a line probe. The full key list is in the [input reference](../input.md#probes);
-each shape, where its samples go and how to read the files, with figures:
-[Geometry](geometry.md#point-sets-and-curves).
+each type, where its samples go and how to read the files, with figures:
+[Geometry](geometry.md#points-and-curves).
 
 Pitfalls:
 
@@ -168,7 +168,7 @@ Pitfalls:
   cut as their straight versions); `bounds` clips it to a box.
 - Fluxes of boundary probes are those of the face states, not the scheme's
   numerical fluxes: they agree as the mesh is refined.
-- Reductions of point sets weigh each point 1 (`integral` is a sum); curves
+- Reductions of points weigh each point 1 (`integral` is a sum); curves
   integrate with three Gauss points per element between samples.
 
 ### Region probes
@@ -178,7 +178,7 @@ Pitfalls:
 [[probes]]
 name = "box"
 variables = ["RHO", "T", "P"]
-region = {type = "box", center = [0.5, 0.5], size = [0.4, 0.2]}
+region = {type = "rectangle", center = [0.5, 0.5], size = [0.4, 0.2]}
 reductions = ["integral", "mean", "min", "max"]   # the default
 interval = 10
 ```
@@ -220,7 +220,7 @@ Pitfalls:
 
 - Values are cell averages, so `min` and `max` are those of the cells, not of
   the field inside them, and include cells the region only touches.
-- A region probe has no samples: `shape`, `boundary`, `boundary_type`,
+- A region probe has no samples: `type`, `boundary`, `boundary_type`,
   `sampling`, `format`, `file` and `samples` do not apply to it.
 
 ## Wall forces: `[[forces]]`
@@ -264,6 +264,6 @@ molecular, SGS and numerical dissipation.
 ## See also
 
 - [Input reference: `[[probes]]`](../input.md#probes), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals)
-- [Geometry](geometry.md): probe shapes, sample placement, reading probe files
+- [Geometry](geometry.md): probe types, sample placement, reading probe files
 - [Statistics](statistics.md): time averages, spectra and phase averages
 - [Output](output.md): snapshots, the run record (which repeats the latest forces and integrals at each progress row), units and file formats

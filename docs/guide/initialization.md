@@ -61,7 +61,7 @@ builds), one cell per thread.
 Expressions may use local variables, conditionals and loops
 ([Expressions](input_files.md#expressions)), and read
 [tabulated data](#tabulated-data-and-point-clouds); a comparison such as
-`hypot(x, y) < 0.2` draws a shape ([Geometry](geometry.md#who-uses-what)). Pitfall:
+`hypot(x, y) < 0.2` draws a region ([Geometry](geometry.md#who-uses-what)). Pitfall:
 TOML requires the expressions to be strings, also for constants: `u =
 ["0.0", "0.0"]` with `analytical`.
 
@@ -83,8 +83,11 @@ T = 2000              # T alone: the pressure, velocity and composition stay
 
 [[initialize.regions]]
 name = "fuel"
-region = { type = "rectangle", center = ["6 mm", 0.0], size = ["2 mm", "8 mm"],
-           pivot = ["6 mm", 0.0], rotate = 30 }
+region.type = "rectangle"
+region.center = ["6 mm", 0.0]
+region.size = ["2 mm", "8 mm"]
+region.pivot = ["6 mm", 0.0]
+region.rotate = 30
 X = { H2 = 1.0 }
 ```
 
@@ -339,5 +342,5 @@ Method, accuracy and cost: [docs/design/remap.md](../design/remap.md).
 ## See also
 
 - [Input reference: `[initialize]`](../input.md#initialize)
-- [Geometry](geometry.md): shapes, and how cells average them
-- [Output](output.md): writing restart files and snapshots
+- [Geometry](geometry.md): regions, and how cells average them
+- [Output and diagnostics](output.md): writing restart files and snapshots

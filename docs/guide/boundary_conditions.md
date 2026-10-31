@@ -233,10 +233,11 @@ Pitfalls:
 The velocity, pressure and temperature of `upt` and `nscbc_inlet`, `p0` and
 `T0` of `stagnation_inlet`, `mass_flux` and `T` of `mass_flow_inlet`, the
 wall velocity and, for mixtures, the inflow composition may be expressions of
-`x`, `y`, `z` and `t`. Those of `t` are evaluated at every Runge-Kutta stage,
-so a pulsed or acoustically forced inlet converges at the time integrator's
-order (third with SSPRK3); evaluating them once per step would give first
-order.
+`x`, `y`, `z` and `t`, as may the state of `dirichlet`. Those of `t` are
+evaluated on the device at every Runge-Kutta stage, inside the step's CUDA
+graph, so a pulsed or acoustically forced inlet converges at the time
+integrator's order (third with SSPRK3); evaluating them once per step would
+give first order. The others are evaluated once, at the start of the run.
 
 ```toml
 [[boundaries]]

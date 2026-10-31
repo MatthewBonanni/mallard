@@ -299,7 +299,7 @@ then rotate about the origin, then translate.
 Pitfalls:
 
 - Everything else in the input (`[[periodic]]` translations,
-  `[[mesh.curved]]` shapes, probes, initial conditions) is in the
+  `[[mesh.curved]]` surfaces, regions, probes, initial conditions) is in the
   transformed coordinates.
 - Mesh files only: generated meshes reject it.
 - `mallard mesh convert input.toml mesh.h5` writes the transformed mesh; do
@@ -356,7 +356,8 @@ The geometry comes from either
 
 - **high-order boundary elements** of a Gmsh file (`line3`, `line4` in 2D;
   `triangle6`, `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`,
-  `quadrangle16` in 3D), e.g. `make_cylinder_mesh.py --order 3`; or
+  `quadrangle16` in 3D), e.g. `make_cylinder_mesh.py --order 3` or
+  `make_mallard_mesh.py --order 3`; or
 - **an analytic shape** that a zone is projected onto, on any mesh.
 
 | Key | Default | Meaning |
@@ -368,7 +369,7 @@ The geometry comes from either
 | `axis` | required for `cylinder` | Direction of the cylinder's axis |
 
 These shapes are curved boundaries' own; [#407](https://github.com/MatthewBonanni/mallard/issues/407)
-plans to take them from the [region engine](geometry.md#regions) instead.
+plans to take them from [regions](geometry.md#regions) instead.
 
 Pitfalls:
 
@@ -405,6 +406,6 @@ It reports the largest and mean value of each and where the worst cells are;
 - [Input reference: `[mesh]`](../input.md#mesh), [`[[periodic]]`](../input.md#periodic)
 - [Boundary conditions](boundary_conditions.md): what to put on each zone
 - [Running in parallel](parallel.md): partitions and halos
-- [Geometry](geometry.md): shapes shared by sources, probes and other features
+- [Geometry](geometry.md): regions shared by sources, probes and other features
 - Design notes: [periodic boundaries](../design/periodic.md),
   [curved boundaries](../design/curved_boundaries.md)

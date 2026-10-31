@@ -403,7 +403,7 @@ build reads. It is never misread.
 [[probes]]
 name = "box"
 variables = ["RHO", "T", "P"]
-region = {type = "box", center = [0.5, 0.5], size = [0.4, 0.2]}
+region = {type = "rectangle", center = [0.5, 0.5], size = [0.4, 0.2]}
 reductions = ["integral", "mean", "min", "max"]   # the default
 interval = 10
 ```
@@ -445,7 +445,7 @@ Pitfalls:
 
 - Values are cell averages, so `min` and `max` are those of the cells, not of
   the field inside them, and include cells the region only touches.
-- A region probe has no samples: `shape`, `boundary`, `boundary_type`,
+- A region probe has no samples: `type`, `boundary`, `boundary_type`,
   `sampling`, `format`, `file` and `samples` do not apply to it.
 
 ## Post-processing
