@@ -48,8 +48,8 @@ std::shared_ptr<Mesh> inlet_mesh(uint32_t n, double width) {
     std::ostringstream s;
     s.precision(17);
     s << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = " << n << "\nLx = 0.5\nLy = " << width << "\n";
-    if constexpr (N_DIM == 3) s << "Nz = " << n << "\nLz = " << width << "\nperiodic = [\"y\", \"z\"]\n";
-    else s << "periodic = [\"y\"]\n";
+    if constexpr (N_DIM == 3) s << "Nz = " << n << "\nLz = " << width << "\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    else s << "[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml(s.str()));
     mesh->copy_host_to_device();
@@ -218,7 +218,7 @@ std::string duct_input(const std::string & dir, const std::string & init, uint32
     s.precision(17);
     s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.5\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 10\nNy = 6\nLx = 1.0\nLy = 0.6\n"
-      << (N_DIM == 3 ? "Nz = 6\nLz = 0.6\nperiodic = [\"y\", \"z\"]\n" : "periodic = [\"y\"]\n")
+      << (N_DIM == 3 ? "Nz = 6\nLz = 0.6\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
       << "[initialize]\n" << init
       << "[[boundaries]]\nname = \"left\"\ntype = \"nscbc_inlet\"\nu = [\"1.0 + 0.1 * y\", 0.0"
       << (N_DIM == 3 ? ", 0.0" : "") << "]\np = " << P_DUCT << "\nT = 1.0\nL = 1.0\n"
@@ -288,16 +288,18 @@ TEST(SyntheticInflowTest, FieldDependsOnlyOnTimeAndSeed) {
 TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     // The generator has no state; the characteristic faces' state goes into the restart file
     const std::string dir = (scratch_dir() / "mallard_inflow_restart_test").string();
-    std::filesystem::remove_all(dir);
     Solver straight;
+    straight.set_distributed(false);
     straight.init(parse_toml(duct_input(dir + "/a", duct_constant(), 40)));
     straight.run();
     straight.copy_device_to_host();
 
     Solver first;
+    first.set_distributed(false);
     first.init(parse_toml(duct_input(dir + "/b", duct_constant(), 20)));
     first.run();
     Solver second;
+    second.set_distributed(false);
     second.init(parse_toml(
         duct_input(dir + "/b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000020.restart\"\n", 40)));
     second.run();
@@ -312,7 +314,6 @@ TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     }
     // The turbulence has entered the domain
     EXPECT_GT(v_max, 0.01);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(SyntheticInflowTest, InvalidInputIsRejected) {

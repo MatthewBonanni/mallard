@@ -127,7 +127,7 @@ std::string channel_input(const std::string & u, const std::string & run, bool h
                           const std::string & extra = "") {
     std::ostringstream s;
     s << "[run]\n" << run
-      << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 32\nLx = 0.5\nLy = 2.0\nperiodic = [\"x\"]\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 32\nLx = 0.5\nLy = 2.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"" << u << "\", \"0.0\"]\n"
       << "p = \"0.7142857142857143\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"

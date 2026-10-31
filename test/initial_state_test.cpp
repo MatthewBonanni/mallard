@@ -262,6 +262,21 @@ TEST(InitialStateTest, CenterCellsTakeTheLayerWhole) {
     }
 }
 
+TEST(InitialStateTest, NamedRegionsLayerAsTheTablesTheyName) {
+    const std::string disk = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.3}"
+                                        : "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.3}";
+    const auto inline_region = initialized(box(TRI, 8, "[[initialize.regions]]\nrho = \"2\"\nregion = " + disk + "\n"));
+    const auto named = initialized(box(TRI, 8, "[[initialize.regions]]\nrho = \"2\"\nregion = \"blob\"\n") +
+                                   "[regions]\nblob = " + disk + "\n");
+    const Mesh & mesh = *named->get_mesh();
+    size_t n_inside = 0;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        EXPECT_EQ(named->h_conservatives(c, 0), inline_region->h_conservatives(c, 0));
+        n_inside += named->h_conservatives(c, 0) > 1.0_r;
+    }
+    EXPECT_GT(n_inside, 0u);
+}
+
 TEST(InitialStateTest, TableInterpolationHasItsDesignOrder) {
     // Linear: exact for linear data, error / 4 per halving; cubic: exact for
     // cubics, error / 16 per halving, on non-uniform grids too

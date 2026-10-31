@@ -21,6 +21,12 @@
  */
 const std::filesystem::path & scratch_dir();
 
+/**
+ * @brief A directory in scratch_dir() of this rank's own, for the files of a
+ *        test that every rank writes on its own (not those of a distributed run).
+ */
+std::filesystem::path rank_scratch_dir();
+
 /** @brief Gives every test a scratch_dir(); call once, before RUN_ALL_TESTS(). */
 void install_scratch_directories();
 

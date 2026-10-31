@@ -176,7 +176,7 @@ TEST(MeshBlockTest, StretchingClustersNodesTowardBothEnds) {
     const uint32_t ny = 8;
     const Input input = parse_toml(
         std::string("[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 8\nNz = 4\nLx = 1.5\nLy = 2.0\nLz = 0.5\n") +
-        (N_DIM == 2 ? "stretching = [0.0, 1.7]\nperiodic = [\"x\"]\n" : "stretching = [0.0, 1.7, 0.0]\nperiodic = [\"x\", \"z\"]\n"));
+        (N_DIM == 2 ? "stretching = [0.0, 1.7]\n[[periodic]]\nzones = [\"left\", \"right\"]\n" : "stretching = [0.0, 1.7, 0.0]\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"));
     Mesh mesh;
     mesh.init(input);
     std::set<double> ys, xs;
