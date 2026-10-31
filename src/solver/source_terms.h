@@ -89,7 +89,7 @@ struct CellVariables {
 struct Term {
     uint32_t program = 0;
     uint32_t column = 0;       // < N_CONSERVATIVE: flow; else species column - N_CONSERVATIVE
-    int32_t weights = -1;      // row of the volume fractions, -1 for none
+    int32_t weights = -1;      // row of the cell fractions, -1 for none
     double scale = 1.0;        // 1 / (integral of the fraction) for totals, else 1
 };
 

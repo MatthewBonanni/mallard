@@ -90,12 +90,12 @@ variables = ["RHO", "U", "P"]
 
 [[write_data]]
 prefix = "./solut/cone"
-geometry = "cone"
+region = "cone"
 time_interval = 0.5
 variables = ["P"]
 
 [[write_data]]
 prefix = "./solut/plane"
-geometry = "symmetry_z"
+region = "symmetry_z"
 time_interval = 0.5
 variables = ["RHO", "U", "P"]

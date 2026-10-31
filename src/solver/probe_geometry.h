@@ -1,7 +1,7 @@
 /**
  * @file probe_geometry.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Geometry of [[probes]]: point sets and curves, with transforms.
+ * @brief Geometry of [[probes]]: points and curves, with transforms.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -45,12 +45,12 @@ struct Transform {
 
 /**
  * @brief Where a probe samples. nodes are the points written out; quadrature
- *        points with weights (length elements of curves, 1 for point sets)
+ *        points with weights (length elements of curves, 1 for points)
  *        are those the reductions sum over.
  */
 struct Geometry {
-    uint8_t dim = 0;  // 0: point set, 1: curves, 2: surfaces
-    std::string shape;
+    uint8_t dim = 0;  // 0: points, 1: curves, 2: surfaces
+    std::string type;
     std::vector<Point> nodes;
     std::vector<double> arc_length;                // curves: per node, from the start of its curve
     std::vector<std::vector<uint32_t>> polylines;  // curves: node indices in order, closed ones end at their start
@@ -70,7 +70,7 @@ struct Geometry {
     std::vector<uint32_t> polygon_vertices;
 };
 
-/** @brief The geometry of a [[probes]] entry (key names it in errors). */
+/** @brief The geometry of a [[probes]] entry or of a region table (key names it in errors). */
 Geometry make_geometry(const Input & entry, const std::string & key);
 
 /** @brief Points of a text file: rows of N_DIM coordinates split by commas or blanks; '#' starts a comment. */

@@ -167,8 +167,10 @@ std::string channel(const std::string & dir) {
         "variables = [\"RHO\", \"RHOU\", \"RHOE\", \"U\", \"U_X\", \"P\", \"T\", \"H\", \"CFL\", \"Q\", \"VORTICITY\", "
         "\"MEAN_*\", \"COV_*\"]\n";
     s << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 2\n" << variables
-      << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtu\"\ngeometry = \"bottom\"\ninterval = 2\n"
-      << "variables = [\"P\", \"U\"]\n";
+      << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtu\"\nregion = \"bottom\"\ninterval = 2\n"
+      << "variables = [\"P\", \"U\"]\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/near\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"P\"]\n"
+      << "region = {type = \"sphere\", center = " << SIDE_POINT << ", radius = 0.3}\n";
 #ifdef Mallard_HAS_HDF5
     if (comm::size() == 1 || have_parallel_hdf5()) {
         s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"hdf5\"\ninterval = 2\n" << variables
@@ -183,7 +185,7 @@ std::string channel(const std::string & dir) {
           << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\ninterval = 2\n" << variables
           << "[[write_data]]\nprefix = \"" << dir << "/ks\"\nformat = \"vtkhdf\"\nseries = true\ninterval = 2\n"
           << variables << "[[write_data]]\nprefix = \"" << dir << "/kwall\"\nformat = \"vtkhdf\"\n"
-          << "geometry = \"bottom\"\ninterval = 2\nvariables = [\"P\", \"U\"]\n"
+          << "region = \"bottom\"\ninterval = 2\nvariables = [\"P\", \"U\"]\n"
           << "[[probes]]\nname = \"vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/probe.vtkhdf\"\nstart = "
           << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
           << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nvariables = [\"RHO\", \"U\"]\n"
@@ -271,9 +273,9 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
     comm::barrier();
     if (!comm::is_root()) return;
 
-    // VTU (each piece of a PVTU), boundary-zone VTU and VTP
-    for (const std::string & vtu : comm::size() > 1 ? std::vector<std::string>{"f_000002_p0000.vtu", "wall_000002_p0000.vtu"}
-                                                    : std::vector<std::string>{"f_000002.vtu", "wall_000002.vtu"}) {
+    // VTU (each piece of a PVTU), of the mesh and of a region, and VTP of probes and boundary-zone snapshots
+    for (const std::string & vtu : comm::size() > 1 ? std::vector<std::string>{"f_000002_p0000.vtu", "near_000002_p0000.vtu"}
+                                                    : std::vector<std::string>{"f_000002.vtu", "near_000002.vtu"}) {
         expect_vtk_units(dir + "/" + vtu);
     }
     const auto record = string_arrays(read_file(dir + (comm::size() > 1 ? "/f_000002_p0000.vtu" : "/f_000002.vtu")));
@@ -282,7 +284,8 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
         EXPECT_NE(std::find(names.begin(), names.end(), name), names.end()) << name;
     }
     const std::string area = N_DIM == 3 ? "m2" : "m";
-    for (const char * vtp : {"/vtp_000002.vtp", "/wall_vtp_000002.vtp", "/cut_vtp_000002.vtp", "/surface_vtp_000002.vtp"}) {
+    for (const char * vtp : {"/vtp_000002.vtp", "/wall_vtp_000002.vtp", "/cut_vtp_000002.vtp", "/surface_vtp_000002.vtp",
+                             "/wall_000002.vtp"}) {
         expect_vtk_units(dir + vtp, {{"arc_length", "m"}, {"normal", "1"}, {"measure", area}});
     }
 
@@ -398,7 +401,8 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
             EXPECT_EQ(h5::read_string_attribute(time, "units"), "s") << k;
         }
         for (const auto & [path, name] : std::vector<std::pair<std::string, std::string>>{
-                 {"/kwall_000002.vtkhdf", "VTKHDF/CellData/P"}, {"/probe.vtkhdf", "VTKHDF/PointData/RHO"},
+                 {"/kwall.vtkhdf", N_DIM == 3 ? "VTKHDF/CellData/P" : "VTKHDF/PointData/P"},
+                 {"/probe.vtkhdf", "VTKHDF/PointData/RHO"},
                  {"/probe.vtkhdf", "VTKHDF/PointData/U_Y"}}) {
             h5::Handle h5file(H5Fopen((dir + path).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, path);
             h5::Handle dset(H5Dopen2(h5file, name.c_str(), H5P_DEFAULT), H5Dclose, name);

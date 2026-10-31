@@ -1001,7 +1001,6 @@
    "examples/heated_duct/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/reactive_shock_tube/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -1337,7 +1336,6 @@
    "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -1447,6 +1445,12 @@
   ],
   "set_in": []
  },
+ "initialize.regions.region.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "initialize.regions.region.normal": {
   "dims": [
    2
@@ -1510,15 +1514,18 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
+   "boundary",
+   "circle",
    "cone",
    "cylinder",
    "difference",
    "disk",
    "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
+   "interior",
    "intersection",
    "polygon",
    "rectangle",
@@ -1566,6 +1573,9 @@
  },
  "initialize.type": {
   "default": "\"constant\"",
+  "defaults_by_dim": {
+   "2": "\"\""
+  },
   "dims": [
    2,
    3
@@ -1661,7 +1671,6 @@
    "examples/shock_bubble_2d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -4196,24 +4205,6 @@
   ],
   "set_in": []
  },
- "probes.shape": {
-  "default": "\"\"",
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": [],
-  "type": "string",
-  "values": [
-   "arc",
-   "circle",
-   "curve",
-   "line",
-   "point",
-   "points",
-   "polyline"
-  ]
- },
  "probes.start": {
   "dims": [
    2,
@@ -4240,6 +4231,24 @@
    3
   ],
   "set_in": []
+ },
+ "probes.type": {
+  "default": "\"\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "arc",
+   "circle",
+   "curve",
+   "line",
+   "point",
+   "points",
+   "polyline"
+  ]
  },
  "probes.variables": {
   "dims": [
@@ -4322,6 +4331,12 @@
    "examples/source_regions/input.toml"
   ]
  },
+ "regions.<name>.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "regions.<name>.inner_radius": {
   "dims": [
    2
@@ -4379,15 +4394,18 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
+   "boundary",
+   "circle",
    "cone",
    "cylinder",
    "difference",
    "disk",
    "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
+   "interior",
    "intersection",
    "polygon",
    "rectangle",
@@ -4796,6 +4814,12 @@
    "examples/source_regions/input.toml"
   ]
  },
+ "sources.region.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "sources.region.pivot": {
   "dims": [
    2
@@ -4843,15 +4867,18 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
+   "boundary",
+   "circle",
    "cone",
    "cylinder",
    "difference",
    "disk",
    "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
+   "interior",
    "intersection",
    "polygon",
    "rectangle",
@@ -5119,6 +5146,18 @@
   ],
   "type": "array"
  },
+ "write_data.boundary": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "write_data.boundary_type": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
  "write_data.chunk_cells": {
   "dims": [
    2,
@@ -5139,7 +5178,14 @@
    "zlib"
   ]
  },
+ "write_data.end": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
  "write_data.format": {
+  "default": "\"vtkhdf\"",
   "dims": [
    2,
    3
@@ -5181,18 +5227,6 @@
    "vtu"
   ]
  },
- "write_data.geometry": {
-  "default": "\"all\"",
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": [
-   "examples/detonation_3d/input.toml",
-   "examples/sedov_3d/input.toml"
-  ],
-  "type": "string"
- },
  "write_data.interval": {
   "dims": [
    2,
@@ -5215,6 +5249,12 @@
    "examples/turbulent_inflow_duct/input.toml"
   ],
   "type": "integer"
+ },
+ "write_data.point": {
+  "dims": [
+   3
+  ],
+  "set_in": []
  },
  "write_data.prefix": {
   "dims": [
@@ -5267,7 +5307,6 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -5280,6 +5319,29 @@
   ],
   "type": "string"
  },
+ "write_data.reference": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "write_data.region": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/detonation_3d/input.toml",
+   "examples/sedov_3d/input.toml"
+  ]
+ },
+ "write_data.regions": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "write_data.relative_error": {
   "dims": [
    2,
@@ -5290,6 +5352,12 @@
  "write_data.series": {
   "dims": [
    2,
+   3
+  ],
+  "set_in": []
+ },
+ "write_data.start": {
+  "dims": [
    3
   ],
   "set_in": []
@@ -5346,7 +5414,6 @@
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
-   "examples/source_regions/input.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
@@ -5356,6 +5423,14 @@
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
+ },
+ "write_data.type": {
+  "default": "\"\"",
+  "dims": [
+   3
+  ],
+  "set_in": [],
+  "type": "string"
  },
  "write_data.variables": {
   "dims": [

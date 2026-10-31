@@ -64,63 +64,6 @@ TEST(IOTest, ProvenanceHashesTheMeshFile) {
     EXPECT_FALSE(q["mesh"].has("sha256"));
 }
 
-TEST(IOTest, BoundaryZoneOutputCarriesAdjacentCellValues) {
-    const std::string dir = (scratch_dir() / "mallard_surface_test").string();
-    std::ostringstream s;
-    s << "[run]\nn_steps = 4\ncfl = 0.25\n"
-      << "[mesh]\ntype = \"wedge\"\nNx = 12\nNy = 6\nLx = 2.0\nLy = 1.5\n"
-      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"1.5\", \"0.0\"]\np = \"1.0\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
-      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
-      << "[numerics]\nriemann_solver = \"HLLC\"\n"
-      << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
-      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-      << "[output]\ncheck_interval = 1000000\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtu\"\ngeometry = \"bottom\"\n"
-      << "interval = 4\nvariables = [\"P\", \"U\"]\n";
-    Solver solver;
-    solver.set_distributed(false);
-    solver.init(parse_toml(s.str()));
-    solver.run();
-    solver.update_primitives();
-    solver.copy_device_to_host();
-
-    std::ifstream in(dir + "/wall_000004.vtu");
-    ASSERT_TRUE(in.good());
-    std::stringstream buffer;
-    buffer << in.rdbuf();
-    const std::string text = buffer.str();
-    EXPECT_NE(text.find("NumberOfCells=\"12\""), std::string::npos);
-    EXPECT_NE(text.find("NumberOfPoints=\"13\""), std::string::npos);
-
-    // P values in the file, in zone order, equal the adjacent cells' pressure
-    const size_t start = text.find(">", text.find("Name=\"P\"")) + 1;
-    std::istringstream values(text.substr(start, text.find("</DataArray>", start) - start));
-    FaceZone * zone = solver.get_mesh()->get_face_zone("bottom");
-    for (uint32_t i = 0; i < zone->n_faces(); i++) {
-        double p;
-        values >> p;
-        const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
-        EXPECT_RTYPE_EQ(static_cast<rtype>(p), solver.h_primitives(c, 2));
-    }
-
-    // U is a 3-component vector, zero-padded in 2D
-    const size_t u_tag = text.find("Name=\"U\"");
-    const size_t u_start = text.find(">", u_tag) + 1;
-    EXPECT_NE(text.substr(u_tag, u_start - u_tag).find("NumberOfComponents=\"3\""), std::string::npos);
-    std::istringstream u_values(text.substr(u_start, text.find("</DataArray>", u_start) - u_start));
-    for (uint32_t i = 0; i < zone->n_faces(); i++) {
-        double u[3];
-        u_values >> u[0] >> u[1] >> u[2];
-        const int32_t c = solver.get_mesh()->h_cells_of_face(zone->h_faces(i), 0);
-        EXPECT_RTYPE_EQ(static_cast<rtype>(u[0]), solver.h_primitives(c, 0));
-        EXPECT_RTYPE_EQ(static_cast<rtype>(u[1]), solver.h_primitives(c, 1));
-        EXPECT_EQ(u[2], 0.0);
-    }
-}
-
 TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
     // TOML integers for real parameters must not be silently replaced by defaults
     const std::string input =
@@ -165,45 +108,6 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
     solver.init(parse_toml(input));
     solver.run();
     EXPECT_NEAR(solver.get_time(), 0.075, roundoff(1e-12));
-}
-
-TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
-    // Uniform flow u = 0.1, a = sqrt(1.4) on 0.25 x 0.5 cells: the CFL = 1 time
-    // step is 2 V / sum_f (|u_n| + a) A_f = 0.25 / (0.1 + 1.5 a)
-    const std::string dir = (scratch_dir() / "mallard_cfl_output").string();
-    const std::string input =
-        "[run]\nn_steps = 1\ndt = 0.01\n"
-        "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
-        "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
-        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
-        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-        "[output]\ncheck_interval = 1000000\n"
-        "[[write_data]]\nprefix = \"" + dir + "/wall\"\nformat = \"vtu\"\ngeometry = \"bottom\"\n"
-        "interval = 1\nvariables = [\"CFL\"]\n";
-    Solver solver;
-    solver.set_distributed(false);
-    solver.init(parse_toml(input));
-    solver.run();
-    const double expected = 0.01 * (0.1 + 1.5 * std::sqrt(1.4)) / 0.25;
-    for (const char * file : {"/wall_000000.vtu", "/wall_000001.vtu"}) {
-        std::ifstream in(dir + file);
-        ASSERT_TRUE(in.good()) << file;
-        std::stringstream buffer;
-        buffer << in.rdbuf();
-        const std::string text = buffer.str();
-        const size_t start = text.find(">", text.find("Name=\"CFL\"")) + 1;
-        std::istringstream values(text.substr(start, text.find("</DataArray>", start) - start));
-        double cfl;
-        int n = 0;
-        while (values >> cfl) {
-            EXPECT_NEAR(cfl, expected, 1e-6) << file;
-            n++;
-        }
-        EXPECT_EQ(n, 4) << file;
-    }
 }
 
 TEST(IOTest, ZeroCheckIntervalIsRejected) {
@@ -301,8 +205,8 @@ std::string output_case(const std::string & dir, const std::string & output_keys
       << "[output]\ncheck_interval = 1000000\n" << output_keys
       << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ninterval = 4\n"
       << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
-      << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtu\"\ngeometry = \"bottom\"\ninterval = 4\n"
-      << "variables = [\"P\"]\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/near\"\nformat = \"vtu\"\ninterval = 4\n"
+      << "region = {type = \"disk\", center = [0.4, 0.5], radius = 0.3}\nvariables = [\"P\"]\n" << snapshot_keys
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 6\n" << restart_keys;
     if (have_hdf5()) {
         s << "[[write_data]]\nprefix = \"" << dir << "/h5/flow\"\nformat = \"hdf5\"\ninterval = 4\n"
@@ -311,8 +215,8 @@ std::string output_case(const std::string & dir, const std::string & output_keys
           << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
           << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/series\"\nseries = true\ninterval = 4\n"
           << "variables = [\"RHO\", \"U\"]\n" << snapshot_keys
-          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/wall\"\ngeometry = \"bottom\"\ninterval = 4\n"
-          << "variables = [\"P\"]\n" << snapshot_keys;
+          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/near\"\ninterval = 4\n"
+          << "region = {type = \"disk\", center = [0.4, 0.5], radius = 0.3}\nvariables = [\"P\"]\n" << snapshot_keys;
     }
     return s.str();
 }
@@ -380,6 +284,52 @@ void expect_within_relative_error(const std::vector<rtype> & rounded, const std:
 }
 
 } // namespace
+
+TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
+    // Uniform flow u = 0.1, a = sqrt(1.4) on 0.25 x 0.5 cells: the CFL = 1 time
+    // step is 2 V / sum_f (|u_n| + a) A_f = 0.25 / (0.1 + 1.5 a)
+    const std::string dir = (scratch_dir() / "mallard_cfl_output").string();
+    const std::string input =
+        "[run]\nn_steps = 1\ndt = 0.01\n"
+        "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
+        "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n"
+        "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\n"
+        "interval = 1\nvariables = [\"CFL\"]\n"
+        "[[write_data]]\nprefix = \"" + dir + "/wall\"\nformat = \"vtu\"\nregion = \"bottom\"\n"
+        "interval = 1\nvariables = [\"P\", \"CFL\"]\n"
+        "[[write_data]]\nprefix = \"" + dir + "/slice\"\nformat = \"vtu\"\ninterval = 1\nvariables = [\"P\", \"CFL\"]\n"
+        "region = {type = \"cut_plane\", point = [0.3, 0.5], normal = [1.0, 0.0]}\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input));
+    solver.run();
+    const double expected = 0.01 * (0.1 + 1.5 * std::sqrt(1.4)) / 0.25;
+    for (const char * file : {"/flow_000000.vtu", "/flow_000001.vtu"}) {
+        const std::vector<rtype> cfl = as_reals(vtu_arrays(dir + file).at(0));
+        ASSERT_EQ(cfl.size(), 8u) << file;
+        for (rtype value : cfl) EXPECT_NEAR(double(value), expected, 1e-6) << file;
+    }
+    // A boundary zone's and a slice's snapshots give a cell field the value of each sample's cell
+    for (const std::string file : {"/wall_000000.vtp", "/wall_000001.vtp", "/slice_000000.vtp", "/slice_000001.vtp"}) {
+        const std::string text = file_contents(dir + file);
+        const size_t tag = text.find("Name=\"CFL\"");
+        ASSERT_NE(tag, std::string::npos) << file;
+        const size_t at = text.find('_', text.find("<AppendedData")) + 1 +
+                          std::stoull(text.substr(text.find("offset=\"", tag) + 8));
+        uint64_t n_bytes = 0;
+        std::memcpy(&n_bytes, text.data() + at, sizeof(n_bytes));
+        std::vector<double> cfl(n_bytes / sizeof(double));
+        std::memcpy(cfl.data(), text.data() + at + sizeof(n_bytes), n_bytes);
+        ASSERT_EQ(cfl.size(), file.find("wall") != std::string::npos ? 4u : 2u) << file;
+        for (double value : cfl) EXPECT_NEAR(value, expected, 1e-6) << file;
+    }
+}
 
 TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
     // The snapshot taken when a file is due is what lands in it, although the
@@ -731,60 +681,6 @@ TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {
                other_data, other);
     third.resume(10, 0.1_r);
     EXPECT_THROW(third.write(25, 0.2_r), std::runtime_error);
-}
-
-TEST(IOTest, VTKHDFBoundaryZoneIsAPolyDataOfItsFaces) {
-    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
-    const std::string dir = (scratch_dir() / "mallard_vtkhdf_surface").string();
-    std::ostringstream s;
-    s << "[run]\nn_steps = 4\ncfl = 0.25\n"
-      << "[mesh]\ntype = \"wedge\"\nNx = 12\nNy = 6\nLx = 2.0\nLy = 1.5\n"
-      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"1.5\", \"0.0\"]\np = \"1.0 + x * x\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
-      << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
-      << "[numerics]\nriemann_solver = \"HLLC\"\n"
-      << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
-      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-      << "[output]\ncheck_interval = 1000000\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtkhdf\"\ngeometry = \"bottom\"\n"
-      << "interval = 4\nvariables = [\"P\"]\n";
-    Solver solver;
-    solver.set_distributed(false);
-    solver.init(parse_toml(s.str()));
-    solver.run();
-    solver.update_primitives();
-    solver.copy_device_to_host();
-    const std::string file = dir + "/wall_000004.vtkhdf";
-    EXPECT_EQ(vtkhdf_type(file), "PolyData");
-    for (const char * empty : {"Vertices", "Polygons", "Strips"}) {
-        EXPECT_EQ(h5_values<int64_t>(file, std::string("VTKHDF/") + empty + "/NumberOfCells"), std::vector<int64_t>{0});
-        EXPECT_EQ(h5_values<int64_t>(file, std::string("VTKHDF/") + empty + "/Offsets"), std::vector<int64_t>{0});
-    }
-    EXPECT_EQ(h5_values<int64_t>(file, "VTKHDF/Lines/NumberOfCells"), std::vector<int64_t>{12});
-    EXPECT_EQ(h5_values<int64_t>(file, "VTKHDF/NumberOfPoints"), std::vector<int64_t>{13});
-    const std::vector<double> points = h5_values<double>(file, "VTKHDF/Points");
-    const std::vector<int64_t> connectivity = h5_values<int64_t>(file, "VTKHDF/Lines/Connectivity");
-    const std::vector<double> p = h5_values<double>(file, "VTKHDF/CellData/P");
-    ASSERT_EQ(connectivity.size(), 24u);
-    ASSERT_EQ(p.size(), 12u);
-    // Each segment carries the pressure of the cell above it
-    const auto & mesh = *solver.get_mesh();
-    FaceZone * zone = solver.get_mesh()->get_face_zone("bottom");
-    for (size_t k = 0; k < 12; k++) {
-        const double x = 0.5 * (points[3 * size_t(connectivity[2 * k])] + points[3 * size_t(connectivity[2 * k + 1])]);
-        int matches = 0;
-        for (uint32_t i = 0; i < zone->n_faces(); i++) {
-            const uint32_t f = zone->h_faces(i);
-            const double xf = 0.5 * (double(mesh.h_node_coords(mesh.h_node_of_face(f, 0), 0)) +
-                                     double(mesh.h_node_coords(mesh.h_node_of_face(f, 1), 0)));
-            if (std::abs(xf - x) > 1e-6) continue;
-            matches++;
-            EXPECT_EQ(p[k], double(solver.h_primitives(mesh.h_cells_of_face(f, 0), 2))) << k;
-        }
-        EXPECT_EQ(matches, 1) << k;
-    }
 }
 
 TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {

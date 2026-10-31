@@ -12,7 +12,7 @@ sponge layers that damp the solution toward a reference state.
 gravity = [0.0, -9.81]          # adds rho g to momentum, rho u.g to energy
 ```
 
-*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+*Used in:* [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -81,19 +81,19 @@ act.
 
 ### Regions
 
-A region is a shape — sphere, cylinder (solid or annular), cone, box, torus,
-half-space, polygon, any implicit `f(x, y, z) < 0` — or a union, intersection
-or difference of shapes, each scaled, rotated and translated. Shapes need not
+A region is a primitive — sphere, cylinder (solid or annular), cone, box (2D:
+rectangle), torus, half-space, polygon (2D), any implicit `f(x, y, z) < 0` — or a union, intersection
+or difference of regions, each scaled, rotated and translated. Regions need not
 follow the mesh: each cell gets its volume fraction, so a coarse mesh sees the
-right amount of the shape instead of a staircase of whole cells. `edge` (on the
+right amount of the region instead of a staircase of whole cells. `edge` (on the
 outermost region) smooths the boundary over a band of that width, so that a
 source switches on gradually and excites fewer grid-scale waves.
 
 ```toml
 # A disk with a rotated slot cut out of it
-region = {type = "difference",
-          a = {type = "disk", center = [0.5, 0.5], radius = 0.38},
-          b = {type = "rectangle", center = [0.5, 0.5], size = [0.5, 0.16], rotate = 45, pivot = [0.5, 0.5]}}
+region.type = "difference"
+region.a = {type = "disk", center = [0.5, 0.5], radius = 0.38}
+region.b = {type = "rectangle", center = [0.5, 0.5], size = [0.5, 0.16], rotate = 45, pivot = [0.5, 0.5]}
 ```
 
 ![Volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-light.svg#gh-light-mode-only)
@@ -114,7 +114,11 @@ rhoE = "50 W"
 region = "igniter"
 ```
 
-See [named regions](geometry.md#named-regions).
+See [named regions](geometry.md#named-regions). The mesh's own regions need
+no definition: `region = "domain"` is every cell, and a cell zone of the mesh
+file (a Gmsh physical group of cells, a Fluent cell zone, ...) is a region by
+its name, e.g. `region = "flame_holder"`
+([regions of the mesh](geometry.md#regions-of-the-mesh)).
 
 ### Exact totals
 

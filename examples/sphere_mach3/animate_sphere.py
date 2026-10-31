@@ -59,6 +59,8 @@ def resample(mesh, plane_axis, spacing, smoothing, gamma):
     constant on each face, so unsmoothed contours and schlieren would show the
     tetrahedra. Point data VALID marks the flow."""
     mesh = mesh.clean().extract_surface(algorithm="dataset_surface")
+    if "U" not in mesh.cell_data:
+        mesh.cell_data["U"] = np.column_stack([mesh.cell_data[f"U_{a}"] for a in "XYZ"])
     mesh.cell_data["H"] = np.sqrt(2.0 * np.abs(mesh.compute_cell_sizes(length=False, volume=False)["Area"]))
     pts = mesh.cell_data_to_point_data()
     lo, hi = np.array(WINDOW[0::2]), np.array(WINDOW[1::2])

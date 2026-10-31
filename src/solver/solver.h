@@ -522,6 +522,9 @@ class Solver {
         void check_settings(CheckReport & report) const;
         void init_run_parameters();
         void init_output(region::Regions & regions);
+        /** @brief The writers of a [[write_data]] entry: one per region, or of the whole mesh. */
+        void add_data_writers(const Input & output, const Probes::Context & context, bool async_output,
+                              uint32_t io_threads);
         void init_solution();
         void init_solution_constant();
         void init_solution_restart();

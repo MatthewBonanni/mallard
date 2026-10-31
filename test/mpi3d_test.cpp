@@ -229,30 +229,23 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
 }
 
 TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
-    // Ranks whose part of the mesh does not touch the zone write empty pieces
+    // Ranks whose part of the mesh does not touch the zone have no faces to send
     const std::string dir = (scratch_dir() / "mallard_mpi3d_faces").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     Solver solver;
     solver.init(parse_toml(blast_input("cartesian", "type = \"FO\"\n") +
-                           "[[write_data]]\nprefix = \"" + dir + "/left\"\nformat = \"vtu\"\ngeometry = \"left\"\n"
+                           "[[write_data]]\nprefix = \"" + dir + "/left\"\nformat = \"vtu\"\nregion = \"left\"\n"
                            "interval = 3\nvariables = [\"RHO\"]\n"));
     solver.run();
     comm::barrier();
-    uint64_t total = 0;
-    for (int r = 0; r < comm::size(); r++) {
-        std::ostringstream piece;
-        piece << dir << "/left_000003";
-        if (comm::size() > 1) piece << "_p" << std::setw(4) << std::setfill('0') << r;
-        std::ifstream in(piece.str() + ".vtu");
-        std::stringstream ss;
-        ss << in.rdbuf();
-        const std::string text = ss.str();
-        const size_t k = text.find("NumberOfCells=\"");
-        ASSERT_NE(k, std::string::npos) << piece.str();
-        total += std::stoull(text.substr(k + 15));
-    }
-    EXPECT_EQ(total, 12u * 12u);
+    std::ifstream in(dir + "/left_000003.vtp");
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string text = ss.str();
+    const size_t k = text.find("NumberOfPolys=\"");
+    ASSERT_NE(k, std::string::npos);
+    EXPECT_EQ(std::stoull(text.substr(k + 15)), 12u * 12u);
 }
 
 TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {

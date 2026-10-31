@@ -1527,8 +1527,10 @@ void Solver::init_output(region::Regions & regions) {
             }
         }
     }
-    probes.init(input, *mesh, regions, species_names,
-                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous());
+    const Probes::Context probe_context{input, *mesh, regions, species_names,
+                                        find_value_or<std::string>(input, "initialize", "type", "") == "restart",
+                                        is_viscous(), &data};
+    probes.init(probe_context);
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     if (run_log_on) {
@@ -1538,22 +1540,106 @@ void Solver::init_output(region::Regions & regions) {
     } else {
         run_log::close();
     }
+    if (input.contains("write_data")) {
+        for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
+            add_data_writers(output, probe_context, async_output, io_threads);
+        }
+    }
     if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
-    }
-    if (input.contains("write_data")) {
-        for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
-            data_writers.push_back(std::make_unique<DataWriter>());
-            data_writers.back()->init(output, data, mesh, restart_variables());
-            data_writers.back()->set_async(async_output, io_threads);
-        }
     }
     if (std::none_of(data_writers.begin(), data_writers.end(),
                      [](const auto & writer) { return writer->get_format() == DataFormat::RESTART; })) {
         const Input table(Input::table_type{{"prefix", "restart"}, {"format", "restart"}, {"interval", 1}});
         checkpoint_writer = std::make_unique<DataWriter>();
         checkpoint_writer->init(table, data, mesh, restart_variables());
+    }
+}
+
+void Solver::add_data_writers(const Input & output, const Probes::Context & context, bool async_output,
+                              uint32_t io_threads) {
+    auto add_writer = [&](const CellSubset * subset, const std::string & prefix) {
+        data_writers.push_back(std::make_unique<DataWriter>());
+        data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix);
+        data_writers.back()->set_async(async_output, io_threads);
+    };
+    const bool one = output.contains("region"), several = output.contains("regions");
+    if (!one && !several) {
+        add_writer(nullptr, "");
+        return;
+    }
+    if (one && several) {
+        throw InputError({.key = "write_data.regions",
+                          .line = line_of(output, "regions"),
+                          .message = "is given with region",
+                          .fix = "Give region for one region, or regions = [...] for several"});
+    }
+    if (!output.contains("prefix")) {
+        throw missing_key(output, "write_data.prefix", "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
+    }
+    const std::string prefix = find_value<std::string>(output, "prefix");
+    const std::string entry_key = "write_data[prefix = \"" + prefix + "\"]";
+    std::vector<std::pair<const Input *, std::string>> values;
+    if (one) {
+        values.emplace_back(&output.at("region"), entry_key + ".region");
+    } else {
+        const Input & list = output.at("regions");
+        if (!list.is_array() || list.as_array().empty()) {
+            throw InputError({.key = "write_data.regions",
+                              .line = line_of(output, "regions"),
+                              .message = "must be a non-empty list of regions or their names",
+                              .fix = "For example regions = [\"x0\", \"x1\"]"});
+        }
+        for (size_t i = 0; i < list.as_array().size(); i++) {
+            values.emplace_back(&list.as_array()[i], entry_key + ".regions[" + std::to_string(i) + "]");
+        }
+    }
+    for (size_t i = 0; i < values.size(); i++) {
+        const auto & [value, key] = values[i];
+        const probe::RegionValue r = probe::classify_region(input, context.regions, *value, key);
+        const std::string file_prefix = one ? prefix : prefix + "_" + (r.name.empty() ? std::to_string(i) : r.name);
+        if (r.kind == probe::RegionValue::Kind::WHOLE_MESH) {
+            add_writer(nullptr, file_prefix);
+        } else if (r.kind == probe::RegionValue::Kind::VOLUME) {
+            const region::Region & region = context.regions.get(*value, key);
+            region::require_full_dimension(region, key);
+            CellSubset subset{region.summary(), {}, context.regions.fractions(*value, key)};
+            for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+                if (subset.fractions[c] > 0.0) subset.cells.push_back(c);
+            }
+            if (comm::allreduce(uint64_t(subset.cells.size()), comm::Op::SUM) == 0) {
+                throw InputError(key + " contains no part of any cell.");
+            }
+            add_writer(&subset, file_prefix);
+        } else {
+            // Boundary zones, cut planes, surfaces, curves and points: point values, written as a probe writes them
+            const std::string format = find_value_or<std::string>(output, "format", have_hdf5() ? "vtkhdf" : "vtu");
+            if (format != "vtkhdf" && format != "vtu") {
+                throw InputError({.key = "write_data.format",
+                                  .line = line_of(output, "format"),
+                                  .message = "\"" + format + "\" does not hold surfaces, curves or points",
+                                  .fix = "Use format = \"vtkhdf\" (one file of every snapshot) or \"vtu\" (VTK PolyData "
+                                         "files and a .pvd series)"});
+            }
+            if (format == "vtkhdf" && !have_hdf5()) {
+                throw InputError({.key = "write_data.format",
+                                  .line = line_of(output, "format"),
+                                  .message = "\"vtkhdf\" needs a build with HDF5, and this one has none",
+                                  .fix = "Use format = \"vtu\", or rebuild with -DMallard_ENABLE_HDF5=ON"});
+            }
+            if (output.contains("series") && !find_value<bool>(output, "series")) {
+                throw InputError({.key = "write_data.series",
+                                  .line = line_of(output, "series"),
+                                  .message = "is false, but a surface, curve or points is written as one series file",
+                                  .fix = "Remove series"});
+            }
+            const bool vtkhdf = format == "vtkhdf";
+            Probes::Snapshot snapshot{file_prefix, entry_key, value, key, file_prefix + (vtkhdf ? ".vtkhdf" : ".pvd"),
+                                      vtkhdf ? Probes::Format::VTKHDF : Probes::Format::VTP};
+            if (output_files_enabled()) create_parent_directories("the output", file_prefix);
+            probes.add_snapshot(context, output, snapshot);
+        }
     }
 }
 
@@ -2306,7 +2392,8 @@ RestartAttributes Solver::restart_attributes() const {
 }
 
 void Solver::write_data(bool force) {
-    bool any_due = force;
+    const bool snapshots = probes.snapshots_due(step, t) || (force && probes.any_snapshots());
+    bool any_due = force || snapshots;
     for (auto & writer : data_writers) {
         any_due = any_due || writer->due(step, t);
     }
@@ -2322,10 +2409,16 @@ void Solver::write_data(bool force) {
         writer->write(step, t, force, attributes, faces, arrays);
     }
     statistics.write(step, t);
+    if (snapshots) {
+        // Regions of lower dimension: point values, written as probes write them
+        update_cell_W();
+        if (is_mixture() && probes.snapshots_need_transport()) update_transport();
+        probes.write(step, t, probe_fields(), true, force);
+    }
 }
 
 void Solver::write_probes() {
-    if (!probes.due(step, t)) return;
+    if (!probes.probes_due(step, t)) return;
     if (probes.point_values_due(step, t) || probes.gradients_due(step, t)) {
         update_cell_W();
         if (is_mixture() && probes.transport_due(step, t)) update_transport();
