@@ -260,8 +260,8 @@ TEST(Units, RunWithUnitsMatchesTheSameRunInSI) {
         std::ostringstream s;
         s << "[run]\nn_steps = 3\ndt = " << q("0.2 us", "2e-7") << "\nt_stop = " << q("1 s", "1.0") << "\n"
           << "[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 4\nLx = " << q("10 cm", "0.1") << "\nLy = " << q("50 mm", "0.05")
-          << "\n" << (N_DIM == 3 ? "Nz = 3\nLz = " + q("2 cm", "0.02") + "\nperiodic = [\"x\", \"y\", \"z\"]\n"
-                                 : std::string("periodic = [\"x\", \"y\"]\n"))
+          << "\n" << (N_DIM == 3 ? "Nz = 3\nLz = " + q("2 cm", "0.02") + "\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
+                                 : std::string("[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"))
           << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = " << q("1 atm", "101325")
           << "\nT_ref = " << q("300 K", "300") << "\nrho_ref = " << q("1.1766 kg/m^3", "1.1766")
           << "\nmu = " << q("1.8e-2 Pa s", "1.8e-2") << "\nviscosity_model = \"sutherland\"\nT_mu_ref = "
@@ -294,7 +294,7 @@ TEST(Units, RunWithUnitsMatchesTheSameRunInSI) {
 
 TEST(Units, UnitErrorsStopTheSetupNamingTheKey) {
     const std::string input = std::string("[run]\nn_steps = 1\ndt = \"1 m\"\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\n") +
-                              (N_DIM == 3 ? "Nz = 4\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n") +
+                              (N_DIM == 3 ? "Nz = 4\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n") +
                               "[physics]\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
                               "[initialize]\nu = [0, 0" + (N_DIM == 3 ? ", 0" : "") + "]\np = 1.0\nT = 1.0\n";
     Solver solver;

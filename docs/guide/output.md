@@ -335,7 +335,7 @@ variable's units, `integral` times those of the measure (`m` along a curve,
 `volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
 forces, integrals and region probes are per radian of the revolved domain, and their units
 say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
-(`m2 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
+(`m2 rad-1`), region probes' `volume` (`m3 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
 field's units, `spectrum`, `correlation` and `shell` (sums, not densities)
 the product of their pair's (`U_X*U_Y`: `m2 s-2`); the `abscissa` is a
 wavenumber in `m-1` (spectra, shells) or a separation in `m` (correlations).

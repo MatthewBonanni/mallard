@@ -176,9 +176,10 @@ class Mesh {
         void init(const Input & input);
 
         /**
-         * @brief Periodic pairs from [[periodic]] entries, and for generated
-         *        meshes from [mesh] periodic: left/right for x, bottom/top for
-         *        y, back/front for z.
+         * @brief Periodic pairs from the [[periodic]] entries. On a generated
+         *        mesh, opposite sides (left/right, bottom/top, back/front, the
+         *        annulus' start/end) need no translation or angle: the mesh
+         *        gives it, and checks one that is set.
          */
         static std::vector<PeriodicPair> periodic_pairs(const Input & input);
 

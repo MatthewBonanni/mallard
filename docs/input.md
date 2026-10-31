@@ -97,20 +97,21 @@ factor: node `j` of `N` lies at `L/2 (1 + tanh(beta (2j/N - 1)) / tanh(beta))`;
 `y = 0` and `y = Ly`, `stretching = [0, 1.7, 0]` makes the cells next to the
 walls about 8 times thinner than those at the center (with `Ny = 96`).
 
-`periodic = ["x", "y"]` (and `"z"` in 3D) makes a generated mesh (except
-`wedge`) periodic in those directions: `left`/`right`, `bottom`/`top` and
-`back`/`front` are joined into interior faces and disappear as boundary zones.
-Every scheme sees the seam as interior. Each periodic direction needs at least
-3 cells. Zones of mesh files are paired with `[[periodic]]` (below).
+A generated mesh (except `wedge`) is made periodic by [`[[periodic]]`](#periodic)
+entries pairing opposite sides, `["left", "right"]`, `["bottom", "top"]` and
+`["back", "front"]` (3D), which take their translation from the mesh: the
+zones are joined into interior faces and disappear as boundary zones. The
+deprecated `periodic = ["x", "y"]` of `[mesh]` (until 0.10.0) does the same;
+`mallard input upgrade` rewrites it.
 
 `type = "annulus"` generates the annulus `r_inner <= r <= r_outer` about the
 z axis, or its sector `0 <= theta <= angle`, of `Ntheta x Nr` quadrilaterals
 with nodes on equispaced circles and rays (in 3D extruded over `0 <= z <= Lz`
 into `Ntheta x Nr x Nz` hexahedra). Zones: `inner`, `outer`, for a sector
 `start` (theta = 0) and `end` (theta = angle), and in 3D `back` and `front`.
-`periodic = ["theta"]` joins `start` and `end` through the rotation by
-`angle` (rotational periodicity, `[[periodic]]` below), and `"z"` (3D) `back`
-and `front`.
+`[[periodic]]` with `zones = ["start", "end"]` joins them through the rotation
+by `angle` (rotational periodicity, below), and `["back", "front"]` (3D) by
+the translation `Lz`.
 
 | Key | Description |
 |---|---|
@@ -265,8 +266,8 @@ an error. Curved boundaries are not yet supported with `physics.axisymmetric`.
 
 ## `[[periodic]]`
 
-Pairs two boundary zones of any mesh (e.g. Gmsh physical curves or surfaces,
-or zones of an HDF5 mesh) into a periodic seam, serially and in distributed
+Pairs two boundary zones of any mesh (the sides of a generated mesh, Gmsh
+physical curves or surfaces, zones of an HDF5 mesh) into a periodic seam, serially and in distributed
 runs: zone B must be zone A translated, or rotated about an axis, node by node
 (to 1e-6 of the zones' shortest edge), as Gmsh's `Periodic` constraint
 produces. The faces of both zones become interior faces and take no
@@ -277,8 +278,8 @@ direction needs at least 3 cells.
 | Key | Description |
 |---|---|
 | `zones` | `[A, B]`: the zone names |
-| `translation` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) with B = A + translation |
-| `angle` | Instead of `translation`: B is A rotated by `angle` degrees (right-handed about `axis`; counterclockwise in 2D) |
+| `translation` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) with B = A + translation. Optional for opposite sides of a generated mesh (`left`/`right`, `bottom`/`top`, `back`/`front`), which are the box length apart; checked against the mesh if set |
+| `angle` | Instead of `translation`: B is A rotated by `angle` degrees (right-handed about `axis`; counterclockwise in 2D). Optional for the `start` and `end` of a generated `annulus` (its `angle`); checked if set |
 | `center` | With `angle`: a point of the axis, `[x, y]` (`[x, y, z]` in 3D); default the origin |
 | `axis` | With `angle`, 3D only: the axis direction (default `[0, 0, 1]`) |
 
@@ -311,6 +312,21 @@ filename = "box.msh"
 [[periodic]]
 zones = ["left", "right"]
 translation = [1.0, 0.0]
+```
+
+```toml
+# A generated channel, periodic in x and z: the mesh gives the translations
+[mesh]
+type = "cartesian"
+Lx = 6.283185307179586
+Ly = 2.0
+Lz = 3.141592653589793
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["back", "front"]
 ```
 
 ## `[physics]`
@@ -943,6 +959,7 @@ ranks. A probe that is not due costs nothing.
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
 | `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
@@ -1254,6 +1271,9 @@ least aligned with `normal`).
 
 The parts of a boolean (the entries of `regions`, `a` and `b`) and `of` may be
 names of `[regions]` or of the mesh too.
+
+The parts of a boolean (the entries of `regions`, `a` and `b`) may be names of
+`[regions]` too.
 
 Any region, primitive or boolean, may also have, applied in this order:
 
