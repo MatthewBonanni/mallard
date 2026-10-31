@@ -274,10 +274,11 @@ T = 0.7142857142857143
 ![A pulsed jet launching vortex rings: vorticity, ring core positions and the inlet velocity against its target](../images/guide/pulsed_jet-light.svg#gh-light-mode-only)
 ![A pulsed jet launching vortex rings: vorticity, ring core positions and the inlet velocity against its target](../images/guide/pulsed_jet-dark.svg#gh-dark-mode-only)
 
-*`examples/pulsed_jet` (axisymmetric) at D / 32 and Re_D = 1000: each pulse
-rolls up into a vortex ring. The inlet cell delivers strokes of 3.001 D and
-2.996 D against 3, and the rings leave at 0.39 and 0.44 U0 with 1.04 and 1.06
-times the circulation of the slug model (`examples/pulsed_jet/plot_pulsed_jet.py`).*
+*`examples/pulsed_jet` (axisymmetric, D / 96, Re_D = 2000, six pulses to
+t U0 / D = 36): each pulse rolls up into a vortex ring. The inlet cell delivers
+strokes of 2.995 to 3.000 D against 3. The first ring travels at 0.40 U0 with
+1.04 times the circulation of the slug model; the rings behind it, in its wake,
+at 0.455 to 0.465 U0 with 1.01 to 1.11 times (`examples/pulsed_jet/plot_pulsed_jet.py`).*
 
 Pitfalls:
 

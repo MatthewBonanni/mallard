@@ -55,6 +55,39 @@ def cores(x, y, w, threshold):
     return sorted(kept, reverse=True)
 
 
+def track(files, threshold, dA):
+    """Follows the rings by continuity: each core continues the ring whose position, extrapolated from
+    the previous snapshots, is nearest, so a ring keeps its number after the rings ahead of it have
+    left the window. Returns ring k (0: the first pulse's) -> [(t, x, r, circulation)]."""
+    tracks = []
+    for n, f in enumerate(files):
+        x, y, w, t = grid(f)
+        found = cores(x, y, w, threshold)
+        predicted = {}
+        for k, rows in enumerate(tracks):
+            if n - rows[-1][4] > 2:
+                continue
+            t1, x1, r1 = rows[-1][:3]
+            speed = (x1 - rows[-2][1]) / (t1 - rows[-2][0]) if len(rows) > 1 else 0.4 * U0
+            predicted[k] = (x1 + speed * (t - t1), r1)
+        pairs = sorted((np.hypot(xc - px, rc - pr), k, c) for k, (px, pr) in predicted.items()
+                       for c, (xc, rc) in enumerate(found))
+        owner = {}
+        for dist, k, c in pairs:
+            if dist < 0.5 * D and k not in owner.values() and c not in owner:
+                owner[c] = k
+        released = int(np.floor((t - 0.75 * PERIOD) / PERIOD)) + 1  # rings whose pulse has ended
+        for c in range(len(found)):  # found runs downstream to upstream: a new ring is the furthest unclaimed core
+            if c not in owner and len(tracks) < released:
+                owner[c] = len(tracks)
+                tracks.append([])
+        for c, k in owner.items():
+            xc, rc = found[c]
+            box = (np.abs(x - xc) < 0.75 * D) & (w > 0.0)
+            tracks[k].append((t, xc, rc, w[box].sum() * dA, n))
+    return {k: [row[:4] for row in rows] for k, rows in enumerate(tracks)}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("prefix")
@@ -64,18 +97,10 @@ def main():
     args = ap.parse_args()
 
     files = [f for _, f in read_index(args.prefix)]
-    x, y, w, _ = grid(files[-1])
+    x, y, w, t = grid(files[-1])
     threshold = 0.25 * w[(x > 1.0) & (x < 9.0)].max()
     dA = (x[0, 1] - x[0, 0]) * (y[1, 0] - y[0, 0])
-    tracks = {}  # ring k (0: the first pulse's) -> [(t, x, r, circulation)]
-    for f in files:
-        x, y, w, t = grid(f)
-        found = cores(x, y, w, threshold)
-        released = int(np.floor((t - 0.75 * PERIOD) / PERIOD)) + 1  # rings whose pulse has ended
-        for k, (xc, rc) in enumerate(found[:max(released, 0)]):
-            box = (np.abs(x - xc) < 0.75 * D) & (w > 0.0)
-            tracks.setdefault(k, []).append((t, xc, rc, w[box].sum() * dA))
-
+    tracks = track(files, threshold, dA)
     tt = np.linspace(0.0, PERIOD, 30001)
     slug = np.trapezoid(U(tt) ** 2 / 2.0, tt)
     stroke = np.trapezoid(U(tt), tt)
@@ -83,8 +108,7 @@ def main():
     fits = {}
     for k, rows in sorted(tracks.items()):
         r = np.array(rows)
-        start = (k + 0.75) * PERIOD + 5.0
-        sel = r[:, 0] >= start
+        sel = (r[:, 0] >= (k + 0.75) * PERIOD + 5.0) & (r[:, 1] < 8.0 * D)  # formed, clear of the sponge
         if sel.sum() < 4:
             continue
         speed, x0 = np.polyfit(r[sel, 0], r[sel, 1], 1)
@@ -98,7 +122,7 @@ def main():
     plateau = U(tp) > 0.95 * U0
     print(f"inlet cell: max |u - U(t)| = {np.abs(up - U(tp)).max() / U0:.4f} U0 over {tp.size} samples to "
           f"t = {tp[-1]:.1f}, {np.abs(up - U(tp))[plateau].max() / U0:.4f} U0 where U > 0.95 U0")
-    for k in range(int(tp[-1] // PERIOD)):
+    for k in range(int((tp[-1] + 0.01 * PERIOD) // PERIOD)):  # U(t) vanishes at the period's end
         sel = (tp >= k * PERIOD) & (tp <= (k + 1) * PERIOD)
         print(f"pulse {k + 1}: stroke of the inlet cell {np.trapezoid(up[sel], tp[sel]) / D:.3f} D "
               f"(target {stroke / D:.3f})")

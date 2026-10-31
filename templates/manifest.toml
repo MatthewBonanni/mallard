@@ -262,7 +262,7 @@ summary = "A pulsed round jet launching a train of vortex rings (inflow as an ex
 source = "examples/pulsed_jet"
 files = ["input.toml", "plot_pulsed_jet.py"]
 dim = 2
-cost = "442,368 quadrilaterals, about 6 minutes on one A100 (estimate)"
+cost = "442,368 quadrilaterals, about 5 minutes on one A100"
 post = ["plot_pulsed_jet.py solut/jet solut/probe_inlet.csv --png pulsed_jet.png"]
 results = "pulsed_jet.png, the vorticity, the rings' core positions and the inlet velocity against U(t)"
 quick = ["mesh.Nx = 96", "mesh.Ny = 32", "physics.mu = 8.0e-4", "run.t_stop = 15.0"]
