@@ -114,6 +114,13 @@ std::string broadcast(const std::string & value);
 std::vector<std::string> allgather(const std::string & value);
 
 /**
+ * @brief The error of the lowest rank that has one (non-empty), on every rank;
+ *        empty if none has. For checks of rank-local data, so that every rank
+ *        throws and none waits in a later collective.
+ */
+std::string first_error(const std::string & error);
+
+/**
  * @brief Concatenation of every rank's local vector, in rank order.
  */
 template <typename T>

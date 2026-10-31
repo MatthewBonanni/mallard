@@ -30,10 +30,16 @@
 #include "mesh.h"
 #include "scratch.h"
 
-/** @brief Write content to a file in the test's scratch_dir(); returns its path. */
+/**
+ * @brief Write content to a file in the test's scratch_dir(); returns its path.
+ *        Ranks that write the same file never expose a partial one to each other.
+ */
 inline std::string write_temp(const std::string & name, const std::string & content) {
     const auto path = scratch_dir() / name;
-    std::ofstream(path) << content;
+    auto part = path;
+    part += ".part" + std::to_string(comm::rank());
+    std::ofstream(part) << content;
+    std::filesystem::rename(part, path);
     return path.string();
 }
 

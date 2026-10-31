@@ -14,14 +14,17 @@
 #include "front_end.h"
 #include "mesh_block.h"
 #include "mesh_file.h"
+#include "scratch.h"
 
 namespace {
 
 std::string mesh(const std::string & name) { return source_dir() + "/test/data/meshes/" + name; }
 
+std::string own(const std::string & name) { return (rank_scratch_dir() / name).string(); }
+
 int input_dim(const std::string & mesh_table) {
-    std::ofstream("input.toml") << "[mesh]\n" << mesh_table;
-    return front_end::input_dimension("input.toml").dim;
+    std::ofstream(own("input.toml")) << "[mesh]\n" << mesh_table;
+    return front_end::input_dimension(own("input.toml")).dim;
 }
 
 } // namespace
@@ -46,15 +49,18 @@ TEST(FrontEndTest, MeshFilesOfEveryFormatHaveTheirDimension) {
 
 TEST(FrontEndTest, Gmsh22DimensionIsThatOfItsElements) {
     EXPECT_EQ(front_end::mesh_file_dimension(source_dir() + "/test/data/formats/annulus.msh").dim, 2);
-    std::ofstream("tet.msh") << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n4\n1 0 0 0\n2 1 0 0\n3 0 1 0\n"
+    std::ofstream(own("tet.msh")) << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n4\n1 0 0 0\n2 1 0 0\n3 0 1 0\n"
                                 "4 0 0 1\n$EndNodes\n$Elements\n2\n1 2 2 1 1 1 2 3\n2 4 2 2 2 1 2 3 4\n$EndElements\n";
-    EXPECT_EQ(front_end::mesh_file_dimension("tet.msh").dim, 3);
+    EXPECT_EQ(front_end::mesh_file_dimension(own("tet.msh")).dim, 3);
 }
 
 TEST(FrontEndTest, GeneratedMeshIs3DWithAThirdDirection) {
     EXPECT_EQ(input_dim("type = \"cartesian\"\nNx = 4\nNy = 4\n"), 2);
     EXPECT_EQ(input_dim("type = \"cartesian\"\nNz = 4\n"), 3);
     EXPECT_EQ(input_dim("type = \"cartesian\"\nLz = 2.0\n"), 3);
+    EXPECT_EQ(input_dim("type = \"cartesian\"\n[[periodic]]\nzones = [\"back\", \"front\"]\n"), 3);
+    EXPECT_EQ(input_dim("type = \"cartesian\"\n[[periodic]]\nzones = [\"left\", \"right\"]\n"), 2);
+    // The deprecated [mesh] periodic
     EXPECT_EQ(input_dim("type = \"cartesian\"\nperiodic = [\"x\", \"z\"]\n"), 3);
     EXPECT_EQ(input_dim("type = \"annulus\"\nNz = 4\n"), 3);
     EXPECT_EQ(input_dim("type = \"cartesian_tet\"\n"), 3);
@@ -64,8 +70,8 @@ TEST(FrontEndTest, GeneratedMeshIs3DWithAThirdDirection) {
 TEST(FrontEndTest, MeshFileGivesTheInputItsDimension) {
     EXPECT_EQ(input_dim("type = \"file\"\nfilename = \"" + mesh("cyl3d.msh") + "\"\n"), 3);
     EXPECT_EQ(input_dim("filename = \"" + mesh("cyl2d_foam") + "\"\n"), 2);
-    std::ofstream("input.toml") << "[mesh]\nfilename = \"missing.msh\"\n";
-    const front_end::Dimension d = front_end::input_dimension("input.toml");
+    std::ofstream(own("input.toml")) << "[mesh]\nfilename = \"missing.msh\"\n";
+    const front_end::Dimension d = front_end::input_dimension(own("input.toml"));
     EXPECT_EQ(d.dim, 0);
     EXPECT_NE(d.why.find("missing.msh"), std::string::npos) << d.why;
     EXPECT_TRUE(d.unreadable);

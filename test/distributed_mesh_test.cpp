@@ -299,8 +299,8 @@ TEST(DistributedMeshTest, PeriodicHaloLayersFollowVertexNeighborsAcrossSeams) {
     // Each halo layer holds exactly the cells one vertex-neighbor step further,
     // including neighbors across the seams of a fully periodic box
     const std::string input = N_DIM == 2
-        ? "[mesh]\ntype = \"cartesian_tri\"\nNx = 9\nNy = 7\nperiodic = [\"x\", \"y\"]\n"
-        : "[mesh]\ntype = \"cartesian_tet\"\nNx = 4\nNy = 3\nNz = 3\nperiodic = [\"x\", \"y\", \"z\"]\n";
+        ? "[mesh]\ntype = \"cartesian_tri\"\nNx = 9\nNy = 7\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+        : "[mesh]\ntype = \"cartesian_tet\"\nNx = 4\nNy = 3\nNz = 3\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
     const Input parsed = parse_toml(input);
     Mesh global;
     global.init(parsed);
@@ -363,13 +363,13 @@ std::string periodic_pairs_input(int n_dirs) {
 std::vector<std::string> periodic_inputs() {
     if constexpr (N_DIM == 2) {
         const std::string file = write_temp_shared("mallard_distributed_periodic.msh", jittered_periodic_mesh_2d(7));
-        return {"[mesh]\ntype = \"cartesian\"\nNx = 9\nNy = 7\nperiodic = [\"x\", \"y\"]\n",
-                "[mesh]\ntype = \"cartesian_tri\"\nNx = 6\nNy = 5\nperiodic = [\"x\"]\n",
+        return {"[mesh]\ntype = \"cartesian\"\nNx = 9\nNy = 7\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n",
+                "[mesh]\ntype = \"cartesian_tri\"\nNx = 6\nNy = 5\n[[periodic]]\nzones = [\"left\", \"right\"]\n",
                 "[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + periodic_pairs_input(2)};
     }
     const std::string file = write_temp_shared("mallard_distributed_periodic.msh", jittered_periodic_mesh_3d(4));
-    return {"[mesh]\ntype = \"cartesian_tet\"\nNx = 4\nNy = 3\nNz = 3\nperiodic = [\"x\", \"y\", \"z\"]\n",
-            "[mesh]\ntype = \"cartesian_mixed\"\nNx = 6\nNy = 3\nNz = 4\nperiodic = [\"x\", \"z\"]\n",
+    return {"[mesh]\ntype = \"cartesian_tet\"\nNx = 4\nNy = 3\nNz = 3\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n",
+            "[mesh]\ntype = \"cartesian_mixed\"\nNx = 6\nNy = 3\nNz = 4\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n",
             "[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + periodic_pairs_input(3)};
 }
 

@@ -24,6 +24,20 @@
 #include "boundary.h"
 #include "test_utils.h"
 
+/**
+ * @brief [[periodic]] entries joining the opposite sides of a generated box
+ *        along each direction named in `directions` ("xy", or "[\"x\", \"z\"]").
+ */
+inline std::string periodic_sides(const std::string & directions) {
+    std::string s;
+    for (const char d : directions) {
+        if (d == 'x') s += "[[periodic]]\nzones = [\"left\", \"right\"]\n";
+        if (d == 'y') s += "[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
+        if (d == 'z') s += "[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    }
+    return s;
+}
+
 inline Input parse_toml(const std::string & str) {
     return parse_input_string(str);
 }

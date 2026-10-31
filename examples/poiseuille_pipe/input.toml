@@ -18,7 +18,9 @@ Nx = 4
 Ny = 32
 Lx = 0.125
 Ly = 1.0
-periodic = ["x"]
+
+[[periodic]]
+zones = ["left", "right"]
 
 [initialize]
 type = "constant"
