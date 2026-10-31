@@ -182,6 +182,16 @@ class Parser {
                 p = boundary(std::move(p), where, line_of(t, "filled"));
                 p.text = text + ", filled = false";
             }
+            if (t.contains("flip") && find_value<bool>(t, "flip")) {
+                if (p.dimension == N_DIM || p.dimension == 0) {
+                    fail(where + ".flip", line_of(t, "flip"),
+                         "reverses the side a surface or curve faces, and this region is " + dimension_name(p.dimension),
+                         "Remove flip", "docs/guide/geometry.md#orientation");
+                }
+                p.closed = closed(p);
+                for (Piece & piece : p.pieces) piece.flip = !piece.flip;
+                p.text += ", flipped";
+            }
             return p;
         }
 
@@ -367,9 +377,12 @@ class Parser {
                 out.pieces = {edges};
                 return out;
             }
-            if (p.pieces.size() != 1 || p.pieces[0].carriers.empty()) {
+            if (p.pieces.size() != 1) {
                 fail(where, line, "the boundary of a union of " + dimension_name(p.dimension).substr(2) + "s is not defined",
                      "Take the union of their boundaries");
+            }
+            if (p.pieces[0].carriers.empty()) {
+                fail(where, line, "the boundary of boundary zones clipped by filled regions is not defined");
             }
             // Where the surface leaves each region that clips it
             const Piece & piece = p.pieces[0];
@@ -382,6 +395,8 @@ class Parser {
                     }
                     Piece edge = piece;
                     edge.carriers.push_back(masks[k]);
+                    // Leaving a region it keeps outside of, the edge runs the other way around
+                    edge.flip = edge.flip != !in;
                     auto & rest = in ? edge.inside : edge.outside;
                     rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(k));
                     out.pieces.push_back(edge);
@@ -586,15 +601,53 @@ class Parser {
             for (size_t i = 0; i < parts.size(); i++) {
                 ps.push_back(parse(*parts[i].first, parts[i].second, frame));
                 out.text += (i ? ", " : "") + ps.back().text;
-                if (ps.back().dimension != ps[0].dimension) {
-                    fail(where, line_of(t, "type"),
-                         "a " + type + " combines regions of one dimension, but " + parts[0].second + " is " +
-                             dimension_name(ps[0].dimension) + " and " + parts[i].second + " is " +
-                             dimension_name(ps.back().dimension),
-                         "", "docs/guide/geometry.md#booleans");
-                }
             }
             out.text += ")";
+            size_t lower = 0;  // the parts of lower dimension than the run's
+            for (size_t i = 0; i < ps.size(); i++) {
+                if (type == "union" && ps[i].dimension != ps[0].dimension) {
+                    fail(where, line_of(t, "type"),
+                         "a union combines regions of one dimension, but " + parts[0].second + " is " +
+                             dimension_name(ps[0].dimension) + " and " + parts[i].second + " is " +
+                             dimension_name(ps[i].dimension),
+                         "", "docs/guide/geometry.md#booleans");
+                }
+                lower += ps[i].dimension < N_DIM;
+            }
+            if (type != "union" && lower > 0 && lower < ps.size()) {
+                // A surface or curve clipped by the filled parts: inside them, or outside the subtracted ones
+                const auto it = std::find_if(ps.begin(), ps.end(), [](const Parsed & p) { return p.dimension < N_DIM; });
+                const size_t k = static_cast<size_t>(it - ps.begin());
+                const std::string kind = dimension_name(it->dimension).substr(2);
+                if (lower > 1) {
+                    fail(where, line_of(t, "type"),
+                         "a " + type + " clips one " + kind + " with filled regions, and " + std::to_string(lower) +
+                             " of its parts have lower dimensions",
+                         "Combine the " + kind + "s by union first", "docs/guide/geometry.md#clipping-across-dimensions");
+                }
+                if (type == "difference" && k != 0) {
+                    fail(where, line_of(t, "type"),
+                         "a difference subtracts filled regions, and " + parts[k].second + " is " +
+                             dimension_name(it->dimension) + ", which takes nothing from " + parts[0].second,
+                         "", "docs/guide/geometry.md#clipping-across-dimensions");
+                }
+                out = std::move(*it);
+                out.text = type + "(" + out.text;
+                std::vector<uint32_t> masks;
+                for (size_t i = 0; i < ps.size(); i++) {
+                    if (i == k) continue;
+                    masks.push_back(place(ps[i], where));
+                    out.text += ", " + ps[i].text;
+                }
+                out.text += ")";
+                for (Piece & piece : out.pieces) {
+                    auto & to = type == "intersection" ? piece.inside : piece.outside;
+                    to.insert(to.end(), masks.begin(), masks.end());
+                }
+                out.closed = false;
+                out.bounds = -1;
+                return out;
+            }
             out.dimension = ps[0].dimension;
             if (out.dimension < N_DIM) {
                 if (type != "union") {
@@ -1024,6 +1077,21 @@ Region::Region(const Input & value, const std::string & where, const Input * nam
         m_host = host(m_filled[m_root]);
         m_host.edge = edge;
     }
+    if (table && table->contains("resolution")) {
+        if (m_dimension == N_DIM) {
+            fail(key + ".resolution", line_of(*table, "resolution"),
+                 "the resolution of extracted boundaries applies to surfaces and curves, and this region is " +
+                     dimension_name(N_DIM),
+                 "Remove resolution", "docs/guide/geometry.md#surfaces-and-curves-on-a-mesh");
+        }
+        const int64_t r = find_value<int64_t>(*table, "resolution");
+        if (r < 0 || r > MAX_RESOLUTION) {
+            fail(key + ".resolution", line_of(*table, "resolution"),
+                 "must be in [0, " + std::to_string(MAX_RESOLUTION) + "], and is " + std::to_string(r), "",
+                 "docs/guide/geometry.md#surfaces-and-curves-on-a-mesh");
+        }
+        m_resolution = static_cast<int>(r);
+    }
 }
 
 RegionView<Kokkos::HostSpace> Region::host(const Filled & shapes) const {
@@ -1286,6 +1354,10 @@ std::vector<double> fractions_of(const Mesh & mesh, const Region & region, const
 std::vector<double> cell_fractions(const Mesh & mesh, const Region & region) {
     if (region.dimension() != N_DIM) throw std::logic_error("cell_fractions: the region is not filled.");
     return fractions_of(mesh, region, region.root());
+}
+
+std::vector<double> cell_fractions(const Mesh & mesh, const Region & region, const uint32_t filled) {
+    return fractions_of(mesh, region, filled);
 }
 
 void require_full_dimension(const Region & region, const Input & value, const std::string & where) {

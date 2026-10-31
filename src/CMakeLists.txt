@@ -3,6 +3,7 @@ add_library(MallardCore STATIC
     common/common_math.cpp
     common/compiled_expression.cpp
     common/region.cpp
+    common/region_mesh.cpp
     common/tabulated.cpp
     common/common_io.cpp
     common/input.cpp
