@@ -28,7 +28,7 @@ and launch with `mpirun`; the input file is unchanged:
 mpirun -n 4 build/src/mallard -i input.toml --kokkos-num-threads=2
 ```
 
-Each rank owns a piece of the mesh, plus as many layers of halo cells as its reconstruction needs (one for first order, two for MUSCL and viscous terms, more for TENO, which Mallard determines from the stencils themselves). The log reports the split:
+Each rank owns a piece of the mesh, plus as many layers of halo cells as its reconstruction needs (one for first order, two for MUSCL and viscous terms, more for TENO, which Mallard determines from the stencils themselves). The terminal output reports the split:
 
 ```text
 > Distributed over 3 ranks: 160000 cells, at most 53334 per rank, 2 halo layers

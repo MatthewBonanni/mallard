@@ -58,7 +58,6 @@ struct MixtureFluxFunctor {
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<rtype **[2][2]> face_thermo;
     BoundaryData boundaries;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
     Kokkos::View<rtype **, Kokkos::LayoutStride> cell_thermo;  // (cell, [gamma, e0])
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype **> face_mdot;  // (face, q)
@@ -107,7 +106,7 @@ struct MixtureFluxFunctor {
                 th_r[0] = face_thermo(i_face, i_quad, 1, 0);
                 th_r[1] = face_thermo(i_face, i_quad, 1, 1);
             } else {
-                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_l, n_point, W_cells, face_solution,
+                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_l, n_point, face_solution,
                                             face_thermo, cell_thermo, W_r, th_r);
                 if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) {
                     FOR_I_CONSERVATIVE W_l[i] = W_r[i];
@@ -159,7 +158,6 @@ struct MixtureDoubleFluxFunctor {
     Kokkos::View<rtype **> face_weights;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
     Kokkos::View<rtype *[2]> frozen;  // (cell, [gamma, e0])
     Kokkos::View<rtype **[2][2]> face_thermo;
     Kokkos::View<rtype **, Kokkos::LayoutStride> cell_thermo;
@@ -212,7 +210,7 @@ struct MixtureDoubleFluxFunctor {
             } else {
                 const rtype th_i[2] = {th_0.gamma, th_0.e0};
                 rtype th_g[2];
-                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_point, W_cells, face_solution,
+                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_point, face_solution,
                                             face_thermo, cell_thermo, W_r, th_g);
                 if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) FOR_I_CONSERVATIVE W_l[i] = W_r[i];
             }
