@@ -148,27 +148,6 @@ double boole(F f, double a, double b) {
     return 2.0 * h / 45.0 * (7.0 * f(a) + 32.0 * f(a + h) + 12.0 * f(a + 2 * h) + 32.0 * f(a + 3 * h) + 7.0 * f(b));
 }
 
-/** @brief Gauss-Legendre nodes and weights of n >= 2 points on [-1, 1]. */
-std::vector<std::pair<double, double>> gauss_legendre(int n) {
-    std::vector<std::pair<double, double>> rule;
-    const double m = n;
-    for (int i = 0; i < n; i++) {
-        double x = std::cos(std::numbers::pi * (i + 0.75) / (m + 0.5)), dp = 1.0;
-        for (int it = 0; it < 50; it++) {
-            double p0 = 1.0, p1 = x;
-            for (double k = 2.0; k <= m; k += 1.0) {
-                const double p2 = ((2.0 * k - 1.0) * x * p1 - (k - 1.0) * p0) / k;
-                p0 = p1;
-                p1 = p2;
-            }
-            dp = m * (x * p1 - p0) / (x * x - 1.0);
-            x -= p1 / dp;
-        }
-        rule.push_back({x, 2.0 / ((1.0 - x * x) * dp * dp)});
-    }
-    return rule;
-}
-
 } // namespace
 
 TEST(ProbesTest, CurvesHaveTheirLengthsAndFollowTheirTransforms) {
@@ -869,43 +848,20 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
 
 TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMass) {
     // A density wave convected through a circle (sphere): the rate of change of
-    // the mass inside, from point values at Gauss points of the disk (ball),
+    // the mass inside, a region probe's integral of RHO over the disk (ball),
     // balances the outward mass flux through its boundary, up to an error that
-    // falls at the scheme's third order
-    const double R = 0.2, pi = std::numbers::pi;
-    const double c[3] = {0.4, 0.55, 0.45};
-    std::ostringstream points;
-    points.precision(17);
-    std::vector<double> weights;
-    const auto radial = gauss_legendre(8), polar = gauss_legendre(8);
-    const int n_around = 16;
-    for (const auto & [xr, wr] : radial) {
-        const double r = R * (1.0 + xr) / 2.0;
-        for (int k = 0; k < n_around; k++) {
-            const double phi = 2.0 * pi * k / n_around, w = R / 2.0 * wr * 2.0 * pi / n_around;
-            if constexpr (N_DIM == 2) {
-                points << (weights.empty() ? "" : ", ") << "[" << c[0] + r * std::cos(phi) << ", "
-                       << c[1] + r * std::sin(phi) << "]";
-                weights.push_back(w * r);
-            } else {
-                for (const auto & [mu, wmu] : polar) {
-                    const double s = std::sqrt(1.0 - mu * mu);
-                    points << (weights.empty() ? "" : ", ") << "[" << c[0] + r * s * std::cos(phi) << ", "
-                           << c[1] + r * s * std::sin(phi) << ", " << c[2] + r * mu << "]";
-                    weights.push_back(w * r * r * wmu);
-                }
-            }
-        }
-    }
+    // falls at second order: the region probe weighs the average of each cell
+    // the circle cuts by its covered fraction
+    const std::string region = "{type = \"sphere\", center = " + numbers3("0.4", "0.55", "0.45") + ", radius = 0.2}";
     const std::string surface = N_DIM == 2 ? "type = \"circle\"\ncenter = [0.4, 0.55]\nradius = 0.2\nn_points = 64\n"
                                            : "type = \"sphere\"\ncenter = [0.4, 0.55, 0.45]\nradius = 0.2\n"
                                              "n_points = [24, 48]\n";
     const std::string rho = std::string(SINE_RHO) + (N_DIM == 3 ? " * cos(2 * pi * z)" : "");
     auto residual = [&](uint32_t n) {
         const std::string dir = fresh_dir("balance");
-        const std::string probes = "[[probes]]\nname = \"mass\"\ntype = \"points\"\npoints = [" + points.str() +
-                                   "]\nvariables = [\"RHO\"]\nsampling = \"point\"\nfile = \"" + dir + "/mass.csv\"\n"
-                                   "[[probes]]\nname = \"flux\"\n" + surface +
+        const std::string probes = "[[probes]]\nname = \"mass\"\nregion = " + region +
+                                   "\nvariables = [\"RHO\"]\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
+                                   "/mass.csv\"\n[[probes]]\nname = \"flux\"\n" + surface +
                                    "variables = [\"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
                                    "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/flux.csv\"\n";
         const double dt = 0.25 / n;
@@ -916,26 +872,21 @@ TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMass) {
         solver.init(parse_toml(box_case(n, rho, "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probes,
                                         run_keys.str())));
         run(solver);
-        std::vector<double> mass(3, 0.0), flux;
-        for (const auto & row : read_csv(dir + "/mass.csv")) {
-            const double w = weights.at(static_cast<size_t>(row.at("point")));
-            mass.at(static_cast<size_t>(row.at("step"))) += w * row.at("RHO");
-        }
+        std::vector<double> mass, flux;
+        for (const auto & row : read_csv(dir + "/mass.csv")) mass.push_back(row.at("integral_RHO"));
         for (const auto & row : read_csv(dir + "/flux.csv")) flux.push_back(row.at("integral_MASS_FLUX"));
+        EXPECT_EQ(mass.size(), 3u);
         EXPECT_EQ(flux.size(), 3u);
-        if (flux.size() != 3) return 1.0;
+        if (mass.size() != 3 || flux.size() != 3) return 1.0;
         // Simpson's rule in time, so that the time error is far below the space error
         const double balance = (mass[2] - mass[0]) / (2.0 * dt) + (flux[0] + 4.0 * flux[1] + flux[2]) / 6.0;
         return std::fabs(balance / flux[1]);
     };
-    // Single precision: meshes whose residuals stay above its round-off
-    const bool single = sizeof(rtype) == sizeof(float);
-    const std::vector<uint32_t> meshes = N_DIM == 3 || single ? std::vector<uint32_t>{16, 32}
-                                                              : std::vector<uint32_t>{16, 32, 64};
+    const std::vector<uint32_t> meshes = {16, 32, 64};
     std::vector<double> errors;
     for (uint32_t n : meshes) errors.push_back(residual(n));
     for (size_t i = 1; i < errors.size(); i++) {
-        EXPECT_GT(std::log2(errors[i - 1] / errors[i]), 2.5) << errors[i - 1] << " " << errors[i];
+        EXPECT_GT(std::log2(errors[i - 1] / errors[i]), 1.8) << errors[i - 1] << " " << errors[i];
     }
     EXPECT_LT(errors.back(), 0.01);
 }
