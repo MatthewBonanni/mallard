@@ -32,7 +32,9 @@ Ntheta = 64
 Nr = 64
 r_inner = 1.0
 r_outer = 2.0
-periodic = ["theta"]
+
+[[periodic]]
+zones = ["start", "end"]
 
 [initialize]
 type = "analytical"

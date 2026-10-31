@@ -147,7 +147,7 @@ std::string docs_of(const std::string & key);
 
 /**
  * @brief The text of an error that starts with a key ("mesh.Nx must ...",
- *        "[mesh] periodic ..."), followed by the docs of the key's table.
+ *        "[mesh] angle ..."), followed by the docs of the key's table.
  */
 std::string with_docs(const std::string & text);
 

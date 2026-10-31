@@ -14,7 +14,9 @@ Nz = 48
 Lx = 0.192
 Ly = 0.096
 Lz = 0.096
-periodic = ["z"]
+
+[[periodic]]
+zones = ["back", "front"]
 
 [initialize]
 type = "analytical"

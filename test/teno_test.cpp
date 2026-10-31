@@ -503,6 +503,11 @@ std::string temp_cache(const std::string & name) {
     return path;
 }
 
+/** @brief The file of cache_file on this rank: each rank of several has its own. */
+std::string file_of(const std::string & cache) {
+    return comm::size() > 1 ? cache + ".r" + std::to_string(comm::rank()) + "-of-" + std::to_string(comm::size()) : cache;
+}
+
 TEST(TENOTest, PackedStencilsAndTheirCacheDoNotDependOnTheSliceWidth) {
     // Stencils of different sizes, and a cell count that is not a multiple of
     // the GPU slice width, so slices are both ragged and partly empty
@@ -522,16 +527,16 @@ TEST(TENOTest, PackedStencilsAndTheirCacheDoNotDependOnTheSliceWidth) {
     const std::string cache = temp_cache("mallard_teno_cache_slices.bin");
     const auto host = teno_outputs(mesh, bd, 4, "", 0);
     const auto gpu = teno_outputs(mesh, bd, 4, cache, 5, true);
-    ASSERT_TRUE(std::filesystem::exists(cache));
-    const auto written = std::filesystem::last_write_time(cache);
+    ASSERT_TRUE(std::filesystem::exists(file_of(cache)));
+    const auto written = std::filesystem::last_write_time(file_of(cache));
     // A cache written with GPU slices loads into host rows, and back
     const auto loaded_host = teno_outputs(mesh, bd, 4, cache, 0, true);
     const auto loaded_gpu = teno_outputs(mesh, bd, 4, cache, 5, true);
-    EXPECT_EQ(std::filesystem::last_write_time(cache), written);  // Loaded, never rewritten
+    EXPECT_EQ(std::filesystem::last_write_time(file_of(cache)), written);  // Loaded, never rewritten
     expect_bitwise_equal(host, gpu, "32-cell slices");
     expect_bitwise_equal(host, loaded_host, "loaded into host rows");
     expect_bitwise_equal(host, loaded_gpu, "loaded into 32-cell slices");
-    std::filesystem::remove(cache);
+    std::filesystem::remove(file_of(cache));
 }
 
 TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) {
@@ -552,12 +557,12 @@ TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) 
     }
     EXPECT_GT(max_diff, 0.0);
     EXPECT_LT(max_diff, 1e-5 * max_value);
-    EXPECT_LT(static_cast<double>(std::filesystem::file_size(single)), 0.6 * static_cast<double>(std::filesystem::file_size(full)));
+    EXPECT_LT(static_cast<double>(std::filesystem::file_size(file_of(single))), 0.6 * static_cast<double>(std::filesystem::file_size(file_of(full))));
     // A cache in the other precision is recomputed, never reinterpreted
     const auto exact_again = teno_outputs(mesh, bd, 4, single, teno::SLICE_SHIFT, true);
     expect_bitwise_equal(exact, exact_again, "double run given a single-precision cache");
-    std::filesystem::remove(single);
-    std::filesystem::remove(full);
+    std::filesystem::remove(file_of(single));
+    std::filesystem::remove(file_of(full));
 }
 
 TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) {
@@ -570,9 +575,9 @@ TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) 
         return teno_outputs(m, b, order, "");
     };
     auto write_cache = [&]() {
-        std::filesystem::remove(cache);
+        std::filesystem::remove(file_of(cache));
         teno_outputs(mesh, bd, 4, cache, teno::SLICE_SHIFT, true);
-        ASSERT_TRUE(std::filesystem::exists(cache));
+        ASSERT_TRUE(std::filesystem::exists(file_of(cache)));
     };
 
     write_cache();
@@ -580,9 +585,9 @@ TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) 
     write_cache();
     expect_bitwise_equal(teno_outputs(mesh, bd, 3, cache), fresh(mesh, bd, 3), "other order");
     write_cache();
-    std::filesystem::resize_file(cache, std::filesystem::file_size(cache) / 2);
+    std::filesystem::resize_file(file_of(cache), std::filesystem::file_size(file_of(cache)) / 2);
     expect_bitwise_equal(teno_outputs(mesh, bd, 4, cache), fresh(mesh, bd, 4), "truncated cache");
-    std::filesystem::remove(cache);
+    std::filesystem::remove(file_of(cache));
 }
 
 namespace {
