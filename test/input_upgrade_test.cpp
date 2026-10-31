@@ -203,7 +203,7 @@ TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
 
 TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
     const Rules rules = {{}, {{"s[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0", "hollow", false,
-                               0, "axis = [0, 0, 1]"}}};
+                               0, "axis = [0, 0, 1]"}}, {}};
     const std::string text = "[[s]]\n"
                              "region = {type = \"union\", regions = [{type = \"annulus\", radius = 2}]}\n"
                              "[[s]]\n"
