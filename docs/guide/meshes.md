@@ -356,7 +356,8 @@ The geometry comes from either
 
 - **high-order boundary elements** of a Gmsh file (`line3`, `line4` in 2D;
   `triangle6`, `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`,
-  `quadrangle16` in 3D), e.g. `make_cylinder_mesh.py --order 3`; or
+  `quadrangle16` in 3D), e.g. `make_cylinder_mesh.py --order 3` or
+  `make_mallard_mesh.py --order 3`; or
 - **an analytic shape** that a zone is projected onto, on any mesh.
 
 | Key | Default | Meaning |

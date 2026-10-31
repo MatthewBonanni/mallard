@@ -45,16 +45,18 @@ const std::vector<std::string> PROBES = {"points", "line", "circle", "cut", "wal
 #endif
 };
 
+constexpr const char * EVERY_REDUCTION = "reductions = [\"integral\", \"mean\", \"favre\", \"min\", \"max\", \"rms\"]\n";
+
 /**
  * @brief A smooth viscous flow on simplices between an isothermal and an
- *        adiabatic wall, with a fixed step, and every probe kind with point
- *        values and every reduction.
+ *        adiabatic wall, with a fixed step, every probe kind with point values
+ *        and every reduction, and a region with a smooth edge.
  */
 std::string reference_case(const std::string & dir) {
     std::ostringstream s;
     s << "[run]\nn_steps = 6\ndt = 4.0e-3\n[mesh]\n";
     if (N_DIM == 2) s << "type = \"cartesian_tri\"\nNx = 16\nNy = 12\nLx = 1.0\nLy = 0.8\n";
-    else s << "type = \"cartesian_tet\"\nNx = 6\nNy = 5\nNz = 4\nLx = 1.0\nLy = 0.8\nLz = 0.6\nperiodic = [\"z\"]\n";
+    else s << "type = \"cartesian_tet\"\nNx = 6\nNy = 5\nNz = 4\nLx = 1.0\nLy = 0.8\nLz = 0.6\n" << periodic_sides("z");
     s << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * sin(2 * pi * x) * cos(pi * y)\"\nu = "
       << vector3("0.3 + 0.1 * cos(2 * pi * y)", "0.05 * sin(2 * pi * x)", "0.04 * cos(2 * pi * x)")
       << "\np = \"1.0 + 0.1 * cos(2 * pi * x) * sin(pi * y)\"\n"
@@ -86,9 +88,12 @@ std::string reference_case(const std::string & dir) {
     };
     for (const auto & name : PROBES) {
         s << "[[probes]]\nname = \"" << name << "\"\nfile = \"" << dir << "/" << name << ".csv\"\nreductions_file = \""
-          << dir << "/" << name << "_reductions.csv\"\nsampling = \"point\"\ninterval = 3\n"
-          << "reductions = [\"integral\", \"mean\", \"favre\", \"min\", \"max\", \"rms\"]\n" << geometry.at(name);
+          << dir << "/" << name << "_reductions.csv\"\nsampling = \"point\"\ninterval = 3\n" << EVERY_REDUCTION
+          << geometry.at(name);
     }
+    s << "[[probes]]\nname = \"ball\"\nreductions_file = \"" << dir << "/ball_reductions.csv\"\ninterval = 3\n"
+      << EVERY_REDUCTION << "variables = [\"RHO\", \"U\", \"P\", \"T\"]\nregion = {type = \"sphere\", center = "
+      << numbers3("0.45", "0.35", "0.3") << ", radius = 0.3, edge = 0.1}\n";
     return s.str();
 }
 
@@ -178,17 +183,20 @@ TEST(ProbesTest, EveryBackendReproducesTheCpuReference) {
         std::filesystem::path(source_dir()) / "test" / "data" / "probes" / (std::to_string(N_DIM) + "d");
     const bool update = std::getenv("MALLARD_UPDATE_PROBE_REFERENCE") != nullptr;
     if (update) std::filesystem::create_directories(reference);
+    std::vector<std::string> files = {"ball_reductions.csv"};
     for (const auto & name : PROBES) {
-        for (const std::string & file : {name + ".csv", name + "_reductions.csv"}) {
-            if (update) {
-                std::ifstream in(dir + "/" + file);
-                std::ofstream out(reference / file);
-                for (std::string line; std::getline(in, line);) {
-                    if (line.empty() || line[0] != '#') out << line << "\n";
-                }
-                continue;
+        files.push_back(name + ".csv");
+        files.push_back(name + "_reductions.csv");
+    }
+    for (const auto & file : files) {
+        if (update) {
+            std::ifstream in(dir + "/" + file);
+            std::ofstream out(reference / file);
+            for (std::string line; std::getline(in, line);) {
+                if (line.empty() || line[0] != '#') out << line << "\n";
             }
-            expect_matches_reference(dir + "/" + file, (reference / file).string());
+            continue;
         }
+        expect_matches_reference(dir + "/" + file, (reference / file).string());
     }
 }
