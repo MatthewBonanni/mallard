@@ -283,8 +283,8 @@ where = "y >= 0.5"
 *`examples/pulsed_jet` (axisymmetric, D / 96, Re_D = 2000, six pulses to
 t U0 / D = 36): each pulse rolls up into a vortex ring. The inlet cell delivers
 strokes of 2.995 to 3.000 D against 3. The first ring travels at 0.40 U0 with
-1.04 times the circulation of the slug model; the rings behind it, in its wake,
-at 0.455 to 0.465 U0 with 1.01 to 1.11 times (`examples/pulsed_jet/plot_pulsed_jet.py`).*
+1.06 times the circulation of the slug model; the rings behind it, in its wake,
+at 0.454 to 0.463 U0 with 1.02 to 1.12 times (`examples/pulsed_jet/plot_pulsed_jet.py`).*
 
 Pitfalls:
 

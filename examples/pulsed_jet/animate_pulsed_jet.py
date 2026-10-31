@@ -98,7 +98,8 @@ def main():
         axr.set_ylim(0.0, 9.5)
         axr.set_xlabel(r"$t\,U_0 / D$", color=FG, fontsize=13)
         axr.set_ylabel(r"core position $x / D$", color=FG, fontsize=13)
-        axr.legend(loc="upper left", facecolor=BG, edgecolor="#555", labelcolor=FG, fontsize=11, ncol=2)
+        if axr.lines:
+            axr.legend(loc="upper left", facecolor=BG, edgecolor="#555", labelcolor=FG, fontsize=11, ncol=2)
 
         axu = fig.add_axes([0.53, 0.075, 0.42, 0.27])
         axu.plot(tf * U0 / D, U(tf) / U0, color="#777", lw=1.2, label=r"$U(t)$ (target)")
