@@ -258,7 +258,7 @@ quick = ["run.t_stop = 1.0", "write_data.time_interval = 1.0"]
 [[templates]]
 name = "pulsed_jet"
 group = "axisymmetric"
-summary = "A pulsed round jet launching a train of vortex rings (inflow as an expression of t)"
+summary = "A pulsed round jet launching a train of vortex rings (a nozzle split from the wall, inflow as an expression of t)"
 source = "examples/pulsed_jet"
 files = ["input.toml", "plot_pulsed_jet.py"]
 dim = 2

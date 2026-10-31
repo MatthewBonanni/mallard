@@ -257,19 +257,24 @@ sigma = 100.0     # follow the forcing closely
 acoustic waves at `u + c`, temperature forcing at 250 Hz as entropy waves at
 `u`; the inlet cell follows both targets (`examples/forced_inlet/plot_forced_inlet.py`).*
 
-An expression of both `y` and `t` pulses a jet: a `mass_flow_inlet` covering
-the whole wall, with a mass flux that is a top hat in the radius (the nozzle)
-times a smoothed square wave in time, and zero elsewhere. The inlet holds the
-mass flux, so each pulse ejects exactly the stroke the expression integrates
-to.
+An expression of `t` pulses a jet: `where` splits the wall into a nozzle,
+a `mass_flow_inlet` whose mass flux is a smoothed square wave in time, and an
+adiabatic wall around it. The inlet holds the mass flux, so each pulse ejects
+exactly the stroke the expression integrates to.
 
 ```toml
 [[boundaries]]
-name = "left"                 # a wall with a nozzle of diameter 1 in it
+name = "left"                 # the wall, with a nozzle of diameter 1 in it
 type = "mass_flow_inlet"
-# rho0 U(t) f(y): U0 = 0.2 from rest, period 30 (stroke L / D = 3), nozzle edge 0.025 D
-mass_flux = "0.2 * (1 - tanh(4 * cos(2 * pi * t / 30))) / 2 * (1 - tanh((y - 0.5) / 0.025)) / 2"
+where = "y < 0.5"
+# rho0 U(t): U0 = 0.2 from rest, period 30 (stroke L / D = 3)
+mass_flux = "0.2 * (1 - tanh(4 * cos(2 * pi * t / 30))) / 2"
 T = 0.7142857142857143
+
+[[boundaries]]
+name = "left"
+type = "wall_adiabatic"
+where = "y >= 0.5"
 ```
 
 ![A pulsed jet launching vortex rings: vorticity, ring core positions and the inlet velocity against its target](../images/guide/pulsed_jet-light.svg#gh-light-mode-only)

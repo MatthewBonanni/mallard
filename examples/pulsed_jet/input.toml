@@ -1,10 +1,10 @@
 # A pulsed round jet launching a train of vortex rings (axisymmetric; x is
 # the axis, y the radius). The left boundary is a wall with a nozzle of
-# diameter D = 1 in it: a mass_flow_inlet whose mass flux is an expression of
-# y and t, rho0 U(t) f(y), with
+# diameter D = 1 in it: where splits the generated mesh's left zone into a
+# mass_flow_inlet over the nozzle (y < D/2), whose uniform mass flux is an
+# expression of t, rho0 U(t) with
 #   U(t) = U0 (1 - tanh(4 cos(2 pi t / T))) / 2   (a smoothed square wave from rest)
-#   f(y) = (1 - tanh((y - D/2) / 0.025)) / 2      (a top hat, edge 0.025 D)
-# and zero mass flux outside the nozzle. Each period T ejects a slug of
+# and an adiabatic no-slip wall outside it. Each period T ejects a slug of
 # length L = U0 T / 2 exactly (the inlet holds the mass flux), which rolls up
 # into one vortex ring.
 # Nondimensionalization: D = 1, rho0 = 1, c0 = 1.
@@ -17,9 +17,9 @@
 #   python plot_pulsed_jet.py solut/jet solut/probe_inlet.csv --png pulsed_jet.png
 # Full size (1152 x 384 cells, D / 96, six pulses to t = 180): a GPU run.
 # Reduced on a CPU (D / 32, Re_D = 1000, two pulses): Nx = 384, Ny = 128,
-# mu = 2e-4, t_stop = 80; 7,543 steps, 18 minutes on 2 threads. Strokes of
-# 3.001 and 2.996 D at the inlet cell; rings at 0.39 and 0.44 U0 (the second
-# in the wake of the first), 1.04 and 1.06 times the slug model's circulation.
+# mu = 2e-4, t_stop = 80; 7,577 steps, 5 minutes on 2 threads. Strokes of
+# 3.000 and 2.994 D at the inlet cell; rings at 0.39 and 0.44 U0 (the second
+# in the wake of the first), 1.04 and 1.07 times the slug model's circulation.
 
 [run]
 t_stop = 180.0
@@ -41,8 +41,14 @@ T = 0.7142857142857143
 [[boundaries]]
 name = "left"
 type = "mass_flow_inlet"
-mass_flux = "0.2 * (1 - tanh(4 * cos(2 * pi * t / 30))) / 2 * (1 - tanh((y - 0.5) / 0.025)) / 2"
+where = "y < 0.5"
+mass_flux = "0.2 * (1 - tanh(4 * cos(2 * pi * t / 30))) / 2"
 T = 0.7142857142857143
+
+[[boundaries]]
+name = "left"
+type = "wall_adiabatic"
+where = "y >= 0.5"
 
 [[boundaries]]
 name = "bottom"

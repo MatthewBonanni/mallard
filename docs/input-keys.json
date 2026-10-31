@@ -696,6 +696,7 @@
   "required": true,
   "set_in": [
    "examples/double_mach/input.toml",
+   "examples/pulsed_jet/input.toml",
    "tutorials/cluster/input.toml"
   ],
   "type": "string"
