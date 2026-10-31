@@ -2311,6 +2311,7 @@ RestartAttributes Solver::restart_attributes() const {
 void Solver::write_data(bool force) {
     bool any_due = force;
     for (auto & writer : data_writers) {
+        writer->publish_written();
         any_due = any_due || writer->due(step, t);
     }
     if (!any_due) {
