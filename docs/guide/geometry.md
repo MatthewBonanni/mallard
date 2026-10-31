@@ -10,11 +10,11 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | Feature | Geometry | Guide |
 |---|---|---|
 | `[[sources]]` `region` | a [region](#regions) or its [name](#named-regions) | [Sources](sources.md#regions) |
-| `[[probes]]` `region` | a [region](#regions) or its [name](#named-regions): integrals, means, extremes | [Output](output.md#region-probes) |
-| `[[probes]]` `shape` | [points or a curve](#point-sets-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
+| `[[probes]]` `region` | a [region](#regions) or its [name](#named-regions): integrals, means, extremes | [Probes](probes.md#region-probes) |
+| `[[probes]]` `shape` | [points or a curve](#point-sets-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
 | `[[sponges]]` `region` | a [region](#regions) or its [name](#named-regions), times `strength` | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
-| `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
+| `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
 | `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
 | `[[initialize.data]]` `region` | a [region](#regions) or its [name](#named-regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
@@ -308,7 +308,7 @@ TENO converges at the scheme's order:
 
 Use `point` to compare with references or to measure orders of accuracy, and
 `cell` for robust values across shocks. Details and pitfalls:
-[Output](output.md#probes-probes).
+[Probes and monitors](probes.md#accuracy-and-pitfalls).
 
 ## Boundary zones
 
@@ -358,5 +358,5 @@ with h5py.File("probe_wake.h5") as f:
 ## See also
 
 - [Input reference: regions](../input.md#regions), [`[regions]`](../input.md#named-regions-regions), [`[[sources]]`](../input.md#sources), [`[[sponges]]`](../input.md#sponges), [`[[probes]]`](../input.md#probes), [`[mesh]`](../input.md#mesh)
-- [Sources and sponges](sources.md), [Output and diagnostics](output.md#probes-probes), [Meshes](meshes.md#curved-boundaries)
+- [Sources and sponges](sources.md), [Probes and monitors](probes.md), [Meshes](meshes.md#curved-boundaries)
 - Figures: [`tools/docs/geometry.py`](../../tools/docs/geometry.py), [`tools/docs/regions.py`](../../tools/docs/regions.py)

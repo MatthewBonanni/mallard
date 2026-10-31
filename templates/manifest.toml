@@ -71,7 +71,7 @@ table = "sponges"
 about = "sponge layers that absorb outgoing waves"
 [[tables]]
 table = "output"
-about = "how often the log prints a progress line"
+about = "how often the terminal output shows a progress row"
 [[tables]]
 table = "write_data"
 about = "snapshots (VTKHDF for ParaView and tools/, VTU, restart files)"
