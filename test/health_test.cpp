@@ -38,7 +38,7 @@ std::string mesh(uint32_t nx, uint32_t ny, double lx, double ly, const std::stri
     std::ostringstream s;
     s << "[mesh]\ntype = \"cartesian\"\nNx = " << nx << "\nNy = " << ny << "\nLx = " << lx << "\nLy = " << ly << "\n";
     if (N_DIM == 3) s << "Nz = 4\nLz = " << ly << "\n";
-    if (!periodic.empty()) s << "periodic = " << periodic << "\n";
+    s << periodic_sides(periodic);
     return s.str();
 }
 

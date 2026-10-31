@@ -68,6 +68,7 @@ std::unique_ptr<Solver> init_case(const Case3D & c) {
       << "[physics]\n" << c.physics
       << "[output]\ncheck_interval = 1000000\n" << c.extra;
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(s.str()));
     return solver;
 }
@@ -410,7 +411,7 @@ TEST_P(ForcedChannel3D, SteadyProfileConvergesAtSecondOrder) {
             c.L[d] = d == wall ? 1.0 : double(c.n[d]) / n;
         }
         if (periodic) {
-            c.mesh_options = wall == 1 ? "periodic = [\"x\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n";
+            c.mesh_options = wall == 1 ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
             for (int k = 0; k < 6; k++) c.bc[k].clear();
         }
         c.bc[2 * wall] = c.bc[2 * wall + 1] = "type = \"wall_isothermal\"\nT = 1.0\n";

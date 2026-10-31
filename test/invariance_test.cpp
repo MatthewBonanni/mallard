@@ -153,6 +153,7 @@ struct Result {
 
 Result run(const std::string & input) {
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.copy_device_to_host();

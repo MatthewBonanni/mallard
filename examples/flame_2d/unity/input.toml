@@ -12,7 +12,9 @@ Nx = 336
 Ny = 216
 Lx = 0.0121604
 Ly = 0.0078174000000000004
-periodic = ["y"]
+
+[[periodic]]
+zones = ["bottom", "top"]
 
 [initialize]
 type = "restart"

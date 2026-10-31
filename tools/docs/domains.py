@@ -136,7 +136,7 @@ def save_generated(name, example, coarsen, title, file="input.toml", figsize=(6.
     case = load(example, file)
 
     def draw(P):
-        mesh = meshes.generated(case["mesh"], coarsen)
+        mesh = meshes.generated(case["mesh"], coarsen, case.get("periodic", []))
         fig, ax = plt.subplots(figsize=figsize)
         kinds = draw_2d(ax, mesh, case, P, labels=labels)
         if extra:
@@ -158,6 +158,9 @@ def make_cylinder_mesh(args):
     return meshes.read_gmsh22(tmp)
 
 
+AXIS_OF_SIDE = {"left": "x", "right": "x", "bottom": "y", "top": "y", "back": "z", "front": "z"}
+
+
 def box_3d(name, example, file="input.toml", grid=(16, 12), sponge_from=None, notes=()):
     """A generated 3D box seen from the inlet side: faces filled by the kind of their condition."""
     case = load(example, file)
@@ -173,9 +176,11 @@ def box_3d(name, example, file="input.toml", grid=(16, 12), sponge_from=None, no
     types = {e[0]: e[1] for e in entries(case)}
     turbulent = {b["name"] for b in case.get("boundaries", []) if "turbulence" in b}
     nscbc = {b["name"] for b in case.get("boundaries", []) if "nscbc" in b}
-    for d in m.get("periodic", []):
-        for z in {"x": ("left", "right"), "y": ("bottom", "top"), "z": ("back", "front")}[d]:
+    periodic_dirs = []
+    for pair in case.get("periodic", []):
+        for z in pair["zones"]:
             types[z] = "periodic"
+        periodic_dirs.append(AXIS_OF_SIDE[pair["zones"][0]])
     X, Y, Z = L
     faces = {  # zone: corners, visible
         "back": ([(0, 0, 0), (X, 0, 0), (X, Y, 0), (0, Y, 0)], True),
@@ -204,7 +209,6 @@ def box_3d(name, example, file="input.toml", grid=(16, 12), sponge_from=None, no
             back = hidden in (p0, p1)
             ax.plot(*np.array([proj(*p0), proj(*p1)]).T, color=P["line"], lw=1.0 if back else 1.6,
                     ls=":" if back else "-", zorder=2)
-        periodic_dirs = list(m.get("periodic", []))
         if periodic_dirs:
             kinds.append("periodic")
             figstyle.label(ax, *proj(0.5 * X, Y, 0.5 * Z), "periodic in " + " and ".join(periodic_dirs), P,

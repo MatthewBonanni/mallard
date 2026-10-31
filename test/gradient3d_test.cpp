@@ -156,7 +156,7 @@ TEST_P(ExtrapolationColumn3D, GradientsMatchThoseOfAPeriodicColumn) {
     // gradients agree (one-sided stencils are off by O(h) on tetrahedra)
     auto column = [&](bool periodic) {
         Input input = parse_toml("[mesh]\ntype = \"" + GetParam() + "\"\nNx = 3\nNy = 3\nNz = 4\nLx = 0.75\nLy = 0.75\n" +
-                                 (periodic ? "periodic = [\"x\", \"y\"]\n" : ""));
+                                 (periodic ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n" : ""));
         auto mesh = std::make_shared<Mesh>();
         mesh->init(input);
         mesh->copy_host_to_device();

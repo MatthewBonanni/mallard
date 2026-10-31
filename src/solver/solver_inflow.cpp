@@ -81,10 +81,12 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     }
     if (shape && shape->depends_on_time()) throw InputError(where + ".profile cannot depend on t.");
     std::vector<double> value(faces.size(), 1.0);
+    std::string error;
     for (size_t k = 0; shape && k < faces.size(); k++) {
         value[k] = shape->at(Kokkos::subview(mesh->h_face_coords, faces[k], Kokkos::ALL()), N_DIM);
-        if (!(value[k] >= 0.0)) throw InputError(where + ": the mass flux must be non-negative at every face.");
+        if (!(value[k] >= 0.0)) error = where + ": the mass flux must be non-negative at every face.";
     }
+    if (const std::string first = comm::first_error(error); !first.empty()) throw InputError(first);
     // The faces' measures as the flux integral weighs them, owned faces only so that none counts twice,
     // summed in an order every rank count agrees on: by global cell, then the face's position in it
     std::vector<uint64_t> keys;

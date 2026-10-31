@@ -238,6 +238,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
        << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
        << "[output]\ncheck_interval = 1000000\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(in.str()));
     solver.run();
     solver.copy_device_to_host();

@@ -79,7 +79,7 @@ std::string channel(const std::string & left, const std::string & right, const s
     s.precision(17);
     s << "[run]\n" << (run.empty() ? "n_steps = 12\ncfl = 0.5\n" : run)
       << "[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 6\nLx = 2.0\nLy = 1.0\n"
-      << (N_DIM == 3 ? "Nz = 2\nLz = 0.3\nperiodic = [\"z\"]\n" : "")
+      << (N_DIM == 3 ? "Nz = 2\nLz = 0.3\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
       << "[initialize]\n"
       << (init.empty() ? "type = \"analytical\"\nrho = \"1.0 + 0.05 * sin(3 * x) * cos(2 * y)\"\nu = " +
                              vec("\"0.3\"", "\"0.05 * sin(2 * x)\"", "\"0.0\"") + "\np = \"1.0 + 0.02 * cos(x + y)\"\n"

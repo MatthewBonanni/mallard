@@ -54,7 +54,7 @@ TEST(BoundaryTest, TimeDependentDirichletInflowIsAdvected) {
     solver.copy_device_to_host();
     auto m = solver.get_mesh();
     double max_err = 0.0;
-    for (uint32_t i = 0; i < m->n_cells; i++) {
+    for (uint32_t i = 0; i < m->n_owned(); i++) {
         const double x = double(m->h_cell_coords(i, 0));
         if (x > 0.7) continue;  // Beyond the entering front
         const double h = 0.01;
@@ -115,11 +115,11 @@ double outlet_profile_error(const std::string & outlet) {
     solver.copy_device_to_host();
     auto m = solver.get_mesh();
     double err = 0.0;
-    for (uint32_t i = 0; i < m->n_cells; i++) {
+    for (uint32_t i = 0; i < m->n_owned(); i++) {
         if (m->h_cell_coords(i, 0) < 0.95_r) continue;
         err = std::max(err, std::abs(double(solver.h_primitives(i, 2)) - std::exp(-double(m->h_cell_coords(i, 1)))));
     }
-    return err;
+    return comm::allreduce(err, comm::Op::MAX);
 }
 
 } // namespace
