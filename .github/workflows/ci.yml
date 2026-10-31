@@ -268,8 +268,11 @@ jobs:
           ok=true; wait $first || ok=false; wait $second || ok=false; $ok
       - name: Test (MPI)
         if: matrix.backend.mpi
+        timeout-minutes: 90
         env:
           FULL: ${{ matrix.backend.full }}
+          # A test that hangs (a collective some ranks never reach) aborts and names itself
+          MALLARD_TEST_TIMEOUT: 600
         run: |
           mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
           if [ "$FULL" = true ]; then
@@ -277,9 +280,10 @@ jobs:
           else
             mpirun -n 1 ./build/src/mallard test --gtest_filter="$mpi_tests:CliTest.*:FrontEndTest.*:RunControlTest.*"
           fi
-          # Two rank counts at once, so tests that share a file path collide
+          # Every test on 3 ranks, so none assumes a single rank; two rank
+          # counts at once, so tests that share a file path collide
           mpirun -n 2 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests" & two=$!
-          mpirun -n 3 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests" --gtest_brief=1 & three=$!
+          mpirun -n 3 --oversubscribe ./build/src/mallard test --gtest_brief=1 & three=$!
           ok=true; wait $two || ok=false; wait $three || ok=false; $ok
           mpirun -n 4 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests"
       # Every rank in the report, and no warning about a sensible placement

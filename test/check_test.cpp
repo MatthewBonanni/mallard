@@ -300,7 +300,7 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     auto input = [](double delta_L) {
         std::ostringstream s;
         s << "[run]\nn_steps = 1\ndt = 1e-7\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 0.04\nLy = 0.04\n"
-          << (N_DIM == 3 ? "Nz = 4\nLz = 0.04\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
+          << (N_DIM == 3 ? "Nz = 4\nLz = 0.04\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
           << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"300.0\"\nu = " << U_ZERO << "\n"
           << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
           << "[numerics]\nriemann_solver = \"HLLC\"\n"
