@@ -937,6 +937,7 @@ struct InitialState::Impl {
     std::vector<Variable> variables;
     std::vector<Mapping> mappings;
     std::vector<std::string> names = {"x", "y", "z"};
+    const Input * region_names = nullptr;  // [regions]
 
     Impl(const Mesh & m, const Euler & p, const MixtureModel * mix, bool cells) :
         mesh(m), physics(p), mixture(mix), from_cells(cells) {}
@@ -949,8 +950,8 @@ struct InitialState::Impl {
     /** @brief Append a region's nodes, polygons and implicit functions; its summary. */
     std::string add_region(const Input & table, const std::string & where, uint32_t & first, uint32_t & count,
                            double & edge, bool & bounded) {
-        const region::Region r(table, where);
-        region::require_full_dimension(r, where);
+        const region::Region r(table, where, region_names);
+        region::require_full_dimension(r, table, where);
         const auto & h = r.host();
         const uint32_t vertex_offset = static_cast<uint32_t>(vertices.size() / 2);
         const uint32_t program_offset = static_cast<uint32_t>(programs.size());
@@ -1278,6 +1279,7 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
             throw invalid(init, "initialize.n_subdivisions", "n_subdivisions", "is 0", "Give 1 or more", "");
         }
     }
+    impl->region_names = region::named_regions(input);
     std::ostringstream summary;
     if (!base_from_cells) summary << type;
 

@@ -312,7 +312,7 @@ TEST(RegionMeshTest, RejectsMixedDimensionsThatAreNotClipping) {
     };
     EXPECT_NE(error("{type = \"union\", regions = [" + circle + ", " + ball + "]}").find("one dimension"), std::string::npos);
     EXPECT_NE(error("{type = \"intersection\", regions = [" + circle + ", " + circle + ", " + ball + "]}")
-                  .find("combine by union"),
+                  .find("by union"),
               std::string::npos);
     EXPECT_NE(error("{type = \"difference\", regions = [" + ball + ", " + circle + "]}").find("takes nothing"),
               std::string::npos);

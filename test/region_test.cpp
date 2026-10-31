@@ -367,7 +367,7 @@ TEST(RegionTest, EachTypeHasOneDimension) {
             make_region("{type = \"box\", center = [0, 0], size = [1, 1]}");
             ADD_FAILURE() << "a 2D box was accepted";
         } catch (const InputError & e) {
-            EXPECT_NE(std::string(e.what()).find("use \"rectangle\""), std::string::npos) << e.what();
+            EXPECT_NE(std::string(e.what()).find("Use \"rectangle\""), std::string::npos) << e.what();
         }
     }
 }

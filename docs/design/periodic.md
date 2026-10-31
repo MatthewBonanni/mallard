@@ -82,10 +82,15 @@ cell-to-face distance for the hydrostatic ghost pressure.
 
 ## Input
 
-- Generated meshes: `[mesh] periodic = ["x", "y", "z"]` pairs `left`/`right`,
-  `bottom`/`top` and `back`/`front`.
-- Any mesh, including Gmsh and HDF5 files: `[[periodic]]` entries naming zone
-  `A`, zone `B` and the translation.
+- Any mesh, generated or read from a file: `[[periodic]]` entries naming zone
+  `A`, zone `B` and the translation or angle. On a generated mesh, opposite
+  sides (`left`/`right`, `bottom`/`top`, `back`/`front`, the annulus'
+  `start`/`end`) take it from the mesh, which also checks a value set by hand
+  (`Mesh::periodic_pairs`); one syntax for both kinds of mesh means one
+  vocabulary in the docs and the examples.
+- The deprecated `[mesh] periodic = ["x", "y", "z"]` is rewritten into those
+  entries when the input is read (`src/common/input_upgrade.cpp`), so the setup
+  reads one form only.
 - `[[boundaries]]` is optional, since a fully periodic box has no boundary
   faces; naming a periodic zone there is an error.
 

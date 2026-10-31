@@ -834,13 +834,19 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         const region::Region * region = p.from_region ? &regions.get(entry.at("region"), key + ".region") : nullptr;
         // A surface region with n_points is resampled on a grid of samples, written like a curve's
         p.resampled = region && region->dimension() == N_DIM - 1 && N_DIM == 3 && entry.contains("n_points");
-        for (const char * k : {"type", "sampling", "format", "file", "samples"}) {
+        for (const char * k : {"type", "boundary", "boundary_type", "sampling", "format", "file", "samples"}) {
             // Surfaces and curves sample at their quadrature points: cell averages or point values there
-            const bool allowed = std::string(k) == "sampling" ? region && region->dimension() < N_DIM
-                                                              : p.resampled && std::string(k) != "type";
+            const std::string name = k;
+            const bool allowed = name == "sampling" ? region && region->dimension() < N_DIM
+                                                    : p.resampled && name != "type" && !name.starts_with("boundary");
             if (region && entry.contains(k) && !allowed) {
-                throw InputError(key + "." + k + ": a region probe writes only its reductions, to reductions_file; " +
-                                 k + " applies to points, curves and resampled surfaces (n_points).");
+                throw InputError(Diagnostic{.key = key + "." + k,
+                                            .line = line_of(entry, k),
+                                            .message = "applies to probes of points, curves and resampled surfaces "
+                                                       "(n_points), but a region probe writes only its reductions, "
+                                                       "to reductions_file",
+                                            .fix = "Remove " + name + ", or give the probe a type instead of a region",
+                                            .docs = "docs/guide/output.md#region-probes"});
             }
         }
         const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
@@ -945,10 +951,9 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
             p.reference.p = find_real(ref, "p", dim::pressure);
         }
 
-        const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
         if (p.from_region) {
-            if (boundary) throw InputError(key + ": a region probe takes no boundary or boundary_type.");
             const region::Region & r = *region;
+            const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
             if (r.dimension() == N_DIM) {
                 // Filled regions weigh each cell by f V
                 std::vector<double> weights(mesh.n_owned(), 0.0);
@@ -957,9 +962,15 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                 select_region(p, mesh, r, weights, n_evaluated);
             } else if (p.resampled) {
                 const Input & n = entry.at("n_points");
-                if (!n.is_array() || n.as_array().size() != 2) throw InputError(key + ".n_points must be [n_u, n_v].");
-                const int64_t nu = n.as_array()[0].as_integer(), nv = n.as_array()[1].as_integer();
-                if (nu < 2 || nv < 2) throw InputError(key + ".n_points must be at least [2, 2].");
+                const int64_t nu = n.is_array() && n.as_array().size() == 2 ? n.as_array()[0].as_integer() : 0;
+                const int64_t nv = nu ? n.as_array()[1].as_integer() : 0;
+                if (nu < 2 || nv < 2) {
+                    throw InputError(Diagnostic{.key = key + ".n_points",
+                                                .line = line_of(entry, "n_points"),
+                                                .message = "must be [n_u, n_v], at least [2, 2], for a resampled surface",
+                                                .fix = "e.g. n_points = [32, 16]",
+                                                .docs = "docs/guide/output.md#region-probes"});
+                }
                 p.geometry = probe::grid_geometry(region::sample_grid(region::surface_patches(r, key + ".region"),
                                                                       static_cast<uint32_t>(nu), static_cast<uint32_t>(nv)));
                 p.geometry.type = "region " + r.summary();
@@ -971,7 +982,13 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                 const bool normals = std::any_of(h_codes.begin(), h_codes.end(), [](int32_t k) { return code::normals(k); });
                 select_elements(p, mesh, r, n_evaluated, p.sampling == Sampling::CELL && !normals && !p.gradients);
             }
-            if (p.quadrature.n_global == 0) throw InputError(key + ".region contains no part of any cell.");
+            if (p.quadrature.n_global == 0) {
+                throw InputError(Diagnostic{.key = key + ".region",
+                                            .line = line_of(entry, "region"),
+                                            .message = "covers no part of any cell of the mesh",
+                                            .fix = "Move or enlarge the region so that it overlaps the domain",
+                                            .docs = "docs/guide/output.md#region-probes"});
+            }
         } else if (boundary) {
             for (const char * k : {"type", "point", "start", "end"}) {
                 if (entry.contains(k)) throw InputError(key + ": boundary probes take no " + k + ".");

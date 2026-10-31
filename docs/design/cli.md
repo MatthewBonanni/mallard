@@ -22,6 +22,7 @@ Maintain  mallard test | completion | --version
 | `new`, `input upgrade` | Set up | available |
 | `input resolve` | Set up | planned ([#509](https://github.com/MatthewBonanni/mallard/issues/509)) |
 | `check input.toml` | Inspect | available |
+| `check --view DIR` (the case view) | Inspect | regions and boundary zones available; the rest planned ([#546](https://github.com/MatthewBonanni/mallard/issues/546)) |
 | `check` with no input | Inspect | planned ([#508](https://github.com/MatthewBonanni/mallard/issues/508)) |
 | `info <file>`, `info <run-dir> [--html]` (the run report) | Inspect | planned ([#504](https://github.com/MatthewBonanni/mallard/issues/504), [#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
 | `list fields\|species\|templates\|keys` | Inspect | planned ([#502](https://github.com/MatthewBonanni/mallard/issues/502)) |
