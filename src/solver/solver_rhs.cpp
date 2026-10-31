@@ -406,6 +406,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         face_reconstruction->calc_face_values(W_cells, face_solution);
     }
     face_reconstruction->rotate_periodic_faces(face_solution);
+    face_reconstruction->image_point_values(W_cells, face_solution);
 
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
@@ -569,7 +570,6 @@ ConvectiveFluxFunctor<T_riemann_solver> Solver::flux_functor() const {
                                                     flux_weights,
                                                     face_solution,
                                                     boundary_data,
-                                                    W_cells,
                                                     face_flux,
                                                     physics.gamma,
                                                     low_mach_cutoff,

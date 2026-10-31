@@ -15,7 +15,7 @@ parts that work together:
 
 Turbulent inflow comes from [synthetic turbulence at characteristic
 inlets](boundary_conditions.md#synthetic-turbulence-turbulence), and statistics from
-[running averages and probes](output.md#statistics).
+[running averages](statistics.md) and [probes](probes.md).
 
 ## A minimal LES
 

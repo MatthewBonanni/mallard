@@ -56,7 +56,7 @@ cd runs/sod
 ./run.sh
 ```
 
-`run.sh` runs this build of Mallard on 4 CPU threads (`./run.sh -t 8` for 8; `./run.sh -n 4` for 4 MPI ranks, or 4 GPUs on a GPU build with MPI). The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [the log](../guide/output.md#the-log)), and writes eleven snapshots (t = 0 to 0.2) and their series, which ParaView opens as a time series: `solut/sod_000000.vtkhdf` to `solut/sod_000010.vtkhdf` and `solut/sod.vtkhdf.series` in builds with HDF5 (`-DMallard_ENABLE_HDF5=ON`), or VTU files, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` and `solut/sod.pvd`, in builds without it such as this one.
+`run.sh` runs this build of Mallard on 4 CPU threads (`./run.sh -t 8` for 8; `./run.sh -n 4` for 4 MPI ranks, or 4 GPUs on a GPU build with MPI). The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [terminal output](../guide/output.md#terminal-output)), and writes eleven snapshots (t = 0 to 0.2) and their series, which ParaView opens as a time series: `solut/sod_000000.vtkhdf` to `solut/sod_000010.vtkhdf` and `solut/sod.vtkhdf.series` in builds with HDF5 (`-DMallard_ENABLE_HDF5=ON`), or VTU files, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` and `solut/sod.pvd`, in builds without it such as this one.
 
 The input file, `input.toml`, has one table per part of the problem; the comment above each table says what it sets and links to its keys in the [input reference](../input.md):
 
@@ -90,7 +90,7 @@ Edit `input.toml` and run again:
     preset = "accurate"
     ```
 
-    The result is identical: the preset sets exactly the keys the example spells out, and the log lists them. `preset = "robust"` (MUSCL, RHLL, CFL 0.5) is the one to start any new case with; it runs on every mesh and through the strongest shocks. The [Numerics](../guide/numerics.md#presets) page lists the four presets and what each is for; any key you set yourself overrides the preset.
+    The result is identical: the preset sets exactly the keys the example spells out, and the terminal output lists them. `preset = "robust"` (MUSCL, RHLL, CFL 0.5) is the one to start any new case with; it runs on every mesh and through the strongest shocks. The [Numerics](../guide/numerics.md#presets) page lists the four presets and what each is for; any key you set yourself overrides the preset.
 - **Scheme.** Replace the reconstruction with second-order MUSCL,
 
     ```toml

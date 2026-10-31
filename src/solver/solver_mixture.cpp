@@ -453,6 +453,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     update_cell_states(state, !budget_pass);
     face_reconstruction->calc_face_values(W_cells, face_solution);
     face_reconstruction->rotate_periodic_faces(face_solution);
+    face_reconstruction->image_point_values(W_cells, face_solution);
     // The characteristic faces read the reconstructed gamma of this stage
     scalar_reconstruction.calc(cell_scalars, W_cells, face_thermo);
     if (!budget_pass) update_characteristic_boundaries(t_stage);
@@ -572,7 +573,6 @@ void Solver::launch_mixture_flux_functor() {
         face_solution,
         face_thermo,
         boundary_data,
-        W_cells,
         Kokkos::subview(cell_scalars, Kokkos::ALL(), Kokkos::make_pair(n_species, n_species + 2)),
         face_flux,
         face_mdot,
@@ -599,7 +599,6 @@ void Solver::launch_double_flux_functor() {
         flux_weights,
         face_solution,
         boundary_data,
-        W_cells,
         frozen_thermo,
         face_thermo,
         Kokkos::subview(cell_scalars, Kokkos::ALL(), Kokkos::make_pair(n_species, n_species + 2)),

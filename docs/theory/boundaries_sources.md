@@ -68,9 +68,16 @@ face reached by translating the boundary face inward by the depth of the
 boundary cell (or, where no face lies there, as for pyramids, whose apex is
 halfway, by the smallest distance at which a neighboring cell has one), with
 its reconstructed state on the far side at the
-matching quadrature point; without one, the state of the image cell, else
-the interior state. This is exactly what an interior face sees for a
-solution that does not vary normal to the boundary, at any order. A
+matching quadrature point. Without one (as on most faces of unstructured
+triangles and tetrahedra), each quadrature point is translated the same way
+into the image cell and takes the value of that cell's reconstruction
+polynomial there (TENO-E's central polynomial; the image cell's average with
+MUSCL and first order, at troubled cells and where the value is not
+admissible). This is exactly what an interior face sees for a solution that
+does not vary normal to the boundary, at any order. The image cell's
+average instead is first order against the high-order interior state: with
+TENO-E it amplified round-off at subsonic inflows on unstructured triangles
+to vacuum states within a few flow-through times. A
 zero-gradient copy of the boundary cell would feed the cell back to itself
 at inflow boundaries, and on triangles, whose centroids are offset from the
 face, create an O(1) mass imbalance at moving shocks. The gradient stencils

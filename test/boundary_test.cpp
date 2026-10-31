@@ -288,3 +288,32 @@ TEST(BoundaryTest, FarfieldLetsAPressurePulseLeave) {
     // upt leaves 1.8e-4, extrapolation 5e-4; single precision adds ~1e-6 of round-off
     EXPECT_LT(dp_max, precision_tol<double>(1.2e-4, 1.3e-4));
 }
+
+TEST(BoundaryTest, ExtrapolationKeepsAPerturbedUniformFlowOnTrianglesWithTENO) {
+    // A uniform subsonic flow with a tiny transverse velocity crosses a Delaunay
+    // triangle mesh with extrapolation sides. Image cells' averages as the
+    // exterior state against TENO's face values grew it 15-fold every 250 steps
+    // at the inflow, from round-off up to vacuum states
+    const double a = precision_tol<double>(1e-10, 1e-4);
+    std::ostringstream s;
+    s << "[run]\nn_steps = 1000\ncfl = 0.3\n"
+      << "[mesh]\ntype = \"file\"\nfilename = \"" << source_dir() << "/test/data/meshes/square_delaunay.msh\"\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
+      << "u = [\"0.7\", \"" << a << " * sin(23 * x + 41 * y)\"]\np = \"0.7142857142857143\"\n";
+    for (const char * name : {"left", "right", "top", "bottom"}) {
+        s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"outlet_extrapolation\"\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.copy_device_to_host();
+    double v_max = 0.0;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
+        v_max = std::max(v_max, std::abs(double(solver.h_conservatives(i, 2) / solver.h_conservatives(i, 0))));
+    }
+    EXPECT_LT(v_max, a);
+}

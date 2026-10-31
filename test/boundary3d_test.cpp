@@ -17,6 +17,7 @@
 #include <cmath>
 #include <string>
 
+#include "gmsh_fixtures.h"
 #include "test_fixtures.h"
 #include "boundary.h"
 #include "solver.h"
@@ -392,4 +393,31 @@ TEST(Boundary3DTest, CharacteristicOutletSurvivesEddiesThatReverseTheFlow) {
     // Bounded: the inflow is 0.2, and the weakly held mean pressure (L = 12) is still settling
     EXPECT_LT(max_speed, 0.6);
     EXPECT_LT(max_dp, 0.15);
+}
+
+TEST(Boundary3DTest, ExtrapolationKeepsAPerturbedUniformFlowOnTetrahedraWithTENO) {
+    // As BoundaryTest.ExtrapolationKeepsAPerturbedUniformFlowOnTrianglesWithTENO:
+    // image cells' averages grew the perturbation 100-fold every 1000 steps
+    const double a = precision_tol<double>(1e-10, 1e-4);
+    std::ostringstream s;
+    s << "[run]\nn_steps = 2000\ncfl = 0.3\n"
+      << "[mesh]\ntype = \"file\"\nfilename = \"" << write_temp("tets.msh", jittered_tetrahedral_mesh(6)) << "\"\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
+      << "u = [\"0.7\", \"" << a << " * sin(23 * x + 41 * y + 31 * z)\", \"0.0\"]\np = \"0.7142857142857143\"\n";
+    for (const char * name : {"left", "right", "bottom", "top", "back", "front"}) {
+        s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"outlet_extrapolation\"\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.copy_device_to_host();
+    double v_max = 0.0;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
+        v_max = std::max(v_max, std::abs(double(solver.h_conservatives(i, 2) / solver.h_conservatives(i, 0))));
+    }
+    EXPECT_LT(v_max, a);
 }

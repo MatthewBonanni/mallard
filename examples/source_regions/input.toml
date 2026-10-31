@@ -11,7 +11,7 @@
 #
 # The ring is a named region in [regions], shared by its source and by a probe
 # that writes the mass, mean temperature and peak pressure in the ring to
-# probe_ring_reductions.csv every 50 steps. The run log lists each source with
+# probe_ring_reductions.csv every 50 steps. The terminal output lists each source with
 # its region and measure. SOURCE_RHOE and SOURCE_RHOU_X/Y in the snapshots show
 # where they act. The total energy rises by the integral of Q, 10 sqrt(pi) 0.02
 # = 0.3545, plus the fan's work.
