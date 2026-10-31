@@ -34,6 +34,10 @@ enum class Kind : uint8_t {
     UNION, INTERSECTION, DIFFERENCE,
 };
 
+/** @brief Subdivisions of the cells' simplices for extracted boundaries: the default and the most. */
+constexpr int DEFAULT_RESOLUTION = 3;
+constexpr int MAX_RESOLUTION = N_DIM == 2 ? 8 : 5;
+
 /** @brief Deepest evaluation stack of a region (nesting of booleans). */
 constexpr int MAX_STACK = 16;
 
@@ -297,6 +301,9 @@ class Region {
         /** @brief Lower dimensions: whether it has no boundary (a closed surface or curve). */
         bool closed() const { return m_closed; }
 
+        /** @brief Lower dimensions: subdivisions of each cell's simplices where a boundary is extracted. */
+        int resolution() const { return m_resolution; }
+
         /** @brief Its name in [regions] or of the mesh, or empty if given inline. */
         const std::string & name() const { return m_name; }
 
@@ -343,6 +350,7 @@ class Region {
         bool m_bounded = true;
         bool m_closed = false;
         int m_dimension = N_DIM;
+        int m_resolution = DEFAULT_RESOLUTION;
         std::string m_name;
         std::string m_summary;
 };
@@ -360,6 +368,9 @@ void require_full_dimension(const Region & region, const Input & value, const st
  *        outside. Collective for regions inside boundary zones.
  */
 std::vector<double> cell_fractions(const Mesh & mesh, const Region & region);
+
+/** @brief The fractions of one of the region's filled parts (an index into filled()). Collective. */
+std::vector<double> cell_fractions(const Mesh & mesh, const Region & region, uint32_t filled);
 
 /**
  * @brief The regions that the region keys of a run give on its mesh. A named
