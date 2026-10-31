@@ -488,6 +488,17 @@ A probe samples the solution on a geometry every `interval` steps (or
 them, or both; a probe of a [region](#region-probes) writes integrals, means and
 extrema over it. The files are the same bit for bit on any number of ranks.
 
+On a GPU the files have the CPU's rows, in the same order, with the same steps,
+times, coordinates, normals, areas and region volumes: the geometry and the
+region fractions are set up on the host, and rank 0 reduces the gathered samples
+(cells, for a region) on the host in sample order. The values agree
+with a CPU run to rounding, not bit for bit, since the device rounds the solution
+and its point values differently (fused multiply-adds, its own math functions).
+The test suite checks every backend against a CPU reference (`test/data/probes`):
+indices, steps and times exactly, geometry to 1e-14 and values to 1e-10 of each
+column's largest magnitude. The geometry tolerance covers other CPUs and
+compilers only; on one host the geometry of every backend is the same bit for bit.
+
 ```toml
 [[probes]]
 name = "centerline"
