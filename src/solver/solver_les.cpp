@@ -19,6 +19,7 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "exact_sums.h"
 #include "input.h"
 #include "launch_bounds.h"
 #include "mixture_viscous_flux.h"
@@ -653,46 +654,6 @@ struct DynamicProcedureFunctor {
 };
 
 /**
- * @brief Sums over all ranks of the owned cells' terms, exact in fixed point (each term rounded to 2^-b of
- *        the largest, b leaving room for every cell in 63 bits), so independent of the rank count and order.
- */
-template <size_t N>
-std::array<double, N> exact_sums(const Kokkos::View<double *[N]> & terms, const uint32_t n_owned, const bool distributed) {
-    std::array<double, N> largest = {};
-    for (size_t k = 0; k < N; k++) {
-        double local = 0.0;
-        Kokkos::parallel_reduce(
-            "dynamic_largest", n_owned,
-            KOKKOS_LAMBDA(const uint32_t c, double & m) { m = Kokkos::fmax(m, Kokkos::fabs(terms(c, k))); },
-            Kokkos::Max<double>(local));
-        largest[k] = local;
-    }
-    if (distributed) largest = comm::allreduce(largest, comm::Op::MAX);
-    const uint64_t n_global =
-        distributed ? comm::allreduce(static_cast<uint64_t>(n_owned), comm::Op::SUM) : static_cast<uint64_t>(n_owned);
-    const int bits = 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0)));
-    std::array<int64_t, N> sums = {};
-    std::array<double, N> scale = {};
-    for (size_t k = 0; k < N; k++) {
-        if (!(largest[k] > 0.0)) continue;
-        const double s = std::ldexp(1.0, bits) / largest[k];
-        scale[k] = s;
-        int64_t local = 0;
-        Kokkos::parallel_reduce(
-            "dynamic_sum", n_owned,
-            KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
-                sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * s));
-            },
-            Kokkos::Sum<int64_t>(local));
-        sums[k] = local;
-    }
-    if (distributed) sums = comm::allreduce(sums, comm::Op::SUM);
-    std::array<double, N> result = {};
-    for (size_t k = 0; k < N; k++) result[k] = scale[k] > 0.0 ? static_cast<double>(sums[k]) / scale[k] : 0.0;
-    return result;
-}
-
-/**
  * @brief Extents h_1 <= h_2 <= h_3 of a 3D cell: V over the eigenvalues of its projected-area tensor
  *        1/2 sum_f A_f A_f^T / |A_f| (exact for boxes; equal for regular tetrahedra). Faces only, so cells
  *        on periodic boundaries need no node unwrapping.
@@ -1045,6 +1006,6 @@ KineticEnergyBudget Solver::kinetic_energy_budget() {
         Kokkos::deep_copy(T_seed, seeds);
     }
     const std::array<rtype, 4> local = {budget.convective, budget.viscous, budget.sgs, budget.pressure_work};
-    const std::array<rtype, 4> total = comm::allreduce(local, comm::Op::SUM);
+    const std::array<rtype, 4> total = is_distributed() ? comm::allreduce(local, comm::Op::SUM) : local;
     return KineticEnergyBudget{total[0], total[1], total[2], total[3]};
 }

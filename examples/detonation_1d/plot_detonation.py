@@ -1,6 +1,6 @@
 """Front speed and structure of a 1D detonation run (examples/detonation_1d).
 
-    python examples/detonation_1d/plot_detonation.py SERIES.pvd [D_CJ L_IND [PNG]]
+    python examples/detonation_1d/plot_detonation.py SERIES [D_CJ L_IND [PNG]]
 
 For each output: the shock position (rightmost cell with p above twice the
 initial minimum), the local front speed, the induction length (from the
@@ -15,7 +15,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import read_vtu_cells, read_index  # noqa: E402
 
 
 def profile(path):
@@ -37,15 +37,13 @@ def front(x, p, hrr, p0):
 
 
 def main():
-    pvd = sys.argv[1]
     D_cj = float(sys.argv[2]) if len(sys.argv) > 2 else None
     L_ind = float(sys.argv[3]) if len(sys.argv) > 3 else None
-    base = os.path.dirname(pvd)
-    files = re.findall(r'file="([^"]+)"', open(pvd).read())
+    files = [f for _, f in read_index(sys.argv[1])]
     rows = []
     p0 = None
     for f in files:
-        t, x, p, T, hrr = profile(os.path.join(base, f))
+        t, x, p, T, hrr = profile(f)
         p0 = p.min() if p0 is None else p0
         r = front(x, p, hrr, p0)
         if r and x[-1] - r[0] > 0.01:
@@ -67,7 +65,7 @@ def main():
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        t, x, p, T, _ = profile(os.path.join(base, files[-1]))
+        t, x, p, T, _ = profile(files[-1])
         fig, ax = plt.subplots(2, 1, figsize=(7, 5), sharex=True)
         ax[0].plot(x * 1e3, p / 1e3)
         ax[0].set_ylabel("p [kPa]")

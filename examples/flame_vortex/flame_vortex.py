@@ -26,7 +26,7 @@ inlet, and the flame has 2 r + 6 delta of burnt gas behind it. --flame-times
 sets the run's length in delta / S_L (default: the time for the pair to reach
 the flame at 0.3 u' + S_L, plus 3 flame times). Writes RUN_DIR/input.toml,
 RUN_DIR/flame.restart and a copy of FULL.csv as RUN_DIR/planar_full.csv (the
-reference of examples/flame_vortex/flame_vortex_analysis.py); outputs RUN_DIR/solut/flame.pvd
+reference of examples/flame_vortex/flame_vortex_analysis.py); outputs the series RUN_DIR/solut/flame
 (T, HRR, velocity, density, the fuel's (H2 or CH4) and O2's mass fractions,
 and with --radiation QRAD).
 """
@@ -105,7 +105,7 @@ def main():
     # Channel of symmetry planes instead of a periodic one, and the outputs the analysis reads
     path = os.path.join(args.run_dir, "input.toml")
     text = open(path).read()
-    text = text.replace('periodic = ["y"]\n', "")
+    text = text.replace('[[periodic]]\nzones = ["bottom", "top"]\n', "")
     text = text.replace('name = "right"\ntype = "p_out"\np = 101325.0\n',
                         'name = "right"\ntype = "p_out"\np = 101325.0\n\n[[boundaries]]\nname = "bottom"\n'
                         'type = "symmetry"\n\n[[boundaries]]\nname = "top"\ntype = "symmetry"\n')

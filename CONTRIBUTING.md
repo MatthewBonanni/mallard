@@ -53,6 +53,12 @@ cmake --build build -j
   Run the whole suite, 2D and 3D, before asking for review.
 - With MPI (`-DMallard_ENABLE_MPI=ON`), run the multi-rank tests on 2 to 4 ranks:
   `mpirun -n 3 ./build/src/mallard test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
+  CI also runs the whole suite on 3 ranks, so every test must pass on any
+  number: a test that inspects one rank's cells runs its solver undistributed
+  (`set_distributed(false)`) or reduces over the ranks, loops over owned cells
+  (halo cells hold stale values), and leaves shared files to rank 0 (files that
+  every rank writes on its own go in `rank_scratch_dir()`). `MALLARD_TEST_TIMEOUT=<seconds>`
+  aborts a test that runs longer, naming it, as CI does for the MPI runs.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
@@ -74,6 +80,11 @@ cmake --build build -j
   `toml::value` or `toml::table` directly (configuration fails if you do). Every
   key setup reads is then validated automatically: misspelled or unused keys are
   errors, with suggestions.
+- **Error messages** teach: an invalid value throws an `InputError` built from a
+  `Diagnostic` (key, line from `line_of`, what is wrong, the accepted values, the
+  fix and the docs page); `missing_key`, `not_accepted` and `cannot_read` cover the
+  common cases. A run and `mallard check` report it the same way, and
+  `test/error_messages_test.cpp` holds an example of each kind.
 - **Kokkos device code** must run on CUDA and HIP, not only on the CPU backends:
   - Kernels (`KOKKOS_LAMBDA`, functors) capture by value; never capture `this` or
     references to host objects. Copy the members a kernel needs into locals first.
@@ -143,10 +154,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   failure, and its *Details* link shows every job and its log. `main` requires a
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors and runs the full suite in 2D and 3D, with
-  OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a Clang build and
-  the tutorials and case templates. Each job also shows on the PR as its own status,
-  `CI / <job>`. Documentation-only changes skip the build jobs (the run takes about a
-  minute). `main` runs CI on every merge.
+  OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a single-precision
+  Clang build and the tutorials and case templates. Each job also shows on the PR as
+  its own status, `CI / <job>`. Documentation-only changes skip the build jobs (the
+  run takes about a minute). `main` runs CI on every merge.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only
   what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
   only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `fuzz`). The `CI` status

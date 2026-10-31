@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -133,7 +134,8 @@ TEST(NumericsPreset, InvalidPresetsAreInputErrors) {
         FAIL() << "no error for an unknown preset";
     } catch (const InputError & e) {
         EXPECT_EQ(std::string(e.what()),
-                  "numerics.preset = \"fast\" is not one of: accurate, les, reacting, robust.");
+                  "line 2: numerics.preset: \"fast\" is not accepted. Accepted values: accurate, les, reacting, robust. "
+                  "See docs/input.md#numerics.");
     }
     EXPECT_THROW(resolve("[numerics]\npreset = 1\n"), InputError);
 }
@@ -160,6 +162,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"flame_outflow/input.toml", "reacting", 2, "", {}, ""},
     {"flame_vortex/input.toml", "reacting", 2, "", {}, ""},
     {"flame_vortex_quenching/input.toml", "reacting", 2, "", {}, ""},
+    {"forced_inlet/input.toml", "robust", 2, "", {}, ""},
     {"heated_duct/closed.toml", "robust", 2, "", {}, ""},
     {"heated_duct/closed_upt.toml", "robust", 2, "", {}, ""},
     {"heated_duct/input.toml", "robust", 2, "", {}, ""},
@@ -179,6 +182,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"rotational_sector/annulus.toml", "accurate", 2, "", {}, ""},
     {"rotational_sector/sector.toml", "accurate", 2, "", {}, ""},
     {"sedov_axisymmetric/input.toml", "robust", 2, "", {}, ""},
+    {"shock_bubble_2d/input.toml", "robust", 2, "", {}, ""},
     {"shu_osher/input.toml", "accurate", 2, "", {}, ""},
     {"sod/input.toml", "accurate", 2, "", {}, ""},
     {"source_regions/input.toml", "robust", 2, "", {}, ""},
@@ -274,6 +278,53 @@ TEST_P(ExampleUnderPreset, RunsAFewSteps) {
     EXPECT_EQ(solver.get_numerics_preset().name, c.preset);
     solver.run();
     EXPECT_EQ(solver.get_step(), 3u);
+}
+
+namespace {
+
+/**
+ * @brief The example's [[periodic]] pairs of opposite sides of its generated
+ *        mesh in the deprecated [mesh] periodic, or false if it has none (or others).
+ */
+bool to_mesh_periodic(Input & input) {
+    if (!input.contains("periodic") || find_value_or<std::string>(input, "mesh", "type", "file") == "file") return false;
+    const std::map<std::string, std::string> directions = {
+        {"left", "x"}, {"bottom", "y"}, {"back", "z"}, {"start", "theta"}};
+    Input::array_type listed;
+    for (const auto & entry : input.at("periodic").as_array()) {
+        const auto & zones = entry.at("zones").as_array();
+        if (entry.as_table().size() != 1 || !directions.count(zones.at(0).as_string())) return false;
+        listed.push_back(directions.at(zones.at(0).as_string()));
+    }
+    input.at("mesh").as_table()["periodic"] = listed;
+    input.as_table().erase("periodic");
+    return true;
+}
+
+} // namespace
+
+TEST_P(ExampleUnderPreset, DeprecatedMeshPeriodicRunsBitwiseAsItsZonePairs) {
+    const ExampleCase & c = GetParam();
+    Input deprecated = example_under_preset(c, 3, N_DIM == 3 ? 8 : 16);
+    if (!to_mesh_periodic(deprecated)) GTEST_SKIP() << "no [[periodic]] sides of a generated mesh";
+    Solver old_form, new_form;
+    old_form.init(deprecated);
+    new_form.init(example_under_preset(c, 3, N_DIM == 3 ? 8 : 16));
+    old_form.run();
+    new_form.run();
+    old_form.copy_device_to_host();
+    new_form.copy_device_to_host();
+    EXPECT_EQ(old_form.get_time(), new_form.get_time());
+    size_t n_diff = 0;
+    for (size_t i = 0; i < new_form.h_conservatives.extent(0); i++) {
+        for (size_t k = 0; k < new_form.h_conservatives.extent(1); k++) {
+            n_diff += std::memcmp(&old_form.h_conservatives(i, k), &new_form.h_conservatives(i, k), sizeof(rtype)) != 0;
+        }
+        for (size_t k = 0; k < new_form.h_species.extent(1); k++) {
+            n_diff += std::memcmp(&old_form.h_species(i, k), &new_form.h_species(i, k), sizeof(rtype)) != 0;
+        }
+    }
+    EXPECT_EQ(n_diff, 0u);
 }
 
 INSTANTIATE_TEST_SUITE_P(Examples, ExampleUnderPreset, ::testing::ValuesIn(examples_of_this_build()), param_name);

@@ -52,7 +52,7 @@ std::string box(const std::string & dir, uint32_t n_steps, const std::string & i
     std::ostringstream s;
     s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.25\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n"
-      << (N_DIM == 3 ? "Nz = 4\nLz = 1.0\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
+      << (N_DIM == 3 ? "Nz = 4\nLz = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
       << "[initialize]\n" << initialize
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
@@ -148,7 +148,13 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
 
     // The first record names the format and holds the provenance
     const Value & start = records.front();
-    EXPECT_EQ(key_set(start), (std::set<std::string>{"type", "schema", "version", "provenance"}));
+    EXPECT_EQ(key_set(start),
+              (std::set<std::string>{"type", "schema", "version", "provenance", "placement", "setup_phases"}));
+    EXPECT_EQ(start["placement"].array.size(), static_cast<size_t>(comm::size()));
+    EXPECT_EQ(start["placement"].array[0]["rank"].number, 0.0);
+    EXPECT_TRUE(start["setup_phases"].has("mesh"));
+    EXPECT_TRUE(start["provenance"]["dependencies"].has("kokkos"));
+    EXPECT_EQ(start["provenance"]["run"]["hosts"].number, 1.0);
     EXPECT_EQ(start["type"].string, "start");
     EXPECT_EQ(start["schema"].string, run_log::SCHEMA);
     EXPECT_EQ(start["version"].number, run_log::VERSION);
@@ -156,7 +162,8 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
 
     const std::set<std::string> progress_keys = {
         "type", "step", "t", "dt", "cfl", "progress", "wall", "wall_per_step", "cells_per_second", "eta", "cells",
-        "ranks", "memory_host", "memory_host_peak", "memory_device", "memory_device_total", "monitors", "integrals"};
+        "ranks", "memory_host", "memory_host_peak", "memory_device", "memory_device_total", "monitors", "integrals",
+        "health"};
     std::vector<double> steps;
     double last_progress = 0.0;
     std::set<std::string> events;
@@ -256,9 +263,10 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     }
     for (const char * csv : {"/integrals.csv", "/probe.csv"}) {
         const auto rows = lines(dir + csv);
-        ASSERT_GE(rows.size(), 3u) << csv;
+        ASSERT_GE(rows.size(), 4u) << csv;
         EXPECT_EQ(rows[0].rfind("step,t", 0), 0u) << csv;
-        EXPECT_EQ(provenance::parse_comment(rows[1]), expected) << csv;
+        EXPECT_EQ(rows[1].rfind("# units: ", 0), 0u) << csv;
+        EXPECT_EQ(provenance::parse_comment(rows[2]), expected) << csv;
     }
     EXPECT_EQ(json_reader::parse(lines(dir + "/run.jsonl").front())["provenance"].keys(), p.keys());
     EXPECT_NE(lines(dir + "/run.jsonl").front().find(expected), std::string::npos);
@@ -288,7 +296,7 @@ TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
     // Each part of a monitor file follows the provenance of the run that wrote it
     std::vector<std::string> blocks;
     for (const auto & row : lines(dir + "/integrals.csv")) {
-        if (row[0] == '#') blocks.push_back(provenance::parse_comment(row));
+        if (row.rfind("# provenance ", 0) == 0) blocks.push_back(provenance::parse_comment(row));
     }
     EXPECT_EQ(blocks, (std::vector<std::string>{first, second}));
     std::vector<std::string> starts;

@@ -2,7 +2,7 @@
  * @file input_upgrade_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Deprecated input keys: warnings, errors once removed, and the
- *        rewrite of `mallard upgrade-input`, which keeps comments and layout.
+ *        rewrite of `mallard input upgrade`, which keeps comments and layout.
  * @version 0.9
  * @date 2026-10-16
  *
@@ -40,6 +40,7 @@ const Rules RULES = {
     {
         {"boundaries[].type", "outflow", "extrapolation", "0.9.0", "0.10.0", "renamed"},
     },
+    {},
 };
 
 std::string upgrade(const std::string & text, bool & reformatted, std::vector<Finding> & findings) {
@@ -155,7 +156,7 @@ TEST(InputUpgradeTest, DeprecatedKeysAreReadWithAWarningUntilTheyAreRemoved) {
     } catch (const InputError & e) {
         const std::string what = e.what();
         EXPECT_NE(what.find("run.old_cfl was removed in 0.10.0: use run.cfl"), std::string::npos) << what;
-        EXPECT_NE(what.find("mallard upgrade-input"), std::string::npos) << what;
+        EXPECT_NE(what.find("mallard input upgrade"), std::string::npos) << what;
     }
 }
 
@@ -169,4 +170,132 @@ TEST(InputUpgradeTest, KeysAreDeprecatedForAtLeastOneMinorReleaseBeforeRemoval) 
     };
     for (const auto & rule : input_upgrade::rules().keys) check(rule.from, rule.since, rule.removed);
     for (const auto & rule : input_upgrade::rules().options) check(rule.key, rule.since, rule.removed);
+    for (const auto & rule : input_upgrade::rules().arrays) check(rule.from, rule.since, rule.removed);
+}
+
+TEST(InputUpgradeTest, KeptOptionsWorkAsBeforeButAreRewritten) {
+    // format = "hdf5" still writes XDMF and HDF5 while deprecated; the
+    // upgraded file asks for VTKHDF
+    const std::string text = "[[write_data]]\nprefix = 'f'\nformat = \"hdf5\"  # ParaView\n";
+    Input input = parse_input_string(text);
+    const std::vector<Finding> findings = input_upgrade::apply(input, "0.9.0");
+    ASSERT_EQ(findings.size(), 1u);
+    EXPECT_FALSE(findings[0].removed);
+    EXPECT_NE(findings[0].message.find("use \"vtkhdf\""), std::string::npos) << findings[0].message;
+    EXPECT_EQ(input.at("write_data").at(0).at("format").as_string(), "hdf5");
+    bool reformatted = true;
+    std::vector<Finding> rewritten;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, rewritten, reformatted),
+              "[[write_data]]\nprefix = 'f'\nformat = \"vtkhdf\"  # ParaView\n");
+    EXPECT_FALSE(reformatted);
+    Input later = parse_input_string(text);
+    EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
+}
+
+TEST(InputUpgradeTest, MeshPeriodicBecomesPeriodicZonePairsAfterTheMesh) {
+    const std::string text =
+        "[run]\n"
+        "n_steps = 1\n"
+        "\n"
+        "[mesh]\n"
+        "type = \"cartesian\"\n"
+        "periodic = [\"x\", \"z\"]  # walls in y\n"
+        "Lx = 2.0\n"
+        "\n"
+        "[output]\n"
+        "check_interval = 10\n";
+    const std::string expected =
+        "[run]\n"
+        "n_steps = 1\n"
+        "\n"
+        "[mesh]\n"
+        "type = \"cartesian\"\n"
+        "Lx = 2.0\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"left\", \"right\"]  # walls in y\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"back\", \"front\"]\n"
+        "\n"
+        "[output]\n"
+        "check_interval = 10\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), expected);
+    EXPECT_FALSE(reformatted);
+    ASSERT_EQ(findings.size(), 1u);
+    EXPECT_EQ(findings[0].line, 6u);
+    EXPECT_EQ(findings[0].suggestion,
+              "[[periodic]] zones = [\"left\", \"right\"], [[periodic]] zones = [\"back\", \"front\"]");
+
+    // The setup reads the pairs the rewritten file has
+    Input input = parse_input_string(text);
+    ASSERT_EQ(input_upgrade::apply(input, "0.9.0").size(), 1u);
+    EXPECT_FALSE(input.at("mesh").contains("periodic"));
+    ASSERT_EQ(input.at("periodic").size(), 2u);
+    EXPECT_EQ(input.at("periodic").at(1).at("zones").at(0).as_string(), "back");
+    Input later = parse_input_string(text);
+    EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
+}
+
+TEST(InputUpgradeTest, MeshPeriodicFollowsTheExistingPairsAndTheRemapSourceGetsItsOwn) {
+    const std::string text =
+        "[mesh]\n"
+        "type = \"annulus\"\n"
+        "periodic = [\"theta\"]\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"inner\", \"outer\"]\n"
+        "translation = [0.0, 1.0]\n"
+        "\n"
+        "[initialize]\n"
+        "type = \"remap\"\n"
+        "\n"
+        "[initialize.mesh]\n"
+        "type = \"cartesian\"\n"
+        "periodic = [\n"
+        "    \"y\",\n"
+        "]\n";
+    const std::string expected =
+        "[mesh]\n"
+        "type = \"annulus\"\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"inner\", \"outer\"]\n"
+        "translation = [0.0, 1.0]\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"start\", \"end\"]\n"
+        "\n"
+        "[initialize]\n"
+        "type = \"remap\"\n"
+        "\n"
+        "[initialize.mesh]\n"
+        "type = \"cartesian\"\n"
+        "\n"
+        "[[initialize.periodic]]\n"
+        "zones = [\"bottom\", \"top\"]\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), expected);
+    EXPECT_FALSE(reformatted);
+    ASSERT_EQ(findings.size(), 2u);
+    EXPECT_EQ(findings[1].key, "initialize.mesh.periodic");
+    EXPECT_EQ(findings[1].suggestion, "[[initialize.periodic]] zones = [\"bottom\", \"top\"]");
+}
+
+TEST(InputUpgradeTest, MeshPeriodicOnlyTakesTheDirectionsOfAGeneratedMesh) {
+    for (const auto & [text, error] : std::vector<std::pair<std::string, std::string>>{
+             {"[mesh]\nfilename = \"a.msh\"\nperiodic = [\"x\"]\n", "line 3: mesh.periodic: applies to generated meshes"},
+             {"[mesh]\ntype = \"cartesian\"\nperiodic = [\"theta\"]\n", "line 3: mesh.periodic: \"theta\" is not accepted"},
+             {"[mesh]\ntype = \"annulus\"\nperiodic = [\"x\"]\n", "the annulus is periodic in \"theta\""}}) {
+        Input input = parse_input_string(text);
+        try {
+            input_upgrade::apply(input, "0.9.0");
+            ADD_FAILURE() << text;
+        } catch (const InputError & e) {
+            EXPECT_NE(std::string(e.what()).find(error), std::string::npos) << e.what();
+        }
+    }
 }

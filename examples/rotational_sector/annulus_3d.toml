@@ -13,7 +13,9 @@ Nz = 8
 Lz = 0.5
 r_inner = 1.0
 r_outer = 2.0
-periodic = ["z"]
+
+[[periodic]]
+zones = ["back", "front"]
 
 [initialize]
 type = "analytical"
@@ -53,6 +55,5 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/annulus_3d"
-format = "vtu"
 time_interval = 0.2
 variables = ["RHO", "RHOU", "RHOE", "P"]

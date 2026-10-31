@@ -35,7 +35,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang or SIMPLER balanced splitting from the flow; ignition delays match Cantera up to 1268 species
 - Mixture-averaged, unity-Lewis or constant-Lewis transport; optional thermal (Soret) diffusion
 - Optically thin radiation (TNF Planck-mean model)
-- Gravity and any number of source terms: expressions of position, time and the local or domain-averaged solution (species too), compiled for the GPU, in regions built from spheres, cylinders, cones, boxes, tori, polygons or implicit shapes with unions, intersections and differences, with exact integrated totals on any mesh ([guide](docs/guide/sources.md), [regions](docs/guide/geometry.md#regions))
+- Gravity and any number of source terms: expressions of position, time and the local or domain-averaged solution (species too), compiled for the GPU, in regions built from spheres, cylinders, cones, boxes, tori, polygons or implicit shapes with unions, intersections and differences, with exact integrated totals on any mesh ([guide](docs/guide/sources.md), [regions](docs/guide/geometry.md#regions)); regions defined once by name and shared by sources, sponges and probes
 
 **Large-eddy simulation** ([guide](docs/guide/les.md))
 - Explicit LES: Sigma (default), WALE, Vreman or Smagorinsky eddy viscosity for single gases and mixtures, with Scotti's filter width on anisotropic cells and an opt-in dynamic constant
@@ -48,7 +48,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 **Boundary conditions**
 - Slip, adiabatic, isothermal and heat-flux walls, optionally moving
 - Inflow at a given velocity, mass flow, or stagnation pressure and temperature (thermally perfect mixtures included; [guide](docs/guide/boundary_conditions.md#stagnation-inlet)), characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
-- Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers
+- Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers of any expression or region
 - Zones split between conditions by expressions
 
 **Performance and parallelism**
@@ -62,16 +62,17 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - The whole time step as one CUDA graph; optional NCCL halo exchange; TENO-E setup on the GPU
 
 **Input, output and diagnostics**
-- TOML input with units (`p = "1 atm"`, `Lx = "5 mm"`), converted to SI and checked against each key's dimension; initial conditions, boundary states, sources and sponges as analytical expressions; misspelled or unused keys are errors, with suggestions
+- TOML input with units (`p = "1 atm"`, `Lx = "5 mm"`), converted to SI and checked against each key's dimension; initial conditions, boundary states, sources and sponges as analytical expressions; misspelled or unused keys are errors, with suggestions; every error names the key and line, the fix and the docs page
 - Pre-flight check (`mallard check`): mesh quality, stable time step, memory per GPU and cost estimate before a run
 - Case templates (`mallard new <template>`): a ready-to-run case with mesh, run and post-processing scripts
-- Stable inputs and files across releases: renamed keys keep working with a warning for a release and `mallard upgrade-input` rewrites old inputs; restart, mesh and output files carry format versions, and files written since 0.6 are read by later releases
+- Stable inputs and files across releases: renamed keys keep working with a warning for a release and `mallard input upgrade` rewrites old inputs; restart, mesh and output files carry format versions, and files written since 0.6 are read by later releases
+- Initial states layered from regions (cut cells averaged exactly for flat surfaces), CSV tables and point clouds (e.g. a Cantera flame profile along a radius or the distance to a region), over expressions, a restart or a remap, integrated over each cell on the GPU ([guide](docs/guide/initialization.md#regions))
 - Conservative, high-order remap of a restart onto another mesh (any cell type, resolution or rank count): exact cell intersections, integrals kept to rounding
-- VTU (ParaView) or parallel HDF5 with XDMF; surface output of boundary zones
-- Running means and covariances; probes on points and curves (cell averages or high-order point values, CSV, HDF5 or VTK, with integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces
+- VTKHDF output for ParaView (default; one file per snapshot written by all ranks in parallel, or one file for the whole series; curved cells as quadratic cells), or VTU; surface output of boundary zones
+- Running means and covariances; probes on points, curves, surfaces, exact cut planes and boundary zones (cell averages or high-order point values; wall shear, C_f, C_p, heat flux, y+ and fluxes through any surface; CSV, HDF5 or VTK, with integrals, means and extrema) and over regions (fraction-weighted integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces
 - Heat release, species production rates and detonation soot foils (`P_MAX`)
-- A machine-readable JSON-lines run log, and provenance (code version, build, input and mesh hashes, resolved setup) in every output file
-- `mallard reactor`, a 0D reactor, and Python tools for plotting, animation and HDF5 output
+- A machine-readable JSON-lines run log, and provenance (code version, build, input and mesh hashes, resolved setup) and units (CF attributes in VTKHDF and HDF5, XDMF information, VTK field data, a CSV units line) in every output file
+- `mallard reactor`, a 0D reactor, and Python tools for plotting, animation and VTKHDF and HDF5 output
 
 **Run control** ([docs](docs/guide/running.md))
 - Signals: `SIGUSR1` writes a restart and continues; `SIGTERM`, `SIGINT` or `SIGUSR2` write one and stop, on every rank after the same step and at no communication cost; works under `mpirun`, Slurm and Kubernetes grace periods
@@ -98,7 +99,7 @@ Three ways to install Mallard, quickest first:
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development; options the others lack | CMake |
 
-Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `upgrade-input` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them.
+Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](docs/guide/cli.md)).
 
 ### Container
 

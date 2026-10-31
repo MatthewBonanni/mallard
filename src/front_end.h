@@ -15,14 +15,18 @@
 
 #include <string>
 
+#include "cli.h"
+
 namespace front_end {
 
 /**
- * @brief A case's dimension: 2 or 3, or 0 with why it cannot be told.
+ * @brief A case's dimension: 2 or 3, or 0 with why it cannot be told; unreadable
+ *        if a file is missing or invalid, which either solver reports in full.
  */
 struct Dimension {
     int dim = 0;
     std::string why;
+    bool unreadable = false;
 };
 
 /**
@@ -33,7 +37,7 @@ Dimension mesh_file_dimension(const std::string & path);
 
 /**
  * @brief The dimension of the case an input file describes: from its
- *        generated mesh ([mesh] type, Nz, Lz, periodic z) or its mesh file.
+ *        generated mesh ([mesh] type, Nz, Lz, [[periodic]] back and front) or its mesh file.
  */
 Dimension input_dimension(const std::string & input_file);
 
@@ -43,8 +47,14 @@ Dimension input_dimension(const std::string & input_file);
 bool invoked(const char * argv0);
 
 /**
- * @brief Entry point of the front end: execs the solver the command needs
- *        (`mallard test`: runs the test suites installed); returns only on error.
+ * @brief `mallard test`: runs the test suites next to this executable (an
+ *        install tree) or in its build tree, or those of --dim.
+ */
+int test_main(const cli::Args & args);
+
+/**
+ * @brief Entry point of the front end: execs the solver the command needs,
+ *        or runs a command of its own (`mallard test`); returns only on error.
  */
 int main(int argc, char ** argv);
 

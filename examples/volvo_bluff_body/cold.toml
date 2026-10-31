@@ -36,7 +36,7 @@
 #   python make_volvo_mesh.py volvo.msh --ds 1.25e-3 --nz 64
 #   python volvo.py probes >> cold.toml   # optional: mid-span plane for a movie
 #   mpirun -n 4 ../../build3d/src/mallard -i cold.toml --kokkos-map-device-id-by=mpi_rank
-#   python volvo.py profiles stats/cold_000003.pvtu --u-bulk 16.6 --out cold.npz
+#   python volvo.py profiles stats/cold_000003.vtkhdf --u-bulk 16.6 --out cold.npz
 #   python volvo.py plot cold.npz --exp reference --out cold.png
 #   python volvo.py budget integrals.csv --t0 0.08
 # Cost: 626,000 steps, 14 ms each on four A100s (2.8 hours).
@@ -132,12 +132,10 @@ time_interval = 0.02
 
 [[write_data]]
 prefix = "stats/cold"
-format = "vtu"
 time_interval = 0.1
 variables = ["MEAN_*", "COV_*", "MU_T"]
 
 [[write_data]]
 prefix = "snap/cold"
-format = "vtu"
 time_interval = 0.15
 variables = ["U", "Q", "MU_T"]

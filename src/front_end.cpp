@@ -22,7 +22,9 @@
 
 #include "build_info.h"
 #include "case_template.h"
+#include "cli.h"
 #include "input.h"
+#include "input_upgrade.h"
 #include "mesh/mesh_block.h"
 #include "mesh/mesh_file.h"
 
@@ -33,6 +35,7 @@ namespace front_end {
 namespace {
 
 Dimension unknown(const std::string & why) { return {0, why}; }
+Dimension unreadable(const std::string & why) { return {0, why, true}; }
 
 Dimension openfoam_dimension(const fs::path & path) {
     for (const fs::path & dir : {path, path / "polyMesh", path / "constant" / "polyMesh"}) {
@@ -193,38 +196,33 @@ struct Need {
     bool dimension_free = false;
 };
 
-Need command_need(const std::vector<std::string> & args) {
-    const std::set<std::string> free = {"ctl", "reactor", "upgrade-input", "-h", "--help", "--version"};
-    if (args.empty() || free.count(args[0])) return {{}, "", true};
-    if (args[0] == "new") {
-        for (size_t i = 1; i < args.size(); i++) {
-            if (args[i].rfind('-', 0) == 0) continue;
+Need command_need(const cli::Command * command, const std::vector<std::string> & args) {
+    const Need free = {{}, "", true};
+    cli::Args parsed;
+    std::string error;
+    if (!command || !cli::parse(*command, args, parsed, error) || parsed.help) return free;
+    const std::string first = parsed.positional.empty() ? "" : parsed.positional[0];
+    switch (command->dim) {
+        case cli::Case::input: {
+            const std::string file = parsed.has("-i") ? parsed.value_or("-i", "") : first;
+            if (file.empty()) return free;
+            return {input_dimension(file), file};
+        }
+        case cli::Case::template_name: {
+            if (first.empty() || parsed.has("--list")) return free;
             try {
-                const int dim = case_template::template_dimension(args[i]);
-                if (dim == 0) break;
-                return {{dim, ""}, "template " + args[i]};
+                const int dim = case_template::template_dimension(first);
+                return dim == 0 ? free : Need{{dim, ""}, "template " + first};
             } catch (const std::exception & e) {
-                return {unknown(e.what()), "template " + args[i]};
+                return {unknown(e.what()), "template " + first};
             }
         }
-        return {{}, "", true};
+        case cli::Case::mesh:
+            if (first.empty()) return free;
+            return {fs::path(first).extension() == ".toml" ? input_dimension(first) : mesh_file_dimension(first), first};
+        default:
+            return free;
     }
-    if (args[0] == "mesh") {
-        if (args.size() < 3 || args[1] != "convert") return {{}, "", true};
-        const std::string & in = args[2];
-        return {fs::path(in).extension() == ".toml" ? input_dimension(in) : mesh_file_dimension(in), in};
-    }
-    const bool check = args[0] == "check";
-    const std::set<std::string> with_value = {"--ranks", "--throughput", "--steps", "--quality-vtu", "--catalog"};
-    for (size_t i = check ? 1 : 0; i < args.size(); i++) {
-        if (args[i] == "-i" && i + 1 < args.size()) return {input_dimension(args[i + 1]), args[i + 1]};
-        if (check && with_value.count(args[i])) {
-            i++;
-        } else if (check && args[i].rfind('-', 0) != 0) {
-            return {input_dimension(args[i]), args[i]};
-        }
-    }
-    return {{}, "", true};
 }
 
 } // namespace
@@ -232,7 +230,7 @@ Need command_need(const std::vector<std::string> & args) {
 Dimension mesh_file_dimension(const std::string & path) {
     try {
         if (fs::is_directory(path)) return openfoam_dimension(path);
-        if (!fs::exists(path)) return unknown("Could not open mesh file: " + path + ".");
+        if (!fs::exists(path)) return unreadable("Could not open mesh file: " + path + ".");
         if (is_hdf5_mesh(path)) return {mesh_h5_dimension(path), ""};
         const std::string ext = fs::path(path).extension().string();
         if (ext == ".cgns") return {cgns_dimension(path), ""};
@@ -242,13 +240,14 @@ Dimension mesh_file_dimension(const std::string & path) {
         in >> first;
         return first == '(' ? fluent_dimension(path) : gmsh_dimension(path);
     } catch (const std::exception & e) {
-        return unknown(e.what());
+        return unreadable(e.what());
     }
 }
 
 Dimension input_dimension(const std::string & input_file) {
     try {
-        const Input input = parse_input(input_file);
+        Input input = parse_input(input_file);
+        input_upgrade::apply(input);
         const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
         if (type == "file") return mesh_file_dimension(find_value_or<std::string>(input, "mesh", "filename", "mesh.msh"));
         if (type == "cartesian_tri" || type == "wedge") return {2, ""};
@@ -258,36 +257,55 @@ Dimension input_dimension(const std::string & input_file) {
         }
         const bool mesh = input.contains("mesh") && input.at("mesh").is_table();
         if (mesh && (input.at("mesh").contains("Nz") || input.at("mesh").contains("Lz"))) return {3, ""};
-        for (const auto & dir : find_value_or<std::vector<std::string>>(input, "mesh", "periodic", {})) {
-            if (dir == "z") return {3, ""};
+        for (const auto & entry : find_value_or<std::vector<Input>>(input, "periodic", {})) {
+            for (const auto & zone : find_value_or<std::vector<std::string>>(entry, "zones", {})) {
+                if (zone == "back" || zone == "front") return {3, ""};
+            }
         }
         return {2, ""};
     } catch (const std::exception & e) {
-        return unknown(e.what());
+        return unreadable(e.what());
     }
 }
 
 bool invoked(const char * argv0) { return fs::path(argv0).filename() == "mallard"; }
 
+int test_main(const cli::Args & args) {
+    const std::string value = args.value_or("--dim", "0");
+    if (value != "0" && value != "2" && value != "3") {
+        return cli::usage_error(*cli::command("test"), "--dim takes 2 or 3, not " + value);
+    }
+    const int dim = value[0] - '0';
+    const fs::path bin = executable_path().parent_path();
+    std::vector<std::string> passthrough = args.passthrough;
+    return run_tests(bin, dim, passthrough);
+}
+
 int main(int argc, char ** argv) {
     std::vector<std::string> args(argv + 1, argv + argc);
+    std::vector<std::string> dim_option;
     int dim = 0;
     for (size_t i = 0; i < args.size(); i++) {
         if (args[i] != "--dim") continue;
         const std::string value = i + 1 < args.size() ? args[i + 1] : "";
         if (value != "2" && value != "3") {
-            std::cerr << "mallard: --dim takes 2 or 3.\n";
+            std::cerr << "mallard: --dim takes 2 or 3 (see mallard --help)\n";
             return 2;
         }
         dim = value[0] - '0';
+        dim_option = {args[i], value};
         args.erase(args.begin() + std::ptrdiff_t(i), args.begin() + std::ptrdiff_t(i) + 2);
         break;
     }
-    const fs::path bin = executable_path().parent_path();
-    if (!args.empty() && args[0] == "test") {
-        args.erase(args.begin());
-        return run_tests(bin, dim, args);
+    size_t words = 0;
+    const cli::Command * command = cli::find(args, words);
+    if (command && command->dim == cli::Case::front_end) {
+        args.insert(args.begin() + std::ptrdiff_t(words), dim_option.begin(), dim_option.end());
+        std::string program = argv[0];
+        std::vector<char *> command_argv = c_args(program, args);
+        return cli::main(static_cast<int>(command_argv.size()) - 1, command_argv.data());
     }
+    const fs::path bin = executable_path().parent_path();
 
     std::vector<int> installed;
     for (const int d : {2, 3}) {
@@ -298,10 +316,11 @@ int main(int argc, char ** argv) {
         return 1;
     }
     const bool stated = dim != 0;
-    const Need need = stated ? Need{{dim, ""}, "", false} : command_need(args);
+    const Need need = stated ? Need{{dim, ""}, "", false}
+                             : command_need(command, {args.begin() + std::ptrdiff_t(words), args.end()});
     dim = need.dimension.dim;
     if (dim == 0) {
-        if (!need.dimension_free && installed.size() > 1) {
+        if (!need.dimension_free && !need.dimension.unreadable && installed.size() > 1) {
             std::cerr << "mallard: cannot tell whether " << need.what << " is 2D or 3D: " << need.dimension.why
                       << "\nState it with --dim 2 or --dim 3, e.g. mallard --dim 3 -i input.toml.\n";
             return 1;

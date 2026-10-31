@@ -1,24 +1,29 @@
 # Geometry
 
 Several features take a piece of space as input: where a source acts, where a
-probe samples, which faces are curved. This page explains the shapes they share
-and how Mallard puts them on a mesh. Every key, with its default, is in the
+probe samples or integrates, where a sponge damps, which faces are curved. This
+page explains the regions they share and how Mallard puts them on a mesh. Every key, with its default, is in the
 [input reference](../input.md#regions).
 
 ## Who uses what
 
 | Feature | Geometry | Guide |
 |---|---|---|
-| `[[sources]]` `region` | a [region](#regions) | [Sources](sources.md#regions) |
-| `[[probes]]` | a [point set or curve](#point-sets-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
+| `[[sources]]` `region` | a [region](#regions) or its [name](#named-regions) | [Sources](sources.md#regions) |
+| `[[probes]]` `region` | a [region](#regions) or its [name](#named-regions): integrals, means, extremes | [Output](output.md#region-probes) |
+| `[[probes]]` `shape` | [points or a curve](#point-sets-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
+| `[[sponges]]` `region` | a [region](#regions) or its [name](#named-regions), times `strength` | [Sponge layers](sources.md#sponge-layers) |
+| `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
-| `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
+| `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
+| `[[initialize.data]]` `region` | a [region](#regions) or its [name](#named-regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
 | `[[mesh.curved]]` | `circle`, `sphere` or `cylinder` of its own keys (to move onto regions: [#407](https://github.com/MatthewBonanni/mallard/issues/407)) | [Curved boundaries](meshes.md#curved-boundaries) |
 
-Initial states and sponges take expressions rather than regions; a comparison
-such as `"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp shape there, which the
-initial state averages over each cell.
+Analytical initial states take expressions; a comparison such as
+`"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp region there, which the initial
+state averages over each cell. `[[initialize.regions]]` takes the region itself,
+and also layers it over a restart.
 
 ## Coordinates and units
 
@@ -41,14 +46,56 @@ rhoE = "1 MW/m^3"
 region = {type = "sphere", center = [0, 0, 0], radius = "2 mm"}
 ```
 
-A region is a table: a primitive shape, or a boolean of regions, each with
-optional transforms, nested to any depth. Each has a **signed distance** φ,
+A region is a table: a primitive, or a boolean of regions, each with
+optional transforms, nested to any depth, or the [name](#named-regions) of one.
+The regions below fill space (volumes; areas in 2D runs). Points, curves and
+surfaces are to join them as regions of lower dimension, each `type` with one
+fixed dimension, and each feature checks that a region has the dimension it
+needs. Each has a **signed distance** φ,
 negative inside, that never exceeds the distance to its surface. Mallard uses it
 to skip cells far from the surface and to give [smooth edges](#smooth-edges)
 their width.
 
 ![Signed distance of a disk with a slot cut out, and its smooth-edged indicator](../images/guide/geometry-signed-distance-light.svg#gh-light-mode-only)
 ![Signed distance of a disk with a slot cut out, and its smooth-edged indicator](../images/guide/geometry-signed-distance-dark.svg#gh-dark-mode-only)
+
+### Named regions
+
+```toml
+[regions]
+burner = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.02, length = 0.05, edge = 0.004}
+
+[[sources]]
+name = "heat release"
+total = true
+rhoE = "5 kW"
+region = "burner"
+
+[[probes]]
+name = "burner"
+variables = ["RHO", "T"]
+region = "burner"
+reductions = ["integral", "mean", "max"]
+```
+
+`[regions]` defines regions once, by name; any `region` key, and any part of a
+`union`, `intersection` or `difference`, takes the name instead of a table. The
+source and the probe above act on the same cells with the same fractions: the
+probe's `integral_RHO` is the mass the source heats. Mallard reads each named
+region, and computes its fractions on the mesh, once.
+
+```toml
+[regions]
+duct = {type = "cylinder", center = [0, 0, 0], axis = [1, 0, 0], radius = 0.05, length = 0.4}
+plug = {type = "box", center = [0.15, 0, 0], size = [0.1, 0.2, 0.2]}
+fluid = {type = "difference", regions = ["duct", "plug"]}
+```
+
+Pitfalls: a name that is not defined is an error that lists the defined ones;
+regions that name each other in a loop are an error naming the loop; a named
+region no feature uses is an unused key (an error, like any other); and `edge`
+belongs to the outermost region, so a named region with `edge` cannot be a part
+of a boolean.
 
 ### Primitives
 
@@ -302,13 +349,14 @@ with h5py.File("probe_wake.h5") as f:
     p = f["fields/P"][...]        # (outputs, samples); U expands to fields/U_X, U_Y (, U_Z)
 ```
 
-`format = "vtp"` writes one PolyData file per output and a `.pvd` series:
-open the `.pvd` in ParaView, then plot along the curve with *Plot Data* (by
+`format = "vtkhdf"` writes one VTKHDF PolyData file holding every output, and
+`format = "vtp"` one PolyData file per output and a `.pvd` series: open the
+`.vtkhdf` (or `.pvd`) in ParaView, then plot along the curve with *Plot Data* (by
 `arc_length`) or over time with *Plot Data Over Time*. Reductions go to
 `probe_<name>_reductions.csv`. Format details: [`[[probes]]`](../input.md#probes).
 
 ## See also
 
-- [Input reference: regions](../input.md#regions), [`[[sources]]`](../input.md#sources), [`[[probes]]`](../input.md#probes), [`[mesh]`](../input.md#mesh)
+- [Input reference: regions](../input.md#regions), [`[regions]`](../input.md#named-regions-regions), [`[[sources]]`](../input.md#sources), [`[[sponges]]`](../input.md#sponges), [`[[probes]]`](../input.md#probes), [`[mesh]`](../input.md#mesh)
 - [Sources and sponges](sources.md), [Output and diagnostics](output.md#probes-probes), [Meshes](meshes.md#curved-boundaries)
 - Figures: [`tools/docs/geometry.py`](../../tools/docs/geometry.py), [`tools/docs/regions.py`](../../tools/docs/regions.py)

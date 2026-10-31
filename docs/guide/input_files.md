@@ -60,9 +60,8 @@ riemann_solver = "HLLC"
 type = "TENO"
 order = 5
 
-[[write_data]]                  # VTU snapshots for ParaView
+[[write_data]]                  # snapshots for ParaView (VTKHDF)
 prefix = "solut/sod"
-format = "vtu"
 time_interval = 0.02
 variables = ["RHO", "U_X", "P", "T"]
 ```
@@ -78,15 +77,18 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[chemistry]`, `[radiation]` | no | [Thermochemistry](thermochemistry.md) |
 | `[les]`, `[les.combustion]` | no | [Large-eddy simulation](les.md) |
 | `[source]`, `[[sponges]]` | no | [Sources and sponges](sources.md) |
+| `[regions]` | no | [Named regions](geometry.md#named-regions), used by `[[sources]]`, `[[sponges]]` and `[[probes]]` |
 | `[[write_data]]`, `[output]`, `[[forces]]`, `[integrals]`, `[statistics]`, `[[probes]]` | no | [Output and diagnostics](output.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
-Shapes that several tables use (regions, probe points and curves) are on
-[Geometry](geometry.md).
+Regions that several tables use (inline, or named once in `[regions]`), and
+probe points and curves, are on [Geometry](geometry.md).
 
 Double brackets (`[[boundaries]]`) are TOML arrays of tables: repeat them, one
 entry each. Every key, with its default, is in the
 [input reference](../input.md).
+Tables, arrays and inline tables nest at most 64 levels deep (a key of a
+top-level table is at level 2); deeper input is an error, not a crash.
 
 ## Numbers, vectors and expressions
 
@@ -217,8 +219,9 @@ on GPUs up to the last bits of library functions such as `sin` and `exp`.
 
 **Variables.** `x`, `y`, `z` in meters (`z` is 0 in 2D) and, where the key
 says so, the time `t` in seconds; sources also read the local and
-domain-averaged state ([Sources](sources.md)) and probe curves their
-parameter `s`. Names are case sensitive: `T` is not `t`.
+domain-averaged state ([Sources](sources.md)), initial states the columns of
+tabulated data ([Initialization](initialization.md#tabulated-data-and-point-clouds))
+and probe curves their parameter `s`. Names are case sensitive: `T` is not `t`.
 
 **Operators and functions.**
 
@@ -297,8 +300,8 @@ ones as errors.
 In both steps, one command brings a file up to date:
 
 ```sh
-mallard upgrade-input old.toml > new.toml     # changes listed on stderr
-mallard upgrade-input --check old.toml        # exit status 1 if anything is out of date
+mallard input upgrade old.toml > new.toml     # changes listed on stderr
+mallard input upgrade --check old.toml        # exit status 1 if anything is out of date
 ```
 
 It changes only the lines of those keys. A renamed key keeps its value and its
@@ -317,6 +320,8 @@ Keys and options changed so far:
 | `basis_type`, `max_stencil_size_factor`, `quadrature_type`, `quadrature_order`, `quadrature_type_cell`, `quadrature_order_cell`, `quadrature_type_face`, `quadrature_order_face` (same table) | none: TENO-E sets them | 0.2.0 | 0.2.0 |
 | `[physics]` `p_min`, `p_max` | none: pressures are not clipped | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
+| `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; until removed, `"hdf5"` still writes XDMF and HDF5 files | 0.9.0 | 0.10.0 |
+| `[mesh]` `periodic = ["x", "z"]` | `[[periodic]]` `zones = ["left", "right"]` and `zones = ["back", "front"]` (`y`: `bottom`/`top`, `theta`: `start`/`end`); `[initialize.mesh]` `periodic` likewise becomes `[[initialize.periodic]]` | 0.9.0 | 0.10.0 |
 
 Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
 appears in this table and in `src/common/input_upgrade.cpp`, which is the
@@ -339,6 +344,21 @@ error: input.toml: keys that are unknown or unused with these settings (mallard 
 When another error stops the setup first, the keys with a suggestion are
 listed under it as possible misspellings.
 
+## Error messages
+
+An error in the input names the file, the line and the key, says what is
+wrong, lists the accepted values or the closest one, says what to do, and
+links the docs that explain the key; `mallard check` reports it the same way:
+
+```text
+error: input.toml: line 6: mesh.Nx: is 16 (a float), but must be a non-negative integer. Write it without a decimal point: 16. See docs/input.md#mesh.
+error: input.toml: line 20: boundaries[name = "inlet"].type: "wall" is not accepted (did you mean "wall_adiabatic", "wall_heat_flux" or "wall_isothermal"?). Accepted values: ... See docs/input.md#boundaries.
+```
+
+A value of the wrong type is always an error, never replaced by the default.
+Errors during the run name the step, the time and the cells or faces involved
+(see [Divergence](running.md#divergence)).
+
 ## Checking an input
 
 `mallard check input.toml` runs the whole setup of the run (mesh,
@@ -347,7 +367,7 @@ without writing any file, then reports on it; the exit status is 1 if there
 is an error. Run it under `mpirun -n N` to check a run on N ranks.
 
 ```text
-$ mallard check input.toml --ranks 4 --throughput 5e7 --quality-vtu quality
+$ mallard check input.toml --ranks 4 --throughput 5e7 --quality quality
 ...
 == Check ==================================================================================
   Input keys         all used
@@ -402,9 +422,11 @@ that the defaults this reference states match it.
 
 ## The other commands
 
+Every command's options, examples and exit status: [Command line](cli.md).
+
 | Command | Purpose | Guide |
 |---|---|---|
-| `mallard upgrade-input old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
+| `mallard input upgrade old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
 | `mallard reactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallard-reactor) |
 | `mallard mesh convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
 | `mallard test` | The unit and regression tests: `mallard-test2d` and `mallard-test3d` (`build/test/mallard-test2d`), from a build or an install tree; `--dim 2\|3` runs one | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |

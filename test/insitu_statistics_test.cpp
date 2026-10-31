@@ -43,8 +43,8 @@ std::string box(const std::string & periodic, double beta_y, uint32_t n_steps, c
     std::ostringstream s;
     s << std::setprecision(17) << "[run]\nn_steps = " << n_steps << "\ncfl = 0.4\n[mesh]\ntype = \"cartesian\"\n";
     for (size_t d = 0; d < N_DIM; d++) s << "N" << "xyz"[d] << " = " << N[d] << "\nL" << "xyz"[d] << " = " << L[d] << "\n";
-    s << "periodic = " << periodic << "\n";
     if (beta_y > 0.0) s << "stretching = [0.0, " << beta_y << (N_DIM == 3 ? ", 0.0" : "") << "]\n";
+    s << periodic_sides(periodic);
     if (periodic.find("\"y\"") == std::string::npos) {
         s << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
              "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n";
@@ -120,6 +120,7 @@ TEST(SpectraTest, CorrelationsAndShellSpectraOfAPeriodicBoxMatchDirectSums) {
     // sums of a direct (non-FFT) DFT of the cells over the whole box
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"y\", \"z\"]" : "[\"x\", \"y\"]";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(box(periodic, 0.0, 4, one_sample("fields = [\"U_X\", \"RHO\"]\nproducts = [\"U_X*RHO\"]\n", 4))));
     solver.run();
     solver.copy_device_to_host();
@@ -186,6 +187,7 @@ TEST(SpectraTest, ChannelCorrelationsAtEachHeightMatchDirectSums) {
     // on their slab, and each height has its own spectra and plane means
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"z\"]" : "[\"x\"]";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(box(periodic, 1.5, 3, one_sample("fields = [\"U_Y\"]\nproducts = [\"U_X*U_Y\"]\n", 3))));
     solver.run();
     solver.copy_device_to_host();
@@ -229,8 +231,8 @@ std::string oscillating(uint32_t n_steps, const std::string & extra) {
     const double u0 = 0.1, w = 2.0 * M_PI;
     std::ostringstream s;
     s << std::setprecision(17) << "[run]\nn_steps = " << n_steps << "\ndt = 0.0078125\n[mesh]\ntype = \"cartesian\"\n"
-      << "Nx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\nperiodic = [\"x\", \"y\", \"z\"]\n"
-                                                                : "periodic = [\"x\", \"y\"]\n")
+      << "Nx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
+                                                                : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
       << "[initialize]\ntype = \"constant\"\nu = " << (N_DIM == 3 ? "[0, 0, 0]" : "[0, 0]") << "\np = 1.0\nT = 1.0\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[source]\nrhou = [\"" << u0 * w << " * cos(" << w << " * t)\", \"0\"" << (N_DIM == 3 ? ", \"0\"" : "")
@@ -250,7 +252,6 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
     const double u0 = 0.1, t_ref = 1.0 / 12.0;
     const uint32_t n_steps = 416, bins = 4;
     const std::string dir = (scratch_dir() / "mallard_phase_restart").string();
-    std::filesystem::remove_all(dir);
     auto run = [&](uint32_t steps, const std::string & phase, const std::string & from = "") {
         std::string input = oscillating(steps, "[statistics]\nt_start = 1.25\ninterval = 2\n"
                                                "[statistics.phase]\nfields = [\"U_X\", \"RHO\"]\nbins = 4\n" + phase);
@@ -259,6 +260,7 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
             input.replace(a, b - a, "[initialize]\ntype = \"restart\"\nfile = \"" + from + "\"\n");
         }
         auto solver = std::make_unique<Solver>();
+        solver->set_distributed(false);
         solver->init(parse_toml(input));
         solver->run();
         solver->copy_device_to_host();
@@ -274,7 +276,6 @@ TEST(PhaseAverageTest, BinsOfAnOscillatingFlowHoldTheMeansOfTheirSamples) {
     // window, carries the bins and the trigger's last crossings and sample
     run(200, trigger + "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 200\n");
     const auto continued = run(n_steps, trigger, dir + "/r_000200.restart");
-    std::filesystem::remove_all(dir);
 
     std::vector<double> sum(bins, 0.0), count(bins, 0.0);
     for (uint32_t k = 81; k <= n_steps / 2; k++) {
@@ -307,7 +308,6 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     // continues the averaged spectra (restart arrays) and the phase bins as if
     // uninterrupted, and leaves the solution unchanged
     const std::string dir = (scratch_dir() / "mallard_insitu_restart").string();
-    std::filesystem::remove_all(dir);
     const std::string periodic = N_DIM == 3 ? "[\"x\", \"z\"]" : "[\"x\"]";
     auto extra = [&](const std::string & sub, bool zlib = false) {
         return "[statistics]\nt_start = 0.01\ninterval = 3\n"
@@ -381,7 +381,6 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
     for (uint32_t c = 0; c < straight->get_mesh()->n_owned(); c++) {
         for (uint32_t bin = 0; bin < 3; bin++) EXPECT_EQ(pb.host_means()(c, bin), pa.host_means()(c, bin));
     }
-    std::filesystem::remove_all(dir);
 }
 
 namespace {

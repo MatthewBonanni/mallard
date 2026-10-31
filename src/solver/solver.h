@@ -24,6 +24,7 @@
 
 #include "mesh.h"
 #include "boundary.h"
+#include "boundary_fields.h"
 #include "face_reconstruction.h"
 #include "riemann_solver.h"
 #include "time_integrator.h"
@@ -39,6 +40,7 @@
 #include "data_writer.h"
 #include "probes.h"
 #include "statistics.h"
+#include "health_state.h"
 #include "synthetic_inflow.h"
 #include "source_terms.h"
 #include "wall_exchange.h"
@@ -102,6 +104,10 @@ struct DivergedError : std::exception {
 
 /** @brief Exit status of a run stopped on request (signal, `mallard ctl stop`, STOP file) after writing a restart. */
 constexpr int EXIT_STOPPED = 3;
+
+struct ViscousFluxFunctor;
+template <typename T_riemann_solver>
+struct ConvectiveFluxFunctor;
 
 class Solver {
     public:
@@ -244,6 +250,8 @@ class Solver {
         /** @brief Inside a captured step: the step's dt on the device. */
         const rtype * step_dt_device() const;
         void update_average_pressure_outlets(StateView solution);
+        /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
+        void set_stage_time(rtype t_stage, rtype c);
         /**
          * @brief Add the uniform body force along the mass flow direction that
          *        holds the volume average of rho u at its target: it cancels the
@@ -461,6 +469,8 @@ class Solver {
         rtype get_time() const { return t; }
         const Statistics & get_statistics() const { return statistics; }
         uint64_t get_step() const { return step; }
+        /** @brief Steps launched as a captured CUDA graph so far. */
+        uint64_t get_graph_steps() const { return graph_steps; }
         /** @brief Steps rejected by the error controller in this run. */
         uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
@@ -469,6 +479,13 @@ class Solver {
         const Input & resolved_input() const { return input; }
         /** @brief The numerics preset and the value and origin of each of its keys. */
         const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
+
+        /** @brief Test-only: errors injected into the update, for the conservation ledger's tests. */
+        void set_ledger_mutation(const LedgerMutation & m) { run_health.mutation = m; }
+        /** @brief The run health of the latest report (empty without [output] health). */
+        const health::Report & get_health() const { return run_health.last; }
+        /** @brief Collects the health report now, as a progress row does (collective). */
+        void report_health();
 
         /** @brief The solution: flow block and species partial densities. */
         State state() const { return State(conservatives, species); }
@@ -504,10 +521,9 @@ class Solver {
         void check_cost(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker);
         void check_settings(CheckReport & report) const;
         void init_run_parameters();
-        void init_output();
+        void init_output(region::Regions & regions);
         void init_solution();
         void init_solution_constant();
-        void init_solution_analytical();
         void init_solution_restart();
         /** @brief Remaps a restart file of another mesh ([initialize] type = "remap"). */
         void init_solution_remap();
@@ -516,10 +532,14 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
-        void update_boundary_states(rtype t_eval);
+        void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
+        /** @brief The faces' own conditions whose numbers depend on t, on the device at the stage time. */
+        void update_boundary_fields(rtype t_eval, rtype c);
+        /** @brief The faces' own conditions that depend on t, at the time in stage_time. */
+        void apply_boundary_fields();
         /**
          * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
          *        face for a mass_flux expression or an mdot with a profile,
@@ -527,8 +547,8 @@ class Solver {
          */
         std::vector<double> mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
                                                    BoundaryCondition & bc) const;
-        void init_sources();
-        void init_sponges();
+        void init_sources(region::Regions & regions);
+        void init_sponges(region::Regions & regions);
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const;
@@ -546,7 +566,15 @@ class Solver {
         void record_mesh_provenance() const;
         /** @brief Provenance lines of the CSV files and the run log's start record. */
         void write_provenance();
-        std::vector<std::string> integral_names() const;
+        // Run health (solver_health.cpp)
+        void init_health();
+        /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
+        void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
+        void health_summary() const;
+        /** @brief The columns of the integrals file after step and t, and their dimensions. */
+        std::vector<std::pair<std::string, Dimension>> integral_columns() const;
+        /** @brief Dimension of the cell measure: m^N_DIM (per unit depth in 2D); m^3 rad^-1 in axisymmetric runs. */
+        Dimension measure_dimension() const;
         template <typename F>
         void timed_phase(const std::string & name, F && f);
         void write_data(bool force = false);
@@ -557,10 +585,29 @@ class Solver {
         ProbeFields probe_fields();
 
     private:
+        /**
+         * @brief Runs f, a check of this rank's faces or cells; if it throws on
+         *        any rank, every rank throws the error of the first one
+         *        (collective), so that none waits in a later collective.
+         */
+        template <typename F>
+        static void on_every_rank(F && f) {
+            std::string error;
+            try {
+                f();
+            } catch (const std::exception & e) {
+                error = e.what();
+            }
+            if (const std::string first = comm::first_error(error); !first.empty()) throw InputError(first);
+        }
+        /** @brief Throws, on every rank, the error of a time-dependent boundary value that went out of range on any. */
+        void check_timed_boundaries() const;
+
         // Step graph (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
+        uint64_t graph_steps = 0;
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
         Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, requests, dt, reduced]
@@ -617,6 +664,8 @@ class Solver {
         rtype pressure_work_rate() const;
 
         template <typename T_riemann_solver>
+        ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
+        template <typename T_riemann_solver>
         void launch_flux_functor();
         template <typename T_riemann_solver>
         void launch_mixture_flux_functor();
@@ -625,6 +674,8 @@ class Solver {
         void init_mixture_boundaries(const std::vector<Input> & input_boundaries,
                                      const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
+        /** @brief Write the conditions' bc_Y, bc_thermo and bc_transport_values to the device. */
+        void copy_boundary_gas();
 
         Kokkos::View<uint32_t *> rhs_cells;  // reconstructed cells, the n_early_cells independent of the halo first
         uint32_t n_early_cells = 0;
@@ -692,6 +743,12 @@ class Solver {
         Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
         rtype t_boundary_states;
         bool boundary_states_steady = false;  // evaluated, and no expression depends on t
+        // The numbers of each input boundary, per face where they vary; for mixtures, the composition per input
+        // boundary where it depends on t; the faces' own conditions that depend on t, evaluated on the device
+        std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
+        std::vector<std::shared_ptr<CompositionPrograms>> boundary_composition;
+        std::vector<std::array<uint32_t, 3>> field_faces;  // (input boundary, face, its own condition)
+        TimedBoundaryFields timed_fields;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1_r;
@@ -842,6 +899,8 @@ class Solver {
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
         // Synthetic turbulence of inlets, and the time of the targets in char_target
         std::vector<std::unique_ptr<SyntheticInflow>> inflows;
+        // nscbc_inlet velocities depending on t
+        TimedInletTargets timed_inlets;
         rtype t_inflow = -1.0;
 
         // Checks
@@ -855,6 +914,7 @@ class Solver {
         IntegralMonitor integral_monitor;
         Statistics statistics;
         Probes probes;
+        HealthState run_health;
 };
 
 #endif // SOLVER_H

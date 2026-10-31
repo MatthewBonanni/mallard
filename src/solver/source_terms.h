@@ -27,6 +27,10 @@
 #include "mesh.h"
 #include "state.h"
 
+namespace region {
+class Regions;
+}
+
 namespace sources {
 
 /** @brief Variables of source expressions, by index; species follow. */
@@ -100,9 +104,10 @@ class SourceTerms {
          * @param input The input (reads [source] rho, rhou, rhoE and [[sources]]).
          * @param species Species names (empty for a single gas).
          * @param fields The cell fields the expressions read.
+         * @param regions The regions of the run, on mesh.
          */
         SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh,
-                    const std::vector<std::string> & species, const CellFields & fields);
+                    const std::vector<std::string> & species, const CellFields & fields, region::Regions & regions);
 
         bool empty() const { return m_empty; }
         /** @brief Whether some expression reads t (the stage time must be set on the device). */
@@ -143,6 +148,7 @@ class SourceTerms {
         Kokkos::View<rtype **, Kokkos::LayoutRight> static_field;  // (cell, column), per unit volume; empty if none
         Kokkos::View<double **, Kokkos::LayoutRight> weights;      // (row, cell)
         Kokkos::View<double *> means;
+        Kokkos::View<double *[N_MEANS + 1]> mean_terms;  // (cell, [volume, mean integrands])
         logging::Items m_summary;
 
 };

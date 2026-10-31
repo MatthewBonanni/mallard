@@ -66,7 +66,14 @@ With generated meshes, and with meshes converted to Mallard's HDF5 format (`mall
 
 ### Output
 
-Each rank writes the cells it owns as a piece, `<prefix>_<step>_p<rank>.vtu`, and rank 0 writes a `<prefix>_<step>.pvtu` that assembles them; the `.pvd` series points at the `.pvtu` files, so ParaView opens a parallel run exactly like a serial one:
+With the default VTKHDF output every rank writes the cells it owns into one shared file per snapshot, at their global places (parallel HDF5), so the files of a run are the same on any number of ranks:
+
+```text
+solut/r.vtkhdf.series
+solut/r_000100.vtkhdf
+```
+
+With `format = "vtu"` (and in builds without parallel HDF5) each rank writes the cells it owns as a piece, `<prefix>_<step>_p<rank>.vtu`, and rank 0 writes a `<prefix>_<step>.pvtu` that assembles them; the `.pvd` series points at the `.pvtu` files, so ParaView opens a parallel run exactly like a serial one:
 
 ```text
 solut/r.pvd
@@ -83,6 +90,8 @@ Boundary-zone output (`geometry = "<zone>"`) likewise holds each rank's own face
 Restart files have the same layout whatever the number of ranks, cells in global order, and each rank reads only its cells by global id. A run can therefore restart on a different number of ranks, or serially from a parallel run and vice versa: a run written at step 50 on 3 ranks and continued to step 100 on 2 ranks ends with a restart file identical to that of an uninterrupted serial run.
 
 ## Running on clusters
+
+The [Running on a cluster](../tutorials/cluster.md) tutorial goes through all of this on a case that runs on a laptop: sizing the run, a job script, the rank report, `mallard ctl`, and a stop and resume.
 
 ### Job scripts
 

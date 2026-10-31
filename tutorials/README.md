@@ -3,7 +3,7 @@
 The files of the step-by-step tutorials in [`docs/tutorials/`](../docs/tutorials/index.md)
 (on the website: *Tutorials*): one directory per tutorial with its Gmsh script (if any),
 input file and the Python scripts that set it up and draw its figures, and
-`common/` with what they share (figure style, mesh and VTU readers).
+`common/` with what they share (figure style, mesh and snapshot readers).
 
 | Directory | Tutorial |
 |---|---|
@@ -11,6 +11,7 @@ input file and the Python scripts that set it up and draw its figures, and
 | `cylinder/` | [Vortex shedding behind a cylinder](../docs/tutorials/cylinder.md) (2D, Gmsh) at Re = 100 against reference computations |
 | `cone/` | [Supersonic flow over a cone](../docs/tutorials/cone.md) (3D) against the Taylor-Maccoll solution |
 | `channel_les/` | [Channel LES](../docs/tutorials/channel_les.md): turbulent channel at Re_τ = 180 against DNS |
+| `cluster/` | [Running on a cluster](../docs/tutorials/cluster.md): a coarse double Mach reflection through the job scripts, stopped and resumed |
 
 `ci.sh` runs every tutorial at reduced size on two MPI ranks, as CI does, with the steps in each
 tutorial's own `ci.sh`, through the `mallard` of an install with both dimensions:

@@ -73,6 +73,5 @@ check_interval = 100
 
 [[write_data]]
 prefix = "./solut/sod"
-format = "vtu"
 time_interval = 0.02
 variables = ["RHO", "U_X", "P", "T"]

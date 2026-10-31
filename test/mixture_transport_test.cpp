@@ -53,7 +53,7 @@ std::string strip(uint32_t nx, double Lx, bool periodic) {
     s << std::setprecision(17) << "[mesh]\ntype = \"cartesian\"\nNx = " << nx << "\nNy = " << ny << "\nLx = " << Lx
       << "\nLy = " << ny * h << "\n";
     if (N_DIM == 3) s << "Nz = 1\nLz = " << h << "\n";
-    if (periodic) s << "periodic = [\"x\", \"y\"]\n";
+    if (periodic) s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
     const char * zones[] = {"left", "right", "bottom", "top", "back", "front"};
     for (int k = periodic ? 4 : 0; k < 2 * N_DIM; k++) {
         s << "[[boundaries]]\nname = \"" << zones[k] << "\"\ntype = \"symmetry\"\n";
@@ -87,6 +87,7 @@ double sine_amplitude(const Profile & p, double L) {
 
 /** @brief Run to completion and refresh the host copies. */
 void run(Solver & solver, const std::string & input) {
+    solver.set_distributed(false);  // the checks are over this rank's cells
     solver.init(parse_toml(input));
     solver.run();
     solver.update_primitives();
@@ -115,8 +116,9 @@ std::string channel(uint32_t ny, double Ly, const std::string & bottom, const st
     std::ostringstream s;
     const double h = Ly / ny;
     s << std::setprecision(17) << "[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = " << ny << "\nLx = " << 3 * h
-      << "\nLy = " << Ly << "\nperiodic = [\"x\"]\n";
+      << "\nLy = " << Ly << "\n";
     if (N_DIM == 3) s << "Nz = 1\nLz = " << h << "\n";
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n";
     s << "[[boundaries]]\nname = \"bottom\"\n" << bottom << "[[boundaries]]\nname = \"top\"\n" << top;
     if (N_DIM == 3) {
         s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
@@ -502,6 +504,7 @@ TEST(MixtureTransportTest, WallsAreImpermeableToEverySpecies) {
         std::string text = input.str();
         text.insert(text.find("[physics]\n") + 10, "phase = \"hydrogen\"\n");
         Solver solver;
+        solver.set_distributed(false);
         solver.init(parse_toml(text));
         const std::vector<rtype> before = solver.integrate_species();
         const auto energy_before = solver.integrate_conservatives();

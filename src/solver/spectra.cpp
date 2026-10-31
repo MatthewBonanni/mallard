@@ -22,8 +22,11 @@
 #include <sstream>
 
 #include "comm.h"
+#include "common_io.h"
+#include "field_units.h"
 #include "input.h"
 #include "log.h"
+#include "mesh.h"
 #include "mesh_block.h"
 #include "provenance.h"
 #include "statistics.h"
@@ -151,7 +154,11 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     }
     const Stretching stretching = mesh_stretching(input);
     std::vector<std::string> periodic;
-    if (input.at("mesh").contains("periodic")) periodic = find_value<std::vector<std::string>>(input, "mesh", "periodic");
+    for (const Mesh::PeriodicPair & pair : Mesh::periodic_pairs(input)) {
+        for (size_t d = 0; d < N_DIM; d++) {
+            if (pair.translation[d] != 0.0_r) periodic.push_back(std::string(1, static_cast<char>('x' + d)));
+        }
+    }
     std::vector<std::string> names =
         find_value_or<std::vector<std::string>>(table, "directions", periodic);
     for (const auto & name : names) {
@@ -727,10 +734,9 @@ void Spectra::write(uint64_t step, rtype t) const {
 }
 
 void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const {
-    const std::filesystem::path parent = std::filesystem::path(name).parent_path();
-    if (!parent.empty()) std::filesystem::create_directories(parent);
+    create_parent_directories("the spectra file", name);
     std::ofstream out(name);
-    if (!out.good()) throw std::runtime_error("Could not open " + name + ".");
+    if (!out.good()) throw cannot_write("the spectra file", name);
     out << provenance::csv_comment() << "\n";
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     out << "# step = " << step << ", t = " << double(t) << ", samples = " << n_samples << ", weight = " << weight
@@ -741,7 +747,15 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
     }
     out << "quantity,a,b,direction,position";
     for (size_t d : inhomogeneous) out << "," << AXES[d];
-    out << ",index,abscissa,value\n";
+    out << ",index,abscissa,value,units\n";
+    // The value's units: a mean's are its field's; spectra (sums, not densities) and correlations, the product's
+    std::vector<std::string> units(fields.size()), pair_units(pairs.size());
+    for (size_t f = 0; f < fields.size(); f++) units[f] = field_units::describe(fields[f]).units();
+    for (size_t p = 0; p < pairs.size(); p++) {
+        pair_units[p] = field_units::describe(fields[pairs[p].first])
+                            .dimension.times(field_units::describe(fields[pairs[p].second]).dimension)
+                            .udunits();
+    }
     auto position = [&](uint32_t pos) {
         std::ostringstream s;
         s << std::setprecision(std::numeric_limits<double>::max_digits10) << pos;
@@ -757,7 +771,7 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
     for (uint32_t pos = 0; pos < n_pos; pos++) {
         const std::string where = position(pos);
         for (uint32_t f = 0; f < fields.size(); f++) {
-            out << "mean," << fields[f] << ",,," << where << ",,," << mean(pos, f) << "\n";
+            out << "mean," << fields[f] << ",,," << where << ",,," << mean(pos, f) << "," << units[f] << "\n";
         }
         for (uint32_t p = 0; p < pairs.size(); p++) {
             const std::string ab = fields[pairs[p].first] + "," + fields[pairs[p].second];
@@ -766,12 +780,12 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
                 const std::vector<double> E = spectrum(pos, p, h);
                 for (uint32_t k = 0; k < E.size(); k++) {
                     out << "spectrum," << ab << "," << AXES[d] << "," << where << "," << k << ","
-                        << 2.0 * M_PI * k / L[d] << "," << E[k] << "\n";
+                        << 2.0 * M_PI * k / L[d] << "," << E[k] << "," << pair_units[p] << "\n";
                 }
                 const std::vector<double> R = correlation(pos, p, h);
                 for (uint32_t m = 0; m < R.size(); m++) {
                     out << "correlation," << ab << "," << AXES[d] << "," << where << "," << m << ","
-                        << L[d] * m / N[d] << "," << R[m] << "\n";
+                        << L[d] * m / N[d] << "," << R[m] << "," << pair_units[p] << "\n";
                 }
             }
         }
@@ -780,7 +794,8 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
         const std::string ab = fields[pairs[p].first] + "," + fields[pairs[p].second];
         const std::vector<double> E = shell(p);
         for (uint32_t s = 0; s < n_shells; s++) {
-            out << "shell," << ab << ",k," << position(0) << "," << s << "," << s * dk << "," << E[s] << "\n";
+            out << "shell," << ab << ",k," << position(0) << "," << s << "," << s * dk << "," << E[s] << ","
+                << pair_units[p] << "\n";
         }
     }
 }

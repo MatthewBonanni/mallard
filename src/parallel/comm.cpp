@@ -95,6 +95,35 @@ std::string broadcast(const std::string & value) {
     return out;
 }
 
+std::string first_error(const std::string & error) {
+    const int n_ranks = size();
+    int from = error.empty() ? n_ranks : rank();
+    check(MPI_Allreduce(MPI_IN_PLACE, &from, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD), "MPI_Allreduce");
+    if (from == n_ranks) return "";
+    uint64_t n = error.size();
+    check(MPI_Bcast(&n, 1, MPI_UINT64_T, from, MPI_COMM_WORLD), "MPI_Bcast");
+    std::string out = rank() == from ? error : std::string(n, '\0');
+    check(MPI_Bcast(out.data(), static_cast<int>(n), MPI_CHAR, from, MPI_COMM_WORLD), "MPI_Bcast");
+    return out;
+}
+
+std::vector<std::string> allgather(const std::string & value) {
+    const size_t p = static_cast<size_t>(size());
+    int n_local = static_cast<int>(value.size());
+    std::vector<int> counts(p), displs(p + 1, 0);
+    check(MPI_Allgather(&n_local, 1, MPI_INT, counts.data(), 1, MPI_INT, MPI_COMM_WORLD), "MPI_Allgather");
+    for (size_t r = 0; r < p; r++) displs[r + 1] = displs[r] + counts[r];
+    std::string all(static_cast<size_t>(displs[p]), '\0');
+    check(MPI_Allgatherv(value.data(), n_local, MPI_CHAR, all.data(), counts.data(), displs.data(), MPI_CHAR,
+                         MPI_COMM_WORLD),
+          "MPI_Allgatherv");
+    std::vector<std::string> out(p);
+    for (size_t r = 0; r < p; r++) {
+        out[r] = all.substr(static_cast<size_t>(displs[r]), static_cast<size_t>(counts[r]));
+    }
+    return out;
+}
+
 void abort(int code) {
     int initialized = 0, finalized = 0;
     MPI_Initialized(&initialized);
@@ -204,6 +233,8 @@ int rank() { return 0; }
 int size() { return 1; }
 void barrier() {}
 std::string broadcast(const std::string & value) { return value; }
+std::string first_error(const std::string & error) { return error; }
+std::vector<std::string> allgather(const std::string & value) { return {value}; }
 
 void abort(int code) { std::exit(code); }
 

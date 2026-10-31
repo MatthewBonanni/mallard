@@ -110,6 +110,16 @@ Received<T> exchange(std::vector<std::vector<T>> && send);
  */
 std::string broadcast(const std::string & value);
 
+/** @brief Every rank's string, in rank order, on every rank (collective). */
+std::vector<std::string> allgather(const std::string & value);
+
+/**
+ * @brief The error of the lowest rank that has one (non-empty), on every rank;
+ *        empty if none has. For checks of rank-local data, so that every rank
+ *        throws and none waits in a later collective.
+ */
+std::string first_error(const std::string & error);
+
 /**
  * @brief Concatenation of every rank's local vector, in rank order.
  */

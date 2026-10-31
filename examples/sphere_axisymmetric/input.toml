@@ -75,6 +75,5 @@ file = "./solut/forces_sphere.csv"
 
 [[write_data]]
 prefix = "./solut/sphere"
-format = "vtu"
 time_interval = 10.0
 variables = ["RHO", "U_X", "U_Y", "P"]

@@ -1,8 +1,8 @@
 """Average the [statistics] fields of a run over homogeneous directions.
 
-    python tools/post/plane_average.py FLOW.pvtu --average x z [--out profile.csv]
+    python tools/post/plane_average.py FLOW.vtkhdf --average x z [--out profile.csv]
 
-Reads a VTU or PVTU snapshot holding MEAN_<field> and COV_<a>_<b> arrays
+Reads a snapshot (VTKHDF, VTU or PVTU) holding MEAN_<field> and COV_<a>_<b> arrays
 (written by [statistics]) of a mesh of axis-aligned quads or hexahedra, such as
 the generated `cartesian` meshes (stretched or not), and averages them over the
 listed directions as a function of the others: cells are grouped by their
@@ -31,7 +31,7 @@ AXES = "xyz"
 
 
 def read_cells(path):
-    """Cell centers, volumes (axis-aligned boxes) and statistics arrays of a VTU or all pieces of a PVTU."""
+    """Cell centers, volumes (axis-aligned boxes) and statistics arrays of a snapshot, or all pieces of a PVTU."""
     if path.endswith(".pvtu"):
         pieces = re.findall(r'Source="([^"]+)"', open(path).read())
         parts = [read_cells(os.path.join(os.path.dirname(path), p)) for p in pieces]
@@ -117,7 +117,7 @@ def plane_average(centers, volumes, stats, average, rtol=1e-6):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("snapshot", help="VTU or PVTU file with MEAN_ and COV_ arrays")
+    ap.add_argument("snapshot", help="VTKHDF, VTU or PVTU file with MEAN_ and COV_ arrays")
     ap.add_argument("--average", nargs="+", required=True, choices=list(AXES), help="homogeneous directions")
     ap.add_argument("--rtol", type=float, default=1e-6,
                     help="relative tolerance for equal cell-center coordinates (default 1e-6)")

@@ -25,6 +25,7 @@
 #include "solver.h"
 #include "scratch.h"
 #include "test_fixtures.h"
+#include "test_utils.h"
 #include "wall_exchange.h"
 #include "wall_model.h"
 
@@ -290,7 +291,7 @@ std::string channel_input(const std::string & mesh, const uint32_t n[3], const s
     std::ostringstream s;
     s << "[run]\n" << run
       << "[mesh]\ntype = \"" << mesh << "\"\nNx = " << n[0] << "\nNy = " << n[1] << "\nNz = " << n[2]
-      << "\nLx = 1.0\nLy = 1.0\nLz = 0.6\nperiodic = [\"x\", \"z\"]\n"
+      << "\nLx = 1.0\nLy = 1.0\nLz = 0.6\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
       << "[initialize]\n" << init
       << "[[boundaries]]\nname = \"bottom\"\n" << bottom
       << "[[boundaries]]\nname = \"top\"\n" << top
@@ -318,7 +319,7 @@ TEST(WallModel3D, ExchangePointsOnEveryCellType) {
     for (const std::string type : {"cartesian", "cartesian_tet", "cartesian_prism", "cartesian_pyramid",
                                    "cartesian_mixed"}) {
         auto input = parse_toml("[mesh]\ntype = \"" + type +
-                                "\"\nNx = 6\nNy = 7\nNz = 5\nLx = 1.0\nLy = 1.0\nLz = 0.6\nperiodic = [\"x\", \"z\"]\n");
+                                "\"\nNx = 6\nNy = 7\nNz = 5\nLx = 1.0\nLy = 1.0\nLz = 0.6\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n");
         Mesh mesh;
         mesh.init(input);
         std::vector<int32_t> face_bc(mesh.n_faces, -1);
@@ -386,6 +387,7 @@ namespace {
 std::unique_ptr<Solver> modeled_couette(const std::string & mesh, const std::string & bottom) {
     const uint32_t n[3] = {3, 8u, 3};
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(channel_input(
         mesh, n, bottom, "type = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0, 0.0]\n",
         "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.1 * y + 0.02 * sin(3.14159265 * y)\", \"0.0\", \"0.0\"]\np = \"1.0\"\n", "t_stop = 4.0\ncfl = 0.4\n")));
@@ -420,12 +422,33 @@ TEST(WallModel3D, LaminarCouetteFlowOverAModeledWall) {
     }
 }
 
+// A modeled wall whose velocity is given as expressions gets a condition per
+// face; each keeps the wall model of its boundary. Fails if the per-face copies
+// lose the model's parameters.
+TEST(WallModel3D, ExpressionVelocityKeepsTheModel) {
+    const uint32_t n[3] = {3, 8u, 3};
+    auto run = [&](const std::string & u) {
+        Solver solver;
+        solver.init(parse_toml(channel_input(
+            "cartesian", n, MODELED_GFM + "u = " + u + "\n", "type = \"wall_isothermal\"\nT = 1.0\nu = [0.1, 0.0, 0.0]\n",
+            "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.1 * y\", \"0.0\", \"0.0\"]\np = \"1.0\"\n", "n_steps = 20\ncfl = 0.4\n")));
+        solver.run();
+        solver.copy_device_to_host();
+        return solver.calc_force(solver.get_mesh()->get_face_zone("bottom")->faces);
+    };
+    const auto numbers = run("[-0.05, 0.0, 0.0]");
+    const auto expressions = run("[\"-0.05 + 0 * x\", \"0 * y\", \"0 * z\"]");
+    EXPECT_GT(std::abs(double(numbers[3])), 1e-4);
+    for (size_t i = 0; i < numbers.size(); i++) {
+        EXPECT_NEAR(double(expressions[i]), double(numbers[i]), roundoff(1e-12)) << i;
+    }
+}
+
 // A restarted wall-modeled run reproduces the uninterrupted one bitwise: the
 // models keep no state. Fails if a model or the exchange data came to depend
 // on anything but the state (e.g. a filtered input without restart data).
 TEST(WallModel3D, RestartIsExact) {
     const std::string dir = (scratch_dir() / "mallard_wall_model_restart").string();
-    std::filesystem::remove_all(dir);
     const uint32_t n[3] = {4, 6, 3};
     const std::string init = "type = \"analytical\"\nrho = \"1.0 + 0.1 * sin(6.283 * x)\"\n"
                              "u = [\"0.5 + 0.1 * sin(6.283 * z)\", \"0.05 * sin(6.283 * x)\", \"0.0\"]\np = \"1.0\"\n";
@@ -452,7 +475,6 @@ TEST(WallModel3D, RestartIsExact) {
             ASSERT_EQ(second.h_conservatives(i, v), straight.h_conservatives(i, v)) << "cell " << i;
         }
     }
-    std::filesystem::remove_all(dir);
 }
 
 #endif
