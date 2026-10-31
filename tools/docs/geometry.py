@@ -645,7 +645,10 @@ Nx = {n}
 Ny = {n}
 Lx = 1.0
 Ly = 1.0
-periodic = ["x", "y"]
+[[periodic]]
+zones = ["left", "right"]
+[[periodic]]
+zones = ["bottom", "top"]
 [initialize]
 type = "analytical"
 rho = "{SINE_RHO}"

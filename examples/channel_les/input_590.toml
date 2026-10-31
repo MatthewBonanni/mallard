@@ -41,7 +41,12 @@ Lx = 6.283185307179586
 Ly = 2.0
 Lz = 3.141592653589793
 stretching = [0.0, 2.5, 0.0]
-periodic = ["x", "z"]
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["back", "front"]
 
 [initialize]
 type = "restart"

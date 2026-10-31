@@ -228,7 +228,7 @@ TEST(Boundary3DTest, CharacteristicNeighborsContinueAcrossPeriodicSeams) {
     // turbulence leaving through it
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 3\nNy = 4\nNz = 5\nLx = 1.5\nLy = 1.0\nLz = 2.0\n"
-                          "periodic = [\"y\", \"z\"]\n"));
+                          "[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"));
     mesh->copy_host_to_device();
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::NSCBC_OUTLET);
     auto h_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bd.char_faces);

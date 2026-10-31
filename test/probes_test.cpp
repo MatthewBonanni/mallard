@@ -70,8 +70,8 @@ std::string box_case(uint32_t n, const std::string & rho, const std::string & re
                      const std::string & run = "n_steps = 1\ndt = 1.0e-6\n") {
     std::ostringstream s;
     s << "[run]\n" << run << "[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n << "\nLx = 1.0\nLy = 1.0\n";
-    if (N_DIM == 3) s << "Nz = " << std::max(n / 2, 3u) << "\nLz = 1.0\nperiodic = [\"x\", \"y\", \"z\"]\n";
-    else s << "periodic = [\"x\", \"y\"]\n";
+    if (N_DIM == 3) s << "Nz = " << std::max(n / 2, 3u) << "\nLz = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    else s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
     s << "[initialize]\ntype = \"analytical\"\nrho = \"" << rho << "\"\nu = " << vector3("0.3", "-0.1", "0.2")
       << "\np = \"1.0\"\n[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
       << "[numerics.face_reconstruction]\n" << recon << PERFECT_GAS << "[output]\ncheck_interval = 1000000\n" << extra;
@@ -534,8 +534,8 @@ std::string couette_case(uint32_t n, const std::string & extra, const std::strin
       << COUETTE_MU * COUETTE_U * COUETTE_U / (2.0 * COUETTE_KAPPA) << " * y * (1 - y)";
     std::ostringstream s;
     s << "[run]\n" << run << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = " << n << "\nLx = 1.0\nLy = 1.0\n";
-    if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\nperiodic = [\"x\", \"z\"]\n";
-    else s << "periodic = [\"x\"]\n";
+    if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    else s << "[[periodic]]\nzones = [\"left\", \"right\"]\n";
     s << "[initialize]\ntype = \"analytical\"\nrho = \"1 / (" << T.str() << ")\"\nu = " << vector3("0.5 * y", "0", "0")
       << "\np = \"1.0\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = " << COUETTE_T0 << "\n"
@@ -649,7 +649,7 @@ TEST(ProbesTest, InletAndOutletFluxesHaveTheBoundaryStates) {
     const std::string dir = fresh_dir("fluxes");
     std::ostringstream s;
     s << "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 4\nLx = 2.0\nLy = 1.0\n";
-    if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\nperiodic = [\"z\"]\n";
+    if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
     s << "[initialize]\ntype = \"constant\"\nu = " << numbers3("0.3", "0", "0") << "\np = 1.0\nT = 1.0\n"
       << "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = " << numbers3("0.3", "0", "0") << "\np = 1.0\nT = 1.0\n"
       << "[[boundaries]]\nname = \"right\"\ntype = \"p_out\"\np = 1.0\n"
@@ -814,7 +814,7 @@ TEST(ProbesTest, AxisymmetricRunsKeepPerRadianIntegralsOnBoundaries) {
     // curves sample, but take no fluxes and (cut planes) no reductions
     auto input = [](const std::string & probe) {
         return "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n"
-               "periodic = [\"x\"]\n[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\n"
+               "[[periodic]]\nzones = [\"left\", \"right\"]\n[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\n"
                "type = \"wall_adiabatic\"\n[initialize]\ntype = \"constant\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\n"
                "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n" +
                PERFECT_GAS + "axisymmetric = true\n[output]\ncheck_interval = 1000000\n[[probes]]\nname = \"p\"\n" +
@@ -887,13 +887,13 @@ TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMass) {
                 points << (weights.empty() ? "" : ", ") << "[" << c[0] + r * std::cos(phi) << ", "
                        << c[1] + r * std::sin(phi) << "]";
                 weights.push_back(w * r);
-                continue;
-            }
-            for (const auto & [mu, wmu] : polar) {
-                const double s = std::sqrt(1.0 - mu * mu);
-                points << (weights.empty() ? "" : ", ") << "[" << c[0] + r * s * std::cos(phi) << ", "
-                       << c[1] + r * s * std::sin(phi) << ", " << c[2] + r * mu << "]";
-                weights.push_back(w * r * r * wmu);
+            } else {
+                for (const auto & [mu, wmu] : polar) {
+                    const double s = std::sqrt(1.0 - mu * mu);
+                    points << (weights.empty() ? "" : ", ") << "[" << c[0] + r * s * std::cos(phi) << ", "
+                           << c[1] + r * s * std::sin(phi) << ", " << c[2] + r * mu << "]";
+                    weights.push_back(w * r * r * wmu);
+                }
             }
         }
     }

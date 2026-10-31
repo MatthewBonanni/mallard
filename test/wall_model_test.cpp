@@ -291,7 +291,7 @@ std::string channel_input(const std::string & mesh, const uint32_t n[3], const s
     std::ostringstream s;
     s << "[run]\n" << run
       << "[mesh]\ntype = \"" << mesh << "\"\nNx = " << n[0] << "\nNy = " << n[1] << "\nNz = " << n[2]
-      << "\nLx = 1.0\nLy = 1.0\nLz = 0.6\nperiodic = [\"x\", \"z\"]\n"
+      << "\nLx = 1.0\nLy = 1.0\nLz = 0.6\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"
       << "[initialize]\n" << init
       << "[[boundaries]]\nname = \"bottom\"\n" << bottom
       << "[[boundaries]]\nname = \"top\"\n" << top
@@ -319,7 +319,7 @@ TEST(WallModel3D, ExchangePointsOnEveryCellType) {
     for (const std::string type : {"cartesian", "cartesian_tet", "cartesian_prism", "cartesian_pyramid",
                                    "cartesian_mixed"}) {
         auto input = parse_toml("[mesh]\ntype = \"" + type +
-                                "\"\nNx = 6\nNy = 7\nNz = 5\nLx = 1.0\nLy = 1.0\nLz = 0.6\nperiodic = [\"x\", \"z\"]\n");
+                                "\"\nNx = 6\nNy = 7\nNz = 5\nLx = 1.0\nLy = 1.0\nLz = 0.6\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n");
         Mesh mesh;
         mesh.init(input);
         std::vector<int32_t> face_bc(mesh.n_faces, -1);

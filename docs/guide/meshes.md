@@ -10,8 +10,8 @@ which `[[boundaries]]` assigns a condition to.
 The spatial dimension is a build option (`-DMallard_DIM=2`, the default, or
 `3`): one solver per dimension, `mallard2d` and `mallard3d`, with the same input
 keys. `mallard` runs the one a case needs, by its mesh: a mesh file's own
-dimension, and for a generated mesh 3D when `[mesh]` sets `Nz` or `Lz` (or
-`periodic` has `z`, or the type has 3D cells). `mallard --dim 2|3 -i input.toml`
+dimension, and for a generated mesh 3D when `[mesh]` sets `Nz` or `Lz` (or a
+`[[periodic]]` pair joins `back` and `front`, or the type has 3D cells). `mallard --dim 2|3 -i input.toml`
 states it.
 
 ## Generated meshes
@@ -54,7 +54,8 @@ hexahedra, pyramids and prisms in successive thirds of x):
 | `Nx`, `Ny`, `Nz` | 100 | Cells (2D) or blocks (3D) along each axis |
 | `Lx`, `Ly`, `Lz` | 1.0 | Domain size |
 | `stretching` | zeros | One factor per axis clustering nodes toward both ends |
-| `periodic` | none | Directions joined periodically, e.g. `["x", "z"]`; `annulus`: `"theta"`, `"z"` |
+
+Opposite sides are joined with [`[[periodic]]`](#periodic-boundaries).
 
 ### Stretching
 
@@ -85,7 +86,12 @@ Lx = 12.566370614359172
 Ly = 2.0
 Lz = 4.1887902047863905
 stretching = [0.0, 1.7, 0.0]   # cells at the walls ~8x thinner than at the center
-periodic = ["x", "z"]
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["back", "front"]
 ```
 
 ![Uniform and stretched node spacing across a channel](../images/guide/stretching-light.svg#gh-light-mode-only)
@@ -98,7 +104,9 @@ periodic = ["x", "z"]
 type = "cartesian"
 Nx = 64
 Ny = 64
-periodic = ["x"]     # left and right joined
+
+[[periodic]]
+zones = ["left", "right"]     # joined; the mesh gives the translation, [Lx, 0]
 ```
 
 *Used in:* [`rotational_sector`](https://matthewbonanni.github.io/mallard/docs/examples/#rotational-sector), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180) and 10 more.
@@ -110,12 +118,17 @@ seam as the inside of the domain, and the zones disappear from
 ![A periodic seam: the cells of zone A are translated next to zone B, so the faces of the seam become interior faces](../images/guide/periodic-light.svg#gh-light-mode-only)
 ![A periodic seam: the cells of zone A are translated next to zone B, so the faces of the seam become interior faces](../images/guide/periodic-dark.svg#gh-dark-mode-only)
 
-- **Generated meshes:** `periodic = ["x", "y"]` in `[mesh]` joins
-  `left`/`right`, `bottom`/`top` and (3D, `"z"`) `back`/`front`. Not for
-  `wedge`.
-- **Mesh files:** pair zones with `[[periodic]]`; zone B must be zone A
-  translated node for node (to 1e-6 of the zones' shortest edge), as Gmsh's
-  `Periodic` constraint makes it. A node without a partner is reported with
+Each `[[periodic]]` entry pairs two zones, `zones = [A, B]`, of any mesh: zone
+B must be zone A translated by `translation` (B = A + translation), or rotated
+by `angle` ([below](#rotational-periodicity)), node for node (to 1e-6 of the
+zones' shortest edge).
+
+- **Generated meshes:** opposite sides need neither. `["left", "right"]`,
+  `["bottom", "top"]` and (3D) `["back", "front"]` are the box length apart,
+  and the annulus' `["start", "end"]` its `angle`. A `translation` or `angle`
+  given anyway must match the mesh. Not for `wedge`.
+- **Mesh files:** give the `translation` (or `angle`); Gmsh's `Periodic`
+  constraint makes matching zones. A node without a partner is reported with
   its coordinates.
 
 ```toml
@@ -128,16 +141,28 @@ zones = ["left", "right"]
 translation = [1.0, 0.0]     # B = A + translation
 ```
 
+| Key | Default | Meaning |
+|---|---|---|
+| `zones` | required | `[A, B]`, the two zones |
+| `translation` | generated meshes: from the mesh | B = A + translation, `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) |
+| `angle` | generated `annulus`: from the mesh | Instead of `translation`: degrees from A to B ([below](#rotational-periodicity)) |
+
 Each periodic direction needs at least 3 cells, and each zone joins at most
 one pair. Periodic meshes work in distributed runs, and with every
 reconstruction ([design order across seams](https://matthewbonanni.github.io/mallard/validation/#periodic-seams)).
+
+Before 0.9.0, generated meshes took `periodic = ["x", "z"]` in `[mesh]`; it
+still works until 0.10.0, with a warning, and `mallard input upgrade`
+rewrites it into `[[periodic]]` entries (`x`: `left`/`right`, `y`:
+`bottom`/`top`, `z`: `back`/`front`, `theta`: `start`/`end`).
 
 ### Rotational periodicity
 
 Sectors of annular combustors or blade rows are periodic through a rotation:
 zone B is zone A turned by `angle` degrees about an axis. Give `angle`
 instead of `translation` (with `center`, a point of the axis, and in 3D
-`axis`); the generated `annulus` mesh takes `periodic = ["theta"]`.
+`axis`); on the generated `annulus`, `zones = ["start", "end"]` needs no
+angle.
 Velocity, momentum and gradients turn across the seam; density, pressure,
 temperature, species and scalars carry over unchanged.
 

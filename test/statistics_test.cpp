@@ -34,7 +34,7 @@ std::string box(uint32_t n, bool periodic) {
     std::ostringstream s;
     s << "[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n << "\nLx = 1.0\nLy = 1.0\n";
     if (N_DIM == 3) s << "Nz = " << std::max(n / 2, 3u) << "\nLz = 1.0\n";
-    if (periodic) s << (N_DIM == 2 ? "periodic = [\"x\", \"y\"]\n" : "periodic = [\"x\", \"y\", \"z\"]\n");
+    if (periodic) s << (N_DIM == 2 ? "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n");
     return s.str();
 }
 
