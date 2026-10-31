@@ -6,6 +6,8 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
    "examples/channel_les/input_590.toml",
@@ -31,6 +33,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
@@ -59,21 +62,6 @@
   ],
   "type": "array"
  },
- "boundaries.L": {
-  "dimension": "length (m)",
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/channel_inflow_retau180/input.toml",
-   "examples/flame_outflow/input.toml",
-   "examples/forced_inlet/input.toml",
-   "examples/turbulent_inflow_duct/input.toml"
-  ],
-  "type": "number"
- },
  "boundaries.T": {
   "dimension": "temperature (K)",
   "dims": [
@@ -82,6 +70,8 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
    "examples/channel_les/input_590.toml",
@@ -228,6 +218,17 @@
   ],
   "type": "number"
  },
+ "boundaries.average": {
+  "default": "false",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/average_outlet/input.toml"
+  ],
+  "type": "bool"
+ },
  "boundaries.balance": {
   "dims": [
    2,
@@ -235,20 +236,10 @@
   ],
   "set_in": []
  },
- "boundaries.beta": {
+ "boundaries.direction": {
   "dims": [
    2,
    3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/channel_inflow_retau180/input.toml"
-  ],
-  "type": "number"
- },
- "boundaries.direction": {
-  "dims": [
-   2
   ],
   "set_in": []
  },
@@ -281,6 +272,8 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
    "examples/channel_les/input_590.toml",
@@ -306,6 +299,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
@@ -334,6 +328,69 @@
   ],
   "type": "string"
  },
+ "boundaries.nscbc": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/flame_outflow/input.toml",
+   "examples/forced_inlet/input.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ]
+ },
+ "boundaries.nscbc.L": {
+  "dimension": "length (m)",
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/flame_outflow/input.toml",
+   "examples/forced_inlet/input.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ],
+  "type": "number"
+ },
+ "boundaries.nscbc.beta": {
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/channel_inflow_retau180/input.toml"
+  ],
+  "type": "number"
+ },
+ "boundaries.nscbc.sigma": {
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/forced_inlet/input.toml"
+  ],
+  "type": "number"
+ },
+ "boundaries.nscbc.sigma_T": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "boundaries.nscbc.sigma_t": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "boundaries.p": {
   "dimension": "pressure (kg m^-1 s^-2)",
   "dims": [
@@ -342,6 +399,8 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/double_mach/input.toml",
    "examples/flame_2d/input.toml",
@@ -375,6 +434,17 @@
   ],
   "set_in": []
  },
+ "boundaries.q": {
+  "dimension": "heat flux (kg s^-3)",
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/heated_wall/input.toml"
+  ],
+  "type": "number"
+ },
  "boundaries.rho": {
   "dims": [
    2
@@ -385,31 +455,6 @@
    "examples/shu_osher/input.toml",
    "tutorials/cluster/input.toml"
   ]
- },
- "boundaries.sigma": {
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/forced_inlet/input.toml"
-  ],
-  "type": "number"
- },
- "boundaries.sigma_T": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
- },
- "boundaries.sigma_t": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
  },
  "boundaries.turbulence": {
   "dims": [
@@ -485,6 +530,8 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
    "examples/channel_les/input_590.toml",
@@ -510,6 +557,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
@@ -539,16 +587,13 @@
   "type": "string",
   "values": [
    "dirichlet",
-   "extrapolation",
    "farfield",
-   "mass_flow_inlet",
-   "nscbc_inlet",
-   "nscbc_outlet",
-   "p_out",
-   "p_out_average",
-   "stagnation_inlet",
+   "inlet_mass_flow",
+   "inlet_stagnation",
+   "inlet_state",
+   "outlet_extrapolation",
+   "outlet_pressure",
    "symmetry",
-   "upt",
    "wall_adiabatic",
    "wall_heat_flux",
    "wall_isothermal"
@@ -560,6 +605,8 @@
    3
   ],
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/double_mach/input.toml",
    "examples/flame_2d/input.toml",
    "examples/flame_2d/unity/input.toml",
@@ -931,6 +978,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -956,6 +1005,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -999,6 +1049,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/source_regions/input.toml",
@@ -1296,9 +1347,9 @@
   "type": "string"
  },
  "initialize.n_subdivisions": {
-  "default": "1",
+  "default": "4",
   "defaults_by_dim": {
-   "2": "4"
+   "3": "1"
   },
   "dims": [
    2,
@@ -1318,12 +1369,15 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/explosion_3d/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/reactive_shock_tube/input.toml",
@@ -1549,6 +1603,8 @@
    3
   ],
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/explosion_3d/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/riemann_2d/input.toml",
@@ -1572,6 +1628,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -1597,6 +1655,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -1642,12 +1701,15 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/explosion_3d/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/forced_inlet/input.toml",
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/reactive_shock_tube/input.toml",
@@ -1936,6 +1998,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -1964,6 +2028,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2006,6 +2071,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -2034,6 +2101,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2073,6 +2141,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -2101,6 +2171,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2193,6 +2264,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -2220,6 +2293,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2258,6 +2332,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -2285,6 +2361,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2432,6 +2509,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -2460,6 +2539,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2512,6 +2592,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -2540,6 +2622,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2662,6 +2745,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -2687,6 +2772,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2919,6 +3005,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -2944,6 +3032,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3029,6 +3118,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -3054,6 +3145,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3167,6 +3259,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -3192,6 +3286,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3239,6 +3334,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -3264,6 +3361,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3420,6 +3518,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -3447,6 +3547,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3495,6 +3596,7 @@
    "examples/channel_wmles/tl_m1.7.toml",
    "examples/channel_wmles/tl_m3.0.toml",
    "examples/flame_turbulence/hit.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/taylor_green_3d/coarse.toml",
@@ -3526,6 +3628,8 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -3542,6 +3646,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3588,6 +3693,8 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -3604,6 +3711,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3715,6 +3823,7 @@
    "examples/channel_wmles/tl_m1.7.toml",
    "examples/channel_wmles/tl_m3.0.toml",
    "examples/flame_turbulence/hit.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/taylor_green_3d/coarse.toml",
@@ -3733,6 +3842,8 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -3749,6 +3860,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3805,6 +3917,8 @@
   ],
   "required": true,
   "set_in": [
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -3821,6 +3935,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -3887,6 +4002,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -3914,6 +4031,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -4403,6 +4521,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -4431,6 +4551,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -4472,6 +4593,8 @@
   "required": true,
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -4500,6 +4623,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -4595,6 +4719,8 @@
   ],
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -4623,6 +4749,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -5063,6 +5190,8 @@
   "required": true,
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -5088,6 +5217,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -5147,6 +5277,8 @@
   "required": true,
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -5162,6 +5294,7 @@
    "examples/flame_turbulence/input.toml",
    "examples/flame_turbulence/les.toml",
    "examples/forced_inlet/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
    "examples/sedov_3d/input.toml",
@@ -5224,6 +5357,8 @@
   "required": true,
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -5249,6 +5384,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -5303,6 +5439,8 @@
   "required": true,
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/cbc_les/input.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
@@ -5328,6 +5466,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -5365,6 +5504,8 @@
   "required": true,
   "set_in": [
    "examples/autoignition_2d/input.toml",
+   "examples/average_outlet/input.toml",
+   "examples/average_outlet/local.toml",
    "examples/channel_inflow_retau180/input.toml",
    "examples/channel_les/input.toml",
    "examples/channel_les/input_590.toml",
@@ -5388,6 +5529,7 @@
    "examples/heated_duct/closed.toml",
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
+   "examples/heated_wall/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",

@@ -36,22 +36,22 @@ type = "wall_adiabatic"
 
 [[boundaries]]
 name = "inflow"
-type = "upt"
+type = "inlet_state"
 u = [8.0, 0.0]
 p = 0.7142857142857143
 T = 0.7142857142857143
 
 [[boundaries]]
 name = "outflow"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "bottom"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [numerics]
 riemann_solver = "RHLL"

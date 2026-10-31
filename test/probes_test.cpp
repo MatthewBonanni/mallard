@@ -630,8 +630,8 @@ TEST(ProbesTest, InletAndOutletFluxesHaveTheBoundaryStates) {
     s << "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 4\nLx = 2.0\nLy = 1.0\n";
     if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
     s << "[initialize]\ntype = \"constant\"\nu = " << numbers3("0.3", "0", "0") << "\np = 1.0\nT = 1.0\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = " << numbers3("0.3", "0", "0") << "\np = 1.0\nT = 1.0\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"p_out\"\np = 1.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = " << numbers3("0.3", "0", "0") << "\np = 1.0\nT = 1.0\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 1.0\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n" << PERFECT_GAS

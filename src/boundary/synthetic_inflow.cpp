@@ -18,6 +18,7 @@
 #include <numeric>
 #include <sstream>
 
+#include "boundary_fields.h"
 #include "comm.h"
 #include "input.h"
 #include "log.h"
@@ -183,12 +184,15 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
         return;
     }
     if (!boundary.contains("u")) throw InputError(where + ": missing u.");
-    const Input & u_in = boundary.at("u");
-    if (!u_in.is_array() || u_in.as_array().size() != N_DIM) {
-        throw InputError(where + ".u must have " + std::to_string(N_DIM) + " components (numbers or expressions).");
+    const VectorKey u_in(boundary, "u", where);
+    speed = u_in.speed;
+    directed = u_in.directed;
+    direction = u_in.direction;
+    bool varies = speed && !directed;
+    for (size_t i = 0; i < u_in.items.size(); i++) {
+        u.push_back(field(u_in.items[i], where + ".u" + (speed ? "" : "[" + std::to_string(i) + "]"), dim::velocity,
+                          varies));
     }
-    bool varies = false;
-    FOR_I_DIM u.push_back(field(u_in.as_array()[i], where + ".u[" + std::to_string(i) + "]", dim::velocity, varies));
     uniform_ = !varies;
     if (!turbulence) return;
     if (!turbulence->contains("reynolds_stress")) {
@@ -282,8 +286,13 @@ double InletProfile::table(size_t column, double s) const {
     return (1.0 - f) * columns[column][i - 1] + f * columns[column][i];
 }
 
-std::array<double, N_DIM> InletProfile::velocity(const Point & x) const {
+std::array<double, N_DIM> InletProfile::velocity(const Point & x, const Point & n_in) const {
     std::array<double, N_DIM> v{};
+    if (axis < 0 && speed) {
+        const double s = u[0].at(x);
+        FOR_I_DIM v[i] = s * (directed ? direction[i] : n_in[i]);
+        return v;
+    }
     FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[static_cast<size_t>(axis)]) : u[i].at(x);
     return v;
 }
@@ -430,7 +439,9 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     double flux = 0.0;
     for (size_t i = 0; i < n_global; i++) {
         area += area_global[i];
-        flux += area_global[i] * std::abs(profile.velocity(x_global[i])[normal_axis]);
+        Point n_axis{};
+        n_axis[normal_axis] = 1.0;
+        flux += area_global[i] * std::abs(profile.velocity(x_global[i], n_axis)[normal_axis]);
     }
     U_c = turbulence.contains("convection_velocity") ? find_double(turbulence, "convection_velocity", dim::velocity)
                                                      : flux / area;
@@ -592,7 +603,9 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
             h_corner(i, d, 1) = corner[d][1];
             h_fraction(i, d) = static_cast<rtype>(fraction[d]);
         }
-        const std::array<double, N_DIM> mean = profile.velocity(x);
+        Point n_in;
+        for (size_t d = 0; d < N_DIM; d++) n_in[d] = -double(mesh.h_face_normals(f, d)) / double(mesh.h_face_area(f));
+        const std::array<double, N_DIM> mean = profile.velocity(x, n_in);
         const std::array<double, N_STRESS> chol = cholesky(profile.stress_at(x), x, tw);
         for (uint8_t j = 0; j < N_DIM; j++) {
             h_scale(i, j) = static_cast<rtype>(scale(fraction, j));

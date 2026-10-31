@@ -271,8 +271,8 @@ struct ViscousFluxFunctor {
                 symmetry = true;
             } else if (boundaries.face_image_face(i_face) >= 0) {
                 interior_face(static_cast<uint32_t>(boundaries.face_image_face(i_face)), q_f, g_f);
-            } else if (bc.type == BoundaryType::EXTRAPOLATION || bc.type == BoundaryType::P_OUT ||
-                       bc.type == BoundaryType::P_OUT_AVERAGE || bc.type == BoundaryType::FARFIELD ||
+            } else if (bc.type == BoundaryType::OUTLET_EXTRAPOLATION || bc.type == BoundaryType::OUTLET_PRESSURE ||
+                       bc.type == BoundaryType::FARFIELD ||
                        bc.type == BoundaryType::PARTITION || bc.is_characteristic()) {
                 // Zero normal derivatives across transmissive and outflow boundaries
                 for (uint8_t k = 0; k < NQ; k++) {

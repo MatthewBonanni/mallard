@@ -34,8 +34,9 @@ constexpr uint8_t N_STRESS = N_DIM * (N_DIM + 1) / 2;
 using Point = std::array<double, N_DIM>;
 
 /**
- * @brief Mean velocity and Reynolds stress of an `nscbc_inlet` at given points:
- *        `u` (numbers or expressions in x, y, z), and with a
+ * @brief Mean velocity and Reynolds stress of an `inlet_state` with `nscbc` at
+ *        given points: `u` (components or a speed along `direction`, numbers or
+ *        expressions in x, y, z), and with a
  *        `[boundaries.turbulence]` table its `reynolds_stress` (numbers or
  *        expressions), or both from its `profile`, a CSV file of plane
  *        averages (tools/post/plane_average.py: a coordinate column, `MEAN_U_*` and
@@ -51,7 +52,8 @@ class InletProfile {
         /** @brief Whether the mean velocity is the same everywhere. */
         bool uniform() const { return uniform_; }
 
-        std::array<double, N_DIM> velocity(const Point & x) const;
+        /** @brief The mean velocity at x on a face of unit inward normal n_in (the direction of a speed without one). */
+        std::array<double, N_DIM> velocity(const Point & x, const Point & n_in) const;
 
         /** @brief Reynolds stress in N_STRESS order (zero without turbulence). */
         std::array<double, N_STRESS> stress_at(const Point & x) const;
@@ -64,7 +66,9 @@ class InletProfile {
             double at(const Point & x) const;
         };
         bool uniform_ = true;
-        std::vector<Field> u;       // per component
+        std::vector<Field> u;       // per component, or the speed alone
+        bool speed = false, directed = false;
+        Point direction{};
         std::vector<Field> stress;  // per N_STRESS component, empty without turbulence
         // Profile table: coordinate axis, sorted coordinates, and N_DIM mean + N_STRESS stress columns
         int axis = -1;
@@ -76,7 +80,7 @@ class InletProfile {
 };
 
 /**
- * @brief Synthetic turbulence for one `nscbc_inlet`: the digital filter of
+ * @brief Synthetic turbulence for one `inlet_state` with `nscbc`: the digital filter of
  *        Klein, Sadiki & Janicka (2003), with the inlet's Reynolds stress
  *        imposed by the Cholesky factor of Lund, Wu & Squires (1998)
  *        (docs/design/synthetic_inflow.md).

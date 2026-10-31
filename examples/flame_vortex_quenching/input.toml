@@ -106,7 +106,7 @@
 #   describe for Le = 1.2 is weaker here.
 # - Their l_F = 3.7 nu_u / S_L against delta_L = 5.1 nu_u / S_L here: on their
 #   axis the runs sit at r / l_F = 1.4 r / delta_L.
-# - Pockets that quench reach the outlet (p_out) before they are gone; the
+# - Pockets that quench reach the outlet (outlet_pressure) before they are gone; the
 #   classification relies on q_min along the front while the pocket is inside
 #   the domain.
 # - 2D, a pair in a channel of symmetry planes, as theirs; the TNF fits are
@@ -139,7 +139,7 @@ file = "flame.restart"
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [0.026891638416794341, 0.0]
 p = 101325.0
 T = 300
@@ -147,7 +147,7 @@ X = { "CH4" = 0.04225351977940104, "O2" = 0.20120724335659781, "N2" = 0.75653923
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 
 [[boundaries]]

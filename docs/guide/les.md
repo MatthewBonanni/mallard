@@ -14,7 +14,7 @@ parts that work together:
    reactor (PaSR).
 
 Turbulent inflow comes from [synthetic turbulence at characteristic
-inlets](boundary_conditions.md#synthetic-turbulence), and statistics from
+inlets](boundary_conditions.md#synthetic-turbulence-turbulence), and statistics from
 [running averages and probes](output.md#statistics).
 
 ## A minimal LES

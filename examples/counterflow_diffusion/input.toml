@@ -2,7 +2,7 @@
 # H2/N2 (1:3 by volume) against air, both at 300 K and 1 atm, from opposed
 # round nozzles 10 mm apart, momentum-balanced (U_o = 2 m/s, U_f = 2.316
 # m/s), h2o2.yaml with mixture-averaged transport. A quarter of the two jets:
-# symmetry planes y = 0 and z = 0, plug jets (upt) at r < 5 mm inside N2
+# symmetry planes y = 0 and z = 0, plug jets (inlet_state) at r < 5 mm inside N2
 # coflows at the same velocity, pressure outlets at y, z = 7.5 mm. Reference:
 # Cantera's CounterflowDiffusionFlame (the axisymmetric similarity
 # solution), reference/strain.csv and K711.csv from
@@ -46,7 +46,7 @@ file = "counterflow.restart"
 [[boundaries]]
 name = "fuel"
 where = "y * y + z * z < 2.5e-05"
-type = "upt"
+type = "inlet_state"
 u = [2.3160189, 0.0, 0.0]
 p = 101325.0
 T = 300
@@ -55,7 +55,7 @@ X = { "H2" = 0.25, "N2" = 0.75 }
 [[boundaries]]
 name = "fuel"
 where = "y * y + z * z >= 2.5e-05"
-type = "upt"
+type = "inlet_state"
 u = [2.3160189, 0.0, 0.0]
 p = 101325.0
 T = 300
@@ -64,7 +64,7 @@ X = { "N2" = 1.0 }
 [[boundaries]]
 name = "oxidizer"
 where = "y * y + z * z < 2.5e-05"
-type = "upt"
+type = "inlet_state"
 u = [-2, 0.0, 0.0]
 p = 101325.0
 T = 300
@@ -73,7 +73,7 @@ X = { "O2" = 0.21, "N2" = 0.79 }
 [[boundaries]]
 name = "oxidizer"
 where = "y * y + z * z >= 2.5e-05"
-type = "upt"
+type = "inlet_state"
 u = [-2, 0.0, 0.0]
 p = 101325.0
 T = 300
@@ -89,12 +89,12 @@ type = "symmetry"
 
 [[boundaries]]
 name = "side_y"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 
 [[boundaries]]
 name = "side_z"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 
 [numerics]

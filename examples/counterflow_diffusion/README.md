@@ -13,7 +13,7 @@ strain and flame, with no exact rescaling onto the axisymmetric one), and
 this case predates Mallard's axisymmetric formulation
 (`docs/design/axisymmetric.md`, a 2D cross-check left for later), so the run
 is 3D: a quarter of the two jets, with symmetry planes `y = 0` and `z = 0`,
-plug jets (`upt`) at `r < 5 mm` surrounded by N2 coflows at the same velocity so that each
+plug jets (`inlet_state`) at `r < 5 mm` surrounded by N2 coflows at the same velocity so that each
 whole nozzle plane is an inlet, and pressure outlets at `y, z = 7.5 mm`.
 The jets are momentum-balanced (`rho_f U_f^2 = rho_o U_o^2`). A finite jet
 only approximates the similarity solution, so the comparison is made where

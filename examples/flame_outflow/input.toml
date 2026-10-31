@@ -10,8 +10,8 @@
 # the pressure stays within 0.75 kPa (0.7%) of the target and within 0.3 kPa
 # across the probes. The largest deviation is a uniform dip while the burnt
 # gas leaves and the exit velocity falls from 68 to 10 m/s; the outlet then
-# relaxes it within about 50 us (sigma = 0.25 over L = 2.4 mm). Swap the outlet
-# for the commented p_out to compare: the fixed pressure removes the dip, but
+# relaxes it within about 50 us (sigma = 0.25 over L = 2.4 mm). Remove the
+# outlet's nscbc to compare: the fixed pressure removes the dip, but
 # reflects acoustic waves.
 
 [run]
@@ -35,20 +35,18 @@ balance = "N2"
 
 [[boundaries]]
 name = "left"
-type = "nscbc_inlet"
+type = "inlet_state"
 u = [10.0, 0.0]
 p = 101325.0
 T = 300.0
-L = 2.4e-3
 X = { H2 = 0.29586, O2 = 0.14793, N2 = 0.55621 }
+nscbc = { L = 2.4e-3 }
 
 [[boundaries]]
 name = "right"
-type = "nscbc_outlet"
+type = "outlet_pressure"
 p = 101325.0
-L = 2.4e-3
-# type = "p_out"
-# p = 101325.0
+nscbc = { L = 2.4e-3 }   # remove for a fixed pressure
 
 [[boundaries]]
 name = "bottom"

@@ -132,9 +132,9 @@ TEST_P(MixtureEquivalence, ConstantCpSingleSpeciesReproducesPerfectGas) {
         "T = \"x < 0.5 ? 400.0 : 300.0\"\nu = " + velocity("x > 0.5 ? 50.0 : 0.0", "y > 0.6 ? -30.0 : 0.0") + "\n";
     const std::string scheme = numerics(c.reconstruction, c.riemann);
     const std::string bcs = boundaries(
-        "type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[20.0, 0.0]" : "[20.0, 0.0, 0.0]") +
+        "type = \"inlet_state\"\nu = " + std::string(N_DIM == 2 ? "[20.0, 0.0]" : "[20.0, 0.0, 0.0]") +
             "\np = 1.0e5\nT = 400.0\nY = { AIR = 1.0 }\n",
-        "type = \"p_out\"\np = 3.0e4\n", "type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n");
+        "type = \"outlet_pressure\"\np = 3.0e4\n", "type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n");
     Solver perfect;
     std::string perfect_bcs = bcs;  // a perfect gas takes no composition
     perfect_bcs.erase(perfect_bcs.find("Y = { AIR = 1.0 }\n"), 18);
@@ -349,9 +349,9 @@ TEST(MixtureTest, TimeDependentUptCompositionIsAdvected) {
         "[run]\nt_stop = 0.015\ncfl = 0.4\n" + mesh_block("cartesian", nx, n, 1.0, 0.05) +
         "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " + velocity_vec + "\nY = { AIR = 0.5, AIR2 = 0.5 }\n" +
         numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs") +
-        boundaries("type = \"upt\"\nu = " + velocity_vec + "\np = 1.0e5\nT = 300.0\n"
+        boundaries("type = \"inlet_state\"\nu = " + velocity_vec + "\np = 1.0e5\nT = 300.0\n"
                    "Y = { AIR2 = \"0.5 + 0.4 * sin(2 * pi * 100 * t)\" }\nbalance = \"AIR\"\n",
-                   "type = \"p_out\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
+                   "type = \"outlet_pressure\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
     Solver solver;
     solver.init(parse_toml(input));
     solver.run();
@@ -379,9 +379,9 @@ TEST(MixtureTest, UptCompositionExpressionsGiveAStratifiedInflow) {
         "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " +
         (N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]") + "\nY = { AIR = 1.0 }\n" +
         numerics("type = \"MUSCL\"\n", "HLLC") + mixture(PERFECT_AIR, "two-airs") +
-        boundaries("type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]") +
+        boundaries("type = \"inlet_state\"\nu = " + std::string(N_DIM == 2 ? "[50.0, 0.0]" : "[50.0, 0.0, 0.0]") +
                        "\np = 1.0e5\nT = 300.0\nY = { AIR2 = \"0.8 * y^2\" }\nbalance = \"AIR\"\n",
-                   "type = \"p_out\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
+                   "type = \"outlet_pressure\"\np = 1.0e5\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n");
     Solver solver;
     solver.init(parse_toml(input));
     solver.run();
@@ -436,7 +436,7 @@ std::vector<double> shock_tube_errors(uint32_t n, const std::string & reconstruc
         "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
         "u = " + velocity("0.0") + "\n"
         "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", AR = \"x < 0.5 ? 7 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n" +
-        boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+        boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                    "type = \"symmetry\"\n") +
         numerics(reconstruction, riemann) + mixture(H2O2);
     Solver solver;
@@ -652,7 +652,7 @@ TEST(MixtureTest, HydrogenAirContactPressureErrorDecreasesUnderRefinement) {
 TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
     const std::string base = "[run]\nn_steps = 1\ncfl = 0.25\n" + mesh_block("cartesian", 4, 4, 1.0, 1.0) +
                              numerics("type = \"FO\"\n", "HLLC");
-    const std::string bcs = boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
+    const std::string bcs = boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n",
                                        "type = \"symmetry\"\n", "type = \"symmetry\"\n");
     const std::string init = "[initialize]\ntype = \"constant\"\np = 1.0e5\nT = 300.0\nu = " +
                              std::string(N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") + "\n";
@@ -672,7 +672,7 @@ TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
                      boundaries("type = \"farfield\"\nu = " +
                                     std::string(N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") +
                                     "\np = 1.0e5\nT = 300.0\nX = { H2 = 1.0 }\n",
-                                "type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n") +
+                                "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n") +
                      mixture(H2O2),
                  "farfield");
     expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\nintegrator = \"bdf\"\n",
@@ -709,7 +709,7 @@ TEST(MixtureTest, RestartedRunMatchesUninterruptedRunExactly) {
             return "[run]\nn_steps = " + std::to_string(n_steps) + "\ncfl = 0.25\n" +
                    mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", N_DIM == 2 ? 24 : 8, 4, 1.0, 0.2) +
                    "[initialize]\n" + init +
-                   boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+                   boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                               "type = \"wall_adiabatic\"\n") +
                    numerics("type = \"MUSCL\"\n", "HLLC", double_flux) +
                    mixture(H2O2, "", viscous ? "navier_stokes" : "euler") +
@@ -750,7 +750,7 @@ TEST(MixtureTest, BudgetWithDoubleFluxLeavesTheSolutionUnchanged) {
                "[initialize]\ntype = \"analytical\"\np = \"x < 0.5 ? 1.0e5 : 1.0e4\"\nT = \"x < 0.5 ? 1000.0 : 300.0\"\n"
                "u = " + velocity("0.0", "10.0 * sin(6.283 * x)") +
                "\nX = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", N2 = \"x < 0.5 ? 0 : 1\" }\n" +
-               boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+               boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                           "type = \"wall_adiabatic\"\n") +
                numerics("type = \"MUSCL\"\n", "HLLC", true) + mixture(H2O2, "", "navier_stokes") +
                (budget ? "[integrals]\ninterval = 1\nbudget = true\nfile = \"" + file + "\"\n" : "");
@@ -845,7 +845,7 @@ TEST(MixtureTest, DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError) {
             "u = " + velocity("0.0") + "\n"
             "X = { H2 = \"x < 0.5 ? 2 : 0\", O2 = \"x < 0.5 ? 1 : 0\", AR = \"x < 0.5 ? 7 : 0\", "
             "N2 = \"x < 0.5 ? 0 : 1\" }\n" +
-            boundaries("type = \"extrapolation\"\n", "type = \"extrapolation\"\n", "type = \"symmetry\"\n",
+            boundaries("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                        "type = \"symmetry\"\n") +
             numerics("type = \"MUSCL\"\n", "HLLC", double_flux) + mixture(H2O2);
         Solver solver;
@@ -895,9 +895,9 @@ namespace {
       << "p = \"x < 0.5 ? " << p1 << " : " << p2 << "\"\n"
       << "T = \"x < 0.5 ? " << T1 << " : " << T2 << " / (1 + (abs(y - 0.5) < 0.026 and abs(x - 0.51) < 0.02 ? 1e-3 : 0))\"\n"
       << "u = " << velocity("x < 0.5 ? " + std::to_string(u1) + " : " + std::to_string(u2)) << "\n"
-      << boundaries("type = \"upt\"\nu = [" + std::to_string(u1) + ", 0.0]\np = " + std::to_string(p1) +
+      << boundaries("type = \"inlet_state\"\nu = [" + std::to_string(u1) + ", 0.0]\np = " + std::to_string(p1) +
                         "\nT = " + std::to_string(T1) + "\nY = { AIR = 1.0 }\n",
-                    "type = \"p_out\"\np = " + std::to_string(p2) + "\n", "type = \"symmetry\"\n",
+                    "type = \"outlet_pressure\"\np = " + std::to_string(p2) + "\n", "type = \"symmetry\"\n",
                     "type = \"symmetry\"\n")
       << numerics("type = \"FO\"\n", riemann) << mixture(PERFECT_AIR, "air");
     Solver solver;

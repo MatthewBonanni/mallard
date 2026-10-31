@@ -192,6 +192,79 @@ TEST(InputUpgradeTest, KeptOptionsWorkAsBeforeButAreRewritten) {
     EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
 }
 
+// The boundary types renamed in 0.9.0 (#564): a characteristic boundary's
+// parameters move into its nscbc table, written after the entry's own keys
+// with their comments, p_out_average gains average = true, and the rest is
+// untouched. Fails if a rule moves keys of another entry, drops a comment,
+// or rewrites the file instead of its lines.
+TEST(InputUpgradeTest, OldBoundaryTypesBecomeTypesWithOptions) {
+    const std::string text =
+        "[[boundaries]]\n"
+        "name = \"left\"\n"
+        "type = \"nscbc_inlet\"   # inflow\n"
+        "u = [1.0, 0.0]\n"
+        "p = 1.0\n"
+        "T = 1.0\n"
+        "L = 2.0\n"
+        "sigma = 0.5  # stiffer\n"
+        "X = { O2 = 1.0 }\n"
+        "\n"
+        "[boundaries.turbulence]\n"
+        "length_scale = 0.1\n"
+        "\n"
+        "[[boundaries]]\n"
+        "name = \"right\"\n"
+        "type = \"p_out_average\"\n"
+        "p = 1.0\n"
+        "\n"
+        "[[boundaries]]\n"
+        "name = \"top\"\n"
+        "type = \"upt\"\n";
+    const std::string expected =
+        "[[boundaries]]\n"
+        "name = \"left\"\n"
+        "type = \"inlet_state\"   # inflow\n"
+        "u = [1.0, 0.0]\n"
+        "p = 1.0\n"
+        "T = 1.0\n"
+        "X = { O2 = 1.0 }\n"
+        "\n"
+        "[boundaries.nscbc]\n"
+        "L = 2.0\n"
+        "sigma = 0.5  # stiffer\n"
+        "\n"
+        "[boundaries.turbulence]\n"
+        "length_scale = 0.1\n"
+        "\n"
+        "[[boundaries]]\n"
+        "name = \"right\"\n"
+        "type = \"outlet_pressure\"\n"
+        "average = true\n"
+        "p = 1.0\n"
+        "\n"
+        "[[boundaries]]\n"
+        "name = \"top\"\n"
+        "type = \"inlet_state\"\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), expected);
+    EXPECT_FALSE(reformatted);
+    EXPECT_EQ(findings.size(), 5u);
+    // The setup reads the old form as the new one
+    Input old_form = parse_input_string(text);
+    input_upgrade::apply(old_form);
+    const Input & left = old_form.at("boundaries").at(0);
+    EXPECT_EQ(left.at("type").as_string(), "inlet_state");
+    EXPECT_FALSE(left.contains("L"));
+    EXPECT_EQ(left.at("nscbc").at("L").as_floating(), 2.0);
+    EXPECT_EQ(left.at("nscbc").at("sigma").as_floating(), 0.5);
+    EXPECT_TRUE(old_form.at("boundaries").at(1).at("average").as_boolean());
+    // An nscbc type without its parameters still gets an nscbc table, so that the missing L is reported
+    Input bare = parse_input_string("[[boundaries]]\nname = \"a\"\ntype = \"nscbc_outlet\"\np = 1.0\n");
+    input_upgrade::apply(bare);
+    EXPECT_TRUE(bare.at("boundaries").at(0).at("nscbc").is_table());
+}
+
 TEST(InputUpgradeTest, MeshPeriodicBecomesPeriodicZonePairsAfterTheMesh) {
     const std::string text =
         "[run]\n"

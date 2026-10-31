@@ -73,7 +73,7 @@ std::array<rtype, N_CONSERVATIVE> isentropic_state(double gamma, double R, doubl
 std::array<rtype, N_CONSERVATIVE> perfect_ghost(double gamma, double R, double T0, double p0, const Vec & d,
                                                 const std::array<rtype, N_CONSERVATIVE> & W_i, const Vec & n) {
     BoundaryCondition bc;
-    bc.type = BoundaryType::STAGNATION_INLET;
+    bc.type = BoundaryType::INLET_STAGNATION;
     bc.data[0] = rtype(T0);
     FOR_I_DIM bc.data[1 + i] = d[i];
     bc.data[N_DIM + 1] = rtype(p0);
@@ -260,12 +260,12 @@ TEST(StagnationInletTest, OneSpeciesMixtureMatchesThePerfectGas) {
         "[run]\nn_steps = 40\ncfl = 0.4\n" + mesh_block(N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", 16, 4, 1.0, 0.25) +
         "[initialize]\ntype = \"analytical\"\np = \"1.0e5 - 2.0e4 * x\"\nT = \"300.0\"\nu = " +
         (N_DIM == 2 ? std::string("[\"0.0\", \"0.0\"]") : std::string("[\"0.0\", \"0.0\", \"0.0\"]")) + "\n";
-    const std::string inlet = "type = \"stagnation_inlet\"\np0 = 1.2e5\nT0 = 320.0\n" +
+    const std::string inlet = "type = \"inlet_stagnation\"\np0 = 1.2e5\nT0 = 320.0\n" +
                               std::string(N_DIM == 2 ? "direction = [1.0, 0.2]\n" : "direction = [1.0, 0.2, 0.1]\n");
     const auto rest = [&](const std::string & composition) {
         return "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
                "[output]\ncheck_interval = 1000000\n" +
-               duct_boundaries(inlet + composition, "type = \"p_out\"\np = 8.0e4\n");
+               duct_boundaries(inlet + composition, "type = \"outlet_pressure\"\np = 8.0e4\n");
     };
     Solver perfect;
     perfect.set_distributed(false);
@@ -304,8 +304,8 @@ void expect_isentropic_duct(const std::string & reconstruction) {
         "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n" + reconstruction +
         "[output]\ncheck_interval = 1000000\n"
         "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + H2O2 + "\"\n" +
-        duct_boundaries("type = \"stagnation_inlet\"\np0 = 2.0e5\nT0 = 2000.0\nX = { N2 = 0.79, O2 = 0.21 }\n",
-                        "type = \"p_out\"\np = 1.4e5\n");
+        duct_boundaries("type = \"inlet_stagnation\"\np0 = 2.0e5\nT0 = 2000.0\nX = { N2 = 0.79, O2 = 0.21 }\n",
+                        "type = \"outlet_pressure\"\np = 1.4e5\n");
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(input));
@@ -353,12 +353,12 @@ TEST(StagnationInletTest, InvalidInputIsRejected) {
         "[initialize]\ntype = \"constant\"\nrho = 1.0\np = 1.0\nu = " + zero_velocity() +
         "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n";
-    const std::string outlet = "type = \"p_out\"\np = 1.0\n";
+    const std::string outlet = "type = \"outlet_pressure\"\np = 1.0\n";
     const std::string wrong_way = N_DIM == 2 ? "direction = [-1.0, 0.0]\n" : "direction = [-1.0, 0.0, 0.0]\n";
-    for (const std::string & left : {std::string("type = \"stagnation_inlet\"\nT0 = 1.0\n"),
-                                     std::string("type = \"stagnation_inlet\"\np0 = 1.0\nT0 = -1.0\n"),
-                                     "type = \"stagnation_inlet\"\np0 = 1.0\nT0 = 1.0\n" + wrong_way,
-                                     std::string("type = \"stagnation_inlet\"\np0 = 1.0\nT0 = 1.0\ndirection = [0.0]\n")}) {
+    for (const std::string & left : {std::string("type = \"inlet_stagnation\"\nT0 = 1.0\n"),
+                                     std::string("type = \"inlet_stagnation\"\np0 = 1.0\nT0 = -1.0\n"),
+                                     "type = \"inlet_stagnation\"\np0 = 1.0\nT0 = 1.0\n" + wrong_way,
+                                     std::string("type = \"inlet_stagnation\"\np0 = 1.0\nT0 = 1.0\ndirection = [0.0]\n")}) {
         Solver solver;
         EXPECT_THROW(solver.init(parse_toml(head + duct_boundaries(left, outlet))), std::runtime_error) << left;
     }
@@ -461,8 +461,8 @@ TEST(StagnationInletTest, NozzleMatchesTheQuasiOneDimensionalShockSolution) {
       << "[mesh]\ntype = \"file\"\nfilename = \"" << mesh << "\"\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 - 0.25 * x / 4\"\nu = [\"0.0\", \"0.0\"]\n"
       << "p = \"1.0 - 0.25 * x / 4\"\n"
-      << "[[boundaries]]\nname = \"inlet\"\ntype = \"stagnation_inlet\"\np0 = 1.0\nT0 = 1.0\n"
-      << "[[boundaries]]\nname = \"outlet\"\ntype = \"p_out\"\np = " << p_b << "\n"
+      << "[[boundaries]]\nname = \"inlet\"\ntype = \"inlet_stagnation\"\np0 = 1.0\nT0 = 1.0\n"
+      << "[[boundaries]]\nname = \"outlet\"\ntype = \"outlet_pressure\"\np = " << p_b << "\n"
       << "[[boundaries]]\nname = \"axis\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"wall\"\ntype = \"symmetry\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
@@ -546,7 +546,7 @@ TEST(MassFlowInletTest, GhostCarriesTheMassFluxAndTheOutgoingWave) {
             W_i[2] = -4.0_r;
             W_i[N_DIM + 1] = rtype(1.0e5 * rho_i);
             BoundaryCondition bc;
-            bc.type = BoundaryType::MASS_FLOW_INLET;
+            bc.type = BoundaryType::INLET_MASS_FLOW;
             bc.data[0] = rtype(T);
             FOR_I_DIM bc.data[1 + i] = d[i];
             bc.data[N_DIM + 1] = rtype(G);
@@ -617,8 +617,8 @@ TEST(MassFlowInletTest, ClosedHeatedDuctGainsExactlyTheInflow) {
     const double A = N_DIM == 2 ? 0.1 : 0.01, G = 20.0;
     const std::string mixture = "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + H2O2 + "\"\n";
     const std::string X = "X = { N2 = 0.79, O2 = 0.21 }\n";
-    const std::string flux = "type = \"mass_flow_inlet\"\nT = 300.0\nmass_flux = 20.0\n";
-    const std::string total = "type = \"mass_flow_inlet\"\nT = 300.0\nmdot = " + std::to_string(G * A) +
+    const std::string flux = "type = \"inlet_mass_flow\"\nT = 300.0\nmass_flux = 20.0\n";
+    const std::string total = "type = \"inlet_mass_flow\"\nT = 300.0\nmdot = " + std::to_string(G * A) +
                               "\nprofile = \"1 + 4 * y\"\n";
     const std::string muscl = "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n";
     // TENO has no full-rank stencils in a 3D duct two cells across
@@ -636,7 +636,7 @@ TEST(MassFlowInletTest, ClosedHeatedDuctGainsExactlyTheInflow) {
     // upt fixes the velocity: its mass flow follows the inlet density
     const double u = G / 1.1614401858304297;
     const ClosedDuct fixed = closed_heated_duct(
-        "type = \"upt\"\nu = [" + std::to_string(u) + (N_DIM == 2 ? ", 0.0]" : ", 0.0, 0.0]") +
+        "type = \"inlet_state\"\nu = [" + std::to_string(u) + (N_DIM == 2 ? ", 0.0]" : ", 0.0, 0.0]") +
             "\np = 1.0e5\nT = 300.0\n",
         muscl, PERFECT_GAS_AIR, G * A);
     EXPECT_GT(std::abs(fixed.added / fixed.expected - 1.0), 1e-2);
@@ -681,7 +681,7 @@ TEST(MassFlowInletTest, HeatedDuctMatchesRayleighFlow) {
         "[source]\nrhoE = \"x > 0.4 and x < 0.6 ? 1.0e8 : 0.0\"\n" +
         "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
         "[output]\ncheck_interval = 1000000\n" + PERFECT_GAS_AIR +
-        duct_boundaries("type = \"mass_flow_inlet\"\nT = 300.0\nmass_flux = 100.0\n", "type = \"p_out\"\np = 1.0e5\n");
+        duct_boundaries("type = \"inlet_mass_flow\"\nT = 300.0\nmass_flux = 100.0\n", "type = \"outlet_pressure\"\np = 1.0e5\n");
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(input));
@@ -715,16 +715,16 @@ TEST(MassFlowInletTest, InvalidInputIsRejected) {
         "[initialize]\ntype = \"constant\"\nrho = 1.0\np = 1.0\nu = " + zero_velocity() +
         "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n";
-    const std::string outlet = "type = \"p_out\"\np = 1.0\n";
-    for (const std::string & left : {std::string("type = \"mass_flow_inlet\"\nT = 1.0\n"),
-                                     std::string("type = \"mass_flow_inlet\"\nmass_flux = 1.0\n"),
-                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = 1.0\nmdot = 1.0\n"),
-                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = -1.0\n"),
-                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = \"y - 0.5\"\n"),
-                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = 1.0\nprofile = \"y\"\n"),
-                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmdot = 1.0\nprofile = \"0 * y\"\n"),
-                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = \"1 + t\"\n"),
-                                     std::string("type = \"mass_flow_inlet\"\nT = 1.0\nmass_flux = 1.0\ndirection = ") +
+    const std::string outlet = "type = \"outlet_pressure\"\np = 1.0\n";
+    for (const std::string & left : {std::string("type = \"inlet_mass_flow\"\nT = 1.0\n"),
+                                     std::string("type = \"inlet_mass_flow\"\nmass_flux = 1.0\n"),
+                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = 1.0\nmdot = 1.0\n"),
+                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = -1.0\n"),
+                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = \"y - 0.5\"\n"),
+                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = 1.0\nprofile = \"y\"\n"),
+                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = 1.0\nprofile = \"0 * y\"\n"),
+                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = \"1 + t\"\n"),
+                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = 1.0\ndirection = ") +
                                          (N_DIM == 2 ? "[-1.0, 0.0]" : "[-1.0, 0.0, 0.0]") + "\n"}) {
         Solver solver;
         EXPECT_THROW(solver.init(parse_toml(head + duct_boundaries(left, outlet))), std::runtime_error) << left;
@@ -756,7 +756,7 @@ std::string forced_input(const ForcedCase & c, const std::string & run) {
             s << "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
         }
     } else {
-        s << duct_boundaries(c.left, "type = \"p_out\"\np = 1.0\n");
+        s << duct_boundaries(c.left, "type = \"outlet_pressure\"\np = 1.0\n");
     }
     return s.str();
 }
@@ -811,17 +811,17 @@ TEST(ForcedInletTest, TimeDependentConditionsConvergeAtTheIntegratorsOrder) {
         double dt = 0.0075;  // coarse; then dt / 2, and dt / 8 as the reference
     };
     const Case cases[] = {
-        {{"upt T(t)", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = \"1 + 0.2 * sin(40 * t)\"\n", "", UNIT_GAS},
-         {"", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS}, 2.6},
-        {{"upt u(t)", "type = \"upt\"\nu = " + u_t + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS},
-         {"", "type = \"upt\"\nu = " + u0 + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS}, 2.6},
-        {{"nscbc_inlet u(t)", "type = \"nscbc_inlet\"\nu = " + u_slow + "\np = 1.0\nT = 1.0\nL = 1.0\n", "", UNIT_GAS},
-         {"", "type = \"nscbc_inlet\"\nu = " + u0 + "\np = 1.0\nT = 1.0\nL = 1.0\n", "", UNIT_GAS}, 0.9, 0.004},
-        {{"stagnation_inlet p0(t)", "type = \"stagnation_inlet\"\np0 = \"1.3 + 0.1 * sin(40 * t)\"\nT0 = 1.2\n", "", UNIT_GAS},
-         {"", "type = \"stagnation_inlet\"\np0 = 1.3\nT0 = 1.2\n", "", UNIT_GAS}, 2.6},
-        {{"mass_flow_inlet mass_flux(t)", "type = \"mass_flow_inlet\"\nmass_flux = \"0.5 + 0.1 * sin(40 * t)\"\nT = 1.0\n", "",
+        {{"upt T(t)", "type = \"inlet_state\"\nu = " + u0 + "\np = 1.0\nT = \"1 + 0.2 * sin(40 * t)\"\n", "", UNIT_GAS},
+         {"", "type = \"inlet_state\"\nu = " + u0 + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS}, 2.6},
+        {{"upt u(t)", "type = \"inlet_state\"\nu = " + u_t + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS},
+         {"", "type = \"inlet_state\"\nu = " + u0 + "\np = 1.0\nT = 1.0\n", "", UNIT_GAS}, 2.6},
+        {{"nscbc_inlet u(t)", "type = \"inlet_state\"\nu = " + u_slow + "\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n", "", UNIT_GAS},
+         {"", "type = \"inlet_state\"\nu = " + u0 + "\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n", "", UNIT_GAS}, 0.9, 0.004},
+        {{"stagnation_inlet p0(t)", "type = \"inlet_stagnation\"\np0 = \"1.3 + 0.1 * sin(40 * t)\"\nT0 = 1.2\n", "", UNIT_GAS},
+         {"", "type = \"inlet_stagnation\"\np0 = 1.3\nT0 = 1.2\n", "", UNIT_GAS}, 2.6},
+        {{"mass_flow_inlet mass_flux(t)", "type = \"inlet_mass_flow\"\nmass_flux = \"0.5 + 0.1 * sin(40 * t)\"\nT = 1.0\n", "",
           UNIT_GAS},
-         {"", "type = \"mass_flow_inlet\"\nmass_flux = 0.5\nT = 1.0\n", "", UNIT_GAS}, 2.6},
+         {"", "type = \"inlet_mass_flow\"\nmass_flux = 0.5\nT = 1.0\n", "", UNIT_GAS}, 2.6},
         {{"moving wall u(t)", "", "type = \"wall_adiabatic\"\nu = " + wall_u + "\n", viscous},
          {"", "", "type = \"wall_adiabatic\"\nu = " + wall_0 + "\n", viscous}, 2.6},
     };
@@ -846,18 +846,24 @@ TEST(ForcedInletTest, TimeDependentConditionsConvergeAtTheIntegratorsOrder) {
     }
 }
 
+static BoundaryCondition inlet_state() {
+    BoundaryCondition bc;
+    bc.type = BoundaryType::INLET_STATE;
+    return bc;
+}
+
 TEST(ForcedInletTest, QuantitiesWithUnitsAreNumbersNotExpressions) {
     // "1 bar" and "300 K" are the numbers 1e5 and 300, uniform along the inlet;
     // the expression of y varies along it
     const std::string u = N_DIM == 2 ? "u = [\"10 m/s\", 0.0]\n" : "u = [\"10 m/s\", 0.0, 0.0]\n";
-    const BoundaryFields with_units(parse_toml("p = \"1 bar\"\nT = \"300 K\"\n" + u), BoundaryType::UPT, "b");
+    const BoundaryFields with_units(parse_toml("p = \"1 bar\"\nT = \"300 K\"\n" + u), inlet_state(), "b");
     EXPECT_FALSE(with_units.varies());
     BoundaryCondition bc;
-    with_units.apply(bc, Point{}, 0.0, 287.0);
+    with_units.apply(bc, Point{}, 0.0, 287.0, Point{});
     EXPECT_DOUBLE_EQ(double(bc.data[N_DIM + 1]), double(rtype(1e5)));
     EXPECT_DOUBLE_EQ(double(bc.data[1]), 10.0);
     EXPECT_DOUBLE_EQ(with_units.temperature(Point{}, 0.0), 300.0);
-    const BoundaryFields expression(parse_toml("p = 1.0e5\nT = \"300 + y\"\n" + u), BoundaryType::UPT, "b");
+    const BoundaryFields expression(parse_toml("p = 1.0e5\nT = \"300 + y\"\n" + u), inlet_state(), "b");
     EXPECT_TRUE(expression.varies());
     EXPECT_FALSE(expression.depends_on_time());
 }
@@ -866,7 +872,7 @@ TEST(ForcedInletTest, NumberOfTThatTurnsNegativeIsAnInputErrorWithFaceAndTime) {
     // T(t) crosses zero at t = 0.1: the run stops at the next check with the
     // key, the value, the time and the face
     try {
-        forced_run({"T(t) < 0", "type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") +
+        forced_run({"T(t) < 0", "type = \"inlet_state\"\nu = " + std::string(N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") +
                                     "\np = 1.0\nT = \"1 - 10 * t\"\n", "", UNIT_GAS},
                    0.004);
         FAIL() << "no error";
@@ -881,7 +887,7 @@ TEST(ForcedInletTest, NumberOfTThatTurnsNegativeIsAnInputErrorWithFaceAndTime) {
 TEST(ForcedInletTest, AValueOutOfRangeOnSomeRanksStopsEveryRank) {
     // Distributed, only the ranks holding the inlet see T turn negative; the others throw too
     Solver solver;
-    solver.init(parse_toml(forced_input({"T(t) < 0", "type = \"upt\"\nu = " +
+    solver.init(parse_toml(forced_input({"T(t) < 0", "type = \"inlet_state\"\nu = " +
                                                          std::string(N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") +
                                                          "\np = 1.0\nT = \"1 - 10 * t\"\n", "", UNIT_GAS},
                                         "dt = 0.004\n")));
@@ -901,7 +907,7 @@ TEST(ForcedInletTest, ConditionsOfTKeepTheStepGraph) {
     const std::string viscous =
         "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 0.02\nPr = 0.72\n";
     const ForcedCase cases[] = {
-        {"upt u(t), T(t)", "type = \"upt\"\nu = " + u + "\np = 1.0\nT = \"1 + 0.2 * sin(20 * t)\"\n", "", UNIT_GAS},
+        {"upt u(t), T(t)", "type = \"inlet_state\"\nu = " + u + "\np = 1.0\nT = \"1 + 0.2 * sin(20 * t)\"\n", "", UNIT_GAS},
         {"moving wall u(t)", "", "type = \"wall_adiabatic\"\nu = " + wall_u + "\n", viscous},
     };
     for (const ForcedCase & c : cases) {
@@ -930,7 +936,7 @@ TEST(ForcedInletTest, ExpressionThatLoopsForeverIsAnInputError) {
     // Evaluated on the device at the stage times, a loop that never ends past
     // t = 0.01 stops at the iteration limit and the run reports it
     try {
-        forced_run({"T(t) loops", "type = \"upt\"\nu = " + std::string(N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") +
+        forced_run({"T(t) loops", "type = \"inlet_state\"\nu = " + std::string(N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") +
                                       "\np = 1.0\nT = \"var i := 0; while (t > 0.01 and i >= 0) { i += 1 }; 1 + t\"\n",
                     "", UNIT_GAS},
                    0.004);

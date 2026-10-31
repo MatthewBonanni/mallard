@@ -53,8 +53,8 @@ double sod_error(const std::string & preset, uint32_t n) {
       << "[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = 4\nLx = 1.0\nLy = " << 4.0 / n << "\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"x < 0.5 ? 1.0 : 0.125\"\nu = [\"0.0\", \"0.0\"]\n"
       << "p = \"x < 0.5 ? 1.0 : 0.1\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
       << numerics(preset) << "[physics]\ntype = \"euler\"\n" << PERFECT_GAS
@@ -185,7 +185,7 @@ TEST(PresetValidation, ReactingPropagatesAPremixedFlameAtCanterasSpeed) {
        << "H2O = \"0.2276783 * " << s << "\", OH = \"0.0103755 * " << s << "\", O = \"0.0013623 * " << s << "\", "
        << "H = \"0.0002325 * " << s << "\" }\n"
        << "[[boundaries]]\nname = \"left\"\ntype = \"symmetry\"\n"
-       << "[[boundaries]]\nname = \"right\"\ntype = \"p_out\"\np = 101325.0\n"
+       << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 101325.0\n"
        << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
        << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
        << numerics("reacting")

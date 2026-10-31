@@ -12,7 +12,7 @@ sponge layers that damp the solution toward a reference state.
 gravity = [0.0, -9.81]          # adds rho g to momentum, rho u.g to energy
 ```
 
-*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+*Used in:* [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -204,11 +204,11 @@ centroids) and shares a named region with sources and probes. Several sponges
 add up. Strength and reference are evaluated once, at cell
 centroids. The source is explicit and caps the time step at
 `1 / max(strength)`. Example: `channel_inflow_retau180`, a sponge over the last
-fifth of the channel in front of its `nscbc_outlet`.
+fifth of the channel in front of its `outlet_pressure` with `nscbc`.
 
 ## See also
 
 - [Geometry](geometry.md): regions, their transforms and volume fractions
 - [Input reference: `[source]`](../input.md#source), [`[[sources]]`](../input.md#sources), [regions](../input.md#regions), [`[[sponges]]`](../input.md#sponges)
-- [Boundary conditions](boundary_conditions.md#characteristic-boundaries)
+- [Boundary conditions](boundary_conditions.md#nscbc-characteristic-boundaries)
 - Design notes: [characteristic boundaries and sponges](../design/nscbc.md)

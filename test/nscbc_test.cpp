@@ -140,7 +140,7 @@ std::string pulse_input(const std::string & right, const std::string & mesh, con
     s << "[run]\nt_stop = 1.0\ncfl = 0.2\n" << mesh
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + " << pulse << "\"\nu = [\"" << pulse
       << "\", \"0.0\"]\np = \"" << P0 << " + " << pulse << "\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"right\"\n" << right
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
@@ -188,7 +188,7 @@ Reflection measure_reflection(const Result & r, double K) {
 std::string outlet(double sigma) {
     std::ostringstream s;
     s.precision(17);
-    s << "type = \"nscbc_outlet\"\np = " << P0 << "\nL = 1.0\nsigma = " << sigma << "\n";
+    s << "type = \"outlet_pressure\"\np = " << P0 << "\nnscbc.L = 1.0\nnscbc.sigma = " << sigma << "\n";
     return s.str();
 }
 
@@ -215,7 +215,7 @@ TEST(NSCBCTest, PulseReflectionMatchesTheory) {
             // A pressure outlet reflects all of it
             std::ostringstream p_out;
             p_out.precision(17);
-            p_out << "type = \"p_out\"\np = " << P0 << "\n";
+            p_out << "type = \"outlet_pressure\"\np = " << P0 << "\n";
             const Reflection full = measure_reflection(run(pulse_input(p_out.str(), mesh, reconstruction)), 0.0);
             EXPECT_GT(full.max_measured, 0.95 * 2 * EPS);
         }
@@ -246,8 +246,8 @@ std::string vortex_input(const std::string & right, const std::string & mesh, do
       << "[initialize]\ntype = \"analytical\"\nrho = \"(1.0 + " << dp.str() << " / " << P0 << ")^(1 / 1.4)\"\n"
       << "u = [\"0.25 - " << g.str() << " * (y - 0.5) * " << e.str() << "\", \"" << g.str() << " * (x - 0.5) * "
       << e.str() << "\"]\np = \"" << P0 << " + " << dp.str() << "\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"nscbc_inlet\"\nu = [0.25, 0.0]\np = " << P0 << "\nT = " << P0
-      << "\nL = 1.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [0.25, 0.0]\np = " << P0 << "\nT = " << P0
+      << "\nnscbc.L = 1.0\n"
       << "[[boundaries]]\nname = \"right\"\n" << right
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
@@ -300,7 +300,7 @@ TEST(NSCBCTest, VortexLeavesWithoutReflection) {
         SCOPED_TRACE(type);
         const Result ref = run(vortex_input(outlet(0.0), mesh_input(type, 96, 32, 3.0, 1.0, 32), t_stop));
         const std::string mesh = mesh_input(type, 32, 32, 1.0, 1.0, 32);
-        const double plain = rms_pressure_difference(run(vortex_input(outlet(0.25) + "beta = 1.0\n", mesh, t_stop)), ref);
+        const double plain = rms_pressure_difference(run(vortex_input(outlet(0.25) + "nscbc.beta = 1.0\n", mesh, t_stop)), ref);
         const double transverse = rms_pressure_difference(run(vortex_input(outlet(0.25), mesh, t_stop)), ref);
         EXPECT_LT(transverse, 0.1 * dp_vortex);
         EXPECT_GT(plain, 0.5 * dp_vortex);
@@ -374,8 +374,8 @@ std::string front_input(const std::string & right, double t_stop) {
       << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"300.0 + 600.0 * " << front
       << "\"\nu = [\"50.0\", \"0.0\"]\n"
       << "X = { O2 = \"0.21 * (1 - " << front << ")\", H2 = \"0.3 * " << front << "\" }\nbalance = \"N2\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"nscbc_inlet\"\nu = [50.0, 0.0]\np = 101325.0\nT = 300.0\n"
-      << "L = 1.0\nX = { O2 = 0.21, N2 = 0.79 }\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [50.0, 0.0]\np = 101325.0\nT = 300.0\n"
+      << "nscbc.L = 1.0\nX = { O2 = 0.21, N2 = 0.79 }\n"
       << "[[boundaries]]\nname = \"right\"\n" << right
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
@@ -393,7 +393,7 @@ TEST(NSCBCTest, MixtureFrontLeavesThroughTheOutlet) {
     // pressure stays within a few percent of the dynamic pressure of it
     Solver solver;
     solver.set_distributed(false);
-    solver.init(parse_toml(front_input("type = \"nscbc_outlet\"\np = 101325.0\nL = 1.0\n", 0.016)));
+    solver.init(parse_toml(front_input("type = \"outlet_pressure\"\np = 101325.0\nnscbc.L = 1.0\n", 0.016)));
     double spread = 0.0;
     while (double(solver.get_time()) < 0.016 * (1 - 1e-6)) {
         solver.calc_dt();
@@ -433,7 +433,7 @@ double mixture_reflection(const std::string & right) {
       << "[initialize]\ntype = \"analytical\"\np = \"" << p0 << " + " << pulse.str() << "\"\nT = \"" << T0
       << " * (1 + " << (gamma - 1.0) / gamma / p0 << " * " << pulse.str() << ")\"\nu = [\"" << pulse.str() << " / "
       << rho * c << "\", \"0.0\"]\nX = { O2 = 0.21, N2 = 0.79 }\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"right\"\n" << right
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
@@ -455,8 +455,8 @@ double mixture_reflection(const std::string & right) {
 } // namespace
 
 TEST(NSCBCTest, MixtureAcousticPulseLeaves) {
-    EXPECT_LT(mixture_reflection("type = \"nscbc_outlet\"\np = 101325.0\nL = 1.0\nsigma = 0.0\n"), 0.02);
-    EXPECT_GT(mixture_reflection("type = \"p_out\"\np = 101325.0\n"), 0.9);
+    EXPECT_LT(mixture_reflection("type = \"outlet_pressure\"\np = 101325.0\nnscbc.L = 1.0\nnscbc.sigma = 0.0\n"), 0.02);
+    EXPECT_GT(mixture_reflection("type = \"outlet_pressure\"\np = 101325.0\n"), 0.9);
 }
 
 namespace {
@@ -466,7 +466,7 @@ std::string sponge_input(const std::string & strength) {
     std::ostringstream right, sponge;
     right.precision(17);
     sponge.precision(17);
-    right << "type = \"p_out\"\np = " << P0 << "\n";
+    right << "type = \"outlet_pressure\"\np = " << P0 << "\n";
     sponge << "[[sponges]]\nstrength = \"" << strength << "\"\nu = [0.0, 0.0]\np = " << P0 << "\nT = " << P0 << "\n";
     return pulse_input(right.str(), mesh_input("cartesian", 200, 2, 1.0, 0.01, 200), "type = \"MUSCL\"\n") +
            sponge.str();
@@ -487,9 +487,9 @@ TEST(NSCBCTest, InvalidCharacteristicInputIsRejected) {
     const std::string mesh = mesh_input("cartesian", 20, 2, 1.0, 0.1, 20);
     std::ostringstream base;
     base.precision(17);
-    base << "type = \"nscbc_outlet\"\np = " << P0 << "\n";
-    for (const std::string & extra : {std::string(""), std::string("L = 0.0\n"), std::string("L = 1.0\nsigma = -1.0\n"),
-                                      std::string("L = 1.0\nbeta = 1.5\n")}) {
+    base << "type = \"outlet_pressure\"\np = " << P0 << "\n";
+    for (const std::string & extra : {std::string("nscbc = {}\n"), std::string("nscbc.L = 0.0\n"), std::string("nscbc.L = 1.0\nnscbc.sigma = -1.0\n"),
+                                      std::string("nscbc.L = 1.0\nnscbc.beta = 1.5\n")}) {
         Solver solver;
         EXPECT_THROW(solver.init(parse_toml(pulse_input(base.str() + extra, mesh, "type = \"FO\"\n"))),
                      std::runtime_error)
