@@ -1360,6 +1360,127 @@ std::vector<double> cell_fractions(const Mesh & mesh, const Region & region, con
     return fractions_of(mesh, region, filled);
 }
 
+namespace {
+
+using Box = std::array<Vec, 2>;
+constexpr Box EVERYWHERE = {Vec{-INF, -INF, -INF}, Vec{INF, INF, INF}};
+
+/** @brief A box around a primitive: its local box, through its frame. */
+Box primitive_bounds(const Node & n, const std::vector<double> & vertices) {
+    Vec lo, hi;
+    const double * p = n.p;
+    switch (n.kind) {
+        case Kind::SPHERE: lo = {-p[0], -p[0], -p[0]}; break;
+        case Kind::ELLIPSOID: lo = {-p[0], -p[1], -p[2]}; break;
+        case Kind::CYLINDER: lo = {-p[0], -p[0], -p[2]}; break;
+        case Kind::CONE: lo = {-std::max(p[1], p[2]), -std::max(p[1], p[2]), -p[0]}; break;
+        case Kind::BOX: lo = {-p[0], -p[1], -p[2]}; break;
+        case Kind::TORUS: lo = {-(p[0] + p[1]), -(p[0] + p[1]), -p[1]}; break;
+        case Kind::POLYGON: {
+            lo = {INF, INF, -INF};
+            hi = {-INF, -INF, INF};
+            for (uint32_t k = 0; k < n.count; k++) {
+                for (size_t i = 0; i < 2; i++) {
+                    lo[i] = std::min(lo[i], vertices[2 * (n.first + k) + i]);
+                    hi[i] = std::max(hi[i], vertices[2 * (n.first + k) + i]);
+                }
+            }
+            break;
+        }
+        default: return EVERYWHERE;
+    }
+    if (n.kind != Kind::POLYGON) hi = {-lo[0], -lo[1], -lo[2]};
+    // 2D: a local z axis along the world's leaves x and y bounded however far it extends
+    const bool planar = n.m[2] == 0.0 && n.m[5] == 0.0 && n.m[6] == 0.0 && n.m[7] == 0.0;
+    if (N_DIM == 2 && planar) lo[2] = hi[2] = 0.0;
+    for (size_t i = 0; i < 3; i++) {
+        if (!std::isfinite(lo[i]) || !std::isfinite(hi[i])) return EVERYWHERE;
+    }
+    // x = M^-1 (q - d) over the corners
+    const double * m = n.m;
+    const double det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) +
+                       m[2] * (m[3] * m[7] - m[4] * m[6]);
+    const std::array<double, 9> inv = {(m[4] * m[8] - m[5] * m[7]) / det, (m[2] * m[7] - m[1] * m[8]) / det,
+                                       (m[1] * m[5] - m[2] * m[4]) / det, (m[5] * m[6] - m[3] * m[8]) / det,
+                                       (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
+                                       (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det,
+                                       (m[0] * m[4] - m[1] * m[3]) / det};
+    Box out = {Vec{INF, INF, INF}, Vec{-INF, -INF, -INF}};
+    for (int c = 0; c < 8; c++) {
+        const Vec q = {((c & 1) ? hi[0] : lo[0]) - n.d[0], ((c & 2) ? hi[1] : lo[1]) - n.d[1],
+                       ((c & 4) ? hi[2] : lo[2]) - n.d[2]};
+        for (size_t i = 0; i < 3; i++) {
+            const double x = inv[3 * i] * q[0] + inv[3 * i + 1] * q[1] + inv[3 * i + 2] * q[2];
+            out[0][i] = std::min(out[0][i], x);
+            out[1][i] = std::max(out[1][i], x);
+        }
+    }
+    return out;
+}
+
+Box filled_bounds(const Region & region, const uint32_t i) {
+    const Filled & f = region.filled()[i];
+    auto join = [](const Box & a, const Box & b, const bool both) {
+        Box out;
+        for (size_t k = 0; k < 3; k++) {
+            out[0][k] = both ? std::max(a[0][k], b[0][k]) : std::min(a[0][k], b[0][k]);
+            out[1][k] = both ? std::min(a[1][k], b[1][k]) : std::max(a[1][k], b[1][k]);
+        }
+        return out;
+    };
+    if (f.kind == Filled::Kind::SHAPES) {
+        const RegionView<Kokkos::HostSpace> view = region.host(f);
+        const std::vector<double> vertices(view.vertices.data(), view.vertices.data() + view.vertices.extent(0));
+        std::vector<Box> stack;
+        for (uint32_t k = 0; k < f.count; k++) {
+            const Node & n = view.nodes(k);
+            if (n.kind == Kind::UNION || n.kind == Kind::INTERSECTION || n.kind == Kind::DIFFERENCE) {
+                const Box b = stack.back();
+                stack.pop_back();
+                if (n.kind != Kind::DIFFERENCE) stack.back() = join(stack.back(), b, n.kind == Kind::INTERSECTION);
+            } else {
+                stack.push_back(primitive_bounds(n, vertices));
+            }
+        }
+        return stack.back();
+    }
+    if (f.parts.empty()) return EVERYWHERE;
+    Box out = filled_bounds(region, f.parts[0]);
+    for (size_t k = 1; k < f.parts.size() && f.kind != Filled::Kind::DIFFERENCE; k++) {
+        out = join(out, filled_bounds(region, f.parts[k]), f.kind == Filled::Kind::INTERSECTION);
+    }
+    return out;
+}
+
+} // namespace
+
+std::array<std::array<double, 3>, 2> bounds(const Region & region) {
+    if (region.dimension() == N_DIM) return filled_bounds(region, region.root());
+    Box out = {Vec{INF, INF, INF}, Vec{-INF, -INF, -INF}};
+    for (const Piece & p : region.pieces()) {
+        Box b = EVERYWHERE;
+        for (const uint32_t i : p.carriers) {
+            const Box c = filled_bounds(region, i);
+            for (size_t k = 0; k < 3; k++) {
+                b[0][k] = std::max(b[0][k], c[0][k]);
+                b[1][k] = std::min(b[1][k], c[1][k]);
+            }
+        }
+        for (const uint32_t i : p.inside) {
+            const Box c = filled_bounds(region, i);
+            for (size_t k = 0; k < 3; k++) {
+                b[0][k] = std::max(b[0][k], c[0][k]);
+                b[1][k] = std::min(b[1][k], c[1][k]);
+            }
+        }
+        for (size_t k = 0; k < 3; k++) {
+            out[0][k] = std::min(out[0][k], b[0][k]);
+            out[1][k] = std::max(out[1][k], b[1][k]);
+        }
+    }
+    return out;
+}
+
 void require_full_dimension(const Region & region, const Input & value, const std::string & where) {
     if (region.dimension() == N_DIM) return;
     const std::string what = region.name().empty() ? "this region" : "\"" + region.name() + "\"";
@@ -1395,13 +1516,19 @@ Regions::Regions(const Input & input, const Mesh & mesh) :
 }
 
 Regions::Entry & Regions::entry(const Input & value, const std::string & where) {
-    if (value.is_string()) {
-        const auto it = m_by_name.find(value.as_string());
-        if (it != m_by_name.end()) return *m_entries[it->second];
-        m_by_name.emplace(value.as_string(), m_entries.size());
-    }
-    m_entries.push_back(std::make_unique<Entry>(Entry{Region(value, where, m_names, &m_automatic), {}}));
+    // Named regions once for all their keys; inline ones once for their key
+    const std::string label = value.is_string() ? value.as_string() : where;
+    const auto it = m_by_name.find(label);
+    if (it != m_by_name.end()) return *m_entries[it->second];
+    m_by_name.emplace(label, m_entries.size());
+    m_entries.push_back(std::make_unique<Entry>(Entry{Region(value, where, m_names, &m_automatic), {}, label}));
     return *m_entries.back();
+}
+
+std::vector<std::pair<std::string, const Region *>> Regions::used() const {
+    std::vector<std::pair<std::string, const Region *>> out;
+    for (const auto & e : m_entries) out.emplace_back(e->label, &e->region);
+    return out;
 }
 
 const Region & Regions::get(const Input & value, const std::string & where) { return entry(value, where).region; }

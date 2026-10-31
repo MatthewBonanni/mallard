@@ -50,6 +50,10 @@ constexpr Option CHECK_OPTIONS[] = {
     {"--catalog", "", "KEYS.json",
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
      "Default: none."},
+    {"--view", "", "DIR",
+     "Write the case view to DIR/case.vtkhdf for ParaView: every region the case uses (filled regions as their "
+     "cells with their fractions, surfaces and curves with their normals or tangents and measures) and every "
+     "boundary zone, one block each (builds without HDF5: DIR/case.vtm). Default: none."},
     KOKKOS,
 };
 
@@ -267,13 +271,16 @@ constexpr Command COMMANDS[] = {
             "Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial solution) without "
             "time stepping and without writing any file, then reports: unknown or unused keys, boundary zones "
             "without a condition, mesh quality with the worst cells, the stable time step and the cell that "
-            "sets it, memory per rank and, with --throughput or --steps, the cost. Under mpirun -n N it checks "
-            "the run on N ranks.",
+            "sets it, memory per rank and, with --throughput or --steps, the cost. It lists every region the case "
+            "uses and the mesh's own (domain, boundary zones, cell zones) with its dimension, measure and cells, "
+            "and whether a surface or curve is exact or extracted; a region that covers no cell is an error. Under "
+            "mpirun -n N it checks the run on N ranks.",
         .options = CHECK_OPTIONS,
         .arguments = CHECK_ARGUMENTS,
         .examples = "$ mallard check input.toml\n"
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
-                    "$ mpirun -n 4 mallard check input.toml --quality quality",
+                    "$ mpirun -n 4 mallard check input.toml --quality quality\n"
+                    "$ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView",
         .exit_status = "0  no errors (there may be warnings)\n"
                        "1  errors: in the input, the mesh or the setup\n"
                        "2  usage error",
