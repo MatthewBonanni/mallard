@@ -14,7 +14,7 @@ the commands stay working.
 | 2 | [Oblique shock on a ramp](wedge.md) | Generated meshes and boundary zones, inflow, outflow and slip walls, units and the gas constant, line probes, ParaView, mesh refinement | seconds, laptop | θ-β-M relation |
 | 3 | [Vortex shedding behind a cylinder](cylinder.md) | A Gmsh geometry with a structured ring and triangles, Navier-Stokes, initial conditions as expressions, wall forces, Strouhal number | 5 minutes, laptop | Reference computations |
 | 4 | [Supersonic flow over a cone](cone.md) | 3D builds, tetrahedra, symmetry planes, a characteristic far field, surface output, MPI ranks and GPUs | minutes, laptop | Taylor-Maccoll solution |
-| 5 | Premixed flame against Cantera (in preparation) | Gas mixtures, mechanisms, finite-rate chemistry, flame speed | | Cantera |
+| 5 | [Premixed flame](premixed_flame.md) | Gas mixtures, mechanisms, finite-rate chemistry, mixture-averaged transport, flame speed from φ = 0.6 to 1.4 | | Cantera's `FreeFlame` |
 | 6 | [Channel LES](channel_les.md) | Periodic Gmsh hexahedra, the Sigma model, constant mass flow, running statistics, the dissipation budget | an hour, one GPU | DNS of Moser, Kim & Mansour |
 | 7 | [Running on a cluster](cluster.md) | Sizing a run with `mallard check`, the job scripts for `mpirun`, Slurm, PBS and Kubernetes, GPU and core binding, `mallard ctl`, stopping and resuming from the newest restart, reading the log and the run health | minutes, laptop | Uninterrupted run, bit for bit |
 
