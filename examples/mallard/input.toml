@@ -7,8 +7,7 @@
 #
 # Generate the mesh first (needs the gmsh Python module, pip install gmsh):
 #   python make_mallard_mesh.py mallard.msh --order 3    # 1.05M cubic triangles, curved on the duck
-# Run (75,000 steps, about 1.5 hours on one data-center GPU; 251 snapshots,
-# 20 GB), then animate:
+# Run (89,000 steps, 1h 15m on one A100; 251 snapshots, 20 GB), then animate:
 #   mallard -i input.toml
 #   python ../../tools/post/animate.py solut mallard --var MACH --cmap inferno_r \
 #       --vmin 0 --vmax 8.5 --interp linear --layout single --overlay \
