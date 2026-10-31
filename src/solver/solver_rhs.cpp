@@ -87,6 +87,166 @@ struct GeometricSourceFunctor {
     }
 };
 
+/**
+ * @brief Positivity limiter of the convective face fluxes (Hu, Adams & Shu,
+ *        J. Comput. Phys. 242, 2013), shared parts. With the closure
+ *        sum_f A_f n_f = 0 a forward-Euler update of cell i is the convex
+ *        combination sum_f mu_f U_i^f, mu_f = A_f alpha_f / S_i,
+ *        S_i = sum_f A_f alpha_f, of the partial states
+ *        U_i^f = U_i + kappa_i / (A_f alpha_f) (R_f + A_f F(U_i) . n_f),
+ *        kappa_i = dt S_i / V_i, R_f the face's rate into the cell. With the
+ *        local Lax-Friedrichs flux of the cell averages and alpha_f >= |u_n| + a
+ *        on both sides, every U_i^f is admissible for kappa_i <= 1, that is
+ *        cfl <= 0.5 at the step's start.
+ */
+struct PositivityGeometry {
+    Kokkos::View<rtype *[N_DIM]> normals;
+    Kokkos::View<rtype *> face_area;
+    Kokkos::View<int32_t *[2]> cells_of_face;
+    Kokkos::View<uint8_t *> face_shift;
+    PeriodicMaps periodic;
+    BoundaryData boundaries;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    rtype gamma;
+
+    KOKKOS_INLINE_FUNCTION
+    rtype wave_speed(const rtype * W_c, const rtype * n) const {
+        return Kokkos::fabs(dot<N_DIM>(W_c + 1, n)) + Kokkos::sqrt(gamma * W_c[N_DIM + 1] / W_c[0]);
+    }
+
+    /**
+     * @brief Unit normal n of face f, and the states of its sides in cell 0's
+     *        frame: W_1 the cell average of cell 1 or the ghost of W_0.
+     * @return The face's alpha_f, the larger wave speed of its two sides.
+     */
+    KOKKOS_INLINE_FUNCTION
+    rtype sides(const uint32_t f, rtype * n, rtype * W_0, rtype * W_1) const {
+        rtype n_vec[N_DIM];
+        FOR_I_DIM n_vec[i] = normals(f, i);
+        unit<N_DIM>(n_vec, n);
+        const int32_t c0 = cells_of_face(f, 0), c1 = cells_of_face(f, 1);
+        FOR_I_CONSERVATIVE W_0[i] = W(c0, i);
+        if (c1 >= 0) {
+            FOR_I_CONSERVATIVE W_1[i] = W(c1, i);
+            if (periodic.rotated()) periodic.rotate(face_shift(f), W_1 + 1);
+        } else {
+            const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));
+            if (bc.is_transmissive() || bc.type == BoundaryType::PARTITION) {
+                FOR_I_CONSERVATIVE W_1[i] = W_0[i];
+            } else {
+                boundaries.ghost_W(f, W_0, n, W_1, true);
+            }
+        }
+        return Kokkos::fmax(wave_speed(W_0, n), wave_speed(W_1, n));
+    }
+};
+
+/** @brief kappa_i = dt S_i / V_i of every reconstructed cell. */
+struct PositivityKappaFunctor {
+    PositivityGeometry g;
+    Kokkos::View<uint32_t *> offsets_faces_of_cell;
+    Kokkos::View<uint32_t *> faces_of_cell;
+    Kokkos::View<rtype *> volume;
+    Kokkos::View<rtype *> kappa;
+    const rtype * dt_device;
+    rtype dt_host;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t c) const {
+        rtype S = 0.0_r;
+        for (uint32_t k = offsets_faces_of_cell(c); k < offsets_faces_of_cell(c + 1); k++) {
+            const uint32_t f = faces_of_cell(k);
+            rtype n[N_DIM], W_0[N_CONSERVATIVE], W_1[N_CONSERVATIVE];
+            S += g.face_area(f) * g.sides(f, n, W_0, W_1);
+        }
+        kappa(c) = (dt_device ? *dt_device : dt_host) * S / volume(c);
+    }
+};
+
+/**
+ * @brief Blends each face flux toward the local Lax-Friedrichs flux of the
+ *        cell averages by the largest theta in [0, 1] that keeps the partial
+ *        states of both cells admissible (density and pressure above a
+ *        relative floor), along which the density is linear and the pressure
+ *        concave. Faces that need no limiting keep their flux bit for bit.
+ */
+struct PositivityFluxFunctor {
+    PositivityGeometry g;
+    StateView U;
+    Kokkos::View<rtype *> kappa;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
+
+    KOKKOS_INLINE_FUNCTION
+    rtype pressure(const rtype * U_c) const {
+        return (g.gamma - 1.0_r) * (U_c[N_DIM + 1] - 0.5_r * dot<N_DIM>(U_c + 1, U_c + 1) / U_c[0]);
+    }
+
+    /**
+     * @brief Largest theta for one side: U_c and W_c its cell's conservative
+     *        and primitive state, n_out its outward normal, A the face's area,
+     *        scale kappa_c / (A alpha_f), R_high and R_low the face's rates
+     *        into it.
+     */
+    KOKKOS_INLINE_FUNCTION
+    rtype side_theta(const rtype * U_c, const rtype * W_c, const rtype * n_out, const rtype A, const rtype scale,
+                     const rtype * R_high, const rtype * R_low) const {
+        rtype U_dummy[N_CONSERVATIVE], F_c[N_CONSERVATIVE];
+        riemann::physical_flux(W_c, n_out, g.gamma, U_dummy, F_c);
+        rtype low[N_CONSERVATIVE], high[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE {
+            const rtype closure = A * F_c[i];
+            low[i] = U_c[i] + scale * (R_low[i] + closure);
+            high[i] = U_c[i] + scale * (R_high[i] + closure);
+        }
+        const rtype p_low = pressure(low);
+        if (!(low[0] > 0.0_r && p_low > 0.0_r)) return 0.0_r;
+        const rtype tol = precision_tol<rtype>(1e-10, 1e-4);
+        rtype theta = 1.0_r;
+        const rtype rho_min = tol * low[0];
+        if (high[0] < rho_min) theta = (low[0] - rho_min) / (low[0] - high[0]);
+        rtype mid[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE mid[i] = low[i] + theta * (high[i] - low[i]);
+        const rtype p_min = tol * p_low;
+        const rtype p_mid = pressure(mid);
+        if (p_mid < p_min) theta *= (p_low - p_min) / (p_low - p_mid);
+        return theta;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t f) const {
+        rtype n[N_DIM], W_0[N_CONSERVATIVE], W_1[N_CONSERVATIVE];
+        const rtype alpha = g.sides(f, n, W_0, W_1);
+        const rtype A = g.face_area(f);
+        rtype U_l[N_CONSERVATIVE], U_r[N_CONSERVATIVE], F_l[N_CONSERVATIVE], F_r[N_CONSERVATIVE];
+        riemann::physical_flux(W_0, n, g.gamma, U_l, F_l);
+        riemann::physical_flux(W_1, n, g.gamma, U_r, F_r);
+        rtype R_low[N_CONSERVATIVE], R_high[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE {
+            R_low[i] = -0.5_r * A * (F_l[i] + F_r[i] - alpha * (U_r[i] - U_l[i]));
+            R_high[i] = face_flux(f, i);
+        }
+        const int32_t c0 = g.cells_of_face(f, 0), c1 = g.cells_of_face(f, 1);
+        rtype U_c[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE U_c[i] = U(c0, i);
+        rtype theta = side_theta(U_c, W_0, n, A, kappa(c0) / (A * alpha), R_high, R_low);
+        if (c1 >= 0) {
+            FOR_I_CONSERVATIVE U_c[i] = U(c1, i);
+            if (g.periodic.rotated()) g.periodic.rotate(g.face_shift(f), U_c + 1);
+            rtype n_in[N_DIM];
+            FOR_I_DIM n_in[i] = -n[i];
+            FOR_I_CONSERVATIVE {
+                R_high[i] = -R_high[i];
+                R_low[i] = -R_low[i];
+            }
+            theta = Kokkos::fmin(theta, side_theta(U_c, W_1, n_in, A, kappa(c1) / (A * alpha), R_high, R_low));
+            FOR_I_CONSERVATIVE R_low[i] = -R_low[i];
+        }
+        if (theta >= 1.0_r) return;
+        theta = Kokkos::fmax(theta, 0.0_r);
+        FOR_I_CONSERVATIVE face_flux(f, i) = R_low[i] + theta * (face_flux(f, i) - R_low[i]);
+    }
+};
+
 /** @brief The ledger's boundary flux of a face: the convective flux, and the viscous one if any. */
 template <typename C>
 struct LedgerBoundaryFlux {
@@ -267,6 +427,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
             launch_flux_functor<riemann::RHLL>();
             break;
     }
+    if (positivity_limiter) limit_flux_positivity(solution);
     if (run_health.mutation.flux_factor != 1.0) {
         const Kokkos::View<rtype *[N_CONSERVATIVE]> F = face_flux;
         const rtype factor = static_cast<rtype>(run_health.mutation.flux_factor);
@@ -336,6 +497,17 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         budget.sgs = kinetic_energy_rate();
         budget.viscous -= budget.sgs;
     }
+}
+
+void Solver::limit_flux_positivity(StateView solution) {
+    const PositivityGeometry g{mesh->face_normals, mesh->face_area, mesh->cells_of_face, mesh->face_shift,
+                               mesh->periodic_maps(), boundary_data, W_cells, physics.gamma};
+    Kokkos::parallel_for("positivity_kappa", mesh->n_reconstructed(),
+                         PositivityKappaFunctor{g, mesh->offsets_faces_of_cell, mesh->faces_of_cell,
+                                                mesh->cell_measure, positivity_kappa,
+                                                recording_step ? step_dt_device() : nullptr, dt});
+    parallel_for_faces("positivity_flux", PositivityFluxFunctor{g, solution, positivity_kappa, face_flux}, rhs_faces,
+                       mesh->n_faces);
 }
 
 void Solver::update_cell_fields(const State & solution) {
