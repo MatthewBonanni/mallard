@@ -257,6 +257,7 @@ TEST(CliTest, TestHelpIsMallardsPageAlone) {
     std::ostringstream page;
     cli::print_help(page, *cli::command("test"));
     EXPECT_EQ(r.out, page.str());
+}
 
 TEST(CliTest, InputUpgradeSaysWhereItLookedForTheMesh) {
     SKIP_UNDER_MPI();
