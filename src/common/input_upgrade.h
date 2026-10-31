@@ -23,8 +23,9 @@ namespace input_upgrade {
 
 /**
  * @brief A key renamed, moved to another table, or removed. Paths are dotted;
- *        `name[]` stands for every table of the array of tables `name`, and
- *        `to` has the same `[]` steps as `from` (the same element).
+ *        `name[]` stands for every table of the array of tables `name`,
+ *        `**` for any number of nested tables and their arrays, and `to`
+ *        has the same `[]` steps as `from` (the same element).
  */
 struct KeyRule {
     std::string from;
@@ -37,18 +38,18 @@ struct KeyRule {
 };
 
 /**
- * @brief A string option renamed: `key = "from"` becomes `key = "to"`. A kept
- *        option still does what it did while deprecated (the setup reads it
- *        unchanged); only the rewritten file switches to `to`. `adds` are keys
- *        of the same table, set with the new option if absent: (key, TOML value),
- *        e.g. ("average", "true").
+ * @brief A string option renamed: `key = "from"` becomes `key = "to"`, and
+ *        `add` (`name = value`), if given, is set beside it unless its table
+ *        has it. A kept option still does what it did while deprecated (the
+ *        setup reads it unchanged); only the rewritten file switches to `to`.
  */
 struct OptionRule {
     std::string key;
     std::string from, to;
     std::string since, removed, note;
     bool kept = false;
-    std::vector<std::pair<std::string, std::string>> adds = {};
+    int dim = 0;           ///< The only dimension of runs it applies to; 0: every run
+    std::string add = {};  ///< E.g. "axis = [0, 0, 1]"
 };
 
 /**
@@ -104,18 +105,21 @@ std::vector<Finding> apply(Input & input, const std::string & version = "", cons
  *        ones), changing only the lines of those keys: a renamed key keeps its
  *        line, value and comment; a moved key goes to the end of its new table;
  *        a removed key is commented out with a note. Where that is not
- *        possible (dotted keys, inline tables), the whole file is reformatted,
- *        and `reformatted` is set. `findings` gets every change.
+ *        possible (renamed or moved dotted keys, or keys of inline tables),
+ *        the whole file is reformatted, and `reformatted` is set. `findings`
+ *        gets every change. `dim` is the case's dimension (0: unknown, an
+ *        error if a rule of one dimension matches).
  */
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
-                         bool & reformatted, const Rules & table = rules());
+                         bool & reformatted, const Rules & table = rules(), int dim = N_DIM);
 
 /**
  * @brief `mallard input upgrade [--check] old.toml > new.toml`: writes the
  *        upgraded file to stdout and the changes to stderr; with `check`, only
- *        the changes, and exit status 1 if there are any. Returns the exit status.
+ *        the changes, and exit status 1 if there are any. `dim` is the case's
+ *        dimension (0: unknown). Returns the exit status.
  */
-int upgrade_file(const std::string & file, bool check);
+int upgrade_file(const std::string & file, bool check, int dim);
 
 } // namespace input_upgrade
 

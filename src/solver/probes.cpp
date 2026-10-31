@@ -1,7 +1,7 @@
 /**
  * @file probes.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief [[probes]]: samples of the solution on point sets and curves.
+ * @brief [[probes]]: samples of the solution on points and curves.
  * @version 0.2
  * @date 2026-10-15
  *
@@ -266,7 +266,7 @@ std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
 
 /**
  * @brief A VTK XML PolyData file with its arrays appended raw: the samples as
- *        vertices (point sets), polyline points (curves) or polygons (3D
+ *        vertices (points), polyline points (curves) or polygons (3D
  *        surfaces of mesh faces), with one array per variable.
  */
 void write_vtp_file(const std::string & file, const probe::Geometry & g, const std::vector<std::string> & names,
@@ -406,7 +406,7 @@ void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & 
     std::sort(by_id.begin(), by_id.end(), [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
     p.geometry.dim = static_cast<uint8_t>(r.dimension());
     p.geometry.revolved = mesh.axisymmetric;
-    p.geometry.shape = "region " + r.summary();
+    p.geometry.type = "region " + r.summary();
     for (const size_t i : by_id) p.geometry.quad_weights.push_back(weights[i]);
 }
 
@@ -769,14 +769,14 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         }
 
         p.from_region = entry.contains("region");
-        for (const char * k : {"shape", "boundary", "boundary_type", "sampling", "format", "file", "samples"}) {
+        for (const char * k : {"type", "boundary", "boundary_type", "sampling", "format", "file", "samples"}) {
             if (p.from_region && entry.contains(k)) {
                 throw InputError(Diagnostic{.key = key + "." + k,
                                             .line = line_of(entry, k),
                                             .message = std::string("applies to probes of points and curves, but a "
                                                                    "region probe writes only its reductions, to "
                                                                    "reductions_file"),
-                                            .fix = std::string("Remove ") + k + ", or give the probe a shape instead "
+                                            .fix = std::string("Remove ") + k + ", or give the probe a type instead "
                                                    "of a region",
                                             .docs = "docs/guide/output.md#region-probes"});
             }
@@ -832,12 +832,12 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
         p.codes = to_device(h_codes, "probe_codes");
 
         const bool boundary = entry.contains("boundary") || entry.contains("boundary_type");
-        const std::string shape = find_value_or<std::string>(entry, "shape", "");
-        const bool cut = shape == "cut_plane";
-        const bool oriented = cut || (N_DIM == 2 && entry.contains("shape") && shape != "point" && shape != "points") ||
-                              (N_DIM == 2 && !entry.contains("shape") && !entry.contains("point")) ||
-                              (N_DIM == 3 && (shape == "rectangle" || shape == "disk" || shape == "sphere" ||
-                                              shape == "cylinder" || shape == "cone" || shape == "surface"));
+        const std::string type = find_value_or<std::string>(entry, "type", "");
+        const bool cut = type == "cut_plane";
+        const bool oriented = cut || (N_DIM == 2 && entry.contains("type") && type != "point" && type != "points") ||
+                              (N_DIM == 2 && !entry.contains("type") && !entry.contains("point")) ||
+                              (N_DIM == 3 && (type == "rectangle" || type == "disk" || type == "sphere" ||
+                                              type == "cylinder" || type == "cone" || type == "surface"));
         if (cut && mesh.axisymmetric && !p.reductions.empty()) {
             throw InputError(key + ".reductions: cut planes take no reductions with physics.axisymmetric.");
         }
@@ -848,7 +848,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
             }
             if (code::normals(k) && !boundary && !oriented) {
                 throw InputError(key + ".variables: " + p.variables[v] + " needs a surface (" +
-                                 (N_DIM == 2 ? "a curve, boundary or cut plane)." : "a boundary, cut plane or surface shape)."));
+                                 (N_DIM == 2 ? "a curve, boundary or cut plane)." : "a boundary, cut plane or surface)."));
             }
             if (code::normals(k) && !boundary && mesh.axisymmetric) {
                 throw InputError(key + ".variables: " + p.variables[v] +
@@ -894,7 +894,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                                             .docs = "docs/guide/output.md#region-probes"});
             }
         } else if (boundary) {
-            for (const char * k : {"shape", "point", "start", "end"}) {
+            for (const char * k : {"type", "point", "start", "end"}) {
                 if (entry.contains(k)) throw InputError(key + ": boundary probes take no " + k + ".");
             }
             std::vector<std::string> zones;
@@ -907,15 +907,15 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                 }
             }
             if (entry.contains("boundary_type")) {
-                const std::string type = find_value<std::string>(entry, "boundary_type");
-                if (type != "wall" && BOUNDARY_TYPES.find(type) == BOUNDARY_TYPES.end()) {
-                    throw InputError(key + ".boundary_type = \"" + type + "\" is not wall or a boundary type.");
+                const std::string zone_type = find_value<std::string>(entry, "boundary_type");
+                if (zone_type != "wall" && BOUNDARY_TYPES.find(zone_type) == BOUNDARY_TYPES.end()) {
+                    throw InputError(key + ".boundary_type = \"" + zone_type + "\" is not wall or a boundary type.");
                 }
                 for (const auto & b : find_value_or<std::vector<Input>>(input, "boundaries", {})) {
                     const std::string t = find_value_or<std::string>(b, "type", "");
                     const auto it = BOUNDARY_TYPES.find(t);
                     const bool wall = it != BOUNDARY_TYPES.end() && BoundaryCondition{it->second}.is_wall();
-                    if (t == type || (type == "wall" && wall)) zones.push_back(find_value<std::string>(b, "name"));
+                    if (t == zone_type || (zone_type == "wall" && wall)) zones.push_back(find_value<std::string>(b, "name"));
                 }
             }
             if (zones.empty()) throw InputError(key + ": no boundary zone selected.");
@@ -931,7 +931,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
             probe::FaceSet set = probe::boundary_faces(mesh, zones, distributed);
             p.nodes.on_faces(mesh, set, static_cast<uint32_t>(h_codes.size()));
             p.geometry = std::move(set.geometry);
-            p.geometry.shape = zones.size() == 1 ? "boundary " + zones[0] : "boundaries";
+            p.geometry.type = zones.size() == 1 ? "boundary " + zones[0] : "boundaries";
         } else if (cut) {
             probe::Vec3 x = {0.0, 0.0, 0.0}, n = {0.0, 0.0, 0.0};
             const std::vector<rtype> xv = find_real_vector(entry, "point", dim::length),
@@ -994,7 +994,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                 for (const Reduction r : p.reductions) {
                     for (const auto & v : p.variables) {
                         const Dimension d = field_units::describe(v).dimension;
-                        // Integrals take the units of the measure (sums over point sets)
+                        // Integrals take the units of the measure (sums over points)
                         columns.emplace_back(reduction_name(r) + "_" + v,
                                              r == Reduction::INTEGRAL ? d.times(measure) : d);
                     }
@@ -1061,7 +1061,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                     h5::write_rows(file, "polygons/offsets", g.polygon_offsets.size(), 1, 0, g.polygon_offsets.size(),
                                    g.polygon_offsets.data(), H5P_DEFAULT);
                 }
-                auto extensible = [&](const std::string & name, hid_t type, uint64_t cols) {
+                auto extensible = [&](const std::string & name, hid_t dtype, uint64_t cols) {
                     const int rank = cols > 0 ? 2 : 1;
                     const hsize_t dims[2] = {0, cols}, max[2] = {H5S_UNLIMITED, cols};
                     const hsize_t chunk[2] = {cols > 0 ? hsize_t(1) : hsize_t(256), std::max<hsize_t>(cols, 1)};
@@ -1070,7 +1070,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                     h5::check(H5Pset_chunk(plist, rank, chunk), "H5Pset_chunk");
                     h5::Handle lcpl(H5Pcreate(H5P_LINK_CREATE), H5Pclose, "H5Pcreate");
                     h5::check(H5Pset_create_intermediate_group(lcpl, 1), "H5Pset_create_intermediate_group");
-                    h5::Handle dset(H5Dcreate2(file, name.c_str(), type, space, lcpl, plist, H5P_DEFAULT), H5Dclose,
+                    h5::Handle dset(H5Dcreate2(file, name.c_str(), dtype, space, lcpl, plist, H5P_DEFAULT), H5Dclose,
                                     "creating " + name);
                 };
                 extensible("step", H5T_STD_U64LE, 0);
@@ -1465,7 +1465,7 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         for (const auto & v : p.variables) vars += (vars.empty() ? "" : ", ") + v;
         const size_t n = p.from_region ? p.quadrature.n_global : p.geometry.nodes.size();
         const char * unit = p.from_region ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
-        std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.shape + (p.from_region ? " over " : " of ") +
+        std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.type + (p.from_region ? " over " : " of ") +
                            logging::count(n) + unit +
                            (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
                                            : " every t = " + logging::real(double(p.time_interval))) +

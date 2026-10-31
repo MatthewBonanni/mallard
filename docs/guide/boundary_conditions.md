@@ -173,8 +173,8 @@ flux `m . n_in` at each face; `mdot` stays a scalar total.
 ### Time-dependent conditions
 
 Expressions of `x`, `y`, `z` are evaluated once at each face center, so each
-face gets a condition of its own; those of `t` on the device at every
-Runge-Kutta stage, so a pulsed or acoustically forced inlet converges at the
+face gets a condition of its own (`dirichlet` states too); those of `t` on
+the device at every Runge-Kutta stage, inside the step's CUDA graph, so a pulsed or acoustically forced inlet converges at the
 time integrator's order (third with SSPRK3; evaluating them once per step
 would give first order). Inputs that do not depend on `t` cost nothing per
 stage. A number of `t` that leaves its range (`p`, `T`, `p0`, `T0` or a wall

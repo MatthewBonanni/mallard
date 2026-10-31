@@ -226,6 +226,46 @@ class TimedBoundaryFields {
 };
 
 /**
+ * @brief The exterior states [rho, u, p] of dirichlet faces, expressions of
+ *        x, y, z and t, evaluated on the device: those of t at the stage time
+ *        held in a device scalar, so that a captured CUDA graph replays them,
+ *        the others once.
+ */
+class DirichletStates {
+    public:
+        /** @brief Face states `states` (indices into BoundaryData::face_state) at x take the programs W. */
+        void add(const std::vector<std::shared_ptr<const expr::Program>> & W, const std::vector<int32_t> & states,
+                 const std::vector<Point> & x);
+
+        /** @brief Copy what add() gathered to the device and write the states that do not depend on t. */
+        void finish(const Kokkos::View<rtype *[N_DIM + 2]> & face_state);
+
+        bool depends_on_time() const { return n_timed > 0; }
+
+        /** @brief The states that depend on t, at the time held in `time`. */
+        void apply(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM + 2]> & face_state) const;
+
+        /** @brief Throw the InputError of an expression stopped at the iteration limit, if any was. */
+        void check() const;
+
+    private:
+        struct FaceHost {
+            int32_t state;
+            uint32_t set;
+            Point x;
+        };
+        std::vector<std::shared_ptr<const expr::Program>> host_programs;  // N_DIM + 2 per set
+        std::vector<bool> set_timed;
+        std::vector<FaceHost> faces_host;
+        uint32_t n_timed = 0;  // faces whose states depend on t, first on the device
+
+        Kokkos::View<int32_t *> face_state_index;
+        Kokkos::View<uint32_t *> face_set;
+        Kokkos::View<double *[3]> face_x;
+        expr::ProgramTable<> programs;
+};
+
+/**
  * @brief Velocity targets of inlet_state with nscbc that depend on t, evaluated on the
  *        device at a time into a target array (char_target or char_target_next).
  */

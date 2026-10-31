@@ -1,7 +1,7 @@
 /**
  * @file region.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Regions from their input tables, and their cell volume fractions.
+ * @brief Regions from their input tables, and the fraction of each cell inside them.
  * @version 0.1
  * @date 2026-10-15
  *
@@ -17,6 +17,7 @@
 #include <limits>
 #include <optional>
 #include <sstream>
+#include <utility>
 
 #include "comm.h"
 #include "input.h"
@@ -36,20 +37,6 @@ Vec cross(const Vec & a, const Vec & b) {
     return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
 }
 double norm(const Vec & a) { return std::sqrt(dot(a, a)); }
-
-/** @brief The primitive types, each with its fixed dimension; every one so far fills space (a volume, an area in 2D). */
-const std::vector<std::pair<std::string, int>> PRIMITIVES = {
-    {"sphere", N_DIM}, {"ellipsoid", N_DIM}, {"cylinder", N_DIM}, {"cone", N_DIM},  {"box", N_DIM},
-    {"torus", N_DIM},  {"half_space", N_DIM}, {"implicit", N_DIM}, {"polygon", N_DIM}, {"disk", N_DIM},
-    {"annulus", N_DIM}, {"ellipse", N_DIM},  {"rectangle", N_DIM}};
-const std::vector<std::string> BOOLEANS = {"union", "intersection", "difference"};
-
-std::vector<std::string> type_names() {
-    std::vector<std::string> names;
-    for (const auto & [type, d] : PRIMITIVES) names.push_back(type);
-    names.insert(names.end(), BOOLEANS.begin(), BOOLEANS.end());
-    return names;
-}
 
 /** @brief A region of that dimension, in the words of the run (2D: point, curve, area). */
 std::string dimension_name(int d) {
@@ -116,7 +103,7 @@ class Parser {
             }
             if (!t.contains("type")) throw InputError(where + " has no type.");
             const std::string type = find_value<std::string>(t, "type");
-            record_options(where + ".type", type_names());
+            record_options(where + ".type", types());
             const Frame frame = transformed(t, where, parent);
             if (type == "union" || type == "intersection" || type == "difference") {
                 return boolean(t, where, type, frame);
@@ -125,6 +112,39 @@ class Parser {
         }
 
     private:
+        static std::vector<std::string> types() {
+            std::vector<std::string> out = {"sphere", "ellipsoid", "cylinder", "cone", "frustum", "torus",
+                                            "half_space", "implicit", "union", "intersection", "difference"};
+            if (N_DIM == 2) {
+                out.insert(out.end(), {"disk", "annulus", "rectangle", "polygon"});
+            } else {
+                out.push_back("box");
+            }
+            return out;
+        }
+
+        /** @brief For a type of another dimension than the run's regions: what it is, and the type to use instead. */
+        static std::optional<std::pair<std::string, std::string>> other_dimension(const std::string & type) {
+            if (type == "circle") return {{"a curve", N_DIM == 2 ? "\"disk\", the area inside a circle" : "\"sphere\""}};
+            if (type == "ellipse") {
+                return {{"a curve", N_DIM == 2 ? "\"ellipsoid\", whose z = 0 slice is the area inside an ellipse"
+                                               : "\"ellipsoid\""}};
+            }
+            if (N_DIM == 2) {
+                if (type == "box") return {{"a 3D solid", "\"rectangle\""}};
+                return std::nullopt;
+            }
+            if (type == "annulus") {
+                return {{"a flat surface in 3D runs", "\"cylinder\" with inner_radius, a hollow cylinder along its axis"}};
+            }
+            if (type == "disk") return {{"a flat surface in 3D runs", "\"sphere\", or a short \"cylinder\""}};
+            if (type == "rectangle") return {{"a flat surface in 3D runs", "\"box\""}};
+            if (type == "polygon") {
+                return {{"a flat surface in 3D runs", "\"implicit\", or an \"intersection\" of half spaces"}};
+            }
+            return std::nullopt;
+        }
+
         std::string named(const Input & value, const std::string & where, const Frame & parent) {
             const std::string name = value.as_string();
             const Input & t = lookup(names, value, where);
@@ -318,11 +338,15 @@ class Parser {
             const std::array<double, 9> I = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
             std::ostringstream text;
             text << type;
-            if (type == "sphere" || type == "disk" || type == "circle") {
+            if (const auto other = other_dimension(type)) {
+                throw InputError(where + ".type = \"" + type + "\" is " + other->first + ", and regions here are " +
+                                 (N_DIM == 2 ? "areas" : "volumes") + ": use " + other->second + ".");
+            }
+            if (type == "sphere" || type == "disk") {
                 n.kind = Kind::SPHERE;
                 frame = frame.then(I, vec(t, "center", where));
                 n.p[0] = positive(t, "radius", where);
-            } else if (type == "ellipsoid" || type == "ellipse") {
+            } else if (type == "ellipsoid") {
                 n.kind = Kind::ELLIPSOID;
                 frame = frame.then(I, vec(t, "center", where));
                 const Vec a = vec(t, "semi_axes", where);
@@ -374,7 +398,6 @@ class Parser {
                 n.kind = Kind::HALF_SPACE;
                 frame = frame.then(basis_along(direction(t, "normal", where)), vec(t, "point", where, zero));
             } else if (type == "polygon") {
-                if (N_DIM != 2) throw InputError(where + ": polygons are 2D regions.");
                 n.kind = Kind::POLYGON;
                 if (!t.contains("vertices") || !t.at("vertices").is_array() || t.at("vertices").as_array().size() < 3) {
                     throw InputError(where + " needs vertices = [[x, y], ...] (at least 3).");
@@ -394,14 +417,11 @@ class Parser {
                                       std::vector<std::string>{"x", "y", "z"});
                 bounded = false;
             } else {
-                std::string known;
-                for (const auto & name : type_names()) known += (known.empty() ? "" : ", ") + name;
-                throw InputError(where + ".type = \"" + type + "\" is not one of: " + known + ".");
+                std::string list;
+                for (const std::string & name : types()) list += (list.empty() ? "" : ", ") + name;
+                throw InputError(where + ".type = \"" + type + "\" is not one of: " + list + ".");
             }
-            const auto entry = std::find_if(PRIMITIVES.begin(), PRIMITIVES.end(), [&type](const auto & e) {
-                return e.first == (type == "circle" ? "disk" : type == "frustum" ? "cone" : type);
-            });
-            last_dimension = entry->second;
+            last_dimension = N_DIM;  // every primitive type so far fills space
             std::copy(frame.M.begin(), frame.M.end(), n.m);
             std::copy(frame.d.begin(), frame.d.end(), n.d);
             n.scale = frame.k;
@@ -568,11 +588,11 @@ struct Sampler {
 
 } // namespace
 
-std::vector<double> volume_fractions(const Mesh & mesh, const Region & region) {
+std::vector<double> cell_fractions(const Mesh & mesh, const Region & region) {
     const Sampler sampler{region, mesh.axisymmetric, N_DIM == 2 ? 8 : 5};
     std::vector<double> fractions(mesh.n_cells, 0.0);
     using HostSpace = Kokkos::DefaultHostExecutionSpace;
-    Kokkos::parallel_for("region_volume_fractions",
+    Kokkos::parallel_for("region_cell_fractions",
                          Kokkos::RangePolicy<HostSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, mesh.n_cells),
                          [&](const uint32_t i_cell) {
         double inside = 0.0, total = 0.0;
@@ -636,7 +656,7 @@ const Region & Regions::get(const Input & value, const std::string & where) { re
 
 const std::vector<double> & Regions::fractions(const Input & value, const std::string & where) {
     Entry & e = entry(value, where);
-    if (e.fractions.empty()) e.fractions = volume_fractions(m_mesh, e.region);
+    if (e.fractions.empty()) e.fractions = cell_fractions(m_mesh, e.region);
     return e.fractions;
 }
 

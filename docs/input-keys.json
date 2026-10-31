@@ -1564,13 +1564,12 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
    "cone",
    "cylinder",
    "difference",
    "disk",
-   "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
    "intersection",
@@ -4314,24 +4313,6 @@
   ],
   "set_in": []
  },
- "probes.shape": {
-  "default": "\"\"",
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": [],
-  "type": "string",
-  "values": [
-   "arc",
-   "circle",
-   "curve",
-   "line",
-   "point",
-   "points",
-   "polyline"
-  ]
- },
  "probes.start": {
   "dims": [
    2,
@@ -4358,6 +4339,24 @@
    3
   ],
   "set_in": []
+ },
+ "probes.type": {
+  "default": "\"\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "arc",
+   "circle",
+   "curve",
+   "line",
+   "point",
+   "points",
+   "polyline"
+  ]
  },
  "probes.variables": {
   "dims": [
@@ -4497,13 +4496,12 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
    "cone",
    "cylinder",
    "difference",
    "disk",
-   "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
    "intersection",
@@ -4970,13 +4968,12 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
    "cone",
    "cylinder",
    "difference",
    "disk",
-   "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
    "intersection",
