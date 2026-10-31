@@ -184,6 +184,7 @@ bool planar(const Node & n) {
 struct Patch {
     std::function<void(double, double, Vec &, Vec &, Vec &)> at;
     double u0, u1, v0 = 0.0, v1 = 0.0;
+    bool cap = false;  // an end of a cylinder or cone
 };
 
 const double GAUSS_X[3] = {-0.7745966692414834, 0.0, 0.7745966692414834};
@@ -383,8 +384,19 @@ struct Clipper {
     }
 };
 
+const Mesh & no_mesh() {
+    static const Mesh mesh;
+    return mesh;
+}
+
 class Builder {
     public:
+        /** @brief For the patches of a region alone: no mesh, so no extent for unbounded surfaces. */
+        explicit Builder(const Region & region) : m_mesh(no_mesh()), m_region(region) {
+            m_lo = m_hi = {0.0, 0.0, 0.0};
+            for (const auto & f : region.filled()) m_views.push_back(region.host(f));
+        }
+
         Builder(const Mesh & mesh, const Region & region) : m_mesh(mesh), m_region(region) {
             const bool distributed = !mesh.h_global_cell_id.empty();
             double volume = 0.0;
@@ -972,7 +984,7 @@ class Builder {
                                            qv = z > 0.0 ? dt : dr;
                                        },
                                        z > 0.0 ? r0 : 0.0, z > 0.0 ? 1.0 : 2.0 * PI, z > 0.0 ? 0.0 : r0,
-                                       z > 0.0 ? 2.0 * PI : 1.0});
+                                       z > 0.0 ? 2.0 * PI : 1.0, true});
                     }
                 }
             } else if (n.kind == Kind::BOX) {
@@ -1021,10 +1033,14 @@ class Builder {
         }
 
         /** @brief Sample a piece of exact form on its patches, if it has one. */
-        bool exact_piece(const Piece & p) {
-            std::vector<Patch> patches;
-            const Node * frame = nullptr;
-            Piece rest = p;
+    public:
+        /**
+         * @brief The patches of a piece of exact form, with the frame they are in,
+         *        and the piece's clipping regions left to apply (a flat surface's
+         *        own outline is its patches); none if it has no exact form.
+         */
+        bool exact_patches(const Piece & p, std::vector<Patch> & patches, const Node *& frame, Piece & rest) const {
+            rest = p;
             if (p.carriers.size() == 1 && single(p.carriers[0])) {
                 const Node & n = only_node(p.carriers[0]);
                 if (N_DIM == 3 && n.kind == Kind::HALF_SPACE && !p.inside.empty() && single(p.inside[0]) &&
@@ -1044,7 +1060,15 @@ class Builder {
                     frame = &plane;
                 }
             }
-            if (patches.empty()) return false;
+            return !patches.empty();
+        }
+
+    private:
+        bool exact_piece(const Piece & p) {
+            std::vector<Patch> patches;
+            const Node * frame = nullptr;
+            Piece rest;
+            if (!exact_patches(p, patches, frame, rest)) return false;
             sample(rest, Local(*frame), patches);
             return true;
         }
@@ -1169,6 +1193,100 @@ class Builder {
 };
 
 } // namespace
+
+std::vector<SurfacePatch> surface_patches(const Region & region, const std::string & where) {
+    const Builder builder(region);
+    std::vector<Patch> patches;
+    const Node * frame = nullptr;
+    Piece rest, piece;
+    if (region.dimension() == N_DIM) {
+        piece.carriers = {region.root()};  // a filled region's surface
+    } else if (region.dimension() == N_DIM - 1 && region.pieces().size() == 1) {
+        piece = region.pieces()[0];
+    }
+    if (!builder.exact_patches(piece, patches, frame, rest) || !rest.inside.empty() || !rest.outside.empty()) {
+        throw InputError(where + ": a resampled surface is the surface of one primitive, or a flat surface.");
+    }
+    const Local map(*frame);
+    const bool flip = piece.flip;
+    std::vector<SurfacePatch> out;
+    for (const Patch & patch : patches) {
+        SurfacePatch s;
+        s.u0 = patch.u0;
+        s.u1 = patch.u1;
+        s.v0 = patch.v0;
+        s.v1 = patch.v1;
+        s.cap = patch.cap;
+        // A flipped surface runs v backwards, so that x_u x x_v turns around
+        s.at = [at = patch.at, map, flip, v0 = patch.v0, v1 = patch.v1](double u, double v, Vec & x, Vec & xu, Vec & xv) {
+            Vec q, qu, qv;
+            at(u, flip ? v0 + v1 - v : v, q, qu, qv);
+            x = map.point(q);
+            xu = map.vector(qu);
+            xv = mul(flip ? -1.0 : 1.0, map.vector(qv));
+        };
+        out.push_back(s);
+    }
+    return out;
+}
+
+Grid sample_grid(const std::vector<SurfacePatch> & patches, const uint32_t nu, const uint32_t nv) {
+    Grid g;
+    for (const SurfacePatch & patch : patches) {
+        // A parameter spanning a full turn closes: its last nodes are its first
+        auto same = [&](const Vec & a, const Vec & b) { return norm(sub(a, b)) <= 1e-12 * std::max(1.0, norm(a)); };
+        auto x_at = [&](double u, double v) {
+            Vec x, xu, xv;
+            patch.at(u, v, x, xu, xv);
+            return x;
+        };
+        bool wrap_v = true, wrap_u = true;
+        for (const double t : {0.25, 0.5, 0.75}) {
+            wrap_v = wrap_v && same(x_at(patch.u0 + t * (patch.u1 - patch.u0), patch.v0), x_at(patch.u0 + t * (patch.u1 - patch.u0), patch.v1));
+            wrap_u = wrap_u && same(x_at(patch.u0, patch.v0 + t * (patch.v1 - patch.v0)), x_at(patch.u1, patch.v0 + t * (patch.v1 - patch.v0)));
+        }
+        const uint32_t su = wrap_u ? nu : nu - 1, sv = wrap_v ? nv : nv - 1;  // intervals
+        auto u_of = [&](uint32_t i) { return patch.u0 + (patch.u1 - patch.u0) * double(i) / double(su); };
+        auto v_of = [&](uint32_t j) { return patch.v0 + (patch.v1 - patch.v0) * double(j) / double(sv); };
+        const uint32_t first = static_cast<uint32_t>(g.nodes.size());
+        for (uint32_t i = 0; i < nu; i++) {
+            for (uint32_t j = 0; j < nv; j++) {
+                Vec x, xu, xv;
+                patch.at(u_of(i), v_of(j), x, xu, xv);
+                Vec n = cross(xu, xv);
+                if (norm(n) == 0.0) {
+                    // A degenerate node (a pole): the normal just inside the grid
+                    const double u = u_of(i) + 1e-6 * (i + 1 < nu || wrap_u ? u_of(i + 1) - u_of(i) : u_of(i - 1) - u_of(i));
+                    Vec y;
+                    patch.at(u, v_of(j), y, xu, xv);
+                    n = cross(xu, xv);
+                }
+                g.nodes.push_back(x);
+                g.normals.push_back(unit(n));
+            }
+        }
+        for (uint32_t i = 0; i < su; i++) {
+            for (uint32_t j = 0; j < sv; j++) {
+                const uint32_t i1 = (i + 1) % nu, j1 = (j + 1) % nv;
+                g.quads.push_back({first + i * nv + j, first + i1 * nv + j, first + i1 * nv + j1, first + i * nv + j1});
+                const double hu = 0.5 * (u_of(i + 1) - u_of(i)), mu = 0.5 * (u_of(i + 1) + u_of(i));
+                const double hv = 0.5 * (v_of(j + 1) - v_of(j)), mv = 0.5 * (v_of(j + 1) + v_of(j));
+                for (int a = 0; a < 3; a++) {
+                    for (int b = 0; b < 3; b++) {
+                        Vec x, xu, xv;
+                        patch.at(mu + hu * GAUSS_X[a], mv + hv * GAUSS_X[b], x, xu, xv);
+                        const Vec n = cross(xu, xv);
+                        const double dA = norm(n);
+                        g.quad_points.push_back(x);
+                        g.quad_weights.push_back(GAUSS_W[a] * GAUSS_W[b] * std::abs(hu * hv) * dA);
+                        g.quad_normals.push_back(dA > 0.0 ? mul(1.0 / dA, n) : n);
+                    }
+                }
+            }
+        }
+    }
+    return g;
+}
 
 Elements elements(const Mesh & mesh, const Region & region) {
     if (region.dimension() == N_DIM) throw std::logic_error("region::elements: the region is filled.");

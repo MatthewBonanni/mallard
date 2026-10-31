@@ -25,6 +25,7 @@ struct CheckOptions {
     size_t n_worst = 5;         // worst cells listed per quality metric
     std::string quality_file;   // prefix of the quality fields' snapshot, or empty
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
+    std::string view_dir;       // directory of the case view (case_view.h), or empty
     std::string input_file;     // named before input errors, as a run names it, or empty
 };
 
@@ -35,6 +36,8 @@ struct CheckReport {
     bool setup_done = false;
 
     logging::Items boundaries;  // zone, condition and faces
+    logging::Items regions;     // name, then dimension, measure, cells and how it is made
+    std::string view_file;      // the case view written, or empty
 
     bool has_quality = false;
     std::array<QualitySummary, MeshQuality::N_METRICS> quality;
