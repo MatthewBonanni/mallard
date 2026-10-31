@@ -16,6 +16,8 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 
 #include "region.h"
@@ -61,6 +63,40 @@ struct Elements {
  *        vertices (exact for planes). Collective.
  */
 Elements elements(const Mesh & mesh, const Region & region);
+
+/**
+ * @brief A patch of a surface in world coordinates: x(u, v) and its
+ *        derivatives over [u0, u1] x [v0, v1], with x_u x x_v facing as the
+ *        surface does.
+ */
+struct SurfacePatch {
+    std::function<void(double, double, std::array<double, 3> &, std::array<double, 3> &, std::array<double, 3> &)> at;
+    double u0 = 0.0, u1 = 1.0, v0 = 0.0, v1 = 1.0;
+    bool cap = false;  // an end of a cylinder or cone
+};
+
+/**
+ * @brief The patches of a surface that is one primitive's (of a filled
+ *        region, its surface) or a flat surface, in the parameters region_mesh
+ *        samples them on (docs/guide/geometry.md lists them per type). An
+ *        error at where otherwise.
+ */
+std::vector<SurfacePatch> surface_patches(const Region & region, const std::string & where);
+
+/** @brief A surface resampled on a grid: nodes with unit normals, quadrilaterals, and 3 x 3 Gauss points per quadrilateral. */
+struct Grid {
+    std::vector<std::array<double, 3>> nodes, normals;
+    std::vector<std::array<uint32_t, 4>> quads;
+    std::vector<std::array<double, 3>> quad_points, quad_normals;
+    std::vector<double> quad_weights;
+};
+
+/**
+ * @brief Patches on nu x nv nodes each, evenly in their parameters (a
+ *        parameter spanning a closed turn does not repeat its first nodes),
+ *        with Gauss points of degree 5 on each quadrilateral of parameters.
+ */
+Grid sample_grid(const std::vector<SurfacePatch> & patches, uint32_t nu, uint32_t nv);
 
 } // namespace region
 

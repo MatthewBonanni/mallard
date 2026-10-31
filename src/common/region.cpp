@@ -814,10 +814,13 @@ class Parser {
                 } else {
                     mask.kind = Kind::CYLINDER;
                     mask.p[0] = positive(t, "radius", where);
-                    if (type == "annulus") {
+                    // A disk may have a hole (inner_radius, default 0); an annulus must
+                    if (type == "annulus" || t.contains("inner_radius")) {
                         mask.p[1] = number(t, "inner_radius", where);
-                        if (mask.p[1] <= 0.0 || mask.p[1] >= mask.p[0]) {
-                            fail(where + ".inner_radius", line_of(t, "inner_radius"), "must be in (0, radius)", "", "docs/input.md#regions");
+                        if (mask.p[1] < 0.0 || mask.p[1] >= mask.p[0] || (type == "annulus" && mask.p[1] == 0.0)) {
+                            fail(where + ".inner_radius", line_of(t, "inner_radius"),
+                                 type == "annulus" ? "must be in (0, radius)" : "must be in [0, radius)", "",
+                                 "docs/input.md#regions");
                         }
                     }
                     mask.p[2] = INF;
