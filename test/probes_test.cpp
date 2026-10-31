@@ -983,13 +983,13 @@ TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMass) {
                 points << (weights.empty() ? "" : ", ") << "[" << c[0] + r * std::cos(phi) << ", "
                        << c[1] + r * std::sin(phi) << "]";
                 weights.push_back(w * r);
-                continue;
-            }
-            for (const auto & [mu, wmu] : polar) {
-                const double s = std::sqrt(1.0 - mu * mu);
-                points << (weights.empty() ? "" : ", ") << "[" << c[0] + r * s * std::cos(phi) << ", "
-                       << c[1] + r * s * std::sin(phi) << ", " << c[2] + r * mu << "]";
-                weights.push_back(w * r * r * wmu);
+            } else {
+                for (const auto & [mu, wmu] : polar) {
+                    const double s = std::sqrt(1.0 - mu * mu);
+                    points << (weights.empty() ? "" : ", ") << "[" << c[0] + r * s * std::cos(phi) << ", "
+                           << c[1] + r * s * std::sin(phi) << ", " << c[2] + r * mu << "]";
+                    weights.push_back(w * r * r * wmu);
+                }
             }
         }
     }
