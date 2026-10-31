@@ -25,7 +25,7 @@ Lx = 2.0              # the domain is [0, Lx] x [0, Ly]
 Ly = 1.0
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 32 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
 
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-light.svg#gh-light-mode-only)
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-dark.svg#gh-dark-mode-only)

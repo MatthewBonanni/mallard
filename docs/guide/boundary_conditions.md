@@ -62,7 +62,7 @@ name = "wall"           # a boundary zone of the mesh
 type = "wall_adiabatic"
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 38 more.
 
 | `type` | Kind | Keys | Use |
 |---|---|---|---|
@@ -256,6 +256,30 @@ sigma = 100.0     # follow the forcing closely
 acoustic waves at `u + c`, temperature forcing at 250 Hz as entropy waves at
 `u`; the inlet cell follows both targets (`examples/forced_inlet/plot_forced_inlet.py`).*
 
+An expression of both `y` and `t` pulses a jet: a `mass_flow_inlet` covering
+the whole wall, with a mass flux that is a top hat in the radius (the nozzle)
+times a smoothed square wave in time, and zero elsewhere. The inlet holds the
+mass flux, so each pulse ejects exactly the stroke the expression integrates
+to.
+
+```toml
+[[boundaries]]
+name = "left"                 # a wall with a nozzle of diameter 1 in it
+type = "mass_flow_inlet"
+# rho0 U(t) f(y): U0 = 0.2 from rest, period 30 (stroke L / D = 3), nozzle edge 0.025 D
+mass_flux = "0.2 * (1 - tanh(4 * cos(2 * pi * t / 30))) / 2 * (1 - tanh((y - 0.5) / 0.025)) / 2"
+T = 0.7142857142857143
+```
+
+![A pulsed jet launching vortex rings: vorticity, ring core positions and the inlet velocity against its target](../images/guide/pulsed_jet-light.svg#gh-light-mode-only)
+![A pulsed jet launching vortex rings: vorticity, ring core positions and the inlet velocity against its target](../images/guide/pulsed_jet-dark.svg#gh-dark-mode-only)
+
+*`examples/pulsed_jet` (axisymmetric, D / 96, Re_D = 2000, six pulses to
+t U0 / D = 36): each pulse rolls up into a vortex ring. The inlet cell delivers
+strokes of 2.995 to 3.000 D against 3. The first ring travels at 0.40 U0 with
+1.04 times the circulation of the slug model; the rings behind it, in its wake,
+at 0.455 to 0.465 U0 with 1.01 to 1.11 times (`examples/pulsed_jet/plot_pulsed_jet.py`).*
+
 Pitfalls:
 
 - `nscbc_inlet` relaxes its velocity toward the target at the rate
@@ -279,7 +303,7 @@ L = 0.1            # a length of the domain [m]
 # sigma = 0.25     # relaxation: 0 is perfectly non-reflecting but drifts
 ```
 
-*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow).
+*Used in:* [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet), [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body) and 1 more.
 
 `nscbc_outlet` and `nscbc_inlet` let outgoing waves leave and relax the
 incoming ones toward a target (Poinsot & Lele 1992, with the transverse terms

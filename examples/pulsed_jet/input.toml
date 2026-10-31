@@ -1,0 +1,101 @@
+# A pulsed round jet launching a train of vortex rings (axisymmetric; x is
+# the axis, y the radius). The left boundary is a wall with a nozzle of
+# diameter D = 1 in it: a mass_flow_inlet whose mass flux is an expression of
+# y and t, rho0 U(t) f(y), with
+#   U(t) = U0 (1 - tanh(4 cos(2 pi t / T))) / 2   (a smoothed square wave from rest)
+#   f(y) = (1 - tanh((y - D/2) / 0.025)) / 2      (a top hat, edge 0.025 D)
+# and zero mass flux outside the nozzle. Each period T ejects a slug of
+# length L = U0 T / 2 exactly (the inlet holds the mass flux), which rolls up
+# into one vortex ring.
+# Nondimensionalization: D = 1, rho0 = 1, c0 = 1.
+#   U0 = 0.2      Mach 0.2: compressibility effects ~ M^2 = 4%
+#   T = 30        L / D = 3, below the formation number ~4 (Gharib, Rambod
+#                 & Shariff 1998): each pulse makes one ring and no trailing jet
+#   mu = 1e-4     Re_D = U0 D / nu = 2000, laminar rings
+# Domain 12 D x 4 D; a sponge over the last 3 D damps the rings before the
+# outlet. Track the rings and draw the vorticity with
+#   python plot_pulsed_jet.py solut/jet solut/probe_inlet.csv --png pulsed_jet.png
+# Full size (1152 x 384 cells, D / 96, six pulses to t = 180): a GPU run.
+# Reduced on a CPU (D / 32, Re_D = 1000, two pulses): Nx = 384, Ny = 128,
+# mu = 2e-4, t_stop = 80; 7,543 steps, 18 minutes on 2 threads. Strokes of
+# 3.001 and 2.996 D at the inlet cell; rings at 0.39 and 0.44 U0 (the second
+# in the wake of the first), 1.04 and 1.06 times the slug model's circulation.
+
+[run]
+t_stop = 180.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 1152
+Ny = 384
+Lx = 12.0
+Ly = 4.0
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "left"
+type = "mass_flow_inlet"
+mass_flux = "0.2 * (1 - tanh(4 * cos(2 * pi * t / 30))) / 2 * (1 - tanh((y - 0.5) / 0.025)) / 2"
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "farfield"
+u = [0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "right"
+type = "nscbc_outlet"
+p = 0.7142857142857143
+L = 12.0
+
+[[sponges]]
+strength = "x > 9 ? 0.5 * ((x - 9) / 3)^2 : 0"
+u = [0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 3
+
+[physics]
+type = "navier_stokes"
+axisymmetric = true
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 1.0e-4
+Pr = 0.72
+
+[output]
+check_interval = 500
+
+[[probes]]
+name = "inlet"
+point = [0.001, 0.001]
+variables = ["U_X"]
+interval = 10
+file = "./solut/probe_inlet.csv"
+
+[[write_data]]
+prefix = "./solut/jet"
+time_interval = 1.0
+variables = ["VORTICITY", "U", "P"]
