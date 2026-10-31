@@ -10,13 +10,13 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <initializer_list>
 #include <sstream>
 #include <string>
 
 #include "check.h"
 #include "data_paths.h"
+#include "gmsh_fixtures.h"
 #include "input.h"
 #include "mixture.h"
 #include "scratch.h"
@@ -158,8 +158,7 @@ TEST(ErrorMessages, GeneratedMeshOfTheOtherDimensionNamesTheSolverToRun) {
 }
 
 TEST(ErrorMessages, OutputThatCannotBeWrittenSaysWhatToCheck) {
-    const std::filesystem::path blocker = scratch_dir() / "a_file_not_a_directory";
-    std::ofstream(blocker) << "x";
+    const std::filesystem::path blocker = write_temp("a_file_not_a_directory", "x");
     const std::string input = box() + "[[write_data]]\nprefix = \"" + (blocker / "flow").string() +
                               "\"\nformat = \"vtu\"\ninterval = 5\nvariables = [\"P\"]\n";
     expect_parts(run_error(input), {"cannot write the output " + (blocker / "flow").string(), "directory exists"});
@@ -229,8 +228,7 @@ TEST(ErrorMessages, InitialRegionsAndDataNameTheEntryAndTheColumns) {
     const std::string empty = box() + "[[initialize.regions]]\nregion = " + region + "\n";
     expect_parts(run_error(empty), {"initialize.regions[0]", "sets none of u, rho, p, T, X, Y", "T = 2000",
                                     "docs/guide/initialization.md#regions"});
-    const std::string file = (scratch_dir() / "profile.csv").string();
-    std::ofstream(file) << "r,T\n0,2\n1,1\n";
+    const std::string file = write_temp("profile.csv", "r,T\n0,2\n1,1\n");
     const std::string data = box() + "[[initialize.data]]\nname = \"flame\"\nfile = \"" + file +
                              "\"\ncoordinates = [\"radius\"]\n";
     expect_parts(run_error(data), {line_prefix(data, "coordinates =") + "initialize.data[0].coordinates",
