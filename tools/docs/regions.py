@@ -505,6 +505,80 @@ def mesh_regions(P, args):
     return fig
 
 
+ORIENTED = [
+    ("circle (exact)", '{type = "circle", center = [0.5, 0.5], radius = 0.3}'),
+    ("rectangle minus a disk, boundary (extracted)",
+     '{type = "boundary", of = {type = "difference", regions = [{type = "rectangle", center = [0.5, 0.5], '
+     'size = [0.8, 0.6]}, {type = "disk", center = [0.75, 0.5], radius = 0.22}]}}'),
+    ('"outer" in a box; a flipped ellipse',
+     '{type = "intersection", regions = ["outer", {type = "rectangle", center = [0, 0.5], size = [0.6, 2]}]}'),
+]
+
+
+@functools.cache
+def data_orientation(mallard):
+    """The case view of a check whose probes are the oriented curves: per curve, segments and normals."""
+    import h5py
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "holed.msh"
+    holed_mesh(mesh, hole=HOLE)
+    regions = [r for _, r in ORIENTED] + ['{type = "ellipse", center = [0.62, 0.62], semi_axes = [0.2, 0.1], '
+                                          'rotate = 30, pivot = [0.62, 0.62], flip = true}']
+    probes = "".join(f'[[probes]]\nname = "c{i}"\nvariables = ["P"]\nregion = {r}\n' for i, r in enumerate(regions))
+    toml = f"""[run]
+n_steps = 1
+dt = 1e-9
+[mesh]
+type = "file"
+filename = "{mesh.name}"
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0
+T = 1.0
+[[boundaries]]
+name = "outer"
+type = "symmetry"
+[[boundaries]]
+name = "hole"
+type = "symmetry"
+{probes}{PHYSICS}"""
+    (work / "case.toml").write_text(toml)
+    subprocess.run([str(mallard), "check", "case.toml", "--view", "view", "--kokkos-num-threads=2"], cwd=work,
+                   check=True, stdout=subprocess.DEVNULL)
+    out = {}
+    with h5py.File(work / "view" / "case.vtkhdf") as f:
+        for i in range(len(regions)):
+            b = f["VTKHDF"][f'probes[name = "c{i}"].region']
+            pts, conn, offs = b["Points"][:, :2], b["Connectivity"][:], b["Offsets"][:]
+            segs = np.array([pts[conn[offs[k]:offs[k + 1]]] for k in range(len(offs) - 1)])
+            out[i] = (segs, b["CellData"]["normal"][:, :2], b["CellData"]["length"][:])
+    pts, cells, _ = fractions(mallard, mesh.name, '"domain"', work, "dom", 2, zones=("outer", "hole"))
+    return out, pts, cells
+
+
+def orientation(P, args):
+    """Curves with their normals, as mallard check --view writes them."""
+    data, pts, cells = data_orientation(args.mallard)
+    fig, axes = plt.subplots(1, 3, figsize=(12.0, 4.2), gridspec_kw=dict(wspace=0.08))
+    polys = [pts[c, :2] for c in cells]
+    for k, ax in enumerate(axes):
+        ax.add_collection(PolyCollection(polys, facecolors="none", edgecolors=P["mesh"], linewidths=0.4))
+        for i, color in ((k, P["blue"]), (3, P["flame"])) if k == 2 else ((k, P["blue"]),):
+            segs, normals, lengths = data[i]
+            for s in segs:
+                ax.plot(s[:, 0], s[:, 1], color=color, lw=1.8, solid_capstyle="round")
+            mid = segs.mean(axis=1)
+            step = max(1, len(mid) // 28)
+            ax.quiver(mid[::step, 0], mid[::step, 1], normals[::step, 0], normals[::step, 1], color=color,
+                      angles="xy", scale_units="xy", scale=12.0, width=0.006)
+        bare(ax)
+        ax.set_xlim(-0.12, 1.12)
+        ax.set_ylim(-0.12, 1.12)
+        ax.set_title(ORIENTED[k][0], fontsize=11)
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -516,7 +590,8 @@ class Args(tuple):
 
 
 FIGURES = {"region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
-           "region_mesh_regions": mesh_regions, "regions_3d": regions_3d, "initial_layers": initial_layers}
+           "region_mesh_regions": mesh_regions, "region_orientation": orientation, "regions_3d": regions_3d,
+           "initial_layers": initial_layers}
 
 
 def figures(mallard, mallard3d=None, names=()):
