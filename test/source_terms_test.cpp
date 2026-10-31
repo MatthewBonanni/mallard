@@ -118,11 +118,11 @@ TEST(SourceTermsTest, TotalsAreExactOverRegionsOfCoarseUnstructuredMeshes) {
     EXPECT_NEAR(integral(r, 0), 0.1, tol * 0.1);
     EXPECT_NEAR(integral(r, 1), 0.3, precision_tol<double>(1e-12, 1e-5));
 
-    // Distributed by the regions' volume fractions, not their cell centers
+    // Distributed by the regions' cell fractions, not their cell centers
     const auto & mesh = *solver.get_mesh();
     const region::Region ring(parse_toml("r = " + ANNULUS).at("r"), "r");
     const region::Region box(parse_toml("r = " + ROTATED_BOX).at("r"), "r");
-    const std::vector<double> f_ring = region::volume_fractions(mesh, ring), f_box = region::volume_fractions(mesh, box);
+    const std::vector<double> f_ring = region::cell_fractions(mesh, ring), f_box = region::cell_fractions(mesh, box);
     double w_ring = 0.0, w_box = 0.0;
     for (uint32_t c = 0; c < mesh.n_owned(); c++) {
         w_ring += f_ring[c] * r.measure[c];
@@ -202,7 +202,7 @@ TEST(SourceTermsTest, SpongeRegionsScaleTheStrengthByTheirFractions) {
     const Rates a = rates(with, 0.0_r), b = rates(without, 0.0_r);
     const auto & mesh = *with.get_mesh();
     const std::vector<double> f =
-        region::volume_fractions(mesh, region::Region(parse_toml("r = " + edged).at("r"), "r"));
+        region::cell_fractions(mesh, region::Region(parse_toml("r = " + edged).at("r"), "r"));
     int n_partial = 0;
     for (uint32_t c = 0; c < mesh.n_owned(); c++) {
         for (const size_t i : {size_t(0), size_t(N_DIM + 1)}) {

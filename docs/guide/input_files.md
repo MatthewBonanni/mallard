@@ -269,7 +269,9 @@ p = """\
 
 # Layers by height
 T = "switch { case y < 0.1 : 300; case y < 0.2 : 600; default : 900; }"
+```
 
+```toml
 # The root of s^3 + s = x by Newton's method
 T = """\
     var s := x; var ds := 1; \
@@ -305,11 +307,14 @@ mallard input upgrade --check old.toml        # exit status 1 if anything is out
 ```
 
 It changes only the lines of those keys. A renamed key keeps its value and its
-comment, a moved key goes to the end of its new table, and a removed key is
-commented out with a note. A file with nothing to change comes back
-unchanged, byte for byte. When a changed key is written as a dotted key
+comment, a moved key goes to the end of its new table, a removed key is
+commented out with a note, and a renamed option changes in place, also inside
+inline tables. A file with nothing to change comes back unchanged, byte for
+byte. When a renamed, moved or removed key is written as a dotted key
 (`run.cfl = 1`) or in an inline table, the file is reformatted instead: its
-comments are kept, its layout is not. The command is tested on the input
+comments are kept, its layout is not. Some renames depend on the case's
+dimension, which the command reads from the mesh as a run does; when the mesh
+is not at hand, state it: `mallard input upgrade --dim 3 old.toml`. The command is tested on the input
 files of every release (`tools/dev/check_upgrade_input.py`).
 
 Keys and options changed so far:
@@ -321,6 +326,12 @@ Keys and options changed so far:
 | `[physics]` `p_min`, `p_max` | none: pressures are not clipped | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; until removed, `"hdf5"` still writes XDMF and HDF5 files | 0.9.0 | 0.10.0 |
+| `[[probes]]` `shape` | `type` | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "circle"` (a filled circle) | 2D `"disk"`, 3D `"sphere"`: `circle` is the curve | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "ellipse"` (a filled ellipse) | `"ellipsoid"`: `ellipse` is the curve | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "disk"`, `"rectangle"` in 3D | `"sphere"`, `"box"`: disks and rectangles are flat | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "annulus"` in 3D | `"cylinder"` with `axis = [0, 0, 1]` (added): annuli are flat | 0.9.0 | 0.10.0 |
+| `[[sources]]` `region` `type = "box"` in 2D | `"rectangle"`: boxes are 3D solids | 0.9.0 | 0.10.0 |
 | `[mesh]` `periodic = ["x", "z"]` | `[[periodic]]` `zones = ["left", "right"]` and `zones = ["back", "front"]` (`y`: `bottom`/`top`, `theta`: `start`/`end`); `[initialize.mesh]` `periodic` likewise becomes `[[initialize.periodic]]` | 0.9.0 | 0.10.0 |
 
 Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename

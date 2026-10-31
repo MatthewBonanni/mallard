@@ -152,7 +152,7 @@ Every format and the transform below are illustrated in the user guide
 `x -> R (S x) + t`: scale first, then rotate about the origin, then translate.
 Boundary zones, high-order nodes and cell types are unchanged; mirroring scales
 (negative factors) are allowed. `[[periodic]]` translations, `[[mesh.curved]]`
-shapes, probes and every other coordinate in the input refer to the
+surfaces, regions, probes and every other coordinate in the input refer to the
 transformed mesh. `mallard mesh convert input.toml mesh.h5` writes the
 transformed mesh.
 
@@ -941,7 +941,7 @@ weights and the trigger state.
 ## `[[probes]]`
 
 Samples of the solution on a geometry (points, curves, surfaces, exact cut planes or boundary zones;
-[geometry guide](guide/geometry.md#point-sets-and-curves)), or reductions over a
+[geometry guide](guide/geometry.md#points-and-curves)), or reductions over a
 [region](#regions) (below), every `interval`
 steps or `time_interval` of simulation time, written raw and/or reduced. Setup
 locates the samples in the cells of each rank; a write evaluates them on the
@@ -953,10 +953,10 @@ ranks. A probe that is not due costs nothing.
 |---|---|
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
-| `shape` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (below); without it, `point` or `start`/`end` select a point or a line |
-| `boundary` | Instead of a shape: a boundary zone name, or a list of them; each face is a sample (below) |
+| `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (below); without it, `point` or `start`/`end` select a point or a line |
+| `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
-| `region` | Instead of `shape`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
 | `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
@@ -967,9 +967,9 @@ ranks. A probe that is not due costs nothing.
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
 | `scale`, `rotate`, `pivot`, `translate` | Transform of the geometry, as for [regions](#regions): scaled (a factor, or one per axis), then rotated (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`), both about `pivot` (default the origin), then translated |
 
-Shapes (`[x, y(, z)]` points):
+Types (`[x, y(, z)]` points):
 
-| `shape` | Keys |
+| `type` | Keys |
 |---|---|
 | `point` | `point` |
 | `points` | `points = [[...], ...]`, or `points_file`: a text file of one point per row (numbers split by commas or blanks; `#` starts a comment, a header row is skipped) |
@@ -1023,7 +1023,7 @@ surfaces with point data.
 # Mass flow through a tilted section of a duct, and its pressure for ParaView
 [[probes]]
 name = "section"
-shape = "cut_plane"
+type = "cut_plane"
 point = [0.5, 0.0, 0.0]
 normal = [1.0, 0.2, 0.0]
 variables = ["P", "MASS_FLUX"]
@@ -1099,21 +1099,21 @@ sample and step; a restarted run appends). `hdf5` holds `coordinates`
 (samples x dimension), for curves `arc_length` and `polylines/nodes` with
 `polylines/offsets`, and the extensible `step`, `time` and `fields/<variable>`
 (steps x samples); `vtp` writes one VTK PolyData file per output,
-`<stem>_<step>.vtp` (vertices for point sets, polylines with `arc_length`
+`<stem>_<step>.vtp` (vertices for points, polylines with `arc_length`
 for curves), indexed by the `.pvd` series; `vtkhdf` writes one VTKHDF PolyData
 file (the same vertices or polylines, `arc_length`, and each variable's point
 values at every output, with `Steps/Values` the times). A restarted run cuts the
 HDF5 rows, the VTKHDF outputs and the `.pvd` entries after the restart back and
 continues them.
 
-**Reductions.** Rows `step, t, length` (curves, 2D boundaries), `area` (3D boundaries) or `count` (point sets), then
+**Reductions.** Rows `step, t, length` (curves, 2D boundaries), `area` (3D boundaries) or `count` (points), then
 `<reduction>_<variable>` for each reduction and variable: `integral` is
 `int q ds`, `mean` `int q ds / int ds`, `favre` the density-weighted mean
 `int rho q ds / int rho ds`, `rms` `sqrt(int q^2 ds / int ds)`, and `min`, `max`
 the extrema over the samples and the integration points. Curves integrate
 with three Gauss points on each element between consecutive samples (exact for
 polynomials of degree 5 along straight elements), boundaries with one point
-per face (the face measure), point sets with unit weights
+per face (the face measure), points with unit weights
 (`integral` is the sum, `mean` the arithmetic mean). Rank 0 sums them in a
 fixed order, so they too are the same bit for bit on any number of ranks.
 
@@ -1125,7 +1125,7 @@ fraction `f`: `integral` is `sum f V q`, `mean` `sum f V q / sum f V`, `favre`
 rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
 radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
 in global cell order, so they are the same bit for bit on any number of ranks.
-A region probe has no samples: `shape`, `boundary`, `boundary_type`,
+A region probe has no samples: `type`, `boundary`, `boundary_type`,
 `sampling`, `format`, `file` and `samples` do not apply. The region must cover part of some cell.
 
 ```toml
@@ -1146,7 +1146,7 @@ fuel's mass fraction there, so the fuel mass is their product.
 name = "wake"
 variables = ["U", "P"]
 sampling = "point"
-shape = "arc"
+type = "arc"
 center = [0.0, 0.0]
 radius = 2.0
 angles = [-60.0, 60.0]
@@ -1231,18 +1231,21 @@ smooth edges their width and lets cell volume fractions skip cells away from
 the surface. Volume fractions are cell averages of the region's indicator,
 sampled on each cell's triangles (2D) or tetrahedra (3D), subdivided where the
 surface or the smooth edge crosses them: cells entirely inside get exactly 1.
-In 2D, regions are the z = 0 slices of the 3D shapes (`z` components may be
-left out). Lengths take units (`radius = "5 mm"`) and angles are in degrees
+In 2D, regions are the z = 0 slices of the 3D primitives (`z` components may be
+left out). `circle` and `ellipse` are curves, `disk`, `annulus`, `rectangle`
+and `polygon` are flat (areas in 2D, surfaces in 3D), and `box` is a 3D solid,
+so sources in 3D use `sphere`, `ellipsoid`, `box` and `cylinder`, and in 2D
+`rectangle` for a rectangle. Lengths take units (`radius = "5 mm"`) and angles are in degrees
 unless given a unit; `axis`, `normal`, `axes` and `scale` are plain numbers.
 
-| `type` | Keys | Shape |
+| `type` | Keys | Region |
 |---|---|---|
-| `sphere` (2D: also `disk`, `circle`) | `center`, `radius` | |
-| `ellipsoid` (`ellipse`) | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`) |
+| `sphere` (2D: also `disk`) | `center`, `radius` | |
+| `ellipsoid` | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`); in 2D its slice is the area inside an ellipse |
 | `cylinder` | `center`, `axis` (default z in 2D), `radius`, `inner_radius` (default 0: solid), `length` (default infinite) | annular with `inner_radius`; centered on `center` along `axis` |
-| `annulus` (2D) | `center`, `radius`, `inner_radius` | |
+| `annulus` (2D) | `center`, `radius`, `inner_radius` | a ring; in 3D a `cylinder` with `inner_radius` |
 | `cone` (`frustum`) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0) | |
-| `box` (`rectangle`) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
+| `box` (3D), `rectangle` (2D) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | |
 | `half_space` | `point` (default origin), `normal` | the side `(x - point) . normal < 0` |
 | `polygon` (2D) | `vertices` = `[[x, y], ...]` | simple polygon |
@@ -1270,11 +1273,13 @@ moment (e.g. `pi R edge^2 / 5` for a sphere).
 
 ```toml
 # A tilted pipe wall with a hole drilled through it
-region = {type = "difference",
-          a = {type = "cylinder", center = [0, 0, 0], axis = [1, 1, 0], radius = 0.3, inner_radius = 0.2, length = 1.0},
-          b = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.05},
-          edge = 0.01}
+region.type = "difference"
+region.a = {type = "cylinder", center = [0, 0, 0], axis = [1, 1, 0], radius = 0.3, inner_radius = 0.2, length = 1.0}
+region.b = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.05}
+region.edge = 0.01
+```
 
+```toml
 # A box rotated 30 degrees about z around its own center
 region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 0, 0], rotate = {axis = [0, 0, 1], angle = 30}}
 ```
