@@ -118,6 +118,7 @@ class Probes {
         struct Samples {
             uint64_t n_global = 0;
             bool distributed = false;               // samples split over the ranks (else each holds them all)
+            std::vector<uint64_t> ids;              // global index of each local sample
             std::vector<uint64_t> gathered_row;     // rank 0: row in the gathered values of each global sample
             Kokkos::View<uint32_t *> cells;
             // Samples of surfaces (and 2D curves): their unit normals; samples
@@ -149,6 +150,10 @@ class Probes {
                           const ProbeReference & reference, bool gradients);
             /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
             std::vector<double> gather() const;
+
+            private:
+                /** @brief Rank 0's row of each global sample, from the samples' ids. */
+                void order(const Mesh & mesh);
         };
 
     private:

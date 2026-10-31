@@ -331,9 +331,9 @@ CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
 (`kg s-2`), and the wall model's `Q` in `W`; domain integrals carry the
 volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
 variable's units, `integral` times those of the measure (`m` along a curve,
-`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`;
-over a region its `volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
-forces and integrals are per radian of the revolved domain, and their units
+`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`; over a region its
+`volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
+forces, integrals and region probes are per radian of the revolved domain, and their units
 say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
 (`m2 rad-1`), region probes' `volume` (`m3 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
 field's units, `spectrum`, `correlation` and `shell` (sums, not densities)
@@ -663,8 +663,10 @@ follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`),
 `mean` that over `sum f V`, `favre` the density-weighted mean, `rms` the root
 mean square, and `min`, `max` the extremes over the cells with `f > 0`. Rank 0
 sums them in global cell order, so they are the same bit for bit on any number
-of ranks. Each output appends a row to `reductions_file` (default
-`probe_<name>_reductions.csv`):
+of ranks. The region may be one of the mesh's own: `region = "domain"` gives
+the totals of the whole domain (the mass, for `RHO`), a cell zone those of its
+cells ([regions of the mesh](geometry.md#regions-of-the-mesh)). Each output
+appends a row to `reductions_file` (default `probe_<name>_reductions.csv`):
 
 ```
 step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P
@@ -692,8 +694,8 @@ Pitfalls:
 
 - Values are cell averages, so `min` and `max` are those of the cells, not of
   the field inside them, and include cells the region only touches.
-- A region probe has no samples: `type`, `boundary`, `boundary_type`,
-  `sampling`, `format`, `file` and `samples` do not apply to it.
+- A region probe has no samples: `type`, `sampling`, `format`, `file` and
+  `samples` do not apply to it.
 
 ## Post-processing
 
