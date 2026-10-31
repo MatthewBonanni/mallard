@@ -466,6 +466,14 @@ the extrema of $v$ over the cell and its face neighbors (boundary faces add
 none). The scaled values are checked again, and an inadmissible cell still
 falls back to first order.
 
+Admissible face values do not make the cell update admissible, since a
+troubled cell's face values come from different stencils and do not average
+to the cell's mean. In planar single-gas runs `bound_preserving = true` also
+limits the convective fluxes so that every forward-Euler stage keeps each
+cell's density and pressure positive at $\mathrm{CFL} \le 0.5$
+([Hu, Adams & Shu 2013](../references.md#hu-adams-shu-2013); details in the
+[theory manual](../theory/finite_volume.md#reconstruction)).
+
 ### Face quadrature
 
 The face points $\boldsymbol{\xi}_q$, set once
