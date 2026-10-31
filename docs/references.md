@@ -24,6 +24,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: building the TENO-E central stencil from neighbor layers sorted by centroid distance.
 - <a id="zhang-shu-2010"></a>X. Zhang and C.-W. Shu, On maximum-principle-satisfying high order schemes for scalar conservation laws, *J. Comput. Phys.* 229, 3091–3120 (2010). [doi:10.1016/j.jcp.2009.12.030](https://doi.org/10.1016/j.jcp.2009.12.030)
   Used in: the scaling limiter of `bound_preserving = true`, which scales troubled-cell polynomials toward the cell average to keep density and pressure within the neighbors' range.
+- <a id="hu-adams-shu-2013"></a>X. Y. Hu, N. A. Adams and C.-W. Shu, Positivity-preserving method for high-order conservative schemes solving compressible Euler equations, *J. Comput. Phys.* 242, 169–180 (2013). [doi:10.1016/j.jcp.2013.01.024](https://doi.org/10.1016/j.jcp.2013.01.024)
+  Used in: the positivity limiter of the convective fluxes with `bound_preserving = true`, which blends each face flux toward the Lax-Friedrichs flux of the cell averages where the update would leave a cell without positive density or pressure (`limit_flux_positivity`, `src/solver/solver_rhs.cpp`).
 
 ## Riemann solvers
 

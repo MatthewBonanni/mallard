@@ -667,6 +667,12 @@ class Solver {
         ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
         template <typename T_riemann_solver>
         void launch_flux_functor();
+        /**
+         * @brief Blend the convective face fluxes toward first order where the
+         *        update would leave a cell without positive density or pressure
+         *        (bound-preserving TENO; see PositivityFluxFunctor).
+         */
+        void limit_flux_positivity(StateView solution);
         template <typename T_riemann_solver>
         void launch_mixture_flux_functor();
         template <typename T_riemann_solver>
@@ -756,6 +762,8 @@ class Solver {
         rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
+        bool positivity_limiter = false;         // bound-preserving TENO, planar single gas: limit_flux_positivity
+        Kokkos::View<rtype *> positivity_kappa;  // (cell): dt sum_f A_f alpha_f / V
         std::unique_ptr<TimeIntegrator> time_integrator;
         StepController step_controller;  // [numerics.error_control], else not enabled
         uint64_t n_rejected = 0;         // steps rejected by step_controller in this run
