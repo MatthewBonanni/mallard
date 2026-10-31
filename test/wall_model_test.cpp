@@ -494,6 +494,7 @@ TEST(WallModel3D, EachWallTakesItsOwnModel) {
     };
     auto forces = [&](const std::string & bottom, const std::string & top) {
         Solver solver;
+        solver.set_distributed(false);
         solver.init(parse_toml(channel_input(
             "cartesian", n, bottom, top,
             "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.5 * y * (1 - y) + 0.1 * y\", \"0.0\", \"0.0\"]\np = \"1.0\"\n",

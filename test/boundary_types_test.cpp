@@ -96,6 +96,7 @@ std::string channel(const std::string & left, const std::string & right, const s
 /** @brief The conservative state of every owned cell after the run. */
 std::vector<double> final_state(const std::string & input) {
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.copy_device_to_host();
