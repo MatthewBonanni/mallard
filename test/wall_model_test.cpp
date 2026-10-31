@@ -494,16 +494,18 @@ TEST(WallModel3D, EachWallTakesItsOwnModel) {
     };
     auto forces = [&](const std::string & bottom, const std::string & top) {
         Solver solver;
-        solver.set_distributed(false);
         solver.init(parse_toml(channel_input(
             "cartesian", n, bottom, top,
             "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.5 * y * (1 - y) + 0.1 * y\", \"0.0\", \"0.0\"]\np = \"1.0\"\n",
             "n_steps = 1\ncfl = 0.4\n")));
         solver.run();
         solver.copy_device_to_host();
-        auto m = solver.get_mesh();
-        return std::make_pair(solver.calc_force(m->get_face_zone("bottom")->faces)[3],
-                              solver.calc_force(m->get_face_zone("top")->faces)[3]);
+        // calc_force sums over the ranks: those without faces of a zone take part with none
+        auto faces = [&](const char * name) {
+            const FaceZone * zone = solver.get_mesh()->get_face_zone(name);
+            return zone ? zone->faces : Kokkos::View<uint32_t *>("no faces", 0);
+        };
+        return std::make_pair(solver.calc_force(faces("bottom"))[3], solver.calc_force(faces("top"))[3]);
     };
     const auto mixed = forces(gfm, ode("0.2"));
     const auto both_gfm = forces(gfm, gfm);

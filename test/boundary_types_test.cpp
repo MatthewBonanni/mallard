@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "boundary.h"
+#include "comm.h"
 #include "data_paths.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -96,7 +97,6 @@ std::string channel(const std::string & left, const std::string & right, const s
 /** @brief The conservative state of every owned cell after the run. */
 std::vector<double> final_state(const std::string & input) {
     Solver solver;
-    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     solver.copy_device_to_host();
@@ -107,10 +107,11 @@ std::vector<double> final_state(const std::string & input) {
     return U;
 }
 
+/** @brief The largest difference over the owned cells of every rank. */
 double max_difference(const std::vector<double> & a, const std::vector<double> & b) {
     double d = 0.0;
     for (size_t i = 0; i < a.size(); i++) d = std::max(d, std::abs(a[i] - b[i]));
-    return d;
+    return comm::allreduce(d, comm::Op::MAX);
 }
 
 const std::string WALL = "type = \"wall_adiabatic\"\n";
