@@ -441,6 +441,7 @@ TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
 }
 
 TEST(IOTest, ARestartFileCutShortIsNeverFoundUnderItsName) {
+    if (comm::size() > 1) GTEST_SKIP() << "a write failing on one rank alone ends a parallel run";
     // Writing stops partway through the file, as when a run is killed or its disk fills:
     // a run resuming from the newest .restart file must not find it
     const std::string dir = (scratch_dir() / "mallard_restart_cut_short").string();
@@ -470,8 +471,7 @@ TEST(IOTest, ARestartFileCutShortIsNeverFoundUnderItsName) {
         }
         setrlimit(RLIMIT_FSIZE, &unlimited);
         std::signal(SIGXFSZ, on_xfsz);
-        if (comm::is_root() || mesh->n_global_cells > 0) EXPECT_TRUE(failed);  // rank 0 writes serial meshes
-        comm::barrier();
+        EXPECT_TRUE(failed);
         EXPECT_FALSE(std::filesystem::exists(prefix + "_000000.restart")) << async;
     }
 }

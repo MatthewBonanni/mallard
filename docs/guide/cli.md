@@ -224,8 +224,12 @@ Mallard <version>, keeping its comments and layout, and writes it to standard
 output; the changes go to standard error. A renamed key keeps its value and
 comment, a moved key goes to the end of its new table, and a removed key is
 commented out with a note. A file with nothing to change comes back byte for
-byte; one with a changed dotted key or inline table is reformatted, comments
-kept.
+byte; one with a renamed, moved or removed dotted key or key of an inline table
+is reformatted, comments kept; a renamed option changes in place, also inside
+inline tables.
+
+Some renames depend on the case's dimension, which the command reads from the
+input's mesh as a run does; when the mesh is not at hand, --dim states it.
 
 Renamed keys still work, with a warning, for at least one minor release before
 they are removed. mallard check lists deprecated keys as warnings and removed
@@ -234,11 +238,14 @@ ones as errors.
 Options:
   --check     Write nothing: list the changes, with exit status 1 if there are
               any.
+  --dim 2|3   The case's dimension, for renames that depend on it. Default: from
+              the input's mesh, as a run finds it.
   -h, --help  Show this page.
 
 Examples:
   $ mallard input upgrade old.toml > new.toml
   $ mallard input upgrade --check input.toml
+  $ mallard input upgrade --dim 3 old.toml > new.toml
 
 Exit status:
   0  the file was written (with --check: it is up to date)

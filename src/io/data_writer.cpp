@@ -150,7 +150,7 @@ void DataWriter::init(const Input & input,
                            .suggestion = suggest_value(var, names),
                            .fix = "Vectors also go by their name without _X, _Y, _Z (e.g. U); a trailing * selects "
                                   "every variable it starts (e.g. Y_*)",
-                           .docs = "docs/guide/output.md#snapshots-write_data"});
+                           .docs = "docs/guide/output.md#solution-snapshots-write_data"});
     };
     auto find_data = [&](const std::string & name) -> const Data * {
         for (const auto & data_var : data) {

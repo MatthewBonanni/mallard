@@ -62,7 +62,7 @@ name = "wall"           # a boundary zone of the mesh
 type = "wall_adiabatic"
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 35 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 37 more.
 
 | `type` | Kind | Keys | Use |
 |---|---|---|---|
@@ -233,10 +233,11 @@ Pitfalls:
 The velocity, pressure and temperature of `upt` and `nscbc_inlet`, `p0` and
 `T0` of `stagnation_inlet`, `mass_flux` and `T` of `mass_flow_inlet`, the
 wall velocity and, for mixtures, the inflow composition may be expressions of
-`x`, `y`, `z` and `t`. Those of `t` are evaluated at every Runge-Kutta stage,
-so a pulsed or acoustically forced inlet converges at the time integrator's
-order (third with SSPRK3); evaluating them once per step would give first
-order.
+`x`, `y`, `z` and `t`, as may the state of `dirichlet`. Those of `t` are
+evaluated on the device at every Runge-Kutta stage, inside the step's CUDA
+graph, so a pulsed or acoustically forced inlet converges at the time
+integrator's order (third with SSPRK3); evaluating them once per step would
+give first order. The others are evaluated once, at the start of the run.
 
 ```toml
 [[boundaries]]
@@ -279,7 +280,7 @@ L = 0.1            # a length of the domain [m]
 # sigma = 0.25     # relaxation: 0 is perfectly non-reflecting but drifts
 ```
 
-*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow).
+*Used in:* [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow).
 
 `nscbc_outlet` and `nscbc_inlet` let outgoing waves leave and relax the
 incoming ones toward a target (Poinsot & Lele 1992, with the transverse terms

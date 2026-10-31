@@ -353,7 +353,7 @@ python tools/post/insitu_statistics.py compare spectra.csv reference.csv
 python tools/post/insitu_statistics.py phase input.toml probe_wake.csv -o phase.npz
 ```
 
-Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([output guide](../docs/guide/output.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
+Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([statistics guide](../docs/guide/statistics.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
 
 ## Performance
 
@@ -427,6 +427,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `dev/make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
 | `dev/chemistry_reference.py`, `dev/transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |
 | `dev/v3_reference.py`, `dev/v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `mallard reactor` against them |
+| `dev/check_doc_toml.py` | Parses every ```` ```toml ```` snippet of the Markdown docs (`docs/`, README, examples, tutorials) and lists those that are not valid TOML; runs in `ci.yml`; standard library only |
 | `dev/input_catalog.py` | The key catalog `docs/input-keys.json` (every input key with its type, default or requiredness and accepted values, as setup records them): `build` runs `mallard check --catalog` on every example and tutorial in 2D and 3D and merges them (`--check` compares with the committed file); `docs` checks the defaults `docs/input.md` states against it. Both run in `ci.yml`; standard library only |
 | `dev/check_upgrade_input.py` | Runs `mallard input upgrade` on every input file of every release tag: it must succeed, leave nothing to upgrade, and return up-to-date files byte for byte (CI, openmp job); standard library only |
 | `dev/changelog.py` | Changelog fragments (`changelog/`): `check` fails when a branch changes `src/` without adding one (first job of `ci.yml`); `notes X.Y.Z` / `notes Unreleased` prints a release's section or previews the next; `release X.Y.Z` folds the fragments into `CHANGELOG.md`; standard library only |

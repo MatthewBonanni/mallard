@@ -141,7 +141,7 @@ FaceSet boundary_faces(const Mesh & mesh, const std::vector<std::string> & zones
 
     Geometry & g = set.geometry;
     g.dim = N_DIM - 1;
-    g.shape = "boundary";
+    g.type = "boundary";
     g.revolved = mesh.axisymmetric;
     std::vector<uint64_t> order;  // record of each global sample
     if constexpr (N_DIM == 2) {
@@ -500,7 +500,7 @@ CutSet cut_plane(const Mesh & mesh, const Vec3 & point, const Vec3 & normal, boo
     std::sort(order.begin(), order.end(), [&](uint64_t x, uint64_t y) { return cuts[x].key < cuts[y].key; });
     Geometry & g = set.geometry;
     g.dim = N_DIM - 1;
-    g.shape = "cut_plane";
+    g.type = "cut_plane";
     g.polygon_offsets.push_back(0);
     set.nodes.gathered_row.clear();
     set.quadrature.gathered_row.clear();

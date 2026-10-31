@@ -94,7 +94,7 @@ struct KineticEnergyBudget {
  */
 struct DirichletBoundary {
     std::vector<uint32_t> faces;
-    std::vector<Expression> W;
+    std::vector<std::shared_ptr<const expr::Program>> W;
 };
 
 /** @brief Thrown inside the time loop when the state stops being valid; run() handles it. */
@@ -536,9 +536,9 @@ class Solver {
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
         void update_inflow(rtype t_eval);
-        /** @brief The faces' own conditions whose numbers depend on t, on the device at the stage time. */
+        /** @brief The faces' own conditions and dirichlet states that depend on t, on the device at the stage time. */
         void update_boundary_fields(rtype t_eval, rtype c);
-        /** @brief The faces' own conditions that depend on t, at the time in stage_time. */
+        /** @brief The faces' own conditions and dirichlet states that depend on t, at the time in stage_time. */
         void apply_boundary_fields();
         /**
          * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
@@ -738,17 +738,13 @@ class Solver {
         std::vector<double> bc_temperatures;                  // T of prescribed states
         BoundaryData boundary_data;
         std::vector<uint8_t> image_reach;  // Halo depth each cell's image neighbors need (make_boundary_data)
-        std::vector<DirichletBoundary> dirichlet_boundaries;
+        DirichletStates dirichlet_states;
         struct AveragePressureOutlet {
             int32_t i_bc;
             Kokkos::View<uint32_t *> faces;   // Faces of owned cells
             std::vector<uint32_t> sum_order;  // Order of the gathered faces of all ranks by global key
         };
         std::vector<AveragePressureOutlet> average_pressure_outlets;
-        Kokkos::View<rtype *[N_DIM + 2]>::host_mirror_type h_face_state;
-        Kokkos::View<int32_t *>::host_mirror_type h_face_state_index;
-        rtype t_boundary_states;
-        bool boundary_states_steady = false;  // evaluated, and no expression depends on t
         // The numbers of each input boundary, per face where they vary; for mixtures, the composition per input
         // boundary where it depends on t; the faces' own conditions that depend on t, evaluated on the device
         std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
