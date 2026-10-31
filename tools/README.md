@@ -113,7 +113,7 @@ An O-grid between two circles (zones `inner` and `outer`): quadrilaterals, trian
 ### `make_mallard_mesh.py`: a flying mallard
 
 ```sh
-python examples/mallard/make_mallard_mesh.py OUTPUT.msh [--h-wall 0.0015] [--h-far 0.0045] [--preview duck.png]
+python examples/mallard/make_mallard_mesh.py OUTPUT.msh [--h-wall 0.0015] [--h-far 0.0045] [--order 1|2|3] [--preview duck.png]
 ```
 
 Triangles around a duck silhouette (a periodic spline), refined linearly from `--h-wall` on the body to `--h-far`; zones `duck`, `inflow`, `outflow`, `top` and `bottom`. The mesh of the [`mallard`](../examples/mallard) example, and a template for meshing any spline outline with the gmsh Python module.
