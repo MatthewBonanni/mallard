@@ -342,6 +342,6 @@ TEST(MeshFileTest, PeriodicZonesThatDoNotMatchAreRejected) {
                   .find("Periodic zone rigth is not a boundary zone"),
               std::string::npos);
     EXPECT_NE(periodic_mesh_error(file, "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0]\n")
-                  .find("[[periodic]] needs zones = [A, B]"),
+                  .find("periodic[0].translation: has 1 components"),
               std::string::npos);
 }

@@ -93,7 +93,15 @@ Nz = 256
 Lx = 6.283185307179586
 Ly = 6.283185307179586
 Lz = 6.283185307179586
-periodic = ["x", "y", "z"]
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[[periodic]]
+zones = ["back", "front"]
 
 [initialize]
 type = "restart"

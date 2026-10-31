@@ -52,7 +52,8 @@ void Solver::init_sponges(region::Regions & regions) {
 
         const std::vector<double> * fractions = nullptr;
         if (sponge.contains("region")) {
-            region::require_full_dimension(regions.get(sponge.at("region"), where + ".region"), where + ".region");
+            region::require_full_dimension(regions.get(sponge.at("region"), where + ".region"), sponge.at("region"),
+                                           where + ".region");
             fractions = &regions.fractions(sponge.at("region"), where + ".region");
         }
 

@@ -37,7 +37,7 @@ Dimension mesh_file_dimension(const std::string & path);
 
 /**
  * @brief The dimension of the case an input file describes: from its
- *        generated mesh ([mesh] type, Nz, Lz, periodic z) or its mesh file.
+ *        generated mesh ([mesh] type, Nz, Lz, [[periodic]] back and front) or its mesh file.
  */
 Dimension input_dimension(const std::string & input_file);
 

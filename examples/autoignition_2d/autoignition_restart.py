@@ -141,7 +141,12 @@ Nx = {n}
 Ny = {n}
 Lx = {length:.17g}
 Ly = {length:.17g}
-periodic = ["x", "y"]
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
 
 [initialize]
 type = "restart"

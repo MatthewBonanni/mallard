@@ -364,7 +364,7 @@ class Region {
 std::array<std::array<double, 3>, 2> bounds(const Region & region);
 
 /** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
-void require_full_dimension(const Region & region, const std::string & where);
+void require_full_dimension(const Region & region, const Input & value, const std::string & where);
 
 /**
  * @brief Fraction of every cell of the mesh (owned and halo) inside a filled
