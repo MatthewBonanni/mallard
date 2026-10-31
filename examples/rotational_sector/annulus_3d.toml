@@ -13,7 +13,9 @@ Nz = 8
 Lz = 0.5
 r_inner = 1.0
 r_outer = 2.0
-periodic = ["z"]
+
+[[periodic]]
+zones = ["back", "front"]
 
 [initialize]
 type = "analytical"

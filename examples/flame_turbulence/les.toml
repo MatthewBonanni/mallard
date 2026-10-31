@@ -44,7 +44,12 @@ Nz = 16
 Lx = 0.015846708573358105
 Ly = 0.004225788952895495
 Lz = 0.004225788952895495
-periodic = ["y", "z"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[[periodic]]
+zones = ["back", "front"]
 
 [initialize]
 type = "restart"

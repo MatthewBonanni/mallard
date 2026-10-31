@@ -53,6 +53,12 @@ cmake --build build -j
   Run the whole suite, 2D and 3D, before asking for review.
 - With MPI (`-DMallard_ENABLE_MPI=ON`), run the multi-rank tests on 2 to 4 ranks:
   `mpirun -n 3 ./build/src/mallard test --gtest_filter='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:ProbesTest.*'`.
+  CI also runs the whole suite on 3 ranks, so every test must pass on any
+  number: a test that inspects one rank's cells runs its solver undistributed
+  (`set_distributed(false)`) or reduces over the ranks, loops over owned cells
+  (halo cells hold stale values), and leaves shared files to rank 0 (files that
+  every rank writes on its own go in `rank_scratch_dir()`). `MALLARD_TEST_TIMEOUT=<seconds>`
+  aborts a test that runs longer, naming it, as CI does for the MPI runs.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 

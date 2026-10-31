@@ -44,6 +44,7 @@ set(MALLARD_TEST_SOURCES
     format_compat_test.cpp
     wall_model_test.cpp
     units_test.cpp
+    periodic_pairs_test.cpp
     rotational_periodic_test.cpp
     invariance_test.cpp
     inlet_test.cpp

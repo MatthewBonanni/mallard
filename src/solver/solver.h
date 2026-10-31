@@ -588,6 +588,24 @@ class Solver {
         ProbeFields probe_fields();
 
     private:
+        /**
+         * @brief Runs f, a check of this rank's faces or cells; if it throws on
+         *        any rank, every rank throws the error of the first one
+         *        (collective), so that none waits in a later collective.
+         */
+        template <typename F>
+        static void on_every_rank(F && f) {
+            std::string error;
+            try {
+                f();
+            } catch (const std::exception & e) {
+                error = e.what();
+            }
+            if (const std::string first = comm::first_error(error); !first.empty()) throw InputError(first);
+        }
+        /** @brief Throws, on every rank, the error of a time-dependent boundary value that went out of range on any. */
+        void check_timed_boundaries() const;
+
         // Step graph (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;

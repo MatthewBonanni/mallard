@@ -32,6 +32,25 @@ std::string plus_one(const std::string & text) { return std::to_string(std::stol
 // geometry = "all" wrote the whole mesh, which region calls "domain"
 std::string all_to_domain(const std::string & text) { return text == "\"all\"" || text == "'all'" ? "\"domain\"" : text; }
 
+/** @brief The zones of a generated mesh that a direction of `[mesh] periodic` joined. */
+std::vector<std::string> periodic_zones(const std::string & direction, const std::string & mesh_type) {
+    if (mesh_type.empty() || mesh_type == "file") {
+        throw std::invalid_argument("applies to generated meshes; pair the zones of a mesh file with [[periodic]] "
+                                    "zones and a translation or an angle");
+    }
+    if (mesh_type == "annulus") {
+        if (direction == "theta") return {"start", "end"};
+        if (direction == "z") return {"back", "front"};
+        throw std::invalid_argument("\"" + direction + "\" is not accepted: the annulus is periodic in \"theta\" "
+                                    "(and \"z\" in 3D)");
+    }
+    if (direction == "x") return {"left", "right"};
+    if (direction == "y") return {"bottom", "top"};
+    if (direction == "z") return {"back", "front"};
+    throw std::invalid_argument("\"" + direction + "\" is not accepted: a " + mesh_type +
+                                " mesh is periodic in \"x\", \"y\" (and \"z\" in 3D)");
+}
+
 } // namespace
 
 const Rules & rules() {
@@ -73,6 +92,12 @@ const Rules & rules() {
             {"sources[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0",
              "annulus is a flat surface in 3D; the hollow solid is a cylinder along z with inner_radius, and "
              "axis = [0, 0, 1] is added", false, 3, "axis = [0, 0, 1]"},
+        },
+        {
+            {"mesh.periodic", "periodic", "zones", "type", "0.9.0", "0.10.0",
+             "one syntax for the periodic zones of generated meshes and mesh files", periodic_zones},
+            {"initialize.mesh.periodic", "initialize.periodic", "zones", "type", "0.9.0", "0.10.0",
+             "one syntax for the periodic zones of generated meshes and mesh files", periodic_zones},
         },
     };
     return table;
@@ -264,6 +289,22 @@ Finding option_finding(const OptionRule & rule, const Concrete & key, std::size_
     return f;
 }
 
+Finding array_finding(const ArrayRule & rule, const Concrete & key, std::size_t line, const std::string & version,
+                      const std::vector<std::vector<std::string>> & elements) {
+    Finding f;
+    f.key = to_string(key);
+    f.line = line;
+    f.removed = is_removed(rule.removed, version);
+    for (const auto & values : elements) {
+        f.suggestion += (f.suggestion.empty() ? "" : ", ") + ("[[" + rule.to + "]] " + rule.key + " = ") +
+                        input_detail::toml_text(values);
+    }
+    f.message = f.key + (f.removed ? " was removed in " + rule.removed
+                                   : " is deprecated since " + rule.since + " and will be removed in " + rule.removed);
+    f.message += ": use " + (f.suggestion.empty() ? "[[" + rule.to + "]]" : f.suggestion) + " (" + rule.note + ")";
+    return f;
+}
+
 /** @brief A value's TOML text, without the comments attached to it. */
 template <typename V>
 std::string bare_text(V value) {
@@ -277,6 +318,41 @@ std::size_t line_of(const V & value) {
 }
 
 // ---------------------------------------------------------------- the rewrite of a parsed input
+
+/** @brief The new elements' values for the `from` key matched at `key`, or an InputError for one it does not take. */
+template <typename V>
+std::vector<std::vector<std::string>> array_elements(V & root, const ArrayRule & rule, const Concrete & key) {
+    const auto & table = entries_of(*at(root, parent(key)));
+    const V & value = table.at(key.back().first);
+    std::string context;
+    if (!rule.context.empty() && table.contains(rule.context) && table.at(rule.context).is_string()) {
+        context = table.at(rule.context).as_string();
+    }
+    auto error = [&](const std::string & message) {
+        Diagnostic d;
+        d.key = to_string(key);
+        d.line = line_of(value);
+        d.message = message;
+        return InputError(d);
+    };
+    if (!value.is_array()) throw error("takes an array of strings");
+    std::vector<std::vector<std::string>> elements;
+    for (size_t i = 0; i < value.size(); i++) {
+        if (!value.at(i).is_string()) throw error("takes an array of strings");
+        try {
+            elements.push_back(rule.convert(value.at(i).as_string(), context));
+        } catch (const std::invalid_argument & e) {
+            throw error(e.what());
+        }
+    }
+    return elements;
+}
+
+Concrete plain_path(const std::string & dotted_path) {
+    Concrete key;
+    for (const Step & step : parse_path(dotted_path)) key.emplace_back(step.key, -1);
+    return key;
+}
 
 /**
  * @brief Whether the rule applies to a run of dimension dim (0: unknown). Throws
@@ -342,6 +418,29 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
                     if (!beside.contains(name)) beside[name] = v;
                 }
             }
+        }
+    }
+    for (const ArrayRule & rule : table.arrays) {
+        for (const Concrete & key : matches(root, rule.from)) {
+            const auto elements = array_elements(root, rule, key);
+            findings.push_back(array_finding(rule, key, line_of(*at(root, key)), version, elements));
+            const Concrete to = plain_path(rule.to);
+            V * holder = at(root, parent(to), true);
+            if (holder == nullptr || !holder->is_table()) {
+                throw InputError("cannot move " + to_string(key) + " to [[" + rule.to + "]].");
+            }
+            auto & entries = entries_of(*holder);
+            if (!entries.contains(to.back().first)) entries[to.back().first] = V(typename V::array_type{});
+            V & array = entries.at(to.back().first);
+            if (!array.is_array()) throw InputError(rule.to + " must be an array of tables.");
+            for (const auto & values : elements) {
+                typename V::array_type names;
+                for (const auto & v : values) names.push_back(V(v));
+                typename V::table_type element;
+                element[rule.key] = V(names);
+                array.as_array().push_back(V(element));
+            }
+            entries_of(*at(root, parent(key))).erase(key.back().first);
         }
     }
     return findings;
@@ -543,6 +642,46 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
     return false;
 }
 
+/** @brief The line of the first match of an array rule removed and its elements inserted, or false if none is left. */
+bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule, bool & impossible) {
+    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    const std::vector<Concrete> found = matches(root, rule.from);
+    if (found.empty()) return false;
+    const Concrete & key = found.front();
+    const OrderedValue & value = *at(root, key);
+    const size_t first = value.location().first_line_number() - 1, last = value.location().last_line_number() - 1;
+    const Concrete to = plain_path(rule.to);
+    const OrderedValue * existing = at(root, to);
+    if (!key_column(lines[first], key.back().first) || (existing != nullptr && !existing->is_array())) {
+        impossible = true;
+        return false;
+    }
+    std::string comment;
+    if (const size_t hash = lines[last].find('#', last == first ? lines[first].find('=') : 0); hash != std::string::npos) {
+        comment = "  " + lines[last].substr(hash);
+    }
+    std::vector<std::string> block;
+    for (const auto & values : array_elements(root, rule, key)) {
+        block.push_back("");
+        block.push_back("[[" + rule.to + "]]");
+        block.push_back(rule.key + " = " + input_detail::toml_text(values) + comment);
+        comment.clear();
+    }
+    lines.erase(lines.begin() + static_cast<long>(first), lines.begin() + static_cast<long>(last) + 1);
+    Concrete after = parent(key);
+    if (existing != nullptr && existing->size() > 0) {
+        after = to;
+        after.back().second = static_cast<long>(existing->size()) - 1;
+    }
+    const auto end = end_of_table(lines, after);
+    if (!end || (existing != nullptr && existing->size() == 0)) {
+        impossible = true;
+        return false;
+    }
+    lines.insert(lines.begin() + static_cast<long>(*end), block.begin(), block.end());
+    return true;
+}
+
 } // namespace
 
 std::string advice(const Finding & finding) {
@@ -581,6 +720,9 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     for (const OptionRule & rule : table.options) {
         if (rule.dim != 0 && rule.dim != dim) continue;
         for (int guard = 0; guard < 100000 && !impossible && rewrite_one_option(lines, rule, impossible); guard++) {}
+    }
+    for (const ArrayRule & rule : table.arrays) {
+        for (int guard = 0; guard < 100000 && !impossible && rewrite_one_array(lines, rule, impossible); guard++) {}
     }
     if (!impossible) {
         try {
