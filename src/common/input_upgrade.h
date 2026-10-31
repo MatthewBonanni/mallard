@@ -108,18 +108,21 @@ std::vector<Finding> apply(Input & input, const std::string & version = "", cons
  *        possible (renamed or moved dotted keys, or keys of inline tables),
  *        the whole file is reformatted, and `reformatted` is set. `findings`
  *        gets every change. `dim` is the case's dimension (0: unknown, an
- *        error if a rule of one dimension matches).
+ *        error if a rule of one dimension matches, which gives
+ *        `unknown_dimension` as the reason).
  */
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
-                         bool & reformatted, const Rules & table = rules(), int dim = N_DIM);
+                         bool & reformatted, const Rules & table = rules(), int dim = N_DIM,
+                         const std::string & unknown_dimension = "");
 
 /**
  * @brief `mallard input upgrade [--check] old.toml > new.toml`: writes the
  *        upgraded file to stdout and the changes to stderr; with `check`, only
  *        the changes, and exit status 1 if there are any. `dim` is the case's
- *        dimension (0: unknown). Returns the exit status.
+ *        dimension (0: unknown, for the reason `unknown_dimension`). Returns
+ *        the exit status.
  */
-int upgrade_file(const std::string & file, bool check, int dim);
+int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension = "");
 
 } // namespace input_upgrade
 
