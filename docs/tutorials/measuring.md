@@ -119,14 +119,14 @@ python3 $MALLARD/tutorials/measuring/plot_measurements.py . --t-start 60 --out .
 
 ```text
 t >= 60, 4 shedding periods
-wall:     mean Cd 1.3691 ([[forces]]), 1.3691 (wall probe); largest difference 3.92e-07
+wall:     mean Cd 1.3691 ([[forces]]), 1.3691 (wall probe); largest difference 2.29e-11
 mass:     box 23.0665, inflow 0.73687 per unit time, residual d/dt + net outflow: RMS 6.17e-05 (8.4e-05 of the inflow)
 energy:   residual d/dt + net enthalpy outflow: RMS 1.71e-04 (9.2e-05 of the inflow), net outflow alone 8.5e-04
 momentum: mean Cd 1.3658 from the box against 1.3691 on the wall; Cl amplitude 0.3715 against 0.3336
 Strouhal: 0.1654 from the lift's crossings, 0.1651 from the wake spectrum
 ```
 
-**The wall.** The integral of the wall probe's tractions agrees with the force of `[[forces]]` to 4e-7 (in C_D). The wall probe's samples also give the force's distribution around the
+**The wall.** The integral of the wall probe's tractions agrees with the force of `[[forces]]` to round-off (2e-11 in C_D). The wall probe's samples also give the force's distribution around the
 cylinder, which `[[forces]]` does not.
 
 **Mass.** Over the box, dM/dt plus the net mass flux out through the four sides should vanish. The
