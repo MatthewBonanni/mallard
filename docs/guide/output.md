@@ -320,9 +320,9 @@ CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
 (`kg s-2`), and the wall model's `Q` in `W`; domain integrals carry the
 volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
 variable's units, `integral` times those of the measure (`m` along a curve,
-`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`;
-over a region its `volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
-forces and integrals are per radian of the revolved domain, and their units
+`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`; over a region its
+`volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
+forces, integrals and region probes are per radian of the revolved domain, and their units
 say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
 (`m2 rad-1`), region probes' `volume` (`m3 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
 field's units, `spectrum`, `correlation` and `shell` (sums, not densities)

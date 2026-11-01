@@ -24,9 +24,12 @@
 #include <vector>
 
 #include "comm.h"
+#include "gmsh_fixtures.h"
 #include "file_format.h"
 #include "input.h"
 #include "probe_geometry.h"
+#include "region.h"
+#include "region_mesh.h"
 #include "scratch.h"
 #include "gmsh_fixtures.h"
 #include "solver.h"
@@ -373,6 +376,87 @@ TEST(ProbesTest, RegionReductionsAreTheSameOnAnyNumberOfRanks) {
     const std::string a = without_provenance(read_all(dir + "/distributed.csv"));
     EXPECT_EQ(a, without_provenance(read_all(dir + "/serial.csv"))) << "on " << comm::size() << " ranks";
     EXPECT_EQ(read_csv(dir + "/serial.csv").size(), 5u);
+}
+
+#if N_DIM == 2
+TEST(ProbesTest, RegionsOfTheMeshAreTheSameOnAnyNumberOfRanks) {
+    // A cell zone, the domain inside its closed boundary, and a disk cut from the domain
+    const std::string dir = fresh_dir("mesh_region_ranks");
+    const std::string mesh = write_temp_shared("mallard_probe_cell_zones.msh", jittered_mixed_mesh(16, true));
+    auto input = [&](const std::string & suffix) {
+        std::string s = box_case(4, SINE_RHO, "type = \"MUSCL\"\n", "", "n_steps = 2\ncfl = 0.4\n");
+        s.replace(s.find("type = \"cartesian\""), s.find("[initialize]") - s.find("type = \"cartesian\""),
+                  "type = \"file\"\nfilename = \"" + mesh + "\"\n");
+        for (const char * zone : {"left", "right", "bottom", "top"}) {
+            s += std::string("[[boundaries]]\nname = \"") + zone + "\"\ntype = \"symmetry\"\n";
+        }
+        const std::vector<std::pair<std::string, std::string>> probes = {
+            {"half", "\"left_half\""},
+            {"inside", "{type = \"interior\", of = {type = \"union\", regions = [\"left\", \"right\", \"bottom\", "
+                       "\"top\"]}}"},
+            {"cut", "{type = \"difference\", regions = [\"domain\", {type = \"disk\", center = [0.4, 0.6], "
+                    "radius = 0.25}]}"}};
+        for (const auto & [name, region] : probes) {
+            s += "[[probes]]\nname = \"" + name + "\"\nvariables = [\"RHO\", \"P\"]\nregion = " + region +
+                 "\nreductions_file = \"" + dir + "/" + name + "_" + suffix + ".csv\"\n";
+        }
+        return s;
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input("serial")));
+    run(serial);
+    for (const char * name : {"half", "inside", "cut"}) {
+        const std::string file = dir + "/" + name;
+        EXPECT_EQ(without_provenance(read_all(file + "_distributed.csv")), without_provenance(read_all(file + "_serial.csv")))
+            << name << " on " << comm::size() << " ranks";
+    }
+    const auto & mesh_s = *serial.get_mesh();
+    double left = 0.0;
+    for (uint32_t c = 0; c < mesh_s.n_cells; c++) left += mesh_s.h_cell_coords(c, 0) < 0.5_r ? double(mesh_s.h_cell_volume(c)) : 0.0;
+    EXPECT_NEAR(read_csv(dir + "/half_serial.csv")[0].at("area"), left, precision_tol<double>(1e-14, 1e-5));
+    EXPECT_NEAR(read_csv(dir + "/inside_serial.csv")[0].at("area"), 1.0, precision_tol<double>(1e-14, 1e-5));
+}
+#endif
+
+TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
+    // A sphere's surface (2D: a circle) and, in 3D, a circle: their area or length, on any number of ranks
+    const std::string dir = fresh_dir("surface_region_ranks");
+    const std::string shell = std::string("{type = \"sphere\", center = ") + numbers3("0.45", "0.55", "0.5") +
+                              ", radius = 0.3, filled = false}";
+    const std::string ring = "{type = \"circle\", center = [0.45, 0.55, 0.5], normal = [1, 1, 0], radius = 0.25}";
+    auto input = [&](const std::string & suffix) {
+        std::string probes;
+        for (const auto & [name, region] : std::vector<std::pair<std::string, std::string>>{{"shell", shell}, {"ring", ring}}) {
+            if (name == "ring" && N_DIM == 2) continue;
+            probes += "[[probes]]\nname = \"" + name + "\"\nvariables = [\"RHO\", \"P\"]\nregion = " + region +
+                      "\nreductions_file = \"" + dir + "/" + name + "_" + suffix + ".csv\"\n";
+        }
+        return box_case(10, SINE_RHO, "type = \"MUSCL\"\n", probes, "n_steps = 2\ncfl = 0.4\n");
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input("serial")));
+    run(serial);
+    for (const std::string name : {"shell", "ring"}) {
+        if (name == "ring" && N_DIM == 2) continue;
+        const std::string file = dir + "/" + name;
+        EXPECT_EQ(without_provenance(read_all(file + "_distributed.csv")), without_provenance(read_all(file + "_serial.csv")))
+            << name << " on " << comm::size() << " ranks";
+        const auto rows = read_csv(file + "_serial.csv");
+        const double exact = name == "ring" ? 2.0 * std::numbers::pi * 0.25
+                             : N_DIM == 2   ? 2.0 * std::numbers::pi * 0.3
+                                            : 4.0 * std::numbers::pi * 0.09;
+        const std::string measure = name == "ring" || N_DIM == 2 ? "length" : "area";
+        EXPECT_NEAR(rows[0].at(measure), exact, 1e-9 * exact) << name;
+        EXPECT_NEAR(rows[0].at("mean_P"), 1.0, 1e-3) << name;
+    }
 }
 
 TEST(ProbesTest, RejectsRegionProbesWithSampleKeys) {
@@ -830,10 +914,17 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     // integral of its divergence over the disk (ball)
     const std::string dir = fresh_dir("divergence");
     const std::string shape = N_DIM == 2 ? "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 64\n"
-                                         : "type = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [24, 48]\n";
+                                         : "region = {type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}\n"
+                                           "n_points = [24, 48]\n";
+    // The same through the region of that surface, sampled at its elements' quadrature points
+    const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [0.5, 0.5], radius = 0.2}"
+                                           : "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}";
     const std::string probe = "[[probes]]\nname = \"closed\"\n" + shape +
                               "variables = [\"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
-                              "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/closed.csv\"\n";
+                              "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/closed.csv\"\n"
+                              "[[probes]]\nname = \"region\"\nregion = " + surface + "\n"
+                              "variables = [\"MASS_FLUX\"]\nsampling = \"point\"\nreductions = [\"integral\"]\n"
+                              "reductions_file = \"" + dir + "/region.csv\"\n";
     std::string input = box_case(16, "1.0", "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probe);
     const std::string u = "u = " + vector3("0.3", "-0.1", "0.2");
     input.replace(input.find(u), u.size(), "u = " + vector3("0.1 * (x - 0.5)", "0.2 * (y - 0.5)", "-0.05 * (z - 0.5)"));
@@ -842,8 +933,13 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     run(solver);
     const double r = 0.2, pi = std::numbers::pi;
     const double expected = N_DIM == 2 ? 0.3 * pi * r * r : 0.25 * 4.0 / 3.0 * pi * r * r * r;
-    EXPECT_NEAR(read_csv(dir + "/closed.csv").front().at("integral_MASS_FLUX"), expected,
-                precision_tol<double>(1e-9, 1e-5) * expected);
+    for (const char * file : {"/closed.csv", "/region.csv"}) {
+        // The region's patches are half a cell wide (here coarser than the probe's 24 x 48 grid)
+        const double tol = std::string(file) == "/region.csv" ? 1e-8 : 1e-9;
+        EXPECT_NEAR(read_csv(dir + file).front().at("integral_MASS_FLUX"), expected,
+                    precision_tol<double>(tol, 1e-5) * expected)
+            << file;
+    }
 }
 
 TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMass) {
@@ -854,8 +950,8 @@ TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMass) {
     // the circle cuts by its covered fraction
     const std::string region = "{type = \"sphere\", center = " + numbers3("0.4", "0.55", "0.45") + ", radius = 0.2}";
     const std::string surface = N_DIM == 2 ? "type = \"circle\"\ncenter = [0.4, 0.55]\nradius = 0.2\nn_points = 64\n"
-                                           : "type = \"sphere\"\ncenter = [0.4, 0.55, 0.45]\nradius = 0.2\n"
-                                             "n_points = [24, 48]\n";
+                                           : "region = {type = \"sphere\", center = [0.4, 0.55, 0.45], radius = 0.2, "
+                                             "filled = false}\nn_points = [24, 48]\n";
     const std::string rho = std::string(SINE_RHO) + (N_DIM == 3 ? " * cos(2 * pi * z)" : "");
     auto residual = [&](uint32_t n) {
         const std::string dir = fresh_dir("balance");
@@ -905,22 +1001,22 @@ TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
         bool flat;    // normals along +z
         int radial;   // else: away from the origin in the first `radial` coordinates
     };
+    // Surface regions resampled on an n_points grid (cylinders and cones with their ends)
     const std::vector<Case> cases = {
-        {"type = \"rectangle\"\ncenter = [0.1, 0.2, 0.3]\nnormal = [0.0, 0.0, 1.0]\nsize = [0.4, 0.3]\nn_points = [5, 4]\n",
-         0.12, true, 0},
-        {"type = \"disk\"\ncenter = [0.0, 0.0, 0.0]\nnormal = [0.0, 0.0, 1.0]\nradius = 0.5\ninner_radius = 0.2\n"
-         "n_points = [6, 32]\n",
+        {"{type = \"rectangle\", center = [0.1, 0.2, 0.3], normal = [0.0, 0.0, 1.0], size = [0.4, 0.3]}", 0.12, true, 0},
+        {"{type = \"disk\", center = [0.0, 0.0, 0.0], normal = [0.0, 0.0, 1.0], radius = 0.5, inner_radius = 0.2}",
          pi * (0.25 - 0.04), true, 0},
-        {"type = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 0.5\nn_points = [16, 32]\n", pi, false, 3},
-        {"type = \"cylinder\"\ncenter = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nradius = 0.3\nlength = 2.0\n"
-         "n_points = [5, 32]\n",
-         2.0 * pi * 0.3 * 2.0, false, 2},
-        {"type = \"cone\"\nbase = [0.0, 0.0, 0.0]\naxis = [0.0, 0.0, 1.0]\nlength = 1.0\nbase_radius = 0.5\n"
-         "top_radius = 0.2\nn_points = [5, 32]\n",
-         pi * 0.7 * std::hypot(1.0, 0.3), false, 2},
+        {"{type = \"sphere\", center = [0.0, 0.0, 0.0], radius = 0.5, filled = false}", pi, false, 3},
+        {"{type = \"cylinder\", center = [0.0, 0.0, 0.0], axis = [0.0, 0.0, 1.0], radius = 0.3, length = 2.0, "
+         "filled = false}",
+         2.0 * pi * 0.3 * 2.0 + 2.0 * pi * 0.09, false, 2},
+        {"{type = \"cone\", base = [0.0, 0.0, 0.0], axis = [0.0, 0.0, 1.0], length = 1.0, base_radius = 0.5, "
+         "top_radius = 0.2, filled = false}",
+         pi * 0.7 * std::hypot(1.0, 0.3) + pi * (0.25 + 0.04), false, 2},
     };
     for (const auto & c : cases) {
-        const probe::Geometry g = probe::make_geometry(parse_toml(c.toml), "surface");
+        const region::Region r(parse_toml("r = " + c.toml).at("r"), "r");
+        const probe::Geometry g = probe::grid_geometry(region::sample_grid(region::surface_patches(r, "r"), 16, 32));
         EXPECT_EQ(g.dim, 2);
         EXPECT_NEAR(area(g), c.area, 1e-7 * c.area) << c.toml;
         ASSERT_EQ(g.normals.size(), g.nodes.size());
@@ -933,6 +1029,14 @@ TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
             for (size_t d = 0; d < size_t(c.radial); d++) radial += g.normals[i][d] * g.nodes[i][d];
             EXPECT_GE(radial, -1e-12) << c.toml << " node " << i;
         }
+    }
+    // The old probe surface types point to the region
+    try {
+        probe::make_geometry(parse_toml("type = \"sphere\"\ncenter = [0, 0, 0]\nradius = 1\n"), "p");
+        ADD_FAILURE() << "a probe sphere was accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("region = {type = \"sphere\", ...} with filled = false"), std::string::npos)
+            << e.what();
     }
 }
 #endif

@@ -223,7 +223,9 @@ The file holds global arrays, with global ids the row indices:
 count, Gmsh/VTK node order), `/boundary/offsets`, `/boundary/nodes` and
 `/boundary/zone` (boundary faces and their zone index), the attribute
 `/boundary/zone_names`, and the root attributes `format = "mallard-mesh"`,
-`version = 1` and `dimension`. Meshes with high-order boundary faces also have
+`version = 1` and `dimension`. Meshes with cell zones also have `/cells/zone`
+(uint32 per cell, `4294967295` for cells in no zone) and the attribute
+`/cells/zone_names`. Meshes with high-order boundary faces also have
 `/boundary/high_order/offsets` (per boundary face) and
 `/boundary/high_order/coordinates` (all nodes of each high-order face, corners
 first in Gmsh order; none for linear faces).
@@ -1007,7 +1009,8 @@ ranks. A probe that is not due costs nothing.
 |---|---|
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
-| `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (below); without it, `point` or `start`/`end` select a point or a line |
+| `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `surface` (below); without it, `point` or `start`/`end` select a point or a line |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples (below). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
@@ -1033,11 +1036,6 @@ Types (`[x, y(, z)]` points):
 | `arc` | as `circle`, with `angles = [start, end]` in degrees from the x axis (3D: from `reference`) and `n_points` from start to end, ends included |
 | `curve` | `x`, `y`(, `z`): expressions of the parameter `s` over `s_range = [s0, s1]` (default `[0, 1]`), `n_points` evenly spaced in `s` |
 | `cut_plane` | `point`, `normal`: the exact intersection of the plane (a line in 2D) with the mesh, one sample per cut cell; optional `bounds = [[lo...], [hi...]]` keeps the part inside that box |
-| `rectangle` (3D) | `center`, `normal`, `size = [a, b]` (along `reference` and normal x `reference`), `n_points = [n_a, n_b]` |
-| `disk` (3D) | `center`, `normal`, `radius`, `inner_radius` (default 0: an annulus otherwise), `n_points = [n_radial, n_around]` |
-| `sphere` (3D) | `center`, `radius`, `n_points = [n_polar, n_around]` |
-| `cylinder` (3D) | `center` (of the axis), `axis`, `radius`, `length`, `n_points = [n_axial, n_around]` |
-| `cone` (3D) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0), `n_points = [n_axial, n_around]` |
 | `surface` (3D) | `x`, `y`, `z`: expressions of `u` and `v` over `u_range`, `v_range` (default `[0, 1]`), `n_points = [n_u, n_v]` |
 
 **Point values.** With TENO, `sampling = "point"` evaluates each cell's
@@ -1052,10 +1050,17 @@ cell averages. A sample on a face between cells belongs to the cell with the low
 id, so any number of ranks pick the same cell; samples outside the domain take
 the nearest cell's average in both modes.
 
-**Surfaces.** Resampled surfaces (3D) sample a grid of points (`n_points`)
-joined into quadrilaterals, and integrate with 3 x 3 Gauss points per
-quadrilateral of the parameters; spheres, cylinders and cones have outward
-normals, flat shapes `normal`, parametric surfaces `x_u x x_v`. A cut plane
+**Surfaces.** A surface region (3D) with `n_points = [n_u, n_v]`, e.g.
+`region = {type = "sphere", center = [0, 0, 0], radius = 1, filled = false}`
+or `region = {type = "disk", center = [0, 0, 0], normal = [1, 0, 0], radius = 0.5}`,
+is resampled: a grid of points along each patch's parameters (the
+[geometry guide](guide/geometry.md#surfaces-and-curves-on-a-mesh) lists them per
+type; a cylinder's or cone's ends are patches too) joined into quadrilaterals,
+written like a curve's samples, and integrated with 3 x 3 Gauss points per
+quadrilateral; closed surfaces face out, flat ones along `normal`. The
+parametric `type = "surface"` does the same on `x_u x x_v`. Without
+`n_points`, a surface region writes only its reductions, at the quadrature
+points of its elements. A cut plane
 samples one point per cut cell, at the centroid of its cut, weighing the cut's
 area, and integrates with a degree-5 rule on the triangles where the plane cuts
 the cell's tetrahedra (three Gauss points per cut segment in 2D), so its
@@ -1179,8 +1184,8 @@ fraction `f`: `integral` is `sum f V q`, `mean` `sum f V q / sum f V`, `favre`
 rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
 radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
 in global cell order, so they are the same bit for bit on any number of ranks.
-A region probe has no samples: `type`, `boundary`, `boundary_type`,
-`sampling`, `format`, `file` and `samples` do not apply. The region must cover part of some cell.
+A region probe has no samples: `type`, `sampling`, `format`, `file` and
+`samples` do not apply. The region must cover part of some cell.
 
 ```toml
 # Fuel mass and the extreme temperatures in the combustor
@@ -1272,40 +1277,56 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 
 ## Regions
 
-Regions select parts of space in `[[sources]]`, `[[sponges]]`, `[[probes]]`,
-`[[initialize.regions]]` and `[[initialize.data]]` (explained with figures in the
+Regions select parts of space in `[[sources]]`, `[[sponges]]`,
+`[[initialize.regions]]` and `[[probes]]` (explained with figures in the
 [geometry guide](guide/geometry.md#regions)). Each `region` key takes a table,
-or the name of a region defined once in [`[regions]`](#named-regions-regions).
-The regions below fill space: volumes in 3D, areas in 2D. Points, curves and
-surfaces are to join the same table, each `type` with one fixed dimension, and
-each key states the dimension it needs. A region is a table: a primitive, or a boolean of regions, each with
-optional transforms, nested to any depth. Every region has a signed distance
-(negative inside) that never exceeds the distance to its surface, which gives
-smooth edges their width and lets cell volume fractions skip cells away from
-the surface. Volume fractions are cell averages of the region's indicator,
-sampled on each cell's triangles (2D) or tetrahedra (3D), subdivided where the
-surface or the smooth edge crosses them: cells entirely inside get exactly 1.
-In 2D, regions are the z = 0 slices of the 3D primitives (`z` components may be
-left out). `circle` and `ellipse` are curves, `disk`, `annulus`, `rectangle`
-and `polygon` are flat (areas in 2D, surfaces in 3D), and `box` is a 3D solid,
-so sources in 3D use `sphere`, `ellipsoid`, `box` and `cylinder`, and in 2D
-`rectangle` for a rectangle. Lengths take units (`radius = "5 mm"`) and angles are in degrees
-unless given a unit; `axis`, `normal`, `axes` and `scale` are plain numbers.
+or the name of a region defined once in [`[regions]`](#named-regions-regions)
+or of a [region of the mesh](#regions-of-the-mesh). A region is a primitive, a
+boolean of regions, or the boundary or interior of a region, each with optional
+transforms, nested to any depth. Each `type` has one dimension: filled regions
+(volumes in 3D, areas in 2D), surfaces (3D), curves, or points. `sphere`,
+`ellipsoid`, `cylinder`, `cone`, `torus`, `half_space`, `implicit` and `box`
+(3D) are filled, as are `disk`, `annulus`, `rectangle` and `polygon` in 2D;
+in 3D these four are flat surfaces, and `circle` and `ellipse` are curves in
+both. Sources, sponges and region probes take filled regions; a region of
+another dimension is an error naming the one needed. Filled regions of
+primitives have a signed distance (negative inside) that never exceeds the
+distance to their surface, which gives smooth edges their width and lets cell
+volume fractions skip cells away from the surface. Volume fractions are cell
+averages of the region's indicator, sampled on each cell's triangles (2D) or
+tetrahedra (3D), subdivided where the surface or the smooth edge crosses them:
+cells entirely inside get exactly 1. In 2D, filled regions are the z = 0
+slices of the 3D primitives (`z` components may be left out). Lengths take
+units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
+`axis`, `normal`, `reference`, `axes` and `scale` are plain numbers.
 
 | `type` | Keys | Region |
 |---|---|---|
-| `sphere` (2D: also `disk`) | `center`, `radius` | |
-| `ellipsoid` | `center`, `semi_axes` | semi-axes along x, y, z (orient with `rotate`); in 2D its slice is the area inside an ellipse |
-| `cylinder` | `center`, `axis` (default z in 2D), `radius`, `inner_radius` (default 0: solid), `length` (default infinite) | annular with `inner_radius`; centered on `center` along `axis` |
-| `annulus` (2D) | `center`, `radius`, `inner_radius` | a ring; in 3D a `cylinder` with `inner_radius` |
-| `cone` (`frustum`) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0) | |
-| `box` (3D), `rectangle` (2D) | `center`, `size` (edge lengths) | axis-aligned before `rotate` |
-| `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | |
-| `half_space` | `point` (default origin), `normal` | the side `(x - point) . normal < 0` |
-| `polygon` (2D) | `vertices` = `[[x, y], ...]` | simple polygon |
-| `implicit` | `f`, an expression in `x`, `y`, `z` | `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
-| `union`, `intersection` | `regions` = `[{...}, ...]` | |
-| `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b` |
+| `sphere` (2D: also `disk`) | `center`, `radius` | filled |
+| `ellipsoid` | `center`, `semi_axes` | filled: semi-axes along x, y, z (orient with `rotate`); in 2D its slice is the area inside an ellipse |
+| `cylinder` | `center`, `axis` (default z in 2D), `radius`, `inner_radius` (default 0: solid), `length` (default infinite) | filled: annular with `inner_radius`; centered on `center` along `axis` |
+| `annulus` | `center`, `radius`, `inner_radius`; 3D: `normal` | 2D: filled ring; 3D: flat ring of normal `normal` (the solid one is a `cylinder` with `inner_radius`) |
+| `cone` (`frustum`) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0) | filled |
+| `box` (3D) | `center`, `size` (edge lengths) | filled, axis-aligned before `rotate` |
+| `rectangle` | 2D: `center`, `size`; 3D: `center`, `normal`, `size = [a, b]`, `reference` | 2D: filled; 3D: flat, `a` along `reference` and `b` along `normal x reference` |
+| `disk` | `center`, `radius`; 3D: `normal` | 2D: filled (a `sphere`); 3D: flat |
+| `polygon` | `vertices` = `[[x, y], ...]` (3D: `[[x, y, z], ...]` in one plane) | 2D: filled, simple; 3D: flat, its normal by the right-hand rule along the vertices |
+| `circle` | `center`, `radius`; 3D: `normal`, `reference` | closed curve |
+| `ellipse` | `center`, `semi_axes = [a, b]`; 3D: `normal`, `reference` | closed curve, `a` along x (3D: `reference`) |
+| `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
+| `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
+| `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
+| `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
+| `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b`: filled regions, or a surface or curve `a` clipped to outside filled ones |
+| `boundary` | `of`: a region or its name | one dimension lower: a filled region's closed surface (2D: curve), a flat surface's edge curve, the edges of open boundary zones |
+| `interior` | `of`: a closed surface (2D: a closed curve) or its name | the filled region it encloses |
+
+`reference` (3D flat surfaces and curves) is any vector not along `normal`;
+its part in the plane is the first in-plane axis (default: the axis of x, y, z
+least aligned with `normal`).
+
+The parts of a boolean (the entries of `regions`, `a` and `b`) and `of` may be
+names of `[regions]` or of the mesh too.
 
 The parts of a boolean (the entries of `regions`, `a` and `b`) may be names of
 `[regions]` too.
@@ -1323,7 +1344,53 @@ The outermost region may also have `edge`, the width of a smooth edge: the
 indicator falls from 1 to 0 as the smoothstep `s^2 (3 - 2 s)` across the band
 of that width centered on the surface (default 0, sharp), which keeps the
 volume of a flat surface and changes that of a curved one by the band's second
-moment (e.g. `pi R edge^2 / 5` for a sphere).
+moment (e.g. `pi R edge^2 / 5` for a sphere). `edge` needs a filled region of
+primitives alone: on a surface, curve, or a region using regions of the mesh it
+is an error.
+
+Filled regions and flat surfaces may also have `filled` (default `true`):
+`filled = false` is the region's boundary, the same as
+`{type = "boundary", of = {...}}`: `{type = "sphere", ..., filled = false}` is
+the sphere's surface (2D: its circle), `{type = "rectangle", ..., filled = false}`
+in 3D its four edges. On a curve, `filled = false` is an error; take the
+boundary of a region by name with `{type = "boundary", of = "<name>"}`.
+
+| Region | `boundary` | `interior` |
+|---|---|---|
+| filled (volume; 2D: area) | its closed surface (2D: curve), facing out | error: already filled |
+| closed surface (2D: closed curve), e.g. a sphere's surface, a `circle` in 2D | error: closed | the filled region it encloses |
+| open surface (3D), e.g. `disk`, `rectangle` | its edge curve | error: not closed |
+| closed curve in 3D, e.g. `circle` | error: closed | error: needs a surface |
+| boundary zones | the zones' edges (2D: end points), if they are open; error if closed | the cells inside, if the zones are closed; error if open |
+
+Surfaces and curves may also have `flip = true`, which reverses the side they
+face (the direction 3D curves run), and `resolution` (default 3 in 2D, 2 in
+3D, at most 8 in 2D and 5 in 3D): how many times each cell's triangles
+(tetrahedra) are halved where an extracted surface or curve crosses them.
+Orientation: closed surfaces (2D: curves) face out of what they enclose,
+boundary zones out of the domain, flat surfaces along `normal`, 2D curves to
+the right of travel, 3D curves counterclockwise about their `normal` (edges:
+about the surface's); the subtracted part of a difference's boundary faces
+into the subtracted region. `intersection` and `difference` of one surface or
+curve with filled regions clip it: the parts inside them (outside the
+subtracted ones), keeping its dimension and orientation; the surface or curve
+comes first in a `difference`.
+
+The surfaces of primitives (and 3D flat surfaces and curves) are exact: their
+parameters cut into patches about half a cell wide with Gauss points; planes,
+boundary zones and the faces around regions of the mesh are cut or taken
+exactly from the cells; boundaries of booleans and `implicit` regions are
+extracted as the zero set of the signed distance, linear on the subdivided
+simplices. Clipping regions cut exact surfaces at the roots of their signed
+distance along the surface's parameters (high order: the Gauss points fill the
+kept intervals), and other elements linearly between vertices (exact for
+planes).
+
+`interior` and `boundary` are inverses: the interior of a region's boundary is
+the region. The boundary of a boolean with regions of the mesh is assembled
+from its parts' boundaries (the part of each that bounds the whole); the
+interior of boundary zones is the cells of each connected part of the mesh
+whose centroid the zones' faces wind around.
 
 ```toml
 # A tilted pipe wall with a hole drilled through it
@@ -1340,6 +1407,35 @@ region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 
 
 Expressions in regions are those of every section:
 [Expressions](guide/input_files.md#expressions).
+
+### Regions of the mesh
+
+```toml
+# The mass of the whole domain, and the heat release in the mesh's cell zone "flame"
+[[probes]]
+name = "total"
+variables = ["RHO"]
+region = "domain"
+
+[[sources]]
+rhoE = "1 MW/m^3"
+region = "flame"
+```
+
+Every mesh defines, without a `[regions]` entry:
+
+| Name | Region |
+|---|---|
+| `domain` | every cell: the filled region of the whole domain |
+| each boundary zone's name | its faces: a surface (2D: a curve), facing out of the domain |
+| each cell zone's name | its cells: a filled region. Cell zones are Gmsh physical groups of cells (physical surfaces in 2D, volumes in 3D), Fluent cell zones, CGNS families of element sections, and OpenFOAM `cellZones` |
+
+They are used by name like any region, also inside booleans and as `of`;
+the fractions of their cells are exactly 0 or 1, so a boolean of one with
+primitives has the primitives' fractions where it keeps them. A name in `[regions]` that is also one of these is an
+error naming both, and so is a mesh whose cell zone is named like a boundary
+zone or `domain` (rename one in the mesh file). Regions of the mesh take no transforms and no
+`edge`, and need no use: an unused one is no error.
 
 ### Named regions: `[regions]`
 
@@ -1364,7 +1460,7 @@ Each key of `[regions]` (equivalently a table `[regions.<name>]`) names a
 region, which any `region` key, and any part of a boolean, may give by its
 name instead of a table. A named region is read, and its volume fractions
 computed, once for all the keys that name it. A name that is not defined is an
-error listing the defined ones, a named region whose parts name it again
+error listing the defined ones and the regions of the mesh, a named region whose parts name it again
 (directly or through others) is an error naming the cycle, and a named region
 nothing uses is an unused key. `edge` belongs to the outermost region: a named
 region with `edge` may not be a part of a boolean.

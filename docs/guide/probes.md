@@ -61,7 +61,7 @@ reductions = ["mean", "rms"]
 |---|---|---|
 | `name` | required | Names the files |
 | `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
-| `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D surfaces `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (`x`, `y`, `z` of `u`, `v`) |
+| `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D `surface` (`x`, `y`, `z` of `u`, `v`) |
 | `region` | none | Instead of `type`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
@@ -74,9 +74,10 @@ reductions = ["mean", "rms"]
 
 `type = "cut_plane"` intersects the mesh exactly with a plane: one sample per
 cut cell, and integrals exact for the reconstruction polynomials. Surfaces
-(`sphere`, `cylinder`, ...) are resampled on a grid instead. Both have normals,
-so fluxes through them are variables: a closed sphere's `integral` of
-`MASS_FLUX` is the net outflow.
+are regions, resampled on a grid with `n_points`:
+`region = {type = "sphere", center = [0.5, 0.5, 0.5], radius = 0.3, filled = false}`
+with `n_points = [24, 48]`. Both have normals, so fluxes through them are
+variables: a closed sphere's `integral` of `MASS_FLUX` is the net outflow.
 
 ![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-light.svg#gh-light-mode-only)
 ![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-dark.svg#gh-dark-mode-only)
@@ -191,8 +192,18 @@ follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`),
 `mean` that over `sum f V`, `favre` the density-weighted mean, `rms` the root
 mean square, and `min`, `max` the extremes over the cells with `f > 0`. Rank 0
 sums them in global cell order, so they are the same bit for bit on any number
-of ranks. Each output appends a row to `reductions_file` (default
-`probe_<name>_reductions.csv`):
+of ranks. The region may be one of the mesh's own: `region = "domain"` gives
+the totals of the whole domain (the mass, for `RHO`), a cell zone those of its
+cells ([regions of the mesh](geometry.md#regions-of-the-mesh)). A surface,
+curve or set of points weighs each cell by its area, length or count in the
+cell instead of `f V` ([on a mesh](geometry.md#surfaces-and-curves-on-a-mesh)):
+`integral` is then the surface integral, `mean` the area-weighted mean,
+evaluated at the elements' quadrature points (cell averages, or point values
+with `sampling = "point"`), and the third column is `area`, `length` or
+`count`. Surfaces (2D: curves) have normals, so their fluxes (`MASS_FLUX`, ...)
+are variables too: a closed surface's `integral` of `MASS_FLUX` is the net
+outflow. Each output
+appends a row to `reductions_file` (default `probe_<name>_reductions.csv`):
 
 ```
 step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P
@@ -220,8 +231,8 @@ Pitfalls:
 
 - Values are cell averages, so `min` and `max` are those of the cells, not of
   the field inside them, and include cells the region only touches.
-- A region probe has no samples: `type`, `boundary`, `boundary_type`,
-  `sampling`, `format`, `file` and `samples` do not apply to it.
+- A region probe has no samples: `type`, `sampling`, `format`, `file` and
+  `samples` do not apply to it.
 
 ## Wall forces: `[[forces]]`
 
