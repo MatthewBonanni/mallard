@@ -262,7 +262,7 @@ std::string periodic_box(const std::string & mesh, const std::string & recon, co
     std::string input = box_input(mesh, recon, physics, boundaries, n_steps);
     // A Hilbert partition always cuts the seams; a graph partition of a torus need not
     const std::string anchor = "Ly = 0.8\n";
-    return input.replace(input.find(anchor), anchor.size(), anchor + "periodic = " + dirs + "\n") +
+    return input.replace(input.find(anchor), anchor.size(), anchor + periodic_sides(dirs)) +
            "[parallel]\npartitioner = \"hilbert\"\n";
 }
 
@@ -322,6 +322,29 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
             "type = \"wall_isothermal\"\nT = 1.2\nu = [0.1, 0.0]\n",
             "type = \"wall_adiabatic\"\n"),
         25));
+}
+
+TEST(MPITest, IntegralsOfAnUndistributedSolverAreThoseOfItsOwnMesh) {
+    // A serial reference on every rank integrates its whole mesh once, not once per rank
+    const std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                        bcs("type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
+                                            "type = \"wall_adiabatic\"\n", "type = \"wall_adiabatic\"\n"),
+                                        3);
+    Solver distributed, serial;
+    serial.set_distributed(false);
+    distributed.init(parse_toml(input));
+    serial.init(parse_toml(input));
+    distributed.run();
+    serial.run();
+    auto expect_close = [](double a, double b, const char * what) {
+        EXPECT_NEAR(a, b, precision_tol<double>(1e-12, 1e-5) * std::abs(b)) << what;
+    };
+    const auto U = serial.integrate_conservatives(), U_ref = distributed.integrate_conservatives();
+    FOR_I_CONSERVATIVE expect_close(double(U[i]), double(U_ref[i]), "integrate_conservatives");
+    expect_close(double(serial.integrate_flow_statistics()[0]), double(distributed.integrate_flow_statistics()[0]),
+                 "integrate_flow_statistics");
+    expect_close(double(serial.kinetic_energy_budget().convective),
+                 double(distributed.kinetic_energy_budget().convective), "kinetic_energy_budget");
 }
 
 TEST(MPITest, InletsMatchSerial) {

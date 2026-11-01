@@ -86,6 +86,12 @@ const std::filesystem::path & scratch_dir() {
     return current;
 }
 
+std::filesystem::path rank_scratch_dir() {
+    const std::filesystem::path dir = scratch_dir() / ("rank" + std::to_string(comm::rank()));
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
 void install_scratch_directories() {
     testing::UnitTest::GetInstance()->listeners().Append(new ScratchDirectories);
 }

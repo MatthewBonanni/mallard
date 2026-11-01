@@ -124,7 +124,6 @@ struct ConvectiveFluxFunctor {
     Kokkos::View<rtype **> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     rtype gamma;
     rtype low_mach_cutoff;  // 1 disables the low-Mach correction
@@ -173,7 +172,7 @@ struct ConvectiveFluxFunctor {
             if (c1 >= 0) {
                 FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
             } else {
-                boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, W_cells, face_solution, W_r);
+                boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, face_solution, W_r);
                 if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) FOR_I_CONSERVATIVE W_l[i] = W_r[i];
             }
             rtype central[N_CONSERVATIVE] = {};

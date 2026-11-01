@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <numbers>
 #include <sstream>
 #include <string>
@@ -300,7 +301,7 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     auto input = [](double delta_L) {
         std::ostringstream s;
         s << "[run]\nn_steps = 1\ndt = 1e-7\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 0.04\nLy = 0.04\n"
-          << (N_DIM == 3 ? "Nz = 4\nLz = 0.04\nperiodic = [\"x\", \"y\", \"z\"]\n" : "periodic = [\"x\", \"y\"]\n")
+          << (N_DIM == 3 ? "Nz = 4\nLz = 0.04\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
           << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"300.0\"\nu = " << U_ZERO << "\n"
           << "X = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n"
           << "[numerics]\nriemann_solver = \"HLLC\"\n"
@@ -404,3 +405,67 @@ TEST(MemoryTracker, CountsLiveAllocationsAndThePeak) {
     EXPECT_EQ(usage().current, 0u);
     EXPECT_GE(usage().peak, 32000u);
 }
+
+TEST(CheckRegions, ListsEveryRegionWithItsDimensionMeasureAndCells) {
+    // The box is 2 x 1 (x 0.25): its regions, a probe's ball and the ball's surface
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.3"
+                                        : "{type = \"sphere\", center = [0.5, 0.5, 0.125], radius = 0.1";
+    const std::string extra = "[regions]\nball = " + ball + "}\n[[probes]]\nname = \"in\"\nvariables = [\"P\"]\n"
+                              "region = \"ball\"\n[[probes]]\nname = \"on\"\nvariables = [\"P\"]\nregion = " + ball +
+                              ", filled = false}\n";
+    auto report = [&](const bool distributed) {
+        Solver solver;
+        solver.set_distributed(distributed);
+        return solver.check(parse_input_string(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", extra)), CheckOptions{});
+    };
+    const CheckReport r = report(true);
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    std::map<std::string, std::string> regions(r.regions.begin(), r.regions.end());
+    EXPECT_EQ(regions.at("domain"), std::string(N_DIM == 2 ? "area 2" : "volume 0.5") + ", " +
+                                        (N_DIM == 2 ? "128" : "256") + " cells (of the mesh)");
+    EXPECT_EQ(regions.at("left"), std::string(N_DIM == 2 ? "curve, length 1, 8" : "surface, area 0.25, 16") +
+                                      " cells (of the mesh)");
+    EXPECT_NE(regions.at("ball").find(N_DIM == 2 ? "area " : "volume "), std::string::npos);
+    const std::string on = regions.at("probes[name = \"on\"].region");
+    EXPECT_NE(on.find(std::string(N_DIM == 2 ? "curve, length " : "surface, area ") +
+                      logging::real(N_DIM == 2 ? 2.0 * std::numbers::pi * 0.3 : 4.0 * std::numbers::pi * 0.01)),
+              std::string::npos)
+        << on;
+    EXPECT_NE(on.find(", exact"), std::string::npos) << on;
+    // The same on one rank as on several
+    EXPECT_EQ(report(false).regions, r.regions);
+}
+
+TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
+    const std::string far = N_DIM == 2 ? "{type = \"rectangle\", center = [5, 5], size = [1, 2]}"
+                                       : "{type = \"box\", center = [5, 5, 5], size = [1, 2, 1]}";
+    const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
+                                    "[[sponges]]\nstrength = 1.0\nregion = " + far + "\nu = " + U_ZERO +
+                                        "\np = 1.0\nT = 1.0\n"));
+    EXPECT_TRUE(mentions(r.errors, "region sponges[0].region lies outside the domain: it spans (4.5, 4"))
+        << (r.errors.empty() ? "" : r.errors[0]);
+}
+
+#ifdef Mallard_HAS_HDF5
+TEST(CheckRegions, TheCaseViewHoldsEveryRegionAndZone) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_view";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
+                                           : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
+    const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
+                                    "[[probes]]\nname = \"s\"\nvariables = [\"P\"]\nregion = " + surface + "\n"),
+                                options);
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_EQ(r.view_file, (dir / "case.vtkhdf").string());
+    comm::barrier();
+    if (!comm::is_root()) return;
+    const auto datasets = h5_all_datasets(r.view_file);
+    for (const std::string block : {"left", "right", "bottom", "top", "probes[name = \"s\"].region"}) {
+        EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/Connectivity")) << block;
+        EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/CellData/normal")) << block;
+    }
+}
+#endif

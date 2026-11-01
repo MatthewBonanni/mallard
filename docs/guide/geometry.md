@@ -10,14 +10,15 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | Feature | Geometry | Guide |
 |---|---|---|
 | `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone) | [Sources](sources.md#regions) |
-| `[[probes]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes | [Output](output.md#region-probes) |
-| `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
+| `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh) | [Probes](probes.md#region-probes) |
+| `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength` | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
-| `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
+| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file of them | [Checking regions](#checking-regions) |
+| `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
-| `[[initialize.regions]]` `region` | a [region](#regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
-| `[[initialize.data]]` `region` | a [region](#regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
+| `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
+| `[[initialize.data]]` `region` | a [region](#regions) or its [name](#named-regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
 | `[[mesh.curved]]` | a surface (2D: a curve), e.g. `{type = "sphere", ..., filled = false}` or a `circle` | [Curved boundaries](meshes.md#curved-boundaries) |
 
 Filled regions are volumes (areas in 2D runs). Surfaces and curves, such as
@@ -253,6 +254,128 @@ boundary zones is found by winding numbers: each connected part of the mesh
 is inside or outside them as a whole, so the interior of the zones around a
 domain is the domain, and that of a body's wall holds no cell.
 
+### Clipping across dimensions
+
+```toml
+# The part of the wall zone inside a box
+region = {type = "intersection", regions = ["wall", {type = "box", center = [0.5, 0, 0], size = [0.2, 1, 1]}]}
+```
+
+```toml
+# A plane's section of a duct, outside a centerbody
+region = {type = "difference", regions = [{type = "half_space", point = [0.3, 0, 0], normal = [1, 0, 0], filled = false}, "centerbody"]}
+```
+
+`intersection` and `difference` of one surface or curve with filled regions
+clip it and keep its dimension: an `intersection` keeps the part inside every
+filled region, a `difference` (the surface or curve first) the part outside
+the others. Clipping keeps the surface's orientation; the boundary of a clipped
+surface is where the clipping regions cut it. Two surfaces or curves combine
+only by `union`, and a `difference` that subtracts a surface from a filled
+region is an error (it would remove nothing).
+
+### Orientation
+
+Surfaces (2D: curves) face one way, which sets the sign of what is measured
+through them:
+
+| Region | Faces |
+|---|---|
+| a closed surface: the boundary of a filled region, `circle` and `ellipse` in 2D | out of the region it encloses |
+| a boundary zone, `domain`'s boundary | out of the domain |
+| a flat surface (3D `disk`, `annulus`, `rectangle`, `polygon`) | along `normal` (`polygon`: by the right-hand rule along its vertices) |
+| the part of a boundary that a `difference` subtracts | into the subtracted region (out of the result) |
+| a 2D curve | to the right of the direction of travel |
+| a 3D curve (`circle`, `ellipse`, the edge of a surface) | runs counterclockwise about its `normal`, or about the normal of the surface it bounds (right-hand rule) |
+
+`flip = true` on any surface or curve reverses it. Points have no orientation.
+
+As `mallard check --view` writes them: a circle and the boundary of a
+rectangle minus a disk (the disk's part facing into the disk), and the part of
+a boundary zone in a box with a flipped ellipse, on a mesh with a hole:
+
+![Normals of an exact circle, of the extracted boundary of a rectangle minus a disk, of a clipped boundary zone and of a flipped ellipse](../images/guide/region-orientation-light.svg#gh-light-mode-only)
+![Normals of an exact circle, of the extracted boundary of a rectangle minus a disk, of a clipped boundary zone and of a flipped ellipse](../images/guide/region-orientation-dark.svg#gh-dark-mode-only)
+
+### Surfaces and curves on a mesh
+
+```toml
+# The area of a sphere's surface and the mean pressure on it
+[[probes]]
+name = "shell"
+variables = ["P"]
+region = {type = "sphere", center = [0, 0, 0], radius = 0.1, filled = false}
+reductions = ["integral", "mean"]
+```
+
+A surface, curve or set of points is a set of elements in the cells it
+crosses: polygons, segments or points, each with its measure (area, length,
+or 1 for a point) and orientation. They are made in one of two ways, and
+`mallard check` reports which:
+
+- **Exact**: the surfaces of primitives (`sphere`, `ellipsoid`, `cylinder`,
+  `cone`, `box`, `torus`; in 2D their circles, ellipses and polygons) and the
+  flat surfaces and curves of 3D runs follow their own parameters, cut into
+  patches about half a cell wide and integrated with Gauss points, so an
+  unclipped surface has its exact area to round-off; planes (`half_space`) are
+  cut from the cells exactly; boundary zones and the faces around regions of
+  the mesh are the mesh's faces.
+- **Extracted**: the boundaries of booleans and of `implicit` regions are cut
+  from the cells as the zero set of the signed distance, linear on each cell's
+  triangles (tetrahedra) subdivided `resolution` times where the surface may
+  cross them (default 3 in 2D, 2 in 3D): second-order accurate in the
+  subdivided size.
+
+Exact surfaces follow these parameters `(u, v)`, with `x_u x x_v` facing
+out; a probe resampling a surface region (`[[probes]]` with `region` and
+`n_points`) takes `n_points = [n_u, n_v]` nodes along each patch, and a parameter that closes a turn
+does not repeat its first node:
+
+| Surface | `u` | `v` |
+|---|---|---|
+| `sphere`, `ellipsoid` | polar angle, from the local +z pole | angle around local z, from +x |
+| `cylinder`, `cone` (side) | angle around the axis | along the axis, from the base |
+| their ends | radius (top), angle (bottom) | angle (top), radius (bottom) |
+| `box` faces | the face's next axis | the one after (cyclic x, y, z) |
+| `torus` | angle around the axis | angle around the tube |
+| `disk`, `annulus` (3D) | radius, from `inner_radius` | angle from `reference` |
+| `rectangle` (3D) | along `reference` | along `normal x reference` |
+| `polygon` (3D) | each triangle of its ear clipping | |
+
+Clipping regions cut exact surfaces where their own surface crosses them:
+along lines of the surface's parameters, the Gauss points fill the kept
+intervals between the clipping region's roots, found to round-off, so a clipped
+area or flux converges at high order (in the tests, errors fall by over 8 per
+halving of the cells, to round-off); patches where the clipping boundary is not
+a graph over one parameter, or that several clipping regions cross, are
+subdivided. Extracted elements and mesh faces are cut linearly between their
+vertices: exactly along planes and mesh-aligned boxes. Only the parts inside the
+domain count. In axisymmetric runs measures are those of the r-z plane, not
+of the revolved surface.
+
+### Checking regions
+
+`mallard check` lists every region a case uses, and the mesh's own, with its
+dimension, measure and cells; surfaces and curves say whether they are exact
+or extracted. A region that covers no cell is an error naming it with its
+extent and the domain's:
+
+```
+  Regions            domain: area 1, 800 cells (of the mesh)
+                     left: curve, length 1, 20 cells (of the mesh)
+                     ring: area 0.0339292, 58 cells
+                     probes[name = "around"].region: curve, length 0.942478, 30 cells, exact
+```
+
+`mallard check input.toml --view view` also writes `view/case.vtkhdf`, the
+case view: one block per region (filled regions as their cells with
+`fraction`; surfaces, curves and points with `normal` or, for 3D curves,
+`tangent`, and their `area`, `length` or `count`) and per boundary zone. Open
+it in ParaView (5.12 or later) and pick blocks in the Multiblock Inspector;
+builds without HDF5 write `view/case.vtm`. More of the case (conditions,
+probes, injectors) is to join it
+([#546](https://github.com/MatthewBonanni/mallard/issues/546)).
+
 ### Transforms
 
 Any region, primitive or boolean, may be scaled, rotated and translated, in
@@ -421,7 +544,7 @@ TENO converges at the scheme's order:
 
 Use `point` to compare with references or to measure orders of accuracy, and
 `cell` for robust values across shocks. Details and pitfalls:
-[Output](output.md#probes-probes).
+[Probes and monitors](probes.md#accuracy-and-pitfalls).
 
 ## Boundary zones
 
@@ -471,5 +594,5 @@ with h5py.File("probe_wake.h5") as f:
 ## See also
 
 - [Input reference: regions](../input.md#regions), [regions of the mesh](../input.md#regions-of-the-mesh), [`[regions]`](../input.md#named-regions-regions), [`[[sources]]`](../input.md#sources), [`[[sponges]]`](../input.md#sponges), [`[[probes]]`](../input.md#probes), [`[mesh]`](../input.md#mesh)
-- [Sources and sponges](sources.md), [Output and diagnostics](output.md#probes-probes), [Meshes](meshes.md#curved-boundaries)
+- [Sources and sponges](sources.md), [Probes and monitors](probes.md), [Meshes](meshes.md#curved-boundaries)
 - Figures: [`tools/docs/geometry.py`](../../tools/docs/geometry.py), [`tools/docs/regions.py`](../../tools/docs/regions.py)

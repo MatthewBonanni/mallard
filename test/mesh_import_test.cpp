@@ -210,7 +210,7 @@ const std::string FOAM_HEADER = "FoamFile\n{\n    format ascii;\n}\n";
 
 /** @brief An OpenFOAM polyMesh directory of the given files' data (after their header). */
 std::string write_foam(const std::string & name, const std::array<std::string, 5> & data) {
-    const auto dir = std::filesystem::temp_directory_path() / name / "constant" / "polyMesh";
+    const auto dir = rank_scratch_dir() / name / "constant" / "polyMesh";
     std::filesystem::create_directories(dir);
     const char * files[5] = {"points", "faces", "owner", "neighbour", "boundary"};
     for (size_t k = 0; k < 5; k++) {
@@ -249,6 +249,7 @@ TEST(MeshImportTest, MalformedOpenFoamIsRejected) {
 
 TEST(MeshImportTest, MalformedHdf5MeshIsRejected) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1) GTEST_SKIP() << "writes one rank's block";
     auto block_with = [](std::vector<uint64_t> offsets, std::vector<uint64_t> nodes) {
         MeshBlock block;
         block.node_coords.assign(N_DIM + 1, {});
@@ -262,7 +263,7 @@ TEST(MeshImportTest, MalformedHdf5MeshIsRejected) {
     for (size_t k = 0; k < cell.size(); k++) cell[k] = k;
     std::vector<uint64_t> missing_node = cell;
     missing_node.back() = 99;
-    const std::string h5 = (std::filesystem::temp_directory_path() / "mallard_fuzz.h5").string();
+    const std::string h5 = (scratch_dir() / "mallard_fuzz.h5").string();
     const std::vector<MeshBlock> blocks = {
         block_with({0, cell.size()}, missing_node),     // a node that is not there
         block_with({0, cell.size(), 1}, cell),          // decreasing offsets
@@ -276,7 +277,7 @@ TEST(MeshImportTest, MalformedHdf5MeshIsRejected) {
 
 #ifdef Mallard_HAS_CGNS
 TEST(MeshImportTest, CgnsBadElementRangeIsRejected) {
-    const std::string file = (std::filesystem::temp_directory_path() / "mallard_fuzz_range.cgns").string();
+    const std::string file = (rank_scratch_dir() / "mallard_fuzz_range.cgns").string();
     int fn = 0, B = 0, Z = 0, C = 0, S = 0;
     ASSERT_EQ(cg_open(file.c_str(), CG_MODE_WRITE, &fn), CG_OK);
     ASSERT_EQ(cg_base_write(fn, "base", N_DIM, 3, &B), CG_OK);

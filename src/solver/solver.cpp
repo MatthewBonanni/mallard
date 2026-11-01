@@ -68,6 +68,25 @@ Input unrecorded(Input value) {
     return value;
 }
 
+/**
+ * @brief The names of the mesh's boundary zones, sorted, on every rank (collective if
+ *        distributed): a rank's part of the mesh may not touch every zone.
+ */
+std::vector<std::string> boundary_zone_names(Mesh & mesh, const bool distributed) {
+    std::string local;
+    for (const FaceZone & z : *mesh.face_zones()) {
+        if (z.get_type() == FaceZoneType::BOUNDARY && z.get_name() != PARTITION_ZONE) local += z.get_name() + '\n';
+    }
+    std::vector<std::string> names;
+    for (const std::string & part : distributed ? comm::allgather(local) : std::vector<std::string>{local}) {
+        std::istringstream lines(part);
+        for (std::string name; std::getline(lines, name);) names.push_back(name);
+    }
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    return names;
+}
+
 } // namespace
 
 int Solver::init(const std::string & input_file_name, const std::string & restart_file) {
@@ -174,11 +193,11 @@ void Solver::setup_from_input() {
         init_les();
         statistics.init(input, species_names, *mesh);
         init_rhs_split();
-        region::Regions regions(input, *mesh);
-        init_sources(regions);
-        init_sponges(regions);
+        used_regions = std::make_unique<region::Regions>(input, *mesh);
+        init_sources(*used_regions);
+        init_sponges(*used_regions);
         register_data();
-        init_output(regions);
+        init_output(*used_regions);
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
@@ -644,7 +663,7 @@ void Solver::init_boundaries() {
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
     wall_model_specs.clear();
-    dirichlet_boundaries.clear();
+    std::vector<DirichletBoundary> dirichlet_boundaries;
     average_pressure_outlets.clear();
     // Faces of upt boundaries whose composition varies along them, as (boundary, face):
     // each face gets its own copy of the condition, appended after the input's
@@ -689,13 +708,7 @@ void Solver::init_boundaries() {
         if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
         // A rank's part of the mesh may not touch every zone
         if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-            std::vector<std::string> names;
-            for (const FaceZone & z : *mesh->face_zones()) {
-                if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
-            }
-            std::sort(names.begin(), names.end());
-            std::string zones;
-            for (const auto & z : names) zones += (zones.empty() ? "" : ", ") + z;
+            const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
             throw InputError({.key = where_name + ".name",
                               .line = line_of(bound, "name"),
                               .message = "the mesh has no boundary zone \"" + name + "\"",
@@ -730,12 +743,13 @@ void Solver::init_boundaries() {
                                   .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
             }
             const auto & u = bound.at("u").as_array();
-            dirichlet.W.emplace_back(name + ".rho", quantity_or_expression(bound.at("rho"), name + ".rho", dim::density));
-            FOR_I_DIM {
-                const std::string key = name + ".u[" + std::to_string(i) + "]";
-                dirichlet.W.emplace_back(key, quantity_or_expression(u[i], key, dim::velocity));
-            }
-            dirichlet.W.emplace_back(name + ".p", quantity_or_expression(bound.at("p"), name + ".p", dim::pressure));
+            auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
+                dirichlet.W.push_back(std::make_shared<const expr::Program>(
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables()));
+            };
+            add_state(bound.at("rho"), name + ".rho", dim::density);
+            FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
+            add_state(bound.at("p"), name + ".p", dim::pressure);
         }
         auto fields = std::make_shared<BoundaryFields>(bound, bcs.back().type, "boundaries[name = \"" + name + "\"]");
         boundary_fields[i_bc] = fields;
@@ -749,47 +763,56 @@ void Solver::init_boundaries() {
                               dot<N_DIM>(direction, direction) > 0.0_r;
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
+        std::string twice, outward;
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
             if (where && where->at(Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL()), N_DIM) == 0.0) {
                 continue;
             }
-            if (face_bc[i_face] != -1) {
+            if (face_bc[i_face] != -1 && twice.empty()) {
                 const auto & first = input_boundaries[static_cast<size_t>(face_bc[i_face])];
                 std::string at;
                 for (uint8_t d = 0; d < N_DIM; d++) {
                     at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
                 }
-                throw InputError({.key = where_name,
-                                  .line = line_of(bound),
-                                  .message = "the face at " + at + ") already has a condition, from the entry on "
-                                             "line " + std::to_string(line_of(first)) + " (name = \"" +
-                                             find_value<std::string>(first, "name") + "\")",
-                                  .fix = "Give each face one condition: one entry per zone, or where = \"...\" "
-                                         "filters that do not overlap",
-                                  .docs = "docs/guide/boundary_conditions.md"});
+                twice = "the face at " + at + ") already has a condition, from the entry on line " +
+                        std::to_string(line_of(first)) + " (name = \"" + find_value<std::string>(first, "name") + "\")";
             }
             face_bc[i_face] = static_cast<int>(i_bc);
             if (directed) {
                 rtype inward = 0.0_r;
                 for (uint8_t k = 0; k < N_DIM; k++) inward -= direction[k] * mesh->h_face_normals(i_face, k);
                 if (!(inward > 0.0_r)) {
-                    std::string at;
-                    for (uint8_t d = 0; d < N_DIM; d++) {
-                        at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
+                    if (outward.empty()) {
+                        std::string at;
+                        for (uint8_t d = 0; d < N_DIM; d++) {
+                            at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
+                        }
+                        outward = "points out of the domain at the face at " + at + ")";
                     }
-                    throw InputError({.key = where_name + ".direction",
-                                      .line = line_of(bound, "direction"),
-                                      .message = "points out of the domain at the face at " + at + ")",
-                                      .fix = "Give a direction into the domain at every face of the zone, or "
-                                             "remove it to use each face's inward normal",
-                                      .docs = "docs/guide/boundary_conditions.md#stagnation-inlet"});
                 }
             }
 
             dirichlet.faces.push_back(i_face);
             n_selected++;
             n_owned_selected += static_cast<uint32_t>(mesh->h_cells_of_face(i_face, 0)) < mesh->n_owned();
+        }
+        // Faces are checked where they are, so every rank throws what the first one found
+        if (const std::string message = comm::first_error(twice); !message.empty()) {
+            throw InputError({.key = where_name,
+                              .line = line_of(bound),
+                              .message = message,
+                              .fix = "Give each face one condition: one entry per zone, or where = \"...\" "
+                                     "filters that do not overlap",
+                              .docs = "docs/guide/boundary_conditions.md"});
+        }
+        if (const std::string message = comm::first_error(outward); !message.empty()) {
+            throw InputError({.key = where_name + ".direction",
+                              .line = line_of(bound, "direction"),
+                              .message = message,
+                              .fix = "Give a direction into the domain at every face of the zone, or "
+                                     "remove it to use each face's inward normal",
+                              .docs = "docs/guide/boundary_conditions.md#stagnation-inlet"});
         }
         if (comm::allreduce(n_selected, comm::Op::SUM) == 0) {
             throw InputError({.key = where ? where_name + ".where" : where_name,
@@ -843,19 +866,21 @@ void Solver::init_boundaries() {
         if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
         boundary_summary.emplace_back(name, text);
     }
-    for (size_t k = 0; k < profiled_faces.size(); k++) {
-        const auto [i_bc, i_face] = profiled_faces[k];
-        BoundaryCondition copy = bcs[i_bc];
-        if (!std::isnan(profiled_flux[k])) copy.data[N_DIM + 1] = static_cast<rtype>(profiled_flux[k]);
-        Point x{};
-        FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
-        // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
-        if (boundary_fields[i_bc]->varies()) boundary_fields[i_bc]->apply(copy, x, 0.0, double(physics.R));
-        face_bc[i_face] = static_cast<int32_t>(bcs.size());
-        field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
-        bcs.push_back(copy);
-        wall_model_specs.push_back(wall_model_specs[i_bc]);
-    }
+    on_every_rank([&] {
+        for (size_t k = 0; k < profiled_faces.size(); k++) {
+            const auto [i_bc, i_face] = profiled_faces[k];
+            BoundaryCondition copy = bcs[i_bc];
+            if (!std::isnan(profiled_flux[k])) copy.data[N_DIM + 1] = static_cast<rtype>(profiled_flux[k]);
+            Point x{};
+            FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+            // Single gases: the numbers at t = 0; mixtures complete them in init_mixture_boundaries
+            if (boundary_fields[i_bc]->varies()) boundary_fields[i_bc]->apply(copy, x, 0.0, double(physics.R));
+            face_bc[i_face] = static_cast<int32_t>(bcs.size());
+            field_faces.push_back({i_bc, i_face, static_cast<uint32_t>(bcs.size())});
+            bcs.push_back(copy);
+            wall_model_specs.push_back(wall_model_specs[i_bc]);
+        }
+    });
 
     if (FaceZone * partition = mesh->get_face_zone(PARTITION_ZONE)) {
         BoundaryCondition bc;
@@ -914,14 +939,22 @@ void Solver::init_boundaries() {
         FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
         timed_fields.add(i_bc, x, boundary_fields[base], composition);
     }
-    if (!timed_fields.empty()) {
-        timed_fields.finish();
-        if (!stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
+    if (!timed_fields.empty()) timed_fields.finish();
+    dirichlet_states = DirichletStates();
+    const auto h_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
+    for (const DirichletBoundary & d : dirichlet_boundaries) {
+        std::vector<int32_t> states;
+        std::vector<Point> x(d.faces.size());
+        for (size_t k = 0; k < d.faces.size(); k++) {
+            states.push_back(h_state_index(d.faces[k]));
+            FOR_I_DIM x[k][i] = static_cast<double>(mesh->h_face_coords(d.faces[k], i));
+        }
+        dirichlet_states.add(d.W, states, x);
     }
-    h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
-    h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
-    t_boundary_states = -1.0;
-    boundary_states_steady = false;
+    dirichlet_states.finish(boundary_data.face_state);
+    if ((!timed_fields.empty() || dirichlet_states.depends_on_time()) && !stage_time.is_allocated()) {
+        stage_time = Kokkos::View<rtype>("stage_time");
+    }
     init_inlets(input_boundaries, inlets);
 }
 
@@ -1156,12 +1189,14 @@ void Solver::copy_boundary_gas() {
 }
 
 void Solver::update_boundary_fields(const rtype t_eval, const rtype c) {
-    if (timed_fields.empty()) return;
+    if (timed_fields.empty() && !dirichlet_states.depends_on_time()) return;
     set_stage_time(t_eval, c);
     apply_boundary_fields();
 }
 
 void Solver::apply_boundary_fields() {
+    dirichlet_states.apply(stage_time, boundary_data.face_state);
+    if (timed_fields.empty()) return;
     TimedBoundaryFields::Gas gas;
     gas.R = double(physics.R);
     if (is_mixture()) {
@@ -1177,22 +1212,6 @@ void Solver::apply_boundary_fields() {
 void Solver::update_boundary_states(const rtype t_eval, const rtype c) {
     update_boundary_fields(t_eval, c);
     update_inflow(t_eval);
-    if (dirichlet_boundaries.empty() || t_eval == t_boundary_states || boundary_states_steady) {
-        return;
-    }
-    for (const auto & bc : dirichlet_boundaries) {
-        for (uint32_t i_face : bc.faces) {
-            const auto x = Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL());
-            const int32_t k = h_face_state_index(i_face);
-            if (k < 0) throw std::logic_error("Dirichlet boundary face " + std::to_string(i_face) + " has no state.");
-            for (uint8_t i = 0; i < N_DIM + 2; i++) h_face_state(k, i) = static_cast<rtype>(bc.W[i].at(x, N_DIM, double(t_eval)));
-        }
-    }
-    Kokkos::deep_copy(boundary_data.face_state, h_face_state);
-    t_boundary_states = t_eval;
-    boundary_states_steady = std::none_of(dirichlet_boundaries.begin(), dirichlet_boundaries.end(), [](const auto & bc) {
-        return std::any_of(bc.W.begin(), bc.W.end(), [](const Expression & w) { return w.depends_on_time(); });
-    });
 }
 
 void Solver::init_numerics() {
@@ -1252,6 +1271,8 @@ void Solver::init_numerics() {
     face_reconstruction->init(face_reconstruction_input);
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
     if (is_mixture()) {
         scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
     }
@@ -1404,11 +1425,7 @@ void Solver::init_output(region::Regions & regions) {
             FaceZone * zone = mesh->get_face_zone(monitor.zone);
             if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
             if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-                std::vector<std::string> names;
-                for (const FaceZone & z : *mesh->face_zones()) {
-                    if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
-                }
-                std::sort(names.begin(), names.end());
+                const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
                 throw InputError({.key = "forces.zone",
                                   .line = line_of(entry, "zone"),
                                   .message = "the mesh has no boundary zone \"" + monitor.zone + "\"",
@@ -1507,8 +1524,8 @@ void Solver::init_output(region::Regions & regions) {
             }
         }
     }
-    probes.init(input, *mesh, regions, species_names, find_value_or<std::string>(input, "initialize", "type", "") == "restart",
-                is_viscous());
+    probes.init(input, *mesh, regions, species_names,
+                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous());
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     if (run_log_on) {
@@ -1592,6 +1609,7 @@ void Solver::allocate_memory() {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
+    if (positivity_limiter) positivity_kappa = Kokkos::View<rtype *>("positivity_kappa", mesh->n_cells);
     if (hybrid_flux) {
         cell_upwind = Kokkos::View<rtype *>("cell_upwind", mesh->n_cells);
         if (!viscous_gradients.is_allocated()) {
@@ -1920,8 +1938,7 @@ int Solver::run() {
             t_wall_output += output_timer.seconds();
             if (step % check_interval == 0) {
                 Kokkos::Timer check_timer;
-                timed_fields.check();
-                timed_inlets.check();
+                check_timed_boundaries();
                 print_progress();
                 t_wall_checks += check_timer.seconds();
             }
@@ -1936,14 +1953,12 @@ int Solver::run() {
     } catch (const DivergedError &) {
         defer_chemistry = false;
         destroy_step_graph();
-        timed_fields.check();
-        timed_inlets.check();
+        check_timed_boundaries();
         diverged();
     }
     defer_chemistry = false;
     destroy_step_graph();
-    timed_fields.check();
-    timed_inlets.check();
+    check_timed_boundaries();
     if (step != step_last_check) print_progress();
     Kokkos::Timer output_timer;
     copy_device_to_host();
@@ -2395,6 +2410,14 @@ void Solver::update_primitives() {
     });
 }
 
+void Solver::check_timed_boundaries() const {
+    on_every_rank([&] {
+        timed_fields.check();
+        dirichlet_states.check();
+        timed_inlets.check();
+    });
+}
+
 void Solver::update_p_max() {
     update_primitives();
     Kokkos::View<rtype *> peak = p_max;
@@ -2697,7 +2720,7 @@ std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t 
     Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
     std::array<rtype, 2 * N_DIM + 1> F;
     for (size_t i = 0; i < 2 * N_DIM + 1; i++) F[i] = result.v[i];
-    return comm::allreduce(F, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(F, comm::Op::SUM) : F;
 }
 
 void Solver::write_forces() {
@@ -2730,7 +2753,7 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
         }, sum);
         total[i_var] = sum;
     }
-    return comm::allreduce(total, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(total, comm::Op::SUM) : total;
 }
 
 /**
@@ -2824,7 +2847,7 @@ std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
     Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);
     std::array<rtype, N_FLOW_STATISTICS> sums;
     for (size_t i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = result.v[i];
-    return comm::allreduce(sums, comm::Op::SUM);
+    return is_distributed() ? comm::allreduce(sums, comm::Op::SUM) : sums;
 }
 
 void Solver::update_vortex_fields() {

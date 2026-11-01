@@ -122,7 +122,7 @@ std::string channel(const std::string & dir) {
     std::ostringstream s;
     s << "[run]\nn_steps = 2\ncfl = 0.25\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n"
-      << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\nperiodic = [\"x\", \"z\"]\n" : "periodic = [\"x\"]\n")
+      << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"left\", \"right\"]\n")
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\np = \"1.0\"\nu = "
@@ -158,7 +158,7 @@ std::string channel(const std::string & dir) {
           << "reductions = [\"integral\"]\nreductions_file = \"" << dir << "/cut_" << format << "_reductions.csv\"\n"
           << "[[probes]]\nname = \"surface_" << format << "\"\nformat = \"" << format << "\"\nfile = \"" << dir
           << "/surface" << suffix << "\"\n"
-          << (N_DIM == 3 ? "type = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [8, 16]\n"
+          << (N_DIM == 3 ? "region = {type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}\nn_points = [8, 16]\n"
                          : "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n")
           << "variables = [\"MASS_FLUX\"]\nreductions = [\"integral\"]\nreductions_file = \"" << dir << "/surface_"
           << format << "_reductions.csv\"\n";
@@ -193,7 +193,7 @@ std::string channel(const std::string & dir) {
           << "type = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
           << "\nvariables = [\"MASS_FLUX\"]\n"
           << "[[probes]]\nname = \"surface_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/surface_probe.vtkhdf\"\n"
-          << (N_DIM == 3 ? "type = \"sphere\"\ncenter = [0.5, 0.5, 0.5]\nradius = 0.2\nn_points = [8, 16]\n"
+          << (N_DIM == 3 ? "region = {type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}\nn_points = [8, 16]\n"
                          : "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n")
           << "variables = [\"MASS_FLUX\"]\n";
     }
@@ -492,7 +492,7 @@ TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
     comm::barrier();
     std::ostringstream s;
     s << "[run]\nn_steps = 1\ncfl = 0.25\n"
-      << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\nperiodic = [\"x\"]\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n[[periodic]]\nzones = [\"left\", \"right\"]\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"1.0\"\nu = [\"0.5\", \"0.0\"]\n"

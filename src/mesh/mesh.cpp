@@ -21,6 +21,9 @@
 #include <limits>
 #include <numeric>
 #include <numbers>
+#include <optional>
+#include <iomanip>
+#include <sstream>
 
 #include <Kokkos_Core.hpp>
 
@@ -67,10 +70,10 @@ void Mesh::init(const Input & input) {
     }
     if (!periodic.empty() || stretching != Stretching{}) {
         if (get_type() == MeshType::WEDGE && !periodic.empty()) {
-            throw InputError({.key = "mesh.periodic",
-                              .line = line_of(input.at("mesh"), "periodic"),
+            throw InputError({.key = "periodic",
+                              .line = line_of(input, "periodic"),
                               .message = "the wedge mesh cannot be periodic",
-                              .fix = "Remove periodic, or use type = \"cartesian\"",
+                              .fix = "Remove [[periodic]], or use type = \"cartesian\"",
                               .docs = "docs/guide/meshes.md#generated-meshes"});
         }
         if (get_type() != MeshType::CARTESIAN && get_type() != MeshType::CARTESIAN_TRI &&
@@ -91,27 +94,106 @@ void Mesh::init(const Input & input) {
     }
 }
 
+namespace {
+
+/**
+ * The pair a generated mesh's two opposite zones form, with the mesh's own
+ * translation (its length) or angle (the annulus' sweep), or nullopt.
+ */
+std::optional<Mesh::PeriodicPair> generated_pair(const Input & input, const std::string & a, const std::string & b) {
+    const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
+    if (type == "file") return std::nullopt;
+    struct Sides {
+        const char * low;
+        const char * high;
+        const char * length;  // empty: the annulus' angle
+        size_t axis;
+    };
+    std::vector<Sides> sides;
+    if (type == "annulus") {
+        sides = {{"start", "end", "", 0}};
+    } else {
+        sides = {{"left", "right", "Lx", 0}, {"bottom", "top", "Ly", 1}};
+    }
+    if constexpr (N_DIM == 3) sides.push_back({"back", "front", "Lz", 2});
+    for (const Sides & s : sides) {
+        const bool forward = a == s.low && b == s.high;
+        if (!forward && !(a == s.high && b == s.low)) continue;
+        const rtype sign = forward ? 1.0_r : -1.0_r;
+        Mesh::PeriodicPair pair{a, b};
+        if (std::string(s.length).empty()) {
+            pair.angle = sign * find_real_or(input, "mesh", "angle", dim::angle_degrees, 360.0_r) *
+                         rtype(std::numbers::pi / 180.0);
+        } else {
+            pair.translation[s.axis] = sign * find_real_or(input, "mesh", s.length, dim::length, 1.0_r);
+        }
+        return pair;
+    }
+    return std::nullopt;
+}
+
+std::string zones_text(const std::vector<std::string> & zones) { return input_detail::toml_text(zones); }
+
+/** @brief A number as TOML writes it, to the precision of rtype. */
+std::string number_text(rtype x) {
+    std::ostringstream os;
+    os << std::setprecision(std::numeric_limits<rtype>::digits10) << x;
+    std::string t = os.str();
+    if (t.find_first_of(".eEn") == std::string::npos) t += ".0";
+    return t;
+}
+
+} // namespace
+
 std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     std::vector<PeriodicPair> pairs;
-    if (input.contains("periodic")) {
-        const auto entries = find_value<std::vector<Input>>(input, "periodic");
-        for (const auto & entry : entries) {
-            const auto zones = find_value<std::vector<std::string>>(entry, "zones");
-            const bool rotation = entry.contains("angle");
-            if (zones.size() != 2 || rotation == entry.contains("translation")) {
-                throw InputError("[[periodic]] needs zones = [A, B] and either a translation or an angle.");
+    if (!input.contains("periodic")) return pairs;
+    const auto entries = find_value<std::vector<Input>>(input, "periodic");
+    for (size_t e = 0; e < entries.size(); e++) {
+        const Input & entry = entries[e];
+        const std::string key = "periodic[" + std::to_string(e) + "]";
+        const auto zones = find_value<std::vector<std::string>>(entry, "zones");
+        if (zones.size() != 2) {
+            throw InputError({.key = key + ".zones",
+                              .line = line_of(entry, "zones"),
+                              .message = "lists " + std::to_string(zones.size()) + " zones",
+                              .fix = "Name the two zones the pair joins: zones = [\"A\", \"B\"]",
+                              .docs = "docs/guide/meshes.md#periodic-boundaries"});
+        }
+        const bool rotation = entry.contains("angle");
+        const bool translation = entry.contains("translation");
+        const std::optional<PeriodicPair> generated = generated_pair(input, zones[0], zones[1]);
+        if (rotation && translation) {
+            throw InputError({.key = key,
+                              .line = line_of(entry, "angle"),
+                              .message = "sets both a translation and an angle",
+                              .fix = "Keep one: translation for a shift, angle for a rotation",
+                              .docs = "docs/guide/meshes.md#periodic-boundaries"});
+        }
+        if (!rotation && !translation) {
+            if (!generated) {
+                throw InputError({.key = key,
+                                  .line = line_of(entry, "zones"),
+                                  .message = "joins " + zones_text(zones) + " by neither a translation nor an angle",
+                                  .fix = "Set translation (zone B is zone A shifted by it) or angle (rotated by it); "
+                                         "only the opposite sides of a generated mesh need neither",
+                                  .docs = "docs/guide/meshes.md#periodic-boundaries"});
             }
-            PeriodicPair pair{zones[0], zones[1]};
-            if (!rotation) {
-                const std::vector<rtype> t = find_real_vector(entry, "translation", dim::length);
-                if (t.size() != N_DIM) {
-                    throw InputError("[[periodic]] needs zones = [A, B] and a translation with " +
-                                     std::to_string(N_DIM) + " components (or an angle).");
-                }
-                FOR_I_DIM pair.translation[i] = t[i];
-                pairs.push_back(pair);
-                continue;
+            pairs.push_back(*generated);
+            continue;
+        }
+        PeriodicPair pair{zones[0], zones[1]};
+        if (translation) {
+            const std::vector<rtype> t = find_real_vector(entry, "translation", dim::length);
+            if (t.size() != N_DIM) {
+                throw InputError({.key = key + ".translation",
+                                  .line = line_of(entry, "translation"),
+                                  .message = "has " + std::to_string(t.size()) + " components",
+                                  .fix = "Give " + std::to_string(N_DIM) + " components, one per direction",
+                                  .docs = "docs/guide/meshes.md#periodic-boundaries"});
             }
+            FOR_I_DIM pair.translation[i] = t[i];
+        } else {
             pair.angle = find_real_or(entry, "angle", dim::angle_degrees, 0.0_r) * rtype(std::numbers::pi / 180.0);
             if (pair.angle == 0.0_r) throw InputError("[[periodic]] angle must be nonzero.");
             if (entry.contains("center")) {
@@ -130,58 +212,39 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
                     for (size_t i = 0; i < 3; i++) pair.axis[i] = a[i];
                 }
             }
-            pairs.push_back(pair);
         }
-    }
-    if (!input.contains("mesh") || !input.at("mesh").contains("periodic")) return pairs;
-    const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
-    if (type == "file") {
-        throw InputError("[mesh] periodic applies to generated meshes; pair the zones of a mesh file with "
-                         "[[periodic]].");
-    }
-    if (type == "annulus") {
-        // theta: the sector's start and end; z (3D): back and front
-        for (const std::string & dir : find_value<std::vector<std::string>>(input, "mesh", "periodic")) {
-            PeriodicPair pair;
-            if (dir == "theta") {
-                pair = PeriodicPair{"start", "end"};
-                pair.angle = find_real_or(input, "mesh", "angle", dim::angle_degrees, 360.0_r) *
-                             rtype(std::numbers::pi / 180.0);
-            } else if (dir == "z" && N_DIM == 3) {
-                pair = PeriodicPair{"back", "front"};
-                pair.translation[N_DIM - 1] = find_real_or(input, "mesh", "Lz", dim::length, 1.0_r);
+        if (generated) {
+            // Checked against the mesh, then taken from it exactly, so that it
+            // runs as if it were left out
+            const bool rotates = generated->angle != 0.0_r;
+            rtype error = 0.0_r, size = std::abs(generated->angle);
+            if (!rotates) {
+                size = 0.0_r;
+                FOR_I_DIM {
+                    error = std::max(error, std::abs(pair.translation[i] - generated->translation[i]));
+                    size = std::max(size, std::abs(generated->translation[i]));
+                }
             } else {
-                throw InputError("[mesh] periodic: the annulus is periodic in theta" +
-                                 std::string(N_DIM == 3 ? " or z." : "."));
+                error = std::abs(pair.angle - generated->angle);
             }
-            for (const auto & other : pairs) {
-                if (other.zone_a == pair.zone_a) throw InputError("[mesh] periodic lists " + dir + " twice.");
+            if (rotates != rotation || error > periodic_tolerance(size)) {
+                std::string value = "translation = [";
+                FOR_I_DIM value += (i ? ", " : "") + number_text(generated->translation[i]);
+                value += "]";
+                if (rotates) {
+                    value = "angle = " + number_text((generated->angle > 0.0_r ? 1.0_r : -1.0_r) *
+                                                     find_real_or(input, "mesh", "angle", dim::angle_degrees, 360.0_r));
+                }
+                throw InputError({.key = key + (rotation ? ".angle" : ".translation"),
+                                  .line = line_of(entry, rotation ? "angle" : "translation"),
+                                  .message = "does not match the generated mesh, whose zones " + zones_text(zones) +
+                                             " are joined by " + value,
+                                  .fix = "Set " + value + ", or leave it out: the mesh gives it",
+                                  .docs = "docs/guide/meshes.md#periodic-boundaries"});
             }
-            pairs.push_back(pair);
+            pair.translation = generated->translation;
+            pair.angle = generated->angle;
         }
-        return pairs;
-    }
-    const rtype L[3] = {find_real_or(input, "mesh", "Lx", dim::length, 1.0),
-                        find_real_or(input, "mesh", "Ly", dim::length, 1.0),
-                        find_real_or(input, "mesh", "Lz", dim::length, 1.0)};
-    const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
-    for (const std::string & dir : find_value<std::vector<std::string>>(input, "mesh", "periodic")) {
-        const int d = (dir == "x") ? 0 : (dir == "y") ? 1 : (dir == "z") ? 2 : -1;
-        if (N_DIM == 2 && d == 2) {
-            throw InputError({.key = "mesh.periodic",
-                              .line = line_of(input.at("mesh"), "periodic"),
-                              .message = "\"z\" is a direction of 3D meshes, but this is the 2D solver",
-                              .fix = "Remove \"z\", or run the 3D solver (built with -DMallard_DIM=3)"});
-        }
-        if (d < 0 || d >= N_DIM) {
-            throw not_accepted(input.at("mesh"), "mesh.periodic", dir,
-                               N_DIM == 3 ? std::vector<std::string>{"x", "y", "z"} : std::vector<std::string>{"x", "y"});
-        }
-        for (const auto & pair : pairs) {
-            if (pair.zone_a == zones[d][0]) throw std::runtime_error("[mesh] periodic lists " + dir + " twice.");
-        }
-        PeriodicPair pair{zones[d][0], zones[d][1]};
-        pair.translation[static_cast<size_t>(d)] = L[static_cast<size_t>(d)];
         pairs.push_back(pair);
     }
     return pairs;

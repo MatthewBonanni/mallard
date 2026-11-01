@@ -12,7 +12,7 @@ You will use: `mallard check` to size a run, the job scripts of
 [`tools/jobs/`](../../tools/jobs), the rank report and automatic GPU and core
 binding, `mallard ctl` (`status`, `checkpoint`, `stop`), stopping a run as a
 scheduler does and resuming it from its newest restart file, the progress rows
-of the log, the run health and the run log `mallard.jsonl`. Files:
+of the log, the run health and the run record `mallard.jsonl`. Files:
 [`tutorials/cluster/`](../../tutorials/cluster). Setup: [Tutorials](index.md),
 with an MPI build, and the `mallard` of that build on the `PATH`:
 
@@ -200,7 +200,7 @@ What to look for in a long job:
 - **`troubled`:** with TENO, the share of cells at shocks; it grows here as
   the reflected shocks lengthen.
 
-The same rows go, as JSON, to `mallard.jsonl` ([the run log](../guide/output.md#the-run-log)),
+The same rows go, as JSON, to `mallard.jsonl` ([the run record](../guide/output.md#run-record-mallardjsonl)),
 for scripts and dashboards. While the run goes, `mallard ctl` asks it directly,
 through the socket `mallard.sock` in the case directory:
 

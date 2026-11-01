@@ -305,13 +305,13 @@ TEST(IO3DTest, HigherOrderCellsKeepTheirCornersAndUnsupportedOrdersAreRejected) 
 
 TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
     const std::string dir = (scratch_dir() / "mallard_vtu3d").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
     DataWriter writer;
     writer.init(parse_toml("prefix = \"" + dir + "/flow\"\nformat = \"vtu\"\ninterval = 1\n"
                            "variables = [\"RHO\", \"U\"]\n"), fields.data, mesh);
     writer.write(0, 0.0);
+    comm::barrier();  // Rank 0 writes the files
 
     auto arrays = read_appended_arrays(dir + "/flow_000000.vtu");
     const auto points = as_vector<rtype>(arrays["Points"]);
@@ -369,14 +369,12 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         for (uint32_t k = 0; k < 3; k++) EXPECT_EQ(u[3 * c + k], fields.values(c, 1 + k));
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
 #ifdef Mallard_HAS_HDF5
     const std::string dir = (scratch_dir() / "mallard_h5_3d").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
     for (const char * format : {"vtu", "hdf5"}) {
@@ -386,6 +384,7 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
                     fields.data, mesh);
         writer.write(0, 0.0);
     }
+    comm::barrier();  // Rank 0 writes the files
     auto vtu = read_appended_arrays(dir + "/vtu_000000.vtu");
     const auto mesh_h5 = h5_datasets(dir + "/hdf5_mesh.h5");
     const auto fields_h5 = h5_datasets(dir + "/hdf5_000000.h5");
@@ -416,7 +415,6 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     EXPECT_EQ(coords, points);
     EXPECT_EQ(fields_h5.at("fields/U"), std::vector<char>(vtu["U"].begin(), vtu["U"].end()));
     EXPECT_EQ(fields_h5.at("fields/RHO"), std::vector<char>(vtu["RHO"].begin(), vtu["RHO"].end()));
-    std::filesystem::remove_all(dir);
 #endif
 }
 
@@ -426,7 +424,6 @@ TEST(IO3DTest, VTKHDFHoldsTheVTUCells) {
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
 #ifdef Mallard_HAS_HDF5
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_3d").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
     for (const char * format : {"vtu", "vtkhdf"}) {
@@ -436,6 +433,7 @@ TEST(IO3DTest, VTKHDFHoldsTheVTUCells) {
                     fields.data, mesh);
         writer.write(0, 0.0);
     }
+    comm::barrier();  // Rank 0 writes the files
     auto vtu = read_appended_arrays(dir + "/vtu_000000.vtu");
     const std::string file = dir + "/vtkhdf_000000.vtkhdf";
     const auto stored = h5_all_datasets(file);
@@ -452,7 +450,6 @@ TEST(IO3DTest, VTKHDFHoldsTheVTUCells) {
     std::set<uint8_t> kinds;
     for (uint8_t t : as_vector<uint8_t>(vtu["types"])) kinds.insert(t);
     EXPECT_EQ(kinds, (std::set<uint8_t>{10, 12, 13, 14}));
-    std::filesystem::remove_all(dir);
 #endif
 }
 
@@ -460,13 +457,14 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
     // Cells of a spherical shell at its walls are quadratic: the middles of
     // their wall edges and faces lie on the spheres; the middle layer stays linear
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
 #ifdef Mallard_HAS_HDF5
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_shell").string();
-    std::filesystem::remove_all(dir);
     const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
     for (bool prisms : {false, true}) {
         const std::string file = write_temp("vtkhdf_shell.msh", shell_gmsh(3, 3, prisms, false));
         Solver solver;
+        solver.set_distributed(false);
         solver.init(parse_toml(
             "[run]\nn_steps = 1\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
             "[[mesh.curved]]\nzone = \"inner\"\ntype = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
@@ -539,19 +537,18 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
         EXPECT_GT(n_linear, 0u);
         EXPECT_GT(n_on_walls, n_quadratic);
     }
-    std::filesystem::remove_all(dir);
 #endif
 }
 
 TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
     const std::string dir = (scratch_dir() / "mallard_vtu3d_faces").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO"});
     DataWriter writer;
     writer.init(parse_toml("prefix = \"" + dir + "/sides\"\nformat = \"vtu\"\ninterval = 1\n"
                            "geometry = \"sides\"\nvariables = [\"RHO\"]\n"), fields.data, mesh);
     writer.write(0, 0.0);
+    comm::barrier();  // Rank 0 writes the files
 
     std::ifstream in(dir + "/sides_000000.vtu");
     std::stringstream buffer;
@@ -574,18 +571,17 @@ TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
     double x, y, z, z_max = 0.0;
     while (coords >> x >> y >> z) z_max = std::max(z_max, z);
     EXPECT_EQ(z_max, 1.0);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IO3DTest, RestartRoundTripCarriesAllConservatives) {
     const std::string dir = (scratch_dir() / "mallard_restart3d").string();
-    std::filesystem::remove_all(dir);
     auto mesh = mixed_mesh();
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     CellFields fields(mesh->n_cells, names);
     DataWriter writer;
     writer.init(parse_toml("prefix = \"" + dir + "/r\"\nformat = \"restart\"\ninterval = 7\n"), fields.data, mesh);
     writer.write(7, 0.25);
+    comm::barrier();  // Rank 0 writes the files
 
     RestartData restart = read_restart(dir + "/r_000007.restart");
     EXPECT_EQ(restart.step, 7u);
@@ -604,11 +600,11 @@ TEST(IO3DTest, RestartRoundTripCarriesAllConservatives) {
     writer_2d.init(parse_toml("prefix = \"" + dir + "/r2d\"\nformat = \"restart\"\ninterval = 7\n"), fields_2d.data,
                    mesh, names_2d);
     writer_2d.write(7, 0.25);
+    comm::barrier();  // Rank 0 writes the files
     try {
         read_restart(dir + "/r2d_000007.restart");
         ADD_FAILURE() << "a 2D restart file was accepted";
     } catch (const std::runtime_error & e) {
         EXPECT_NE(std::string(e.what()).find("Mallard_DIM"), std::string::npos) << e.what();
     }
-    std::filesystem::remove_all(dir);
 }
