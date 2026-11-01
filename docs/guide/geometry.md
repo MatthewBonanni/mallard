@@ -14,6 +14,7 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength` | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
+| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file of them | [Checking regions](#checking-regions) |
 | `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
 | `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
@@ -289,6 +290,13 @@ through them:
 
 `flip = true` on any surface or curve reverses it. Points have no orientation.
 
+As `mallard check --view` writes them: a circle and the boundary of a
+rectangle minus a disk (the disk's part facing into the disk), and the part of
+a boundary zone in a box with a flipped ellipse, on a mesh with a hole:
+
+![Normals of an exact circle, of the extracted boundary of a rectangle minus a disk, of a clipped boundary zone and of a flipped ellipse](../images/guide/region-orientation-light.svg#gh-light-mode-only)
+![Normals of an exact circle, of the extracted boundary of a rectangle minus a disk, of a clipped boundary zone and of a flipped ellipse](../images/guide/region-orientation-dark.svg#gh-dark-mode-only)
+
 ### Surfaces and curves on a mesh
 
 ```toml
@@ -328,6 +336,29 @@ subdivided. Extracted elements and mesh faces are cut linearly between their
 vertices: exactly along planes and mesh-aligned boxes. Only the parts inside the
 domain count. In axisymmetric runs measures are those of the r-z plane, not
 of the revolved surface.
+
+### Checking regions
+
+`mallard check` lists every region a case uses, and the mesh's own, with its
+dimension, measure and cells; surfaces and curves say whether they are exact
+or extracted. A region that covers no cell is an error naming it with its
+extent and the domain's:
+
+```
+  Regions            domain: area 1, 800 cells (of the mesh)
+                     left: curve, length 1, 20 cells (of the mesh)
+                     ring: area 0.0339292, 58 cells
+                     probes[name = "around"].region: curve, length 0.942478, 30 cells, exact
+```
+
+`mallard check input.toml --view view` also writes `view/case.vtkhdf`, the
+case view: one block per region (filled regions as their cells with
+`fraction`; surfaces, curves and points with `normal` or, for 3D curves,
+`tangent`, and their `area`, `length` or `count`) and per boundary zone. Open
+it in ParaView (5.12 or later) and pick blocks in the Multiblock Inspector;
+builds without HDF5 write `view/case.vtm`. More of the case (conditions,
+probes, injectors) is to join it
+([#546](https://github.com/MatthewBonanni/mallard/issues/546)).
 
 ### Transforms
 
