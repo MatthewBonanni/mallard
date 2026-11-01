@@ -208,15 +208,16 @@ struct BoundaryCondition {
         constexpr uint8_t E = N_DIM + 1;
         for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
         const rtype u_n = dot<N_DIM>(W_i + 1, n);
-        switch (dispatch) {
-            case Dispatch::TRANSMISSIVE:
+        switch (type) {
+            case BoundaryType::OUTLET_EXTRAPOLATION:
+            case BoundaryType::PARTITION:
                 break;
-            case Dispatch::WALL_ADIABATIC:
-            case Dispatch::WALL_ISOTHERMAL:
-            case Dispatch::WALL_HEAT_FLUX:
+            case BoundaryType::WALL_ADIABATIC:
+            case BoundaryType::WALL_ISOTHERMAL:
+            case BoundaryType::WALL_HEAT_FLUX:
                 if (viscous && !modeled) {
                     FOR_I_DIM W_g[1 + i] = 2.0_r * data[1 + i] - W_i[1 + i];
-                    if (dispatch == Dispatch::WALL_ISOTHERMAL && wall_temperature) {
+                    if (type == BoundaryType::WALL_ISOTHERMAL && wall_temperature) {
                         const rtype T_i = W_i[E] / (W_i[0] * R);
                         const rtype T_g = Kokkos::fmax(2.0_r * data[0] - T_i, 0.1_r * data[0]);
                         W_g[0] = W_i[E] / (R * T_g);
@@ -224,24 +225,25 @@ struct BoundaryCondition {
                     break;
                 }
                 [[fallthrough]];
-            case Dispatch::SYMMETRY:
+            case BoundaryType::SYMMETRY:
                 FOR_I_DIM W_g[1 + i] = W_i[1 + i] - 2.0_r * u_n * n[i];
                 break;
-            case Dispatch::STATE:
+            case BoundaryType::INLET_STATE:
+                if (is_characteristic()) break;
                 for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
                 break;
-            case Dispatch::STAGNATION:
+            case BoundaryType::INLET_STAGNATION:
                 inflow::perfect_stagnation_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1,
                                                  W_i, n, W_g);
                 break;
-            case Dispatch::MASS_FLOW:
+            case BoundaryType::INLET_MASS_FLOW:
                 inflow::mass_flow_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1, W_i, n,
                                         W_g);
                 break;
-            case Dispatch::DIRICHLET:
+            case BoundaryType::DIRICHLET:
                 // Handled per face by BoundaryData
                 break;
-            case Dispatch::FARFIELD: {
+            case BoundaryType::FARFIELD: {
                 // Characteristic far field: the outgoing Riemann invariant comes from
                 // the interior, the incoming one from the free stream, and entropy and
                 // tangential velocity from the upwind side
@@ -266,23 +268,20 @@ struct BoundaryCondition {
                 W_g[E] = W_g[0] * a_b * a_b / gamma;
                 break;
             }
-            case Dispatch::PRESSURE: {
+            case BoundaryType::OUTLET_PRESSURE: {
+                if (is_characteristic()) break;
                 const rtype a = Kokkos::sqrt(gamma * W_i[E] / W_i[0]);
-                if (u_n < a) {
-                    // Subsonic: impose pressure, keep temperature
-                    W_g[0] = W_i[0] * data[E] / W_i[E];
-                    W_g[E] = data[E];
-                }
-                break;
-            }
-            case Dispatch::PRESSURE_AVERAGE: {
-                const rtype a = Kokkos::sqrt(gamma * W_i[E] / W_i[0]);
-                if (u_n < a) {
+                if (u_n >= a) break;
+                if (has(AVERAGE)) {
                     // Subsonic: shift the local pressure so the boundary average
                     // matches the target, keeping temperature
                     const rtype p_g = Kokkos::fmax(W_i[E] + data[0], 1e-3_r * W_i[E]);
                     W_g[0] = W_i[0] * p_g / W_i[E];
                     W_g[E] = p_g;
+                } else {
+                    // Subsonic: impose pressure, keep temperature
+                    W_g[0] = W_i[0] * data[E] / W_i[E];
+                    W_g[E] = data[E];
                 }
                 break;
             }
