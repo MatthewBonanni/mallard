@@ -23,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <tuple>
@@ -236,13 +237,21 @@ void Solver::write_provenance() {
     for (const auto & phase : health::spread(names, seconds, ones)) {
         setup_phases.raw(phase.name, json::Object().add("max", phase.max).add("mean", phase.all).str());
     }
-    run_log::write(json::Object()
-                       .add("type", "start")
-                       .add("schema", run_log::SCHEMA)
-                       .add("version", run_log::VERSION)
-                       .raw("provenance", provenance::json())
-                       .raw("placement", provenance::placement())
-                       .raw("setup_phases", setup_phases.str()));
+    json::Object start;
+    start.add("type", "start")
+        .add("schema", run_log::SCHEMA)
+        .add("version", run_log::VERSION)
+        .raw("provenance", provenance::json())
+        .raw("placement", provenance::placement())
+        .raw("setup_phases", setup_phases.str());
+    if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart") {
+        json::Object restart;
+        restart.add("file", find_value<std::string>(input, "initialize", "file")).add("step", step).add("t", double(t));
+        const std::optional<uint64_t> recorded = run_log::last_step();
+        if (recorded && *recorded > step) restart.add("rewound_from", *recorded);
+        start.raw("restart", restart.str());
+    }
+    run_log::write(start);
 }
 
 namespace {
