@@ -128,8 +128,8 @@ std::string run_input(const std::string & file, const Scheme & scheme, const std
         s << "\"";
     }
     s << "]\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = " << moved({0.3, 0.0, 0.0}) << "\np = 1.0\nT = 1.0\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"p_out\"\np = 1.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = " << moved({0.3, 0.0, 0.0}) << "\np = 1.0\nT = 1.0\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 1.0\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
       << (scheme.viscous ? "u = " + moved({0.1, 0.0, 0.05}) + "\n" : "")
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n";

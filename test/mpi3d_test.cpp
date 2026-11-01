@@ -50,8 +50,8 @@ std::string blast_input(const std::string & mesh, const std::string & recon) {
 }
 
 std::string box_input(const std::string & mesh, const std::string & recon, const std::string & physics) {
-    const char * types[6] = {"type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
-                             "type = \"extrapolation\"\n", "type = \"symmetry\"\n", "type = \"extrapolation\"\n"};
+    const char * types[6] = {"type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n", "type = \"wall_adiabatic\"\n",
+                             "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n", "type = \"outlet_extrapolation\"\n"};
     std::ostringstream s;
     s << "[run]\nn_steps = 8\ncfl = 0.25\n"
       << "[mesh]\ntype = \"" << mesh << "\"\nNx = 6\nNy = 4\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n"
@@ -191,10 +191,10 @@ TEST(MPI3DTest, DynamicFlameEfficiencyOnTetrahedraMatchesSerial) {
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
-    input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n");
-    const std::string left = "name = \"left\"\ntype = \"extrapolation\"\n";
+    input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n");
+    const std::string left = "name = \"left\"\ntype = \"outlet_extrapolation\"\n";
     input.replace(input.find(left), left.size(),
-                  "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [0.3, 0.0, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n");
+                  "name = \"left\"\ntype = \"inlet_state\"\nu = [0.3, 0.0, 0.0]\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n");
     expect_matches_serial(input);
 }
 
@@ -203,10 +203,10 @@ TEST(MPI3DTest, SyntheticTurbulenceInletMatchesSerial) {
     // and its zero-net-flux correction sums over the whole inlet in a fixed order
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
-    input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n");
-    const std::string left = "name = \"left\"\ntype = \"extrapolation\"\n";
+    input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n");
+    const std::string left = "name = \"left\"\ntype = \"outlet_extrapolation\"\n";
     input.replace(input.find(left), left.size(),
-                  "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [\"0.3 + 0.1 * y\", 0.0, 0.0]\np = 1.0\nT = 1.0\nL = 1.0\n"
+                  "name = \"left\"\ntype = \"inlet_state\"\nu = [\"0.3 + 0.1 * y\", 0.0, 0.0]\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n"
                   "[boundaries.turbulence]\nreynolds_stress = [0.004, 0.002, 0.002, -0.001, 0.0, 0.0]\n"
                   "length_scale = [0.3, 0.15, 0.1]\n");
     expect_matches_serial(input);

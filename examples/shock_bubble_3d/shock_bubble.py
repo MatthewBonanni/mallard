@@ -14,7 +14,7 @@ at rest at T0, p0, with a tanh profile DELTA_CELLS cells thick, and a shock
 of Mach MS (Rankine-Hugoniot of the thermally perfect air) GAP diameters
 ahead of it moving to +x, with the post-shock air behind it; cell averages
 over 2 x 2 x 2 points. It prints the post-shock state, which the input's
-`upt` inflow on the left must match, and writes the geometry to bubble.json
+`inlet_state` inflow on the left must match, and writes the geometry to bubble.json
 next to INPUT for the other commands.
 
 `frame` reduces a restart file to what the renders need: the He mass
@@ -142,7 +142,7 @@ def init(case, out, d, xb, gap, delta_cells, ms, air, T0, p0):
         json.dump({"xb": xb, "d": d, "xs": xs, "w": w, "ms": ms, "u_p": up, "p2": p2, "T2": T2, "rho2": r2,
                    "T0": T0, "p0": p0, "air_in_bubble": air, "delta": delta}, f, indent=1)
     print(f"wrote {out}: {nx} x {ny} x {nz} cells; shock at x = {xs:.6g} (W = {w:.2f} m/s); behind it "
-          f"u = {up:.4f} m/s, p = {p2:.2f} Pa, T = {T2:.4f} K (the left boundary's upt state)")
+          f"u = {up:.4f} m/s, p = {p2:.2f} Pa, T = {T2:.4f} K (the left boundary's inlet_state)")
 
 
 def fields(case, restart):
@@ -184,7 +184,7 @@ def frame(case, restart, out):
     j0 = 3  # skip the axis
     i, j = np.unravel_index(np.argmax(plane_w[:, j0:]), plane_w[:, j0:].shape)
     _, d, _, _ = geometry(case)
-    u_ref = max(abs(float(b["u"][0])) for b in case.toml["boundaries"] if b.get("type") == "upt")
+    u_ref = max(abs(float(b["u"][0])) for b in case.toml["boundaries"] if b.get("type") == "inlet_state")
     rho_ref = float(rho[-1, -1, -1])
     np.savez(out + ".tmp.npz", t=h["t"], step=h["step"], dx=dx, lo=np.array(lo), d=d, u_ref=u_ref, rho_ref=rho_ref,
              y_he=y_he[box].astype(np.float16), vort=(w[box] * d / u_ref).astype(np.float16),

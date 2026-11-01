@@ -37,7 +37,7 @@ T = 0.7142857142857143
 
 [[boundaries]]
 name = "inflow"
-type = "upt"
+type = "inlet_state"
 u = [3.0, 0.0, 0.0]
 p = 1.0
 T = 0.7142857142857143
@@ -51,7 +51,7 @@ T = 0.7142857142857143
 
 [[boundaries]]
 name = "outflow"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "sphere"

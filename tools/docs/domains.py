@@ -22,8 +22,8 @@ ROOT = Path(__file__).resolve().parents[2]
 KIND = {
     "wall_adiabatic": "wall", "wall_isothermal": "wall", "wall_heat_flux": "wall",
     "symmetry": "symmetry",
-    "upt": "inflow", "dirichlet": "inflow", "nscbc_inlet": "inflow",
-    "p_out": "outflow", "p_out_average": "outflow", "nscbc_outlet": "outflow", "extrapolation": "outflow",
+    "inlet_state": "inflow", "inlet_stagnation": "inflow", "inlet_mass_flow": "inflow", "dirichlet": "inflow",
+    "outlet_pressure": "outflow", "outlet_extrapolation": "outflow",
     "farfield": "farfield",
     "periodic": "periodic",
 }
@@ -175,6 +175,7 @@ def box_3d(name, example, file="input.toml", grid=(16, 12), sponge_from=None, no
 
     types = {e[0]: e[1] for e in entries(case)}
     turbulent = {b["name"] for b in case.get("boundaries", []) if "turbulence" in b}
+    nscbc = {b["name"] for b in case.get("boundaries", []) if "nscbc" in b}
     periodic_dirs = []
     for pair in case.get("periodic", []):
         for z in pair["zones"]:
@@ -238,7 +239,8 @@ def box_3d(name, example, file="input.toml", grid=(16, 12), sponge_from=None, no
             if zone == "front":
                 c = proj(0.75 * X, Y, Z)
             ha = "right" if out[0] < 0 else "left" if out[0] > 0 else "center"
-            text = f"{zone}\n{types[zone]}" + ("\n+ turbulence" if zone in turbulent else "")
+            text = f"{zone}\n{types[zone]}" + ("\n+ nscbc" if zone in nscbc else "") + \
+                ("\n+ turbulence" if zone in turbulent else "")
             figstyle.label(ax, c[0] + out[0], c[1] + out[1], text, P, size=11, ha=ha, linespacing=1.15)
         for t in notes:
             figstyle.label(ax, *t[0], t[1], P, size=11, color=P["muted"])

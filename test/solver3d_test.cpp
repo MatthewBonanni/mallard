@@ -40,9 +40,9 @@ struct Case3D {
     std::string recon = "FO";
     std::string recon_options;
     std::string riemann = "HLLC";
-    std::string bc[6] = {"type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
-                         "type = \"extrapolation\"\n", "type = \"extrapolation\"\n",
-                         "type = \"extrapolation\"\n", "type = \"extrapolation\"\n"};
+    std::string bc[6] = {"type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n",
+                         "type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n",
+                         "type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n"};
     std::string init;
     std::string run = "n_steps = 10\ncfl = 0.25\n";
     std::string physics = "type = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
@@ -176,8 +176,8 @@ double sod_error(const std::string & mesh, const std::string & recon, uint32_t n
         c.L[d] = (d == axis) ? 1.0 : 2.0 / n;
     }
     c.set_all_bcs("type = \"symmetry\"\n");
-    c.bc[2 * axis] = "type = \"extrapolation\"\n";
-    c.bc[2 * axis + 1] = "type = \"extrapolation\"\n";
+    c.bc[2 * axis] = "type = \"outlet_extrapolation\"\n";
+    c.bc[2 * axis + 1] = "type = \"outlet_extrapolation\"\n";
     c.run = "t_stop = 0.2\ncfl = 0.25\n";
     const std::string s = std::string(1, "xyz"[axis]);
     c.init = "type = \"analytical\"\nrho = \"" + s + " < 0.5 ? 1.0 : 0.125\"\n"

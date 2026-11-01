@@ -224,14 +224,14 @@ def characteristics(P):
                 arrow(ax, (x0, tb - dt), (xb, tb), P, color=color, lw=2)
                 label(ax, x0, tb - dt - 0.04, name, P, size=11.5, va="top", color=color)
         if side == "outlet":
-            ax.set_title("nscbc_outlet", fontsize=12, family="monospace")
+            ax.set_title("outlet_pressure + nscbc", fontsize=12, family="monospace")
             txt = ("outgoing $w^+ = p + Z u_n$ from the interior\n"
                    "incoming $w^- = p_f - Z u_{n,f}$:\n"
                    r"$dw^-/dt = -K(p_f - p_t) - \beta\,\mathcal{T}^-$")
             label(ax, 0.42, -0.12, txt, P, size=11, va="top")
             ax.set_xlim(-0.1, 1.6)
         else:
-            ax.set_title("nscbc_inlet", fontsize=12, family="monospace")
+            ax.set_title("inlet_state + nscbc", fontsize=12, family="monospace")
             txt = ("outgoing $w^+ = p + Z u_n$ from the interior\n"
                    "incoming $w^-$ relaxed toward $u_{n,t}$;\n"
                    "$T$ and $\\mathbf{u}_t$ toward their targets")

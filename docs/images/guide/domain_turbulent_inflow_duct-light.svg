@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="429.84pt" height="167.442171pt" viewBox="0 0 429.84 167.442171" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="439.48749pt" height="167.442171pt" viewBox="0 0 439.48749 167.442171" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -21,8 +21,8 @@
  <g id="figure_1">
   <g id="patch_1">
    <path d="M 0 167.442171 
-L 429.84 167.442171 
-L 429.84 0 
+L 439.48749 167.442171 
+L 439.48749 0 
 L 0 0 
 L 0 167.442171 
 z
@@ -256,13 +256,15 @@ z
 " clip-path="url(#p8d5b7c0b8f)" style="fill: #d9730d; opacity: 0.28; stroke: #d9730d; stroke-width: 2.4; stroke-linejoin: miter"/>
    </g>
    <g id="text_1">
-    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(63.890301 54.504716)">left</text>
-    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(23.534051 65.513525)">nscbc_inlet</text>
-    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(17.717801 77.735771)">+ turbulence</text>
+    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(63.890301 48.686211)">left</text>
+    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(28.422176 59.682129)">inlet_state</text>
+    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(40.348583 71.909531)">+ nscbc</text>
+    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(17.717801 83.554277)">+ turbulence</text>
    </g>
    <g id="text_2">
-    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(360.78999 59.165644)">right</text>
-    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(360.78999 71.332031)">nscbc_outlet</text>
+    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(360.78999 53.347138)">right</text>
+    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(360.78999 65.041728)">outlet_pressure</text>
+    <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #1f1a1d" transform="translate(360.78999 77.728037)">+ nscbc</text>
    </g>
    <g id="text_3">
     <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #7b3f6e" x="211.748913" y="31.631569" transform="rotate(-0 211.748913 31.631569)">periodic in y and z</text>

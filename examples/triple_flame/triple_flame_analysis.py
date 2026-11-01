@@ -68,7 +68,7 @@ def stream_n2(spec, mechanism, phase):
 
 def run_info(run_dir, mechanism, phase):
     head = open(os.path.join(run_dir, "input.toml")).read()
-    u_in = float(re.search(r'name = "left"\ntype = "upt"\nu = \[([^,]+),', head).group(1))
+    u_in = float(re.search(r'name = "left"\ntype = "inlet_state"\nu = \[([^,]+),', head).group(1))
     d = np.loadtxt(os.path.join(run_dir, "planar_full.csv"), delimiter=",", skiprows=1)
     x, T = d[:, 0], d[:, 2]
     delta = (T[-1] - T[0]) / np.gradient(T, x).max()

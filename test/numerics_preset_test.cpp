@@ -149,6 +149,8 @@ const std::string H2_AIR_INIT = "type = \"constant\"\np = 101325.0\nT = 300.0\nu
 
 /** @brief Every solver example, with the preset closest to its numerics and purpose. */
 const std::vector<ExampleCase> EXAMPLES = {
+    {"average_outlet/input.toml", "robust", 2, "", {}, ""},
+    {"average_outlet/local.toml", "robust", 2, "", {}, ""},
     {"autoignition_2d/input.toml", "reacting", 2,
      "type = \"constant\"\np = 4.154e6\nT = 1070.0\nu = [0.0, 0.0]\nX = { H2 = 0.04, O2 = 0.2, N2 = 0.76 }\n", {}, ""},
     {"cylinder/input.toml", "accurate", 2, "",
@@ -166,6 +168,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"heated_duct/closed.toml", "robust", 2, "", {}, ""},
     {"heated_duct/closed_upt.toml", "robust", 2, "", {}, ""},
     {"heated_duct/input.toml", "robust", 2, "", {}, ""},
+    {"heated_wall/input.toml", "robust", 2, "", {}, ""},
     {"mallard/input.toml", "robust", 2, "",
      {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "top"}, {"cylinder", "duck"}}, ""},
     {"noh_axisymmetric/input.toml", "robust", 2, "", {}, ""},
@@ -333,3 +336,54 @@ TEST_P(ExampleUnderPreset, DeprecatedMeshPeriodicRunsBitwiseAsItsZonePairs) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Examples, ExampleUnderPreset, ::testing::ValuesIn(examples_of_this_build()), param_name);
+
+namespace {
+
+/** @brief The input with its boundaries in the types of 0.8 (before #564): the inverse of the upgrade rules. */
+Input with_old_boundary_types(Input input) {
+    if (!input.contains("boundaries")) return input;
+    for (Input & entry : input.as_table().entries().at("boundaries").as_array()) {
+        auto & keys = entry.as_table().entries();
+        std::string type = keys.at("type").as_string();
+        if (keys.contains("nscbc")) {
+            for (auto & [key, value] : keys.at("nscbc").as_table().entries()) keys[key] = value;
+            keys.erase("nscbc");
+            type = type == "inlet_state" ? "nscbc_inlet" : "nscbc_outlet";
+        } else if (keys.contains("average")) {
+            if (keys.at("average").as_boolean()) type = "p_out_average";
+            keys.erase("average");
+        } else {
+            static const std::map<std::string, std::string> OLD = {
+                {"inlet_state", "upt"},     {"inlet_stagnation", "stagnation_inlet"},
+                {"inlet_mass_flow", "mass_flow_inlet"}, {"outlet_pressure", "p_out"},
+                {"outlet_extrapolation", "extrapolation"}};
+            if (const auto it = OLD.find(type); it != OLD.end()) type = it->second;
+        }
+        keys["type"] = Input(type);
+    }
+    return input;
+}
+
+std::vector<double> state_after(const Input & input) {
+    Solver solver;
+    solver.init(input);
+    solver.run();
+    solver.copy_device_to_host();
+    std::vector<double> U;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        for (uint8_t i = 0; i < N_CONSERVATIVE; i++) U.push_back(double(solver.h_conservatives(c, i)));
+    }
+    return U;
+}
+
+} // namespace
+
+// Every example in the boundary types of 0.8 (still read, with a warning)
+// runs bitwise as in the current ones. Fails if an old name stops mapping to
+// its new type and options, or maps to a different condition (a p_out_average
+// losing average, an nscbc_inlet's L left behind).
+TEST_P(ExampleUnderPreset, OldBoundaryTypesRunBitwiseTheSame) {
+    const Input input = example_under_preset(GetParam(), 2, N_DIM == 3 ? 8 : 16);
+    const Input old_types = with_old_boundary_types(input);
+    EXPECT_EQ(state_after(input), state_after(old_types)) << GetParam().file;
+}

@@ -1087,9 +1087,9 @@ The rig of Sjunnesson et al. at the conditions of the AIAA Model Validation
 for Propulsion workshop: a channel of height `3 D` with an equilateral
 triangle of edge `D = 40` mm, air at 288 K and `U_b = 16.6` m/s
 (`Re_D = 45,000`), span periodic over `2 D` (the workshop's choice; the rig
-is `6 D` wide), inlet `5 D` upstream of the base (`nscbc_inlet` with
+is `6 D` wide), inlet `5 D` upstream of the base (`inlet_state` with `nscbc`, with
 digital-filter turbulence, `u' = 5% U_b`, `L = 10` mm), outlet `17 D`
-downstream (`nscbc_outlet`), no-slip adiabatic walls without a wall model.
+downstream (`outlet_pressure` with `nscbc`), no-slip adiabatic walls without a wall model.
 Sigma with Scotti's width, hybrid flux, MUSCL without limiter, 2.7M
 hexahedra (`examples/volvo_bluff_body/make_volvo_mesh.py`): `Delta = 1.25` mm `= D / 32` in the
 near wake and shear layers, 0.6 mm at the separation corners. Statistics

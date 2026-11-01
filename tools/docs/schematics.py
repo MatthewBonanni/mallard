@@ -367,10 +367,10 @@ def characteristic(P):
             label(ax, 1.2 if side == "outlet" else 0.8, y + 0.2, text, P, size=12)
         if side == "outlet":
             note = "incoming acoustic wave\nrelaxes p toward the target:\n" + r"$K = \sigma\, c\,(1 - M^2) / L$"
-            ax.set_title("nscbc_outlet", fontsize=12, family="monospace")
+            ax.set_title("outlet_pressure + nscbc", fontsize=12, family="monospace")
         else:
             note = "incoming waves relax\nu (and T) toward the targets;\nturbulence enters here"
-            ax.set_title("nscbc_inlet", fontsize=12, family="monospace")
+            ax.set_title("inlet_state + nscbc", fontsize=12, family="monospace")
         label(ax, 1.0 if side == "outlet" else 1.0, -0.15, note, P, va="top", size=11, color=P["flame"])
         bare(ax)
         ax.set_xlim(-0.7 if side == "inlet" else -0.3, 2.7 if side == "outlet" else 2.3)

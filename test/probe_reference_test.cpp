@@ -60,8 +60,8 @@ std::string reference_case(const std::string & dir) {
     s << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * sin(2 * pi * x) * cos(pi * y)\"\nu = "
       << vector3("0.3 + 0.1 * cos(2 * pi * y)", "0.05 * sin(2 * pi * x)", "0.04 * cos(2 * pi * x)")
       << "\np = \"1.0 + 0.1 * cos(2 * pi * x) * sin(pi * y)\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.1\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"

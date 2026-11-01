@@ -34,7 +34,7 @@ carried across restarts.
 Write them with `variables = ["MEAN_*", "COV_*"]`, and average further over
 homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of a
 channel, giving profiles in y; its CSV also feeds
-[synthetic inflow](boundary_conditions.md#synthetic-turbulence)).
+[synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)).
 
 **Favre averages** are not computed directly. Favre means follow exactly from
 Reynolds statistics that include `RHO`: with `fields = ["RHO", "U_X", "U_Y", ...]`

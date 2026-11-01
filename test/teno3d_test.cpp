@@ -231,7 +231,7 @@ double advection_error(const std::string & mesh, const std::string & recon, uint
        << "rho = \"1.0 + 0.3 * exp(-8 * ((x - 0.9)^2 + (y - 0.95)^2 + (z - 0.97)^2))\"\n"
        << "u = [\"1.0\", \"0.5\", \"0.3\"]\np = \"1.0\"\n";
     for (const char * zone : {"left", "right", "bottom", "top", "back", "front"}) {
-        in << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"extrapolation\"\n";
+        in << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"outlet_extrapolation\"\n";
     }
     in << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
        << "[numerics.face_reconstruction]\ntype = \"" << recon << "\"\n" << (recon == "TENO" ? "order = 5\n" : "")

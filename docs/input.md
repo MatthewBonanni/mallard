@@ -547,55 +547,109 @@ and [docs/design/remap.md](design/remap.md).
 
 Every boundary face must be assigned exactly once (a fully periodic mesh has
 none, and needs no `[[boundaries]]`). Each entry has a `name`, the boundary
-zone, and a `type`, below. A zone can be split
-between several entries with `where = "<expression in x, y, z>"`, which selects
-the zone's faces whose centers satisfy the expression.
+zone, and a `type`, below. A zone can be split between several entries with
+`where = "<expression in x, y, z>"`, which selects the zone's faces whose
+centers satisfy the expression. Each type requires its keys and rejects the
+keys of other types and options it does not take, with an error naming the
+type that takes them; which options each type takes is the guide's
+[support matrix](guide/boundary_conditions.md#support-matrix). Guide:
+[boundary conditions](guide/boundary_conditions.md), one section per type.
 
 | `type` | Description | Keys |
 |---|---|---|
-| `extrapolation` | Transmissive: the exterior state is the solution translated from inside the domain | |
+| `wall_adiabatic` | Wall (no-slip for `navier_stokes`, slip for `euler`) with zero heat flux | `u` (wall velocity, optional: a vector, or a speed with `direction`), `wall_model` (optional, below) |
+| `wall_isothermal` | Wall at temperature `T` | `T`, `u` and `wall_model` (optional, as `wall_adiabatic`) |
+| `wall_heat_flux` | Wall with heat flux `q` [W/m^2] into the fluid | `q`, `u` and `wall_model` (optional, as `wall_adiabatic`) |
+| `inlet_state` | The full inflow state: exact for supersonic inflow; for subsonic inflow it also fixes `p` and reflects acoustic waves, unless `nscbc` | `u` (a vector, or a speed along `direction`, default the inward normal), `p`, `T`; `X` or `Y` for mixtures (numbers or expressions, with an optional `balance` species as in `[initialize]`); options `nscbc` (below) and, with it, `turbulence` (below) |
+| `inlet_stagnation` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `inlet_state`) |
+| `inlet_mass_flow` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)]: a number or expression, or a vector `m`, which flows along `m / |m|` with `m . n_in` at each face) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]) with an optional `profile` (expression of `x`, `y`, `z`, default uniform) shaping it along the inlet; `direction` (default the inward normal of each face; not with a `mass_flux` vector); `X` or `Y` for mixtures (as `inlet_state`) |
+| `outlet_pressure` | Outlet: imposes `p` on subsonic faces, keeping the interior temperature and velocity; supersonic faces take the interior state | `p`; options `average` (`true`: on subsonic faces, shift the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile, for mixed subsonic/supersonic outflow; `p` then may depend on `t` only; default `false`; not with mixtures) or `nscbc` (below) |
+| `outlet_extrapolation` | Transmissive: the exterior state is the solution translated from inside the domain | |
+| `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike (single gases) | `u` (a vector), `p`, `T` (free stream) |
 | `symmetry` | Slip wall / symmetry plane | |
-| `wall_adiabatic` | Wall (no-slip for `navier_stokes`, slip for `euler`) with zero heat flux | `u` (wall velocity, optional; numbers or expressions of `x`, `y`, `z`, `t`) |
-| `wall_isothermal` | Wall at temperature `T` | `T`, `u` (optional, as `wall_adiabatic`) |
-| `wall_heat_flux` | Wall with heat flux `q` into the fluid | `q`, `u` (optional, as `wall_adiabatic`) |
-| `upt` | Inflow with fixed velocity, pressure and temperature | `u`, `p`, `T` (numbers, or expressions of `x`, `y`, `z`, `t`; below) and `X` or `Y` for mixtures (numbers or expressions likewise, with an optional `balance` species as in `[initialize]`) |
-| `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike | `u`, `p`, `T` (free stream) |
-| `stagnation_inlet` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [the guide](guide/boundary_conditions.md#stagnation-inlet) and [docs/design/inlets.md](design/inlets.md) | `p0`, `T0` (numbers or expressions of `x`, `y`, `z`, `t`), `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `upt`) |
-| `mass_flow_inlet` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density. See [the guide](guide/boundary_conditions.md#mass-flow-inlet) | `T` (a number or an expression of `x`, `y`, `z`, `t`); `mass_flux` (`rho u` into the domain [kg/(m^2 s)], a number or an expression of `x`, `y`, `z`, `t`) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]) with an optional `profile` (expression of `x`, `y`, `z`, default uniform) shaping it along the inlet; `direction` (default the inward normal of each face); `X` or `Y` for mixtures (as `upt`) |
-| `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage | `rho`, `u` (one expression per component), `p` |
-| `p_out` | Outlet: imposes `p` if the outflow is subsonic | `p` |
-| `p_out_average` | Outlet for mixed subsonic/supersonic flow: on subsonic faces, shifts the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile | `p` |
-| `nscbc_outlet` | Partially non-reflecting characteristic outlet (Poinsot & Lele): outgoing waves leave, and each face's incoming acoustic wave relaxes its pressure toward `p` at the rate `K = sigma c (1 - M^2) / L`. Waves of frequency `omega` reflect by `1 / sqrt(1 + (2 omega / K)^2)` | `p`, `L` (a length of the domain), `sigma` (default 0.25; 0 is perfectly non-reflecting but lets the mean pressure drift, large values approach `p_out`), `beta` (the weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number, as Lodato et al.; 1 is Poinsot & Lele's original condition, 0 drops them. Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable) |
-| `nscbc_inlet` | Partially non-reflecting characteristic inlet: the incoming acoustic wave relaxes the normal velocity toward `u` as `nscbc_outlet` relaxes the pressure; temperature and tangential velocity are imposed, or relaxed with `sigma_T`, `sigma_t`; the composition is imposed. Supersonic inflow imposes `u`, `p`, `T` | `u` (numbers, or expressions of `x`, `y`, `z`, `t`; with turbulence, of `x`, `y`, `z` only), `p` (reference pressure, for supersonic inflow), `T` (`p` and `T` numbers or expressions of `x`, `y`, `z`, `t`), `L`, `sigma` (default 0.25), `sigma_T`, `sigma_t` (optional), `beta` (default 0 with turbulence, whose own incoming wave carries the transverse terms), `X` or `Y` for mixtures (numbers or expressions, as `upt`), and an optional `[boundaries.turbulence]` table (below) |
+| `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage (single gases) | `rho`, `u` (one expression per component), `p` |
+
+Types renamed in 0.9.0 (removed in 0.10.0; `mallard input upgrade` rewrites
+them): `upt` is `inlet_state`, `stagnation_inlet` `inlet_stagnation`,
+`mass_flow_inlet` `inlet_mass_flow`, `p_out` `outlet_pressure`,
+`p_out_average` `outlet_pressure` with `average = true`, `extrapolation`
+`outlet_extrapolation`, and `nscbc_inlet` / `nscbc_outlet` `inlet_state` /
+`outlet_pressure` with an `nscbc` table holding their `L`, `sigma`, `beta`,
+`sigma_T` and `sigma_t`.
+
+Not supported yet, each an error naming both, and planned in
+[#565](https://github.com/MatthewBonanni/mallard/issues/565): `nscbc` on
+`inlet_stagnation`, `inlet_mass_flow` and walls; `turbulence` without
+`nscbc`; `average` with `nscbc`; `farfield` with gas mixtures; a wall speed
+without `direction` (a wall moving along its normal).
+
+### Values
+
+Every number of a condition may be a number, a quantity with a unit
+(`"300 K"`, a quantity, not an expression) or an expression of `x`, `y`,
+`z` and `t` in SI units: `u`, `p`, `T` of `inlet_state` and `farfield`, `p0`
+and `T0`, `mass_flux` and `T` of `inlet_mass_flow`, the wall velocity, `T`
+of `wall_isothermal`, `q` of `wall_heat_flux`, `p` of `outlet_pressure`, and
+for mixtures the inflow composition. They are evaluated at each face center,
+so each face gets a condition of its own, and those of `t` at every
+Runge-Kutta stage time, as `dirichlet`'s: pulsed or acoustically forced
+inlets converge at the time integrator's order (with `nscbc` at first
+order, since its boundary point advances once per step). Inputs that do not
+depend on `t`, these and `dirichlet` states alike, are evaluated once and
+cost nothing per stage; those that do are evaluated on the device at the
+stage time, inside the step's CUDA graph.
+A number of `t` that leaves its range (`p`, `T`, `p0`, `T0`, a wall `T` not
+positive, `mass_flux` negative, a `mass_flux` vector out of the domain) stops
+the run at the next progress check with the face, time and value. Guide:
+[values](guide/boundary_conditions.md#values-numbers-expressions-and-vectors).
+
+A vector (`u` of `inlet_state`, walls and `farfield`; `mass_flux`) is either
+`N_DIM` components (each a number or an expression), or one number or
+expression, a magnitude along `direction` (normalized; default the inward
+normal of each face). A vector together with `direction` is an error; a wall
+speed needs its `direction`, and `farfield` takes a vector only.
+
+### Characteristic boundaries (`nscbc`)
+
+An `nscbc` table on `outlet_pressure` or `inlet_state` makes it a partially
+non-reflecting Navier–Stokes characteristic boundary (Poinsot & Lele):
+outgoing waves leave, and each face's incoming acoustic wave relaxes toward
+the target, the pressure `p` (outlets) or the normal velocity `u` (inlets),
+at the rate `K = sigma c (1 - M^2) / L`. Waves of frequency `omega` reflect
+by `1 / sqrt(1 + (2 omega / K)^2)`. Inlets impose the temperature and
+tangential velocity (or relax them with `sigma_T`, `sigma_t`) and the
+composition; supersonic inflow imposes `u`, `p`, `T`. With turbulence, an
+inlet's `u` is of `x`, `y`, `z` only.
+
+| Key | Description |
+|---|---|
+| `L` | A length of the domain (required) |
+| `sigma` | Relaxation coefficient (default 0.25; 0 is perfectly non-reflecting but lets the mean drift, large values approach a fixed pressure or velocity) |
+| `beta` | The weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number at outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets with turbulence, whose own incoming wave carries the transverse terms. Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable |
+| `sigma_T`, `sigma_t` | Inlets only: relax the temperature and tangential velocity at these rates instead of imposing them |
+
+```toml
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 101325.0
+nscbc = { L = 0.1, sigma = 0.25 }
+```
 
 Characteristic conditions change only the exterior state of the convective
-flux; viscous terms treat them like `extrapolation` (image faces, or zero
-normal derivatives: the outflow conditions of Poinsot & Lele). MUSCL boundary
-cells leave out their ghosts across them, so that waves leave intact. Each face keeps its pressure and
-normal velocity between steps, and restart files carry them, so a restarted
-run reproduces an uninterrupted one bitwise, also on a different number of
-ranks (restart files older than version 4 start them afresh from the
-solution). Guide: [characteristic boundaries](guide/boundary_conditions.md#characteristic-boundaries).
-
-The numbers of `upt`, `nscbc_inlet`, `stagnation_inlet`, `mass_flow_inlet`
-and the wall velocity marked above may be expressions of `x`, `y`, `z` and
-`t`. They are evaluated at each face center, so each face gets a condition of
-its own, and those of `t` at every Runge-Kutta stage time, as `dirichlet`'s:
-pulsed or acoustically forced inlets converge at the time integrator's order
-(`nscbc_inlet` at first order, since its boundary point advances once per step).
-Inputs that do not depend on `t`, these and `dirichlet` states alike, are
-evaluated once and cost nothing per stage; those that do are evaluated on the
-device at the stage time, inside the step's CUDA graph. A number of `t` that leaves its range (`p`, `T`, `p0`, `T0`
-not positive, `mass_flux` negative) stops the run at the next progress check
-with the face, time and value. A string
-with a unit (`"300 K"`) is a quantity, not an expression; expressions are in SI
-units. Guide:
-[time-dependent conditions](guide/boundary_conditions.md#time-dependent-conditions).
+flux; viscous terms treat them like `outlet_extrapolation` (image faces, or
+zero normal derivatives: the outflow conditions of Poinsot & Lele). MUSCL
+boundary cells leave out their ghosts across them, so that waves leave
+intact. Each face keeps its pressure and normal velocity between steps, and
+restart files carry them, so a restarted run reproduces an uninterrupted one
+bitwise, also on a different number of ranks (restart files older than
+version 4 start them afresh from the solution). Guide:
+[`nscbc`](guide/boundary_conditions.md#nscbc-characteristic-boundaries).
 
 ### Wall models (`wall_model`)
 
 A wall (`navier_stokes`, single gas, not axisymmetric) with a `wall_model`
-table takes its shear stress and heat flux from a wall model fed by the LES
+table (each wall its own, with its own model and parameters) takes its shear stress and heat flux from a wall model fed by the LES
 state at an exchange point a height `h` above each wall face, along its
 normal (wall-modeled LES; Kawai & Larsson's exchange point, which avoids the
 log-layer mismatch of the first cell). The state there is the containing
@@ -623,7 +677,7 @@ wall_model = { model = "gfm", exchange_distance = 0.3, edge_distance = 1.0 }
 
 ### Synthetic turbulence (`[boundaries.turbulence]`)
 
-An `nscbc_inlet` with a `turbulence` table adds synthetic turbulence to its
+An `inlet_state` with `nscbc` and a `turbulence` table adds synthetic turbulence to its
 target velocity: the digital filter of Klein, Sadiki & Janicka (Gaussian
 correlations of the given integral lengths across the inlet and, by Taylor's
 hypothesis, in time), scaled to the given Reynolds stress by its Cholesky
@@ -633,7 +687,7 @@ target's change without reflecting outgoing waves. The field depends only on
 the time, the seed and the inlet, so runs are bitwise the same on any number
 of ranks and across restarts. The inlet must be planar and normal to a
 coordinate axis; a periodic direction across it makes the field periodic. See
-the [guide](guide/boundary_conditions.md#synthetic-turbulence).
+the [guide](guide/boundary_conditions.md#synthetic-turbulence-turbulence).
 
 | Key | Description |
 |---|---|
@@ -648,11 +702,11 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence).
 ```toml
 [[boundaries]]
 name = "inlet"
-type = "nscbc_inlet"
+type = "inlet_state"
 u = [1.0, 0.0, 0.0]
 p = 17.857
 T = 1.0
-L = 6.0
+nscbc = { L = 6.0 }
 
 [boundaries.turbulence]
 reynolds_stress = [0.01, 0.01, 0.01, 0.0, 0.0, 0.0]
@@ -1048,7 +1102,7 @@ boundary condition sets on the face, from the interior trace (the cell average,
 or with `sampling = "point"` the reconstruction at the face centroid): walls
 take their velocity (no slip; slip walls and symmetry planes drop the normal
 component) and isothermal walls their temperature at the trace's pressure;
-`upt`, `farfield`, `p_out` and `p_out_average` faces the exterior state of their
+`inlet_state`, `farfield` and `outlet_pressure` faces (without `nscbc`) the exterior state of their
 condition; `dirichlet` faces their prescribed state; transmissive and
 characteristic faces the trace. Normals point out of the fluid, so fluxes are
 positive out of the domain. In 2D the faces are chained through shared nodes
@@ -1063,7 +1117,7 @@ have:
 | `MASS_FLUX` | `rho u . n` |
 | `MOMENTUM_FLUX_<X,Y,Z>` (`MOMENTUM_FLUX`) | `rho u u . n + p n` |
 | `ENTHALPY_FLUX` | `rho u . n (h + |u|^2 / 2)` |
-| `SPECIES_FLUX_<species>` (`SPECIES_FLUX_*`) | `rho Y_k u . n` (convective; `upt` faces with their prescribed composition) |
+| `SPECIES_FLUX_<species>` (`SPECIES_FLUX_*`) | `rho Y_k u . n` (convective; `inlet_state` faces with their prescribed composition) |
 | `TRACTION_PRESSURE_<X,Y,Z>` (`TRACTION_PRESSURE`) | `p n`, the pressure force of the fluid on the boundary per unit area |
 | `TRACTION_VISCOUS_<X,Y,Z>` (`TRACTION_VISCOUS`) | `-tau . n`, its viscous part (molecular) |
 | `TAU_W_<X,Y,Z>`, `TAU_W` | Wall shear stress: the tangential part of `-tau . n`, along the flow on a wall at rest; and its magnitude |

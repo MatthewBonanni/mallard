@@ -47,7 +47,7 @@ TEST(IOTest, ProvenanceHashesTheMeshFile) {
         s << "[run]\nn_steps = 1\ncfl = 0.25\n[mesh]\ntype = \"file\"\nfilename = \"" << file << "\"\n"
           << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.1\", \"0.0\"]\np = \"1.0\"\n";
         for (const char * name : {"left", "right", "top", "bottom"}) {
-            s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"extrapolation\"\n";
+            s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"outlet_extrapolation\"\n";
         }
         s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
           << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n[output]\n" << output;
@@ -74,8 +74,8 @@ TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
         "[run]\nn_steps = 1\ncfl = 1\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 2\nLy = 1\n"
         "[initialize]\ntype = \"constant\"\nu = [1, 0]\np = 1\nT = 1\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
         "[numerics.face_reconstruction]\ntype = \"FO\"\n"
@@ -99,8 +99,8 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
         "[run]\nn_steps = 10\ndt = 0.01\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
         "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
         "[numerics.face_reconstruction]\ntype = \"FO\"\n"
@@ -119,8 +119,8 @@ TEST(IOTest, ZeroCheckIntervalIsRejected) {
         "[run]\nn_steps = 1\ncfl = 0.25\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
         "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
@@ -198,8 +198,8 @@ std::string output_case(const std::string & dir, const std::string & output_keys
       << "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 20\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"]\n"
       << "p = \"x < 0.4 ? 2.0 : 1.0\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -297,8 +297,8 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
         "[run]\nn_steps = 1\ndt = 0.01\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
         "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"

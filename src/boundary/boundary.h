@@ -26,99 +26,94 @@
 
 enum class BoundaryType {
     SYMMETRY,
-    EXTRAPOLATION,
+    OUTLET_EXTRAPOLATION,
     WALL_ADIABATIC,
     WALL_ISOTHERMAL,
     WALL_HEAT_FLUX,
-    UPT,
-    P_OUT,
-    P_OUT_AVERAGE,
+    INLET_STATE,
+    OUTLET_PRESSURE,
     DIRICHLET,
     FARFIELD,
-    NSCBC_OUTLET,
-    NSCBC_INLET,
-    STAGNATION_INLET,
-    MASS_FLOW_INLET,
+    INLET_STAGNATION,
+    INLET_MASS_FLOW,
     PARTITION,
 };
 
 static const std::unordered_map<std::string, BoundaryType> BOUNDARY_TYPES = {
     {"symmetry", BoundaryType::SYMMETRY},
-    {"extrapolation", BoundaryType::EXTRAPOLATION},
+    {"outlet_extrapolation", BoundaryType::OUTLET_EXTRAPOLATION},
     {"wall_adiabatic", BoundaryType::WALL_ADIABATIC},
     {"wall_isothermal", BoundaryType::WALL_ISOTHERMAL},
     {"wall_heat_flux", BoundaryType::WALL_HEAT_FLUX},
-    {"upt", BoundaryType::UPT},
-    {"p_out", BoundaryType::P_OUT},
-    {"p_out_average", BoundaryType::P_OUT_AVERAGE},
+    {"inlet_state", BoundaryType::INLET_STATE},
+    {"outlet_pressure", BoundaryType::OUTLET_PRESSURE},
     {"dirichlet", BoundaryType::DIRICHLET},
     {"farfield", BoundaryType::FARFIELD},
-    {"nscbc_outlet", BoundaryType::NSCBC_OUTLET},
-    {"nscbc_inlet", BoundaryType::NSCBC_INLET},
-    {"stagnation_inlet", BoundaryType::STAGNATION_INLET},
-    {"mass_flow_inlet", BoundaryType::MASS_FLOW_INLET}
+    {"inlet_stagnation", BoundaryType::INLET_STAGNATION},
+    {"inlet_mass_flow", BoundaryType::INLET_MASS_FLOW}
 };
 
 static const std::unordered_map<BoundaryType, std::string> BOUNDARY_NAMES = {
     {BoundaryType::SYMMETRY, "symmetry"},
-    {BoundaryType::EXTRAPOLATION, "extrapolation"},
+    {BoundaryType::OUTLET_EXTRAPOLATION, "outlet_extrapolation"},
     {BoundaryType::WALL_ADIABATIC, "wall_adiabatic"},
     {BoundaryType::WALL_ISOTHERMAL, "wall_isothermal"},
     {BoundaryType::WALL_HEAT_FLUX, "wall_heat_flux"},
-    {BoundaryType::UPT, "upt"},
-    {BoundaryType::P_OUT, "p_out"},
-    {BoundaryType::P_OUT_AVERAGE, "p_out_average"},
+    {BoundaryType::INLET_STATE, "inlet_state"},
+    {BoundaryType::OUTLET_PRESSURE, "outlet_pressure"},
     {BoundaryType::DIRICHLET, "dirichlet"},
     {BoundaryType::FARFIELD, "farfield"},
-    {BoundaryType::NSCBC_OUTLET, "nscbc_outlet"},
-    {BoundaryType::NSCBC_INLET, "nscbc_inlet"},
-    {BoundaryType::STAGNATION_INLET, "stagnation_inlet"},
-    {BoundaryType::MASS_FLOW_INLET, "mass_flow_inlet"},
+    {BoundaryType::INLET_STAGNATION, "inlet_stagnation"},
+    {BoundaryType::INLET_MASS_FLOW, "inlet_mass_flow"},
     {BoundaryType::PARTITION, "partition"}
 };
 
 /**
- * @brief Device-copyable boundary condition.
+ * @brief Device-copyable boundary condition: a subtype and its options.
  *
  * Every boundary condition is imposed weakly through a ghost state that is
  * passed to the Riemann solver (and used for gradient reconstruction).
  * The meaning of data depends on type:
- * - UPT: data = W = [rho, u, p] of the inflow state
+ * - INLET_STATE: data = W = [rho, u, p] of the inflow state; with NSCBC the
+ *   target state, whose velocity is per face (BoundaryData::char_target)
  * - FARFIELD: data = W = [rho, u, p] of the free stream
  * - PARTITION: faces towards cells of other ranks, at the edge of the halo. The
  *   interior state is copied; nothing an owned cell uses depends on it.
- * - P_OUT: data[N_DIM + 1] = back pressure
- * - P_OUT_AVERAGE: data[N_DIM + 1] = target area-averaged pressure; data[0] =
- *   current pressure shift (target minus the average of the adjacent cells),
- *   updated every stage
+ * - OUTLET_PRESSURE: data[N_DIM + 1] = back pressure (with AVERAGE the target
+ *   area-averaged pressure, and data[0] = current pressure shift: target minus
+ *   the average of the adjacent cells, updated every stage)
  * - walls: data[1..N_DIM] = wall velocity; WALL_ISOTHERMAL: data[0] = wall
  *   temperature; WALL_HEAT_FLUX: data[N_DIM + 1] = heat flux into the fluid.
  *   Gas mixtures' walls are non-catalytic (zero species diffusive flux)
  * - DIRICHLET: unused; the exterior state is set per face (BoundaryData::face_state)
- * - NSCBC_OUTLET: data[N_DIM + 1] = target pressure
- * - NSCBC_INLET: data = [rho, -, p] of the target state; the target velocity
- *   is per face (BoundaryData::char_target)
- * - STAGNATION_INLET: data = [T0, flow direction (zero: along the inward
+ * - INLET_STAGNATION: data = [T0, flow direction (zero: along the inward
  *   normal), p0]
- * - MASS_FLOW_INLET: data = [T, flow direction (as STAGNATION_INLET), mass
+ * - INLET_MASS_FLOW: data = [T, flow direction (as INLET_STAGNATION), mass
  *   flux rho u . -n]; its faces' flux is the physical flux of the ghost state
  *
- * Characteristic conditions (NSCBC_*) also use relax, indexed by Relax. Their
- * exterior state for the Riemann solver is BoundaryData::characteristic_W;
- * ghosts elsewhere are EXTRAPOLATION's (docs/design/nscbc.md).
+ * Characteristic conditions (option NSCBC) also use relax, indexed by Relax.
+ * Their exterior state for the Riemann solver is BoundaryData::characteristic_W;
+ * ghosts elsewhere are OUTLET_EXTRAPOLATION's (docs/design/nscbc.md).
  */
 struct BoundaryCondition {
     /** @brief Entries of relax: relaxation rates over the sound speed are sigma / L (1/length). */
     enum Relax : uint8_t {
         ACOUSTIC = 0,  // sigma / L of the incoming acoustic wave
-        TEMPERATURE,   // NSCBC_INLET: sigma_T / L, negative to impose T exactly
-        TANGENTIAL,    // NSCBC_INLET: sigma_t / L, negative to impose the tangential velocity exactly
+        TEMPERATURE,   // inlets: sigma_T / L, negative to impose T exactly
+        TANGENTIAL,    // inlets: sigma_t / L, negative to impose the tangential velocity exactly
         BETA,          // transverse relaxation in [0, 1], negative for the local Mach number
-        T_TARGET,      // NSCBC_INLET: target temperature
+        T_TARGET,      // inlets: target temperature
         N_RELAX
     };
 
-    BoundaryType type = BoundaryType::EXTRAPOLATION;
+    /** @brief Options, as bits of options: each composes with the subtypes that take it. */
+    enum Option : uint8_t {
+        NSCBC = 1,    // characteristic (non-reflecting) treatment: INLET_STATE, OUTLET_PRESSURE
+        AVERAGE = 2,  // OUTLET_PRESSURE: the area-averaged pressure is the target
+    };
+
+    BoundaryType type = BoundaryType::OUTLET_EXTRAPOLATION;
+    uint8_t options = 0;
     rtype data[N_DIM + 2] = {};
     rtype relax[N_RELAX] = {};
     bool modeled = false;  // walls: a wall model gives the viscous flux, and the ghost is a slip wall's
@@ -131,14 +126,17 @@ struct BoundaryCondition {
 
     KOKKOS_INLINE_FUNCTION
     bool is_characteristic() const {
-        return type == BoundaryType::NSCBC_OUTLET || type == BoundaryType::NSCBC_INLET;
+        return options & NSCBC;
     }
+
+    KOKKOS_INLINE_FUNCTION
+    bool has(const Option option) const { return options & option; }
 
     /** @brief Whether inflow through the boundary carries the condition's own composition (bc_Y). */
     KOKKOS_INLINE_FUNCTION
     bool prescribes_composition() const {
-        return type == BoundaryType::UPT || type == BoundaryType::NSCBC_INLET || type == BoundaryType::STAGNATION_INLET ||
-               type == BoundaryType::MASS_FLOW_INLET;
+        return type == BoundaryType::INLET_STATE || type == BoundaryType::INLET_STAGNATION ||
+               type == BoundaryType::INLET_MASS_FLOW;
     }
 
     /**
@@ -147,19 +145,20 @@ struct BoundaryCondition {
      *        ghost's mass flux is the face's exactly.
      */
     KOKKOS_INLINE_FUNCTION
-    bool flux_of_ghost() const { return type == BoundaryType::MASS_FLOW_INLET; }
+    bool flux_of_ghost() const { return type == BoundaryType::INLET_MASS_FLOW; }
 
     /** @brief Whether the ghost state is a value at the face (not a mirror of the cell) for gradients. */
     KOKKOS_INLINE_FUNCTION
     bool ghost_at_face() const {
-        return type == BoundaryType::DIRICHLET || type == BoundaryType::UPT || type == BoundaryType::FARFIELD ||
-               type == BoundaryType::STAGNATION_INLET || type == BoundaryType::MASS_FLOW_INLET;
+        return type == BoundaryType::DIRICHLET || (type == BoundaryType::INLET_STATE && !is_characteristic()) ||
+               type == BoundaryType::FARFIELD || type == BoundaryType::INLET_STAGNATION ||
+               type == BoundaryType::INLET_MASS_FLOW;
     }
 
     /** @brief Whether the exterior state is transmissive away from the Riemann solver (image faces). */
     KOKKOS_INLINE_FUNCTION
     bool is_transmissive() const {
-        return type == BoundaryType::EXTRAPOLATION || is_characteristic();
+        return type == BoundaryType::OUTLET_EXTRAPOLATION || is_characteristic();
     }
 
     /**
@@ -186,9 +185,7 @@ struct BoundaryCondition {
         for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
         const rtype u_n = dot<N_DIM>(W_i + 1, n);
         switch (type) {
-            case BoundaryType::EXTRAPOLATION:
-            case BoundaryType::NSCBC_OUTLET:
-            case BoundaryType::NSCBC_INLET:
+            case BoundaryType::OUTLET_EXTRAPOLATION:
             case BoundaryType::PARTITION:
                 break;
             case BoundaryType::WALL_ADIABATIC:
@@ -207,14 +204,15 @@ struct BoundaryCondition {
             case BoundaryType::SYMMETRY:
                 FOR_I_DIM W_g[1 + i] = W_i[1 + i] - 2.0_r * u_n * n[i];
                 break;
-            case BoundaryType::UPT:
+            case BoundaryType::INLET_STATE:
+                if (is_characteristic()) break;
                 for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
                 break;
-            case BoundaryType::STAGNATION_INLET:
+            case BoundaryType::INLET_STAGNATION:
                 inflow::perfect_stagnation_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1,
                                                  W_i, n, W_g);
                 break;
-            case BoundaryType::MASS_FLOW_INLET:
+            case BoundaryType::INLET_MASS_FLOW:
                 inflow::mass_flow_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1, W_i, n,
                                         W_g);
                 break;
@@ -246,23 +244,20 @@ struct BoundaryCondition {
                 W_g[E] = W_g[0] * a_b * a_b / gamma;
                 break;
             }
-            case BoundaryType::P_OUT: {
+            case BoundaryType::OUTLET_PRESSURE: {
+                if (is_characteristic()) break;
                 const rtype a = Kokkos::sqrt(gamma * W_i[E] / W_i[0]);
-                if (u_n < a) {
-                    // Subsonic: impose pressure, keep temperature
-                    W_g[0] = W_i[0] * data[E] / W_i[E];
-                    W_g[E] = data[E];
-                }
-                break;
-            }
-            case BoundaryType::P_OUT_AVERAGE: {
-                const rtype a = Kokkos::sqrt(gamma * W_i[E] / W_i[0]);
-                if (u_n < a) {
+                if (u_n >= a) break;
+                if (has(AVERAGE)) {
                     // Subsonic: shift the local pressure so the boundary average
                     // matches the target, keeping temperature
                     const rtype p_g = Kokkos::fmax(W_i[E] + data[0], 1e-3_r * W_i[E]);
                     W_g[0] = W_i[0] * p_g / W_i[E];
                     W_g[E] = p_g;
+                } else {
+                    // Subsonic: impose pressure, keep temperature
+                    W_g[0] = W_i[0] * data[E] / W_i[E];
+                    W_g[E] = data[E];
                 }
                 break;
             }
@@ -320,7 +315,7 @@ struct BoundaryData {
     Euler gas;
     rtype gravity[N_DIM] = {};
     // Gas mixtures: per condition, the mass fractions and [gamma, e0] of a
-    // prescribed state (UPT); empty for a single gas
+    // prescribed state (INLET_STATE); empty for a single gas
     Kokkos::View<rtype **, Kokkos::LayoutRight> bc_Y;
     Kokkos::View<rtype *[2]> bc_thermo;
     chemistry::ThermoTable<> thermo;  // Gas mixtures: species thermodynamics
@@ -329,7 +324,7 @@ struct BoundaryData {
      * @brief Whether scalar j (the mass fractions, then [gamma, e0]) beyond
      *        a face of condition i_bc is prescribed, and its value: the
      *        composition of inlets other than characteristic ones, whose
-     *        stencils mirror the interior, and the surrogates of upt.
+     *        stencils mirror the interior, and the surrogates of inlet_state.
      */
     KOKKOS_INLINE_FUNCTION
     bool prescribed_scalar(const int32_t i_bc, const uint32_t j, const uint32_t n_species, rtype & value) const {
@@ -339,7 +334,7 @@ struct BoundaryData {
             value = bc_Y(i_bc, j);
             return true;
         }
-        if (bc.type != BoundaryType::UPT && bc.type != BoundaryType::MASS_FLOW_INLET) return false;
+        if (bc.type != BoundaryType::INLET_STATE && bc.type != BoundaryType::INLET_MASS_FLOW) return false;
         value = bc_thermo(i_bc, j - n_species);
         return true;
     }
@@ -347,8 +342,8 @@ struct BoundaryData {
     /** @brief Whether condition i_bc is a mixture inlet whose state follows from the interior's. */
     KOKKOS_INLINE_FUNCTION
     bool mixture_inflow(const int32_t i_bc) const {
-        return mixture && (bcs(i_bc).type == BoundaryType::STAGNATION_INLET ||
-                           bcs(i_bc).type == BoundaryType::MASS_FLOW_INLET);
+        return mixture && (bcs(i_bc).type == BoundaryType::INLET_STAGNATION ||
+                           bcs(i_bc).type == BoundaryType::INLET_MASS_FLOW);
     }
 
     /**
@@ -363,7 +358,7 @@ struct BoundaryData {
         const BoundaryCondition & bc = bcs(i_bc);
         const BoundaryComposition y{bc_Y, i_bc};
         const double R_b = thermo.gas_constant(y);
-        if (bc.type == BoundaryType::MASS_FLOW_INLET) {
+        if (bc.type == BoundaryType::INLET_MASS_FLOW) {
             inflow::mass_flow_state(double(bc_thermo(i_bc, 0)), R_b, double(bc.data[0]), double(bc.data[E]), bc.data + 1,
                                     W_i, n, W_g);
             th_g[0] = bc_thermo(i_bc, 0);
@@ -384,7 +379,7 @@ struct BoundaryData {
      * @brief Exterior state of a gas mixture on boundary face i_face: W as in
      *        exterior_W (with the interior gamma for subsonic checks), and the
      *        exterior thermodynamic surrogates [gamma, e0]: the image's for
-     *        transmissive faces, the prescribed state's for UPT, else the
+     *        transmissive faces, the prescribed state's for INLET_STATE, else the
      *        interior's.
      * @param th_i Interior [gamma, e0].
      * @param face_thermo Face [gamma, e0], indexed (face, quadrature point, side, 0/1).
@@ -423,7 +418,7 @@ struct BoundaryData {
             mixture_inflow_W(i_bc, W_i, n, W_t, th_t);
         } else {
             bc.ghost_W(W_i, n, th_i[0], R, viscous, W_t, false);
-            if (bc.type == BoundaryType::UPT) {
+            if (bc.type == BoundaryType::INLET_STATE && !characteristic) {
                 th_t[0] = bc_thermo(i_bc, 0);
                 th_t[1] = bc_thermo(i_bc, 1);
             } else {
@@ -479,7 +474,7 @@ struct BoundaryData {
     KOKKOS_INLINE_FUNCTION
     bool image_stencil(const uint32_t i_face) const {
         return image_neighbor_offsets.extent(0) > 0 && face_image_face(i_face) >= 0 &&
-               bcs(face_bc(i_face)).type == BoundaryType::EXTRAPOLATION;
+               bcs(face_bc(i_face)).type == BoundaryType::OUTLET_EXTRAPOLATION;
     }
 
     /** @brief Exterior state of exterior_W before the characteristic treatment. */
@@ -530,7 +525,7 @@ struct BoundaryData {
         constexpr uint8_t E = N_DIM + 1;
         const BoundaryCondition & bc = bcs(face_bc(i_face));
         const int32_t k = face_char(i_face);
-        const bool inlet = bc.type == BoundaryType::NSCBC_INLET;
+        const bool inlet = bc.type == BoundaryType::INLET_STATE;
         const rtype rho = W_l[0], p = W_l[E];
         const rtype c2 = gamma_l * p / rho;
         const rtype c = Kokkos::sqrt(c2);
@@ -619,7 +614,7 @@ struct BoundaryData {
             return;
         }
         const BoundaryCondition & bc = bcs(face_bc(i_face));
-        if (!flux && (bc.type == BoundaryType::STAGNATION_INLET || bc.type == BoundaryType::MASS_FLOW_INLET)) {
+        if (!flux && (bc.type == BoundaryType::INLET_STAGNATION || bc.type == BoundaryType::INLET_MASS_FLOW)) {
             for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
             return;
         }
@@ -641,7 +636,7 @@ struct BoundaryData {
         const int32_t i_bc = face_bc(i_face);
         const BoundaryCondition & bc = bcs(i_bc);
         rtype W_g[N_DIM + 2];
-        if (bc.type == BoundaryType::NSCBC_INLET) {
+        if (bc.type == BoundaryType::INLET_STATE && bc.is_characteristic()) {
             const int32_t k = face_char(i_face);
             W_g[0] = bc.data[0];
             FOR_I_DIM W_g[1 + i] = char_target(k, i);
@@ -655,6 +650,23 @@ struct BoundaryData {
         return Kokkos::fabs(dot<N_DIM>(W_g + 1, n)) + Kokkos::sqrt(gamma_g * W_g[E] / W_g[0]);
     }
 };
+
+/**
+ * @brief The keys of a [[boundaries]] subtype, as BoundaryCondition::from_input
+ *        checks them and the guide's support matrix lists them.
+ */
+struct BoundarySubtype {
+    BoundaryType type;
+    std::vector<std::string> required;  // keys ("a|b": exactly one of a and b)
+    std::vector<std::string> optional;  // keys
+    std::vector<std::string> options;   // nscbc, average, turbulence, wall_model, composition, u-field
+};
+
+/** @brief Every subtype of [[boundaries]] (PARTITION is internal). */
+const std::vector<BoundarySubtype> & boundary_subtypes();
+
+/** @brief The keys of an option of boundary_subtypes() (none for u-field, which is how u may be given). */
+const std::vector<std::string> & boundary_option_keys(const std::string & option);
 
 class Mesh;
 

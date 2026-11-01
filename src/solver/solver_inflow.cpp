@@ -34,22 +34,23 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
         const std::string where = "boundaries[name = \"" + name + "\"]";
         const InletProfile profile(bound, where);
         std::vector<int32_t> chars;
-        for (uint32_t f : faces) chars.push_back(h_face_char(f));
-        if (bound.contains("u") && TimedInletTargets::depends_on_time(bound.at("u"), where)) {
+        std::vector<Point> x(faces.size()), n_in(faces.size());
+        for (size_t i = 0; i < faces.size(); i++) {
+            chars.push_back(h_face_char(faces[i]));
+            for (size_t d = 0; d < N_DIM; d++) {
+                x[i][d] = double(mesh->h_face_coords(faces[i], d));
+                n_in[i][d] = -double(mesh->h_face_normals(faces[i], d)) / double(mesh->h_face_area(faces[i]));
+            }
+        }
+        if (bound.contains("u") && TimedInletTargets::depends_on_time(bound, where)) {
             if (InletProfile::turbulent(bound)) {
                 throw InputError(where + ": a velocity depending on t cannot have turbulence.");
             }
-            std::vector<Point> x(faces.size());
-            for (size_t i = 0; i < faces.size(); i++) {
-                for (size_t d = 0; d < N_DIM; d++) x[i][d] = double(mesh->h_face_coords(faces[i], d));
-            }
-            timed_inlets.add(bound.at("u"), where, chars, x);
+            timed_inlets.add(bound, where, chars, x, n_in);
         }
         if (!profile.uniform()) {
             for (size_t i = 0; i < faces.size(); i++) {
-                Point x;
-                for (size_t d = 0; d < N_DIM; d++) x[d] = double(mesh->h_face_coords(faces[i], d));
-                const std::array<double, N_DIM> u = profile.velocity(x);
+                const std::array<double, N_DIM> u = profile.velocity(x[i], n_in[i]);
                 for (size_t d = 0; d < N_DIM; d++) h_target(chars[i], d) = static_cast<rtype>(u[d]);
             }
             profiled = true;
@@ -68,7 +69,7 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
 
 std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
                                                    BoundaryCondition & bc) const {
-    if (bc.type != BoundaryType::MASS_FLOW_INLET) return {};
+    if (bc.type != BoundaryType::INLET_MASS_FLOW) return {};
     const std::string name = find_value<std::string>(bound, "name");
     const std::string where = "boundaries[name = \"" + name + "\"]";
     // An expression for mass_flux is BoundaryFields'

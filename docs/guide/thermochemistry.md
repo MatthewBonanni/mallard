@@ -43,8 +43,8 @@ constant-cp; reactions may be elementary, three-body, falloff (Lindemann,
 Troe, SRI), pressure-dependent Arrhenius (PLOG) and Chebyshev, with
 non-integer reactant orders.
 
-**Compositions.** Everywhere a state is given (`[initialize]`, `upt`, `stagnation_inlet`, `mass_flow_inlet` and
-`nscbc_inlet` boundaries, sponges, `mallard reactor`), give exactly one of `X`
+**Compositions.** Everywhere a state is given (`[initialize]`, `inlet_state` (also with `nscbc`), `inlet_stagnation` and
+`inlet_mass_flow` boundaries, sponges, `mallard reactor`), give exactly one of `X`
 (mole fractions) or `Y` (mass fractions), as a table by species; listed values
 are normalized and unlisted species are zero. Analytical initial conditions
 and inflows take expressions per species, and `balance = "N2"` gives one
@@ -250,8 +250,8 @@ solver's chemistry kernels, which prints cells per second (see
 ![The flame_2d example: a periodic channel with an inflow on the left and a pressure outlet on the right](../images/guide/domain_flame_2d-light.svg#gh-light-mode-only)
 ![The flame_2d example: a periodic channel with an inflow on the left and a pressure outlet on the right](../images/guide/domain_flame_2d-dark.svg#gh-dark-mode-only)
 
-*`examples/flame_2d`: a lean H2/air flame enters through `upt` (with its
-composition) and leaves through `p_out`, periodic across the channel.*
+*`examples/flame_2d`: a lean H2/air flame enters through `inlet_state` (with its
+composition) and leaves through `outlet_pressure`, periodic across the channel.*
 
 ## See also
 

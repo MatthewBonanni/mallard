@@ -101,7 +101,7 @@ cfl = 1.0          # or dt = 1.0e-4 (exactly one of the two)
 t_stop = 0.2       # and/or n_steps, t_wall_stop
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 42 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 44 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -118,8 +118,8 @@ At least one stop condition is required; the first one reached ends the run.
 `cfl` is the usual unstructured CFL number: on a uniform 2D grid of spacing h,
 `dt = cfl * h / (|u| + |v| + 2a)` (viscous, diffusive and source limits
 included). Boundary faces count the wave speed of their exterior state too
-(the inflow state of `upt`, `dirichlet` and inlets, the target of
-`nscbc_inlet`), so a fast jet entering a domain at rest runs from the first
+(the inflow state of `inlet_state`, `dirichlet` and the other inlets, or the
+target of an `inlet_state` with `nscbc`), so a fast jet entering a domain at rest runs from the first
 step at the requested `cfl`.
 
 ![Largest stable CFL number with SSPRK3 for each reconstruction and cell type](../images/guide/cfl_limits-light.svg#gh-light-mode-only)
@@ -147,7 +147,7 @@ type = "TENO"      # "FO", "MUSCL" or "TENO"; the default is "FO"
 order = 5          # TENO: 3 to 6
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 42 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 44 more.
 
 !!! warning "The default is first order"
     Without a [preset](#presets) or `[numerics.face_reconstruction]` Mallard
@@ -225,7 +225,7 @@ Pitfalls:
 riemann_solver = "HLLC"   # default
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 42 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 44 more.
 
 | `riemann_solver` | Use |
 |---|---|

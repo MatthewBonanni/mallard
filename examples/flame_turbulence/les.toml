@@ -57,7 +57,7 @@ file = "les_r8.restart"
 
 [[boundaries]]
 name = "left"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 
 [[boundaries]]

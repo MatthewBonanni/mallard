@@ -20,7 +20,7 @@ from tutfig import label_box, render  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "..", "tools", "docs"))
 import meshes  # noqa: E402
 
-ZONES = {"left": "inflow (upt)", "right": "outflow (extrapolation)", "top": "top (symmetry)",
+ZONES = {"left": "inflow (inlet_state)", "right": "outflow (outlet_extrapolation)", "top": "top (symmetry)",
          "bottom": "bottom: ramp (symmetry, a slip wall)"}
 
 
