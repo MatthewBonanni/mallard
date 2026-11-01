@@ -244,7 +244,7 @@ void Solver::write_provenance() {
         .raw("provenance", provenance::json())
         .raw("placement", provenance::placement())
         .raw("setup_phases", setup_phases.str());
-    if (find_value_or<std::string>(input, "initialize", "type", "") == "restart") {
+    if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart") {
         json::Object restart;
         restart.add("file", find_value<std::string>(input, "initialize", "file")).add("step", step).add("t", double(t));
         const std::optional<uint64_t> recorded = run_log::last_step();
