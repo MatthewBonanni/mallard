@@ -1,1 +1,0 @@
-- `cmake --install --prefix` is honoured (install destinations were absolute), and GoogleTest is no longer installed (#387).

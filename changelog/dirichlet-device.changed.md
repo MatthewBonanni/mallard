@@ -1,1 +1,0 @@
-- **`dirichlet` states of `t` are evaluated on the device** at each Runge-Kutta stage time, like every other boundary expression, instead of on the host with a copy to the device per stage; CUDA builds now run such cases as one CUDA graph per step (`[run] cuda_graphs`). States that do not depend on `t` are evaluated once at setup.

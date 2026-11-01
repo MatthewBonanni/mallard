@@ -1,1 +1,0 @@
-- Restart files are written as `<name>.restart.partial`, flushed to storage, and renamed once every rank has written its part, so a file named `.restart` is always complete: a run killed while writing one, or a script picking the newest restart while one was being written in the background, no longer finds a truncated file.

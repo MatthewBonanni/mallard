@@ -1,1 +1,0 @@
-- `mallard test --help` no longer hangs where MPI cannot start without its launcher (as in the test suite under HPC-X's `mpirun`): it no longer runs a test suite for GoogleTest's page, and `mallard-test2d`/`mallard-test3d --help` start neither MPI nor the device.

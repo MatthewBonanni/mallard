@@ -1,3 +1,0 @@
-- `[[write_data]] format = "vtkhdf"`: VTK's HDF5 format, read by ParaView 5.12 and later. Volume output is an UnstructuredGrid (curved cells as quadratic Lagrange cells), boundary zones a PolyData; all ranks write one file per snapshot in parallel, or with `series = true` one file holding every snapshot, which a restarted run continues. `compression` and `relative_error` apply.
-- `[[probes]] format = "vtkhdf"`: one VTKHDF PolyData file of the samples with their values at every output, continued by restarted runs.
-- `tools/mallard/vtkhdf.py` reads VTKHDF output (snapshots, series files, probes); `mallard.vtu.read_vtu_cells` and the plot and animation scripts read VTKHDF or VTU, whichever the build wrote (`mallard.vtu.snapshot`, `read_index`).

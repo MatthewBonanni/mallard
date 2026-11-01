@@ -1,1 +1,0 @@
-- `[[write_data]] format = "hdf5"` (XDMF indexes over HDF5 files): still written, with a warning, until 0.10.0; `mallard input upgrade` rewrites it to `"vtkhdf"`.

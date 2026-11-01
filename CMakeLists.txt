@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Mallard VERSION 0.8.0 LANGUAGES CXX)
+project(Mallard VERSION 0.9.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 
 find_package(Git QUIET)

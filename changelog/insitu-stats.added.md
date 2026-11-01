@@ -1,3 +1,0 @@
-- `[statistics.spectra]`: in-situ spectra and two-point correlations along the homogeneous directions of a generated `cartesian` mesh (per position of the others, e.g. per y of a channel), shell spectra in a periodic box, time-averaged like the means and bitwise identical on any number of ranks; `[statistics.phase]`: per-cell phase-binned means `PHASE_<bin>_<field>`, by a fixed period or by the crossings of a probe variable (#284, #311).
-- Restart format 6 carries the averaged spectra; files without them are still written in the older versions (#311).
-- `tools/post/insitu_statistics.py` recomputes spectra from restart files, compares them, phase-bins probe series and plots spectra and correlations (#311).

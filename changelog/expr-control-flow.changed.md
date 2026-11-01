@@ -1,1 +1,0 @@
-- Expressions in `[initialize]`, boundaries, sponges and probe curves are checked by the same compiler as `[[sources]]` and regions, with the same error messages (also from `mallard check`): variable names are case sensitive there too (`X` is no longer `x`), and strings and vectors are rejected.

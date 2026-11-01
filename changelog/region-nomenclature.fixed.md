@@ -1,1 +1,0 @@
-- The `difference` region examples of the docs are valid TOML (an inline table cannot span lines); a CI check parses every TOML snippet of the docs (#499).
