@@ -33,7 +33,7 @@ p = """\
              : (y >= 0.8 ? 0.3 : 0.029032258064516)"""
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 17 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 18 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -91,7 +91,7 @@ region.rotate = 30
 X = { H2 = 1.0 }
 ```
 
-*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d).
+*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
 
 Each `[[initialize.regions]]` entry sets some of `u`, `rho`, `p`, `T` and the
 composition inside a region, and leaves the rest to the state below it. The
@@ -167,7 +167,7 @@ interpolation = "cubic"
 at = ["hypot(x - 0.6, y)"]   # the distance from the bubble's center
 ```
 
-*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d).
+*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
 
 Each `[[initialize.data]]` entry reads a CSV file (a header of column names,
 then rows of numbers; lines starting with `#` are comments) and gives every
@@ -179,7 +179,10 @@ its regions as a variable `<name>_<column>`: above, `bubble_rho`.
   any order, e.g. a 1D flame `x, T, u, Y_H2, ...` or a 2D field on `(x, r)`.
   `interpolation = "linear"` is exact for linear data; `"cubic"` (Lagrange on
   the 4 nearest nodes of each axis, non-uniform grids too) for cubic data.
-  Outside the table, the values at its ends.
+  Outside the table, the values at its ends. An image is a 2D table: one row
+  per pixel (`x, y` and a value per color class), as `mallard_logo` paints
+  the Mallard logo in gas (`examples/mallard_logo/make_logo_table.py`); pad it
+  with a border of background pixels, since the edge values extend outward.
 - **Point clouds** (`type = "points"`): scattered points, e.g. the cell
   centers of a solution from another code. A point takes the value of the
   nearest data point (ties to the earlier row), or with `neighbors = k` the
