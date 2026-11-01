@@ -24,7 +24,7 @@
 #include "physics.h"
 #include "thermo.h"
 
-enum class BoundaryType : uint8_t {
+enum class BoundaryType {
     SYMMETRY,
     OUTLET_EXTRAPOLATION,
     WALL_ADIABATIC,
