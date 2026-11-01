@@ -313,8 +313,8 @@ TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     const std::string file = write_temp_shared("mallard_mpi_vtkhdf_shell.msh", shell_gmsh(4, 3, true, false));
     expect_vtkhdf_output_matches_serial(
         "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
-        "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
-        "[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
+        "[[mesh.curved]]\nzone = \"inner\"\ntype = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\ntype = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
         "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n"
         "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n[[boundaries]]\nname = \"outer\"\n"
         "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
@@ -325,17 +325,21 @@ TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
 }
 
 TEST(MPI3DTest, CurvedWallsMatchSerial) {
-    // A spherical shell of prisms: walls projected onto the spheres, or from
-    // triangle6 faces of the file
-    const std::string shapes = "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\n"
-                               "radius = 1.0\n[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\n"
-                               "center = [0.0, 0.0, 0.0]\nradius = 1.5\n";
-    for (bool quadratic : {false, true}) {
+    // A spherical shell of prisms: walls projected onto the spheres (in closed form, and by
+    // closest points on an implicit sphere and an ellipsoid of equal axes), or from triangle6
+    // faces of the file
+    const std::string closed = "[[mesh.curved]]\nzone = \"inner\"\n"
+                               "type = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
+                               "[[mesh.curved]]\nzone = \"outer\"\n"
+                               "type = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n";
+    const std::string general = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"implicit\"\nfilled = false\nf = \"x^2 + y^2 + z^2 - 1\"\n"
+                                "[[mesh.curved]]\nzone = \"outer\"\n"
+                                "type = \"ellipsoid\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nsemi_axes = [1.5, 1.5, 1.5]\n";
+    for (const auto & [quadratic, shapes] : {std::pair{false, closed}, std::pair{false, general}, std::pair{true, std::string()}}) {
         const std::string file = write_temp_shared(std::string("mallard_mpi_shell_") + (quadratic ? "p2" : "p1") + ".msh",
                                                    shell_gmsh(4, 3, true, quadratic));
         const std::string input =
-            "[run]\nn_steps = 6\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" +
-            (quadratic ? "" : shapes) +
+            "[run]\nn_steps = 6\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + shapes +
             "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * exp(-4 * ((x - 1.2)^2 + y^2 + z^2))\"\n"
             "u = [\"0.0\", \"0.3 * z\", \"-0.3 * y\"]\np = \"1.0\"\n"
             "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"

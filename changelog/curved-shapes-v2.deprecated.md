@@ -1,0 +1,1 @@
+- `[[mesh.curved]]` `shape` is `type`, as in every region, and the zone lies on a surface region (2D: a curve): `shape = "sphere"` and `"cylinder"` are `type = "sphere"`, `"cylinder"` with `filled = false`. `shape` is read so with a warning until 0.10.0 and `mallard input upgrade` rewrites it (#407).

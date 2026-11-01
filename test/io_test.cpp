@@ -735,8 +735,8 @@ TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
         solver.set_distributed(false);
         solver.init(parse_toml(
             "[run]\nn_steps = 1\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
-            "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
-            "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+            "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+            "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
             "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"
             "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
             "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"
