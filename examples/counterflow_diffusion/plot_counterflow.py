@@ -4,8 +4,9 @@
         [--reference examples/counterflow_diffusion/reference] [--history] [--still RADIUS]
 
 Each RUN_DIR holds a run of examples/counterflow_diffusion/counterflow_setup.py; its symmetry-plane
-output (solut/plane_*) gives the stagnation line: the cells next to the
-axis, extrapolated to r = 0 with the cells one further out (f = f0 + b r^2).
+output (solut/plane_*: point values at the faces of the plane z = 0) gives the
+stagnation line: the faces next to the axis, extrapolated to r = 0 with the
+faces one further out (f = f0 + b r^2).
 On it: the peak temperature (parabola through the hottest cell and its
 neighbors) and the local strain rates K_ox and K_f (the first maximum of
 -du/dx going from each nozzle towards the flame) and the spread rate
@@ -63,7 +64,7 @@ def local_strains(z, u):
 
 
 def stagnation_line(path):
-    """x and the fields on the axis from a z = 0 symmetry-plane snapshot."""
+    """x and the fields on the axis from a z = 0 symmetry-plane snapshot (its faces' values)."""
     pts, conn, offs, _, arrays = read_vtu_cells(path)
     c = pts[conn.reshape(-1, 4)].mean(axis=1)
     x, y = np.round(c[:, 0], 12), np.round(c[:, 1], 12)
@@ -73,9 +74,8 @@ def stagnation_line(path):
         sel = np.nonzero(y == yy)[0]
         sel = sel[np.argsort(x[sel])]
         rows.append(sel)
-    # cell centers of the plane's cells are at z = dz0 / 2, the first ones at y = dy0 / 2 = dz0 / 2
-    z0 = ys[0]
-    r2 = [ys[0] ** 2 + z0 ** 2, ys[1] ** 2 + z0 ** 2]
+    # the faces' centroids are at z = 0, the first ones at y = dy0 / 2
+    r2 = [ys[0] ** 2, ys[1] ** 2]
     w = r2[0] / (r2[1] - r2[0])
     out = {"x": x[rows[0]], "TIME": arrays["TIME"]}
     for name, v in arrays.items():

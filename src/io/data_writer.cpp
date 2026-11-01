@@ -67,7 +67,9 @@ void sync_file(const std::string & filename) {
 void DataWriter::init(const Input & input,
                       std::vector<Data> & data,
                       std::shared_ptr<Mesh> mesh_in,
-                      const std::vector<std::string> & restart_variables) {
+                      const std::vector<std::string> & restart_variables,
+                      const CellSubset * cell_subset,
+                      const std::string & prefix_in) {
     if (!input.contains("prefix")) {
         throw missing_key(input, "write_data.prefix",
                           "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
@@ -81,7 +83,7 @@ void DataWriter::init(const Input & input,
                                                   : "specify exactly one of interval and time_interval",
                           .fix = "Use interval for every N steps, or time_interval for every T of simulated time"});
     }
-    prefix = find_value<std::string>(input, "prefix");
+    prefix = prefix_in.empty() ? find_value<std::string>(input, "prefix") : prefix_in;
     if (has_interval) {
         interval = find_value<uint64_t>(input, "interval");
         if (interval == 0) {
@@ -215,34 +217,29 @@ void DataWriter::init(const Input & input,
         one_file = find_value<bool>(input, "series");
     }
 
-    geometry = find_value_or<std::string>(input, "geometry", "all");
-    if (geometry != "all") {
+    if (cell_subset) {
         if (format != DataFormat::VTU && format != DataFormat::VTKHDF) {
-            throw InputError({.key = "write_data.geometry",
-                              .line = line_of(input, "geometry"),
-                              .message = "boundary-zone output is written only as vtkhdf or vtu",
-                              .fix = "Set format = \"vtkhdf\" or \"vtu\" for this [[write_data]], or remove geometry"});
+            throw InputError({.key = "write_data.region",
+                              .line = line_of(input, input.contains("region") ? "region" : "regions"),
+                              .message = "a region is written only as vtkhdf or vtu",
+                              .fix = "Set format = \"vtkhdf\" or \"vtu\" for this [[write_data]]"});
         }
-        FaceZone * zone = mesh->get_face_zone(geometry);
-        if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-            std::vector<std::string> names;
-            for (const FaceZone & z : *mesh->face_zones()) {
-                if (z.get_type() == FaceZoneType::BOUNDARY) names.push_back(z.get_name());
-            }
-            std::sort(names.begin(), names.end());
-            throw InputError({.key = "write_data.geometry",
-                              .line = line_of(input, "geometry"),
-                              .message = "the mesh has no boundary zone \"" + geometry + "\"",
-                              .valid = names,
-                              .suggestion = suggest_value(geometry, names),
-                              .fix = "Use \"all\" for the whole domain, or a boundary zone"});
+        subset = true;
+        region_name = cell_subset->name;
+        subset_cells = cell_subset->cells;
+        std::vector<uint64_t> global;
+        for (uint32_t c : subset_cells) global.push_back(mesh->h_global_cell(c));
+        std::vector<uint64_t> all = mesh->n_global_cells > 0 ? comm::allgatherv(global) : global;
+        std::sort(all.begin(), all.end());
+        n_subset = all.size();
+        for (uint64_t g : global) {
+            subset_ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
         }
-        surface = true;
-        // Each rank writes the faces of its owned cells
-        for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
-            const uint32_t f = zone->h_faces(i);
-            if (static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned()) geometry_faces.push_back(f);
-        }
+        Kokkos::View<rtype *, Kokkos::LayoutStride>::host_mirror_type values(
+            "REGION_FRACTION", Kokkos::LayoutStride(cell_subset->fractions.size(), 1));
+        for (size_t c = 0; c < cell_subset->fractions.size(); c++) values(c) = static_cast<rtype>(cell_subset->fractions[c]);
+        fraction = std::make_unique<Data>("REGION_FRACTION", values);
+        fields.push_back(Field{"REGION_FRACTION", {fraction.get()}, field_units::describe("REGION_FRACTION")});
     }
 
     const std::string compression_str = find_value_or<std::string>(input, "compression", "none");
@@ -250,9 +247,6 @@ void DataWriter::init(const Input & input,
         find_option(COMPRESSION_TYPES, "write_data.compression", compression_str, line_of(input, "compression"));
     compression = compression_it->second;
     if (compression != Compression::NONE) {
-        if (surface && format == DataFormat::VTU) {
-            throw InputError("write_data.compression: boundary-zone VTU output is ASCII, which is not compressed.");
-        }
         const bool hdf5 = format == DataFormat::HDF5 || format == DataFormat::VTKHDF;
         if (hdf5 ? !have_hdf5_deflate() : !compression::have_zlib()) {
             throw std::runtime_error(hdf5
@@ -289,7 +283,7 @@ std::pair<std::string, std::string> DataWriter::summary() const {
                                  : format == DataFormat::HDF5   ? "_*.h5"
                                  : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
                                                                 : "_*.vtu");
-    if (geometry != "all") text += " (" + geometry + ")";
+    if (subset) text += " (" + region_name + ", " + logging::count(n_subset) + " cells)";
     if (compression == Compression::ZLIB) {
         text += relative_error > 0.0 ? ", zlib to relative error " + logging::real(relative_error) : ", zlib";
     }
@@ -383,7 +377,9 @@ void DataWriter::publish_restart(bool wait) {
     }
 }
 
-DataWriter::Values DataWriter::capture(uint32_t n_cells) const {
+DataWriter::Values DataWriter::capture(uint32_t n_cells, bool in_subset) const {
+    if (in_subset) n_cells = static_cast<uint32_t>(subset_cells.size());
+    const uint32_t * cell = in_subset ? subset_cells.data() : nullptr;
     Values values(fields.size());
     for (size_t f = 0; f < fields.size(); f++) values[f].resize(size_t(n_cells) * fields[f].n_vtk_components());
     // The run waits for this copy: blocks of cells of every field on io_threads threads
@@ -397,24 +393,13 @@ DataWriter::Values DataWriter::capture(uint32_t n_cells) const {
         rtype * out = values[task / n_blocks].data();
         if (n_comp == 1) {
             const Data & data = *field.components[0];
-            for (uint32_t i = first; i < last; i++) out[i] = data[i];
+            for (uint32_t i = first; i < last; i++) out[i] = data[cell ? cell[i] : i];
             return;
         }
         for (uint32_t i = first; i < last; i++) {
-            for (uint32_t k = 0; k < n_comp; k++) out[size_t(i) * n_comp + k] = field.value(i, k);
+            for (uint32_t k = 0; k < n_comp; k++) out[size_t(i) * n_comp + k] = field.value(cell ? cell[i] : i, k);
         }
     });
-    return values;
-}
-
-DataWriter::Values DataWriter::capture_faces() const {
-    Values values(fields.size());
-    for (size_t f = 0; f < fields.size(); f++) {
-        for (uint32_t face : geometry_faces) {
-            const uint32_t cell = static_cast<uint32_t>(mesh->h_cells_of_face(face, 0));
-            for (uint32_t k = 0; k < fields[f].n_vtk_components(); k++) values[f].push_back(fields[f].value(cell, k));
-        }
-    }
     return values;
 }
 
@@ -467,7 +452,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
             auto job = [this, filename, t, root,
-                        values = surface ? capture_faces() : capture(mesh->n_owned()), list = history]() {
+                        values = capture(mesh->n_owned(), subset), list = history]() {
                 const uint64_t before = one_file ? file_bytes(filename) : 0;
                 write_vtkhdf(filename, t, values);
                 if (root) {
@@ -477,7 +462,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             };
             run(std::move(job), !collective);
         }
-        logging::event(step, double(t), surface ? "surface" : "vtkhdf", filename);
+        logging::event(step, double(t), "vtkhdf", filename);
     } else {
         // Distributed runs: one piece per rank and a .pvtu index
         std::ostringstream piece;
@@ -489,12 +474,8 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         const int n_ranks = comm::size();
         if (distributed || root) {
             auto job = [this, piece = piece.str() + ".vtu", filename, stem, t, root, distributed, n_ranks,
-                        values = surface ? capture_faces() : capture(mesh->n_owned()), series = history]() mutable {
-                if (!surface) {
-                    write_vtu(piece, t, values);
-                } else {
-                    write_vtu_faces(piece, t, values);
-                }
+                        values = capture(mesh->n_owned(), subset), series = history]() mutable {
+                write_vtu(piece, t, values);
                 n_bytes += file_bytes(piece);
                 if (distributed && root) {
                     write_pvtu(filename, std::filesystem::path(stem).filename().string(), n_ranks);
@@ -503,7 +484,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             };
             run(std::move(job));
         }
-        logging::event(step, double(t), surface ? "surface" : "vtu", filename);
+        logging::event(step, double(t), "vtu", filename);
     }
     if (interval == 0) {
         // Skip any output times already passed (e.g. if dt exceeded time_interval)
@@ -1271,68 +1252,6 @@ void DataWriter::write_pvd(const std::vector<std::pair<rtype, std::string>> & se
     out << "</VTKFile>\n";
 }
 
-void DataWriter::write_vtu_faces(const std::string & filename, rtype t, const Values & values) const {
-    std::ofstream out(filename);
-    if (!out.good()) {
-        throw cannot_write("the snapshot", filename);
-    }
-
-    // Renumber the nodes of the selected faces
-    std::unordered_map<uint32_t, uint32_t> local;
-    std::vector<uint32_t> nodes;
-    for (uint32_t f : geometry_faces) {
-        for (uint32_t k = 0; k < mesh->h_n_nodes_of_face(f); k++) {
-            const uint32_t node = mesh->h_node_of_face(f, k);
-            if (local.emplace(node, nodes.size()).second) nodes.push_back(node);
-        }
-    }
-
-    out << std::setprecision(std::numeric_limits<rtype>::max_digits10);
-    out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
-    out << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness() << "\">\n";
-    out << "  <UnstructuredGrid>\n";
-    out << vtu_field_data(t);
-    out << "    <Piece NumberOfPoints=\"" << nodes.size() << "\" NumberOfCells=\"" << geometry_faces.size() << "\">\n";
-    out << "      <CellData>\n";
-    for (size_t i_field = 0; i_field < fields.size(); i_field++) {
-        const Field & field = fields[i_field];
-        out << "        <DataArray type=\"Float64\" Name=\"" << field.name << "\" ";
-        if (field.n_vtk_components() > 1) out << "NumberOfComponents=\"" << field.n_vtk_components() << "\" ";
-        out << "format=\"ascii\">\n";
-        for (rtype value : values[i_field]) out << static_cast<double>(value) << " ";
-        out << "\n        </DataArray>\n";
-    }
-    out << "      </CellData>\n";
-    out << "      <Points>\n";
-    out << "        <DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-    for (uint32_t node : nodes) {
-        FOR_I_DIM out << static_cast<double>(mesh->h_node_coords(node, i)) << " ";
-        for (uint8_t i = N_DIM; i < 3; i++) out << "0 ";
-    }
-    out << "\n        </DataArray>\n";
-    out << "      </Points>\n";
-    out << "      <Cells>\n";
-    out << "        <DataArray type=\"Int64\" Name=\"connectivity\" format=\"ascii\">\n";
-    for (uint32_t f : geometry_faces) {
-        for (uint32_t k = 0; k < mesh->h_n_nodes_of_face(f); k++) out << local.at(mesh->h_node_of_face(f, k)) << " ";
-    }
-    out << "\n        </DataArray>\n";
-    out << "        <DataArray type=\"Int64\" Name=\"offsets\" format=\"ascii\">\n";
-    uint64_t offset = 0;
-    for (uint32_t f : geometry_faces) {
-        offset += mesh->h_n_nodes_of_face(f);
-        out << offset << " ";
-    }
-    out << "\n        </DataArray>\n";
-    out << "        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">\n";
-    for (uint32_t f : geometry_faces) out << static_cast<int>(vtk_cell_type(N_DIM - 1, mesh->h_n_nodes_of_face(f))) << " ";
-    out << "\n        </DataArray>\n";
-    out << "      </Cells>\n";
-    out << "    </Piece>\n";
-    out << "  </UnstructuredGrid>\n";
-    out << "</VTKFile>\n";
-}
-
 namespace {
 
 /** @brief Bytes of a vector. */
@@ -1371,8 +1290,8 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
     }
 
     using header_t = uint64_t;
-    // Distributed runs write their owned cells; unused halo nodes are harmless
-    const uint32_t n_out = mesh->n_owned();
+    // Distributed runs write their owned cells (of the subset); unused halo nodes are harmless
+    const uint32_t n_out = subset ? static_cast<uint32_t>(subset_cells.size()) : mesh->n_owned();
     const bool zlib = compression == Compression::ZLIB;
 
     // The mesh's arrays (points, connectivity, offsets, types): the same in
@@ -1380,19 +1299,27 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
     std::vector<std::vector<char>> mesh_arrays;
     std::vector<std::vector<char>> & arrays = zlib ? vtu_mesh : mesh_arrays;
     if (arrays.empty()) {
+        // A subset's points are the nodes of its cells
+        std::vector<int64_t> point_of(mesh->n_nodes, subset ? -1 : 0);
+        for (uint32_t i = 0; subset && i < n_out; i++) {
+            for (uint32_t j = 0; j < mesh->h_n_nodes_of_cell(subset_cells[i]); j++) point_of[mesh->h_node_of_cell(subset_cells[i], j)] = 0;
+        }
         std::vector<rtype> points;
-        points.reserve(size_t(mesh->n_nodes) * 3);
         for (uint32_t i_node = 0; i_node < mesh->n_nodes; i_node++) {
+            if (point_of[i_node] < 0) continue;
+            point_of[i_node] = static_cast<int64_t>(points.size() / 3);
             FOR_I_DIM points.push_back(static_cast<rtype>(mesh->h_node_coords(i_node, i)));
             for (uint8_t i = N_DIM; i < 3; i++) points.push_back(static_cast<rtype>(0.0));
         }
+        vtu_points = points.size() / 3;
         std::vector<int64_t> connectivity, offsets;
         std::vector<uint8_t> types;
         int64_t cell_offset = 0;
-        for (uint32_t i = 0; i < n_out; i++) {
+        for (uint32_t k = 0; k < n_out; k++) {
+            const uint32_t i = subset ? subset_cells[k] : k;
             const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
             for (uint32_t j = 0; j < n_nodes; j++) {
-                connectivity.push_back(static_cast<int64_t>(mesh->h_node_of_cell(i, vtk_local_node(n_nodes, j))));
+                connectivity.push_back(point_of[mesh->h_node_of_cell(i, vtk_local_node(n_nodes, j))]);
             }
             cell_offset += n_nodes;
             offsets.push_back(cell_offset);
@@ -1433,7 +1360,7 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
         << "\" header_type=\"UInt64\"" << (zlib ? " compressor=\"vtkZLibDataCompressor\"" : "") << ">\n";
     out << "  <UnstructuredGrid>\n";
     out << vtu_field_data(t);
-    out << "    <Piece NumberOfPoints=\"" << mesh->n_nodes << "\" NumberOfCells=\"" << n_out << "\">\n";
+    out << "    <Piece NumberOfPoints=\"" << vtu_points << "\" NumberOfCells=\"" << n_out << "\">\n";
     out << "      <CellData>\n";
     for (size_t f = 0; f < fields.size(); f++) {
         data_array(vtk_float_type(), fields[f].name, fields[f].n_vtk_components(), appended_size(f, nullptr));

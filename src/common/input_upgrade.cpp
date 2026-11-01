@@ -29,6 +29,9 @@ namespace {
 
 std::string plus_one(const std::string & text) { return std::to_string(std::stoll(text) + 1); }
 
+// geometry = "all" wrote the whole mesh, which region calls "domain"
+std::string all_to_domain(const std::string & text) { return text == "\"all\"" || text == "'all'" ? "\"domain\"" : text; }
+
 /** @brief The zones of a generated mesh that a direction of `[mesh] periodic` joined. */
 std::vector<std::string> periodic_zones(const std::string & direction, const std::string & mesh_type) {
     if (mesh_type.empty() || mesh_type == "file") {
@@ -68,6 +71,9 @@ const Rules & rules() {
             {"numerics.face_reconstruction.quadrature_order", "", "0.2.0", "0.2.0", "never read"},
             {"physics.p_min", "", "0.2.0", "0.2.0", "pressures are not clipped"},
             {"physics.p_max", "", "0.2.0", "0.2.0", "pressures are not clipped"},
+            {"write_data[].geometry", "write_data[].region", "0.9.0", "0.10.0",
+             "region takes any region: a boundary zone by name, a named or inline region, or \"domain\"",
+             all_to_domain},
             {"probes[].shape", "probes[].type", "0.9.0", "0.10.0", "type selects the kind of every region"},
             {"mesh.curved[].shape", "mesh.curved[].type", "0.9.0", "0.10.0",
              "type selects the kind of every region; a curved zone lies on a surface (2D: a curve)"},

@@ -120,6 +120,13 @@ enum class Compression {
     ZLIB,  // lossless; with relative_error, after rounding the cell values
 };
 
+/** @brief The cells of a region a writer writes: owned ones, with the region's fraction in every cell of the mesh. */
+struct CellSubset {
+    std::string name;            // the region's, for the log
+    std::vector<uint32_t> cells;  // owned, increasing
+    std::vector<double> fractions;
+};
+
 /**
  * @brief Writes snapshots either every `interval` steps or every
  *        `time_interval` units of simulation time. Time-based writers also
@@ -142,11 +149,15 @@ class DataWriter {
          * @brief Set up from a [[write_data]] entry.
          * @param restart_variables Variables of a restart file, in order
          *        (default: CONSERVATIVE_NAMES); ignored for other formats.
+         * @param subset Only these cells (vtkhdf and vtu), with their fractions as REGION_FRACTION.
+         * @param prefix The files' prefix, if not the entry's.
          */
         void init(const Input & input,
                   std::vector<Data> & data,
                   std::shared_ptr<Mesh> mesh,
-                  const std::vector<std::string> & restart_variables = {});
+                  const std::vector<std::string> & restart_variables = {},
+                  const CellSubset * subset = nullptr,
+                  const std::string & prefix = "");
 
         /**
          * @brief Write files on a background thread ([output] async), and
@@ -222,8 +233,8 @@ class DataWriter {
         /** @brief A snapshot's cell values: per field, its cells' components interleaved. */
         using Values = std::vector<std::vector<rtype>>;
 
-        Values capture(uint32_t n_cells) const;
-        Values capture_faces() const;
+        /** @brief The values of the first n_cells cells, or of the subset's cells. */
+        Values capture(uint32_t n_cells, bool in_subset = false) const;
         void run(std::function<void()> job, bool allow_async = true);
         /**
          * @brief Rename the restart file written under a temporary name once
@@ -232,7 +243,6 @@ class DataWriter {
         void publish_restart(bool wait);
 
         void write_vtu(const std::string & filename, rtype t, Values & values);
-        void write_vtu_faces(const std::string & filename, rtype t, const Values & values) const;
         void write_pvd(const std::vector<std::pair<rtype, std::string>> & series) const;
 
         /** @brief Submit a restart file: written by this rank alone, or by every rank (distributed). */
@@ -256,13 +266,12 @@ class DataWriter {
 
         /**
          * @brief VTKHDF output: an UnstructuredGrid of the owned cells (curved
-         *        cells as quadratic ones), or a PolyData of the faces of a
-         *        boundary zone, written by every rank in global order; one
-         *        file per snapshot, or with series, one file of every snapshot.
+         *        cells as quadratic ones), or of the subset's, written by
+         *        every rank in global order; one file per snapshot, or with
+         *        series, one file of every snapshot.
          */
         void write_vtkhdf(const std::string & filename, rtype t, const Values & values);
         void build_vtkhdf_cells();
-        void build_vtkhdf_faces();
         void write_vtkhdf_series(const std::vector<std::pair<rtype, std::string>> & series) const;
         void resume_vtkhdf(rtype t);
 
@@ -290,15 +299,19 @@ class DataWriter {
         std::vector<Field> fields;
         std::shared_ptr<Mesh> mesh;
         std::vector<std::pair<rtype, std::string>> history;
-        bool surface = false;
-        std::string geometry = "all";
         uint64_t n_files = 0;
         std::string last_file;
         std::string partial_file;  // the restart file being written, renamed to last_file once complete
         void write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const;
         /** @brief The VTU field data: TIME, MALLARD_FORMAT_VERSION and the fields' units record. */
         std::string vtu_field_data(rtype t) const;
-        std::vector<uint32_t> geometry_faces;  // Empty: write all cells
+        // A region's cells (subset), their places among the region's cells of every rank, and its fractions
+        bool subset = false;
+        std::string region_name;
+        std::vector<uint32_t> subset_cells;
+        std::vector<uint64_t> subset_ids;
+        uint64_t n_subset = 0;
+        std::unique_ptr<Data> fraction;
         // Compression
         Compression compression = Compression::NONE;
         double relative_error = 0.0;  // 0: lossless
@@ -311,6 +324,7 @@ class DataWriter {
         uint64_t n_bytes = 0;
         // VTU arrays of the mesh, built by the first snapshot: raw, or compressed
         std::vector<std::vector<char>> vtu_mesh;
+        uint64_t vtu_points = 0;
         // Restart files of a distributed mesh: the owned cells in global order, in runs of chunks
         GlobalOrder restart_order;
         bool restart_order_built = false;
@@ -326,7 +340,7 @@ class DataWriter {
             std::vector<rtype> points;                       // 3 per point
             std::vector<int64_t> connectivity, offsets;      // offsets: one more on the last rank
             std::vector<uint8_t> types;                      // cells only
-            GlobalOrder order;                               // of the cells, or of the zone's faces
+            GlobalOrder order;                               // of the cells
         } vtkhdf;
         bool one_file = false;  // series = true: every snapshot in one file
         uint64_t vtkhdf_steps = 0;  // snapshots in the series file

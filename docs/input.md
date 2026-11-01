@@ -1228,7 +1228,7 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 ## Regions
 
 Regions select parts of space in `[[sources]]`, `[[sponges]]`,
-`[[initialize.regions]]` and `[[probes]]`, and their surfaces are the curved
+`[[initialize.regions]]`, `[[probes]]` and `[[write_data]]`, and their surfaces are the curved
 walls of [`[[mesh.curved]]`](#curved-boundaries) (explained with figures in the
 [geometry guide](guide/geometry.md#regions)). Each `region` key takes a table,
 or the name of a region defined once in [`[regions]`](#named-regions-regions)
@@ -1458,8 +1458,10 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `series` | (`vtkhdf`) `false` (default): one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`; `true`: every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
 | `variables` | (`vtkhdf`, `vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
-| `geometry` | (`vtkhdf`, `vtu`) `all` (default) for the volume, or a boundary zone name to write that zone's faces with the values of their adjacent cells (e.g. wall pressure) |
-| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Not for boundary-zone VTU output (`geometry`), which is ASCII |
+| `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it; a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `variables` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for the deprecated `hdf5` format |
+| `regions` | (`vtkhdf`, `vtu`) Instead of `region`: a list of regions, each written as `region` writes it, to `PREFIX_<name>` (a named region or zone) or `PREFIX_<index>` (inline, from 0) |
+| `geometry` | Deprecated (0.9.0; removed in 0.10.0) for `region`, which `mallard input upgrade` writes in its place (`"all"` as `"domain"`) |
+| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Filled regions only: boundary zones and other regions of lower dimension are written uncompressed |
 | `relative_error` | (`vtkhdf`, `vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
 | `chunk_cells` | (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank reading some cells decompresses only the chunks that hold them |
 
@@ -1473,8 +1475,9 @@ the number of ranks. The volume is an `UnstructuredGrid`: `Points`, `Connectivit
 cell, or three for vectors) and `FieldData/TIME`. Cells touching a curved wall
 (`[[mesh.curved]]` or high-order elements of the mesh file) are quadratic
 Lagrange cells (VTK types 69 to 73, and 27 for pyramids), their extra nodes
-on the curved geometry, after the mesh's nodes. A boundary zone (`geometry`)
-is a `PolyData` of its faces (`Lines` in 2D, `Polygons` in 3D). With
+on the curved geometry, after the mesh's nodes. A filled region's file is the
+`UnstructuredGrid` of its cells, renumbered in global order, and of their nodes.
+With
 `series = true` the mesh is stored once and VTKHDF's `Steps` group holds every
 snapshot's time (`Steps/Values`) and where its cell values start
 (`Steps/CellDataOffsets/<name>`). Nothing else is added to the VTKHDF layout:

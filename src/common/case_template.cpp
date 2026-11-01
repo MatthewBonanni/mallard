@@ -603,9 +603,9 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     written.emplace_back("run.sh", "runs it: ./run.sh [-t threads] [-n MPI ranks]");
     if (!post.empty()) {
         const std::string last =
-            "# The newest snapshot PREFIX_N: .vtkhdf, or without HDF5 .vtu (.pvtu of an MPI run, not its pieces)\n"
+            "# The newest snapshot PREFIX_N: .vtkhdf, or without HDF5 .vtu (.pvtu of an MPI run, not its pieces); .vtp of a region\n"
             "last() {\n"
-            "    newest=$(ls -t \"$1\"_[0-9]*.vtkhdf \"$1\"_[0-9]*.vtu \"$1\"_[0-9]*.pvtu 2>/dev/null | grep -v '_p[0-9]*\\.vtu$' | head -n 1)\n"
+            "    newest=$(ls -t \"$1\"_[0-9]*.vtkhdf \"$1\"_[0-9]*.vtu \"$1\"_[0-9]*.pvtu \"$1\"_[0-9]*.vtp 2>/dev/null | grep -v '_p[0-9]*\\.vtu$' | head -n 1)\n"
             "    [ -n \"$newest\" ] || { echo \"post.sh: no snapshots $1_*: run ./run.sh first\" >&2; exit 1; }\n"
             "    ls \"$1\"_[0-9]*.\"${newest##*.}\" | grep -v '_p[0-9]*\\.vtu$' | tail -n 1\n"
             "}\n";

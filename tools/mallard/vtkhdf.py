@@ -65,7 +65,8 @@ def read_cells(path, step=-1):
             out["TIME"] = float(g["FieldData/TIME"][0])
             for name, data in g["CellData"].items():
                 out[name] = np.asarray(data[...], dtype=float)
-    return pts, conn, starts[1:], types, out
+    from .vtu import vectors
+    return pts, conn, starts[1:], types, vectors(out)
 
 
 def read_points(path, step=-1):

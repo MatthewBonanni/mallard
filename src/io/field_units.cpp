@@ -62,6 +62,7 @@ const Entry NAMED[] = {
     {"TF_OMEGA", dim::none, "flame sensor"},
     {"PASR_KAPPA", dim::none, "PaSR reacting fraction"},
     {"P_MAX", dim::pressure, "largest pressure seen"},
+    {"REGION_FRACTION", dim::none, "volume fraction of the region in the cell"},
     // Probes: fluxes through surfaces, wall quantities
     {"MASS_FLUX", dim::mass_flux, "normal mass flux"},
     {"ENTHALPY_FLUX", dim::heat_flux, "normal total enthalpy flux"},

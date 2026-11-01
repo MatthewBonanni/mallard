@@ -33,7 +33,7 @@ variables = ["RHO", "U", "P", "T", "VORTICITY"]
 [[write_data]]                # several entries write independently
 prefix = "solut/wall"
 interval = 50
-geometry = "cylinder"         # the faces of one boundary zone
+region = "cylinder"           # a boundary zone, a slice, a volume: any region (below)
 variables = ["P", "T"]
 ```
 
@@ -46,7 +46,8 @@ variables = ["P", "T"]
 | `series` | `false` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf` |
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
 | `variables` | required (all but `restart`) | Variables to write, below; `Y_*` selects every variable with that prefix |
-| `geometry` | `"all"` | `vtkhdf`, `vtu`: a boundary zone name writes that zone's faces with the values of their cells (wall pressure, heat flux) |
+| `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (deprecated; `mallard input upgrade` rewrites it) |
+| `regions` | none | Instead of `region`: a list of regions, each written as its own series, `PREFIX_<name>` (inline ones: `PREFIX_<place in the list>`) |
 | `compression` | `"none"` | `"zlib"`: lossless compression of `vtkhdf`, `vtu`, `hdf5` and `restart` files (below) |
 | `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `hdf5` with `compression = "zlib"`: lossy, each cell value within this relative error |
 | `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
@@ -70,8 +71,7 @@ ParaView 5.12 and later open directly: open `PREFIX.vtkhdf.series` for the time
 series. Every rank writes its part of one file per snapshot with collective I/O
 (parallel HDF5 on several ranks), each array in global cell order, so the files
 are the same on any number of ranks. Cells touching a curved wall are written as
-quadratic Lagrange cells, so ParaView shows the curved geometry; a boundary zone
-(`geometry`) is a PolyData of its faces. With `series = true` the mesh is stored
+quadratic Lagrange cells, so ParaView shows the curved geometry. With `series = true` the mesh is stored
 once and every snapshot goes into `PREFIX.vtkhdf`; a restarted run drops the
 snapshots after its restart time and continues the file. Read the files in
 Python with `tools/mallard/vtkhdf.py` (or `read_vtu_cells`, which reads every
@@ -103,6 +103,81 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 
 **Restart files** (`format = "restart"`) are described in
 [Initialization and restarts](initialization.md#restarts).
+
+### Snapshots of regions
+
+Large runs need the whole field rarely and a few planes, a near field or the
+walls often. `region` writes just that, at its own interval, with the same keys
+as a whole-mesh snapshot:
+
+```toml
+[regions]
+near_field = {type = "sphere", center = [0, 0, 0], radius = 0.05}
+x1 = {type = "cut_plane", point = [0.01, 0, 0], normal = [1, 0, 0]}
+x2 = {type = "cut_plane", point = [0.02, 0, 0], normal = [1, 0, 0]}
+x3 = {type = "cut_plane", point = [0.04, 0, 0], normal = [1, 0, 0]}
+
+[[write_data]]                # the cells of a volume
+prefix = "solut/near"
+time_interval = 1e-4
+region = "near_field"
+variables = ["RHO", "U", "P"]
+
+[[write_data]]                # three slices: solut/x_x1.vtkhdf, solut/x_x2.vtkhdf, solut/x_x3.vtkhdf
+prefix = "solut/x"
+time_interval = 2e-5
+regions = ["x1", "x2", "x3"]
+variables = ["U", "P", "MASS_FLUX"]
+
+[[write_data]]                # a boundary zone, by its name
+prefix = "solut/wall"
+interval = 50
+region = "cylinder"
+variables = ["P", "T"]
+```
+
+![A disk's cells with their REGION_FRACTION, and their pressure with three slices across the field, on a triangle mesh](../images/guide/region_snapshots-light.svg#gh-light-mode-only)
+![A disk's cells with their REGION_FRACTION, and their pressure with three slices across the field, on a triangle mesh](../images/guide/region_snapshots-dark.svg#gh-dark-mode-only)
+
+What a snapshot holds depends on the region's dimension:
+
+| Region | Written | Values |
+|---|---|---|
+| A volume (an area in 2D): any region of [`[regions]`](geometry.md#regions), e.g. `sphere`, `box`, booleans | The cells it covers (cell fraction above 0), as a mesh of its own: only their nodes, curved cells as quadratic ones | The cells' fields, and `REGION_FRACTION`, each cell's [volume fraction](geometry.md#regions-on-a-mesh) of the region |
+| `"domain"` | The whole mesh, as without `region` | The cells' fields |
+| A boundary zone, by its name | Its faces: polygons (3D), a polyline (2D) | Point values at the face centroids, as a [boundary probe](probes.md#boundary-data) with `sampling = "point"` writes them, wall quantities included; other cell fields (`P_MAX`, `HRR`) from each face's cell |
+| A surface, curve or points of [`[regions]`](geometry.md#surfaces-and-curves-on-a-mesh) (`filled = false`, `boundary`, flat disks, circles, ...) | Its elements on the mesh: polygons (3D), segments (2D), points | Point values at each element's center, with its normal and measure; other cell fields from the element's cell |
+| A cut plane or other [probe type as a region](geometry.md#probe-types-as-regions) | The exact cut of the mesh, or the resampled surface, curve or points | Point values of the reconstruction, as a [probe](probes.md) of it with `sampling = "point"`; fluxes (`MASS_FLUX`, ...) through surfaces and 2D curves; other cell fields from the cell of each sample |
+
+A volume is written by every rank in global order, like the whole mesh;
+`compression`, `relative_error` and `series` apply as they do there. A boundary
+zone, cut plane, surface, curve or points is written as a probe writes it, by
+the same code: `vtkhdf` writes one PolyData file `PREFIX.vtkhdf` of every
+snapshot (`series` is always on), `vtu` one VTK PolyData file per snapshot,
+`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `variables` are sampled
+as [`[[probes]]`](probes.md) sample them (`U` writes `U_X`, `U_Y`, `U_Z`);
+any other variable of a snapshot (`HRR`, `P_MAX`, `MEAN_P`, ...) takes the value
+of the cell holding each sample. Either kind is
+the same on any number of ranks, takes [units](#units) and descriptions, and
+continues its series on restart. Every region is also written at the end of the
+run, as the whole mesh is.
+
+Pitfalls:
+
+- A slice is sampled where the plane cuts each cell, from the reconstruction:
+  the values are those of a [probe](probes.md#cut-planes-and-surfaces) of the plane, not
+  a cell average. Across a shock, use a volume region around it instead.
+- On a surface, curve or points, `RHO`, the primitives and `Y_<s>` are point
+  values, while cell fields such as `HRR`, `VORTICITY` or `MEAN_*` are the
+  averages of the cells the samples lie in: first order across the cell.
+- A volume region much smaller than a cell can cover no cell, which is an error.
+- A boundary zone's samples lie at the face centroids, on the wall: `P` is the
+  reconstruction's wall pressure, not the first cell's average. Cell fields
+  such as `P_MAX` are still the cell's.
+- Regions are written as `vtkhdf` or `vtu` only, not as the deprecated `hdf5`
+  (XDMF) format.
+- `compression` on a region of lower dimension, alone in its entry, is an
+  unused key: those files are small and written uncompressed.
 
 ## Run progress
 
@@ -310,7 +385,7 @@ those of `A` per second.
 | `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` | `1` |
 | `MASS_FLUX`, `SPECIES_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
-| `CF`, `CP`, `Y_PLUS` | `1` | | |
+| `CF`, `CP`, `Y_PLUS` | `1` | `REGION_FRACTION` (regions) | `1` |
 
 CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
 `point`, `face`, `cell`, `count` and the normal `nx`, `ny`, `nz` `1`; the

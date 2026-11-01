@@ -131,6 +131,6 @@ time_interval = 1.5e-6
 # overwritten by every segment
 [[write_data]]
 prefix = "./wall/bottom"
-geometry = "bottom"
+region = "bottom"
 time_interval = 6.0e-6
 variables = ["P_MAX"]

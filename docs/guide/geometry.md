@@ -12,6 +12,7 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone) | [Sources](sources.md#regions) |
 | `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh) | [Probes](probes.md#region-probes) |
 | `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
+| `[[write_data]]` `region`, `regions` | a [region](#regions) of any dimension or its [name](#named-regions): a filled region's cells, a surface or curve at its elements, a boundary zone, `domain`, or a [probe type as a region](#probe-types-as-regions) | [Output](output.md#snapshots-of-regions) |
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength` | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file of them | [Checking regions](#checking-regions) |
@@ -489,6 +490,22 @@ region = {type = "union", regions = [
 
 In axisymmetric runs the fractions are weighted by the radius, so they are true
 volume fractions of the revolved cells.
+
+### Probe types as regions
+
+```toml
+[regions]
+mid_plane = {type = "cut_plane", point = [0.5, 0, 0], normal = [1, 0, 0]}
+wake_line = {type = "line", start = [1, -0.5, 0], end = [1, 0.5, 0], n_points = 101}
+```
+
+A table whose `type` is one of the [probe types](#points-and-curves) `point`,
+`points`, `line`, `polyline`, `arc`, `curve`, `cut_plane` or `surface` is a
+region of lower dimension for `[[write_data]]` and `[[probes]]`: it takes that
+probe type's keys, below and in [`[[probes]]`](../input.md#probes), and its
+samples go where the probe puts them. It cannot be a part of a boolean, takes no
+`edge`, and transforms as probes do (`scale`, `rotate`, `translate`, about the
+origin).
 
 ## Points and curves
 

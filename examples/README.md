@@ -55,7 +55,7 @@ hardware they were measured on.
 | Case | What it shows | Cells | Run time |
 |---|---|---|---|
 | `viscous_shock_tube` | Daru & Tenaud viscous shock tube at Re = 200: shock / boundary-layer interaction in a closed box, giving a lambda shock and a primary vortex by t = 1. Matches the grid-converged wall density of Zhou et al. to 0.5 RMS; check with `examples/viscous_shock_tube/plot_viscous_shock_tube.py` | 500,000 quads | 58,500 viscous-limited steps: one GPU (or Nx = 500, Ny = 250: ~20 minutes on 6 CPU threads) |
-| `cylinder` | Viscous flow past a cylinder at Re = 100 (vortex shedding) on a Gmsh O-grid; generate the mesh with `tools/mesh/make_cylinder_mesh.py` first. Reproduces St, Cd and lift amplitude to within 2% | 49,152 quads | ~50 minutes on a laptop CPU |
+| `cylinder` | Viscous flow past a cylinder at Re = 100 (vortex shedding) on a Gmsh O-grid; generate the mesh with `tools/mesh/make_cylinder_mesh.py` first. Reproduces St, Cd and lift amplitude to within 2%. Writes snapshots of the near wake's cells and of three cuts across the recirculation bubble ([regions](../docs/guide/output.md#snapshots-of-regions)) besides the whole field | 49,152 quads | ~50 minutes on a laptop CPU |
 | `sphere_re300` | Viscous flow past a sphere at Re = 300 (3D build): periodic shedding of hairpin vortices, on a Gmsh mesh of prisms (boundary layer) and tetrahedra from `examples/sphere_re300/make_sphere_re300_mesh.py`; MUSCL. St = 0.133, Cd = 0.669, Cl = 0.073 against 0.137, 0.656, 0.069 (Johnson & Patel 1999), within 0.2%, 0.4% and 5% of a mesh with 2.4 times the cells | 850,000 cells | 1.04M steps: ~4.7 hours on four A100s |
 
 ## Turbulence
