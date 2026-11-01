@@ -171,6 +171,7 @@ MeshFileData read_cgns(const std::string & filename) {
     std::vector<std::vector<uint64_t>> cell_nodes, face_nodes, face_all_nodes;  // file-wide node ids
     std::vector<int> face_zone;  // zone index of every boundary face
     std::vector<std::pair<size_t, size_t>> cell_section;  // zone and section of every cell
+    std::vector<std::string> cell_bc;  // zone name of a cell from a boundary condition on cells (Gmsh's volume groups)
 
     for (int z = 1; z <= n_zones; z++) {
         ZoneInfo & zone = zones[size_t(z - 1)];
@@ -366,6 +367,10 @@ MeshFileData read_cgns(const std::string & filename) {
                     }
                     const ElementRef & ref = zone.elements[size_t(e - 1)];
                     if (ref.kind == ElementRef::FACE) faces.push_back(ref.index);
+                    if (ref.kind == ElementRef::CELL) {
+                        if (cell_bc.size() <= ref.index) cell_bc.resize(ref.index + 1);
+                        if (cell_bc[ref.index].empty()) cell_bc[ref.index] = name;
+                    }
                 }
             }
             for (uint32_t f : faces) {
@@ -415,7 +420,11 @@ MeshFileData read_cgns(const std::string & filename) {
     for (const auto & c : cell_nodes) data.cells.push_back(renumber(c));
     for (size_t c = 0; c < cell_section.size(); c++) {
         const std::string & family = zones[cell_section[c].first].section_families[cell_section[c].second];
-        if (!family.empty()) data.set_cell_zone(c, family);
+        if (!family.empty()) {
+            data.set_cell_zone(c, family);
+        } else if (c < cell_bc.size() && !cell_bc[c].empty()) {
+            data.set_cell_zone(c, cell_bc[c]);
+        }
     }
     for (size_t f = 0; f < face_nodes.size(); f++) {
         data.boundary_faces.push_back({renumber(face_nodes[f]), face_name[f]});

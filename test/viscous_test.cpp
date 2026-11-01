@@ -53,6 +53,7 @@ std::unique_ptr<Solver> run_viscous(const ViscousCase & c) {
       << "[output]\ncheck_interval = 1000000\n";
     if (!c.source.empty()) s << "[source]\n" << c.source;
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(s.str()));
     solver->run();
     solver->update_primitives();

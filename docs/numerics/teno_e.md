@@ -280,7 +280,7 @@ fan from the face's first vertex. The stencil has $n_s$ entries
 (`small_stencil_size`: 10 in 2D, $2N_2 = 18$ in 3D), up to $2n_s$ so as not to
 split a tie. A face whose cone holds fewer than $n_s$ candidates, whose tie
 cannot be resolved within $2n_s$, or whose fit is rejected has no sector
-stencil; the log counts these ("sector stencils cut by boundaries"), which
+stencil; the terminal output counts these ("sector stencils cut by boundaries"), which
 occur at corners of the domain. A troubled cell then chooses among the
 stencils it has.
 
@@ -466,6 +466,14 @@ the extrema of $v$ over the cell and its face neighbors (boundary faces add
 none). The scaled values are checked again, and an inadmissible cell still
 falls back to first order.
 
+Admissible face values do not make the cell update admissible, since a
+troubled cell's face values come from different stencils and do not average
+to the cell's mean. In planar single-gas runs `bound_preserving = true` also
+limits the convective fluxes so that every forward-Euler stage keeps each
+cell's density and pressure positive at $\mathrm{CFL} \le 0.5$
+([Hu, Adams & Shu 2013](../references.md#hu-adams-shu-2013); details in the
+[theory manual](../theory/finite_volume.md#reconstruction)).
+
 ### Face quadrature
 
 The face points $\boldsymbol{\xi}_q$, set once
@@ -493,7 +501,7 @@ device memory, a team of threads per cell on GPUs. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
 and on the host, so it is independent of the batch, the thread count and
-where it ran. The log's "TENO setup" row gives the execution space and the
+where it ran. The terminal output's "TENO setup" row gives the execution space and the
 time of each phase.
 
 The tables are packed without padding to the largest stencil: per cell, the

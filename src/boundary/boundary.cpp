@@ -634,6 +634,8 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         if (h_face_image_face(f) >= 0) {
             const auto x_g = mesh.h_face_point(static_cast<uint32_t>(h_face_image_face(f)), static_cast<uint32_t>(h_face_image(f)));
             FOR_I_DIM h_face_image_offset(f, i) = mesh.h_face_coords(f, i) - x_g[i];
+        } else {
+            FOR_I_DIM h_face_image_offset(f, i) = mesh.h_face_coords(f, i) - target[i];
         }
     }
     Kokkos::deep_copy(data.face_bc, h_face_bc);

@@ -19,6 +19,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
@@ -51,6 +52,14 @@ uint64_t file_bytes(const std::string & filename) {
     std::error_code error;
     const auto size = std::filesystem::file_size(filename, error);
     return error ? 0 : uint64_t(size);
+}
+
+/** @brief Flush a file written by this process to its storage. */
+void sync_file(const std::string & filename) {
+    const int fd = ::open(filename.c_str(), O_RDONLY);
+    const bool synced = fd >= 0 && ::fsync(fd) == 0;
+    if (fd >= 0) ::close(fd);
+    if (!synced) throw cannot_write("the restart file", filename);
 }
 
 } // namespace
@@ -143,7 +152,7 @@ void DataWriter::init(const Input & input,
                            .suggestion = suggest_value(var, names),
                            .fix = "Vectors also go by their name without _X, _Y, _Z (e.g. U); a trailing * selects "
                                   "every variable it starts (e.g. Y_*)",
-                           .docs = "docs/guide/output.md#snapshots-write_data"});
+                           .docs = "docs/guide/output.md#solution-snapshots-write_data"});
     };
     auto find_data = [&](const std::string & name) -> const Data * {
         for (const auto & data_var : data) {
@@ -335,10 +344,37 @@ void DataWriter::run(std::function<void()> job, bool allow_async) {
 
 void DataWriter::finish() {
     const auto start = std::chrono::steady_clock::now();
+    publish_restart(true);
     if (pending.valid()) pending.get();
     // Every rank's part of the files is written before any rank reads them
     if (comm::size() > 1) comm::barrier();
     t_blocking += seconds_since(start);
+}
+
+void DataWriter::publish_restart(bool wait) {
+    if (partial_file.empty()) return;
+    const bool collective = mesh->n_global_cells > 0 && comm::size() > 1;
+    if (!wait) {
+        int32_t done = !pending.valid() || pending.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+        if (collective) done = comm::allreduce(done, comm::Op::MIN);
+        if (!done) return;
+    }
+    const std::string partial = std::exchange(partial_file, {});
+    std::exception_ptr error;
+    try {
+        if (pending.valid()) pending.get();
+    } catch (...) {
+        error = std::current_exception();
+    }
+    int32_t written = !error;
+    if (collective) written = comm::allreduce(written, comm::Op::MIN);
+    if (error) std::rethrow_exception(error);
+    if (!written) throw std::runtime_error("Another rank could not write its part of " + partial + ".");
+    if (comm::is_root()) {
+        std::error_code rename_error;
+        std::filesystem::rename(partial, last_file, rename_error);
+        if (rename_error) throw cannot_write("the restart file", last_file);
+    }
 }
 
 DataWriter::Values DataWriter::capture(uint32_t n_cells, bool in_subset) const {
@@ -374,6 +410,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     }
     const auto start = std::chrono::steady_clock::now();
     // One snapshot at a time: the previous one is written before the next is taken
+    publish_restart(true);
     if (pending.valid()) pending.get();
     const bool distributed = mesh->n_global_cells > 0;
     const bool root = comm::is_root();
@@ -382,8 +419,11 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
            << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
     const std::string stem = stream.str();
     if (format == DataFormat::RESTART) {
+        // Written under another name, so that no file of this name is ever incomplete
         last_file = stem + ".restart";
-        write_restart(last_file, step, t, attributes, faces, arrays);
+        write_restart(last_file + ".partial", step, t, attributes, faces, arrays);
+        partial_file = last_file + ".partial";
+        publish_restart(false);
         logging::event(step, double(t), "restart", stem + ".restart");
     } else if (format == DataFormat::HDF5) {
         last_file = stem + ".h5";
@@ -803,6 +843,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
         put(trailer.data(), trailer.size());
         out.close();
         if (!out) throw cannot_write("the restart file", filename);
+        sync_file(filename);
         n_bytes += file_bytes(filename);
     };
     run(std::move(job));
@@ -897,7 +938,8 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
                 ::close(fd);
                 throw;
             }
-            if (::close(fd) != 0) throw cannot_write("the restart file", filename);
+            const bool synced = ::fsync(fd) == 0;
+            if (::close(fd) != 0 || !synced) throw cannot_write("the restart file", filename);
             n_bytes += written;
         };
         run(std::move(job));
@@ -911,11 +953,13 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
         MPI_SUCCESS) {
         throw cannot_write("the restart file", filename);
     }
-    MPI_File_set_size(fh, 0);
+    int32_t failed = 0;
+    const auto check = [&failed](int code) { failed = failed || code != MPI_SUCCESS; };
+    check(MPI_File_set_size(fh, 0));
     const std::vector<char> header =
         restart_header(n_global, step, double(t), names, attributes, ordered.total, 0, arrays);
     if (comm::is_root()) {
-        MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE);
+        check(MPI_File_write_at(fh, 0, header.data(), static_cast<int>(header.size()), MPI_BYTE, MPI_STATUS_IGNORE));
     }
     const MPI_Offset header_size = static_cast<MPI_Offset>(header.size());
     const MPI_Datatype real_type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
@@ -929,24 +973,26 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
         for (uint32_t i = 0; i < n_owned; i++) values[i] = fields[v].value(i, 0);
         MPI_File_set_view(fh, header_size + MPI_Offset(v * n_global * sizeof(rtype)), real_type, file_type, "native",
                           MPI_INFO_NULL);
-        MPI_File_write_all(fh, values.data(), static_cast<int>(n_owned), real_type, MPI_STATUS_IGNORE);
+        check(MPI_File_write_all(fh, values.data(), static_cast<int>(n_owned), real_type, MPI_STATUS_IGNORE));
     }
     MPI_Type_free(&file_type);
     // Each rank's faces are a contiguous run of the keys and of the values
     const MPI_Offset faces_at = header_size + MPI_Offset(fields.size() * n_global * sizeof(rtype));
     MPI_File_set_view(fh, 0, MPI_BYTE, MPI_BYTE, "native", MPI_INFO_NULL);
-    MPI_File_write_at_all(fh, faces_at + MPI_Offset(ordered.first * sizeof(uint64_t)), ordered.part.keys.data(),
-                          static_cast<int>(ordered.part.keys.size()), MPI_UINT64_T, MPI_STATUS_IGNORE);
-    MPI_File_write_at_all(fh,
-                          faces_at + MPI_Offset(ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype)),
-                          ordered.part.values.data(), static_cast<int>(ordered.part.values.size()), real_type,
-                          MPI_STATUS_IGNORE);
+    check(MPI_File_write_at_all(fh, faces_at + MPI_Offset(ordered.first * sizeof(uint64_t)), ordered.part.keys.data(),
+                                static_cast<int>(ordered.part.keys.size()), MPI_UINT64_T, MPI_STATUS_IGNORE));
+    check(MPI_File_write_at_all(fh,
+                                faces_at + MPI_Offset(ordered.total * sizeof(uint64_t) + ordered.first * W * sizeof(rtype)),
+                                ordered.part.values.data(), static_cast<int>(ordered.part.values.size()), real_type,
+                                MPI_STATUS_IGNORE));
     if (comm::is_root()) {
         const std::vector<char> trailer = provenance_trailer();
-        MPI_File_write_at(fh, faces_at + MPI_Offset(ordered.total * (sizeof(uint64_t) + W * sizeof(rtype))),
-                          trailer.data(), static_cast<int>(trailer.size()), MPI_BYTE, MPI_STATUS_IGNORE);
+        check(MPI_File_write_at(fh, faces_at + MPI_Offset(ordered.total * (sizeof(uint64_t) + W * sizeof(rtype))),
+                                trailer.data(), static_cast<int>(trailer.size()), MPI_BYTE, MPI_STATUS_IGNORE));
     }
-    MPI_File_close(&fh);
+    check(MPI_File_sync(fh));
+    check(MPI_File_close(&fh));
+    if (comm::allreduce(failed, comm::Op::MAX)) throw cannot_write("the restart file", filename);
     if (comm::is_root()) n_bytes += file_bytes(filename);
     t_writing += seconds_since(start);
 #else

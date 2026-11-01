@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cmath>
+#include <csignal>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -23,6 +24,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include <sys/resource.h>
 
 #include "common_io.h"
 #include "compression.h"
@@ -77,6 +80,7 @@ TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
         "[numerics.face_reconstruction]\ntype = \"FO\"\n"
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1\nT_ref = 1\nrho_ref = 1\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     rtype x_max = 0.0;
     for (uint32_t i = 0; i < solver.get_mesh()->n_nodes; i++) x_max = std::max(x_max, solver.get_mesh()->h_node_coords(i, 0));
@@ -103,10 +107,10 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
         "[output]\ncheck_interval = 1000000\n"
         "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\ntime_interval = 0.015\nvariables = [\"RHO\"]\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     EXPECT_NEAR(solver.get_time(), 0.075, roundoff(1e-12));
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, ZeroCheckIntervalIsRejected) {
@@ -127,8 +131,8 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     // A run restarted at t = 0.1 rewrites the later snapshots: the XDMF time
     // series lists each time once, and numbering continues from the restart
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1) GTEST_SKIP() << "a writer of one rank's whole mesh";
     const std::string dir = (scratch_dir() / "mallard_h5_resume").string();
-    std::filesystem::remove_all(dir);
     auto mesh = make_mesh("cartesian_tri", 3, 2);
     Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
     std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
@@ -159,7 +163,6 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     }
     EXPECT_EQ(times, (std::vector<double>{0.0, double(rtype(0.1)), double(rtype(0.2))}));
     EXPECT_TRUE(std::filesystem::exists(dir + "/f_mesh.h5"));
-    std::filesystem::remove_all(dir);
 }
 
 namespace {
@@ -223,6 +226,7 @@ std::string output_case(const std::string & dir, const std::string & output_keys
 
 void run_case(const std::string & input) {
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
 }
@@ -288,7 +292,6 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
     // Uniform flow u = 0.1, a = sqrt(1.4) on 0.25 x 0.5 cells: the CFL = 1 time
     // step is 2 V / sum_f (|u_n| + a) A_f = 0.25 / (0.1 + 1.5 a)
     const std::string dir = (scratch_dir() / "mallard_cfl_output").string();
-    std::filesystem::remove_all(dir);
     const std::string input =
         "[run]\nn_steps = 1\ndt = 0.01\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
@@ -306,6 +309,7 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
         "[[write_data]]\nprefix = \"" + dir + "/slice\"\nformat = \"vtu\"\ninterval = 1\nvariables = [\"P\", \"CFL\"]\n"
         "region = {type = \"cut_plane\", point = [0.3, 0.5], normal = [1.0, 0.0]}\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
     const double expected = 0.01 * (0.1 + 1.5 * std::sqrt(1.4)) / 0.25;
@@ -328,21 +332,20 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
         ASSERT_EQ(cfl.size(), file.find("wall") != std::string::npos ? 4u : 2u) << file;
         for (double value : cfl) EXPECT_NEAR(value, expected, 1e-6) << file;
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
     // The snapshot taken when a file is due is what lands in it, although the
     // run has moved on while it is written
-    const std::string dir = (scratch_dir() / "mallard_async_output").string();
     std::vector<std::pair<std::string, std::string>> variants = {{"", ""}};
     if (compression::have_zlib()) {
         variants.emplace_back("compression = \"zlib\"\n", "compression = \"zlib\"\n");
         variants.emplace_back("compression = \"zlib\"\nrelative_error = 1e-4\n",
                               "compression = \"zlib\"\nchunk_cells = 100\n");
     }
+    int variant = 0;
     for (const auto & [snapshot_keys, restart_keys] : variants) {
-        std::filesystem::remove_all(dir);
+        const std::string dir = (scratch_dir() / ("mallard_async_output_" + std::to_string(variant++))).string();
         run_case(output_case(dir + "/sync", "async = false\n", snapshot_keys, restart_keys));
         run_case(output_case(dir + "/async", "io_threads = 3\n", snapshot_keys, restart_keys));
         const auto sync = files_under(dir + "/sync"), async = files_under(dir + "/async");
@@ -363,14 +366,12 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
             EXPECT_TRUE(without_provenance(async.at(name)) == without_provenance(bytes)) << name << " " << snapshot_keys;
         }
     }
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
     // A run that stops on an error destroys its writers without finish():
     // the file being written in the background is still written whole
     const std::string dir = (scratch_dir() / "mallard_async_unwind").string();
-    std::filesystem::remove_all(dir);
     auto mesh = make_mesh("cartesian_tri", 300, 200);
     Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
     for (uint32_t i = 0; i < mesh->n_cells; i++) values(i, 0) = rtype(i) / rtype(7);
@@ -383,16 +384,51 @@ TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
         writer.set_async(async);
         writer.write(0, 0.0_r);
     }
+    comm::barrier();  // Rank 0 writes the files
     const std::string sync = file_contents(dir + "/s_000000.vtu");
     EXPECT_GT(sync.size(), 120000u * sizeof(rtype));
     EXPECT_TRUE(file_contents(dir + "/a_000000.vtu") == sync);
-    std::filesystem::remove_all(dir);
+}
+
+TEST(IOTest, ARestartFileCutShortIsNeverFoundUnderItsName) {
+    if (comm::size() > 1) GTEST_SKIP() << "a write failing on one rank alone ends a parallel run";
+    // Writing stops partway through the file, as when a run is killed or its disk fills:
+    // a run resuming from the newest .restart file must not find it
+    const std::string dir = (scratch_dir() / "mallard_restart_cut_short").string();
+    auto mesh = make_mesh("cartesian_tri", 300, 200);
+    Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, N_CONSERVATIVE);
+    std::vector<Data> data;
+    for (uint8_t v = 0; v < N_CONSERVATIVE; v++) {
+        data.push_back(Data(CONSERVATIVE_NAMES[v], Kokkos::subview(values, Kokkos::ALL(), v)));
+    }
+    for (bool async : {false, true}) {
+        const std::string prefix = dir + (async ? "/a" : "/s");
+        DataWriter writer;
+        writer.init(parse_toml("prefix = \"" + prefix + "\"\nformat = \"restart\"\ninterval = 1\n"), data, mesh);
+        writer.set_async(async);
+        rlimit unlimited;
+        ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &unlimited), 0);
+        // Past the limit, writes fail with EFBIG instead of ending the process
+        const rlimit limited = {1 << 20, unlimited.rlim_max};
+        const auto on_xfsz = std::signal(SIGXFSZ, SIG_IGN);
+        ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limited), 0);
+        bool failed = false;
+        try {
+            writer.write(0, 0.0_r);
+            writer.finish();
+        } catch (const std::exception &) {
+            failed = true;
+        }
+        setrlimit(RLIMIT_FSIZE, &unlimited);
+        std::signal(SIGXFSZ, on_xfsz);
+        EXPECT_TRUE(failed);
+        EXPECT_FALSE(std::filesystem::exists(prefix + "_000000.restart")) << async;
+    }
 }
 
 TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
     if (!compression::have_zlib()) GTEST_SKIP() << "built without zlib";
     const std::string dir = (scratch_dir() / "mallard_compressed_output").string();
-    std::filesystem::remove_all(dir);
     run_case(output_case(dir + "/raw", "", "", ""));
     run_case(output_case(dir + "/zlib", "", "compression = \"zlib\"\n", "compression = \"zlib\"\nchunk_cells = 100\n"));
     run_case(output_case(dir + "/lossy", "", "compression = \"zlib\"\nrelative_error = 1e-3\n", ""));
@@ -439,10 +475,10 @@ TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
     }
 
     // VTKHDF: deflated datasets with the same values; rounding changes only the cell values
-    for (const char * file : {"/vtkhdf/flow_000008.vtkhdf", "/vtkhdf/series.vtkhdf", "/vtkhdf/wall_000008.vtkhdf"}) {
+    for (const char * file : {"/vtkhdf/flow_000008.vtkhdf", "/vtkhdf/series.vtkhdf", "/vtkhdf/near_000008.vtkhdf"}) {
         const auto raw_file = h5_all_datasets(dir + "/raw" + file);
         EXPECT_EQ(h5_all_datasets(dir + "/zlib" + file), raw_file) << file;
-        if (!std::string(file).starts_with("/vtkhdf/wall")) {
+        if (!std::string(file).starts_with("/vtkhdf/near")) {
             EXPECT_LT(std::filesystem::file_size(dir + "/zlib" + file),
                       std::filesystem::file_size(dir + "/raw" + file))
                 << file;
@@ -460,7 +496,6 @@ TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
         }
     }
 #endif
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, RoundingKeepsEveryValueWithinTheRelativeError) {
@@ -566,8 +601,8 @@ std::string vtkhdf_type(const std::string & file) {
 TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
     // Triangles and quadrilaterals of a Gmsh file: each cell's nodes, type
     // and values round trip, in serial cell order
+    if (comm::size() > 1) GTEST_SKIP() << "a writer of one rank's whole mesh";
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_cells").string();
-    std::filesystem::remove_all(dir);
     const std::string file = write_temp("vtkhdf_mixed.msh", jittered_mixed_mesh(6));
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml("[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"));
@@ -617,14 +652,13 @@ TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
     std::stringstream text;
     text << index.rdbuf();
     EXPECT_NE(text.str().find("{\"name\": \"f_000010.vtkhdf\", \"time\": 0.25}"), std::string::npos) << text.str();
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {
     // A run restarted at t = 0.1 continues the series of one file after its
     // second snapshot, and a series of files after its second file
+    if (comm::size() > 1) GTEST_SKIP() << "a writer of one rank's whole mesh";
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_resume").string();
-    std::filesystem::remove_all(dir);
     auto mesh = make_mesh("cartesian_tri", 3, 2);
     const uint32_t n = mesh->n_cells;
     Kokkos::View<rtype **>::host_mirror_type values("values", n, 1);
@@ -686,23 +720,23 @@ TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {
                other_data, other);
     third.resume(10, 0.1_r);
     EXPECT_THROW(third.write(25, 0.2_r), std::runtime_error);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
     // Annulus cells at the walls (circles) are quadratic: their edge nodes on
     // the walls lie on the circles; the ring in between stays linear
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_curved").string();
-    std::filesystem::remove_all(dir);
     constexpr uint32_t N_T = 24;
     const double tol = 64.0 * double(std::numeric_limits<rtype>::epsilon());
     for (bool triangles : {false, true}) {
         const std::string file = write_temp("vtkhdf_annulus.msh", annulus_gmsh(3, N_T, 1, triangles));
         Solver solver;
+        solver.set_distributed(false);
         solver.init(parse_toml(
             "[run]\nn_steps = 1\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
-            "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
-            "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+            "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+            "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
             "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"
             "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
             "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"
@@ -737,7 +771,6 @@ TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
         EXPECT_EQ(n_quadratic, 2u * N_T);
         EXPECT_EQ(n_wall_edges, 2u * N_T);
     }
-    std::filesystem::remove_all(dir);
 }
 
 #endif

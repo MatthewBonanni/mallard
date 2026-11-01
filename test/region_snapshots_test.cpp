@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <numbers>
 #include <set>
 #include <sstream>
 #include <string>
@@ -375,6 +376,50 @@ TEST(RegionSnapshotsTest, RegionsWriteOneSeriesEachAndTheLastStateToo) {
         EXPECT_NE(domain.find("NumberOfCells=\"" + std::to_string(8 * 6 * (N_DIM == 3 ? 4 : 1)) + "\""), std::string::npos);
         EXPECT_NE(box.find("Name=\"REGION_FRACTION\""), std::string::npos);
         EXPECT_EQ(domain.find("Name=\"REGION_FRACTION\""), std::string::npos);
+    }
+}
+
+TEST(RegionSnapshotsTest, SurfacesAndCurvesOfRegionsHaveASampleAtEachElement) {
+    // A sphere's surface (3D) or a circle (2D) of [regions]: one sample per element of the region on the mesh,
+    // with its measure and outward normal; the measures sum to the exact area (length)
+    const std::string dir = fresh_dir("elements");
+    const double r = 0.3;
+    const std::string shell = N_DIM == 3 ? "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.3, filled = false}"
+                                         : "{type = \"circle\", center = [0.5, 0.5], radius = 0.3}";
+    run_case(box_case("cartesian", "type = \"MUSCL\"\n",
+                      "[regions]\nshell = " + shell + "\n[[write_data]]\nprefix = \"" + dir +
+                          "/e\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"P\", \"MASS_FLUX\"]\nregion = \"shell\"\n"));
+    if (!comm::is_root()) return;
+    const std::string text = read_all(dir + "/e_000002.vtp");
+    const std::string marker = "<AppendedData encoding=\"raw\">";
+    const size_t base = text.find('_', text.find(marker)) + 1;
+    auto array = [&](const std::string & name) {
+        const size_t tag = text.find("Name=\"" + name + "\"");
+        EXPECT_NE(tag, std::string::npos) << name;
+        const size_t at = base + std::stoull(text.substr(text.find("offset=\"", tag) + 8));
+        uint64_t n = 0;
+        std::memcpy(&n, text.data() + at, sizeof(n));
+        return text.substr(at + sizeof(n), n);
+    };
+    const std::vector<double> measure = as<double>(array("measure")), points = as<double>(array("Points")),
+                              normal = as<double>(array("normal")), p = as<double>(array("P"));
+    const std::vector<int64_t> connectivity = as<int64_t>(array("connectivity")), offsets = as<int64_t>(array("offsets"));
+    ASSERT_GT(measure.size(), 8u);
+    EXPECT_EQ(offsets.size(), measure.size()) << "a cell per element";
+    EXPECT_EQ(p.size(), measure.size());
+    double total = 0.0;
+    for (double m : measure) total += m;
+    EXPECT_NEAR(total, N_DIM == 3 ? 4.0 * std::numbers::pi * r * r : 2.0 * std::numbers::pi * r, 1e-9);
+    int64_t first = 0;
+    for (size_t k = 0; k < offsets.size(); k++) {
+        double outward = 0.0;
+        for (size_t d = 0; d < size_t(N_DIM); d++) {
+            double c = 0.0;
+            for (int64_t v = first; v < offsets[k]; v++) c += points[3 * size_t(connectivity[size_t(v)]) + d];
+            outward += (c / double(offsets[k] - first) - 0.5) * normal[3 * k + d];
+        }
+        EXPECT_GT(outward, 0.0) << k;
+        first = offsets[k];
     }
 }
 

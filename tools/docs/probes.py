@@ -1,7 +1,7 @@
 """Figures of the probes and region snapshots sections of the user guide, from
-short Mallard runs (seconds each on a CPU build): probe shapes over a 2D mesh,
-boundary probes on curved walls (polylines with arc length), a 3D wall's heat
-flux, an exact cut plane and a sphere, measurements around a cylinder at
+short Mallard runs (seconds each on a CPU build): probes of every type over a 2D
+mesh, boundary probes on curved walls (polylines with arc length), a 3D wall's
+heat flux, an exact cut plane and a sphere, measurements around a cylinder at
 Re = 40 (wall CP, CF and y+, fluxes through a closed circle and a cut,
 reductions), and the snapshots of a disk's cells and of three slices.
 
@@ -52,7 +52,7 @@ def read_vtp(path):
     return arrays
 
 
-# --------------------------------------------------------------- probe shapes
+# --------------------------------------------------------------- probe types
 
 FIELD = "1.0 + 0.4 * exp(-12 * ((x - 0.45)^2 + (y - 0.62)^2)) - 0.2 * exp(-20 * ((x - 1.1)^2 + (y - 0.35)^2))"
 
@@ -61,11 +61,11 @@ FIELD = "1.0 + 0.4 * exp(-12 * ((x - 0.45)^2 + (y - 0.62)^2)) - 0.2 * exp(-20 * 
 def shapes_data(mallard):
     work = Path(tempfile.mkdtemp())
     probes = {
-        "points": 'shape = "points"\npoints = [[0.2, 0.2], [0.3, 0.8], [1.25, 0.25], [1.3, 0.75]]',
+        "points": 'type = "points"\npoints = [[0.2, 0.2], [0.3, 0.8], [1.25, 0.25], [1.3, 0.75]]',
         "line": "start = [0.1, 0.5]\nend = [1.4, 0.5]\nn_points = 40",
-        "arc": 'shape = "arc"\ncenter = [0.55, 0.5]\nradius = 0.33\nangles = [20.0, 160.0]\nn_points = 40',
-        "curve": 'shape = "curve"\nx = "0.1 + 1.3 * s"\ny = "0.16 + 0.05 * sin(6 * pi * s)"\nn_points = 80',
-        "polyline": 'shape = "polyline"\nvertices = [[1.05, 0.62], [1.4, 0.92], [1.05, 0.92]]\nn_points = 12',
+        "arc": 'type = "arc"\ncenter = [0.55, 0.5]\nradius = 0.33\nangles = [20.0, 160.0]\nn_points = 40',
+        "curve": 'type = "curve"\nx = "0.1 + 1.3 * s"\ny = "0.16 + 0.05 * sin(6 * pi * s)"\nn_points = 80',
+        "polyline": 'type = "polyline"\nvertices = [[1.05, 0.62], [1.4, 0.92], [1.05, 0.92]]\nn_points = 12',
     }
     toml = f"""
 [run]
@@ -378,7 +378,7 @@ troubled_threshold = 1.0
 {PHYSICS}
 [[probes]]
 name = "cut"
-shape = "cut_plane"
+type = "cut_plane"
 point = [0.5, 0.5, 0.5]
 normal = [0.6, 0.35, 1.0]
 sampling = "point"
@@ -387,9 +387,7 @@ variables = ["P"]
 
 [[probes]]
 name = "sphere"
-shape = "sphere"
-center = [0.5, 0.5, 0.5]
-radius = 0.32
+region = {{type = "sphere", center = [0.5, 0.5, 0.5], radius = 0.32, filled = false}}
 n_points = [24, 48]
 sampling = "point"
 format = "vtp"

@@ -40,6 +40,7 @@ const Rules RULES = {
     {
         {"boundaries[].type", "outflow", "extrapolation", "0.9.0", "0.10.0", "renamed"},
     },
+    {},
 };
 
 std::string upgrade(const std::string & text, bool & reformatted, std::vector<Finding> & findings) {
@@ -169,6 +170,7 @@ TEST(InputUpgradeTest, KeysAreDeprecatedForAtLeastOneMinorReleaseBeforeRemoval) 
     };
     for (const auto & rule : input_upgrade::rules().keys) check(rule.from, rule.since, rule.removed);
     for (const auto & rule : input_upgrade::rules().options) check(rule.key, rule.since, rule.removed);
+    for (const auto & rule : input_upgrade::rules().arrays) check(rule.from, rule.since, rule.removed);
 }
 
 TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
@@ -204,9 +206,32 @@ TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
     EXPECT_NO_THROW(input_upgrade::upgrade_text(probe, findings, reformatted, input_upgrade::rules(), 0));
 }
 
+TEST(InputUpgradeTest, CurvedZonesTakeTheTypeOfTheirRegionAndItsSurface) {
+    // A 2D circle is the curve; a 3D sphere or cylinder is a volume, whose surface filled = false is
+    const std::string shape = N_DIM == 2 ? "circle" : "sphere";
+    const std::string text = "[mesh]\ntype = \"file\"\n[[mesh.curved]]\nzone = \"wall\"\nshape = \"" + shape +
+                             "\"  # the body\ncenter = [0, 0]\nradius = 1\n";
+    std::vector<Finding> findings;
+    bool reformatted = false;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted),
+              "[mesh]\ntype = \"file\"\n[[mesh.curved]]\nzone = \"wall\"\ntype = \"" + shape + "\"  # the body\n" +
+                  (N_DIM == 3 ? "filled = false\n" : "") + "center = [0, 0]\nradius = 1\n");
+    EXPECT_FALSE(reformatted);
+    EXPECT_EQ(findings.size(), N_DIM == 3 ? 2u : 1u);
+    Input input = parse_input_string(text);
+    input_upgrade::apply(input, "0.9.0");
+    const Input & entry = input.at("mesh").at("curved").at(0);
+    EXPECT_EQ(entry.at("type").as_string(), shape);
+    EXPECT_EQ(entry.contains("filled"), N_DIM == 3);
+    // Inputs of this release are left alone
+    const std::string upgraded = input_upgrade::upgrade_text(text, findings, reformatted);
+    input_upgrade::upgrade_text(upgraded, findings, reformatted);
+    EXPECT_TRUE(findings.empty());
+}
+
 TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
     const Rules rules = {{}, {{"s[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0", "hollow", false,
-                               0, "axis = [0, 0, 1]"}}};
+                               0, "axis = [0, 0, 1]"}}, {}};
     const std::string text = "[[s]]\n"
                              "region = {type = \"union\", regions = [{type = \"annulus\", radius = 2}]}\n"
                              "[[s]]\n"
@@ -254,19 +279,110 @@ TEST(InputUpgradeTest, KeptOptionsWorkAsBeforeButAreRewritten) {
     EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
 }
 
-TEST(InputUpgradeTest, GeometryOfWriteDataBecomesRegion) {
-    const std::string text = "[[write_data]]\nprefix = 'w'\ngeometry = \"wall\"  # a zone\n"
-                             "[[write_data]]\nprefix = 'f'\ngeometry = 'all'\n";
+TEST(InputUpgradeTest, MeshPeriodicBecomesPeriodicZonePairsAfterTheMesh) {
+    const std::string text =
+        "[run]\n"
+        "n_steps = 1\n"
+        "\n"
+        "[mesh]\n"
+        "type = \"cartesian\"\n"
+        "periodic = [\"x\", \"z\"]  # walls in y\n"
+        "Lx = 2.0\n"
+        "\n"
+        "[output]\n"
+        "check_interval = 10\n";
+    const std::string expected =
+        "[run]\n"
+        "n_steps = 1\n"
+        "\n"
+        "[mesh]\n"
+        "type = \"cartesian\"\n"
+        "Lx = 2.0\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"left\", \"right\"]  # walls in y\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"back\", \"front\"]\n"
+        "\n"
+        "[output]\n"
+        "check_interval = 10\n";
     bool reformatted = true;
     std::vector<Finding> findings;
-    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted),
-              "[[write_data]]\nprefix = 'w'\nregion = \"wall\"  # a zone\n"
-              "[[write_data]]\nprefix = 'f'\nregion = \"domain\"\n");
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), expected);
     EXPECT_FALSE(reformatted);
+    ASSERT_EQ(findings.size(), 1u);
+    EXPECT_EQ(findings[0].line, 6u);
+    EXPECT_EQ(findings[0].suggestion,
+              "[[periodic]] zones = [\"left\", \"right\"], [[periodic]] zones = [\"back\", \"front\"]");
+
+    // The setup reads the pairs the rewritten file has
     Input input = parse_input_string(text);
-    ASSERT_EQ(input_upgrade::apply(input, "0.9.0").size(), 2u);
-    EXPECT_EQ(input.at("write_data").at(0).at("region").as_string(), "wall");
-    EXPECT_EQ(input.at("write_data").at(1).at("region").as_string(), "domain");
+    ASSERT_EQ(input_upgrade::apply(input, "0.9.0").size(), 1u);
+    EXPECT_FALSE(input.at("mesh").contains("periodic"));
+    ASSERT_EQ(input.at("periodic").size(), 2u);
+    EXPECT_EQ(input.at("periodic").at(1).at("zones").at(0).as_string(), "back");
     Input later = parse_input_string(text);
     EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
+}
+
+TEST(InputUpgradeTest, MeshPeriodicFollowsTheExistingPairsAndTheRemapSourceGetsItsOwn) {
+    const std::string text =
+        "[mesh]\n"
+        "type = \"annulus\"\n"
+        "periodic = [\"theta\"]\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"inner\", \"outer\"]\n"
+        "translation = [0.0, 1.0]\n"
+        "\n"
+        "[initialize]\n"
+        "type = \"remap\"\n"
+        "\n"
+        "[initialize.mesh]\n"
+        "type = \"cartesian\"\n"
+        "periodic = [\n"
+        "    \"y\",\n"
+        "]\n";
+    const std::string expected =
+        "[mesh]\n"
+        "type = \"annulus\"\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"inner\", \"outer\"]\n"
+        "translation = [0.0, 1.0]\n"
+        "\n"
+        "[[periodic]]\n"
+        "zones = [\"start\", \"end\"]\n"
+        "\n"
+        "[initialize]\n"
+        "type = \"remap\"\n"
+        "\n"
+        "[initialize.mesh]\n"
+        "type = \"cartesian\"\n"
+        "\n"
+        "[[initialize.periodic]]\n"
+        "zones = [\"bottom\", \"top\"]\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), expected);
+    EXPECT_FALSE(reformatted);
+    ASSERT_EQ(findings.size(), 2u);
+    EXPECT_EQ(findings[1].key, "initialize.mesh.periodic");
+    EXPECT_EQ(findings[1].suggestion, "[[initialize.periodic]] zones = [\"bottom\", \"top\"]");
+}
+
+TEST(InputUpgradeTest, MeshPeriodicOnlyTakesTheDirectionsOfAGeneratedMesh) {
+    for (const auto & [text, error] : std::vector<std::pair<std::string, std::string>>{
+             {"[mesh]\nfilename = \"a.msh\"\nperiodic = [\"x\"]\n", "line 3: mesh.periodic: applies to generated meshes"},
+             {"[mesh]\ntype = \"cartesian\"\nperiodic = [\"theta\"]\n", "line 3: mesh.periodic: \"theta\" is not accepted"},
+             {"[mesh]\ntype = \"annulus\"\nperiodic = [\"x\"]\n", "the annulus is periodic in \"theta\""}}) {
+        Input input = parse_input_string(text);
+        try {
+            input_upgrade::apply(input, "0.9.0");
+            ADD_FAILURE() << text;
+        } catch (const InputError & e) {
+            EXPECT_NE(std::string(e.what()).find(error), std::string::npos) << e.what();
+        }
+    }
 }

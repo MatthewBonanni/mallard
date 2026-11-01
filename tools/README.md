@@ -113,7 +113,7 @@ An O-grid between two circles (zones `inner` and `outer`): quadrilaterals, trian
 ### `make_mallard_mesh.py`: a flying mallard
 
 ```sh
-python examples/mallard/make_mallard_mesh.py OUTPUT.msh [--h-wall 0.0015] [--h-far 0.0045] [--preview duck.png]
+python examples/mallard/make_mallard_mesh.py OUTPUT.msh [--h-wall 0.0015] [--h-far 0.0045] [--order 1|2|3] [--preview duck.png]
 ```
 
 Triangles around a duck silhouette (a periodic spline), refined linearly from `--h-wall` on the body to `--h-far`; zones `duck`, `inflow`, `outflow`, `top` and `bottom`. The mesh of the [`mallard`](../examples/mallard) example, and a template for meshing any spline outline with the gmsh Python module.
@@ -140,6 +140,7 @@ The figure is in [Meshes](../docs/guide/meshes.md#mesh-quality).
 | Script | Mesh | Example |
 |---|---|---|
 | `make_sphere_mesh.py` | Tetrahedra of the quarter domain around a sphere (symmetry planes `symmetry_y`, `symmetry_z`), refined on the sphere and through the bow-shock layer; `--order 2`/`3` curves the sphere | [`sphere_mach3`](../examples/sphere_mach3) |
+| `make_ellipsoid_mesh.py` | Tetrahedra of the quarter domain around a prolate spheroid (symmetry planes `symmetry_y`, `symmetry_z`), flat on the spheroid for `[[mesh.curved]]` to curve; `--scale` refines everything for mesh studies | [`ellipsoid`](../examples/ellipsoid) |
 | `make_sphere_re300_mesh.py` | The full domain around a sphere: a prism boundary layer, tetrahedra refined through the near wake; `--scale` refines everything for mesh studies | [`sphere_re300`](../examples/sphere_re300) |
 | `make_volvo_mesh.py` | Hexahedra of the Volvo bluff-body combustor: four blocks around the triangular flameholder, mesh lines normal to its faces, periodic in span | [`volvo_bluff_body`](../examples/volvo_bluff_body) |
 | `make_nozzle_mesh.py` | Quadrilaterals of the upper half of a planar converging-diverging nozzle | [`nozzle`](../examples/nozzle) |
@@ -353,7 +354,7 @@ python tools/post/insitu_statistics.py compare spectra.csv reference.csv
 python tools/post/insitu_statistics.py phase input.toml probe_wake.csv -o phase.npz
 ```
 
-Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([output guide](../docs/guide/output.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
+Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([statistics guide](../docs/guide/statistics.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
 
 ## Performance
 
@@ -382,10 +383,12 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`heated_duct`](../examples/heated_duct) | | `plot_heated_duct.py`: the steady run against Rayleigh flow, and the closed duct's mass against `mdot t` for `mass_flow_inlet` and `upt`; `--figure` draws the guide's figures | |
 | [`forced_inlet`](../examples/forced_inlet) | | `plot_forced_inlet.py`: x-t diagrams of the velocity and temperature fluctuations (acoustic and entropy waves) and the inlet cell against the forcing; `--figure` draws the guide's figure | |
 | [`poiseuille_pipe`](../examples/poiseuille_pipe) | | `plot_poiseuille.py`: axial velocity against the exact cell averages | |
+| [`pulsed_jet`](../examples/pulsed_jet) | | `plot_pulsed_jet.py`: the vortex rings' core positions, translation speed, diameter and circulation against the slug model, and the inlet cell against `U(t)`; `--png` draws the vorticity and both histories, `--figure` the guide's figure | `animate_pulsed_jet.py` |
 | [`noh_axisymmetric`](../examples/noh_axisymmetric) | | `plot_noh.py`: density and shock radius by direction against the exact solution | |
 | [`sphere_axisymmetric`](../examples/sphere_axisymmetric) | `make_cylinder_mesh.py --half` | `plot_sphere_axisymmetric.py`: drag, separation angle and wake length | |
 | [`sedov_3d`](../examples/sedov_3d) | | `sedov.py` | `animate_sedov.py` |
 | [`sphere_mach3`](../examples/sphere_mach3) | `make_sphere_mesh.py` | `plot_sphere.py`: bow-shock standoff against Billig | `animate_sphere.py` |
+| [`ellipsoid`](../examples/ellipsoid) | `make_ellipsoid_mesh.py` | `compare_ellipsoid.py`: flat against curved wall faces, drag and entropy error (exact: 0) and wall pressure against potential flow, over mesh scales | `animate_ellipsoid.py` |
 | [`sphere_re300`](../examples/sphere_re300) | `make_sphere_re300_mesh.py` | `plot_sphere_re300.py`: Strouhal number, drag and lift | `animate_sphere_re300.py` |
 | [`taylor_green_3d`](../examples/taylor_green_3d) | | `plot_taylor_green.py`: kinetic energy and dissipation rate against the spectral DNS | `animate_taylor_green.py` |
 | [`isotropic_turbulence`](../examples/isotropic_turbulence) | `isotropic_turbulence_restart.py` | `isotropic_turbulence_stats.py`, `plot_isotropic_turbulence.py`: filtered statistics and spectra against Johnsen et al. | `animate_isotropic_turbulence.py` |

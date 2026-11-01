@@ -324,8 +324,7 @@ TEST(ChemistryKineticsTest, ReaderKeepsReactionOptionsAndRejectsUnsupportedTypes
     ASSERT_EQ(orders.orders.size(), 2u);
     EXPECT_EQ(orders.orders[0].second, 0.5);
 
-    const std::string dir = (scratch_dir() / "mallard_kinetics_errors").string();
-    std::filesystem::create_directories(dir);
+    const std::string dir = rank_scratch_dir().string();
     const std::string file = dir + "/mech.yaml";
     std::ofstream(file) << "phases:\n- name: gas\n  thermo: ideal-gas\n  elements: [H]\n  species: [H2, H]\n"
                            "  kinetics: gas\nspecies:\n"
@@ -339,5 +338,4 @@ TEST(ChemistryKineticsTest, ReaderKeepsReactionOptionsAndRejectsUnsupportedTypes
     } catch (const std::runtime_error & e) {
         EXPECT_NE(std::string(e.what()).find("H2 <=> 2 H"), std::string::npos) << e.what();
     }
-    std::filesystem::remove_all(dir);
 }

@@ -16,13 +16,13 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 #include <functional>
 #include <random>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "gmsh_fixtures.h"
 #include "overlap.h"
 #include "scratch.h"
 #include "solver.h"
@@ -74,10 +74,6 @@ uint32_t mixed_cells(const Solver & s) {
     uint32_t n = 0;
     for (uint32_t c = 0; c < s.get_mesh()->n_owned(); c++) n += s.h_conservatives(c, 0) != 1.0_r && s.h_conservatives(c, 0) != 2.0_r;
     return n;
-}
-
-void write_file(const std::string & path, const std::string & text) {
-    std::ofstream(path) << text;
 }
 
 } // namespace
@@ -262,6 +258,21 @@ TEST(InitialStateTest, CenterCellsTakeTheLayerWhole) {
     }
 }
 
+TEST(InitialStateTest, NamedRegionsLayerAsTheTablesTheyName) {
+    const std::string disk = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.3}"
+                                        : "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.3}";
+    const auto inline_region = initialized(box(TRI, 8, "[[initialize.regions]]\nrho = \"2\"\nregion = " + disk + "\n"));
+    const auto named = initialized(box(TRI, 8, "[[initialize.regions]]\nrho = \"2\"\nregion = \"blob\"\n") +
+                                   "[regions]\nblob = " + disk + "\n");
+    const Mesh & mesh = *named->get_mesh();
+    size_t n_inside = 0;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        EXPECT_EQ(named->h_conservatives(c, 0), inline_region->h_conservatives(c, 0));
+        n_inside += named->h_conservatives(c, 0) > 1.0_r;
+    }
+    EXPECT_GT(n_inside, 0u);
+}
+
 TEST(InitialStateTest, TableInterpolationHasItsDesignOrder) {
     // Linear: exact for linear data, error / 4 per halving; cubic: exact for
     // cubics, error / 16 per halving, on non-uniform grids too
@@ -359,21 +370,18 @@ TEST(InitialStateTest, ProfilesAndPointsFeedExpressions) {
     // A linear profile of x (in mm) read along a rotated axis: the cell
     // averages of a linear velocity are its values at the centroids; a point
     // cloud of one point per cell centroid gives each cell its own value
-    const std::string profile = (scratch_dir() / "profile.csv").string();
-    write_file(profile, "# s [mm], u [m/s]\ns, u\n-1000, -3\n0, 1\n2000, 9\n");
-    const std::string points = (scratch_dir() / "points.csv").string();
-    {
-        std::ofstream f(points);
-        f << "x,y" << (N_DIM == 3 ? ",z" : "") << ",v\n";
-        for (int i = 0; i < 5; i++) {
-            for (int j = 0; j < 5; j++) {
-                for (int k = 0; k < (N_DIM == 3 ? 5 : 1); k++) {
-                    f << 0.1 + 0.2 * i << "," << 0.1 + 0.2 * j << (N_DIM == 3 ? "," + std::to_string(0.1 + 0.2 * k) : "")
+    const std::string profile = write_temp("profile.csv", "# s [mm], u [m/s]\ns, u\n-1000, -3\n0, 1\n2000, 9\n");
+    std::ostringstream cloud;
+    cloud << "x,y" << (N_DIM == 3 ? ",z" : "") << ",v\n";
+    for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 5; j++) {
+            for (int k = 0; k < (N_DIM == 3 ? 5 : 1); k++) {
+                cloud << 0.1 + 0.2 * i << "," << 0.1 + 0.2 * j << (N_DIM == 3 ? "," + std::to_string(0.1 + 0.2 * k) : "")
                       << "," << i + 10 * j + 100 * k << "\n";
-                }
             }
         }
     }
+    const std::string points = write_temp("points.csv", cloud.str());
     const std::string init =
         "[[initialize.data]]\nname = \"line\"\nfile = \"" + profile + "\"\nunits = {s = \"mm\"}\nat = [\"0.6 * x + 0.8 * y\"]\n"
         "[[initialize.data]]\nname = \"cloud\"\ntype = \"points\"\nfile = \"" + points + "\"\n"

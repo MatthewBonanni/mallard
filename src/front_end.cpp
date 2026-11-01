@@ -24,6 +24,7 @@
 #include "case_template.h"
 #include "cli.h"
 #include "input.h"
+#include "input_upgrade.h"
 #include "mesh/mesh_block.h"
 #include "mesh/mesh_file.h"
 
@@ -245,9 +246,20 @@ Dimension mesh_file_dimension(const std::string & path) {
 
 Dimension input_dimension(const std::string & input_file) {
     try {
-        const Input input = parse_input(input_file);
+        Input input = parse_input(input_file);
+        input_upgrade::apply(input);
         const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
-        if (type == "file") return mesh_file_dimension(find_value_or<std::string>(input, "mesh", "filename", "mesh.msh"));
+        if (type == "file") {
+            const fs::path mesh = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
+            if (!fs::exists(mesh)) {
+                std::error_code ec;
+                const fs::path cwd = fs::current_path(ec);
+                return unreadable("mesh file '" + mesh.string() + "' not found" +
+                                  (mesh.is_relative() && !ec ? " relative to the working directory (" + cwd.string() + ")"
+                                                             : std::string()));
+            }
+            return mesh_file_dimension(mesh.string());
+        }
         if (type == "cartesian_tri" || type == "wedge") return {2, ""};
         if (type == "cartesian_tet" || type == "cartesian_prism" || type == "cartesian_pyramid" ||
             type == "cartesian_mixed") {
@@ -255,8 +267,10 @@ Dimension input_dimension(const std::string & input_file) {
         }
         const bool mesh = input.contains("mesh") && input.at("mesh").is_table();
         if (mesh && (input.at("mesh").contains("Nz") || input.at("mesh").contains("Lz"))) return {3, ""};
-        for (const auto & dir : find_value_or<std::vector<std::string>>(input, "mesh", "periodic", {})) {
-            if (dir == "z") return {3, ""};
+        for (const auto & entry : find_value_or<std::vector<Input>>(input, "periodic", {})) {
+            for (const auto & zone : find_value_or<std::vector<std::string>>(entry, "zones", {})) {
+                if (zone == "back" || zone == "front") return {3, ""};
+            }
         }
         return {2, ""};
     } catch (const std::exception & e) {

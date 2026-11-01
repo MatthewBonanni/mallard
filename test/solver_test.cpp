@@ -25,6 +25,7 @@
 #include <tuple>
 #include <vector>
 
+#include "data_paths.h"
 #include "test_fixtures.h"
 #include "verification.h"
 #include "exact_riemann.h"
@@ -65,6 +66,7 @@ std::string make_input(const CaseConfig & c) {
 
 std::unique_ptr<Solver> run_case(const CaseConfig & c) {
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(make_input(c)));
     solver->run();
     solver->update_primitives();
@@ -248,6 +250,7 @@ TEST(SolverRegression, TENOSodOnAFineStripBetweenSymmetryPlanesStaysOneDimension
     SKIP_IN_SINGLE_PRECISION("round-off flips TENO stencil selections at the discontinuity");
     const uint32_t nx = 800, ny = 4;
     auto solver = std::make_unique<Solver>();
+    solver->set_distributed(false);
     solver->init(parse_toml(
         "[run]\nn_steps = 3\ncfl = 0.25\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 800\nNy = 4\nLx = 1.0\nLy = 0.005\n"
@@ -280,6 +283,66 @@ TEST(SolverRegression, TENOSodOnAFineStripBetweenSymmetryPlanesStaysOneDimension
     }
     EXPECT_LT(max_row_diff, 1e-12);
     EXPECT_LT(max_v, 1e-12);
+}
+
+TEST(SolverRegression, BoundPreservingTENOKeepsAMach14NearVacuumPositive) {
+    // 183 cells of the cubic examples/mallard mesh around the lee of the tail,
+    // with the Mach 8 run's state at step 6840 (t = 0.0462): Mach 14 near
+    // vacuum (internal energy 2% of the total) over a slower gas at 300 times
+    // its pressure. TENO's face states within the neighbors' range drew more
+    // energy through one face than a cell's internal energy, and its pressure
+    // went negative within the first stage of the next step.
+    SKIP_IN_SINGLE_PRECISION("the near-vacuum pressures are below single precision's resolution of the energy");
+    const std::string dir = source_dir() + "/test/data/positivity/";
+    auto solver = std::make_unique<Solver>();
+    solver->init(parse_toml(
+        "[run]\nn_steps = 1\ndt = 6.977e-6\n"
+        "[mesh]\ntype = \"file\"\nfilename = \"" + dir + "mallard_lee.msh\"\n"
+        "[initialize]\ntype = \"constant\"\nu = [8.0, 0.0]\np = 0.7142857142857143\nT = 0.7142857142857143\n"
+        "[[boundaries]]\nname = \"duck\"\ntype = \"wall_adiabatic\"\n"
+        "[[boundaries]]\nname = \"outer\"\ntype = \"extrapolation\"\n"
+        "[numerics]\nriemann_solver = \"RHLL\"\ntime_integrator = \"SSPRK3\"\n"
+        "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\nbound_preserving = true\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 0.7142857142857143\nT_ref = 0.7142857142857143\n"
+        "rho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n"));
+    auto mesh = solver->get_mesh();
+    std::ifstream in(dir + "mallard_lee.csv");
+    std::string line;
+    std::getline(in, line);
+    uint32_t n_read = 0;
+    for (; std::getline(in, line); n_read++) {
+        std::istringstream row(line);
+        double v[6];
+        for (double & x : v) {
+            std::string field;
+            std::getline(row, field, ',');
+            x = std::stod(field);
+        }
+        uint32_t nearest = 0;
+        double best = 1e300;
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            const double d = std::hypot(double(mesh->h_cell_coords(c, 0)) - v[0], double(mesh->h_cell_coords(c, 1)) - v[1]);
+            if (d < best) best = d, nearest = c;
+        }
+        const double rho = v[2], u = v[3], w = v[4], p = v[5];
+        solver->h_conservatives(nearest, 0) = rtype(rho);
+        solver->h_conservatives(nearest, 1) = rtype(rho * u);
+        solver->h_conservatives(nearest, 2) = rtype(rho * w);
+        solver->h_conservatives(nearest, 3) = rtype(p / 0.4 + 0.5 * rho * (u * u + w * w));
+    }
+    ASSERT_EQ(n_read, mesh->n_cells);
+    solver->copy_host_to_device();
+    solver->run();
+    solver->copy_device_to_host();
+    uint32_t inadmissible = 0;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        double U[4];
+        for (int i = 0; i < 4; i++) U[i] = double(solver->h_conservatives(c, i));
+        const double p = 0.4 * (U[3] - 0.5 * (U[1] * U[1] + U[2] * U[2]) / U[0]);
+        if (!(U[0] > 0.0 && p > 0.0)) inadmissible++;
+    }
+    EXPECT_EQ(inadmissible, 0u);
 }
 
 TEST(SolverRegression, MUSCLTransmissiveInflowBoundaryStaysBounded) {
@@ -409,6 +472,7 @@ TEST(SolverValidation, ObliqueShockOverWedgeMatchesTheory) {
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 101325.0\nT_ref = 298.15\nrho_ref = 1.225\n"
       << "[output]\ncheck_interval = 1000000\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(s.str()));
     solver.run();
     solver.update_primitives();
@@ -513,7 +577,7 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
         return;
     }
     const std::string exe = ::testing::internal::GetArgvs()[0];
-    const auto dir = scratch_dir();
+    const auto dir = rank_scratch_dir();
     auto run = [&](int threads) {
         const std::string out = (dir / ("mallard_threads_" + std::to_string(threads) + ".bin")).string();
         std::filesystem::remove(out);

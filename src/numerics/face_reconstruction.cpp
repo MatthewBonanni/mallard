@@ -60,6 +60,7 @@ void FaceReconstruction::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVA
 void FaceReconstruction::set_mesh(std::shared_ptr<Mesh> mesh_in) {
     this->mesh = mesh_in;
     rotated_faces_found = false;
+    image_points_found = false;
 }
 
 void FaceReconstruction::rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
@@ -88,8 +89,65 @@ void FaceReconstruction::rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSER
     });
 }
 
+void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
+    const uint32_t n_quad = static_cast<uint32_t>(face_solution.extent(1));
+    if (!image_points_found) {
+        auto h_face_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image);
+        auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_face);
+        auto h_offset = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_offset);
+        auto h_quad_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
+        std::vector<uint32_t> faces, cells;
+        std::vector<std::array<rtype, N_DIM>> offsets;
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            const int32_t c = mesh->h_cells_of_face(f, 0);
+            if (mesh->h_cells_of_face(f, 1) >= 0 || c >= static_cast<int32_t>(mesh->n_owned()) || h_face_image(f) < 0 ||
+                h_image_face(f) >= 0) {
+                continue;
+            }
+            const uint32_t image = static_cast<uint32_t>(h_face_image(f));
+            faces.push_back(f);
+            cells.push_back(image);
+            for (uint32_t q = 0; q < n_quad; q++) {
+                std::array<rtype, N_DIM> x;
+                if (h_quad_points.extent(0) > 0) {
+                    FOR_I_DIM x[i] = h_quad_points(f, q, i);
+                } else {
+                    const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
+                    const rtype s_q = 0.5_r * quadrature_face.h_points(q, 0);
+                    FOR_I_DIM x[i] = mesh->h_face_coords(f, i) + s_q * (mesh->h_node_coords(b, i) - mesh->h_node_coords(a, i));
+                }
+                FOR_I_DIM x[i] -= h_offset(f, i) + mesh->h_cell_coords(image, i);
+                offsets.push_back(x);
+            }
+        }
+        image_point_faces = Kokkos::View<uint32_t *>("image_point_faces", faces.size());
+        image_point_cells = Kokkos::View<uint32_t *>("image_point_cells", cells.size());
+        image_point_offsets = Kokkos::View<rtype *[N_DIM]>("image_point_offsets", offsets.size());
+        image_point_W = Kokkos::View<rtype *[N_CONSERVATIVE]>("image_point_W", offsets.size());
+        Kokkos::deep_copy(image_point_faces, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(faces.data(), faces.size()));
+        Kokkos::deep_copy(image_point_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(cells.data(), cells.size()));
+        auto h_point_offsets = Kokkos::create_mirror_view(image_point_offsets);
+        for (size_t k = 0; k < offsets.size(); k++) FOR_I_DIM h_point_offsets(k, i) = offsets[k][i];
+        Kokkos::deep_copy(image_point_offsets, h_point_offsets);
+        image_points_found = true;
+    }
+    if (image_point_faces.extent(0) == 0) return;
+    const auto faces = image_point_faces;
+    const auto cells = image_point_cells;
+    const auto W = image_point_W;
+    Kokkos::parallel_for("image_point_averages", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
+        FOR_I_CONSERVATIVE W(p, i) = solution(cells(p / n_quad), i);
+    });
+    point_values(solution, cells, image_point_offsets, W);
+    Kokkos::parallel_for("image_point_values", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
+        FOR_I_CONSERVATIVE face_solution(faces(p / n_quad), p % n_quad, 1, i) = W(p, i);
+    });
+}
+
 void FaceReconstruction::set_boundaries(const BoundaryData & boundaries_in) {
     this->boundaries = boundaries_in;
+    image_points_found = false;
 }
 
 void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {

@@ -25,7 +25,8 @@ Nx = 8
 Ny = 4
 Lx = 2.0
 Ly = 1.0
-periodic = ["x"]
+[[periodic]]
+zones = ["left", "right"]
 [[boundaries]]
 name = "bottom"
 type = "wall_adiabatic"

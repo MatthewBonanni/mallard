@@ -65,9 +65,12 @@ step, at its first stage.
 
 - **FE**, forward Euler: $\mathbf{U}^{n+1} = \mathbf{U}^n + \Delta t\,\mathbf{L}(\mathbf{U}^n, t_n)$.
 
-Positivity is not enforced between stages: the face reconstructions fall
-back to first order where a face state would have a non-positive density
-or pressure ([chapter 6](finite_volume.md#reconstruction)).
+The face reconstructions fall back to first order where a face state would
+have a non-positive density or pressure
+([chapter 6](finite_volume.md#reconstruction)). Positivity of the cell
+averages is enforced only by bound-preserving TENO's flux limiter (planar
+single-gas runs, $\mathrm{CFL} \le 0.5$, SSP integrators), which bounds each
+forward-Euler stage.
 
 ## Time step
 

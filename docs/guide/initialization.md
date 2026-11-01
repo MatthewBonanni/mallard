@@ -15,7 +15,7 @@ T = 1.0
 # X = { O2 = 1.0, N2 = 3.76 }   gas mixtures: the composition
 ```
 
-*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions) and 2 more.
+*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct) and 6 more.
 
 ## Expressions
 
@@ -83,7 +83,11 @@ T = 2000              # T alone: the pressure, velocity and composition stay
 
 [[initialize.regions]]
 name = "fuel"
-region = { type = "rectangle", center = ["6 mm", 0.0], size = ["2 mm", "8 mm"], pivot = ["6 mm", 0.0], rotate = 30 }
+region.type = "rectangle"
+region.center = ["6 mm", 0.0]
+region.size = ["2 mm", "8 mm"]
+region.pivot = ["6 mm", 0.0]
+region.rotate = 30
 X = { H2 = 1.0 }
 ```
 
@@ -132,7 +136,7 @@ curved ones (second order in the piece size: a disk 10 cells across loses
 | `X` or `Y`, `balance` | the composition below | Mixtures: the composition inside, as in `[initialize]` |
 | `priority` | 0 | Higher priorities go on top; equal ones in the order listed |
 | `cells` | `"volume_fraction"` | `volume_fraction`: cell averages; `center`: whole cells by their centroids |
-| `name` | `initialize.regions[i]` | Name in the run log |
+| `name` | `initialize.regions[i]` | Name in the terminal output |
 
 **Over a restart or a remap.** With `type = "restart"` or `"remap"`, regions
 change the file's state: ignite a converged cold flow, add a bubble to a
@@ -236,7 +240,8 @@ the total.
 - `[statistics] reset = true` starts the averages afresh instead of
   continuing them.
 - Probes and force monitors append to their files on a restart.
-- Restart files of every earlier release are read, back to 0.1, and files from a newer Mallard are rejected clearly ([compatibility](output.md#file-formats-and-compatibility)).
+- A restart file is written as `<name>.restart.partial` (in the background with `[output] async`) and renamed to `<name>.restart` once every rank has written its part and it is flushed to storage, so a `.restart` file is always complete. A `.partial` file is what a run killed while writing left behind; resume from the newest `.restart` file instead, as the [job scripts](running.md) do.
+- Restart files of every earlier release are read, back to 0.1, and files from a newer Mallard are rejected clearly ([compatibility](output.md#formats-and-compatibility)).
 - `compression = "zlib"` writes compressed restart files (version 5, losslessly: they restart bit for bit), about a third smaller for smooth flows; reading them needs a build with `Mallard_ENABLE_ZLIB`, and the Python tools in `tools/` read only uncompressed ones.
 
 ### Initial states from scripts
@@ -256,7 +261,7 @@ to copy for your own cases:
 | `tile_restart.py` | A restart file of a periodic box tiled into a larger box |
 
 A restart file is binary, little-endian: the 16 bytes `MALLARD-RESTART\0`,
-then `uint32` version (2; [all versions](output.md#file-formats-and-compatibility)) and real size (8), `uint64` cell count, variable
+then `uint32` version (2; [all versions](output.md#formats-and-compatibility)) and real size (8), `uint64` cell count, variable
 count and step, `float64` time, each variable name as a `uint32` length and its
 characters, and finally the values, variable after variable, each over all
 cells in the mesh's global order. The variables are `RHO`, `RHOU_X`, `RHOU_Y`
@@ -310,7 +315,7 @@ with every target cell, so the integrals of all conserved variables are kept
 to rounding and polynomial fields up to `degree` are remapped exactly. Every
 variable of the file is remapped: the flow, species, temperature seeds and
 `[statistics]` averages. The run continues from the file's step and time with
-fresh output series; the log reports how closely the integrals were kept.
+fresh output series; the terminal output reports how closely the integrals were kept.
 
 ![A target triangle cut into pieces by the source quadrilaterals it overlaps](../images/guide/remap-supermesh-light.svg#gh-light-mode-only)
 ![A target triangle cut into pieces by the source quadrilaterals it overlaps](../images/guide/remap-supermesh-dark.svg#gh-dark-mode-only)
@@ -327,7 +332,7 @@ Pitfalls:
   is an error.
 - Where the meshes cover different domains (a curved wall discretized
   differently, a shorter box), target cells average over the covered part and
-  cells outside take the nearest source cell; the log counts them, and
+  cells outside take the nearest source cell; the terminal output counts them, and
   conservation then holds only over the common part.
 - The default `bounds` limiter flattens smooth extrema slightly; use
   `limiter = "none"` for smooth flows such as the Taylor-Green vortex.

@@ -40,8 +40,10 @@ struct KeyRule {
 /**
  * @brief A string option renamed: `key = "from"` becomes `key = "to"`, and
  *        `add` (`name = value`), if given, is set beside it unless its table
- *        has it. A kept option still does what it did while deprecated (the
- *        setup reads it unchanged); only the rewritten file switches to `to`.
+ *        has it (with `from` equal to `to`, the rule only adds it). A kept
+ *        option still does what it did while deprecated (the setup reads it
+ *        unchanged); only the rewritten file switches to `to`. Option rules
+ *        apply before key rules, so `key` may be a key's old name.
  */
 struct OptionRule {
     std::string key;
@@ -52,10 +54,28 @@ struct OptionRule {
     std::string add = {};  ///< E.g. "axis = [0, 0, 1]"
 };
 
+/**
+ * @brief A key holding an array of strings replaced by elements of an array of
+ *        tables, one per string: `from = ["a", "b"]` becomes `[[to]] key =
+ *        convert("a")`, `[[to]] key = convert("b")`, after the elements
+ *        already there. `to` is dotted, without `[]` steps.
+ */
+struct ArrayRule {
+    std::string from;
+    std::string to;
+    std::string key;      ///< The key each new element sets
+    std::string context;  ///< A string key of from's table the conversion depends on, or empty
+    std::string since, removed, note;
+    /// The value of `key` for one string, given the context's value (empty if
+    /// absent); throws std::invalid_argument, saying why, for strings it does not take
+    std::vector<std::string> (*convert)(const std::string & item, const std::string & context) = nullptr;
+};
+
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */
 struct Rules {
     std::vector<KeyRule> keys;
     std::vector<OptionRule> options;
+    std::vector<ArrayRule> arrays;
 };
 const Rules & rules();
 
@@ -90,18 +110,21 @@ std::vector<Finding> apply(Input & input, const std::string & version = "", cons
  *        possible (renamed or moved dotted keys, or keys of inline tables),
  *        the whole file is reformatted, and `reformatted` is set. `findings`
  *        gets every change. `dim` is the case's dimension (0: unknown, an
- *        error if a rule of one dimension matches).
+ *        error if a rule of one dimension matches, which gives
+ *        `unknown_dimension` as the reason).
  */
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
-                         bool & reformatted, const Rules & table = rules(), int dim = N_DIM);
+                         bool & reformatted, const Rules & table = rules(), int dim = N_DIM,
+                         const std::string & unknown_dimension = "");
 
 /**
  * @brief `mallard input upgrade [--check] old.toml > new.toml`: writes the
  *        upgraded file to stdout and the changes to stderr; with `check`, only
  *        the changes, and exit status 1 if there are any. `dim` is the case's
- *        dimension (0: unknown). Returns the exit status.
+ *        dimension (0: unknown, for the reason `unknown_dimension`). Returns
+ *        the exit status.
  */
-int upgrade_file(const std::string & file, bool check, int dim);
+int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension = "");
 
 } // namespace input_upgrade
 

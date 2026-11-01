@@ -40,8 +40,9 @@ def stretched(n, L, beta):
     return x
 
 
-def generated(mesh, coarsen=1):
-    """A generated 2D mesh from a [mesh] table; coarsen divides Nx and Ny (for drawing)."""
+def generated(mesh, coarsen=1, periodic=()):
+    """A generated 2D mesh from a [mesh] table and the case's [[periodic]] entries; coarsen divides Nx and Ny
+    (for drawing)."""
     kind = mesh.get("type", "file")
     nx = max(1, round(mesh.get("Nx", 100) / coarsen))
     ny = max(1, round(mesh.get("Ny", 100) / coarsen))
@@ -71,9 +72,10 @@ def generated(mesh, coarsen=1):
         "left": [(nid(0, j), nid(0, j + 1)) for j in range(ny)],
         "right": [(nid(nx, j), nid(nx, j + 1)) for j in range(ny)],
     }
-    for d in mesh.get("periodic", []):
-        for z in {"x": ("left", "right"), "y": ("bottom", "top")}.get(d, ()):
-            faces[z + "@periodic"] = faces.pop(z)
+    for pair in periodic:
+        for z in pair["zones"]:
+            if z in faces:
+                faces[z + "@periodic"] = faces.pop(z)
     return Mesh2D(nodes, cells, faces)
 
 

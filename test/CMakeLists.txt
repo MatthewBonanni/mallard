@@ -6,6 +6,7 @@ set(MALLARD_TEST_SOURCES
     common_math_test.cpp
     compiled_expression_test.cpp
     region_test.cpp
+    region_mesh_test.cpp
     initial_state_test.cpp
     source_terms_test.cpp
     case_template_test.cpp
@@ -28,6 +29,7 @@ set(MALLARD_TEST_SOURCES
     statistics_test.cpp
     probes_test.cpp
     region_snapshots_test.cpp
+    probe_reference_test.cpp
     insitu_statistics_test.cpp
     remap_test.cpp
     les_test.cpp
@@ -43,6 +45,7 @@ set(MALLARD_TEST_SOURCES
     format_compat_test.cpp
     wall_model_test.cpp
     units_test.cpp
+    periodic_pairs_test.cpp
     rotational_periodic_test.cpp
     invariance_test.cpp
     inlet_test.cpp
