@@ -1,1 +1,1 @@
-- `stagnation_inlet` boundary: subsonic inflow at stagnation pressure `p0` and temperature `T0` (with an optional flow `direction`), for perfect gases and thermally perfect mixtures, with the `nozzle` example against the quasi-one-dimensional solution (#312).
+- `inlet_stagnation` boundary: subsonic inflow at stagnation pressure `p0` and temperature `T0` (with an optional flow `direction`), for perfect gases and thermally perfect mixtures, with the `nozzle` example against the quasi-one-dimensional solution (#312).
