@@ -315,8 +315,9 @@ inline tables. A file with nothing to change comes back unchanged, byte for
 byte. When a renamed, moved or removed key is written as a dotted key
 (`run.cfl = 1`) or in an inline table, the file is reformatted instead: its
 comments are kept, its layout is not. Some renames depend on the case's
-dimension, which the command reads from the mesh as a run does; when the mesh
-is not at hand, state it: `mallard input upgrade --dim 3 old.toml`. The command is tested on the input
+dimension, which the command reads from the mesh as a run does (a relative
+mesh path starts from the working directory, so run it where you run the
+case); when the mesh is not at hand, state it: `mallard input upgrade --dim 3 old.toml`. The command is tested on the input
 files of every release (`tools/dev/check_upgrade_input.py`).
 
 Keys and options changed so far:
