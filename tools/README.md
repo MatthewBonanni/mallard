@@ -353,7 +353,7 @@ python tools/post/insitu_statistics.py compare spectra.csv reference.csv
 python tools/post/insitu_statistics.py phase input.toml probe_wake.csv -o phase.npz
 ```
 
-Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([output guide](../docs/guide/output.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
+Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([statistics guide](../docs/guide/statistics.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
 
 ## Performance
 

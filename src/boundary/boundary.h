@@ -287,7 +287,9 @@ struct BoundaryData {
     Kokkos::View<uint8_t *> face_image_side;  // Side of face_image_face belonging to the image cell
     Kokkos::View<uint8_t *> face_image_flip;  // 2D: whether the image face runs opposite to the boundary face
     Kokkos::View<uint8_t **> face_image_quad; // 3D: quadrature point of the image face matching each point
-    Kokkos::View<rtype *[N_DIM]> face_image_offset;  // Image faces: offset moving the image face onto the boundary face
+    // Transmissive faces: offset moving the image face (or the translated face,
+    // in the image cell's frame) onto the boundary face
+    Kokkos::View<rtype *[N_DIM]> face_image_offset;
     // Vertex neighbors of each cell beyond extrapolation boundaries with image
     // faces: cells translated outward by their image offsets, as the cell would
     // see them in a flow continued unchanged across the boundary (empty without)
@@ -388,10 +390,10 @@ struct BoundaryData {
      * @param face_thermo Face [gamma, e0], indexed (face, quadrature point, side, 0/1).
      * @param cell_thermo Cell [gamma, e0] by cell, as columns (cell, 0/1).
      */
-    template <typename T_W, typename T_F, typename T_FT, typename T_CT>
+    template <typename T_F, typename T_FT, typename T_CT>
     KOKKOS_INLINE_FUNCTION
     void exterior_mixture(const uint32_t i_face, const uint8_t i_quad, const uint8_t n_quad, const rtype * W_i,
-                          const rtype * th_i, const rtype * n, const T_W & W_cells, const T_F & face_solution,
+                          const rtype * th_i, const rtype * n, const T_F & face_solution,
                           const T_FT & face_thermo, const T_CT & cell_thermo, rtype * W_g, rtype * th_g) const {
         const int32_t i_bc = face_bc(i_face);
         const BoundaryCondition & bc = bcs(i_bc);
@@ -414,7 +416,7 @@ struct BoundaryData {
             th_t[0] = face_thermo(image_face, q, side, 0);
             th_t[1] = face_thermo(image_face, q, side, 1);
         } else if (image >= 0) {
-            for (uint8_t i = 0; i < N_DIM + 2; i++) W_t[i] = W_cells(image, i);
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_t[i] = face_solution(i_face, i_quad, 1, i);
             th_t[0] = cell_thermo(image, 0);
             th_t[1] = cell_thermo(image, 1);
         } else if (mixture_inflow(i_bc)) {
@@ -446,25 +448,28 @@ struct BoundaryData {
      *
      * Transmissive faces take the reconstructed state on their image face: the
      * face of the interior cell found by translating the exterior neighbor inward
-     * along the face normal. This matches what interior faces see for a solution
-     * that does not vary normal to the boundary, at any reconstruction order. A
+     * along the face normal, or without one the image cell's reconstruction at
+     * the translated quadrature point (side 1 of the face, from
+     * FaceReconstruction::image_point_values). This matches what interior faces
+     * see for a solution that does not vary normal to the boundary, at any
+     * reconstruction order. A
      * zero-gradient copy of the face's own interior state instead feeds the
      * boundary cell back to itself at inflow boundaries; on triangles, whose
      * centroids are offset from the face, that creates an O(1) mass imbalance
      * at moving shocks and wrong shock speeds along the boundary.
      */
-    template <typename T_W, typename T_F>
+    template <typename T_F>
     KOKKOS_INLINE_FUNCTION
     void exterior_W(const uint32_t i_face, const uint8_t i_quad, const uint8_t n_quad,
-                    const rtype * W_i, const rtype * n, const T_W & W_cells, const T_F & face_solution,
+                    const rtype * W_i, const rtype * n, const T_F & face_solution,
                     rtype * W_g) const {
         if (bcs(face_bc(i_face)).is_characteristic()) {
             rtype W_e[N_DIM + 2];
-            transmissive_W(i_face, i_quad, n_quad, W_i, n, W_cells, face_solution, W_e);
+            transmissive_W(i_face, i_quad, n_quad, W_i, n, face_solution, W_e);
             characteristic_W(i_face, W_i, W_e, n, gamma, W_g);
             return;
         }
-        transmissive_W(i_face, i_quad, n_quad, W_i, n, W_cells, face_solution, W_g);
+        transmissive_W(i_face, i_quad, n_quad, W_i, n, face_solution, W_g);
     }
 
     /**
@@ -478,10 +483,10 @@ struct BoundaryData {
     }
 
     /** @brief Exterior state of exterior_W before the characteristic treatment. */
-    template <typename T_W, typename T_F>
+    template <typename T_F>
     KOKKOS_INLINE_FUNCTION
     void transmissive_W(const uint32_t i_face, const uint8_t i_quad, const uint8_t n_quad,
-                        const rtype * W_i, const rtype * n, const T_W & W_cells, const T_F & face_solution,
+                        const rtype * W_i, const rtype * n, const T_F & face_solution,
                         rtype * W_g) const {
         const int32_t image_face = face_image_face(i_face);
         const int32_t image = face_image(i_face);
@@ -496,7 +501,7 @@ struct BoundaryData {
                 W_g[i] = face_solution(image_face, q, face_image_side(i_face), i);
             }
         } else if (image >= 0) {
-            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_cells(image, i);
+            for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = face_solution(i_face, i_quad, 1, i);
         } else {
             ghost_W(i_face, W_i, n, W_g, true);
         }
