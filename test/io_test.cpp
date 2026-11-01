@@ -436,10 +436,10 @@ TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
     }
 
     // VTKHDF: deflated datasets with the same values; rounding changes only the cell values
-    for (const char * file : {"/vtkhdf/flow_000008.vtkhdf", "/vtkhdf/series.vtkhdf", "/vtkhdf/wall_000008.vtkhdf"}) {
+    for (const char * file : {"/vtkhdf/flow_000008.vtkhdf", "/vtkhdf/series.vtkhdf", "/vtkhdf/near_000008.vtkhdf"}) {
         const auto raw_file = h5_all_datasets(dir + "/raw" + file);
         EXPECT_EQ(h5_all_datasets(dir + "/zlib" + file), raw_file) << file;
-        if (!std::string(file).starts_with("/vtkhdf/wall")) {
+        if (!std::string(file).starts_with("/vtkhdf/near")) {
             EXPECT_LT(std::filesystem::file_size(dir + "/zlib" + file),
                       std::filesystem::file_size(dir + "/raw" + file))
                 << file;
