@@ -5,6 +5,7 @@
     {"name": "teno5_3d", "build": "3d", "input": "teno5_3d.toml"},
     {"name": "air_3d", "build": "3d", "input": "air_3d.toml"},
     {"name": "flame_3d", "build": "3d", "input": "flame_3d.toml"},
+    {"name": "probes_3d", "build": "3d", "input": "probes_3d.toml", "metric": "with_output"},
     {"name": "h2o2", "build": "2d", "command": "reactor", "input": "../chemistry/h2o2.toml"},
     {"name": "gri30", "build": "2d", "command": "reactor", "input": "../chemistry/gri30.toml"}
   ]

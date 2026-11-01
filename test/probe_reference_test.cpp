@@ -83,7 +83,8 @@ std::string reference_case(const std::string & dir) {
                   "\"Y_PLUS\"]\nreference = {rho = 1.0, u = " + numbers3("0.3", "0.0", "0.0") + ", p = 1.0}\n"},
         {"open", "boundary = [\"left\", \"right\"]\nvariables = [\"P\", \"MASS_FLUX\", \"MOMENTUM_FLUX\", "
                  "\"ENTHALPY_FLUX\"]\n"},
-        {"sphere", "shape = \"sphere\"\ncenter = [0.5, 0.4, 0.3]\nradius = 0.2\nn_points = [6, 12]\n"
+        {"sphere", "region = {type = \"sphere\", center = [0.5, 0.4, 0.3], radius = 0.2, filled = false}\n"
+                   "n_points = [6, 12]\n"
                    "variables = [\"RHO\", \"P\", \"MASS_FLUX\"]\n"},
     };
     for (const auto & name : PROBES) {
