@@ -23,7 +23,7 @@ p = 1.0
 nscbc = { L = 1.0 }     # an option: non-reflecting
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 39 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -199,6 +199,35 @@ nscbc = { L = 1.0, sigma = 100.0 }   # follow the forcing closely
 acoustic waves at `u + c`, temperature forcing at 250 Hz as entropy waves at
 `u`; the inlet cell follows both targets (`examples/forced_inlet/plot_forced_inlet.py`).*
 
+An expression of `t` pulses a jet: `where` splits the wall into a nozzle,
+an `inlet_mass_flow` whose mass flux is a smoothed square wave in time, and an
+adiabatic wall around it. The inlet holds the mass flux, so each pulse ejects
+exactly the stroke the expression integrates to.
+
+```toml
+[[boundaries]]
+name = "left"                 # the wall, with a nozzle of diameter 1 in it
+type = "inlet_mass_flow"
+where = "y < 0.5"
+# rho0 U(t): U0 = 0.2 from rest, period 30 (stroke L / D = 3)
+mass_flux = "0.2 * (1 - tanh(4 * cos(2 * pi * t / 30))) / 2"
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "left"
+type = "wall_adiabatic"
+where = "y >= 0.5"
+```
+
+![A pulsed jet launching vortex rings: vorticity, ring core positions and the inlet velocity against its target](../images/guide/pulsed_jet-light.svg#gh-light-mode-only)
+![A pulsed jet launching vortex rings: vorticity, ring core positions and the inlet velocity against its target](../images/guide/pulsed_jet-dark.svg#gh-dark-mode-only)
+
+*`examples/pulsed_jet` (axisymmetric, D / 96, Re_D = 2000, six pulses to
+t U0 / D = 36): each pulse rolls up into a vortex ring. The inlet cell delivers
+strokes of 2.995 to 3.000 D against 3. The first ring travels at 0.40 U0 with
+1.06 times the circulation of the slug model; the rings behind it, in its wake,
+at 0.454 to 0.463 U0 with 1.02 to 1.12 times (`examples/pulsed_jet/plot_pulsed_jet.py`).*
+
 Pitfalls:
 
 - With `nscbc`, an inlet relaxes its velocity toward the target at the rate
@@ -237,7 +266,7 @@ name = "wall"           # a boundary zone of the mesh
 type = "wall_adiabatic"
 ```
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric) and 4 more.
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric) and 5 more.
 
 **Imposes** zero heat flux and, in viscous runs, the wall velocity (through a
 mirrored ghost velocity, `2 u_w - u`); density and pressure come from the
@@ -461,7 +490,7 @@ T = 300.0
 # X = { O2 = 0.21, N2 = 0.79 } # mixtures
 ```
 
-*Used in:* [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct).
+*Used in:* [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet).
 
 **Imposes** the mass flux, the temperature, the flow direction and the
 composition, whatever the density at the inlet does: the usual inflow of
@@ -525,7 +554,7 @@ type = "outlet_pressure"
 p = 101325.0
 ```
 
-*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet), [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet) and 11 more.
+*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet), [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet) and 12 more.
 
 **Imposes** the pressure `p` on subsonic faces (the incoming acoustic wave),
 with the velocity and temperature of the interior (the other waves leave);
@@ -620,7 +649,7 @@ p = 1.0
 T = 1.0
 ```
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300).
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300).
 
 **Imposes** a characteristic free stream: the outgoing Riemann invariant
 comes from the interior and the incoming one from the free stream, entropy and
@@ -647,7 +676,7 @@ name = "bottom"
 type = "symmetry"
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 26 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 27 more.
 
 **Imposes** zero normal velocity and zero normal gradients (the ghost mirrors
 the interior); under gravity it continues the hydrostatic pressure.
@@ -721,7 +750,7 @@ p = 101325.0
 nscbc = { L = 0.1 }        # a length of the domain [m]; sigma = 0.25 by default
 ```
 
-*Used in:* [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow).
+*Used in:* [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet), [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body) and 1 more.
 
 `nscbc` makes `outlet_pressure` and `inlet_state` Navier–Stokes
 characteristic boundary conditions, partially non-reflecting (Poinsot & Lele

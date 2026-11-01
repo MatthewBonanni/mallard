@@ -382,6 +382,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`heated_duct`](../examples/heated_duct) | | `plot_heated_duct.py`: the steady run against Rayleigh flow, and the closed duct's mass against `mdot t` for `inlet_mass_flow` and `inlet_state`; `--figure` draws the guide's figures | |
 | [`forced_inlet`](../examples/forced_inlet) | | `plot_forced_inlet.py`: x-t diagrams of the velocity and temperature fluctuations (acoustic and entropy waves) and the inlet cell against the forcing; `--figure` draws the guide's figure | |
 | [`poiseuille_pipe`](../examples/poiseuille_pipe) | | `plot_poiseuille.py`: axial velocity against the exact cell averages | |
+| [`pulsed_jet`](../examples/pulsed_jet) | | `plot_pulsed_jet.py`: the vortex rings' core positions, translation speed, diameter and circulation against the slug model, and the inlet cell against `U(t)`; `--png` draws the vorticity and both histories, `--figure` the guide's figure | `animate_pulsed_jet.py` |
 | [`noh_axisymmetric`](../examples/noh_axisymmetric) | | `plot_noh.py`: density and shock radius by direction against the exact solution | |
 | [`sphere_axisymmetric`](../examples/sphere_axisymmetric) | `make_cylinder_mesh.py --half` | `plot_sphere_axisymmetric.py`: drag, separation angle and wake length | |
 | [`sedov_3d`](../examples/sedov_3d) | | `sedov.py` | `animate_sedov.py` |

@@ -37,7 +37,7 @@ geometry = "cylinder"         # the faces of one boundary zone
 variables = ["P", "T"]
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 44 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 45 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -113,7 +113,7 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 check_interval = 100   # a progress row every 100 steps
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 44 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 45 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, summaries of mesh, physics, numerics, boundaries and output, then one
@@ -395,58 +395,6 @@ build reads. It is never misread.
 - A change to a format adds a version and keeps the reader of every older one,
   with a fixture in `test/data/formats/` that a test reads (see its
   [README](../../test/data/formats/README.md)).
-
-### Region probes
-
-```toml
-# Mass, mean temperature and pressure range in a box, every 10 steps
-[[probes]]
-name = "box"
-variables = ["RHO", "T", "P"]
-region = {type = "rectangle", center = [0.5, 0.5], size = [0.4, 0.2]}
-reductions = ["integral", "mean", "min", "max"]   # the default
-interval = 10
-```
-
-*Used in:* [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions).
-
-A probe with `region` reduces the cell averages of the cells the region covers,
-each weighted by its volume times its volume fraction `f`, so a region need not
-follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`),
-`mean` that over `sum f V`, `favre` the density-weighted mean, `rms` the root
-mean square, and `min`, `max` the extremes over the cells with `f > 0`. Rank 0
-sums them in global cell order, so they are the same bit for bit on any number
-of ranks. Each output appends a row to `reductions_file` (default
-`probe_<name>_reductions.csv`):
-
-```
-step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P
-```
-
-The third column is `sum f V`: `volume` in 3D and axisymmetric runs (per
-radian), `area` in planar 2D runs (per unit depth). Give the region by name to
-measure exactly where a source or sponge acts:
-
-```toml
-[regions]
-heater = {type = "sphere", center = [0, 0, 0], radius = 0.01, edge = 0.002}
-
-[[sources]]
-rhoE = "1 MW/m^3"
-region = "heater"
-
-[[probes]]
-name = "heater"
-variables = ["T"]
-region = "heater"
-```
-
-Pitfalls:
-
-- Values are cell averages, so `min` and `max` are those of the cells, not of
-  the field inside them, and include cells the region only touches.
-- A region probe has no samples: `type`, `boundary`, `boundary_type`,
-  `sampling`, `format`, `file` and `samples` do not apply to it.
 
 ## Post-processing
 

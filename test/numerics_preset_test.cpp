@@ -175,6 +175,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"nozzle/input.toml", "robust", 2, "",
      {{"inlet", "inlet"}, {"outlet", "outlet"}, {"walls", "wall"}, {"cylinder", "axis"}}, ""},
     {"poiseuille_pipe/input.toml", "accurate", 2, "", {}, ""},
+    {"pulsed_jet/input.toml", "accurate", 2, "", {}, ""},
     {"premixed_flame/input.toml", "reacting", 2, "", {}, ""},
     {"premixed_flame/ch4/input.toml", "reacting", 2, "", {}, ""},
     {"reactive_shock_tube/input.toml", "reacting", 2, "", {}, ""},
