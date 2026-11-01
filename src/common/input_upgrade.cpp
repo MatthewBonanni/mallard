@@ -631,6 +631,15 @@ bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, boo
     }
     // A new table in an element of an array of tables: a header of it after the element's own keys
     const Concrete table = parent(to);
+    // An empty inline table there (an option rule's `add`, e.g. nscbc = {}) gives way to the header
+    if (const OrderedValue * existing = at(root, table);
+        existing && existing->is_table() && existing->size() == 0 && existing->location().is_ok()) {
+        const size_t line = existing->location().first_line_number() - 1;
+        if (line == existing->location().last_line_number() - 1 && key_column(lines[line], table.back().first)) {
+            lines.erase(lines.begin() + static_cast<long>(line));
+            return true;
+        }
+    }
     const bool in_element = !table.empty() && table.back().second < 0 && table.size() >= 2 &&
                             table[table.size() - 2].second >= 0 && at(root, parent(table)) != nullptr;
     if (at(root, table) == nullptr && !in_element) {
