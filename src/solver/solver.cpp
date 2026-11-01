@@ -2393,6 +2393,7 @@ void Solver::write_data(bool force) {
     const bool snapshots = probes.snapshots_due(step, t) || (force && probes.any_snapshots());
     bool any_due = force || snapshots;
     for (auto & writer : data_writers) {
+        writer->publish_written();
         any_due = any_due || writer->due(step, t);
     }
     if (!any_due) {

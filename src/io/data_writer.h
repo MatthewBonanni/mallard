@@ -176,6 +176,12 @@ class DataWriter {
         void finish();
 
         /**
+         * @brief Give a restart file written in the background its name once
+         *        every rank's part is in it (collective on a distributed mesh).
+         */
+        void publish_written() { publish_restart(false); }
+
+        /**
          * @brief Whether a snapshot is due at this step/time.
          */
         bool due(uint64_t step, rtype t) const;
@@ -230,6 +236,11 @@ class DataWriter {
         /** @brief The values of the first n_cells cells, or of the subset's cells. */
         Values capture(uint32_t n_cells, bool in_subset = false) const;
         void run(std::function<void()> job, bool allow_async = true);
+        /**
+         * @brief Rename the restart file written under a temporary name once
+         *        every rank has written its part: at once if wait, else only if done.
+         */
+        void publish_restart(bool wait);
 
         void write_vtu(const std::string & filename, rtype t, Values & values);
         void write_pvd(const std::vector<std::pair<rtype, std::string>> & series) const;
@@ -290,6 +301,7 @@ class DataWriter {
         std::vector<std::pair<rtype, std::string>> history;
         uint64_t n_files = 0;
         std::string last_file;
+        std::string partial_file;  // the restart file being written, renamed to last_file once complete
         void write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const;
         /** @brief The VTU field data: TIME, MALLARD_FORMAT_VERSION and the fields' units record. */
         std::string vtu_field_data(rtype t) const;
