@@ -742,8 +742,9 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
                 if (bc.type == BoundaryType::WALL_ISOTHERMAL) Wf[0] = Wf[E] / (R_c * bc.data[0]);
             } else if (bc.is_wall() || bc.type == BoundaryType::SYMMETRY) {
                 FOR_I_DIM Wf[1 + i] -= u_n * nv[i];
-            } else if (bc.type == BoundaryType::UPT || bc.type == BoundaryType::FARFIELD ||
-                       bc.type == BoundaryType::P_OUT || bc.type == BoundaryType::P_OUT_AVERAGE) {
+            } else if (((bc.type == BoundaryType::INLET_STATE || bc.type == BoundaryType::OUTLET_PRESSURE) &&
+                        !bc.is_characteristic()) ||
+                       bc.type == BoundaryType::FARFIELD) {
                 rtype Wg[N_CONSERVATIVE];
                 bc.ghost_W(Wf, nv, g, R_c, viscous, Wg);
                 FOR_I_CONSERVATIVE Wf[i] = Wg[i];
@@ -854,7 +855,8 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
                 value = Wf[0] * u_tau * dist(s) / mu;
             } else {
                 const int32_t species = k - code::SPECIES_FLUX;
-                const bool prescribed = ibc >= 0 && boundaries.bcs(ibc).type == BoundaryType::UPT &&
+                const bool prescribed = ibc >= 0 && boundaries.bcs(ibc).type == BoundaryType::INLET_STATE &&
+                                        !boundaries.bcs(ibc).is_characteristic() &&
                                         boundaries.bc_Y.extent(0) > 0;
                 const rtype Y = prescribed ? boundaries.bc_Y(ibc, species)
                                            : sampler(c, CellSampler::FIRST_SPECIES + species);

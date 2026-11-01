@@ -5,7 +5,7 @@
         [--width W] [--upstream 12] [--downstream 30] [--u-in 1.6] [--flame-times 12]
         [--outputs 120] [--cfl 0.4] [--transport mixture_averaged] [--planar FULL.csv]
 
-The fresh gas enters on the left at a uniform velocity --u-in times S_L (upt),
+The fresh gas enters on the left at a uniform velocity --u-in times S_L (inlet_state),
 at T and 1 atm, with the mixture fraction Z (kg of fuel stream per kg) of a
 tanh mixing layer across the channel,
 
@@ -180,7 +180,7 @@ file = "flame.restart"
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [{u_in:.17g}, 0.0]
 p = {P}
 T = {args.T:g}
@@ -188,7 +188,7 @@ Y = {{ {entries} }}
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = {P}
 
 [[boundaries]]

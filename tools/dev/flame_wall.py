@@ -132,7 +132,7 @@ T = {args.T_wall}
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = {P}
 
 [[boundaries]]

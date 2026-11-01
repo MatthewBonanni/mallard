@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <set>
@@ -46,7 +47,7 @@ TEST(IOTest, ProvenanceHashesTheMeshFile) {
         s << "[run]\nn_steps = 1\ncfl = 0.25\n[mesh]\ntype = \"file\"\nfilename = \"" << file << "\"\n"
           << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.1\", \"0.0\"]\np = \"1.0\"\n";
         for (const char * name : {"left", "right", "top", "bottom"}) {
-            s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"extrapolation\"\n";
+            s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"outlet_extrapolation\"\n";
         }
         s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
           << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n[output]\n" << output;
@@ -73,8 +74,8 @@ TEST(IOTest, IntegerValuedRealInputsAreAccepted) {
         "[run]\nn_steps = 1\ncfl = 1\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 2\nLy = 1\n"
         "[initialize]\ntype = \"constant\"\nu = [1, 0]\np = 1\nT = 1\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
         "[numerics.face_reconstruction]\ntype = \"FO\"\n"
@@ -98,8 +99,8 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
         "[run]\nn_steps = 10\ndt = 0.01\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
         "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
         "[numerics.face_reconstruction]\ntype = \"FO\"\n"
@@ -118,8 +119,8 @@ TEST(IOTest, ZeroCheckIntervalIsRejected) {
         "[run]\nn_steps = 1\ncfl = 0.25\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
         "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
@@ -197,8 +198,8 @@ std::string output_case(const std::string & dir, const std::string & output_keys
       << "[mesh]\ntype = \"cartesian_tri\"\nNx = 24\nNy = 20\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"]\n"
       << "p = \"x < 0.4 ? 2.0 : 1.0\"\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -296,8 +297,8 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
         "[run]\nn_steps = 1\ndt = 0.01\n"
         "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
         "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
-        "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-        "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
         "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
@@ -720,6 +721,120 @@ TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {
                other_data, other);
     third.resume(10, 0.1_r);
     EXPECT_THROW(third.write(25, 0.2_r), std::runtime_error);
+}
+
+namespace {
+
+/** @brief The distinct snapshot numbers an index file names, in order. */
+std::vector<int> indexed_snapshots(const std::string & file, const std::string & stem) {
+    std::vector<int> numbers;
+    const std::string text = file_contents(file);
+    for (size_t at = 0; (at = text.find(stem + "_", at)) != std::string::npos; at += stem.size()) {
+        const std::string digits = text.substr(at + stem.size() + 1, 6);
+        if (digits.size() < 6 || digits.find_first_not_of("0123456789") != std::string::npos) continue;
+        const int number = std::stoi(digits);
+        if (numbers.empty() || numbers.back() != number) numbers.push_back(number);
+    }
+    return numbers;
+}
+
+} // namespace
+
+TEST(IOTest, ResumedRunsContinueSnapshotNumberingAndSeries) {
+    // Snapshots every 0.25 to t = 1.25 (0 to 5), restart files every 4 steps
+    // and at the end; resuming at t = 1.25 continues at 6, and with the index
+    // lost still never overwrites a snapshot; resuming at t = 1 rewrites 5
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    const std::string dir = (scratch_dir() / "mallard_resume_numbering").string();
+    struct Output {
+        std::string prefix, format, extension, index;
+    };
+    std::vector<Output> outputs = {{"vtu/f", "vtu", ".vtu", ".pvd"}, {"region/f", "vtu", ".vtu", ".pvd"}};
+    if (have_hdf5()) {
+        outputs.push_back({"vtkhdf/f", "vtkhdf", ".vtkhdf", ".vtkhdf.series"});
+        outputs.push_back({"hdf5/f", "hdf5", ".h5", ".xmf"});
+    }
+    auto input = [&](const std::string & t_stop, const std::string & restart) {
+        std::ostringstream s;
+        s << "[run]\nt_stop = " << t_stop << "\ndt = 0.125\n"
+          << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n";
+        if (restart.empty()) {
+            s << "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n";
+        } else {
+            s << "[initialize]\ntype = \"restart\"\nfile = \"" << dir << "/restart_" << restart << ".restart\"\n";
+        }
+        s << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
+          << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+          << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+          << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+          << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
+          << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+          << "[output]\ncheck_interval = 1000000\n"
+          << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 4\n";
+        for (const auto & o : outputs) {
+            s << "[[write_data]]\nprefix = \"" << dir << "/" << o.prefix << "\"\nformat = \"" << o.format
+              << "\"\ntime_interval = 0.25\nvariables = [\"RHO\"]\n";
+            if (o.prefix.starts_with("region")) s << "region = {type = \"disk\", center = [0.5, 0.5], radius = 0.4}\n";
+        }
+        return s.str();
+    };
+    auto run = [](const std::string & text) {
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(text));
+        solver.run();
+    };
+    auto snapshot = [&](const Output & o, int number) {
+        std::ostringstream s;
+        s << dir << "/" << o.prefix << "_" << std::setw(6) << std::setfill('0') << number << o.extension;
+        return s.str();
+    };
+    auto first_segment = [&] {
+        std::filesystem::remove_all(dir);
+        run(input("1.25", ""));
+        std::map<std::string, std::string> written;
+        for (const auto & o : outputs) {
+            for (int k = 0; k <= 5; k++) written[snapshot(o, k)] = file_contents(snapshot(o, k));
+        }
+        return written;
+    };
+    auto expect_kept = [&](const std::map<std::string, std::string> & written, int up_to) {
+        for (const auto & [file, contents] : written) {
+            const int number = std::stoi(file.substr(file.rfind('_') + 1, 6));
+            if (number <= up_to) {
+                EXPECT_TRUE(file_contents(file) == contents) << file << " was overwritten";
+            }
+        }
+    };
+    const std::vector<int> all = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+
+    auto written = first_segment();
+    run(input("2.5", "000010"));
+    expect_kept(written, 5);
+    for (const auto & o : outputs) {
+        EXPECT_TRUE(std::filesystem::exists(snapshot(o, 10))) << o.prefix;
+        EXPECT_FALSE(std::filesystem::exists(snapshot(o, 11))) << o.prefix;
+        EXPECT_EQ(indexed_snapshots(dir + "/" + o.prefix + o.index, "f"), all) << o.prefix;
+    }
+
+    written = first_segment();
+    for (const auto & o : outputs) std::filesystem::remove(dir + "/" + o.prefix + o.index);
+    run(input("2.5", "000010"));
+    expect_kept(written, 5);
+    for (const auto & o : outputs) {
+        EXPECT_TRUE(std::filesystem::exists(snapshot(o, 10))) << o.prefix;
+        EXPECT_EQ(indexed_snapshots(dir + "/" + o.prefix + o.index, "f"), std::vector<int>(all.begin() + 6, all.end()))
+            << o.prefix;
+    }
+
+    written = first_segment();
+    run(input("1.25", "000008"));
+    expect_kept(written, 4);
+    for (const auto & o : outputs) {
+        EXPECT_FALSE(std::filesystem::exists(snapshot(o, 6))) << o.prefix;
+        EXPECT_EQ(indexed_snapshots(dir + "/" + o.prefix + o.index, "f"), std::vector<int>(all.begin(), all.begin() + 6))
+            << o.prefix;
+    }
 }
 
 TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {

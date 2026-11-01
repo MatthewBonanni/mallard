@@ -54,6 +54,8 @@ std::vector<std::string> periodic_zones(const std::string & direction, const std
 } // namespace
 
 const Rules & rules() {
+    static const std::string TYPES = "boundary types name their kind first, and options are keys";
+    static const std::string NSCBC = "the characteristic parameters are the nscbc table";
     // Deprecate before removing: `removed` is at least one minor release after `since`.
     // Keys removed before this policy (0.9.0) have since == removed.
     static const Rules table = {
@@ -71,6 +73,11 @@ const Rules & rules() {
             {"numerics.face_reconstruction.quadrature_order", "", "0.2.0", "0.2.0", "never read"},
             {"physics.p_min", "", "0.2.0", "0.2.0", "pressures are not clipped"},
             {"physics.p_max", "", "0.2.0", "0.2.0", "pressures are not clipped"},
+            {"boundaries[].L", "boundaries[].nscbc.L", "0.9.0", "0.10.0", NSCBC},
+            {"boundaries[].sigma", "boundaries[].nscbc.sigma", "0.9.0", "0.10.0", NSCBC},
+            {"boundaries[].beta", "boundaries[].nscbc.beta", "0.9.0", "0.10.0", NSCBC},
+            {"boundaries[].sigma_T", "boundaries[].nscbc.sigma_T", "0.9.0", "0.10.0", NSCBC},
+            {"boundaries[].sigma_t", "boundaries[].nscbc.sigma_t", "0.9.0", "0.10.0", NSCBC},
             {"write_data[].geometry", "write_data[].region", "0.9.0", "0.10.0",
              "region takes any region: a boundary zone by name, a named or inline region, or \"domain\"",
              all_to_domain},
@@ -82,6 +89,17 @@ const Rules & rules() {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
             {"write_data[].format", "hdf5", "vtkhdf", "0.9.0", "0.10.0",
              "VTKHDF replaces the XDMF and HDF5 files; ParaView 5.12 and later read it", true},
+            {"boundaries[].type", "upt", "inlet_state", "0.9.0", "0.10.0", TYPES},
+            {"boundaries[].type", "stagnation_inlet", "inlet_stagnation", "0.9.0", "0.10.0", TYPES},
+            {"boundaries[].type", "mass_flow_inlet", "inlet_mass_flow", "0.9.0", "0.10.0", TYPES},
+            {"boundaries[].type", "p_out", "outlet_pressure", "0.9.0", "0.10.0", TYPES},
+            {"boundaries[].type", "p_out_average", "outlet_pressure", "0.9.0", "0.10.0", TYPES, false, 0,
+             "average = true"},
+            {"boundaries[].type", "extrapolation", "outlet_extrapolation", "0.9.0", "0.10.0", TYPES},
+            {"boundaries[].type", "nscbc_inlet", "inlet_state", "0.9.0", "0.10.0", TYPES + "; " + NSCBC, false, 0,
+             "nscbc = {}"},
+            {"boundaries[].type", "nscbc_outlet", "outlet_pressure", "0.9.0", "0.10.0", TYPES + "; " + NSCBC, false, 0,
+             "nscbc = {}"},
             {"mesh.curved[].shape", "sphere", "sphere", "0.9.0", "0.10.0",
              "a sphere is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
             {"mesh.curved[].shape", "cylinder", "cylinder", "0.9.0", "0.10.0",
@@ -611,7 +629,20 @@ bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, boo
         lines[first] = indent + to.back().first + " " + rest;
         return true;
     }
-    if (at(root, parent(to)) == nullptr) {
+    // A new table in an element of an array of tables: a header of it after the element's own keys
+    const Concrete table = parent(to);
+    // An empty inline table there (an option rule's `add`, e.g. nscbc = {}) gives way to the header
+    if (const OrderedValue * existing = at(root, table);
+        existing && existing->is_table() && existing->size() == 0 && existing->location().is_ok()) {
+        const size_t line = existing->location().first_line_number() - 1;
+        if (line == existing->location().last_line_number() - 1 && key_column(lines[line], table.back().first)) {
+            lines.erase(lines.begin() + static_cast<long>(line));
+            return true;
+        }
+    }
+    const bool in_element = !table.empty() && table.back().second < 0 && table.size() >= 2 &&
+                            table[table.size() - 2].second >= 0 && at(root, parent(table)) != nullptr;
+    if (at(root, table) == nullptr && !in_element) {
         for (const auto & step : to) {
             if (step.second >= 0) {
                 impossible = true;
@@ -621,9 +652,17 @@ bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, boo
     }
     moved[0] = to.back().first + " " + rest;
     lines.erase(lines.begin() + static_cast<long>(first), lines.begin() + static_cast<long>(last) + 1);
-    const auto end = end_of_table(lines, parent(to));
+    const auto end = end_of_table(lines, table);
     if (end) {
         lines.insert(lines.begin() + static_cast<long>(*end), moved.begin(), moved.end());
+    } else if (in_element) {
+        const auto element_end = end_of_table(lines, parent(table));
+        if (!element_end) {
+            impossible = true;
+            return false;
+        }
+        moved.insert(moved.begin(), {"", "[" + dotted(table) + "]"});
+        lines.insert(lines.begin() + static_cast<long>(*element_end), moved.begin(), moved.end());
     } else {
         lines.push_back("");
         lines.push_back("[" + dotted(parent(to)) + "]");

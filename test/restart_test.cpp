@@ -38,8 +38,8 @@ std::string restart_input(const std::string & dir, const std::string & init, uin
     s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.25\n"
       << "[mesh]\ntype = \"cartesian_tri\"\nNx = 12\nNy = 10\nLx = 1.0\nLy = 1.0\n"
       << "[initialize]\n" << init
-      << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -64,14 +64,14 @@ const std::string IGNITION =
 const std::string REACTING = "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
 "/mechanisms/h2o2.yaml\"\n[chemistry]\n";
 
-const std::string NSCBC_OUTLET = "type = \"nscbc_outlet\"\np = 1.0\nL = 1.0\nsigma = 2.0\nbeta = 0.5\n";
-const std::string NSCBC_INLET = "type = \"nscbc_inlet\"\nu = [0.2, 0.1]\np = 1.0\nT = 1.0\nL = 1.0\nsigma = 2.0\n";
+const std::string NSCBC_OUTLET = "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\nnscbc.sigma = 2.0\nnscbc.beta = 0.5\n";
+const std::string NSCBC_INLET = "type = \"inlet_state\"\nu = [0.2, 0.1]\np = 1.0\nT = 1.0\nnscbc.L = 1.0\nnscbc.sigma = 2.0\n";
 
 /** @brief restart_input with the left and right boundaries replaced. */
 std::string characteristic_input(const std::string & dir, const std::string & init, uint32_t n_steps,
                                  const std::string & left, const std::string & right) {
     std::string s = restart_input(dir, init, n_steps);
-    const std::string extrapolation = "type = \"extrapolation\"\n";
+    const std::string extrapolation = "type = \"outlet_extrapolation\"\n";
     s.replace(s.find(extrapolation, s.find("name = \"left\"")), extrapolation.size(), left);
     s.replace(s.find(extrapolation, s.find("name = \"right\"")), extrapolation.size(), right);
     return s;
@@ -192,7 +192,7 @@ TEST(RestartTest, ErrorControlledRunRestartsExactly) {
 
 TEST(RestartTest, CharacteristicBoundariesRestartExactly) {
     // The faces' pressure and normal velocity carry over in the restart file
-    const std::string extrapolation = "type = \"extrapolation\"\n";
+    const std::string extrapolation = "type = \"outlet_extrapolation\"\n";
     int k = 0;
     for (const auto & [left, right] : {std::pair{extrapolation, NSCBC_OUTLET}, std::pair{NSCBC_INLET, NSCBC_OUTLET}}) {
         const std::string dir = (scratch_dir() / ("mallard_restart_nscbc_" + std::to_string(k++))).string();
@@ -314,7 +314,7 @@ TEST(RestartTest, RejectsZeroForceInterval) {
 namespace {
 
 /**
- * @brief A restart file without attributes split into its header fields,
+ * @brief A restart file split into its header fields,
  *        names, value blocks and (version 4) face count and records.
  */
 struct RestartFile {
@@ -341,7 +341,17 @@ struct RestartFile {
             names.push_back(bytes.substr(pos + 4, length));
             pos += 4 + length;
         }
-        if (version >= 3) pos += sizeof(uint64_t);  // no attributes
+        if (version >= 3) {
+            // Attributes (the snapshot counts) are dropped
+            uint64_t n_attributes;
+            std::memcpy(&n_attributes, bytes.data() + pos, sizeof(n_attributes));
+            pos += sizeof(uint64_t);
+            for (uint64_t a = 0; a < n_attributes; a++) {
+                uint32_t length;
+                std::memcpy(&length, bytes.data() + pos, sizeof(length));
+                pos += 4 + length + sizeof(double);
+            }
+        }
         if (version >= 4) {
             std::memcpy(&n_faces, bytes.data() + pos, sizeof(n_faces));
             pos += sizeof(uint64_t) + sizeof(uint32_t);

@@ -58,7 +58,7 @@ stretching are in [Meshes](../guide/meshes.md#generated-meshes).
 | `[run]` | `t_stop = 0.02` s (six passes of the flow through the 2 m domain), at CFL 1 |
 | `[mesh]` | `type = "wedge"`, 160 × 120 cells on 2 m × 1.5 m |
 | `[initialize]` | The inflow state everywhere (`type = "constant"`): u = (600, 0) m/s, p = 101,325 Pa, T = 300 K |
-| `[[boundaries]]` | `left`: `upt`, the inflow imposed (supersonic: every characteristic enters); `right`: `extrapolation` (supersonic outflow: every characteristic leaves); `bottom` (the ramp) and `top`: `symmetry`, a slip wall |
+| `[[boundaries]]` | `left`: `inlet_state`, the inflow imposed (supersonic: every characteristic enters); `right`: `outlet_extrapolation` (supersonic outflow: every characteristic leaves); `bottom` (the ramp) and `top`: `symmetry`, a slip wall |
 | `[numerics]` | HLLC, SSPRK3, MUSCL with the Venkatakrishnan limiter |
 | `[physics]` | `euler`, γ = 1.4, and the reference state that sets R |
 | `[[probes]]` | 66 points on the vertical line x = 1.5 m, every 10 steps: `probe_line.csv` |

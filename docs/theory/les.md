@@ -323,7 +323,7 @@ chemistry substeps.
 
 ## Synthetic inflow turbulence
 
-A characteristic inlet (`nscbc_inlet`) with a `[boundaries.turbulence]`
+A characteristic inlet (`inlet_state` with `nscbc`) with a `[boundaries.turbulence]`
 table imposes a target velocity
 $\mathbf{u}^\mathrm{t} = \overline{\mathbf{u}} + \mathbf{u}'$ per face, whose
 fluctuation comes from the digital filter of

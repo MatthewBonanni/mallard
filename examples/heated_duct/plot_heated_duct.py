@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The heated-duct example (examples/heated_duct): the steady run against
 Rayleigh flow, and the closed duct's mass against mdot t for the mass-flow
-inlet and for upt.
+inlet and for inlet_state.
 
     plot_heated_duct.py STEADY CLOSED_PREFIX CLOSED_UPT_PREFIX [--figure]
 
@@ -96,7 +96,7 @@ def main():
     held = np.max(np.abs(added[1:] / (MDOT_CLOSED * t[1:]) - 1.0))
     drift = added_u[-1] / (MDOT_CLOSED * t_u[-1]) - 1.0
     print(f"closed duct: mass added within {held:.1e} of mdot t (inlet density {rho_in[0]:.3f} -> {rho_in[-1]:.3f}); "
-          f"upt {100 * drift:+.1f}% after {1e3 * t_u[-1]:.0f} ms")
+          f"inlet_state {100 * drift:+.1f}% after {1e3 * t_u[-1]:.0f} ms")
     if not args.figure:
         return
 
@@ -122,13 +122,13 @@ def main():
         fig, (ax0, ax1) = figstyle.plt.subplots(1, 2, figsize=(10.0, 3.6), gridspec_kw=dict(wspace=0.32))
         ms = 1e3
         ax0.plot(ms * t, MDOT_CLOSED * t, color=P["muted"], lw=1.2, ls="--", label=r"$\dot m\, t$")
-        ax0.plot(ms * t, added, "o", ms=4, mfc="none", mew=1.1, color=P["teal"], label="mass_flow_inlet")
-        ax0.plot(ms * t_u, added_u, "s", ms=4, mfc="none", mew=1.1, color=P["flame"], label="upt")
+        ax0.plot(ms * t, added, "o", ms=4, mfc="none", mew=1.1, color=P["teal"], label="inlet_mass_flow")
+        ax0.plot(ms * t_u, added_u, "s", ms=4, mfc="none", mew=1.1, color=P["flame"], label="inlet_state")
         ax0.set_xlabel("t [ms]")
         ax0.set_ylabel("mass added [kg per m depth]")
         ax0.legend(loc="upper left")
-        ax1.plot(ms * t, rho_in, color=P["teal"], label="mass_flow_inlet")
-        ax1.plot(ms * t_u, rho_in_u, color=P["flame"], label="upt")
+        ax1.plot(ms * t, rho_in, color=P["teal"], label="inlet_mass_flow")
+        ax1.plot(ms * t_u, rho_in_u, color=P["flame"], label="inlet_state")
         ax1.set_xlabel("t [ms]")
         ax1.set_ylabel(r"inlet density [kg/m$^3$]")
         ax1.legend(loc="upper left")

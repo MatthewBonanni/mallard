@@ -28,17 +28,21 @@ T = 300.0
 
 [[boundaries]]
 name = "left"
-type = "nscbc_inlet"
+type = "inlet_state"
 u = ["50 * (1 + 0.1 * sin(2 * pi * 1000 * t))", "0"]
 T = "300 * (1 + 0.05 * sin(2 * pi * 250 * t))"
 p = 1.0e5
+
+[boundaries.nscbc]
 L = 1.0
 sigma = 100.0      # K = sigma c (1 - M^2) / L = 35,000 1/s, well above the forcing's 6,300 1/s: u follows its target
 
 [[boundaries]]
 name = "right"
-type = "nscbc_outlet"
+type = "outlet_pressure"
 p = 1.0e5
+
+[boundaries.nscbc]
 L = 1.0
 
 [[boundaries]]

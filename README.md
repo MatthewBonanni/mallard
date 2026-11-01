@@ -41,13 +41,14 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Explicit LES: Sigma (default), WALE, Vreman or Smagorinsky eddy viscosity for single gases and mixtures, with Scotti's filter width on anisotropic cells and an opt-in dynamic constant
 - Kinetic-energy-preserving hybrid convective flux, with the Riemann solver only at compressions, and a run-time dissipation budget that separates the model's, the scheme's and molecular dissipation
 - Thickened flame (TFLES) with dynamic thickening and a dynamic efficiency (no model constant); partially stirred reactor (PaSR) closure, experimental
-- Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([guide](docs/guide/boundary_conditions.md#synthetic-turbulence))
+- Synthetic turbulent inflow: a digital filter with prescribed Reynolds stresses and length scales, or the statistics of a precursor run, bitwise the same on any number of ranks ([guide](docs/guide/boundary_conditions.md#synthetic-turbulence-turbulence))
 - Channel flow at Re<sub>τ</sub> = 395 and 590: Re<sub>τ</sub> within 0.7% and 1.6% of the DNS of Moser, Kim & Mansour
 - Wall-modeled LES: the Griffin-Fu-Moin compressible model (isothermal and adiabatic walls) or an equilibrium ODE model, fed from an exchange point a few cells off the wall ([guide](docs/guide/les.md#wall-models-wall_model)); channels at Re<sub>τ</sub> = 2000 and 5200 on 12 cells per half-height with C<sub>f</sub> within 2.1% of Lee & Moser, and supersonic isothermal channels at M<sub>b</sub> = 1.7 and 3.0 with wall heat flux within 1.3% of Trettel & Larsson
 
 **Boundary conditions**
-- Slip, adiabatic, isothermal and heat-flux walls, optionally moving
-- Inflow at a given velocity, mass flow, or stagnation pressure and temperature (thermally perfect mixtures included; [guide](docs/guide/boundary_conditions.md#stagnation-inlet)), characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
+- Explicit condition types (`wall_*`, `inlet_*`, `outlet_*`, `farfield`, `symmetry`, `dirichlet`) with composable options, every value a number or an expression of x, y, z, t ([guide](docs/guide/boundary_conditions.md#available-boundary-conditions))
+- Slip, adiabatic, isothermal and heat-flux walls, optionally moving, each with its own wall model
+- Inflow at a given velocity, mass flow, or stagnation pressure and temperature (thermally perfect mixtures included; [guide](docs/guide/boundary_conditions.md#inlets)), characteristic far field, pressure outlets (local or area-averaged), transmissive, time-dependent expressions
 - Partially non-reflecting characteristic (NSCBC) inlets and outlets with transverse terms (1% of an acoustic pulse reflected, against 97-99% at a fixed-pressure outlet); sponge layers of any expression or region
 - Zones split between conditions by expressions
 

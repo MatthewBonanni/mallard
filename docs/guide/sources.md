@@ -208,11 +208,11 @@ centroids) and shares a named region with sources and probes. Several sponges
 add up. Strength and reference are evaluated once, at cell
 centroids. The source is explicit and caps the time step at
 `1 / max(strength)`. Example: `channel_inflow_retau180`, a sponge over the last
-fifth of the channel in front of its `nscbc_outlet`.
+fifth of the channel in front of its `outlet_pressure` with `nscbc`.
 
 ## See also
 
 - [Geometry](geometry.md): regions, their transforms and volume fractions
 - [Input reference: `[source]`](../input.md#source), [`[[sources]]`](../input.md#sources), [regions](../input.md#regions), [`[[sponges]]`](../input.md#sponges)
-- [Boundary conditions](boundary_conditions.md#characteristic-boundaries)
+- [Boundary conditions](boundary_conditions.md#nscbc-characteristic-boundaries)
 - Design notes: [characteristic boundaries and sponges](../design/nscbc.md)

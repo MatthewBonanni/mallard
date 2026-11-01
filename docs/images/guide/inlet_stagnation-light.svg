@@ -161,7 +161,7 @@ L 53.543631 19.767877
   </g>
   <g id="axes_2">
    <g id="text_7">
-    <text style="font-size: 13px; font-family: 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', 'Computer Modern Typewriter', 'Andale Mono', 'Nimbus Mono L', 'Courier New', 'Courier', 'Fixed', 'Terminal', monospace; text-anchor: start; fill: #1f1a1d" x="209.989497" y="18.315591" transform="rotate(-0 209.989497 18.315591)">stagnation_inlet</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', 'Computer Modern Typewriter', 'Andale Mono', 'Nimbus Mono L', 'Courier New', 'Courier', 'Fixed', 'Terminal', monospace; text-anchor: start; fill: #1f1a1d" x="209.989497" y="18.315591" transform="rotate(-0 209.989497 18.315591)">inlet_stagnation</text>
    </g>
    <g id="text_8">
     <text style="font-weight: 700; font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #d9730d" x="209.989497" y="41.15232" transform="rotate(-0 209.989497 41.15232)">imposed</text>

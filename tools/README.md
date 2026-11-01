@@ -380,7 +380,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`sod`](../examples/sod) | | `plot_sod.py`: density profiles against the exact solution | |
 | [`viscous_shock_tube`](../examples/viscous_shock_tube) | | `plot_viscous_shock_tube.py`: wall density and lambda-shock triple point against Zhou et al. | |
 | [`nozzle`](../examples/nozzle) | `make_nozzle_mesh.py` | `plot_nozzle.py`: mass flow, shock position and stagnation pressure against the quasi-one-dimensional solution; `--figure` draws the guide's figure | |
-| [`heated_duct`](../examples/heated_duct) | | `plot_heated_duct.py`: the steady run against Rayleigh flow, and the closed duct's mass against `mdot t` for `mass_flow_inlet` and `upt`; `--figure` draws the guide's figures | |
+| [`heated_duct`](../examples/heated_duct) | | `plot_heated_duct.py`: the steady run against Rayleigh flow, and the closed duct's mass against `mdot t` for `inlet_mass_flow` and `inlet_state`; `--figure` draws the guide's figures | |
 | [`forced_inlet`](../examples/forced_inlet) | | `plot_forced_inlet.py`: x-t diagrams of the velocity and temperature fluctuations (acoustic and entropy waves) and the inlet cell against the forcing; `--figure` draws the guide's figure | |
 | [`poiseuille_pipe`](../examples/poiseuille_pipe) | | `plot_poiseuille.py`: axial velocity against the exact cell averages | |
 | [`pulsed_jet`](../examples/pulsed_jet) | | `plot_pulsed_jet.py`: the vortex rings' core positions, translation speed, diameter and circulation against the slug model, and the inlet cell against `U(t)`; `--png` draws the vorticity and both histories, `--figure` the guide's figure | `animate_pulsed_jet.py` |

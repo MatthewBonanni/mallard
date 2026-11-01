@@ -173,7 +173,7 @@ struct CharacteristicStateFunctor {
             boundaries.char_state(k, 1) = u_n;
             if (u_n >= c) return;
         }
-        const bool inlet = bc.type == BoundaryType::NSCBC_INLET;
+        const bool inlet = bc.type == BoundaryType::INLET_STATE;
         rtype u_target[N_DIM], du_target[N_DIM];
         FOR_I_DIM {
             u_target[i] = boundaries.char_target(k, i);

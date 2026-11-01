@@ -88,9 +88,9 @@ std::string open_channel() {
     s << "[run]\nn_steps = 30\ncfl = 0.4\n" << mesh(16, 8, 2.0, 1.0, N_DIM == 3 ? "[\"z\"]" : "")
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"0.7142857142857143\"\nu = "
       << (N_DIM == 2 ? "[\"0.5\", \"0.0\"]" : "[\"0.5\", \"0.0\", \"0.0\"]") << "\n"
-      << "[[boundaries]]\nname = \"left\"\ntype = \"upt\"\nu = " << (N_DIM == 2 ? "[0.6, 0.0]" : "[0.6, 0.0, 0.0]")
+      << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = " << (N_DIM == 2 ? "[0.6, 0.0]" : "[0.6, 0.0, 0.0]")
       << "\np = 0.7142857142857143\nT = 1.1\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"p_out\"\np = 0.7\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 0.7\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"wall_isothermal\"\nT = 1.2\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"RK4\"\n"

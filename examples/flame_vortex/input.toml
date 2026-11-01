@@ -27,7 +27,7 @@
 # by nu_u / S_L instead would move them 5 times further right.
 #
 # Setup (examples/flame_vortex/flame_vortex.py): the planar Cantera flame in its frame (fresh
-# gas entering on the left at S_L, p_out on the right) and, 3 R_c + delta_L
+# gas entering on the left at S_L, outlet_pressure on the right) and, 3 R_c + delta_L
 # upstream of it, two Gaussian vortices (stream function C exp(-d^2 / 2 R_c^2),
 # centers 2 R_c apart, so r = 4 R_c) with their cyclostrophic pressure. Only
 # the half above the pair's axis is computed (symmetry planes at the axis and
@@ -118,7 +118,7 @@ file = "flame.restart"
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [1.5271245092529449, 0.0]
 p = 101325.0
 T = 300
@@ -126,7 +126,7 @@ X = { "H2" = 0.626959247648878, "O2" = 0.078369905956099162, "N2" = 0.2946708463
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 
 [[boundaries]]

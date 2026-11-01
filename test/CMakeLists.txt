@@ -64,6 +64,7 @@ if(Mallard_DIM EQUAL 2)
     run_control_test.cpp
     step_control_test.cpp
     boundary_test.cpp
+    boundary_types_test.cpp
     nscbc_test.cpp
     source_test.cpp
     axisymmetric_test.cpp

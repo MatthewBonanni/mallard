@@ -26,14 +26,14 @@ T = 300.0
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [600.0, 0.0]
 p = 101325.0
 T = 300.0
 
 [[boundaries]]
 name = "right"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="515.643462pt" height="191.791651pt" viewBox="0 0 515.643462 191.791651" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="551.669712pt" height="191.791651pt" viewBox="0 0 551.669712 191.791651" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -21,8 +21,8 @@
  <g id="figure_1">
   <g id="patch_1">
    <path d="M 0 191.791651 
-L 515.643462 191.791651 
-L 515.643462 0 
+L 551.669712 191.791651 
+L 551.669712 0 
 L 0 0 
 L 0 191.791651 
 z
@@ -1003,7 +1003,7 @@ L 437.295577 35.030228
    </g>
    <g id="text_2">
     <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #ece4e7" transform="translate(444.055962 79.961854)">right</text>
-    <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #ece4e7" transform="translate(444.055962 92.719588)">extrapolation</text>
+    <text style="font-size: 12px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; fill: #ece4e7" transform="translate(444.055962 92.719588)">outlet_extrapolation</text>
    </g>
    <g id="LineCollection_3">
     <path d="M 50.987885 131.607151 

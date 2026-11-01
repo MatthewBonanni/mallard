@@ -1,7 +1,7 @@
 # A pulsed round jet launching a train of vortex rings (axisymmetric; x is
 # the axis, y the radius). The left boundary is a wall with a nozzle of
 # diameter D = 1 in it: where splits the generated mesh's left zone into a
-# mass_flow_inlet over the nozzle (y < D/2), whose uniform mass flux is an
+# inlet_mass_flow over the nozzle (y < D/2), whose uniform mass flux is an
 # expression of t, rho0 U(t) with
 #   U(t) = U0 (1 - tanh(4 cos(2 pi t / T))) / 2   (a smoothed square wave from rest)
 # and an adiabatic no-slip wall outside it. Each period T ejects a slug of
@@ -40,7 +40,7 @@ T = 0.7142857142857143
 
 [[boundaries]]
 name = "left"
-type = "mass_flow_inlet"
+type = "inlet_mass_flow"
 where = "y < 0.5"
 mass_flux = "0.2 * (1 - tanh(4 * cos(2 * pi * t / 30))) / 2"
 T = 0.7142857142857143
@@ -63,8 +63,10 @@ T = 0.7142857142857143
 
 [[boundaries]]
 name = "right"
-type = "nscbc_outlet"
+type = "outlet_pressure"
 p = 0.7142857142857143
+
+[boundaries.nscbc]
 L = 12.0
 
 [[sponges]]

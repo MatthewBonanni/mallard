@@ -250,7 +250,7 @@ class Solver {
         void record_stage_time(rtype c);
         /** @brief Inside a captured step: the step's dt on the device. */
         const rtype * step_dt_device() const;
-        void update_average_pressure_outlets(StateView solution);
+        void update_average_pressure_outlets(StateView solution, rtype t_eval);
         /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
         void set_stage_time(rtype t_stage, rtype c);
         /**
@@ -546,7 +546,7 @@ class Solver {
         /** @brief The faces' own conditions and dirichlet states that depend on t, at the time in stage_time. */
         void apply_boundary_fields();
         /**
-         * @brief Mass fluxes of the faces of a mass_flow_inlet entry: per
+         * @brief Mass fluxes of the faces of an inlet_mass_flow entry: per
          *        face for a mass_flux expression or an mdot with a profile,
          *        else empty (an mdot without profile sets bc's uniform flux).
          */
@@ -749,6 +749,7 @@ class Solver {
             int32_t i_bc;
             Kokkos::View<uint32_t *> faces;   // Faces of owned cells
             std::vector<uint32_t> sum_order;  // Order of the gathered faces of all ranks by global key
+            std::shared_ptr<const BoundaryFields> fields;  // the target p, a number or an expression of t
         };
         std::vector<AveragePressureOutlet> average_pressure_outlets;
         // The numbers of each input boundary, per face where they vary; for mixtures, the composition per input
@@ -844,7 +845,7 @@ class Solver {
         Kokkos::View<double **, Kokkos::LayoutRight> cell_diffusion;  // (cell, k): rho D_k W_k / W, then D^T_k (Soret)
         Kokkos::View<rtype **, Kokkos::LayoutRight> transport_values;      // (cell, [u, T, X_1 .. X_Ns])
         Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
-        Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of UPT
+        Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of inlet_state
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k, then D^T_k (Soret)
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
 
@@ -909,7 +910,7 @@ class Solver {
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
         // Synthetic turbulence of inlets, and the time of the targets in char_target
         std::vector<std::unique_ptr<SyntheticInflow>> inflows;
-        // nscbc_inlet velocities depending on t
+        // Velocities of inlet_state with nscbc depending on t
         TimedInletTargets timed_inlets;
         rtype t_inflow = -1.0;
 

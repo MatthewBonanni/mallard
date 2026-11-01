@@ -50,35 +50,81 @@ class BoundaryValue {
 };
 
 /**
+ * @brief A vector key of a [[boundaries]] entry (u, mass_flux): N_DIM
+ *        components, each a number or an expression, or one number or
+ *        expression, a magnitude along `direction` (the inward normal of each
+ *        face if absent). A vector together with `direction` is an error.
+ */
+struct VectorKey {
+    std::vector<Input> items;  // the components, or the magnitude alone
+    bool speed = false;        // a magnitude along direction
+    bool directed = false;     // direction given (else the inward normal)
+    Point direction{};         // unit
+
+    /** @brief Read entry.key; empty items if absent. */
+    VectorKey(const Input & entry, const std::string & key, const std::string & where);
+
+    /** @brief The unit direction of the magnitude at a face of inward normal n_in. */
+    Point direction_at(const Point & n_in) const { return directed ? direction : n_in; }
+};
+
+/**
  * @brief The numbers of a condition that may be expressions: the velocity of
- *        upt and of walls, p and T of upt and nscbc_inlet (whose velocity is
- *        InletProfile's), p0 and T0 of stagnation_inlet, mass_flux and T of
- *        mass_flow_inlet.
+ *        inlet_state, farfield and walls, given as components or as a speed
+ *        along a direction; p and T of inlet_state (whose velocity with nscbc
+ *        is InletProfile's) and farfield; p0 and T0 of inlet_stagnation;
+ *        mass_flux (a number or a vector) and T of inlet_mass_flow; T of
+ *        wall_isothermal, q of wall_heat_flux and p of outlet_pressure.
  */
 class BoundaryFields {
     public:
-        /** @brief Value slots: the velocity components, p (p0), T (T0), mass_flux. */
+        /**
+         * @brief Value slots: the velocity components (or the speed in the first,
+         *        or the mass flux vector), p (p0), T (T0), mass_flux (q of walls).
+         */
         enum Slot { SLOT_U = 0, SLOT_P = 3, SLOT_T = 4, SLOT_FLUX = 5, N_SLOTS = 6 };
 
-        BoundaryFields(const Input & input, BoundaryType type, const std::string & where);
+        /** @brief How the vector of the condition is given: absent, by components, or as a speed along a direction. */
+        enum class Vector : uint8_t { NONE, COMPONENTS, SPEED };
+
+        BoundaryFields(const Input & input, const BoundaryCondition & bc, const std::string & where);
 
         /** @brief Whether some number is an expression: each face then gets a condition of its own. */
         bool varies() const;
         bool depends_on_time() const;
 
-        /** @brief The temperature the condition prescribes (T, or T0 of stagnation_inlet), 0 if none. */
+        /**
+         * @brief Whether the faces' conditions differ even when no number is an
+         *        expression: a speed along the normal, a mass flux vector.
+         */
+        bool per_face() const {
+            return (vector == Vector::SPEED && !directed) ||
+                   (type == BoundaryType::INLET_MASS_FLOW && vector == Vector::COMPONENTS);
+        }
+
+        /** @brief The temperature the condition prescribes (T, or T0 of inlet_stagnation), 0 if none. */
         double temperature(const Point & x, double t) const;
 
         /**
          * @brief Write the condition's numbers at x and t into bc; densities of
-         *        upt and nscbc_inlet from p and T with gas constant R.
+         *        inlet_state and farfield from p and T with gas constant R.
+         * @param n_in Unit inward normal of the face: the direction of a speed
+         *        without one, and the normal of a mass flux vector.
          * @param numbers_only Write only the numbers that are not expressions
          *        (the condition before it is split by face).
          */
-        void apply(BoundaryCondition & bc, const Point & x, double t, double R, bool numbers_only = false) const;
+        void apply(BoundaryCondition & bc, const Point & x, double t, double R, const Point & n_in,
+                   bool numbers_only = false) const;
 
         BoundaryType get_type() const { return type; }
+        Vector get_vector() const { return vector; }
         const std::string & get_where() const { return where; }
+
+        /** @brief Whether a speed has a direction of its own (else it is along the inward normal). */
+        bool is_directed() const { return directed; }
+
+        /** @brief The fixed unit direction of a speed (with is_directed). */
+        const Point & get_direction() const { return direction; }
 
         /** @brief The value in slot s, null if the condition has none there. */
         const BoundaryValue * slot(int s) const;
@@ -89,9 +135,13 @@ class BoundaryFields {
     private:
         BoundaryType type;
         std::string where;
-        std::vector<BoundaryValue> u;  // upt, walls; empty if absent
+        Vector vector = Vector::NONE;
+        bool directed = false;
+        Point direction{};
+        std::vector<BoundaryValue> u;  // components, or the speed alone; empty if absent
         BoundaryValue p, T, flux;
         bool has_p = false, has_T = false, has_flux = false;
+        std::string vector_key, p_key, T_key, flux_key;
 
         std::vector<const BoundaryValue *> values() const;
 };
@@ -119,8 +169,11 @@ struct CompositionPrograms {
  */
 class TimedBoundaryFields {
     public:
-        /** @brief Condition i_bc of the face at x takes `fields`, and for mixtures `composition` (null: fixed). */
-        void add(uint32_t i_bc, const Point & x, const std::shared_ptr<const BoundaryFields> & fields,
+        /**
+         * @brief Condition i_bc of the face at x, of inward normal n_in, takes
+         *        `fields`, and for mixtures `composition` (null: fixed).
+         */
+        void add(uint32_t i_bc, const Point & x, const Point & n_in, const std::shared_ptr<const BoundaryFields> & fields,
                  const std::shared_ptr<const CompositionPrograms> & composition);
 
         /** @brief Copy what add() gathered to the device; call once, after the last add(). */
@@ -151,6 +204,7 @@ class TimedBoundaryFields {
             uint32_t i_bc;
             uint32_t set;
             Point x;
+            Point n_in;
         };
         std::vector<std::shared_ptr<const BoundaryFields>> sets;
         std::vector<std::shared_ptr<const CompositionPrograms>> compositions;  // per set
@@ -159,7 +213,8 @@ class TimedBoundaryFields {
         Kokkos::View<uint32_t *> face_bc;
         Kokkos::View<uint32_t *> face_set;
         Kokkos::View<double *[3]> face_x;
-        Kokkos::View<uint8_t *> set_type;
+        Kokkos::View<double *[N_DIM]> face_direction;  // the speed's direction, or the normal of a mass flux vector
+        Kokkos::View<uint8_t *[2]> set_type;            // type, Vector
         Kokkos::View<int32_t *[BoundaryFields::N_SLOTS]> set_slot;  // program, -1 if none
         Kokkos::View<int32_t *[4]> set_composition;                 // first, count, balance, mole
         Kokkos::View<uint32_t *> composition_species;
@@ -211,17 +266,17 @@ class DirichletStates {
 };
 
 /**
- * @brief nscbc_inlet velocity targets that depend on t, evaluated on the
+ * @brief Velocity targets of inlet_state with nscbc that depend on t, evaluated on the
  *        device at a time into a target array (char_target or char_target_next).
  */
 class TimedInletTargets {
     public:
-        /** @brief Whether the velocity u (N_DIM numbers or expressions) depends on t. */
-        static bool depends_on_time(const Input & u, const std::string & where);
+        /** @brief Whether the velocity u of a [[boundaries]] entry (a VectorKey) depends on t. */
+        static bool depends_on_time(const Input & entry, const std::string & where);
 
-        /** @brief Characteristic faces `chars` with centers x take the velocity u. */
-        void add(const Input & u, const std::string & where, const std::vector<int32_t> & chars,
-                 const std::vector<Point> & x);
+        /** @brief Characteristic faces `chars` with centers x and inward normals n_in take the entry's velocity u. */
+        void add(const Input & entry, const std::string & where, const std::vector<int32_t> & chars,
+                 const std::vector<Point> & x, const std::vector<Point> & n_in);
 
         /** @brief Copy what add() gathered to the device; call once, after the last add(). */
         void finish();
@@ -236,12 +291,14 @@ class TimedInletTargets {
     private:
         std::vector<std::shared_ptr<expr::Program>> host_programs;
         std::vector<std::array<uint32_t, N_DIM>> host_slots;
+        std::vector<Point> host_scale;  // 1, or the direction of a speed
         std::vector<int32_t> host_chars;
         std::vector<Point> host_x;
 
         Kokkos::View<int32_t *> chars;
         Kokkos::View<double *[3]> x;
         Kokkos::View<uint32_t *[N_DIM]> slots;
+        Kokkos::View<double *[N_DIM]> scale;
         expr::ProgramTable<> programs;
 };
 
