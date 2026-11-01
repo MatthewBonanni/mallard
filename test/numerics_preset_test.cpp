@@ -357,9 +357,7 @@ Input with_old_boundary_types(Input input) {
             keys.erase("average");
         } else {
             static const std::map<std::string, std::string> OLD = {
-                {"inlet_state", "upt"},     {"inlet_stagnation", "stagnation_inlet"},
-                {"inlet_mass_flow", "mass_flow_inlet"}, {"outlet_pressure", "p_out"},
-                {"outlet_extrapolation", "extrapolation"}};
+                {"inlet_state", "upt"}, {"outlet_pressure", "p_out"}, {"outlet_extrapolation", "extrapolation"}};
             if (const auto it = OLD.find(type); it != OLD.end()) type = it->second;
         }
         keys["type"] = Input(type);

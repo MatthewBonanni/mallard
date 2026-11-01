@@ -521,7 +521,7 @@ reductions = ["integral", "mean", "max"]
 time_interval = 0.5
 [[probes]]
 name = "circle"
-shape = "circle"
+type = "circle"
 center = [0.0, 0.0]
 radius = 1.5
 n_points = 120
@@ -530,7 +530,7 @@ reductions = ["integral"]
 time_interval = 0.5
 [[probes]]
 name = "cut"
-shape = "cut_plane"
+type = "cut_plane"
 point = [{CUT_X}, 0.0]
 normal = [1.0, 0.0]
 bounds = [[{CUT_X - 1}, {-CUT_H}], [{CUT_X + 1}, {CUT_H}]]

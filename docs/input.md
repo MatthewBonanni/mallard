@@ -570,8 +570,7 @@ type that takes them; which options each type takes is the guide's
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage (single gases) | `rho`, `u` (one expression per component), `p` |
 
 Types renamed in 0.9.0 (removed in 0.10.0; `mallard input upgrade` rewrites
-them): `upt` is `inlet_state`, `stagnation_inlet` `inlet_stagnation`,
-`mass_flow_inlet` `inlet_mass_flow`, `p_out` `outlet_pressure`,
+them): `upt` is `inlet_state`, `p_out` `outlet_pressure`,
 `p_out_average` `outlet_pressure` with `average = true`, `extrapolation`
 `outlet_extrapolation`, and `nscbc_inlet` / `nscbc_outlet` `inlet_state` /
 `outlet_pressure` with an `nscbc` table holding their `L`, `sigma`, `beta`,

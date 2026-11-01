@@ -81,7 +81,6 @@ const Rules & rules() {
             {"write_data[].geometry", "write_data[].region", "0.9.0", "0.10.0",
              "region takes any region: a boundary zone by name, a named or inline region, or \"domain\"",
              all_to_domain},
-            {"probes[].shape", "probes[].type", "0.9.0", "0.10.0", "type selects the kind of every region"},
             {"mesh.curved[].shape", "mesh.curved[].type", "0.9.0", "0.10.0",
              "type selects the kind of every region; a curved zone lies on a surface (2D: a curve)"},
         },
@@ -90,8 +89,6 @@ const Rules & rules() {
             {"write_data[].format", "hdf5", "vtkhdf", "0.9.0", "0.10.0",
              "VTKHDF replaces the XDMF and HDF5 files; ParaView 5.12 and later read it", true},
             {"boundaries[].type", "upt", "inlet_state", "0.9.0", "0.10.0", TYPES},
-            {"boundaries[].type", "stagnation_inlet", "inlet_stagnation", "0.9.0", "0.10.0", TYPES},
-            {"boundaries[].type", "mass_flow_inlet", "inlet_mass_flow", "0.9.0", "0.10.0", TYPES},
             {"boundaries[].type", "p_out", "outlet_pressure", "0.9.0", "0.10.0", TYPES},
             {"boundaries[].type", "p_out_average", "outlet_pressure", "0.9.0", "0.10.0", TYPES, false, 0,
              "average = true"},
@@ -104,18 +101,6 @@ const Rules & rules() {
              "a sphere is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
             {"mesh.curved[].shape", "cylinder", "cylinder", "0.9.0", "0.10.0",
              "a cylinder is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
-            {"sources[].region.**.type", "circle", "disk", "0.9.0", "0.10.0",
-             "circle is the closed curve, disk the area inside it", false, 2},
-            {"sources[].region.**.type", "circle", "sphere", "0.9.0", "0.10.0", "circle is a curve", false, 3},
-            {"sources[].region.**.type", "ellipse", "ellipsoid", "0.9.0", "0.10.0",
-             "ellipse is a curve; the z = 0 slice of an ellipsoid is the area inside it"},
-            {"sources[].region.**.type", "disk", "sphere", "0.9.0", "0.10.0", "disk is a flat surface in 3D", false, 3},
-            {"sources[].region.**.type", "rectangle", "box", "0.9.0", "0.10.0", "rectangle is a flat surface in 3D",
-             false, 3},
-            {"sources[].region.**.type", "box", "rectangle", "0.9.0", "0.10.0", "box is the 3D solid", false, 2},
-            {"sources[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0",
-             "annulus is a flat surface in 3D; the hollow solid is a cylinder along z with inner_radius, and "
-             "axis = [0, 0, 1] is added", false, 3, "axis = [0, 0, 1]"},
         },
         {
             {"mesh.periodic", "periodic", "zones", "type", "0.9.0", "0.10.0",
@@ -179,27 +164,6 @@ auto & entries_of(V & node) {
 
 template <typename V>
 void find_keys(V & node, const Path & path, size_t k, Concrete & at, std::vector<Concrete> & out) {
-    if (path[k].key == "**") {
-        find_keys(node, path, k + 1, at, out);
-        if (!node.is_table()) return;
-        for (auto & [name, child] : entries_of(node)) {
-            // The region of a boundary or interior (new in 0.9.0) has the current types
-            if (name == "of") continue;
-            if (child.is_table()) {
-                at.emplace_back(name, -1);
-                find_keys(child, path, k, at, out);
-                at.pop_back();
-            } else if (child.is_array()) {
-                for (size_t i = 0; i < child.size(); i++) {
-                    if (!child.at(i).is_table()) continue;
-                    at.emplace_back(name, static_cast<long>(i));
-                    find_keys(child.at(i), path, k, at, out);
-                    at.pop_back();
-                }
-            }
-        }
-        return;
-    }
     if (!node.is_table() || !entries_of(node).contains(path[k].key)) return;
     if (k + 1 == path.size()) {
         at.emplace_back(path[k].key, -1);

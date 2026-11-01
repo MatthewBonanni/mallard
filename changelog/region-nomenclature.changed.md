@@ -1,1 +1,1 @@
-- `mallard input upgrade` changes renamed options in place inside inline tables, keeping the file's layout, can add a key a rename needs (e.g. a cylinder's `axis`), and takes the case's dimension from its mesh (`--dim 2|3` states it) for renames that depend on it (#499).
+- `mallard input upgrade` changes renamed options in place inside inline tables, keeping the file's layout, can add a key a rename needs (e.g. `filled = false` on a curved zone's sphere), and takes the case's dimension from its mesh (`--dim 2|3` states it) for renames that depend on it (#499).
