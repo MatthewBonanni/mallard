@@ -80,8 +80,8 @@ Reconstruction options (`order`, `limiter`) apply only when the
 reconstruction type is the preset's: `type = "MUSCL"` under `accurate` gets
 MUSCL's own defaults, not `order = 5`. The preset's `cfl` applies only when
 `[run]` sets neither `cfl` nor `dt`. Without a preset the defaults below
-apply, unchanged (first order). The log names the preset and every key the
-input overrides, and the Numerics section of the log lists what is used:
+apply, unchanged (first order). The terminal output names the preset and every key the
+input overrides, and its Numerics section lists what is used:
 
 ```
 == Numerics ===========================

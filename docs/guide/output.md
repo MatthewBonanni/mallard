@@ -1,10 +1,28 @@
-# Output and diagnostics
+# Output
 
-A run writes snapshots of the solution (`[[write_data]]`), restart files, and
-diagnostics: wall forces, domain integrals, running statistics and probes.
-The log on the terminal reports progress and timing.
+A run writes snapshots of the solution, restart files, and the diagnostics it
+is asked for: probes, wall forces, domain integrals and statistics. It reports
+its progress on the terminal and in a machine-readable run record.
 
-## Snapshots: `[[write_data]]`
+## What a run writes
+
+| Output | File(s) | Turned on by | Details |
+|---|---|---|---|
+| Solution snapshots | `PREFIX_<n>.vtkhdf` (`<n>`: the step, or with `time_interval` the snapshot's index) and `PREFIX.vtkhdf.series`; VTU: `.vtu`, `.pvtu`, `.pvd` | `[[write_data]]` | [Solution snapshots](#solution-snapshots-write_data) |
+| Restart files | `PREFIX_<step>.restart` | `[[write_data]]` with `format = "restart"` | [Initialization and restarts](initialization.md#restarts) |
+| Terminal output | standard output (errors: standard error) | always; `[output] check_interval` sets the progress rows | [Terminal output](#terminal-output) |
+| Run record | `mallard.jsonl` | on by default; `[output] run_log` | [Run record](#run-record-mallardjsonl) |
+| Run health | the run record's `health` and the terminal output's **Health** section | on by default; `[output] health` | [Run health](#run-health) |
+| Probes | `probe_<name>.csv` (or `.h5`, `.vtkhdf`, `.pvd`), `probe_<name>_reductions.csv` | `[[probes]]` | [Probes and monitors](probes.md#probes-probes) |
+| Wall forces | `forces_<zone>.csv` | `[[forces]]` | [Wall forces](probes.md#wall-forces-forces) |
+| Domain integrals | `integrals.csv` | `[integrals]` | [Domain integrals](probes.md#domain-integrals-integrals) |
+| Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files | `[statistics]`, `[statistics.phase]` | [Statistics](statistics.md) |
+| Spectra and two-point correlations | `spectra.csv` | `[statistics.spectra]` | [Spectra](statistics.md#spectra-and-two-point-correlations-statisticsspectra) |
+
+Every file records its [units](#units), its [provenance](#provenance) and a
+[format version](#formats-and-compatibility).
+
+## Solution snapshots: `[[write_data]]`
 
 ```toml
 [[write_data]]
@@ -45,7 +63,7 @@ variables = ["P", "T"]
 | Chemistry, radiation | `HRR`, `OMEGA_<s>`, `CHEM_COST`, `QRAD` |
 | LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
-| Statistics | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*` |
+| [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
 
 **VTKHDF, the default.** `format = "vtkhdf"` writes VTK's HDF5 format, which
 ParaView 5.12 and later open directly: open `PREFIX.vtkhdf.series` for the time
@@ -86,7 +104,9 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 **Restart files** (`format = "restart"`) are described in
 [Initialization and restarts](initialization.md#restarts).
 
-## The log
+## Run progress
+
+### Terminal output
 
 ```toml
 [output]
@@ -111,13 +131,13 @@ Chemistry adds the share of cells advanced and the largest sub-step count.
 Written files appear as rows with their step and time. The run ends with a
 summary of wall time (setup, time stepping, diagnostics, output) and
 throughput. The same information, in machine-readable form, goes to the
-[run log](#the-run-log). Errors go to stderr from any rank. Colors are off when the output
+[run record](#run-record-mallardjsonl). Errors go to stderr from any rank. Colors are off when the output
 is not a terminal or `NO_COLOR` is set (`CLICOLOR_FORCE=1` forces them, e.g.
 under `mpirun`).
 
-## The run log
+### Run record: `mallard.jsonl`
 
-Next to the human log, rank 0 writes `mallard.jsonl` (`[output] run_log`):
+Next to the terminal output, rank 0 writes `mallard.jsonl` (`[output] run_log`):
 one JSON object per line ([JSON Lines](https://jsonlines.org)), flushed as
 it is written, so scripts and dashboards can follow a running case:
 
@@ -127,7 +147,7 @@ records = [json.loads(line) for line in open("mallard.jsonl")]
 progress = [r for r in records if r["type"] == "progress"]
 ```
 
-A run starting from a restart file appends to the log, so a case continued
+A run starting from a restart file appends to the record, so a case continued
 several times keeps one history, each part led by its own `start` record.
 Each record has a `type`:
 
@@ -161,44 +181,11 @@ Numbers are in SI units (seconds, bytes) and read back exactly; unknown
 values are `null`. Within a `version`, records only gain fields; renaming,
 removing or changing the meaning of one increments it.
 
-## Provenance
-
-Every output file records where it came from: the provenance block, one
-JSON object, is written into restart files (a trailer after the data, also of
-compressed files, which older readers skip), VTU, `.pvtu`, `.pvd`, XDMF and probe `.vtp` files (an XML comment
-`<!-- provenance {...} -->` after the XML declaration), VTKHDF and HDF5 files, probe files included (the
-string attribute `provenance` of the root group; a continued run's probe file holds the latest run's), CSV files of forces,
-integrals and probes (a line `# provenance {...}` after the header and its
-[units line](#units), and another where a continued run starts appending), and
-the run log's `start` record.
-
-| Field | Contents |
-|---|---|
-| `schema`, `version` | `"mallard-provenance"`, 1 |
-| `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
-| `dependencies` | Versions of `compiler`, `kokkos`, `mpi` (the library's own string and the standard), `hdf5`, `cgns`, `zlib`, `nccl`, `gpu_runtime` and `gpu_driver` (CUDA or HIP); `null` for those not built in |
-| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
-| `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run log's `placement`) |
-| `input` | `file`, `sha256` of its bytes, and its `text` |
-| `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
-| `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, resolved `value` and `from_preset` (`false` where the input overrides it) |
-| `setup` | The resolved setup, defaults included: each section of the log's setup summary (`Mesh`, `Physics`, `Numerics`, `Boundaries`, `Output`) as `[key, value]` pairs |
-
-Check that a file belongs to a given input with `sha256sum input.toml`; read
-the block in Python:
-
-```python
-import json, h5py
-json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
-```
-
-or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
-
 ## Run health
 
 At every progress row Mallard also checks that the run is healthy, and
 writes what it finds into the progress record's `health` (and a short
-**Health** section at the end of the human log). Everything is computed at
+**Health** section at the end of the terminal output). Everything is computed at
 progress rows only, from the state of that step. Between rows the ledger
 adds a reduction over the boundary faces (and one over the cells where
 there are volume sources) per stage, chemistry two reductions of the
@@ -274,7 +261,9 @@ safeguarded by bisection within the thermodynamic fits' range) never
 changes the state, and a failed chemistry integration ends the run with an
 error, so neither is a repair.
 
-## Units
+## In every output file
+
+### Units
 
 Every value Mallard writes is in SI units (the mesh-quality angle of
 `mallard check` excepted, in degrees), and every output file says which,
@@ -341,308 +330,71 @@ the product of their pair's (`U_X*U_Y`: `m2 s-2`); the `abscissa` is a
 wavenumber in `m-1` (spectra, shells) or a separation in `m` (correlations).
 Files written before Mallard 0.9 have no units; the readers return them empty.
 
-## Wall forces: `[[forces]]`
+### Provenance
 
-```toml
-[[forces]]
-zone = "cylinder"
-interval = 10        # default 1
-# file = "forces_cylinder.csv"
-```
+Every output file records where it came from: the provenance block, one
+JSON object, is written into restart files (a trailer after the data, also of
+compressed files, which older readers skip), VTU, `.pvtu`, `.pvd`, XDMF and probe `.vtp` files (an XML comment
+`<!-- provenance {...} -->` after the XML declaration), VTKHDF and HDF5 files, probe files included (the
+string attribute `provenance` of the root group; a continued run's probe file holds the latest run's), CSV files of forces,
+integrals and probes (a line `# provenance {...}` after the header and its
+[units line](#units), and another where a continued run starts appending), and
+the run record's `start` record.
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180) and 2 more.
-
-Writes `step, t` and the pressure and viscous force components of the fluid
-on the zone, per unit depth in 2D (per radian in axisymmetric runs). Divide by
-the dynamic pressure and a reference length (or area) for drag and lift
-coefficients. On walls with a [wall model](les.md#wall-models-wall_model)
-the viscous force is the modeled stress, and a last column `Q` gives the
-modeled heat flux into the fluid.
-
-## Domain integrals: `[integrals]`
-
-```toml
-[integrals]
-interval = 1
-budget = true        # kinetic-energy budget (LES), default false
-```
-
-*Used in:* [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence), [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les) and 4 more.
-
-Writes `integrals.csv` with the volume integrals of the kinetic energy,
-enstrophy, squared dilatation and pressure dilatation, and of `|u|^2`,
-`|omega|^2`, `rho^2`, `T` and `T^2` (from which mean squares and variances
-follow). For decaying turbulence (the Taylor–Green
-vortex) the dissipation rate is `-dE/dt`. With TENO, velocity gradients come
-from the reconstruction polynomials (order-consistent: within 1% of spectral
-derivatives of the same field). `budget = true` adds the
-[kinetic-energy budget](les.md#low-dissipation-flux-and-the-budget):
-molecular, SGS and numerical dissipation.
-
-## Statistics
-
-```toml
-[statistics]
-fields = ["RHO", "U_X", "U_Y", "U_Z", "P", "T"]
-products = ["U_X*U_X", "U_Y*U_Y", "U_Z*U_Z", "U_X*U_Y"]
-t_start = 40.0
-interval = 10
-```
-
-*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 2 more.
-
-`[statistics]` keeps running time averages and covariances per cell, on the
-device, without communication: bitwise the same on any number of ranks, and
-carried across restarts.
-
-| Key | Default | Meaning |
-|---|---|---|
-| `fields` | none | `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T`, `H`, `Y_<s>` |
-| `products` | none | Pairs `"A*B"` whose covariance to keep |
-| `t_start` | 0 | Start averaging after this time |
-| `interval` | 1 | Sample every this many steps (weighted by the time since the last sample) |
-| `reset` | `false` | Start afresh on a restart |
-
-Write them with `variables = ["MEAN_*", "COV_*"]`, and average further over
-homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of a
-channel, giving profiles in y; its CSV also feeds
-[synthetic inflow](boundary_conditions.md#synthetic-turbulence)).
-
-### Spectra and two-point correlations: `[statistics.spectra]`
-
-```toml
-[statistics]
-t_start = 120.0
-interval = 20
-
-[statistics.spectra]
-fields = ["U_X", "U_Y", "U_Z"]   # autospectra and autocorrelations
-products = ["U_X*U_Y"]           # cross spectra and correlations
-# directions = ["x", "z"]        # default: the mesh's periodic directions
-# average = false                # per-sample files instead of time averages
-```
-
-*Used in:* the in-situ statistics tests.
-
-On a generated `cartesian` mesh, spectra and two-point correlations along the
-homogeneous (periodic, unstretched) directions, at each position of the
-others: per y of a channel, or shell spectra of a periodic box. Computed by
-FFTs on the device, bitwise the same on any number of ranks.
-
-| Key | Default | Meaning |
-|---|---|---|
-| `fields`, `products` | none | Variables (as `[statistics]`) and pairs `"A*B"` |
-| `directions` | periodic directions | Homogeneous directions |
-| `average` | `true` | Time averages, written to `file` with every snapshot and carried by restart files; `false`: one `<file stem>_<step>.csv` per sample |
-| `file` | `spectra.csv` | Output CSV (`quantity, a, b, direction, position, <coordinates>, index, abscissa, value, units`) |
-| `interval`, `t_start` | `[statistics]`'s | Sampling |
-
-The file holds plane means, one-sided spectra (sums, not densities: they
-add up to the covariance `<a'b'>`), correlations `<a'(x) b'(x + r)>` and, in
-a periodic box, shell spectra. `tools/post/insitu_statistics.py` plots them
-(`plot`) and recomputes them from restart snapshots (`spectra`, `compare`).
-
-- Values are cell averages: at the grid cutoff a spectrum is lower than one
-  of point values by the cell-average factor (sinc^2(k h / 2) per direction,
-  0.41 at k = N/2), as `examples/isotropic_turbulence/isotropic_turbulence_stats.py --no-deconvolve`.
-- A sample costs about a third of a step of the Re_tau 180 channel (11 ms
-  on an A100): sample every 10-20 steps, not every step.
-- Correlations are periodic: `R(L - r) = R(-r)`; use `r <= L/2`.
-
-### Phase averages: `[statistics.phase]`
-
-```toml
-[statistics.phase]
-fields = ["U_X", "U_Y", "P"]
-bins = 12
-probe = [3.0, 0.0]               # or: period = 30.3 (and t_reference)
-variable = "U_Y"
-level = 0.0
-```
-
-*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder).
-
-Per-cell means over the samples whose phase in a periodic cycle falls in each
-of `bins` bins, output as `PHASE_<bin>_<field>` (`variables = ["PHASE_*"]`).
-The phase comes from a fixed `period`, or from the upward crossings of a
-level by a variable at a probe point.
-
-| Key | Default | Meaning |
-|---|---|---|
-| `fields` | none | Variables to average |
-| `bins` | none | Phase bins |
-| `period`, `t_reference` | none, 0 | Fixed period, phase 0 at `t_reference` |
-| `probe`, `variable`, `level` | none, none, 0 | Trigger point, variable and level |
-| `interval`, `t_start` | `[statistics]`'s | Sampling |
-
-- The trigger needs two crossings before it bins anything, and is sampled
-  only every `interval` steps: keep `interval` well below a period / `bins`.
-- A cycle longer than the previous one puts its tail in the last bin.
-- `examples/cylinder` phase-averages
-  its vortex street this way.
-
-## Probes: `[[probes]]`
-
-A probe samples the solution on a geometry every `interval` steps (or
-`time_interval` of simulation time) and writes the samples, reductions over
-them, or both; a probe of a [region](#region-probes) writes integrals, means and
-extrema over it. The files are the same bit for bit on any number of ranks.
-
-On a GPU the files have the CPU's rows, in the same order, with the same steps,
-times, coordinates, normals, areas and region volumes: the geometry and the
-region fractions are set up on the host, and rank 0 reduces the gathered samples
-(cells, for a region) on the host in sample order. The values agree
-with a CPU run to rounding, not bit for bit, since the device rounds the solution
-and its point values differently (fused multiply-adds, its own math functions).
-The test suite checks every backend against a CPU reference (`test/data/probes`):
-indices, steps and times exactly, geometry to 1e-14 and values to 1e-10 of each
-column's largest magnitude. The geometry tolerance covers other CPUs and
-compilers only; on one host the geometry of every backend is the same bit for bit.
-
-```toml
-[[probes]]
-name = "centerline"
-variables = ["RHO", "P"]
-start = [0.0, 0.01]
-end = [1.0, 0.01]
-n_points = 200
-interval = 10
-```
-
-*Used in:* [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`flame_outflow`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-outflow) and 1 more.
-
-```toml
-# Wake survey: high-order point values on an arc, a VTK series for ParaView,
-# and the arc's mean and RMS in probe_wake_reductions.csv
-[[probes]]
-name = "wake"
-variables = ["U", "P"]
-sampling = "point"
-type = "arc"
-center = [0.0, 0.0]
-radius = 5.0
-angles = [-45.0, 45.0]
-n_points = 91
-time_interval = 1.0
-format = "vtp"
-reductions = ["mean", "rms"]
-```
-
-![Probes of every type over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-light.svg#gh-light-mode-only)
-![Probes of every type over a triangle mesh, colored by their point values of the pressure](../images/guide/probe_shapes-dark.svg#gh-dark-mode-only)
-
-| Key | Default | Meaning |
-|---|---|---|
-| `name` | required | Names the files |
-| `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
-| `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D `surface` (`x`, `y`, `z` of `u`, `v`) |
-| `region` | none | Instead of `type`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
-| `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
-| `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
-| `format` | `csv` | `csv`, `hdf5` (one extensible file), `vtkhdf` (one VTKHDF file of every output, which ParaView opens as a time series) or `vtp` (one file per output and a `.pvd` series) |
-| `reductions` | none (`region`: `integral`, `mean`, `min`, `max`) | `integral`, `mean`, `favre`, `min`, `max`, `rms` over the geometry |
-| `samples` | `true` | `false` writes only the reductions |
-| `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
-
-### Cut planes and surfaces
-
-`type = "cut_plane"` intersects the mesh exactly with a plane: one sample per
-cut cell, and integrals exact for the reconstruction polynomials. Surfaces
-are regions, resampled on a grid with `n_points`:
-`region = {type = "sphere", center = [0.5, 0.5, 0.5], radius = 0.3, filled = false}`
-with `n_points = [24, 48]`. Both have normals, so fluxes through them are
-variables: a closed sphere's `integral` of `MASS_FLUX` is the net outflow.
-
-![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-light.svg#gh-light-mode-only)
-![An exact cut plane through a tetrahedral mesh, one polygon per cut cell, and a resampled sphere, both colored by point values of the pressure](../images/guide/probe_cut_3d-dark.svg#gh-dark-mode-only)
-
-```toml
-[[probes]]
-name = "midplane"
-type = "cut_plane"
-point = [0.0, 0.0, 0.5]
-normal = [0.0, 0.0, 1.0]
-variables = ["U", "P", "MASS_FLUX"]
-sampling = "point"
-format = "vtp"
-time_interval = 0.01
-reductions = ["integral"]
-```
-
-### Boundary data
-
-`boundary = "<zone>"` (a name or a list) or `boundary_type = "wall"` (every
-wall) turns each face of the zones into a sample: the state the boundary
-condition sets on the face, wall quantities and fluxes. In 2D the faces form
-ordered polylines with their arc length `s`; in 3D, polygons for ParaView.
-
-```toml
-[[probes]]
-name = "cylinder"
-boundary = "cylinder"
-variables = ["P", "CP", "CF", "Q_W", "Y_PLUS"]
-reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
-time_interval = 1.0
-
-[[probes]]
-name = "inflow"
-boundary = ["inlet", "outlet"]
-samples = false
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
-reductions = ["integral"]
-```
-
-![Boundary probes on the curved walls of an annulus: each wall a closed polyline traversed with the fluid on its left, and the inner wall's pressure against arc length, point values against cell averages and the exact value](../images/guide/probe_walls-light.svg#gh-light-mode-only)
-![Boundary probes on the curved walls of an annulus: each wall a closed polyline traversed with the fluid on its left, and the inner wall's pressure against arc length, point values against cell averages and the exact value](../images/guide/probe_walls-dark.svg#gh-dark-mode-only)
-
-In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
-
-![Heat flux into an isothermal wall under a sheared warm blob, from a 3D boundary probe](../images/guide/probe_wall_3d-light.svg#gh-light-mode-only)
-![Heat flux into an isothermal wall under a sheared warm blob, from a 3D boundary probe](../images/guide/probe_wall_3d-dark.svg#gh-dark-mode-only)
-
-| Variable | Meaning |
+| Field | Contents |
 |---|---|
-| `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*` | Convective fluxes through the face, positive out of the domain |
-| `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force (per radian in axisymmetric runs, as `area`) |
-| `TAU_W`, `TAU_W_X`, ... | Wall shear stress (magnitude, components) |
-| `CF`, `CP` | Skin friction and pressure coefficients of `reference` |
-| `Q_W` | Heat flux into the fluid |
-| `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
+| `schema`, `version` | `"mallard-provenance"`, 1 |
+| `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
+| `dependencies` | Versions of `compiler`, `kokkos`, `mpi` (the library's own string and the standard), `hdf5`, `cgns`, `zlib`, `nccl`, `gpu_runtime` and `gpu_driver` (CUDA or HIP); `null` for those not built in |
+| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
+| `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run record's `placement`) |
+| `input` | `file`, `sha256` of its bytes, and its `text` |
+| `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
+| `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, resolved `value` and `from_preset` (`false` where the input overrides it) |
+| `setup` | The resolved setup, defaults included: each section of the terminal output's setup summary (`Mesh`, `Physics`, `Numerics`, `Boundaries`, `Output`) as `[key, value]` pairs |
 
-Around a cylinder at Re = 40: the wall probe's `CP`, `CF` and `Y_PLUS`, the
-`mean` and `max` of `Y_PLUS`, the `integral` of the tractions (the drag) and
-the `MASS_FLUX` through a closed circle and a cut, whose net outflow settles
-to zero:
+Check that a file belongs to a given input with `sha256sum input.toml`; read
+the block in Python:
 
-![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-light.svg#gh-light-mode-only)
-![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-dark.svg#gh-dark-mode-only)
+```python
+import json, h5py
+json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
+```
 
-With TENO, `sampling = "point"` reads each cell's reconstruction polynomial at
-the sample, so a probe converges at the scheme's order (fifth order for
-`order = 5`) instead of the first order of cell averages at points off the
-centroids. The [Sod comparison](numerics.md#reconstruction) on the Numerics
-page was read from a line probe. The full key list is in the [input reference](../input.md#probes);
-each type, where its samples go and how to read the files, with figures:
-[Geometry](geometry.md#points-and-curves).
+or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
 
-Pitfalls:
+### Formats and compatibility
 
-- Point values fall back to the linear least-squares reconstruction in cells
-  the TENO indicator flags troubled (shocks, and coarse meshes of smooth
-  fields), and to the cell average outside the domain.
-- Mass fractions are cell averages in both modes; `T` and `H` follow the
-  reconstructed `p / rho` at the cell's composition.
-- CSV is for small probes: it repeats the coordinates every output. Use `vtkhdf`, `hdf5`
-  or `vtp` for thousands of samples.
-- Wall shear and heat flux use the viscous flux's one-sided wall gradients:
-  second-order shear on smooth meshes, first-order heat flux at isothermal
-  walls. `CF` is signed along `reference.u`.
-- A cut plane is exact for the mesh's straight-sided cells (curved cells are
-  cut as their straight versions); `bounds` clips it to a box.
-- Fluxes of boundary probes are those of the face states, not the scheme's
-  numerical fluxes: they agree as the mesh is refined.
-- Reductions of points weigh each point 1 (`integral` is a sum); curves
-  integrate with three Gauss points per element between samples.
+Every file Mallard writes carries a format version. **The promise:** a release
+reads the restart and mesh files of every earlier release of the same major
+version. In 0.x that means every restart file since 0.1 and every HDF5 mesh since
+0.3. A file from a *newer*
+Mallard is rejected with a message that gives its version and the versions this
+build reads. It is never misread.
+
+| File | Version, where | Versions (written from) | Read by |
+|---|---|---|---|
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9) | Mallard: all |
+| HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
+| VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
+| HDF5 output (`format = "hdf5"`, deprecated) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
+| VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard/vtu.py` |
+| Run record (`mallard.jsonl`, `[output] run_log`) | `version` of each `start` record | 1 (0.9) | Your scripts (records only gain fields within a version) |
+| Provenance block (every output file) | its `version` | 1 (0.9) | `tools/mallard/vtu.py` (`provenance()`); in restart files a trailer that every restart reader skips, so it changes no restart version |
+| Probe output (`[[probes]]` `format = "hdf5"`, `"vtkhdf"`, `"vtp"`) | root attribute `version` (HDF5, VTKHDF), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
+| TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
+
+- Restart files are written with the **lowest** version that holds their
+  contents, so a run without statistics, characteristic boundaries or
+  compression still writes version 2, which every release since 0.4 reads.
+- A restart file must also match the build's dimension and precision
+  (`Mallard_DIM`, `Mallard_USE_DOUBLE`); the message says which differs.
+- Output files gain arrays and attributes within a version. A version changes
+  only when existing content changes meaning or layout. The Python tools refuse
+  versions newer than they know; update `tools/` with Mallard.
+- A change to a format adds a version and keeps the reader of every older one,
+  with a fixture in `test/data/formats/` that a test reads (see its
+  [README](../../test/data/formats/README.md)).
 
 ### Region probes
 
@@ -722,40 +474,10 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 
 ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` (HDF5) series directly. `read_vtu_cells` reads any snapshot file, and `mallard.vtu.snapshot("solut/flow_000100")` finds it whichever format the build wrote.
 
-## File formats and compatibility
-
-Every file Mallard writes carries a format version. **The promise:** a release
-reads the restart and mesh files of every earlier release of the same major
-version. In 0.x that means every restart file since 0.1 and every HDF5 mesh since
-0.3. A file from a *newer*
-Mallard is rejected with a message that gives its version and the versions this
-build reads. It is never misread.
-
-| File | Version, where | Versions (written from) | Read by |
-|---|---|---|---|
-| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9) | Mallard: all |
-| HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
-| VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
-| HDF5 output (`format = "hdf5"`, deprecated) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
-| VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard/vtu.py` |
-| Run log (`[output] run_log`) | `version` of each `start` record | 1 (0.9) | Your scripts (records only gain fields within a version) |
-| Provenance block (every output file) | its `version` | 1 (0.9) | `tools/mallard/vtu.py` (`provenance()`); in restart files a trailer that every restart reader skips, so it changes no restart version |
-| Probe output (`[[probes]]` `format = "hdf5"`, `"vtkhdf"`, `"vtp"`) | root attribute `version` (HDF5, VTKHDF), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
-| TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
-
-- Restart files are written with the **lowest** version that holds their
-  contents, so a run without statistics, characteristic boundaries or
-  compression still writes version 2, which every release since 0.4 reads.
-- A restart file must also match the build's dimension and precision
-  (`Mallard_DIM`, `Mallard_USE_DOUBLE`); the message says which differs.
-- Output files gain arrays and attributes within a version. A version changes
-  only when existing content changes meaning or layout. The Python tools refuse
-  versions newer than they know; update `tools/` with Mallard.
-- A change to a format adds a version and keeps the reader of every older one,
-  with a fixture in `test/data/formats/` that a test reads (see its
-  [README](../../test/data/formats/README.md)).
-
 ## See also
 
-- [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals), [`[statistics]`](../input.md#statistics), [`[statistics.spectra]`](../input.md#statisticsspectra), [`[statistics.phase]`](../input.md#statisticsphase), [`[[probes]]`](../input.md#probes)
-- [Geometry](geometry.md): probe types, sample placement, reading probe files
+- [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output)
+- [Probes and monitors](probes.md): probes, wall forces, domain integrals
+- [Statistics](statistics.md): time averages, spectra and correlations, phase averages
+- [Initialization and restarts](initialization.md): restart files and their format
+- [Running](running.md): run control of a running case

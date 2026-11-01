@@ -143,6 +143,18 @@ class FaceReconstruction {
         void rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
 
         /**
+         * @brief Exterior states of transmissive boundary faces without an
+         *        image face, into their side 1: W at each quadrature point
+         *        moved onto the image cell (BoundaryData::face_image_offset),
+         *        from the image cell's reconstruction polynomial (point_values),
+         *        or the image cell's average where the scheme has none. Call
+         *        once the face values are complete.
+         * @param solution Cell states W, as in calc_face_values.
+         */
+        void image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
+
+        /**
          * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
          *        cells from the reconstruction polynomials, if the scheme has
          *        higher-order ones than least squares on face neighbors.
@@ -156,10 +168,11 @@ class FaceReconstruction {
         
         /**
          * @brief Values of W = [rho, u, p] at points inside cells from the
-         *        reconstruction polynomials: out(i) = W of cells(i) at offset
-         *        offsets(i) from its centroid, for cells the scheme deems
-         *        smooth and where the value is admissible; out(i) of other
-         *        points is left as it is.
+         *        reconstruction polynomials: out(i) = W of cells(i / m) at
+         *        offset offsets(i) from its centroid, with m =
+         *        offsets.extent(0) / cells.extent(0) points per cell, for cells
+         *        the scheme deems smooth and where the value is admissible;
+         *        out(i) of other points is left as it is.
          * @return Whether the scheme has polynomials of higher order than
          *         least squares on face neighbors (nothing written otherwise).
          */
@@ -212,6 +225,13 @@ class FaceReconstruction {
     private:
         Kokkos::View<uint32_t *> rotated_faces;  // faces whose shift row rotates
         bool rotated_faces_found = false;
+        // image_point_values: boundary faces and their image cells; offsets
+        // from that cell's centroid and values of each face's quadrature points
+        Kokkos::View<uint32_t *> image_point_faces;
+        Kokkos::View<uint32_t *> image_point_cells;
+        Kokkos::View<rtype *[N_DIM]> image_point_offsets;
+        Kokkos::View<rtype *[N_CONSERVATIVE]> image_point_W;
+        bool image_points_found = false;
 };
 
 class FirstOrder : public FaceReconstruction {

@@ -504,7 +504,7 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
     } else if (type == "sphere" || type == "cylinder" || type == "cone" || type == "rectangle" || type == "disk") {
         throw InputError(key + ".type = \"" + type + "\": surfaces are regions; give region = {type = \"" + type +
                          "\", ...}" + (type == "rectangle" || type == "disk" ? "" : " with filled = false") +
-                         " (n_points samples it on a grid). See docs/guide/output.md#region-probes.");
+                         " (n_points samples it on a grid). See docs/guide/probes.md#region-probes.");
     } else {
         throw InputError(key + ".type = \"" + type + "\" is not one of: point, points, line, polyline, circle, " +
                          "arc, curve" + (N_DIM == 3 ? ", surface" : "") + ", cut_plane.");

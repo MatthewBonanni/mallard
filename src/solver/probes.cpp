@@ -846,7 +846,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                                                        "(n_points), but a region probe writes only its reductions, "
                                                        "to reductions_file",
                                             .fix = "Remove " + name + ", or give the probe a type instead of a region",
-                                            .docs = "docs/guide/output.md#region-probes"});
+                                            .docs = "docs/guide/probes.md#region-probes"});
             }
         }
         const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
@@ -969,7 +969,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                                                 .line = line_of(entry, "n_points"),
                                                 .message = "must be [n_u, n_v], at least [2, 2], for a resampled surface",
                                                 .fix = "e.g. n_points = [32, 16]",
-                                                .docs = "docs/guide/output.md#region-probes"});
+                                                .docs = "docs/guide/probes.md#region-probes"});
                 }
                 p.geometry = probe::grid_geometry(region::sample_grid(region::surface_patches(r, key + ".region"),
                                                                       static_cast<uint32_t>(nu), static_cast<uint32_t>(nv)));
@@ -987,7 +987,7 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
                                             .line = line_of(entry, "region"),
                                             .message = "covers no part of any cell of the mesh",
                                             .fix = "Move or enlarge the region so that it overlaps the domain",
-                                            .docs = "docs/guide/output.md#region-probes"});
+                                            .docs = "docs/guide/probes.md#region-probes"});
             }
         } else if (boundary) {
             for (const char * k : {"type", "point", "start", "end"}) {
