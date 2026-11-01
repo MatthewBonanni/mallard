@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "comm.h"
+#include "gmsh_fixtures.h"
 #include "file_format.h"
 #include "input.h"
 #include "probe_geometry.h"
@@ -374,6 +375,50 @@ TEST(ProbesTest, RegionReductionsAreTheSameOnAnyNumberOfRanks) {
     EXPECT_EQ(a, without_provenance(read_all(dir + "/serial.csv"))) << "on " << comm::size() << " ranks";
     EXPECT_EQ(read_csv(dir + "/serial.csv").size(), 5u);
 }
+
+#if N_DIM == 2
+TEST(ProbesTest, RegionsOfTheMeshAreTheSameOnAnyNumberOfRanks) {
+    // A cell zone, the domain inside its closed boundary, and a disk cut from the domain
+    const std::string dir = fresh_dir("mesh_region_ranks");
+    const std::string mesh = write_temp_shared("mallard_probe_cell_zones.msh", jittered_mixed_mesh(16, true));
+    auto input = [&](const std::string & suffix) {
+        std::string s = box_case(4, SINE_RHO, "type = \"MUSCL\"\n", "", "n_steps = 2\ncfl = 0.4\n");
+        s.replace(s.find("type = \"cartesian\""), s.find("[initialize]") - s.find("type = \"cartesian\""),
+                  "type = \"file\"\nfilename = \"" + mesh + "\"\n");
+        for (const char * zone : {"left", "right", "bottom", "top"}) {
+            s += std::string("[[boundaries]]\nname = \"") + zone + "\"\ntype = \"symmetry\"\n";
+        }
+        const std::vector<std::pair<std::string, std::string>> probes = {
+            {"half", "\"left_half\""},
+            {"inside", "{type = \"interior\", of = {type = \"union\", regions = [\"left\", \"right\", \"bottom\", "
+                       "\"top\"]}}"},
+            {"cut", "{type = \"difference\", regions = [\"domain\", {type = \"disk\", center = [0.4, 0.6], "
+                    "radius = 0.25}]}"}};
+        for (const auto & [name, region] : probes) {
+            s += "[[probes]]\nname = \"" + name + "\"\nvariables = [\"RHO\", \"P\"]\nregion = " + region +
+                 "\nreductions_file = \"" + dir + "/" + name + "_" + suffix + ".csv\"\n";
+        }
+        return s;
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input("serial")));
+    run(serial);
+    for (const char * name : {"half", "inside", "cut"}) {
+        const std::string file = dir + "/" + name;
+        EXPECT_EQ(without_provenance(read_all(file + "_distributed.csv")), without_provenance(read_all(file + "_serial.csv")))
+            << name << " on " << comm::size() << " ranks";
+    }
+    const auto & mesh_s = *serial.get_mesh();
+    double left = 0.0;
+    for (uint32_t c = 0; c < mesh_s.n_cells; c++) left += mesh_s.h_cell_coords(c, 0) < 0.5_r ? double(mesh_s.h_cell_volume(c)) : 0.0;
+    EXPECT_NEAR(read_csv(dir + "/half_serial.csv")[0].at("area"), left, precision_tol<double>(1e-14, 1e-5));
+    EXPECT_NEAR(read_csv(dir + "/inside_serial.csv")[0].at("area"), 1.0, precision_tol<double>(1e-14, 1e-5));
+}
+#endif
 
 TEST(ProbesTest, RejectsRegionProbesWithSampleKeys) {
     const std::string region = "region = {type = \"sphere\", center = " + numbers3("0.5", "0.5", "0.5") +

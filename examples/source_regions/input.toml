@@ -11,7 +11,9 @@
 #
 # The ring is a named region in [regions], shared by its source and by a probe
 # that writes the mass, mean temperature and peak pressure in the ring to
-# probe_ring_reductions.csv every 50 steps. The terminal output lists each source with
+# probe_ring_reductions.csv every 50 steps. The mesh's own region "domain"
+# gives the total mass, which stays constant in the closed box, and the gas
+# away from the ring is the domain minus a disk around it. The terminal output lists each source with
 # its region and measure. SOURCE_RHOE and SOURCE_RHOU_X/Y in the snapshots show
 # where they act. The total energy rises by the integral of Q, 10 sqrt(pi) 0.02
 # = 0.3545, plus the fan's work.
@@ -86,6 +88,20 @@ name = "ring"
 variables = ["RHO", "T", "P"]
 region = "ring"
 reductions = ["integral", "mean", "max"]
+interval = 50
+
+[[probes]]
+name = "total"
+variables = ["RHO"]
+region = "domain"
+reductions = ["integral"]
+interval = 50
+
+[[probes]]
+name = "outside"
+variables = ["T"]
+region = {type = "difference", regions = ["domain", {type = "disk", center = [0.3, 0.5], radius = 0.15}]}
+reductions = ["mean", "max"]
 interval = 50
 
 [[write_data]]

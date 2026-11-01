@@ -492,6 +492,11 @@ class Mesh {
         uint64_t n_global_cells = 0;
         std::vector<uint64_t> h_global_node_id;
         uint64_t n_global_nodes = 0;
+        // Cell zones of the mesh file (Gmsh physical groups of cells, Fluent cell zones, CGNS families,
+        // OpenFOAM cellZones), and the zone of every local cell (empty without zones; NO_CELL_ZONE: none)
+        std::vector<std::string> cell_zone_names;
+        std::vector<uint32_t> h_cell_zone;
+        static constexpr uint32_t NO_CELL_ZONE = ~uint32_t(0);
         // Volume of each cell and area of each face in the flow's geometry: the
         // revolved ones per radian in axisymmetric runs, else the same views as
         // cell_volume and face_area

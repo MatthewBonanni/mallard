@@ -95,6 +95,7 @@ class DistributedMesh {
         struct Cells {
             std::vector<uint64_t> gid;
             std::vector<int> owner;
+            std::vector<uint32_t> zone;  // with cell zones
             std::vector<uint8_t> layer;
             std::vector<uint64_t> node_offsets{0}, nodes;            // global node ids
             std::vector<uint32_t> boundary_offsets{0};
