@@ -56,12 +56,11 @@ Each `[[probes]]` entry samples or reduces the solution every `interval` steps (
 | Probe | Geometry | Variables, reductions | File |
 |---|---|---|---|
 | `wall` | `boundary = "cylinder"` | `TRACTION_PRESSURE`, `TRACTION_VISCOUS`: `integral` | `probe_wall_reductions.csv` |
-| `box` | `region = "box"` | `RHO`, `U_X`, `U_Y`, `P`, `H`: `integral`, `favre` | `probe_box_reductions.csv` |
+| `box` | `region = "box"` | `RHO`, `RHOU`, `RHOE`: `integral` | `probe_box_reductions.csv` |
 | `west`, `east`, `south`, `north` | `region = "<side>"` | `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`: `integral` | `probe_<side>_reductions.csv` |
 | `wake` | a point at (3, 0.5) | `U_Y`, `P` every 0.5 time units | `probe_wake.csv` |
 
-The `integral` of `RHO` over the box is its mass M; its `favre` (density-weighted) mean of `U_X` times M
-is its momentum. The flux variables of a cut plane are along its normal: `MASS_FLUX` is ρu·n,
+The `integral`s of `RHO`, `RHOU` and `RHOE` over the box are its mass, momentum and total energy. The flux variables of a cut plane are along its normal: `MASS_FLUX` is ρu·n,
 `MOMENTUM_FLUX` ρu(u·n) + pn (pressure included), `ENTHALPY_FLUX` ρu·n(h + |u|²/2). The wall's traction
 integrals are the force of `[[forces]]`.
 
@@ -70,7 +69,7 @@ The startup lists each one with the cells or samples it found (the other sides a
 ```text
   phase averages     8 bins every 10 steps from t = 60, upward crossings of U_Y = 0 at (3, 0): U_X, U_Y, P
   probe wall         probe_wall_reductions.csv, boundary cylinder of 96 points every 20 steps: TRACTION_PRESSURE_X, TRACTION_PRESSURE_Y, TRACTION_VISCOUS_X, TRACTION_VISCOUS_Y; integral
-  probe box          probe_box_reductions.csv, region box = rectangle over 5,036 cells every 20 steps: RHO, U_X, U_Y, P, H; integral, favre
+  probe box          probe_box_reductions.csv, region box = rectangle over 5,036 cells every 20 steps: RHO, RHOU_X, RHOU_Y, RHOE; integral
   probe west         probe_west_reductions.csv, cut_plane of 50 points every 20 steps (point values): MASS_FLUX, MOMENTUM_FLUX_X, MOMENTUM_FLUX_Y, ENTHALPY_FLUX; integral
   probe wake         probe_wake.csv, point of 1 point every t = 0.5 (point values): U_Y, P
 ```
@@ -122,7 +121,7 @@ python3 $MALLARD/tutorials/measuring/plot_measurements.py . --t-start 60 --out .
 t >= 60, 4 shedding periods
 wall:     mean Cd 1.3691 ([[forces]]), 1.3691 (wall probe); largest difference 3.92e-07
 mass:     box 23.0665, inflow 0.73687 per unit time, residual d/dt + net outflow: RMS 6.17e-05 (8.4e-05 of the inflow)
-energy:   mean net enthalpy outflow -7.308e-05, -3.9e-05 of the inflow
+energy:   residual d/dt + net enthalpy outflow: RMS 1.71e-04 (9.2e-05 of the inflow), net outflow alone 8.5e-04
 momentum: mean Cd 1.3658 from the box against 1.3691 on the wall; Cl amplitude 0.3715 against 0.3336
 Strouhal: 0.1654 from the lift's crossings, 0.1651 from the wake spectrum
 ```
@@ -135,9 +134,11 @@ residual is 8e-5 of the mass flow entering through `west`: the sides are cut exa
 exactly for the reconstruction polynomials, and what remains is the difference between those point values
 and the cell averages the scheme conserves, and the time derivative taken from samples 20 steps apart.
 
-**Energy.** The box holds no heat source and its wall is adiabatic, so averaged over the cycles the total
-enthalpy flowing out equals that flowing in: the net outflow is 4e-5 of the inflow. (The unsteady term
-needs ∫ρE, which a region probe of these variables does not give; over whole cycles it averages out.)
+**Energy.** The box holds no heat source and its wall is adiabatic, so d/dt of its total energy ∫ρE plus
+the total enthalpy flowing out vanishes at every instant: the residual is 9e-5 of the enthalpy flowing in,
+nine times smaller than the net outflow alone, which the unsteady term balances. What remains is the same
+as for the mass, plus the heat conduction and viscous work through the sides, which the flux variables
+leave out.
 
 **Momentum and drag.** The force of the fluid on the cylinder is minus the momentum flowing out of the
 box, pressure included, minus the rate of change of the momentum inside. Measured this way, far from the

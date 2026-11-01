@@ -114,9 +114,14 @@ std::optional<FieldDescription> find_base(const std::string & name) {
     return std::nullopt;
 }
 
-/** @brief A field that statistics and probes sample (RHO, a primitive or Y_<species>), or the vector U. */
+/**
+ * @brief A field that statistics and probes sample (a conservative, a primitive,
+ *        Y_<species> or RHOY_<species>), or the vector U or RHOU.
+ */
 std::optional<FieldDescription> find_sampled(const std::string & name) {
-    bool sampled = name == "RHO" || name == "U" || (starts_with(name, "Y_") && name.size() > 2);
+    bool sampled = name == "U" || name == "RHOU" || (starts_with(name, "Y_") && name.size() > 2) ||
+                   (starts_with(name, "RHOY_") && name.size() > 5);
+    for (const auto & conservative : CONSERVATIVE_NAMES) sampled = sampled || name == conservative;
     for (const auto & primitive : PRIMITIVE_NAMES) sampled = sampled || name == primitive;
     return sampled ? find_base(name) : std::nullopt;
 }
