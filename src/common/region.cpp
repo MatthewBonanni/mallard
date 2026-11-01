@@ -91,6 +91,14 @@ std::string join(const std::vector<std::string> & names) {
     return list;
 }
 
+const char * const BOUNDARIES_DOCS = "docs/guide/geometry.md#boundaries-and-interiors";
+
+/** @brief An input error at key (line: the Input's, 0 if unknown). */
+[[noreturn]] void fail(const std::string & key, const std::size_t line, const std::string & message,
+                       const std::string & fix = "", const std::string & docs = BOUNDARIES_DOCS) {
+    throw InputError(Diagnostic{.key = key, .line = line, .message = message, .fix = fix, .docs = docs});
+}
+
 /** @brief A region as parsed: filled shapes not yet placed, a placed filled region, or pieces of lower dimension. */
 struct Parsed {
     int dimension = N_DIM;
@@ -152,23 +160,37 @@ class Parser {
                 p = boolean(t, where, type, frame);
             } else if (type == "boundary" || type == "interior") {
                 if (!t.contains("of")) {
-                    throw InputError(where + " needs of, the region (or the name of one) it is the " + type + " of.");
+                    fail(where, line_of(t, "type"), "needs of, the region (or the name of one) it is the " + type + " of",
+                         "Add of = {...} or of = \"<name>\"");
                 }
                 Parsed of = parse(t.at("of"), where + ".of", frame);
-                p = type == "boundary" ? boundary(std::move(of), where + ".of") : interior(std::move(of), where + ".of");
+                const std::size_t line = line_of(t, "of");
+                p = type == "boundary" ? boundary(std::move(of), where + ".of", line)
+                                       : interior(std::move(of), where + ".of", line);
             } else {
                 p = primitive(t, where, type, frame);
             }
             if (t.contains("filled") && !find_value<bool>(t, "filled")) {
                 if (p.dimension < N_DIM && !p.flat) {
-                    throw InputError(where + ".filled = false applies to " + dimension_name(N_DIM) +
-                                     "s and flat surfaces, and this region is " + dimension_name(p.dimension) +
-                                     (p.closed ? "" : " with a boundary") +
-                                     ": for its boundary, use {type = \"boundary\", of = ...}.");
+                    fail(where + ".filled", line_of(t, "filled"),
+                         "applies to " + dimension_name(N_DIM).substr(dimension_name(N_DIM)[1] == 'n' ? 3 : 2) +
+                             "s and flat surfaces, and this region is " + dimension_name(p.dimension) +
+                             (p.closed ? "" : " with a boundary"),
+                         "For its boundary, use {type = \"boundary\", of = ...}");
                 }
                 const std::string text = p.text;
-                p = boundary(std::move(p), where);
+                p = boundary(std::move(p), where, line_of(t, "filled"));
                 p.text = text + ", filled = false";
+            }
+            if (t.contains("flip") && find_value<bool>(t, "flip")) {
+                if (p.dimension == N_DIM || p.dimension == 0) {
+                    fail(where + ".flip", line_of(t, "flip"),
+                         "reverses the side a surface or curve faces, and this region is " + dimension_name(p.dimension),
+                         "Remove flip", "docs/guide/geometry.md#orientation");
+                }
+                p.closed = closed(p);
+                for (Piece & piece : p.pieces) piece.flip = !piece.flip;
+                p.text += ", flipped";
             }
             return p;
         }
@@ -218,39 +240,42 @@ class Parser {
                 if (mesh) automatic = mesh->names();
                 if (std::find(automatic.begin(), automatic.end(), name) != automatic.end()) {
                     if (!is_identity(parent)) {
-                        throw InputError(where + ": \"" + name + "\" is a region of the mesh, which transforms do "
-                                         "not move; transform the other regions instead.");
+                        fail(where, line_of(value), "\"" + name + "\" is a region of the mesh, which transforms do not move",
+                             "Transform the other regions instead", "docs/guide/geometry.md#regions-of-the-mesh");
                     }
                     return of_mesh(name);
                 }
                 std::vector<std::string> defined;
                 if (names) {
-                    for (const auto & entry : names->as_table().entries()) defined.push_back(entry.first);
+                    for (const auto & [key, entry] : names->as_table().entries()) defined.push_back(key);
                 }
                 std::sort(defined.begin(), defined.end());
-                std::vector<std::string> valid = defined;
-                valid.insert(valid.end(), automatic.begin(), automatic.end());
-                throw InputError(Diagnostic{.key = where,
-                                            .line = line_of(value),
-                                            .message = "no region named \"" + name + "\" in [regions] (" +
-                                                       (defined.empty() ? std::string("none defined")
-                                                                        : "defined: " + join(defined)) +
-                                                       ") or of the mesh (" +
-                                                       (automatic.empty() ? std::string("none here") : join(automatic)) + ")",
-                                            .suggestion = suggest_value(name, valid),
-                                            .fix = "Define it as [regions." + name + "], or give the region as a table",
-                                            .docs = "docs/guide/geometry.md#named-regions"});
+                std::vector<std::string> known = defined;
+                known.insert(known.end(), automatic.begin(), automatic.end());
+                throw InputError(Diagnostic{
+                    .key = where,
+                    .line = line_of(value),
+                    .message = "no region named \"" + name + "\" in [regions] (" +
+                               (defined.empty() ? std::string("none defined") : "defined: " + join(defined)) +
+                               ") or of the mesh (" + (automatic.empty() ? std::string("none here") : join(automatic)) + ")",
+                    .suggestion = suggest_value(name, known),
+                    .fix = "Define it as [regions." + name + "], or give the region as a table",
+                    .docs = "docs/guide/geometry.md#named-regions"});
             }
             const Input & t = names->at(name);
             const auto repeat = std::find(resolving.begin(), resolving.end(), name);
             if (repeat != resolving.end()) {
                 std::string cycle;
                 for (auto it = repeat; it != resolving.end(); ++it) cycle += *it + " -> ";
-                throw InputError("regions: " + cycle + name + " is a cycle of named regions.");
+                fail(where, line_of(value), "\"" + name + "\" makes a cycle of named regions, " + cycle + name,
+                     "Define one of them without naming the others", "docs/guide/geometry.md#named-regions");
             }
             if (!top && t.is_table() && t.contains("edge")) {
-                throw InputError("regions." + name + ".edge: a smooth edge belongs to a whole region, but " + where +
-                                 " uses " + name + " inside another region.");
+                fail("regions." + name + ".edge", line_of(t, "edge"),
+                     "a smooth edge belongs to a whole region, but " + where + " uses \"" + name +
+                         "\" as a part of another region",
+                     "Move edge to the outermost region, or define the part again without it",
+                     "docs/guide/geometry.md#named-regions");
             }
             resolving.push_back(name);
             Parsed p = parse_table(t, "regions." + name, parent);
@@ -328,9 +353,9 @@ class Parser {
             return out;
         }
 
-        Parsed boundary(Parsed p, const std::string & where) {
+        Parsed boundary(Parsed p, const std::string & where, const std::size_t line) {
             const std::string what = "boundary(" + p.text + ")";
-            if (p.dimension == 0) throw InputError(where + ": points have no boundary.");
+            if (p.dimension == 0) fail(where, line, "points have no boundary");
             Parsed out;
             out.dimension = p.dimension - 1;
             out.closed = true;
@@ -342,8 +367,8 @@ class Parser {
                 return out;
             }
             if (closed(p)) {
-                throw InputError(where + " is a closed " + std::string(p.dimension == 1 ? "curve" : "surface") +
-                                 ", which has no boundary.");
+                fail(where, line, "is a closed " + std::string(p.dimension == 1 ? "curve" : "surface") +
+                                      ", which has no boundary");
             }
             if (const auto zones = zones_of(p)) {
                 Piece edges;
@@ -352,9 +377,12 @@ class Parser {
                 out.pieces = {edges};
                 return out;
             }
-            if (p.pieces.size() != 1 || p.pieces[0].carriers.empty()) {
-                throw InputError(where + ": the boundary of a union of " + dimension_name(p.dimension).substr(2) +
-                                 "s is not defined; take the union of their boundaries.");
+            if (p.pieces.size() != 1) {
+                fail(where, line, "the boundary of a union of " + dimension_name(p.dimension).substr(2) + "s is not defined",
+                     "Take the union of their boundaries");
+            }
+            if (p.pieces[0].carriers.empty()) {
+                fail(where, line, "the boundary of boundary zones clipped by filled regions is not defined");
             }
             // Where the surface leaves each region that clips it
             const Piece & piece = p.pieces[0];
@@ -362,11 +390,13 @@ class Parser {
                 const auto & masks = in ? piece.inside : piece.outside;
                 for (size_t k = 0; k < masks.size(); k++) {
                     if (filled[masks[k]].kind != Filled::Kind::SHAPES) {
-                        throw InputError(where + ": the boundary of " + dimension_name(p.dimension) +
-                                         " clipped by a region of the mesh is not defined.");
+                        fail(where, line, "the boundary of " + dimension_name(p.dimension) +
+                                              " clipped by a region of the mesh is not defined");
                     }
                     Piece edge = piece;
                     edge.carriers.push_back(masks[k]);
+                    // Leaving a region it keeps outside of, the edge runs the other way around
+                    edge.flip = edge.flip != !in;
                     auto & rest = in ? edge.inside : edge.outside;
                     rest.erase(rest.begin() + static_cast<std::ptrdiff_t>(k));
                     out.pieces.push_back(edge);
@@ -375,15 +405,15 @@ class Parser {
             return out;
         }
 
-        Parsed interior(Parsed p, const std::string & where) {
+        Parsed interior(Parsed p, const std::string & where, const std::size_t line) {
             if (p.dimension == N_DIM) {
-                throw InputError(where + " is " + dimension_name(N_DIM) + " already; interior takes a closed " +
-                                 (N_DIM == 2 ? "curve." : "surface."));
+                fail(where, line, "is " + dimension_name(N_DIM) + " already; interior takes a closed " +
+                                      (N_DIM == 2 ? "curve" : "surface"));
             }
             if (p.dimension < N_DIM - 1) {
-                throw InputError(where + " is " + dimension_name(p.dimension) + "; interior takes a closed " +
-                                 (N_DIM == 2 ? "curve" : "surface") + ", " + dimension_name(N_DIM - 1) + " lower than " +
-                                 dimension_name(N_DIM) + ".");
+                fail(where, line, "is " + dimension_name(p.dimension) + "; interior takes a closed " +
+                                      (N_DIM == 2 ? "curve" : "surface") + ", one dimension lower than " +
+                                      dimension_name(N_DIM));
             }
             Parsed out;
             out.text = "interior(" + p.text + ")";
@@ -392,7 +422,7 @@ class Parser {
                 return out;
             }
             if (!closed(p)) {
-                throw InputError(where + " has a boundary (it is not closed), so it has no interior.");
+                fail(where, line, "has a boundary (it is not closed), so it has no interior");
             }
             if (const auto zones = zones_of(p)) {
                 Filled f;
@@ -408,9 +438,9 @@ class Parser {
                 out.filled = static_cast<int32_t>(piece.carriers[0]);
                 return out;
             }
-            throw InputError(where + ": the interior of a union of closed " +
-                             std::string(N_DIM == 2 ? "curves" : "surfaces") +
-                             " is not defined; take the union of their interiors.");
+            fail(where, line, "the interior of a union of closed " + std::string(N_DIM == 2 ? "curves" : "surfaces") +
+                                  " is not defined",
+                 "Take the union of their interiors");
         }
 
         static double number(const Input & t, const std::string & key, const std::string & where,
@@ -571,19 +601,61 @@ class Parser {
             for (size_t i = 0; i < parts.size(); i++) {
                 ps.push_back(parse(*parts[i].first, parts[i].second, frame));
                 out.text += (i ? ", " : "") + ps.back().text;
-                if (ps.back().dimension != ps[0].dimension) {
-                    throw InputError(where + ": a " + type + " combines regions of one dimension, but " +
-                                     parts[0].second + " is " + dimension_name(ps[0].dimension) + " and " +
-                                     parts[i].second + " is " + dimension_name(ps.back().dimension) + ".");
-                }
             }
             out.text += ")";
+            size_t lower = 0;  // the parts of lower dimension than the run's
+            for (size_t i = 0; i < ps.size(); i++) {
+                if (type == "union" && ps[i].dimension != ps[0].dimension) {
+                    fail(where, line_of(t, "type"),
+                         "a union combines regions of one dimension, but " + parts[0].second + " is " +
+                             dimension_name(ps[0].dimension) + " and " + parts[i].second + " is " +
+                             dimension_name(ps[i].dimension),
+                         "", "docs/guide/geometry.md#booleans");
+                }
+                lower += ps[i].dimension < N_DIM;
+            }
+            if (type != "union" && lower > 0 && lower < ps.size()) {
+                // A surface or curve clipped by the filled parts: inside them, or outside the subtracted ones
+                const auto it = std::find_if(ps.begin(), ps.end(), [](const Parsed & p) { return p.dimension < N_DIM; });
+                const size_t k = static_cast<size_t>(it - ps.begin());
+                const std::string kind = dimension_name(it->dimension).substr(2);
+                if (lower > 1) {
+                    fail(where, line_of(t, "type"),
+                         "a " + type + " clips one " + kind + " with filled regions, and " + std::to_string(lower) +
+                             " of its parts have lower dimensions",
+                         "Combine the " + kind + "s by union first", "docs/guide/geometry.md#clipping-across-dimensions");
+                }
+                if (type == "difference" && k != 0) {
+                    fail(where, line_of(t, "type"),
+                         "a difference subtracts filled regions, and " + parts[k].second + " is " +
+                             dimension_name(it->dimension) + ", which takes nothing from " + parts[0].second,
+                         "", "docs/guide/geometry.md#clipping-across-dimensions");
+                }
+                out = std::move(*it);
+                out.text = type + "(" + out.text;
+                std::vector<uint32_t> masks;
+                for (size_t i = 0; i < ps.size(); i++) {
+                    if (i == k) continue;
+                    masks.push_back(place(ps[i], where));
+                    out.text += ", " + ps[i].text;
+                }
+                out.text += ")";
+                for (Piece & piece : out.pieces) {
+                    auto & to = type == "intersection" ? piece.inside : piece.outside;
+                    to.insert(to.end(), masks.begin(), masks.end());
+                }
+                out.closed = false;
+                out.bounds = -1;
+                return out;
+            }
             out.dimension = ps[0].dimension;
             if (out.dimension < N_DIM) {
                 if (type != "union") {
-                    throw InputError(where + ": a " + type + " combines " + dimension_name(N_DIM) + "s, and " +
-                                     parts[0].second + " is " + dimension_name(out.dimension) + "; " +
-                                     dimension_name(out.dimension).substr(2) + "s combine by union.");
+                    fail(where, line_of(t, "type"),
+                         "a " + type + " combines " + dimension_name(N_DIM) + "s, and " + parts[0].second + " is " +
+                             dimension_name(out.dimension) + "; " + dimension_name(out.dimension).substr(2) +
+                             "s combine by union",
+                         "", "docs/guide/geometry.md#booleans");
                 }
                 out.closed = true;
                 Piece zones;
@@ -645,7 +717,7 @@ class Parser {
             const double along = dot(a, n);
             for (size_t i = 0; i < 3; i++) a[i] -= along * n[i];
             const double length = norm(a);
-            if (!(length > 1e-12)) throw InputError(where + ".reference must not be parallel to the normal.");
+            if (!(length > 1e-12)) fail(where + ".reference", line_of(t, "reference"), "must not be parallel to the normal", "", "docs/input.md#regions");
             for (double & v : a) v /= length;
             const Vec e2 = cross(n, a);
             return frame.then({a[0], a[1], a[2], e2[0], e2[1], e2[2], n[0], n[1], n[2]}, center);
@@ -674,11 +746,11 @@ class Parser {
             } else {
                 ring.kind = Kind::ELLIPSOID;
                 if (!t.contains("semi_axes") || !t.at("semi_axes").is_array() || t.at("semi_axes").as_array().size() != 2) {
-                    throw InputError(where + " needs semi_axes = [a, b].");
+                    fail(where, line_of(t, "type"), "needs semi_axes = [a, b]", "", "docs/input.md#regions");
                 }
                 for (size_t i = 0; i < 2; i++) {
                     ring.p[i] = as_double(t.at("semi_axes").as_array()[i], where + ".semi_axes", dim::length);
-                    if (!(ring.p[i] > 0.0)) throw InputError(where + ".semi_axes must be positive.");
+                    if (!(ring.p[i] > 0.0)) fail(where + ".semi_axes", line_of(t, "semi_axes"), "must be positive", "", "docs/input.md#regions");
                 }
                 ring.p[2] = N_DIM == 2 ? 1.0 : INF;
                 ring.p[3] = std::min(ring.p[0], ring.p[1]);
@@ -694,7 +766,7 @@ class Parser {
             Frame f;
             if (type == "polygon") {
                 if (!t.contains("vertices") || !t.at("vertices").is_array() || t.at("vertices").as_array().size() < 3) {
-                    throw InputError(where + " needs vertices = [[x, y, z], ...] (at least 3, in one plane).");
+                    fail(where, line_of(t, "type"), "needs vertices = [[x, y, z], ...] (at least 3, in one plane)", "", "docs/input.md#regions");
                 }
                 std::vector<Vec> v;
                 for (const auto & x : t.at("vertices").as_array()) v.push_back(vec(x, where + ".vertices"));
@@ -709,11 +781,11 @@ class Parser {
                 const double area2 = norm(n);
                 double extent = 0.0;
                 for (const Vec & x : v) extent = std::max(extent, norm({x[0] - c[0], x[1] - c[1], x[2] - c[2]}));
-                if (!(area2 > 1e-12 * extent * extent)) throw InputError(where + ".vertices enclose no area.");
+                if (!(area2 > 1e-12 * extent * extent)) fail(where + ".vertices", line_of(t, "vertices"), "enclose no area", "", "docs/input.md#regions");
                 for (double & x : n) x /= area2;
                 for (const Vec & x : v) {
                     if (std::abs(dot({x[0] - c[0], x[1] - c[1], x[2] - c[2]}, n)) > 1e-9 * extent) {
-                        throw InputError(where + ".vertices must lie in one plane.");
+                        fail(where + ".vertices", line_of(t, "vertices"), "must lie in one plane", "", "docs/input.md#regions");
                     }
                 }
                 f = plane_frame(t, where, frame, c, n);
@@ -731,7 +803,7 @@ class Parser {
                 if (type == "rectangle") {
                     mask.kind = Kind::BOX;
                     if (!t.contains("size") || !t.at("size").is_array() || t.at("size").as_array().size() != 2) {
-                        throw InputError(where + " needs size = [a, b] (along reference and normal x reference).");
+                        fail(where, line_of(t, "type"), "needs size = [a, b] (along reference and normal x reference)", "", "docs/input.md#regions");
                     }
                     for (size_t i = 0; i < 2; i++) {
                         const double s = as_double(t.at("size").as_array()[i], where + ".size", dim::length);
@@ -742,10 +814,13 @@ class Parser {
                 } else {
                     mask.kind = Kind::CYLINDER;
                     mask.p[0] = positive(t, "radius", where);
-                    if (type == "annulus") {
+                    // A disk may have a hole (inner_radius, default 0); an annulus must
+                    if (type == "annulus" || t.contains("inner_radius")) {
                         mask.p[1] = number(t, "inner_radius", where);
-                        if (mask.p[1] <= 0.0 || mask.p[1] >= mask.p[0]) {
-                            throw InputError(where + ".inner_radius must be in (0, radius).");
+                        if (mask.p[1] < 0.0 || mask.p[1] >= mask.p[0] || (type == "annulus" && mask.p[1] == 0.0)) {
+                            fail(where + ".inner_radius", line_of(t, "inner_radius"),
+                                 type == "annulus" ? "must be in (0, radius)" : "must be in [0, radius)", "",
+                                 "docs/input.md#regions");
                         }
                     }
                     mask.p[2] = INF;
@@ -766,7 +841,8 @@ class Parser {
 
         Parsed primitive(const Input & t, const std::string & where, const std::string & type, Frame frame) {
             if (N_DIM == 2 && type == "box") {
-                throw InputError(where + ".type = \"box\" is a 3D solid, and regions here are areas: use \"rectangle\".");
+                fail(where + ".type", line_of(t, "type"), "\"box\" is a 3D solid, and regions here are areas",
+                     "Use \"rectangle\"", "docs/guide/geometry.md#primitives");
             }
             if (type == "circle" || type == "ellipse") return curve(t, where, type, frame);
             if (N_DIM == 3 && (type == "disk" || type == "annulus" || type == "rectangle" || type == "polygon")) {
@@ -864,7 +940,11 @@ class Parser {
 const Input * named_regions(const Input & input) {
     if (!input.contains("regions")) return nullptr;
     const Input & names = input.at("regions");
-    if (!names.is_table()) throw InputError("regions must be a table of named regions: [regions.<name>].");
+    if (!names.is_table()) {
+        fail("regions", line_of(names), "must be a table of named regions",
+             "Write each as [regions.<name>] or <name> = {type = ...} under [regions]",
+             "docs/guide/geometry.md#named-regions");
+    }
     return &names;
 }
 
@@ -889,11 +969,11 @@ MeshRegions::MeshRegions(const Mesh & m) : mesh(&m) {
     boundary_zones.erase(std::unique(boundary_zones.begin(), boundary_zones.end()), boundary_zones.end());
     for (const std::string & zone : m.cell_zone_names) {
         if (zone == "domain" || std::binary_search(boundary_zones.begin(), boundary_zones.end(), zone)) {
-            throw InputError("mesh: the cell zone \"" + zone + "\" has the name of " +
-                             (zone == "domain" ? std::string("the region of the whole domain, domain")
-                                               : "a boundary zone") +
-                             ", and regions are named by both; rename one of them in the mesh file. See "
-                             "docs/guide/geometry.md#regions-of-the-mesh.");
+            fail("mesh", 0,
+                 "the cell zone \"" + zone + "\" has the name of " +
+                     (zone == "domain" ? std::string("the region of the whole domain, domain") : "a boundary zone") +
+                     ", and regions are named by both",
+                 "Rename one of them in the mesh file", "docs/guide/geometry.md#regions-of-the-mesh");
         }
         cell_zones.push_back(zone);
     }
@@ -981,12 +1061,16 @@ Region::Region(const Input & value, const std::string & where, const Input * nam
     double edge = 0.0;
     if (table && table->contains("edge")) {
         if (m_dimension < N_DIM) {
-            throw InputError(key + ".edge: a smooth edge ramps a " + dimension_name(N_DIM).substr(N_DIM == 2 ? 3 : 2) +
-                             ", and this region is " + dimension_name(m_dimension) + ".");
+            fail(key + ".edge", line_of(*table, "edge"),
+                 "a smooth edge ramps a " + dimension_name(N_DIM).substr(N_DIM == 2 ? 3 : 2) + ", and this region is " +
+                     dimension_name(m_dimension),
+                 "Remove edge", "docs/guide/geometry.md#smooth-edges");
         }
         if (!analytic()) {
-            throw InputError(key + ".edge: a smooth edge needs a region of primitives alone, and this one uses "
-                             "regions of the mesh, whose cells are entirely inside or outside.");
+            fail(key + ".edge", line_of(*table, "edge"),
+                 "a smooth edge needs a region of primitives alone, and this one uses regions of the mesh, whose "
+                 "cells are entirely inside or outside",
+                 "Remove edge", "docs/guide/geometry.md#smooth-edges");
         }
         edge = as_double(table->at("edge"), key + ".edge", dim::length);
         if (!(edge >= 0.0) || !std::isfinite(edge)) throw InputError(key + ".edge must be a non-negative width.");
@@ -995,6 +1079,21 @@ Region::Region(const Input & value, const std::string & where, const Input * nam
     if (analytic()) {
         m_host = host(m_filled[m_root]);
         m_host.edge = edge;
+    }
+    if (table && table->contains("resolution")) {
+        if (m_dimension == N_DIM) {
+            fail(key + ".resolution", line_of(*table, "resolution"),
+                 "the resolution of extracted boundaries applies to surfaces and curves, and this region is " +
+                     dimension_name(N_DIM),
+                 "Remove resolution", "docs/guide/geometry.md#surfaces-and-curves-on-a-mesh");
+        }
+        const int64_t r = find_value<int64_t>(*table, "resolution");
+        if (r < 0 || r > MAX_RESOLUTION) {
+            fail(key + ".resolution", line_of(*table, "resolution"),
+                 "must be in [0, " + std::to_string(MAX_RESOLUTION) + "], and is " + std::to_string(r), "",
+                 "docs/guide/geometry.md#surfaces-and-curves-on-a-mesh");
+        }
+        m_resolution = static_cast<int>(r);
     }
 }
 
@@ -1260,16 +1359,141 @@ std::vector<double> cell_fractions(const Mesh & mesh, const Region & region) {
     return fractions_of(mesh, region, region.root());
 }
 
-void require_full_dimension(const Region & region, const std::string & where) {
-    if (region.dimension() == N_DIM) return;
-    const std::string what = region.name().empty() ? "this region" : "'" + region.name() + "'";
-    std::string hint;
-    if (region.dimension() == N_DIM - 1 && region.closed()) {
-        hint = " The " + dimension_name(N_DIM).substr(N_DIM == 2 ? 3 : 2) +
-               " it encloses is {type = \"interior\", of = ...}.";
+std::vector<double> cell_fractions(const Mesh & mesh, const Region & region, const uint32_t filled) {
+    return fractions_of(mesh, region, filled);
+}
+
+namespace {
+
+using Box = std::array<Vec, 2>;
+constexpr Box EVERYWHERE = {Vec{-INF, -INF, -INF}, Vec{INF, INF, INF}};
+
+/** @brief A box around a primitive: its local box, through its frame. */
+Box primitive_bounds(const Node & n, const std::vector<double> & vertices) {
+    Vec lo, hi;
+    const double * p = n.p;
+    switch (n.kind) {
+        case Kind::SPHERE: lo = {-p[0], -p[0], -p[0]}; break;
+        case Kind::ELLIPSOID: lo = {-p[0], -p[1], -p[2]}; break;
+        case Kind::CYLINDER: lo = {-p[0], -p[0], -p[2]}; break;
+        case Kind::CONE: lo = {-std::max(p[1], p[2]), -std::max(p[1], p[2]), -p[0]}; break;
+        case Kind::BOX: lo = {-p[0], -p[1], -p[2]}; break;
+        case Kind::TORUS: lo = {-(p[0] + p[1]), -(p[0] + p[1]), -p[1]}; break;
+        case Kind::POLYGON: {
+            lo = {INF, INF, -INF};
+            hi = {-INF, -INF, INF};
+            for (uint32_t k = 0; k < n.count; k++) {
+                for (size_t i = 0; i < 2; i++) {
+                    lo[i] = std::min(lo[i], vertices[2 * (n.first + k) + i]);
+                    hi[i] = std::max(hi[i], vertices[2 * (n.first + k) + i]);
+                }
+            }
+            break;
+        }
+        default: return EVERYWHERE;
     }
-    throw InputError(where + " needs " + dimension_name(N_DIM) + "; " + what + " is " +
-                     dimension_name(region.dimension()) + "." + hint);
+    if (n.kind != Kind::POLYGON) hi = {-lo[0], -lo[1], -lo[2]};
+    // 2D: a local z axis along the world's leaves x and y bounded however far it extends
+    const bool planar = n.m[2] == 0.0 && n.m[5] == 0.0 && n.m[6] == 0.0 && n.m[7] == 0.0;
+    if (N_DIM == 2 && planar) lo[2] = hi[2] = 0.0;
+    for (size_t i = 0; i < 3; i++) {
+        if (!std::isfinite(lo[i]) || !std::isfinite(hi[i])) return EVERYWHERE;
+    }
+    // x = M^-1 (q - d) over the corners
+    const double * m = n.m;
+    const double det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) +
+                       m[2] * (m[3] * m[7] - m[4] * m[6]);
+    const std::array<double, 9> inv = {(m[4] * m[8] - m[5] * m[7]) / det, (m[2] * m[7] - m[1] * m[8]) / det,
+                                       (m[1] * m[5] - m[2] * m[4]) / det, (m[5] * m[6] - m[3] * m[8]) / det,
+                                       (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
+                                       (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det,
+                                       (m[0] * m[4] - m[1] * m[3]) / det};
+    Box out = {Vec{INF, INF, INF}, Vec{-INF, -INF, -INF}};
+    for (int c = 0; c < 8; c++) {
+        const Vec q = {((c & 1) ? hi[0] : lo[0]) - n.d[0], ((c & 2) ? hi[1] : lo[1]) - n.d[1],
+                       ((c & 4) ? hi[2] : lo[2]) - n.d[2]};
+        for (size_t i = 0; i < 3; i++) {
+            const double x = inv[3 * i] * q[0] + inv[3 * i + 1] * q[1] + inv[3 * i + 2] * q[2];
+            out[0][i] = std::min(out[0][i], x);
+            out[1][i] = std::max(out[1][i], x);
+        }
+    }
+    return out;
+}
+
+Box filled_bounds(const Region & region, const uint32_t i) {
+    const Filled & f = region.filled()[i];
+    auto join = [](const Box & a, const Box & b, const bool both) {
+        Box out;
+        for (size_t k = 0; k < 3; k++) {
+            out[0][k] = both ? std::max(a[0][k], b[0][k]) : std::min(a[0][k], b[0][k]);
+            out[1][k] = both ? std::min(a[1][k], b[1][k]) : std::max(a[1][k], b[1][k]);
+        }
+        return out;
+    };
+    if (f.kind == Filled::Kind::SHAPES) {
+        const RegionView<Kokkos::HostSpace> view = region.host(f);
+        const std::vector<double> vertices(view.vertices.data(), view.vertices.data() + view.vertices.extent(0));
+        std::vector<Box> stack;
+        for (uint32_t k = 0; k < f.count; k++) {
+            const Node & n = view.nodes(k);
+            if (n.kind == Kind::UNION || n.kind == Kind::INTERSECTION || n.kind == Kind::DIFFERENCE) {
+                const Box b = stack.back();
+                stack.pop_back();
+                if (n.kind != Kind::DIFFERENCE) stack.back() = join(stack.back(), b, n.kind == Kind::INTERSECTION);
+            } else {
+                stack.push_back(primitive_bounds(n, vertices));
+            }
+        }
+        return stack.back();
+    }
+    if (f.parts.empty()) return EVERYWHERE;
+    Box out = filled_bounds(region, f.parts[0]);
+    for (size_t k = 1; k < f.parts.size() && f.kind != Filled::Kind::DIFFERENCE; k++) {
+        out = join(out, filled_bounds(region, f.parts[k]), f.kind == Filled::Kind::INTERSECTION);
+    }
+    return out;
+}
+
+} // namespace
+
+std::array<std::array<double, 3>, 2> bounds(const Region & region) {
+    if (region.dimension() == N_DIM) return filled_bounds(region, region.root());
+    Box out = {Vec{INF, INF, INF}, Vec{-INF, -INF, -INF}};
+    for (const Piece & p : region.pieces()) {
+        Box b = EVERYWHERE;
+        for (const uint32_t i : p.carriers) {
+            const Box c = filled_bounds(region, i);
+            for (size_t k = 0; k < 3; k++) {
+                b[0][k] = std::max(b[0][k], c[0][k]);
+                b[1][k] = std::min(b[1][k], c[1][k]);
+            }
+        }
+        for (const uint32_t i : p.inside) {
+            const Box c = filled_bounds(region, i);
+            for (size_t k = 0; k < 3; k++) {
+                b[0][k] = std::max(b[0][k], c[0][k]);
+                b[1][k] = std::min(b[1][k], c[1][k]);
+            }
+        }
+        for (size_t k = 0; k < 3; k++) {
+            out[0][k] = std::min(out[0][k], b[0][k]);
+            out[1][k] = std::max(out[1][k], b[1][k]);
+        }
+    }
+    return out;
+}
+
+void require_full_dimension(const Region & region, const Input & value, const std::string & where) {
+    if (region.dimension() == N_DIM) return;
+    const std::string what = region.name().empty() ? "this region" : "\"" + region.name() + "\"";
+    std::string fix;
+    if (region.dimension() == N_DIM - 1 && region.closed()) {
+        fix = "The " + dimension_name(N_DIM).substr(N_DIM == 2 ? 3 : 2) + " it encloses is {type = \"interior\", of = ...}";
+    }
+    fail(where, line_of(value), "needs " + dimension_name(N_DIM) + ", but " + what + " is " +
+                                    dimension_name(region.dimension()),
+         fix, "docs/guide/geometry.md#who-uses-what");
 }
 
 Regions::Regions(const Input & input, const Mesh & mesh) :
@@ -1287,20 +1511,27 @@ Regions::Regions(const Input & input, const Mesh & mesh) :
             what = "a cell zone of the mesh";
         }
         if (!what.empty()) {
-            throw InputError("regions." + name + ": the name \"" + name + "\" is also " + what +
-                             ", which is a region by that name; rename regions." + name + ".");
+            fail("regions." + name, line_of(*m_names, name),
+                 "the name \"" + name + "\" is also " + what + ", which is a region by that name",
+                 "Rename regions." + name, "docs/guide/geometry.md#regions-of-the-mesh");
         }
     }
 }
 
 Regions::Entry & Regions::entry(const Input & value, const std::string & where) {
-    if (value.is_string()) {
-        const auto it = m_by_name.find(value.as_string());
-        if (it != m_by_name.end()) return *m_entries[it->second];
-        m_by_name.emplace(value.as_string(), m_entries.size());
-    }
-    m_entries.push_back(std::make_unique<Entry>(Entry{Region(value, where, m_names, &m_automatic), {}}));
+    // Named regions once for all their keys; inline ones once for their key
+    const std::string label = value.is_string() ? value.as_string() : where;
+    const auto it = m_by_name.find(label);
+    if (it != m_by_name.end()) return *m_entries[it->second];
+    m_by_name.emplace(label, m_entries.size());
+    m_entries.push_back(std::make_unique<Entry>(Entry{Region(value, where, m_names, &m_automatic), {}, label}));
     return *m_entries.back();
+}
+
+std::vector<std::pair<std::string, const Region *>> Regions::used() const {
+    std::vector<std::pair<std::string, const Region *>> out;
+    for (const auto & e : m_entries) out.emplace_back(e->label, &e->region);
+    return out;
 }
 
 const Region & Regions::get(const Input & value, const std::string & where) { return entry(value, where).region; }

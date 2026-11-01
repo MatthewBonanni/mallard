@@ -78,7 +78,9 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[les]`, `[les.combustion]` | no | [Large-eddy simulation](les.md) |
 | `[source]`, `[[sponges]]` | no | [Sources and sponges](sources.md) |
 | `[regions]` | no | [Named regions](geometry.md#named-regions), used by `[[sources]]`, `[[sponges]]` and `[[probes]]` |
-| `[[write_data]]`, `[output]`, `[[forces]]`, `[integrals]`, `[statistics]`, `[[probes]]` | no | [Output and diagnostics](output.md) |
+| `[[write_data]]`, `[output]` | no | [Output](output.md) |
+| `[[probes]]`, `[[forces]]`, `[integrals]` | no | [Probes and monitors](probes.md) |
+| `[statistics]` and its subtables | no | [Statistics](statistics.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
 Regions that several tables use (inline, or named once in `[regions]`), and
@@ -384,27 +386,27 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --quality quality
 == Check ==================================================================================
   Input keys         all used
   Boundaries         every boundary face has a condition (5 conditions)
-  non-orthogonality  max 23.4, mean 4.66
-                     worst 23.4 at (1.428, 0.09977), 23.4 at (1.448, 0.09361)
-  skewness           max 0.374, mean 0.0489
-                     worst 0.374 at (1.025, -0.6632), 0.374 at (1.022, -0.6803)
-  aspect ratio       max 1.96, mean 1.12
-  volume ratio       max 2.21, mean 1.16
-                     worst 2.21 at (1.095, 0.8271), 2.21 at (1.099, 0.8141)
-  Time step          8.771e-05 (from run.cfl), CFL 0.25 at the initial state
-  CFL-limiting       cell 13,165 at (0.2704, -0.07489)
-                     4 cells within 10% of it, in (0.2617, -0.07529) to (0.9787, 0.5039)
-  Memory             133MB per rank after setup (peak 133MB), 17,297 cells, 1 rank
-                     on 4 ranks: about 46.6MB per rank (peak 46.6MB), largest part 4,325 + 1,729 halo cells
+  non-orthogonality  max 27.7, mean 4.87
+                     worst 27.7 at (1.222, 0.3962), 27.7 at (1.209, 0.389)
+  skewness           max 0.363, mean 0.0545
+                     worst 0.363 at (0.8478, 0.4729), 0.363 at (0.8561, 0.4827)
+  aspect ratio       max 1.95, mean 1.13
+  volume ratio       max 2.26, mean 1.18
+                     worst 2.26 at (0.8694, 0.488), 2.26 at (0.8561, 0.4827)
+  Time step          0.0001416 (from run.cfl), CFL 0.25 at the initial state
+  CFL-limiting       cell 9,273 at (0.468, 0.05182)
+                     2 cells within 10% of it, in (0.4556, 0.05182) to (0.468, 0.05629)
+  Memory             72.2MB per rank after setup (peak 72.2MB), 9,385 cells, 1 rank
+                     on 4 ranks: about 26.7MB per rank (peak 26.7MB), largest part 2,347 + 1,119 halo cells
   Throughput         50.0M cells/s per rank
-  Cost               1.14e+04 steps per unit simulated time
-                     per unit time: 986 ms wall on 4 ranks, 0.0011 rank-hours
-                     per flow-through (0.4375): 431 ms wall on 4 ranks, 0.000479 rank-hours
-                     to t_stop = 0.75: 740 ms wall on 4 ranks, 0.000822 rank-hours
+  Cost               7060 steps per unit simulated time
+                     per unit time: 331 ms wall on 4 ranks, 0.000368 rank-hours
+                     per flow-through (0.4375): 145 ms wall on 4 ranks, 0.000161 rank-hours
+                     to t_stop = 0.75: 248 ms wall on 4 ranks, 0.000276 rank-hours
   Result             ok
 ```
 
-(`examples/mallard` on a coarse mesh of 17k triangles, on a CPU.) The report covers:
+(`examples/mallard` on a coarse mesh of 9k triangles, on a CPU.) The report covers:
 
 | Line | What it is |
 |---|---|

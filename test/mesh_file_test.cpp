@@ -209,7 +209,7 @@ TEST(MeshFileTest, ReadsCellZones) {
     halves.init_file(write_temp("mallard_cell_zones.msh", jittered_mixed_mesh(6, true)));
     EXPECT_EQ(halves.cell_zone_names, (std::vector<std::string>{"left_half", "right_half"}));
     for (uint32_t c = 0; c < halves.n_cells; c++) {
-        EXPECT_EQ(halves.h_cell_zone[c], halves.h_cell_coords(c, 0) < 0.5 ? 0u : 1u) << c;
+        EXPECT_EQ(halves.h_cell_zone[c], halves.h_cell_coords(c, 0) < 0.5_r ? 0u : 1u) << c;
     }
     std::string msh = MSH41;
     msh.replace(msh.find("$PhysicalNames\n4\n"), 17, "$PhysicalNames\n5\n2 5 \"fluid\"\n");

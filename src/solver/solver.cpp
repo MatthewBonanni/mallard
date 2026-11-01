@@ -193,11 +193,11 @@ void Solver::setup_from_input() {
         init_les();
         statistics.init(input, species_names, *mesh);
         init_rhs_split();
-        region::Regions regions(input, *mesh);
-        init_sources(regions);
-        init_sponges(regions);
+        used_regions = std::make_unique<region::Regions>(input, *mesh);
+        init_sources(*used_regions);
+        init_sponges(*used_regions);
         register_data();
-        init_output(regions);
+        init_output(*used_regions);
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
@@ -663,7 +663,7 @@ void Solver::init_boundaries() {
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
     wall_model_specs.clear();
-    dirichlet_boundaries.clear();
+    std::vector<DirichletBoundary> dirichlet_boundaries;
     average_pressure_outlets.clear();
     // Faces of upt boundaries whose composition varies along them, as (boundary, face):
     // each face gets its own copy of the condition, appended after the input's
@@ -743,12 +743,13 @@ void Solver::init_boundaries() {
                                   .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
             }
             const auto & u = bound.at("u").as_array();
-            dirichlet.W.emplace_back(name + ".rho", quantity_or_expression(bound.at("rho"), name + ".rho", dim::density));
-            FOR_I_DIM {
-                const std::string key = name + ".u[" + std::to_string(i) + "]";
-                dirichlet.W.emplace_back(key, quantity_or_expression(u[i], key, dim::velocity));
-            }
-            dirichlet.W.emplace_back(name + ".p", quantity_or_expression(bound.at("p"), name + ".p", dim::pressure));
+            auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
+                dirichlet.W.push_back(std::make_shared<const expr::Program>(
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables()));
+            };
+            add_state(bound.at("rho"), name + ".rho", dim::density);
+            FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
+            add_state(bound.at("p"), name + ".p", dim::pressure);
         }
         auto fields = std::make_shared<BoundaryFields>(bound, bcs.back().type, "boundaries[name = \"" + name + "\"]");
         boundary_fields[i_bc] = fields;
@@ -938,14 +939,22 @@ void Solver::init_boundaries() {
         FOR_I_DIM x[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
         timed_fields.add(i_bc, x, boundary_fields[base], composition);
     }
-    if (!timed_fields.empty()) {
-        timed_fields.finish();
-        if (!stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
+    if (!timed_fields.empty()) timed_fields.finish();
+    dirichlet_states = DirichletStates();
+    const auto h_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
+    for (const DirichletBoundary & d : dirichlet_boundaries) {
+        std::vector<int32_t> states;
+        std::vector<Point> x(d.faces.size());
+        for (size_t k = 0; k < d.faces.size(); k++) {
+            states.push_back(h_state_index(d.faces[k]));
+            FOR_I_DIM x[k][i] = static_cast<double>(mesh->h_face_coords(d.faces[k], i));
+        }
+        dirichlet_states.add(d.W, states, x);
     }
-    h_face_state = Kokkos::create_mirror_view(boundary_data.face_state);
-    h_face_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
-    t_boundary_states = -1.0;
-    boundary_states_steady = false;
+    dirichlet_states.finish(boundary_data.face_state);
+    if ((!timed_fields.empty() || dirichlet_states.depends_on_time()) && !stage_time.is_allocated()) {
+        stage_time = Kokkos::View<rtype>("stage_time");
+    }
     init_inlets(input_boundaries, inlets);
 }
 
@@ -1180,12 +1189,14 @@ void Solver::copy_boundary_gas() {
 }
 
 void Solver::update_boundary_fields(const rtype t_eval, const rtype c) {
-    if (timed_fields.empty()) return;
+    if (timed_fields.empty() && !dirichlet_states.depends_on_time()) return;
     set_stage_time(t_eval, c);
     apply_boundary_fields();
 }
 
 void Solver::apply_boundary_fields() {
+    dirichlet_states.apply(stage_time, boundary_data.face_state);
+    if (timed_fields.empty()) return;
     TimedBoundaryFields::Gas gas;
     gas.R = double(physics.R);
     if (is_mixture()) {
@@ -1201,22 +1212,6 @@ void Solver::apply_boundary_fields() {
 void Solver::update_boundary_states(const rtype t_eval, const rtype c) {
     update_boundary_fields(t_eval, c);
     update_inflow(t_eval);
-    if (dirichlet_boundaries.empty() || t_eval == t_boundary_states || boundary_states_steady) {
-        return;
-    }
-    for (const auto & bc : dirichlet_boundaries) {
-        for (uint32_t i_face : bc.faces) {
-            const auto x = Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL());
-            const int32_t k = h_face_state_index(i_face);
-            if (k < 0) throw std::logic_error("Dirichlet boundary face " + std::to_string(i_face) + " has no state.");
-            for (uint8_t i = 0; i < N_DIM + 2; i++) h_face_state(k, i) = static_cast<rtype>(bc.W[i].at(x, N_DIM, double(t_eval)));
-        }
-    }
-    Kokkos::deep_copy(boundary_data.face_state, h_face_state);
-    t_boundary_states = t_eval;
-    boundary_states_steady = std::none_of(dirichlet_boundaries.begin(), dirichlet_boundaries.end(), [](const auto & bc) {
-        return std::any_of(bc.W.begin(), bc.W.end(), [](const Expression & w) { return w.depends_on_time(); });
-    });
 }
 
 void Solver::init_numerics() {
@@ -1276,6 +1271,8 @@ void Solver::init_numerics() {
     face_reconstruction->init(face_reconstruction_input);
     flux_weights = face_reconstruction->face_quad_weights;
     if (axisymmetric) init_axisymmetric_weights();
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
     if (is_mixture()) {
         scalar_reconstruction.init(mesh, boundary_data, mixture.n_species, *face_reconstruction);
     }
@@ -1527,10 +1524,8 @@ void Solver::init_output(region::Regions & regions) {
             }
         }
     }
-    const Probes::Context probe_context{input, *mesh, regions, species_names,
-                                        find_value_or<std::string>(input, "initialize", "type", "") == "restart",
-                                        is_viscous(), &data};
-    probes.init(probe_context);
+    probes.init(input, *mesh, regions, species_names,
+                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous());
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     if (run_log_on) {
@@ -1542,7 +1537,7 @@ void Solver::init_output(region::Regions & regions) {
     }
     if (input.contains("write_data")) {
         for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
-            add_data_writers(output, probe_context, async_output, io_threads);
+            add_data_writers(output, regions, async_output, io_threads);
         }
     }
     if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
@@ -1557,7 +1552,7 @@ void Solver::init_output(region::Regions & regions) {
     }
 }
 
-void Solver::add_data_writers(const Input & output, const Probes::Context & context, bool async_output,
+void Solver::add_data_writers(const Input & output, region::Regions & regions, bool async_output,
                               uint32_t io_threads) {
     auto add_writer = [&](const CellSubset * subset, const std::string & prefix) {
         data_writers.push_back(std::make_unique<DataWriter>());
@@ -1597,14 +1592,14 @@ void Solver::add_data_writers(const Input & output, const Probes::Context & cont
     }
     for (size_t i = 0; i < values.size(); i++) {
         const auto & [value, key] = values[i];
-        const probe::RegionValue r = probe::classify_region(input, context.regions, *value, key);
+        const probe::RegionValue r = probe::classify_region(input, regions, *value, key);
         const std::string file_prefix = one ? prefix : prefix + "_" + (r.name.empty() ? std::to_string(i) : r.name);
         if (r.kind == probe::RegionValue::Kind::WHOLE_MESH) {
             add_writer(nullptr, file_prefix);
         } else if (r.kind == probe::RegionValue::Kind::VOLUME) {
-            const region::Region & region = context.regions.get(*value, key);
-            region::require_full_dimension(region, key);
-            CellSubset subset{region.summary(), {}, context.regions.fractions(*value, key)};
+            const region::Region & region = regions.get(*value, key);
+            region::require_full_dimension(region, *value, key);
+            CellSubset subset{region.summary(), {}, regions.fractions(*value, key)};
             for (uint32_t c = 0; c < mesh->n_owned(); c++) {
                 if (subset.fractions[c] > 0.0) subset.cells.push_back(c);
             }
@@ -1638,7 +1633,9 @@ void Solver::add_data_writers(const Input & output, const Probes::Context & cont
             Probes::Snapshot snapshot{file_prefix, entry_key, value, key, file_prefix + (vtkhdf ? ".vtkhdf" : ".pvd"),
                                       vtkhdf ? Probes::Format::VTKHDF : Probes::Format::VTP};
             if (output_files_enabled()) create_parent_directories("the output", file_prefix);
-            probes.add_snapshot(context, output, snapshot);
+            probes.add_snapshot(input, *mesh, regions, species_names,
+                                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(),
+                                output, snapshot, data);
         }
     }
 }
@@ -1698,6 +1695,7 @@ void Solver::allocate_memory() {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
+    if (positivity_limiter) positivity_kappa = Kokkos::View<rtype *>("positivity_kappa", mesh->n_cells);
     if (hybrid_flux) {
         cell_upwind = Kokkos::View<rtype *>("cell_upwind", mesh->n_cells);
         if (!viscous_gradients.is_allocated()) {
@@ -2508,6 +2506,7 @@ void Solver::update_primitives() {
 void Solver::check_timed_boundaries() const {
     on_every_rank([&] {
         timed_fields.check();
+        dirichlet_states.check();
         timed_inlets.check();
     });
 }

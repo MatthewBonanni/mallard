@@ -951,7 +951,7 @@ struct InitialState::Impl {
     std::string add_region(const Input & table, const std::string & where, uint32_t & first, uint32_t & count,
                            double & edge, bool & bounded) {
         const region::Region r(table, where, region_names);
-        region::require_full_dimension(r, where);
+        region::require_full_dimension(r, table, where);
         const auto & h = r.host();
         const uint32_t vertex_offset = static_cast<uint32_t>(vertices.size() / 2);
         const uint32_t program_offset = static_cast<uint32_t>(programs.size());

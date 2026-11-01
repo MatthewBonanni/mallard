@@ -19,11 +19,13 @@
 #include <iomanip>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <regex>
 #include <sstream>
 #include <unordered_map>
 
 #include "comm.h"
+#include "region_mesh.h"
 #include "common_io.h"
 #include "field_units.h"
 #include "file_format.h"
@@ -266,7 +268,7 @@ std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
 
 /**
  * @brief A VTK XML PolyData file with its arrays appended raw: the samples as
- *        vertices (point sets), polyline points (curves) or polygons (3D
+ *        vertices (points), polyline points (curves) or polygons (3D
  *        surfaces of mesh faces), with one array per variable.
  */
 void write_vtp_file(const std::string & file, double t, const probe::Geometry & g, const std::vector<std::string> & names,
@@ -359,6 +361,31 @@ void write_pvd_file(const std::string & file, const std::vector<std::pair<double
 
 } // namespace
 
+void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
+                           const std::vector<double> & cell_weights, uint32_t n_variables) {
+    std::vector<uint32_t> cells;
+    std::vector<uint64_t> global;
+    std::vector<double> weights;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        if (cell_weights[c] == 0.0) continue;
+        cells.push_back(c);
+        global.push_back(mesh.h_global_cell(c));
+        weights.push_back(cell_weights[c]);
+    }
+    p.quadrature.select(mesh, cells, n_variables);
+    if (mesh.n_global_cells > 0) {
+        global = comm::allgatherv(global);
+        weights = comm::allgatherv(weights);
+    }
+    std::vector<size_t> by_id(global.size());
+    for (size_t i = 0; i < by_id.size(); i++) by_id[i] = i;
+    std::sort(by_id.begin(), by_id.end(), [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
+    p.geometry.dim = static_cast<uint8_t>(r.dimension());
+    p.geometry.revolved = mesh.axisymmetric && r.dimension() == N_DIM;  // per radian
+    p.geometry.type = "region " + r.summary();
+    for (const size_t i : by_id) p.geometry.quad_weights.push_back(weights[i]);
+}
+
 namespace {
 
 /** @brief Device views of samples in cells (inside: index into cells of those with an offset). */
@@ -387,12 +414,149 @@ void allocate_samples(Probes::Samples & s, const std::vector<uint32_t> & h_cells
 
 } // namespace
 
+void Probes::select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables) {
+    // One sample per element, at its center, in the order of the elements' cells' global ids, then position;
+    // rank 0 keeps the elements' polygons (segments; nothing for points), normals and measures
+    const region::Elements e = region::elements(mesh, r);
+    constexpr size_t W = 9;  // global cell, center, direction, measure, vertex count
+    probe::CellPoints set;
+    std::vector<double> local, corners;
+    for (size_t k = 0; k < e.size(); k++) {
+        probe::Point x;
+        for (size_t d = 0; d < N_DIM; d++) x[d] = e.center[k][d];
+        set.cells.push_back(e.cell[k]);
+        set.points.push_back(x);
+        local.push_back(double(mesh.h_global_cell(e.cell[k])));
+        local.insert(local.end(), e.center[k].begin(), e.center[k].end());
+        local.insert(local.end(), e.direction[k].begin(), e.direction[k].end());
+        local.push_back(e.measure[k]);
+        local.push_back(double(e.offsets[k + 1] - e.offsets[k]));
+        for (uint32_t v = e.offsets[k]; v < e.offsets[k + 1]; v++) {
+            corners.insert(corners.end(), e.vertices[v].begin(), e.vertices[v].end());
+        }
+    }
+    const bool distributed = mesh.n_global_cells > 0;
+    const std::vector<double> all = distributed ? comm::gatherv(local) : local;
+    const std::vector<double> all_corners = distributed ? comm::gatherv(corners) : corners;
+    set.n_global = distributed ? comm::allreduce(uint64_t(set.cells.size()), comm::Op::SUM) : set.cells.size();
+    probe::Geometry & g = p.geometry;
+    g.dim = static_cast<uint8_t>(r.dimension());
+    g.type = "region " + r.summary();
+    if (!distributed || comm::is_root()) {
+        const size_t n = all.size() / W;
+        std::vector<size_t> first(n + 1, 0);
+        for (size_t i = 0; i < n; i++) first[i + 1] = first[i] + static_cast<size_t>(all[W * i + 8]);
+        std::vector<uint64_t> order(n);
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&](uint64_t a, uint64_t b) {
+            return std::lexicographical_compare(&all[W * a], &all[W * a] + 4, &all[W * b], &all[W * b] + 4);
+        });
+        set.gathered_row = order;
+        g.polygon_offsets = {0};
+        for (const uint64_t i : order) {
+            probe::Point x, d;
+            for (size_t c = 0; c < N_DIM; c++) {
+                x[c] = all[W * i + 1 + c];
+                d[c] = all[W * i + 4 + c];
+            }
+            g.nodes.push_back(x);
+            if (g.dim == N_DIM - 1) g.normals.push_back(d);
+            g.node_weights.push_back(all[W * i + 7]);
+            for (size_t v = first[i]; v < first[i + 1]; v++) {
+                probe::Point y;
+                for (size_t c = 0; c < N_DIM; c++) y[c] = all_corners[3 * v + c];
+                g.polygon_vertices.push_back(static_cast<uint32_t>(g.vertices.size()));
+                g.vertices.push_back(y);
+            }
+            g.polygon_offsets.push_back(g.polygon_vertices.size());
+        }
+        if (g.dim == 0) {
+            g.vertices.clear();
+            g.polygon_offsets.clear();
+            g.polygon_vertices.clear();
+        }
+    }
+    p.nodes.in_cells(mesh, set, {}, n_variables);
+    if (r.dimension() == N_DIM - 1) {
+        std::vector<probe::Point> normals;
+        for (size_t k = 0; k < e.size(); k++) {
+            probe::Point d;
+            for (size_t c = 0; c < N_DIM; c++) d[c] = e.direction[k][c];
+            normals.push_back(d);
+        }
+        p.nodes.set_normals(normals);
+    }
+}
+
+void Probes::select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
+                             const bool per_cell) {
+    // The quadrature points of the region's elements, in the order of their cells' global ids, then position;
+    // cell averages without normals are the same summed per cell: one sample each
+    region::Elements e = region::elements(mesh, r);
+    if (per_cell) {
+        std::map<uint32_t, std::pair<double, std::array<double, 3>>> cells;
+        for (size_t k = 0; k < e.size(); k++) {
+            auto & [w, x] = cells[e.cell[k]];
+            for (uint32_t q = e.quad_offsets[k]; q < e.quad_offsets[k + 1]; q++) {
+                w += e.quad_weights[q];
+                for (size_t d = 0; d < 3; d++) x[d] += e.quad_weights[q] * e.quad_points[q][d];
+            }
+        }
+        region::Elements merged;
+        for (const auto & [c, wx] : cells) {
+            merged.cell.push_back(c);
+            std::array<double, 3> x = wx.second;
+            for (double & v : x) v /= wx.first;
+            merged.quad_points.push_back(x);
+            merged.quad_weights.push_back(wx.first);
+            merged.quad_normals.push_back({0.0, 0.0, 0.0});
+            merged.quad_offsets.push_back(static_cast<uint32_t>(merged.quad_points.size()));
+        }
+        e = std::move(merged);
+    }
+    probe::CellPoints set;
+    std::vector<probe::Point> normals;
+    std::vector<double> local;  // global cell, x, y, z, weight
+    for (size_t k = 0; k < e.size(); k++) {
+        for (uint32_t q = e.quad_offsets[k]; q < e.quad_offsets[k + 1]; q++) {
+            probe::Point x, n;
+            for (size_t d = 0; d < N_DIM; d++) {
+                x[d] = e.quad_points[q][d];
+                n[d] = e.quad_normals[q][d];
+            }
+            set.cells.push_back(e.cell[k]);
+            set.points.push_back(x);
+            normals.push_back(n);
+            local.push_back(double(mesh.h_global_cell(e.cell[k])));
+            local.insert(local.end(), e.quad_points[q].begin(), e.quad_points[q].end());
+            local.push_back(e.quad_weights[q]);
+        }
+    }
+    const bool distributed = mesh.n_global_cells > 0;
+    const std::vector<double> all = distributed ? comm::gatherv(local) : local;
+    set.n_global = distributed ? comm::allreduce(uint64_t(set.cells.size()), comm::Op::SUM) : set.cells.size();
+    constexpr size_t W = 5;
+    if (!distributed || comm::is_root()) {
+        std::vector<uint64_t> order(all.size() / W);
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&](uint64_t a, uint64_t b) {
+            return std::lexicographical_compare(&all[W * a], &all[W * a] + 4, &all[W * b], &all[W * b] + 4);
+        });
+        set.gathered_row = order;
+        for (const uint64_t i : order) p.geometry.quad_weights.push_back(all[W * i + 4]);
+    }
+    p.quadrature.in_cells(mesh, set, {}, n_variables);
+    if (!per_cell) p.quadrature.set_normals(normals);
+    p.geometry.dim = static_cast<uint8_t>(r.dimension());
+    p.geometry.type = "region " + r.summary();
+}
+
 void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> & points, uint32_t n_variables,
                              const std::vector<probe::Point> & point_normals) {
     n_global = points.size();
     std::vector<uint8_t> contained;
     const std::vector<int32_t> located = locate_points(mesh, points, &contained);
-    std::vector<uint64_t> ids;
+    ids.clear();
     std::vector<uint32_t> h_cells, h_inside;
     std::vector<rtype> h_offsets;
     for (uint64_t p = 0; p < points.size(); p++) {
@@ -413,7 +577,25 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
         for (uint64_t id : ids) local.push_back(point_normals[id]);
         set_normals(local);
     }
+    order(mesh);
+}
 
+void Probes::Samples::select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables) {
+    std::vector<uint64_t> global(owned_cells.size());
+    for (size_t i = 0; i < owned_cells.size(); i++) global[i] = mesh.h_global_cell(owned_cells[i]);
+    std::vector<uint64_t> all = mesh.n_global_cells > 0 ? comm::allgatherv(global) : global;
+    std::sort(all.begin(), all.end());
+    n_global = all.size();
+    for (const uint64_t g : global) {
+        ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
+    }
+    cells = to_device(owned_cells, "probe_cells");
+    W = Kokkos::View<rtype *[N_CONSERVATIVE]>("probe_W", owned_cells.size());
+    values = Kokkos::View<rtype **, Kokkos::LayoutRight>("probe_values", owned_cells.size(), n_variables);
+    order(mesh);
+}
+
+void Probes::Samples::order(const Mesh & mesh) {
     distributed = mesh.n_global_cells > 0;
     const std::vector<uint64_t> all = distributed ? comm::gatherv(ids) : ids;
     if (comm::is_root() || !distributed) {
@@ -421,50 +603,6 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
         gathered_row.assign(n_global, 0);
         for (uint64_t r = 0; r < all.size(); r++) gathered_row[all[r]] = r;
     }
-}
-
-void Probes::Samples::select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables) {
-    distributed = mesh.n_global_cells > 0;
-    std::vector<uint64_t> global(owned_cells.size());
-    for (size_t i = 0; i < owned_cells.size(); i++) global[i] = mesh.h_global_cell(owned_cells[i]);
-    std::vector<uint64_t> all = distributed ? comm::allgatherv(global) : global;
-    std::sort(all.begin(), all.end());
-    n_global = all.size();
-    std::vector<uint64_t> ids;
-    for (const uint64_t g : global) {
-        ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
-    }
-    const std::vector<uint64_t> rows = distributed ? comm::gatherv(ids) : ids;
-    if (comm::is_root() || !distributed) {
-        gathered_row.assign(n_global, 0);
-        for (uint64_t r = 0; r < rows.size(); r++) gathered_row[rows[r]] = r;
-    }
-    allocate_samples(*this, owned_cells, {}, {}, n_variables);
-}
-
-void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
-                           const std::vector<double> & fractions, uint32_t n_variables) {
-    std::vector<uint32_t> cells;
-    std::vector<uint64_t> global;
-    std::vector<double> weights;
-    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
-        if (fractions[c] == 0.0) continue;
-        cells.push_back(c);
-        global.push_back(mesh.h_global_cell(c));
-        weights.push_back(fractions[c] * double(mesh.h_cell_measure(c)));
-    }
-    p.quadrature.select(mesh, cells, n_variables);
-    if (mesh.n_global_cells > 0) {
-        global = comm::allgatherv(global);
-        weights = comm::allgatherv(weights);
-    }
-    std::vector<size_t> by_id(global.size());
-    for (size_t i = 0; i < by_id.size(); i++) by_id[i] = i;
-    std::sort(by_id.begin(), by_id.end(), [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
-    p.geometry.dim = static_cast<uint8_t>(r.dimension());
-    p.geometry.revolved = mesh.axisymmetric;
-    p.geometry.type = "region " + r.summary();
-    for (const size_t i : by_id) p.geometry.quad_weights.push_back(weights[i]);
 }
 
 void Probes::Samples::on_faces(const Mesh & mesh, const probe::FaceSet & set, uint32_t n_variables) {
@@ -749,7 +887,7 @@ namespace probe {
 
 namespace {
 
-// Region types of lower dimension: the probe shapes whose names no region primitive takes
+// Probe types that are regions too: points, curves and cut planes with the probe keys
 const std::vector<std::string> SAMPLED_TYPES = {"point", "points", "line", "polyline", "arc", "curve", "cut_plane", "surface"};
 
 bool sampled(const Input & table) {
@@ -773,45 +911,43 @@ RegionValue classify_region(const Input & input, region::Regions & regions, cons
         return r;
     }
     const region::Region & region = regions.get(value, where);
+    r.region = &region;
     if (region.dimension() == N_DIM) {
         r.kind = region.filled()[region.root()].kind == region::Filled::Kind::ALL ? RegionValue::Kind::WHOLE_MESH
                                                                                   : RegionValue::Kind::VOLUME;
         return r;
     }
     const auto & pieces = region.pieces();
-    if (pieces.size() == 1 && !pieces[0].zones.empty() && !pieces[0].edges && pieces[0].inside.empty() &&
-        pieces[0].outside.empty() && !pieces[0].flip) {
-        r.kind = RegionValue::Kind::ZONE;
-        r.zones = pieces[0].zones;
-        return r;
-    }
-    throw InputError({.key = where,
-                      .message = "is " + region.summary() + ", a region of lower dimension that is not sampled yet",
-                      .fix = "Give a boundary zone, a probe type (cut_plane, line, points, surface, ...) or a filled region",
-                      .docs = "docs/guide/geometry.md#probe-shapes-as-regions"});
+    const bool zones = pieces.size() == 1 && !pieces[0].zones.empty() && !pieces[0].edges &&
+                       pieces[0].inside.empty() && pieces[0].outside.empty() && !pieces[0].flip;
+    r.kind = zones ? RegionValue::Kind::ZONE : RegionValue::Kind::ELEMENTS;
+    if (zones) r.zones = pieces[0].zones;
+    return r;
 }
 
 } // namespace probe
 
-void Probes::init(const Context & context) {
-    resumed = context.resume;
-    distributed = context.mesh.n_global_cells > 0;
-    if (!context.input.contains("probes")) return;
-    for (const auto & entry : find_value<std::vector<Input>>(context.input, "probes")) add(context, entry, nullptr);
+void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regions,
+                  const std::vector<std::string> & species_names, bool resume, bool viscous) {
+    resumed = resume;
+    distributed = mesh.n_global_cells > 0;
+    if (!input.contains("probes")) return;
+    for (const auto & entry : find_value<std::vector<Input>>(input, "probes")) {
+        add(input, mesh, regions, species_names, resume, viscous, entry, nullptr, nullptr);
+    }
 }
 
-void Probes::add_snapshot(const Context & context, const Input & entry, const Snapshot & snapshot) {
-    resumed = context.resume;
-    distributed = context.mesh.n_global_cells > 0;
-    add(context, entry, &snapshot);
+void Probes::add_snapshot(const Input & input, const Mesh & mesh, region::Regions & regions,
+                          const std::vector<std::string> & species_names, bool resume, bool viscous,
+                          const Input & entry, const Snapshot & snapshot, const std::vector<Data> & cell_data) {
+    resumed = resume;
+    distributed = mesh.n_global_cells > 0;
+    add(input, mesh, regions, species_names, resume, viscous, entry, &snapshot, &cell_data);
 }
 
-void Probes::add(const Context & context, const Input & entry, const Snapshot * snapshot) {
-    const Input & input = context.input;
-    const Mesh & mesh = context.mesh;
-    region::Regions & regions = context.regions;
-    const std::vector<std::string> & species_names = context.species_names;
-    const bool resume = context.resume, viscous = context.viscous;
+void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regions,
+                 const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,
+                 const Snapshot * snapshot, const std::vector<Data> * cell_data) {
     auto probe_ptr = std::make_unique<Probe>();
     Probe & p = *probe_ptr;
     std::string key;
@@ -839,34 +975,43 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
         if (p.interval == 0) throw InputError(key + ".interval must be positive.");
     }
 
-    // Where it samples: its own keys, the keys of a region of lower dimension, or boundary zones
+    // Where it samples: its own keys, a probe type given as a region, boundary zones, or a region's elements
     const Input * where = &entry;
     std::string gkey = key;
     std::vector<std::string> region_zones;
-    const Input * region_value = snapshot ? snapshot->region : entry.contains("region") ? &entry.at("region") : nullptr;
-    if (region_value) {
+    const region::Region * elements = nullptr;
+    if (snapshot || entry.contains("region")) {
+        const Input & value = snapshot ? *snapshot->region : entry.at("region");
         const std::string rkey = snapshot ? snapshot->region_key : key + ".region";
-        const probe::RegionValue r = probe::classify_region(input, regions, *region_value, rkey);
-        if (r.kind == probe::RegionValue::Kind::WHOLE_MESH) {
-            throw InputError(rkey + ": \"domain\" is the whole mesh; give the region to " +
-                             (snapshot ? "write." : "reduce over."));
-        }
-        p.from_region = r.kind == probe::RegionValue::Kind::VOLUME;
-        if (r.kind == probe::RegionValue::Kind::ZONE) region_zones = r.zones;
+        const probe::RegionValue r = probe::classify_region(input, regions, value, rkey);
         if (r.kind == probe::RegionValue::Kind::SAMPLED) {
             where = r.table;
             gkey = rkey;
-        }
-        if (!p.from_region) {
             for (const char * k : {"type", "point", "start", "end", "boundary", "boundary_type"}) {
                 if (entry.contains(k)) throw InputError(key + ": give region or " + k + ", not both.");
             }
+        } else if (snapshot) {
+            if (r.kind == probe::RegionValue::Kind::ZONE) region_zones = r.zones;
+            if (r.kind == probe::RegionValue::Kind::ELEMENTS) elements = r.region;
         }
     }
+    p.from_region = !snapshot && where == &entry && entry.contains("region");
+    const region::Region * region = p.from_region ? &regions.get(entry.at("region"), key + ".region") : nullptr;
+    // A surface region with n_points is resampled on a grid of samples, written like a curve's
+    p.resampled = region && region->dimension() == N_DIM - 1 && N_DIM == 3 && entry.contains("n_points");
     for (const char * k : {"type", "boundary", "boundary_type", "sampling", "format", "file", "samples"}) {
-        if (p.from_region && entry.contains(k)) {
-            throw InputError(key + "." + k + ": a region probe writes only its reductions, to reductions_file; " +
-                             k + " applies to points and curves.");
+        // Surfaces and curves sample at their quadrature points: cell averages or point values there
+        const std::string name = k;
+        const bool allowed = name == "sampling" ? region && region->dimension() < N_DIM
+                                                : p.resampled && name != "type" && !name.starts_with("boundary");
+        if (region && entry.contains(k) && !allowed) {
+            throw InputError(Diagnostic{.key = key + "." + k,
+                                        .line = line_of(entry, k),
+                                        .message = "applies to probes of points, curves and resampled surfaces "
+                                                   "(n_points), but a region probe writes only its reductions, "
+                                                   "to reductions_file",
+                                        .fix = "Remove " + name + ", or give the probe a type instead of a region",
+                                        .docs = "docs/guide/probes.md#region-probes"});
         }
     }
     if (snapshot) {
@@ -874,49 +1019,49 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
         p.format = snapshot->format;
         p.file = snapshot->file;
     } else {
-        const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
-        record_options(key + ".sampling", {"cell", "point"});
-        if (sampling == "point") {
-            p.sampling = Sampling::POINT;
-        } else if (sampling != "cell") {
-            throw InputError(key + ".sampling = \"" + sampling + "\" is not one of: cell, point.");
-        }
-        const std::string format = find_value_or<std::string>(entry, "format", "csv");
-        record_options(key + ".format", {"csv", "hdf5", "vtkhdf", "vtp"});
-        if (format == "hdf5" || format == "vtkhdf") {
+    const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
+    record_options(key + ".sampling", {"cell", "point"});
+    if (sampling == "point") {
+        p.sampling = Sampling::POINT;
+    } else if (sampling != "cell") {
+        throw InputError(key + ".sampling = \"" + sampling + "\" is not one of: cell, point.");
+    }
+    const std::string format = find_value_or<std::string>(entry, "format", "csv");
+    record_options(key + ".format", {"csv", "hdf5", "vtkhdf", "vtp"});
+    if (format == "hdf5" || format == "vtkhdf") {
 #ifndef Mallard_HAS_HDF5
-            throw InputError(key + ".format = \"" + format + "\" needs a build with -DMallard_ENABLE_HDF5=ON.");
+        throw InputError(key + ".format = \"" + format + "\" needs a build with -DMallard_ENABLE_HDF5=ON.");
 #endif
-            p.format = format == "hdf5" ? Format::HDF5 : Format::VTKHDF;
-        } else if (format == "vtp") {
-            p.format = Format::VTP;
-        } else if (format != "csv") {
-            throw not_accepted(entry, key + ".format", format, {"csv", "hdf5", "vtkhdf", "vtp"});
+        p.format = format == "hdf5" ? Format::HDF5 : Format::VTKHDF;
+    } else if (format == "vtp") {
+        p.format = Format::VTP;
+    } else if (format != "csv") {
+        throw not_accepted(entry, key + ".format", format, {"csv", "hdf5", "vtkhdf", "vtp"});
+    }
+    const char * extension = p.format == Format::CSV      ? ".csv"
+                             : p.format == Format::HDF5   ? ".h5"
+                             : p.format == Format::VTKHDF ? ".vtkhdf"
+                                                          : ".pvd";
+    p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
+    p.write_samples = (!p.from_region || p.resampled) && find_value_or<bool>(entry, "samples", true);
+    std::vector<std::string> reductions = find_value_or<std::vector<std::string>>(entry, "reductions", {});
+    if (p.from_region && reductions.empty()) reductions = {"integral", "mean", "min", "max"};
+    for (const auto & r : reductions) {
+        const auto it = find_option(REDUCTIONS, key + ".reductions", r, line_of(entry, "reductions"));
+        if (std::find(p.reductions.begin(), p.reductions.end(), it->second) != p.reductions.end()) {
+            throw InputError(key + ".reductions: \"" + r + "\" is listed twice.");
         }
-        const char * extension = p.format == Format::CSV      ? ".csv"
-                                 : p.format == Format::HDF5   ? ".h5"
-                                 : p.format == Format::VTKHDF ? ".vtkhdf"
-                                                              : ".pvd";
-        p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
-        p.write_samples = !p.from_region && find_value_or<bool>(entry, "samples", true);
-        std::vector<std::string> reductions = find_value_or<std::vector<std::string>>(entry, "reductions", {});
-        if (p.from_region && reductions.empty()) reductions = {"integral", "mean", "min", "max"};
-        for (const auto & r : reductions) {
-            const auto it = find_option(REDUCTIONS, key + ".reductions", r, line_of(entry, "reductions"));
-            if (std::find(p.reductions.begin(), p.reductions.end(), it->second) != p.reductions.end()) {
-                throw InputError(key + ".reductions: \"" + r + "\" is listed twice.");
-            }
-            p.reductions.push_back(it->second);
-        }
-        if (!p.write_samples && p.reductions.empty()) throw InputError(key + ": samples = false needs reductions.");
-        p.reductions_file = find_value_or<std::string>(entry, "reductions_file", "probe_" + p.name + "_reductions.csv");
+        p.reductions.push_back(it->second);
+    }
+    if (!p.write_samples && p.reductions.empty()) throw InputError(key + ": samples = false needs reductions.");
+    p.reductions_file = find_value_or<std::string>(entry, "reductions_file", "probe_" + p.name + "_reductions.csv");
     }
 
     if (!entry.contains("variables")) throw InputError(key + ": variables not specified.");
     // Snapshots also write cell fields, as the value of each sample's cell
     auto cell_field = [&](const std::string & name) -> const Data * {
-        if (!snapshot || !context.cell_data) return nullptr;
-        for (const Data & d : *context.cell_data) {
+        if (!snapshot || !cell_data) return nullptr;
+        for (const Data & d : *cell_data) {
             if (d.name() == name) return &d;
         }
         return nullptr;
@@ -925,9 +1070,9 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
     for (const auto & v : find_value<std::vector<std::string>>(entry, "variables")) {
         const bool probe_name = v == "U" || v == "MOMENTUM_FLUX" || v == "TRACTION_PRESSURE" || v == "TRACTION_VISCOUS" ||
                                 v == "Y_*" || v == "SPECIES_FLUX_*";
-        if (snapshot && context.cell_data && !probe_name && !v.empty() && v.back() == '*') {
+        if (snapshot && cell_data && !probe_name && !v.empty() && v.back() == '*') {
             const size_t before = listed.size();
-            for (const Data & d : *context.cell_data) {
+            for (const Data & d : *cell_data) {
                 if (d.name().rfind(v.substr(0, v.size() - 1), 0) == 0) listed.push_back(d.name());
             }
             if (listed.size() == before) throw InputError(key + ".variables: no variable matches \"" + v + "\".");
@@ -960,12 +1105,15 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
 
     const bool boundary = !region_zones.empty() || (where == &entry && !p.from_region &&
                                                      (entry.contains("boundary") || entry.contains("boundary_type")));
-    const std::string shape = find_value_or<std::string>(*where, "type", "");
-    const bool cut = shape == "cut_plane";
-    const bool oriented = cut || (N_DIM == 2 && where->contains("type") && shape != "point" && shape != "points") ||
-                          (N_DIM == 2 && !where->contains("type") && !where->contains("point")) ||
-                          (N_DIM == 3 && (shape == "rectangle" || shape == "disk" || shape == "sphere" ||
-                                          shape == "cylinder" || shape == "cone" || shape == "surface"));
+    const std::string type = find_value_or<std::string>(*where, "type", "");
+    const bool cut = type == "cut_plane";
+    const bool oriented = (region && region->dimension() == N_DIM - 1) ||
+                          (elements && elements->dimension() == N_DIM - 1) ||
+                          (!p.from_region && !elements &&
+                           (cut || (N_DIM == 2 && where->contains("type") && type != "point" && type != "points") ||
+                            (N_DIM == 2 && !where->contains("type") && !where->contains("point")) ||
+                            (N_DIM == 3 && (type == "rectangle" || type == "disk" || type == "sphere" ||
+                                            type == "cylinder" || type == "cone" || type == "surface"))));
     if (cut && mesh.axisymmetric && !p.reductions.empty()) {
         throw InputError(key + ".reductions: cut planes take no reductions with physics.axisymmetric.");
     }
@@ -976,7 +1124,7 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
         }
         if (code::normals(k) && !boundary && !oriented) {
             throw InputError(key + ".variables: " + p.variables[v] + " needs a surface (" +
-                             (N_DIM == 2 ? "a curve, boundary or cut plane)." : "a boundary, cut plane or surface shape)."));
+                             (N_DIM == 2 ? "a curve, boundary or cut plane)." : "a boundary, cut plane or surface)."));
         }
         if (code::normals(k) && !boundary && mesh.axisymmetric) {
             throw InputError(key + ".variables: " + p.variables[v] +
@@ -1009,12 +1157,47 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
         p.reference.p = find_real(ref, "p", dim::pressure);
     }
 
-    const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
-    if (p.from_region) {
-        const region::Region & r = regions.get(entry.at("region"), key + ".region");
-        region::require_full_dimension(r, key + ".region");
-        select_region(p, mesh, r, regions.fractions(entry.at("region"), key + ".region"), n_evaluated);
-        if (p.quadrature.n_global == 0) throw InputError(key + ".region contains no part of any cell.");
+    if (elements) {
+        select_snapshot_elements(p, mesh, *elements, static_cast<uint32_t>(h_codes.size()));
+        if (p.nodes.n_global == 0) throw InputError(gkey + " covers no part of any cell of the mesh.");
+    } else if (p.from_region) {
+        const region::Region & r = *region;
+        const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
+        if (r.dimension() == N_DIM) {
+            // Filled regions weigh each cell by f V
+            std::vector<double> weights(mesh.n_owned(), 0.0);
+            const std::vector<double> & f = regions.fractions(entry.at("region"), key + ".region");
+            for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = f[c] * double(mesh.h_cell_measure(c));
+            select_region(p, mesh, r, weights, n_evaluated);
+        } else if (p.resampled) {
+            const Input & n = entry.at("n_points");
+            const int64_t nu = n.is_array() && n.as_array().size() == 2 ? n.as_array()[0].as_integer() : 0;
+            const int64_t nv = nu ? n.as_array()[1].as_integer() : 0;
+            if (nu < 2 || nv < 2) {
+                throw InputError(Diagnostic{.key = key + ".n_points",
+                                            .line = line_of(entry, "n_points"),
+                                            .message = "must be [n_u, n_v], at least [2, 2], for a resampled surface",
+                                            .fix = "e.g. n_points = [32, 16]",
+                                            .docs = "docs/guide/probes.md#region-probes"});
+            }
+            p.geometry = probe::grid_geometry(region::sample_grid(region::surface_patches(r, key + ".region"),
+                                                                  static_cast<uint32_t>(nu), static_cast<uint32_t>(nv)));
+            p.geometry.type = "region " + r.summary();
+            p.nodes.locate(mesh, p.geometry.nodes, n_evaluated, p.geometry.normals);
+            if (!p.reductions.empty()) {
+                p.quadrature.locate(mesh, p.geometry.quad_points, n_evaluated, p.geometry.quad_normals);
+            }
+        } else {
+            const bool normals = std::any_of(h_codes.begin(), h_codes.end(), [](int32_t k) { return code::normals(k); });
+            select_elements(p, mesh, r, n_evaluated, p.sampling == Sampling::CELL && !normals && !p.gradients);
+        }
+        if (p.quadrature.n_global == 0) {
+            throw InputError(Diagnostic{.key = key + ".region",
+                                        .line = line_of(entry, "region"),
+                                        .message = "covers no part of any cell of the mesh",
+                                        .fix = "Move or enlarge the region so that it overlaps the domain",
+                                        .docs = "docs/guide/probes.md#region-probes"});
+        }
     } else if (boundary) {
         for (const char * k : {"type", "point", "start", "end"}) {
             if (entry.contains(k)) throw InputError(key + ": boundary probes take no " + k + ".");
@@ -1029,15 +1212,15 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
             }
         }
         if (entry.contains("boundary_type")) {
-            const std::string type = find_value<std::string>(entry, "boundary_type");
-            if (type != "wall" && BOUNDARY_TYPES.find(type) == BOUNDARY_TYPES.end()) {
-                throw InputError(key + ".boundary_type = \"" + type + "\" is not wall or a boundary type.");
+            const std::string zone_type = find_value<std::string>(entry, "boundary_type");
+            if (zone_type != "wall" && BOUNDARY_TYPES.find(zone_type) == BOUNDARY_TYPES.end()) {
+                throw InputError(key + ".boundary_type = \"" + zone_type + "\" is not wall or a boundary type.");
             }
             for (const auto & b : find_value_or<std::vector<Input>>(input, "boundaries", {})) {
                 const std::string t = find_value_or<std::string>(b, "type", "");
                 const auto it = BOUNDARY_TYPES.find(t);
                 const bool wall = it != BOUNDARY_TYPES.end() && BoundaryCondition{it->second}.is_wall();
-                if (t == type || (type == "wall" && wall)) zones.push_back(find_value<std::string>(b, "name"));
+                if (t == zone_type || (zone_type == "wall" && wall)) zones.push_back(find_value<std::string>(b, "name"));
             }
         }
         if (zones.empty()) throw InputError(key + ": no boundary zone selected.");
@@ -1051,7 +1234,7 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
             }
         }
         probe::FaceSet set = probe::boundary_faces(mesh, zones, distributed);
-        p.nodes.on_faces(mesh, set, n_evaluated);
+        p.nodes.on_faces(mesh, set, static_cast<uint32_t>(h_codes.size()));
         p.geometry = std::move(set.geometry);
         p.geometry.type = zones.size() == 1 ? "boundary " + zones[0] : "boundaries";
     } else if (cut) {
@@ -1084,15 +1267,15 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
         const double l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
         probe::Point unit_n;
         for (size_t d = 0; d < N_DIM; d++) unit_n[d] = n[d] / l;
-        p.nodes.in_cells(mesh, set.nodes, {unit_n}, n_evaluated);
-        if (!p.reductions.empty()) p.quadrature.in_cells(mesh, set.quadrature, {unit_n}, n_evaluated);
+        p.nodes.in_cells(mesh, set.nodes, {unit_n}, static_cast<uint32_t>(h_codes.size()));
+        if (!p.reductions.empty()) p.quadrature.in_cells(mesh, set.quadrature, {unit_n}, static_cast<uint32_t>(h_codes.size()));
         p.geometry = std::move(set.geometry);
         if (p.nodes.n_global == 0) throw InputError(gkey + ": the plane misses the mesh.");
     } else {
         p.geometry = probe::make_geometry(*where, gkey);
-        p.nodes.locate(mesh, p.geometry.nodes, n_evaluated, p.geometry.normals);
+        p.nodes.locate(mesh, p.geometry.nodes, static_cast<uint32_t>(h_codes.size()), p.geometry.normals);
         if (!p.reductions.empty() && p.geometry.dim > 0) {
-            p.quadrature.locate(mesh, p.geometry.quad_points, n_evaluated,
+            p.quadrature.locate(mesh, p.geometry.quad_points, static_cast<uint32_t>(h_codes.size()),
                                 p.geometry.quad_normals);
         }
     }
@@ -1117,7 +1300,7 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
             for (const Reduction r : p.reductions) {
                 for (const auto & v : p.variables) {
                     const Dimension d = field_units::describe(v).dimension;
-                    // Integrals take the units of the measure (sums over point sets)
+                    // Integrals take the units of the measure (sums over points)
                     columns.emplace_back(reduction_name(r) + "_" + v,
                                          r == Reduction::INTEGRAL ? d.times(measure) : d);
                 }
@@ -1184,7 +1367,7 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
                 h5::write_rows(file, "polygons/offsets", g.polygon_offsets.size(), 1, 0, g.polygon_offsets.size(),
                                g.polygon_offsets.data(), H5P_DEFAULT);
             }
-            auto extensible = [&](const std::string & name, hid_t type, uint64_t cols) {
+            auto extensible = [&](const std::string & name, hid_t dtype, uint64_t cols) {
                 const int rank = cols > 0 ? 2 : 1;
                 const hsize_t dims[2] = {0, cols}, max[2] = {H5S_UNLIMITED, cols};
                 const hsize_t chunk[2] = {cols > 0 ? hsize_t(1) : hsize_t(256), std::max<hsize_t>(cols, 1)};
@@ -1193,7 +1376,7 @@ void Probes::add(const Context & context, const Input & entry, const Snapshot * 
                 h5::check(H5Pset_chunk(plist, rank, chunk), "H5Pset_chunk");
                 h5::Handle lcpl(H5Pcreate(H5P_LINK_CREATE), H5Pclose, "H5Pcreate");
                 h5::check(H5Pset_create_intermediate_group(lcpl, 1), "H5Pset_create_intermediate_group");
-                h5::Handle dset(H5Dcreate2(file, name.c_str(), type, space, lcpl, plist, H5P_DEFAULT), H5Dclose,
+                h5::Handle dset(H5Dcreate2(file, name.c_str(), dtype, space, lcpl, plist, H5P_DEFAULT), H5Dclose,
                                 "creating " + name);
             };
             extensible("step", H5T_STD_U64LE, 0);
@@ -1375,7 +1558,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         std::vector<double> nodes, quad;
         // Collective on every rank (the geometry lives on rank 0 for some shapes)
         const bool own_quadrature = p.quadrature.n_global == 0;
-        if (!p.from_region && (p.write_samples || extrema || own_quadrature)) {
+        if ((!p.from_region || p.resampled) && (p.write_samples || extrema || own_quadrature)) {
             p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
             nodes = p.nodes.gather(p.cell_columns);
         }
@@ -1606,8 +1789,9 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         const Probe & p = *pp;
         std::string vars;
         for (const auto & v : p.variables) vars += (vars.empty() ? "" : ", ") + v;
-        const size_t n = p.from_region ? p.quadrature.n_global : p.geometry.nodes.size();
-        const char * unit = p.from_region ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
+        const size_t n = p.from_region && !p.resampled ? p.quadrature.n_global : p.geometry.nodes.size();
+        const bool cells = p.from_region && p.geometry.dim == N_DIM;
+        const char * unit = cells ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
         std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.type + (p.from_region ? " over " : " of ") +
                            logging::count(n) + unit +
                            (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"

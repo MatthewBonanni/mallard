@@ -43,12 +43,14 @@ A fixed set for tracking performance across commits, defined in
 | `teno5_2d` | 2D | 2D Riemann problem (configuration 3) on 1024 x 1024 quads, TENO5, 300 steps |
 | `muscl_2d` | 2D | the same with MUSCL |
 | `teno5_3d` | 3D | Taylor-Green vortex (Navier-Stokes) on 96^3 hexes, TENO5, 100 steps |
+| `probes_3d` | 3D | `teno5_3d` with probes every step: an exact cut plane and a sphere's surface with mass fluxes (point values), a wall zone with its shear, and region probes over a ball and a sphere's surface; reductions only. Its gap to `teno5_3d` is the cost of sampling |
 | `flame_3d` | 3D | reacting LES in the Volvo combustor's configuration without the bluff body: premixed propane-air (two-step mechanism, mixture-averaged transport, TFLES, Sigma), 96 x 48 x 48 hexes, MUSCL, hybrid flux, Strang-split chemistry, 100 steps |
 | `air_3d` | 3D | the same flow of air (single gas): the reference of the mixture's cost per cell and step |
 | `h2o2@dt=...`, `gri30@dt=...` | 2D | `chemistry/h2o2.toml` and `chemistry/gri30.toml` at each `dt` |
 
 The solver cases report the throughput over the time stepping (the run's
-summary), the chemistry cases `mallard reactor`'s cells per second.
+summary); `probes_3d` over its time stepping, diagnostics and output, where
+probes sample; the chemistry cases `mallard reactor`'s cells per second.
 
 ```bash
 python tools/perf/perf_suite.py run --build-2d build --build-3d build3d --out perf.json --csv perf.csv

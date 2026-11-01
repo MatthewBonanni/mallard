@@ -80,8 +80,8 @@ Reconstruction options (`order`, `limiter`) apply only when the
 reconstruction type is the preset's: `type = "MUSCL"` under `accurate` gets
 MUSCL's own defaults, not `order = 5`. The preset's `cfl` applies only when
 `[run]` sets neither `cfl` nor `dt`. Without a preset the defaults below
-apply, unchanged (first order). The log names the preset and every key the
-input overrides, and the Numerics section of the log lists what is used:
+apply, unchanged (first order). The terminal output names the preset and every key the
+input overrides, and its Numerics section lists what is used:
 
 ```
 == Numerics ===========================
@@ -101,7 +101,7 @@ cfl = 1.0          # or dt = 1.0e-4 (exactly one of the two)
 t_stop = 0.2       # and/or n_steps, t_wall_stop
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 41 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -147,7 +147,7 @@ type = "TENO"      # "FO", "MUSCL" or "TENO"; the default is "FO"
 order = 5          # TENO: 3 to 6
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 41 more.
 
 !!! warning "The default is first order"
     Without a [preset](#presets) or `[numerics.face_reconstruction]` Mallard
@@ -193,7 +193,7 @@ bound_preserving = true   # for very strong shocks
 | Key | Default | Meaning |
 |---|---|---|
 | `order` | 5 | 3 to 6 |
-| `bound_preserving` | `false` | Keep density and pressure in the neighbors' range in troubled cells: for very strong shocks and blasts (Noh, Sedov, Mach 8 flows) |
+| `bound_preserving` | `false` | Keep density and pressure in the neighbors' range in troubled cells, and (planar single gas) positive in every cell at `cfl` up to 0.5: for very strong shocks, blasts and near vacuum (Noh, Sedov, Mach 8 flows) |
 | `stencil_factor` | 2 | Large-stencil size over the number of coefficients; 1.5 is markedly less dissipative for fine smooth waves, less robust at shocks |
 | `troubled_threshold`, `troubled_upper` | 1e-3, 1e-2 | Troubled-cell indicator: where stencil selection starts, and where its cutoff is most dissipative |
 | `C_T` | adaptive | Fixed TENO cutoff instead of the adaptive one (1e-10 to 1e-6) |
@@ -225,7 +225,7 @@ Pitfalls:
 riemann_solver = "HLLC"   # default
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 41 more.
 
 | `riemann_solver` | Use |
 |---|---|

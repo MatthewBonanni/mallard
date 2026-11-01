@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "input.h"
+#include "region_mesh.h"
 
 #include "common_typedef.h"
 
@@ -70,7 +71,10 @@ struct Geometry {
     std::vector<uint32_t> polygon_vertices;
 };
 
-/** @brief The geometry of a [[probes]] entry or of a region table (key names it in errors). */
+/** @brief A resampled surface's geometry: its grid's nodes with normals, quadrilaterals and Gauss points. */
+Geometry grid_geometry(const region::Grid & grid);
+
+/** @brief The geometry of a [[probes]] entry (key names it in errors). */
 Geometry make_geometry(const Input & entry, const std::string & key);
 
 /** @brief Points of a text file: rows of N_DIM coordinates split by commas or blanks; '#' starts a comment. */

@@ -35,7 +35,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - Finite-rate chemistry: elementary, three-body, falloff, PLOG and Chebyshev reactions; a Rosenbrock (RODAS) integrator per cell with analytical Jacobians, Strang or SIMPLER balanced splitting from the flow; ignition delays match Cantera up to 1268 species
 - Mixture-averaged, unity-Lewis or constant-Lewis transport; optional thermal (Soret) diffusion
 - Optically thin radiation (TNF Planck-mean model)
-- Gravity and any number of source terms: expressions of position, time and the local or domain-averaged solution (species too), compiled for the GPU, in regions built from spheres, cylinders, cones, boxes, tori, polygons or implicit functions with unions, intersections and differences, with exact integrated totals on any mesh ([guide](docs/guide/sources.md), [regions](docs/guide/geometry.md#regions)); regions defined once by name and shared by sources, sponges and probes, the mesh's domain, boundary zones and cell zones as regions by name, and the boundaries and interiors of regions
+- Gravity and any number of source terms: expressions of position, time and the local or domain-averaged solution (species too), compiled for the GPU, in regions built from spheres, cylinders, cones, boxes, tori, polygons or implicit functions with unions, intersections and differences, with exact integrated totals on any mesh ([guide](docs/guide/sources.md), [regions](docs/guide/geometry.md#regions)); regions defined once by name and shared by sources, sponges and probes, the mesh's domain, boundary zones and cell zones as regions by name, and the boundaries and interiors of regions; region probes over surfaces and curves too, exact for primitives, clipped by filled regions and consistently oriented; `mallard check --view` shows every region in ParaView
 
 **Large-eddy simulation** ([guide](docs/guide/les.md))
 - Explicit LES: Sigma (default), WALE, Vreman or Smagorinsky eddy viscosity for single gases and mixtures, with Scotti's filter width on anisotropic cells and an opt-in dynamic constant
@@ -71,7 +71,7 @@ Mallard is a high-order unstructured finite volume solver for the compressible E
 - VTKHDF output for ParaView (default; one file per snapshot written by all ranks in parallel, or one file for the whole series; curved cells as quadratic cells), or VTU; snapshots of any region: the cells of a volume, slices, surfaces, curves, points and boundary zones
 - Running means and covariances; probes on points, curves, surfaces, exact cut planes and boundary zones (cell averages or high-order point values; wall shear, C_f, C_p, heat flux, y+ and fluxes through any surface; CSV, HDF5 or VTK, with integrals, means and extrema) and over regions (fraction-weighted integrals, means and extrema); domain integrals (kinetic energy, enstrophy, ...), wall forces
 - Heat release, species production rates and detonation soot foils (`P_MAX`)
-- A machine-readable JSON-lines run log, and provenance (code version, build, input and mesh hashes, resolved setup) and units (CF attributes in VTKHDF and HDF5, XDMF information, VTK field data, a CSV units line) in every output file
+- A machine-readable JSON-lines run record (`mallard.jsonl`), and provenance (code version, build, input and mesh hashes, resolved setup) and units (CF attributes in VTKHDF and HDF5, XDMF information, VTK field data, a CSV units line) in every output file
 - `mallard reactor`, a 0D reactor, and Python tools for plotting, animation and VTKHDF and HDF5 output
 
 **Run control** ([docs](docs/guide/running.md))
@@ -281,5 +281,5 @@ Mallard includes code and data derived from [Cantera](https://cantera.org) under
 <p align="center">
   <img src="docs/images/mallard.gif" alt="Mach 8 flow over a mallard" width="100%">
   <br>
-  <em>Mach 8 flow over a mallard: 1.07M triangles, TENO5 + RHLL (<a href="examples/mallard">examples/mallard</a>).</em>
+  <em>Mach 8 flow over a mallard: 1.05M triangles, TENO5 + RHLL (<a href="examples/mallard">examples/mallard</a>).</em>
 </p>

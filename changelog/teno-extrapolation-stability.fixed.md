@@ -1,0 +1,1 @@
+- `extrapolation` and characteristic boundary faces without an image face (most faces of unstructured triangles and tetrahedra) take the image cell's TENO-E polynomial at their translated quadrature points instead of its average: against TENO's high-order interior state the average grew round-off in a uniform subsonic inflow into vacuum states and NaNs.

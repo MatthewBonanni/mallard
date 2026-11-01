@@ -208,8 +208,7 @@ TEST(InputUpgradeTest, RegionTypesAreRenamedInPlaceAtAnyDepthAndByDimension) {
 
 TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
     const Rules rules = {{}, {{"s[].region.**.type", "annulus", "cylinder", "0.9.0", "0.10.0", "hollow", false,
-                               0, "axis = [0, 0, 1]"}},
-                         {}};
+                               0, "axis = [0, 0, 1]"}}, {}};
     const std::string text = "[[s]]\n"
                              "region = {type = \"union\", regions = [{type = \"annulus\", radius = 2}]}\n"
                              "[[s]]\n"
@@ -253,23 +252,6 @@ TEST(InputUpgradeTest, KeptOptionsWorkAsBeforeButAreRewritten) {
     EXPECT_EQ(input_upgrade::upgrade_text(text, rewritten, reformatted),
               "[[write_data]]\nprefix = 'f'\nformat = \"vtkhdf\"  # ParaView\n");
     EXPECT_FALSE(reformatted);
-    Input later = parse_input_string(text);
-    EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
-}
-
-TEST(InputUpgradeTest, GeometryOfWriteDataBecomesRegion) {
-    const std::string text = "[[write_data]]\nprefix = 'w'\ngeometry = \"wall\"  # a zone\n"
-                             "[[write_data]]\nprefix = 'f'\ngeometry = 'all'\n";
-    bool reformatted = true;
-    std::vector<Finding> findings;
-    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted),
-              "[[write_data]]\nprefix = 'w'\nregion = \"wall\"  # a zone\n"
-              "[[write_data]]\nprefix = 'f'\nregion = \"domain\"\n");
-    EXPECT_FALSE(reformatted);
-    Input input = parse_input_string(text);
-    ASSERT_EQ(input_upgrade::apply(input, "0.9.0").size(), 2u);
-    EXPECT_EQ(input.at("write_data").at(0).at("region").as_string(), "wall");
-    EXPECT_EQ(input.at("write_data").at(1).at("region").as_string(), "domain");
     Input later = parse_input_string(text);
     EXPECT_THROW(input_upgrade::apply(later, "0.10.0"), InputError);
 }

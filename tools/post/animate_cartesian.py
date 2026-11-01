@@ -245,7 +245,7 @@ def main():
     e.add_argument("grid_dir")
     e.add_argument("--var", default="RHO")
     e.add_argument("--delete", action="store_true", help="Delete each snapshot once extracted")
-    e.add_argument("--follow", metavar="LOG", help="Keep polling until this run log reports the end of the run")
+    e.add_argument("--follow", metavar="LOG", help="Keep polling until this run record (mallard.jsonl) reports the end of the run")
     r = sub.add_parser("render")
     r.add_argument("grid_dir")
     r.add_argument("output_stem")

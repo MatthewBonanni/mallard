@@ -14,6 +14,7 @@
 #ifndef REGION_H
 #define REGION_H
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -33,6 +34,10 @@ enum class Kind : uint8_t {
     SPHERE, ELLIPSOID, CYLINDER, CONE, BOX, TORUS, HALF_SPACE, POLYGON, IMPLICIT,
     UNION, INTERSECTION, DIFFERENCE,
 };
+
+/** @brief Subdivisions of the cells' simplices for extracted boundaries: the default and the most. */
+constexpr int DEFAULT_RESOLUTION = 3;
+constexpr int MAX_RESOLUTION = N_DIM == 2 ? 8 : 5;
 
 /** @brief Deepest evaluation stack of a region (nesting of booleans). */
 constexpr int MAX_STACK = 16;
@@ -297,6 +302,9 @@ class Region {
         /** @brief Lower dimensions: whether it has no boundary (a closed surface or curve). */
         bool closed() const { return m_closed; }
 
+        /** @brief Lower dimensions: subdivisions of each cell's simplices where a boundary is extracted. */
+        int resolution() const { return m_resolution; }
+
         /** @brief Its name in [regions] or of the mesh, or empty if given inline. */
         const std::string & name() const { return m_name; }
 
@@ -343,12 +351,20 @@ class Region {
         bool m_bounded = true;
         bool m_closed = false;
         int m_dimension = N_DIM;
+        int m_resolution = DEFAULT_RESOLUTION;
         std::string m_name;
         std::string m_summary;
 };
 
+/**
+ * @brief A box around a region, from its primitives: [lo, hi] per axis,
+ *        infinite where a part is unbounded or of the mesh (2D: z spans
+ *        the primitives' z extent).
+ */
+std::array<std::array<double, 3>, 2> bounds(const Region & region);
+
 /** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
-void require_full_dimension(const Region & region, const std::string & where);
+void require_full_dimension(const Region & region, const Input & value, const std::string & where);
 
 /**
  * @brief Fraction of every cell of the mesh (owned and halo) inside a filled
@@ -360,6 +376,9 @@ void require_full_dimension(const Region & region, const std::string & where);
  *        outside. Collective for regions inside boundary zones.
  */
 std::vector<double> cell_fractions(const Mesh & mesh, const Region & region);
+
+/** @brief The fractions of one of the region's filled parts (an index into filled()). Collective. */
+std::vector<double> cell_fractions(const Mesh & mesh, const Region & region, uint32_t filled);
 
 /**
  * @brief The regions that the region keys of a run give on its mesh. A named
@@ -382,10 +401,17 @@ class Regions {
         /** @brief Its volume fractions in every cell of the mesh (see cell_fractions). Collective. */
         const std::vector<double> & fractions(const Input & value, const std::string & where);
 
+        /** @brief The regions the run uses, in the order of first use: by name, or by the key of inline ones. */
+        std::vector<std::pair<std::string, const Region *>> used() const;
+
+        /** @brief The regions of the mesh. */
+        const MeshRegions & automatic() const { return m_automatic; }
+
     private:
         struct Entry {
             Region region;
             std::vector<double> fractions;  // empty until asked for
+            std::string label;
         };
         Entry & entry(const Input & value, const std::string & where);
 
@@ -393,7 +419,7 @@ class Regions {
         const Mesh & m_mesh;
         MeshRegions m_automatic;
         std::vector<std::unique_ptr<Entry>> m_entries;
-        std::map<std::string, size_t> m_by_name;
+        std::map<std::string, size_t> m_by_name;  // names, and the keys of inline regions
 };
 
 } // namespace region
