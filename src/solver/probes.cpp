@@ -178,17 +178,17 @@ int32_t variable_code(const std::string & name, const std::vector<std::string> &
 }
 
 /**
- * @brief The variables a [[probes]] entry lists, with U, MOMENTUM_FLUX,
- *        TRACTION_PRESSURE and TRACTION_VISCOUS for their components, Y_* and
- *        SPECIES_FLUX_* for every species.
+ * @brief The variables a [[probes]] entry lists, with U, RHOU, MOMENTUM_FLUX,
+ *        TRACTION_PRESSURE and TRACTION_VISCOUS for their components, Y_*,
+ *        RHOY_* and SPECIES_FLUX_* for every species.
  */
 std::vector<std::string> expand_variables(const std::vector<std::string> & listed,
                                           const std::vector<std::string> & species_names, const std::string & key) {
     std::vector<std::string> names;
     for (const auto & v : listed) {
-        if (v == "U" || v == "MOMENTUM_FLUX" || v == "TRACTION_PRESSURE" || v == "TRACTION_VISCOUS") {
+        if (v == "U" || v == "RHOU" || v == "MOMENTUM_FLUX" || v == "TRACTION_PRESSURE" || v == "TRACTION_VISCOUS") {
             for (size_t d = 0; d < N_DIM; d++) names.push_back(v + "_" + AXES[d]);
-        } else if (v == "Y_*" || v == "SPECIES_FLUX_*") {
+        } else if (v == "Y_*" || v == "RHOY_*" || v == "SPECIES_FLUX_*") {
             if (species_names.empty()) throw InputError(key + ".variables: " + v + " needs a gas mixture.");
             for (const auto & s : species_names) names.push_back(v.substr(0, v.size() - 1) + s);
         } else {
@@ -1068,8 +1068,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     };
     std::vector<std::string> listed;
     for (const auto & v : find_value<std::vector<std::string>>(entry, "variables")) {
-        const bool probe_name = v == "U" || v == "MOMENTUM_FLUX" || v == "TRACTION_PRESSURE" || v == "TRACTION_VISCOUS" ||
-                                v == "Y_*" || v == "SPECIES_FLUX_*";
+        const bool probe_name = v == "U" || v == "RHOU" || v == "MOMENTUM_FLUX" || v == "TRACTION_PRESSURE" ||
+                                v == "TRACTION_VISCOUS" || v == "Y_*" || v == "RHOY_*" || v == "SPECIES_FLUX_*";
         if (snapshot && cell_data && !probe_name && !v.empty() && v.back() == '*') {
             const size_t before = listed.size();
             for (const Data & d : *cell_data) {

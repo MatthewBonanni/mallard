@@ -853,7 +853,7 @@ changing it.
 
 | Key | Description |
 |---|---|
-| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H` and, for mixtures, `Y_<species>` |
+| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE` and, for mixtures, `Y_<species>` and `RHOY_<species>` |
 | `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`) whose covariance to keep; their means are kept too |
 | `t_start` | Start time, default 0 |
 | `interval` | Every this many steps, default 1 |
@@ -958,7 +958,7 @@ ranks. A probe that is not due costs nothing.
 | Key | Description |
 |---|---|
 | `name` | Probe name |
-| `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
+| `variables` | Any of the `[statistics]` fields, `U` and `RHOU` for all components, `Y_*` and `RHOY_*` for every species |
 | `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `surface` (below); without it, `point` or `start`/`end` select a point or a line |
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples (below). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |

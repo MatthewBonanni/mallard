@@ -942,24 +942,28 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     }
 }
 
-TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMass) {
+TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMassMomentumAndEnergy) {
     // A density wave convected through a circle (sphere): the rate of change of
-    // the mass inside, a region probe's integral of RHO over the disk (ball),
-    // balances the outward mass flux through its boundary, up to an error that
-    // falls at second order: the region probe weighs the average of each cell
-    // the circle cuts by its covered fraction
+    // the mass, momentum and total energy inside, a region probe's integrals of
+    // RHO, RHOU_X and RHOE over the disk (ball), balances the outward fluxes
+    // through its boundary, up to an error that falls at second order: the
+    // region probe weighs the average of each cell the circle cuts by its
+    // covered fraction
     const std::string region = "{type = \"sphere\", center = " + numbers3("0.4", "0.55", "0.45") + ", radius = 0.2}";
     const std::string surface = N_DIM == 2 ? "type = \"circle\"\ncenter = [0.4, 0.55]\nradius = 0.2\nn_points = 64\n"
                                            : "region = {type = \"sphere\", center = [0.4, 0.55, 0.45], radius = 0.2, "
                                              "filled = false}\nn_points = [24, 48]\n";
     const std::string rho = std::string(SINE_RHO) + (N_DIM == 3 ? " * cos(2 * pi * z)" : "");
-    auto residual = [&](uint32_t n) {
+    const std::vector<std::pair<std::string, std::string>> balances = {
+        {"RHO", "MASS_FLUX"}, {"RHOU_X", "MOMENTUM_FLUX_X"}, {"RHOE", "ENTHALPY_FLUX"}};
+    auto residuals = [&](uint32_t n) {
         const std::string dir = fresh_dir("balance");
-        const std::string probes = "[[probes]]\nname = \"mass\"\nregion = " + region +
-                                   "\nvariables = [\"RHO\"]\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
-                                   "/mass.csv\"\n[[probes]]\nname = \"flux\"\n" + surface +
-                                   "variables = [\"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
-                                   "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/flux.csv\"\n";
+        const std::string probes = "[[probes]]\nname = \"content\"\nregion = " + region +
+                                   "\nvariables = [\"RHO\", \"RHOU_X\", \"RHOE\"]\nreductions = [\"integral\"]\n"
+                                   "reductions_file = \"" + dir + "/content.csv\"\n[[probes]]\nname = \"flux\"\n" +
+                                   surface + "variables = [\"MASS_FLUX\", \"MOMENTUM_FLUX_X\", \"ENTHALPY_FLUX\"]\n"
+                                   "sampling = \"point\"\nsamples = false\nreductions = [\"integral\"]\n"
+                                   "reductions_file = \"" + dir + "/flux.csv\"\n";
         const double dt = 0.25 / n;
         std::ostringstream run_keys;
         run_keys.precision(17);
@@ -968,23 +972,31 @@ TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMass) {
         solver.init(parse_toml(box_case(n, rho, "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probes,
                                         run_keys.str())));
         run(solver);
-        std::vector<double> mass, flux;
-        for (const auto & row : read_csv(dir + "/mass.csv")) mass.push_back(row.at("integral_RHO"));
-        for (const auto & row : read_csv(dir + "/flux.csv")) flux.push_back(row.at("integral_MASS_FLUX"));
-        EXPECT_EQ(mass.size(), 3u);
+        const auto content = read_csv(dir + "/content.csv");
+        const auto flux = read_csv(dir + "/flux.csv");
+        EXPECT_EQ(content.size(), 3u);
         EXPECT_EQ(flux.size(), 3u);
-        if (mass.size() != 3 || flux.size() != 3) return 1.0;
-        // Simpson's rule in time, so that the time error is far below the space error
-        const double balance = (mass[2] - mass[0]) / (2.0 * dt) + (flux[0] + 4.0 * flux[1] + flux[2]) / 6.0;
-        return std::fabs(balance / flux[1]);
+        std::vector<double> errors(balances.size(), 1.0);
+        if (content.size() != 3 || flux.size() != 3) return errors;
+        for (size_t b = 0; b < balances.size(); b++) {
+            auto q = [&](size_t i) { return content[i].at("integral_" + balances[b].first); };
+            auto f = [&](size_t i) { return flux[i].at("integral_" + balances[b].second); };
+            // Simpson's rule in time, so that the time error is far below the space error
+            const double balance = (q(2) - q(0)) / (2.0 * dt) + (f(0) + 4.0 * f(1) + f(2)) / 6.0;
+            errors[b] = std::fabs(balance / f(1));
+        }
+        return errors;
     };
     const std::vector<uint32_t> meshes = {16, 32, 64};
-    std::vector<double> errors;
-    for (uint32_t n : meshes) errors.push_back(residual(n));
-    for (size_t i = 1; i < errors.size(); i++) {
-        EXPECT_GT(std::log2(errors[i - 1] / errors[i]), 1.8) << errors[i - 1] << " " << errors[i];
+    std::vector<std::vector<double>> errors;
+    for (uint32_t n : meshes) errors.push_back(residuals(n));
+    for (size_t b = 0; b < balances.size(); b++) {
+        for (size_t i = 1; i < errors.size(); i++) {
+            EXPECT_GT(std::log2(errors[i - 1][b] / errors[i][b]), 1.8)
+                << balances[b].first << " " << errors[i - 1][b] << " " << errors[i][b];
+        }
+        EXPECT_LT(errors.back()[b], 0.01) << balances[b].first;
     }
-    EXPECT_LT(errors.back(), 0.01);
 }
 
 #if N_DIM == 3

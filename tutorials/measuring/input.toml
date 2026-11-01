@@ -78,12 +78,12 @@ samples = false
 reductions = ["integral"]
 interval = 20
 
-# Mass, momentum (favre U times mass) and enthalpy in the box
+# Mass, momentum and total energy in the box
 [[probes]]
 name = "box"
 region = "box"
-variables = ["RHO", "U_X", "U_Y", "P", "H"]
-reductions = ["integral", "favre"]
+variables = ["RHO", "RHOU", "RHOE"]
+reductions = ["integral"]
 interval = 20
 
 # Fluxes out of the box through each side

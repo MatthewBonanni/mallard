@@ -32,8 +32,10 @@
 
 /**
  * @brief Cell values that statistics and probes sample, by code: 0 is RHO,
- *        1 + i the primitive PRIMITIVE_NAMES[i], 1 + N_PRIMITIVE + k the mass
- *        fraction Y_k of species k. The primitives must be current.
+ *        1 + i the primitive PRIMITIVE_NAMES[i], FIRST_CONSERVED + i the
+ *        conserved CONSERVATIVE_NAMES[1 + i] (RHOU_*, RHOE), FIRST_SPECIES + k
+ *        the mass fraction Y_k of species k and FIRST_PARTIAL_DENSITY + k its
+ *        partial density RHOY_k. The primitives must be current.
  */
 struct CellSampler {
     StateView U;
@@ -42,16 +44,20 @@ struct CellSampler {
 
     static constexpr int32_t RHO = 0;
     static constexpr int32_t FIRST_PRIMITIVE = 1;
-    static constexpr int32_t FIRST_SPECIES = 1 + N_PRIMITIVE;
+    static constexpr int32_t FIRST_CONSERVED = 1 + N_PRIMITIVE;
+    static constexpr int32_t FIRST_SPECIES = FIRST_CONSERVED + N_CONSERVATIVE - 1;
+    static constexpr int32_t FIRST_PARTIAL_DENSITY = 1 << 16;
 
     KOKKOS_INLINE_FUNCTION
     rtype operator()(const uint32_t c, const int32_t code) const {
         if (code == RHO) return U(c, 0);
-        if (code < FIRST_SPECIES) return P(c, code - FIRST_PRIMITIVE);
-        return rhoY(c, code - FIRST_SPECIES) / U(c, 0);
+        if (code < FIRST_CONSERVED) return P(c, code - FIRST_PRIMITIVE);
+        if (code < FIRST_SPECIES) return U(c, code - FIRST_CONSERVED + 1);
+        if (code < FIRST_PARTIAL_DENSITY) return rhoY(c, code - FIRST_SPECIES) / U(c, 0);
+        return rhoY(c, code - FIRST_PARTIAL_DENSITY);
     }
 
-    /** @brief Code of a variable name (RHO, a primitive, Y_<species>); throws InputError naming key. */
+    /** @brief Code of a variable name (RHO, a primitive, RHOU_*, RHOE, Y_<species>, RHOY_<species>); throws InputError naming key. */
     static int32_t code(const std::string & name, const std::vector<std::string> & species_names,
                         const std::string & key);
 };

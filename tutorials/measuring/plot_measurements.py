@@ -7,7 +7,8 @@ RUN_DIR holds a run of input.toml. From --t-start on, prints
 - the drag and lift coefficients from [[forces]] and from the wall probe's
   traction integrals;
 - the mass balance of the box (d/dt of its mass plus the net mass flux out
-  through its four sides) and the mean net enthalpy flux out of it;
+  through its four sides) and its energy balance (d/dt of its total energy
+  plus the net enthalpy flux out);
 - the drag and lift from the box's momentum balance (the momentum flux,
   pressure included, through its sides plus d/dt of its momentum);
 - the Strouhal number from the lift's zero crossings and from the peak of the
@@ -93,8 +94,11 @@ def main():
     inflow = -sides["west"]["integral_MASS_FLUX"]
     # The force on the cylinder is minus the rate of change of the box's
     # momentum and its flux out (viscous stresses on the sides neglected)
-    cd_box = -(ddt(tb, box["favre_U_X"] * mass) + flux["MOMENTUM_FLUX_X"]) / Q
-    cl_box = -(ddt(tb, box["favre_U_Y"] * mass) + flux["MOMENTUM_FLUX_Y"]) / Q
+    cd_box = -(ddt(tb, box["integral_RHOU_X"]) + flux["MOMENTUM_FLUX_X"]) / Q
+    cl_box = -(ddt(tb, box["integral_RHOU_Y"]) + flux["MOMENTUM_FLUX_Y"]) / Q
+    # Adiabatic wall: no source of energy (heat conduction and viscous work on the sides neglected)
+    energy = ddt(tb, box["integral_RHOE"]) + flux["ENTHALPY_FLUX"]
+    enthalpy_in = -sides["west"]["integral_ENTHALPY_FLUX"]
 
     sel = t >= args.t_start
     selb = tb >= args.t_start
@@ -113,9 +117,9 @@ def main():
     print(f"mass:     box {mass[selb].mean():.4f}, inflow {inflow[selb].mean():.5f} per unit time, "
           f"residual d/dt + net outflow: RMS {np.sqrt(np.mean(residual[selb] ** 2)):.2e} "
           f"({np.sqrt(np.mean(residual[selb] ** 2)) / inflow[selb].mean():.1e} of the inflow)")
-    print(f"energy:   mean net enthalpy outflow {flux['ENTHALPY_FLUX'][selb].mean():.3e}, "
-          f"{flux['ENTHALPY_FLUX'][selb].mean() / -sides['west']['integral_ENTHALPY_FLUX'][selb].mean():.1e} "
-          "of the inflow")
+    print(f"energy:   residual d/dt + net enthalpy outflow: RMS {np.sqrt(np.mean(energy[selb] ** 2)):.2e} "
+          f"({np.sqrt(np.mean(energy[selb] ** 2)) / enthalpy_in[selb].mean():.1e} of the inflow), "
+          f"net outflow alone {np.sqrt(np.mean(flux['ENTHALPY_FLUX'][selb] ** 2)) / enthalpy_in[selb].mean():.1e}")
     print(f"momentum: mean Cd {cd_box[selb].mean():.4f} from the box against {cd[sel].mean():.4f} on the wall; "
           f"Cl amplitude {0.5 * np.ptp(cl_box[selb]):.4f} against {0.5 * np.ptp(cl[sel]):.4f}")
     print(f"Strouhal: {st_lift:.4f} from the lift's crossings, {st_spec:.4f} from the wake spectrum")

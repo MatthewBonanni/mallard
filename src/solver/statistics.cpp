@@ -29,13 +29,21 @@ int32_t CellSampler::code(const std::string & name, const std::vector<std::strin
     for (size_t i = 0; i < N_PRIMITIVE; i++) {
         if (PRIMITIVE_NAMES[i] == name) return FIRST_PRIMITIVE + static_cast<int32_t>(i);
     }
+    for (size_t i = 1; i < N_CONSERVATIVE; i++) {
+        if (CONSERVATIVE_NAMES[i] == name) return FIRST_CONSERVED + static_cast<int32_t>(i - 1);
+    }
     for (size_t k = 0; k < species_names.size(); k++) {
         if ("Y_" + species_names[k] == name) return FIRST_SPECIES + static_cast<int32_t>(k);
+        if ("RHOY_" + species_names[k] == name) return FIRST_PARTIAL_DENSITY + static_cast<int32_t>(k);
     }
     std::vector<std::string> known = {"RHO"};
     for (const auto & p : PRIMITIVE_NAMES) known.push_back(p);
+    known.insert(known.end(), CONSERVATIVE_NAMES.begin() + 1, CONSERVATIVE_NAMES.end());
     const std::string suggestion = suggest_value(name, known);
-    if (!species_names.empty()) known.push_back("Y_<species>");
+    if (!species_names.empty()) {
+        known.push_back("Y_<species>");
+        known.push_back("RHOY_<species>");
+    }
     throw InputError({.key = key, .message = "unknown variable \"" + name + "\"", .valid = known, .suggestion = suggestion});
 }
 

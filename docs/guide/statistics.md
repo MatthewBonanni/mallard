@@ -25,7 +25,7 @@ carried across restarts.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `fields` | none | `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T`, `H`, `Y_<s>` |
+| `fields` | none | `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T`, `H`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `Y_<s>`, `RHOY_<s>` |
 | `products` | none | Pairs `"A*B"` whose covariance to keep |
 | `t_start` | 0 | Start averaging after this time |
 | `interval` | 1 | Sample every this many steps (weighted by the time since the last sample) |

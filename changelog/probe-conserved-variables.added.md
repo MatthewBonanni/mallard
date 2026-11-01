@@ -1,0 +1,1 @@
+- Probes, region probes, `[statistics]` (with phase averages and spectra) accept the conserved variables `RHOU_X`, `RHOU_Y`, `RHOU_Z` (or `RHOU`), `RHOE` and, for mixtures, `RHOY_<species>` (or `RHOY_*`): a region probe's `integral` gives the momentum, total energy and species masses in the region, for instantaneous control-volume balances with the boundary flux probes (#615).

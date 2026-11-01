@@ -56,12 +56,11 @@ Each `[[probes]]` entry samples or reduces the solution every `interval` steps (
 | Probe | Geometry | Variables, reductions | File |
 |---|---|---|---|
 | `wall` | `boundary = "cylinder"` | `TRACTION_PRESSURE`, `TRACTION_VISCOUS`: `integral` | `probe_wall_reductions.csv` |
-| `box` | `region = "box"` | `RHO`, `U_X`, `U_Y`, `P`, `H`: `integral`, `favre` | `probe_box_reductions.csv` |
+| `box` | `region = "box"` | `RHO`, `RHOU`, `RHOE`: `integral` | `probe_box_reductions.csv` |
 | `west`, `east`, `south`, `north` | `region = "<side>"` | `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`: `integral` | `probe_<side>_reductions.csv` |
 | `wake` | a point at (3, 0.5) | `U_Y`, `P` every 0.5 time units | `probe_wake.csv` |
 
-The `integral` of `RHO` over the box is its mass M; its `favre` (density-weighted) mean of `U_X` times M
-is its momentum. The flux variables of a cut plane are along its normal: `MASS_FLUX` is ρu·n,
+The `integral`s of `RHO`, `RHOU` and `RHOE` over the box are its mass, momentum and total energy. The flux variables of a cut plane are along its normal: `MASS_FLUX` is ρu·n,
 `MOMENTUM_FLUX` ρu(u·n) + pn (pressure included), `ENTHALPY_FLUX` ρu·n(h + |u|²/2). The wall's traction
 integrals are the force of `[[forces]]`.
 

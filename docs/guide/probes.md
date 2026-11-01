@@ -60,7 +60,7 @@ reductions = ["mean", "rms"]
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | required | Names the files |
-| `variables` | required | `[statistics]` fields; `U` and `Y_*` expand to all components and species |
+| `variables` | required | `[statistics]` fields; `U`, `RHOU`, `Y_*` and `RHOY_*` expand to all components and species |
 | `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D `surface` (`x`, `y`, `z` of `u`, `v`) |
 | `region` | none | Instead of `type`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
@@ -188,7 +188,8 @@ interval = 10
 
 A probe with `region` reduces the cell averages of the cells the region covers,
 each weighted by its volume times its volume fraction `f`, so a region need not
-follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`),
+follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`, its momentum,
+total energy and species masses for `RHOU_*`, `RHOE` and `RHOY_<species>`),
 `mean` that over `sum f V`, `favre` the density-weighted mean, `rms` the root
 mean square, and `min`, `max` the extremes over the cells with `f > 0`. Rank 0
 sums them in global cell order, so they are the same bit for bit on any number
@@ -212,6 +213,18 @@ step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P
 The third column is `sum f V`: `volume` in 3D and axisymmetric runs (per
 radian), `area` in planar 2D runs (per unit depth). Give the region by name to
 measure exactly where a source or sponge acts:
+
+**Control-volume balances.** The conserved variables and the flux variables
+of the region's boundary give a region's instantaneous balances: with a
+region probe of `RHO`, `RHOU` and `RHOE` (`integral`) and a probe of its
+closed boundary with `MASS_FLUX`, `MOMENTUM_FLUX` and `ENTHALPY_FLUX`
+(`integral`, `sampling = "point"`), d/dt of each integral plus the net
+outflow is the source inside: zero for mass, minus the force on any body
+inside for momentum, its heat and work for energy. The fluxes are
+convective (pressure included), so viscous stresses and heat conduction
+through the boundary are left out, and the time derivative comes from
+successive outputs. [Tutorial 8](../tutorials/measuring.md) closes the
+balances of a box around a cylinder this way.
 
 ```toml
 [regions]
