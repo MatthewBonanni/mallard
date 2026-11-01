@@ -202,8 +202,14 @@ class DataWriter {
         /**
          * @brief Continue numbering and the .pvd (.xmf) series of a previous
          *        run that stopped at (step, t), whose snapshot at t was already written.
+         *        n_snapshots, that run's count of snapshots up to t from its restart
+         *        file, numbers on when the series index lists fewer.
          */
-        void resume(uint64_t step, rtype t);
+        void resume(uint64_t step, rtype t, const double * n_snapshots = nullptr);
+
+        /** @brief Restart attribute of the snapshot count, or "" for writers numbered by step. */
+        std::string snapshot_attribute() const;
+        uint64_t snapshots_written() const { return n_snapshots; }
 
         /**
          * @brief Format and the output key-value line for the run log.
@@ -274,6 +280,9 @@ class DataWriter {
         void build_vtkhdf_cells();
         void write_vtkhdf_series(const std::vector<std::pair<rtype, std::string>> & series) const;
         void resume_vtkhdf(rtype t);
+        void resume_pvd(rtype t);
+        std::string snapshot_stem(uint64_t number) const;
+        bool snapshot_exists(uint64_t number) const;
 
         /**
          * @brief An output array: one scalar, or the N_DIM components of a
@@ -299,6 +308,7 @@ class DataWriter {
         std::vector<Field> fields;
         std::shared_ptr<Mesh> mesh;
         std::vector<std::pair<rtype, std::string>> history;
+        uint64_t n_snapshots = 0;  // numbers the next snapshot of time-based writers
         uint64_t n_files = 0;
         std::string last_file;
         std::string partial_file;  // the restart file being written, renamed to last_file once complete

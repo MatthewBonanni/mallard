@@ -314,7 +314,7 @@ TEST(RestartTest, RejectsZeroForceInterval) {
 namespace {
 
 /**
- * @brief A restart file without attributes split into its header fields,
+ * @brief A restart file split into its header fields,
  *        names, value blocks and (version 4) face count and records.
  */
 struct RestartFile {
@@ -341,7 +341,17 @@ struct RestartFile {
             names.push_back(bytes.substr(pos + 4, length));
             pos += 4 + length;
         }
-        if (version >= 3) pos += sizeof(uint64_t);  // no attributes
+        if (version >= 3) {
+            // Attributes (the snapshot counts) are dropped
+            uint64_t n_attributes;
+            std::memcpy(&n_attributes, bytes.data() + pos, sizeof(n_attributes));
+            pos += sizeof(uint64_t);
+            for (uint64_t a = 0; a < n_attributes; a++) {
+                uint32_t length;
+                std::memcpy(&length, bytes.data() + pos, sizeof(length));
+                pos += 4 + length + sizeof(double);
+            }
+        }
         if (version >= 4) {
             std::memcpy(&n_faces, bytes.data() + pos, sizeof(n_faces));
             pos += sizeof(uint64_t) + sizeof(uint32_t);

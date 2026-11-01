@@ -161,7 +161,8 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     restore_characteristic_state(restart);
     if (!resume_output) return;
     for (auto & writer : data_writers) {
-        writer->resume(step, t);
+        const std::string name = writer->snapshot_attribute();
+        writer->resume(step, t, name.empty() ? nullptr : restart.attribute(name));
     }
     if (checkpoint_writer) checkpoint_writer->resume(step, t);
     probes.resume(step, t);
