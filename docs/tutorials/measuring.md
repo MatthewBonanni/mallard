@@ -43,7 +43,7 @@ north = {type = "cut_plane", point = [0.0, 2.0], normal = [0.0, 1.0], bounds = [
 `[regions]` names geometry once, for every feature that takes a `region`
 ([named regions](../guide/geometry.md#named-regions)). `box` is the rectangle -2 < x < 4, -2 < y < 2
 around the cylinder; it need not follow the mesh, since each cell counts with the fraction of it inside.
-The four sides are [probe shapes as regions](../guide/geometry.md#probe-shapes-as-regions): cut planes
+The four sides are [probe types as regions](../guide/geometry.md#probe-types-as-regions): cut planes
 (lines, in 2D) that intersect the mesh exactly, each clipped by `bounds` to its side of the box and with
 its `normal` pointing out of it.
 
@@ -51,7 +51,7 @@ its `normal` pointing out of it.
 
 Each `[[probes]]` entry samples or reduces the solution every `interval` steps (here 20, as
 `[[forces]]`) and appends a row to its own CSV file
-([probes](../guide/output.md#probes-probes)):
+([probes](../guide/probes.md#probes-probes)):
 
 | Probe | Geometry | Variables, reductions | File |
 |---|---|---|---|
@@ -101,7 +101,7 @@ variables = ["U_X", "U_Y", "P", "MEAN_*", "COV_*", "PHASE_*"]
 From t = 60, `[statistics]` keeps each cell's running means and covariances, and
 `[statistics.phase]` its means in 8 bins of the shedding cycle. The cycle is measured, not given: each
 upward crossing of U_Y = 0 on the wake axis at (3, 0) starts a new one
-([phase averages](../guide/output.md#phase-averages-statisticsphase)). The snapshot writes only the box's
+([phase averages](../guide/statistics.md#phase-averages-statisticsphase)). The snapshot writes only the box's
 cells ([snapshots of regions](../guide/output.md#snapshots-of-regions)), at the start and the end.
 
 ## 5. Run
@@ -120,14 +120,14 @@ python3 $MALLARD/tutorials/measuring/plot_measurements.py . --t-start 60 --out .
 
 ```text
 t >= 60, 4 shedding periods
-wall:     mean Cd 1.3691 ([[forces]]), 1.3691 (wall probe); largest difference 2.29e-11
+wall:     mean Cd 1.3691 ([[forces]]), 1.3691 (wall probe); largest difference 3.92e-07
 mass:     box 23.0665, inflow 0.73687 per unit time, residual d/dt + net outflow: RMS 6.17e-05 (8.4e-05 of the inflow)
 energy:   mean net enthalpy outflow -7.308e-05, -3.9e-05 of the inflow
 momentum: mean Cd 1.3658 from the box against 1.3691 on the wall; Cl amplitude 0.3715 against 0.3336
 Strouhal: 0.1654 from the lift's crossings, 0.1651 from the wake spectrum
 ```
 
-**The wall.** The integral of the wall probe's tractions agrees with the force of `[[forces]]` to 2e-11. The wall probe's samples also give the force's distribution around the
+**The wall.** The integral of the wall probe's tractions agrees with the force of `[[forces]]` to 4e-7 (in C_D). The wall probe's samples also give the force's distribution around the
 cylinder, which `[[forces]]` does not.
 
 **Mass.** Over the box, dM/dt plus the net mass flux out through the four sides should vanish. The
