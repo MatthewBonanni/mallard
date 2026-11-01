@@ -10,6 +10,8 @@
 #ifndef RUN_LOG_H
 #define RUN_LOG_H
 
+#include <cstdint>
+#include <optional>
 #include <string>
 
 #include "json.h"
@@ -27,6 +29,9 @@ constexpr int VERSION = 1;
 void open(const std::string & file, bool append);
 void close();
 bool is_open();
+
+/** @brief Rank 0: the step of the last record of the log appended to, if it has one. */
+std::optional<uint64_t> last_step();
 
 /** @brief Writes a record as one line and flushes it; nothing if the log is not open. */
 void write(const json::Object & record);

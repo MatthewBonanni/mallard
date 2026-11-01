@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -306,6 +307,44 @@ TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
     }
     EXPECT_EQ(starts, (std::vector<std::string>{dir + "/input_4.toml", dir + "/input_8.toml"}));
     EXPECT_EQ(read_restart(dir + "/r_000008.restart").provenance, second);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(RunLogTest, ResumedRunsAppendAndMarkRewinds) {
+    const std::string dir = (scratch_dir() / "mallard_run_log_resume").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    const std::string restart = dir + "/r_000004.restart";
+    run_box(dir, 4, UNIFORM);
+    run_box(dir, 8, "type = \"restart\"\nfile = \"" + restart + "\"\n");
+    run_box(dir, 8, "type = \"restart\"\nfile = \"" + restart + "\"\n");
+    if (!comm::is_root()) return;
+    std::vector<Value> starts;
+    std::vector<std::vector<double>> steps;
+    for (const auto & line : lines(dir + "/run.jsonl")) {
+        const Value r = json_reader::parse(line);
+        if (r["type"].string == "start") {
+            starts.push_back(r);
+            steps.emplace_back();
+        } else if (r.has("step")) {
+            ASSERT_FALSE(steps.empty());
+            steps.back().push_back(r["step"].number);
+        }
+    }
+    ASSERT_EQ(starts.size(), 3u);
+    EXPECT_FALSE(starts[0].has("restart"));
+    for (size_t i : {1u, 2u}) {
+        EXPECT_EQ(starts[i]["restart"]["file"].string, restart);
+        EXPECT_EQ(starts[i]["restart"]["step"].number, 4.0);
+    }
+    EXPECT_FALSE(starts[1]["restart"].has("rewound_from"));
+    EXPECT_EQ(starts[2]["restart"]["rewound_from"].number, 8.0);
+    const std::vector<std::pair<double, double>> spans = {{0.0, 4.0}, {4.0, 8.0}, {4.0, 8.0}};
+    for (size_t i = 0; i < spans.size(); i++) {
+        ASSERT_FALSE(steps[i].empty());
+        EXPECT_TRUE(std::ranges::is_sorted(steps[i]));
+        EXPECT_EQ(steps[i].front(), spans[i].first);
+        EXPECT_EQ(steps[i].back(), spans[i].second);
+    }
     std::filesystem::remove_all(dir);
 }
 
