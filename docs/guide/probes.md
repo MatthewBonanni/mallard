@@ -193,7 +193,11 @@ mean square, and `min`, `max` the extremes over the cells with `f > 0`. Rank 0
 sums them in global cell order, so they are the same bit for bit on any number
 of ranks. The region may be one of the mesh's own: `region = "domain"` gives
 the totals of the whole domain (the mass, for `RHO`), a cell zone those of its
-cells ([regions of the mesh](geometry.md#regions-of-the-mesh)). Each output
+cells ([regions of the mesh](geometry.md#regions-of-the-mesh)). A surface,
+curve or set of points weighs each cell by its area, length or count in the
+cell instead of `f V` ([on a mesh](geometry.md#surfaces-and-curves-on-a-mesh)):
+`integral` is then the surface integral of the cell averages, `mean` their
+area-weighted mean, and the third column is `area`, `length` or `count`. Each output
 appends a row to `reductions_file` (default `probe_<name>_reductions.csv`):
 
 ```

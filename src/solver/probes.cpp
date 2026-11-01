@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "region_mesh.h"
 #include "common_io.h"
 #include "field_units.h"
 #include "file_format.h"
@@ -359,15 +360,15 @@ void write_pvd_file(const std::string & file, const std::vector<std::pair<double
 } // namespace
 
 void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
-                           const std::vector<double> & fractions, uint32_t n_variables) {
+                           const std::vector<double> & cell_weights, uint32_t n_variables) {
     std::vector<uint32_t> cells;
     std::vector<uint64_t> global;
     std::vector<double> weights;
     for (uint32_t c = 0; c < mesh.n_owned(); c++) {
-        if (fractions[c] == 0.0) continue;
+        if (cell_weights[c] == 0.0) continue;
         cells.push_back(c);
         global.push_back(mesh.h_global_cell(c));
-        weights.push_back(fractions[c] * double(mesh.h_cell_measure(c)));
+        weights.push_back(cell_weights[c]);
     }
     p.quadrature.select(mesh, cells, n_variables);
     if (mesh.n_global_cells > 0) {
@@ -378,7 +379,7 @@ void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & 
     for (size_t i = 0; i < by_id.size(); i++) by_id[i] = i;
     std::sort(by_id.begin(), by_id.end(), [&global](const size_t a, const size_t b) { return global[a] < global[b]; });
     p.geometry.dim = static_cast<uint8_t>(r.dimension());
-    p.geometry.revolved = mesh.axisymmetric;  // per radian
+    p.geometry.revolved = mesh.axisymmetric && r.dimension() == N_DIM;  // per radian
     p.geometry.type = "region " + r.summary();
     for (const size_t i : by_id) p.geometry.quad_weights.push_back(weights[i]);
 }
@@ -881,9 +882,16 @@ void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regi
 
         if (p.from_region) {
             const region::Region & r = regions.get(entry.at("region"), key + ".region");
-            region::require_full_dimension(r, entry.at("region"), key + ".region");
-            select_region(p, mesh, r, regions.fractions(entry.at("region"), key + ".region"),
-                          static_cast<uint32_t>(h_codes.size()));
+            // Filled regions weigh each cell by f V; surfaces, curves and points by their measure in it
+            std::vector<double> weights(mesh.n_owned(), 0.0);
+            if (r.dimension() == N_DIM) {
+                const std::vector<double> & f = regions.fractions(entry.at("region"), key + ".region");
+                for (uint32_t c = 0; c < mesh.n_owned(); c++) weights[c] = f[c] * double(mesh.h_cell_measure(c));
+            } else {
+                const region::Elements e = region::elements(mesh, r);
+                for (size_t k = 0; k < e.size(); k++) weights[e.cell[k]] += e.measure[k];
+            }
+            select_region(p, mesh, r, weights, static_cast<uint32_t>(h_codes.size()));
             if (p.quadrature.n_global == 0) {
                 throw InputError(Diagnostic{.key = key + ".region",
                                             .line = line_of(entry, "region"),
