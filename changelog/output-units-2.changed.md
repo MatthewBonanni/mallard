@@ -1,1 +1,0 @@
-- `[statistics.spectra]` CSV files end each row with a `units` column (the units of its `value`); scripts that read columns from the end of the row should read them by header name, as `tools/post/insitu_statistics.py` now does (#518).

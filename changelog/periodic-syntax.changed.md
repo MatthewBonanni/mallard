@@ -1,1 +1,0 @@
-- `[[periodic]]` is the one syntax for periodicity on generated meshes and mesh files alike: on a generated mesh, opposite sides (`zones = ["left", "right"]`, ..., the annulus' `["start", "end"]`) need no `translation` or `angle` (the mesh gives it), and one that is set is checked against the mesh. Examples, tutorials, templates and docs use it.

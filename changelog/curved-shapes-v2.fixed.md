@@ -1,2 +1,0 @@
-- `[mesh] curved_geometry = false` leaves `[[mesh.curved]]` out instead of stopping the run on its keys as unused, as documented (#407).
-- Single-precision builds read the center, radius and axis of closed-form `[[mesh.curved]]` circles, spheres and cylinders in double, as the curved geometry is computed, instead of rounding them to single precision first (projections were off by about 1e-8).

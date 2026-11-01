@@ -1,1 +1,0 @@
-- `[source] mass_flow` on CUDA builds: the force's domain sums and the step's `dt` are now taken on the device, so runs whose steps are captured as a CUDA graph no longer replay a force frozen at capture, and a restarted run reproduces the uninterrupted one bitwise. The sums are exact (fixed point), so the forced flow is also bitwise the same on any number of ranks.

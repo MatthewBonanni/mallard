@@ -1,1 +1,0 @@
-- Analytical initial states are integrated on the device (the GPU in GPU builds) with the compiled expressions instead of on host threads; cells where the state is uniform take it exactly, others change within rounding (#449).

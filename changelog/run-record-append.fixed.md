@@ -1,1 +1,0 @@
-- The `start` record of a run resumed from a restart file did not say which restart file it started from, so a run record (`mallard.jsonl`) continued several times could not be told apart from a rewind. It now holds `restart` (`file`, `step`, `t`), and `rewound_from` when the run resumes from an earlier restart file than the last step recorded.

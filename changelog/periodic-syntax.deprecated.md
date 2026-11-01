@@ -1,1 +1,0 @@
-- `[mesh] periodic = ["x", "z"]` (and `[initialize.mesh] periodic`): still read, with a warning, until 0.10.0; `mallard input upgrade` rewrites it into `[[periodic]]` entries (`x`: `left`/`right`, `y`: `bottom`/`top`, `z`: `back`/`front`, `theta`: `start`/`end`).

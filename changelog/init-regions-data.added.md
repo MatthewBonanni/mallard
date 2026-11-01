@@ -1,3 +1,0 @@
-- Initial states from regions: `[[initialize.regions]]` layer `u`, `rho`, `p`, `T` and the composition inside regions over any base state (also a restart or remap), by priority, with cut cells averaged exactly for flat surfaces (second order for curved ones) or whole cells by their centroids (`cells = "center"`) (#324).
-- Initial states from data: `[[initialize.data]]` reads CSV tables of one to three coordinates (linear or cubic interpolation) and point clouds (nearest points, or inverse-distance weights), placed by expressions or the distance to a region, as variables of the initial expressions (#324).
-- Example `shock_bubble_2d`: a shock on a bubble from a tabulated profile and a tilted slab, set up with regions.

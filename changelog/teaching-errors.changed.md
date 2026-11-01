@@ -1,2 +1,0 @@
-- Input and setup errors name the key and its line, say what is wrong, list the accepted values with the closest one, say what to do and link the docs page, in a run and in `mallard check` alike; this covers the parser, boundary conditions, mesh files, mechanisms and species, outputs and incompatible options.
-- `mallard` leaves an input or mesh file that is missing or invalid to the solver to report, instead of asking for `--dim`.

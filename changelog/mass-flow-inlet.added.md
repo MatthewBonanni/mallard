@@ -1,1 +1,0 @@
-- `inlet_mass_flow` boundary: subsonic inflow at a given mass flux (`mass_flux`, a number or an expression of `x`, `y`, `z`) or total mass flow (`mdot`, with an optional `profile`) and temperature `T`, whose face flux admits exactly the target mass whatever the inlet density, with the `heated_duct` example against Rayleigh flow (#313).

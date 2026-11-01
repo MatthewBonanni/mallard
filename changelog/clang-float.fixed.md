@@ -1,1 +1,0 @@
-- Single-precision builds compile with Clang again: the wall-model input no longer promotes `float` to `double` implicitly, and CI's Clang build is now single precision so this stays covered (#491).

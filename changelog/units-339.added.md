@@ -1,1 +1,0 @@
-- Units in input files: any dimensional key takes a quantity with a unit (`p = "1 atm"`, `T = "25 degC"`, `Lx = "5 mm"`, `u = ["10 m/s", 0]`), converted to SI; a unit of the wrong dimension is an error naming the key, its line and the expected dimension. Plain numbers stay SI (#339, #389).

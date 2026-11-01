@@ -1,1 +1,0 @@
-- Sources that read domain averages (`mean_rho`, `mean_ke`, ...) no longer depend on the number of ranks or threads: the averages are exact sums, as the dynamic LES and flame-thickening constants already were.
