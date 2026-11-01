@@ -386,9 +386,7 @@ variables = ["P"]
 
 [[probes]]
 name = "sphere"
-type = "sphere"
-center = [0.5, 0.5, 0.5]
-radius = 0.32
+region = {{type = "sphere", center = [0.5, 0.5, 0.5], radius = 0.32, filled = false}}
 n_points = [24, 48]
 sampling = "point"
 format = "vtp"

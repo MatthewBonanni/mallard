@@ -118,6 +118,7 @@ class Probes {
         struct Samples {
             uint64_t n_global = 0;
             bool distributed = false;               // samples split over the ranks (else each holds them all)
+            std::vector<uint64_t> ids;              // global index of each local sample
             std::vector<uint64_t> gathered_row;     // rank 0: row in the gathered values of each global sample
             Kokkos::View<uint32_t *> cells;
             // Samples of surfaces (and 2D curves): their unit normals; samples
@@ -149,6 +150,10 @@ class Probes {
                           const ProbeReference & reference, bool gradients);
             /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
             std::vector<double> gather() const;
+
+            private:
+                /** @brief Rank 0's row of each global sample, from the samples' ids. */
+                void order(const Mesh & mesh);
         };
 
     private:
@@ -172,6 +177,7 @@ class Probes {
             ProbeReference reference;
             probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
             bool from_region = false;
+            bool resampled = false;  // a surface region on an n_points grid
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
@@ -186,9 +192,14 @@ class Probes {
             void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
                                   const std::vector<double> & quad) const;
         };
-        /** @brief A region probe's samples: the owned cells the region covers, weighted by f V. */
+        /**
+         * @brief A filled region probe's samples: the owned cells with their weight f V.
+         */
         static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
-                                  const std::vector<double> & fractions, uint32_t n_variables);
+                                  const std::vector<double> & cell_weights, uint32_t n_variables);
+        /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
+        static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
+                                    bool per_cell);
 
         std::vector<std::unique_ptr<Probe>> probes;
         bool resumed = false;

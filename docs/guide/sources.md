@@ -66,7 +66,7 @@ region = {type = "cylinder", center = [0, 0, 0], axis = [0, 0, 1], radius = 0.01
 
 | Key | Default | Meaning |
 |---|---|---|
-| `name` | `sources[i]` | Name in the run log |
+| `name` | `sources[i]` | Name in the terminal output |
 | `region` | everywhere | Where the source acts (below), or the name of a region in `[regions]`; values are multiplied by each cell's volume fraction |
 | `total` | `false` | Values are integrated rates over the region (kg/s, N, W) instead of densities; they may depend on `t` only |
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`"5 MW/m^3"`; with `total`, `"50 W"`) or expressions in SI units |
@@ -114,7 +114,11 @@ rhoE = "50 W"
 region = "igniter"
 ```
 
-See [named regions](geometry.md#named-regions).
+See [named regions](geometry.md#named-regions). The mesh's own regions need
+no definition: `region = "domain"` is every cell, and a cell zone of the mesh
+file (a Gmsh physical group of cells, a Fluent cell zone, ...) is a region by
+its name, e.g. `region = "flame_holder"`
+([regions of the mesh](geometry.md#regions-of-the-mesh)).
 
 ### Exact totals
 
@@ -167,7 +171,7 @@ p = 1.0
 T = 1.0
 ```
 
-*Used in:* [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180).
+*Used in:* [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180).
 
 `[[sponges]]` add `-strength (U - U_ref)` to the conservative variables (and
 species), damping the solution toward a reference state where the strength is

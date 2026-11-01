@@ -1,7 +1,7 @@
 # Format fixtures
 
 Files written by past releases, which `test/format_compat_test.cpp` reads to
-keep the [compatibility promise](../../../docs/guide/output.md#file-formats-and-compatibility):
+keep the [compatibility promise](../../../docs/guide/output.md#formats-and-compatibility):
 each release reads the restart and mesh files of the earlier releases.
 
 | Input | Restart files it writes (version) |

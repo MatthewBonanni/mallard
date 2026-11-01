@@ -40,8 +40,10 @@ struct KeyRule {
 /**
  * @brief A string option renamed: `key = "from"` becomes `key = "to"`, and
  *        `add` (`name = value`), if given, is set beside it unless its table
- *        has it. A kept option still does what it did while deprecated (the
- *        setup reads it unchanged); only the rewritten file switches to `to`.
+ *        has it (with `from` equal to `to`, the rule only adds it). A kept
+ *        option still does what it did while deprecated (the setup reads it
+ *        unchanged); only the rewritten file switches to `to`. Option rules
+ *        apply before key rules, so `key` may be a key's old name.
  */
 struct OptionRule {
     std::string key;

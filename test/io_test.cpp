@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cmath>
+#include <csignal>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -23,6 +24,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include <sys/resource.h>
 
 #include "common_io.h"
 #include "compression.h"
@@ -437,6 +440,42 @@ TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
     EXPECT_TRUE(file_contents(dir + "/a_000000.vtu") == sync);
 }
 
+TEST(IOTest, ARestartFileCutShortIsNeverFoundUnderItsName) {
+    if (comm::size() > 1) GTEST_SKIP() << "a write failing on one rank alone ends a parallel run";
+    // Writing stops partway through the file, as when a run is killed or its disk fills:
+    // a run resuming from the newest .restart file must not find it
+    const std::string dir = (scratch_dir() / "mallard_restart_cut_short").string();
+    auto mesh = make_mesh("cartesian_tri", 300, 200);
+    Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, N_CONSERVATIVE);
+    std::vector<Data> data;
+    for (uint8_t v = 0; v < N_CONSERVATIVE; v++) {
+        data.push_back(Data(CONSERVATIVE_NAMES[v], Kokkos::subview(values, Kokkos::ALL(), v)));
+    }
+    for (bool async : {false, true}) {
+        const std::string prefix = dir + (async ? "/a" : "/s");
+        DataWriter writer;
+        writer.init(parse_toml("prefix = \"" + prefix + "\"\nformat = \"restart\"\ninterval = 1\n"), data, mesh);
+        writer.set_async(async);
+        rlimit unlimited;
+        ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &unlimited), 0);
+        // Past the limit, writes fail with EFBIG instead of ending the process
+        const rlimit limited = {1 << 20, unlimited.rlim_max};
+        const auto on_xfsz = std::signal(SIGXFSZ, SIG_IGN);
+        ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limited), 0);
+        bool failed = false;
+        try {
+            writer.write(0, 0.0_r);
+            writer.finish();
+        } catch (const std::exception &) {
+            failed = true;
+        }
+        setrlimit(RLIMIT_FSIZE, &unlimited);
+        std::signal(SIGXFSZ, on_xfsz);
+        EXPECT_TRUE(failed);
+        EXPECT_FALSE(std::filesystem::exists(prefix + "_000000.restart")) << async;
+    }
+}
+
 TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
     if (!compression::have_zlib()) GTEST_SKIP() << "built without zlib";
     const std::string dir = (scratch_dir() / "mallard_compressed_output").string();
@@ -800,8 +839,8 @@ TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
         solver.set_distributed(false);
         solver.init(parse_toml(
             "[run]\nn_steps = 1\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
-            "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
-            "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+            "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+            "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
             "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"]\np = \"1.0\"\n"
             "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
             "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"

@@ -78,7 +78,9 @@ variables = ["RHO", "U_X", "P", "T"]
 | `[les]`, `[les.combustion]` | no | [Large-eddy simulation](les.md) |
 | `[source]`, `[[sponges]]` | no | [Sources and sponges](sources.md) |
 | `[regions]` | no | [Named regions](geometry.md#named-regions), used by `[[sources]]`, `[[sponges]]` and `[[probes]]` |
-| `[[write_data]]`, `[output]`, `[[forces]]`, `[integrals]`, `[statistics]`, `[[probes]]` | no | [Output and diagnostics](output.md) |
+| `[[write_data]]`, `[output]` | no | [Output](output.md) |
+| `[[probes]]`, `[[forces]]`, `[integrals]` | no | [Probes and monitors](probes.md) |
+| `[statistics]` and its subtables | no | [Statistics](statistics.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
 Regions that several tables use (inline, or named once in `[regions]`), and
@@ -328,6 +330,7 @@ Keys and options changed so far:
 | `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; until removed, `"hdf5"` still writes XDMF and HDF5 files | 0.9.0 | 0.10.0 |
 | `[[probes]]` `shape` | `type` | 0.9.0 | 0.10.0 |
+| `[[mesh.curved]]` `shape` | `type`: the zone lies on a [surface region](geometry.md#regions); `"sphere"` and `"cylinder"` (3D) get `filled = false`, their surface | 0.9.0 | 0.10.0 |
 | `[[sources]]` `region` `type = "circle"` (a filled circle) | 2D `"disk"`, 3D `"sphere"`: `circle` is the curve | 0.9.0 | 0.10.0 |
 | `[[sources]]` `region` `type = "ellipse"` (a filled ellipse) | `"ellipsoid"`: `ellipse` is the curve | 0.9.0 | 0.10.0 |
 | `[[sources]]` `region` `type = "disk"`, `"rectangle"` in 3D | `"sphere"`, `"box"`: disks and rectangles are flat | 0.9.0 | 0.10.0 |

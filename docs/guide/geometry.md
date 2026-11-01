@@ -9,21 +9,27 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 
 | Feature | Geometry | Guide |
 |---|---|---|
-| `[[sources]]` `region` | a [region](#regions) or its [name](#named-regions) | [Sources](sources.md#regions) |
-| `[[probes]]` `region` | a [region](#regions) or its [name](#named-regions): integrals, means, extremes | [Output](output.md#region-probes) |
-| `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Output](output.md#probes-probes) |
-| `[[sponges]]` `region` | a [region](#regions) or its [name](#named-regions), times `strength` | [Sponge layers](sources.md#sponge-layers) |
+| `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone) | [Sources](sources.md#regions) |
+| `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh) | [Probes](probes.md#region-probes) |
+| `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
+| `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength` | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
-| `[statistics.phase]` `probe` | a point | [Output](output.md#phase-averages-statisticsphase) |
+| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file of them | [Checking regions](#checking-regions) |
+| `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
 | `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
 | `[[initialize.data]]` `region` | a [region](#regions) or its [name](#named-regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
-| `[[mesh.curved]]` | `circle`, `sphere` or `cylinder` of its own keys (to move onto regions: [#407](https://github.com/MatthewBonanni/mallard/issues/407)) | [Curved boundaries](meshes.md#curved-boundaries) |
+| `[[mesh.curved]]` | a surface (2D: a curve), e.g. `{type = "sphere", ..., filled = false}` or a `circle` | [Curved boundaries](meshes.md#curved-boundaries) |
 
-Analytical initial states take expressions; a comparison such as
-`"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp region there, which the initial
-state averages over each cell. `[[initialize.regions]]` takes the region itself,
-and also layers it over a restart.
+Filled regions are volumes (areas in 2D runs). Surfaces and curves, such as
+boundary zones and the [boundaries](#boundaries-and-interiors) of regions, are
+regions too; each feature states the dimension it takes, and a region of
+another dimension is an error naming both.
+
+Sponges and analytical initial states take expressions; a comparison
+such as `"hypot(x, y) < 0.2 ? 2.0 : 1.0"` draws a sharp region there, which the
+initial state averages over each cell. `[[initialize.regions]]` takes the
+region itself, and also layers it over a restart.
 
 ## Coordinates and units
 
@@ -46,12 +52,12 @@ rhoE = "1 MW/m^3"
 region = {type = "sphere", center = [0, 0, 0], radius = "2 mm"}
 ```
 
-A region is a table: a primitive, or a boolean of regions, each with
-optional transforms, nested to any depth, or the [name](#named-regions) of one.
-The regions below fill space (volumes; areas in 2D runs). Points, curves and
-surfaces are to join them as regions of lower dimension, each `type` with one
-fixed dimension, and each feature checks that a region has the dimension it
-needs. Each has a **signed distance** φ,
+A region is a table: a primitive, a boolean of regions, or the
+[boundary or interior](#boundaries-and-interiors) of a region, each with
+optional transforms, nested to any depth; or the [name](#named-regions) of
+one, or of a [region of the mesh](#regions-of-the-mesh). Each `type` has one
+dimension, the same wherever it is used: filled (a volume; an area in 2D), a
+surface, a curve. A filled region of primitives has a **signed distance** φ,
 negative inside, that never exceeds the distance to its surface. Mallard uses it
 to skip cells far from the surface and to give [smooth edges](#smooth-edges)
 their width.
@@ -91,7 +97,8 @@ plug = {type = "box", center = [0.15, 0, 0], size = [0.1, 0.2, 0.2]}
 fluid = {type = "difference", regions = ["duct", "plug"]}
 ```
 
-Pitfalls: a name that is not defined is an error that lists the defined ones;
+Pitfalls: a name that is not defined is an error that lists the defined ones
+and the [regions of the mesh](#regions-of-the-mesh);
 regions that name each other in a loop are an error naming the loop; a named
 region no feature uses is an unused key (an error, like any other); and `edge`
 belongs to the outermost region, so a named region with `edge` cannot be a part
@@ -119,19 +126,79 @@ of a boolean.
 
 Each type has one dimension, the same in every run: `circle` and `ellipse`
 are curves; `disk`, `annulus`, `rectangle` and `polygon` are flat (areas in 2D,
-surfaces in 3D); `box` is a solid, so 3D only. Sources need regions of the
-run's full dimension, so 3D runs use `sphere`, `ellipsoid`, `box` and
-`cylinder` (hollow with `inner_radius`), and 2D runs `rectangle` for a
-rectangle; in 2D the `z = 0` slice of an `ellipsoid` is the area inside an
-ellipse. Older inputs with the former names (`circle` and `ellipse` for the
-filled regions, `box` in 2D, `disk`, `annulus` and `rectangle` in 3D) are
-rewritten by [`mallard input upgrade`](input_files.md#inputs-from-older-releases).
+surfaces in 3D); `box` is a solid, so 3D only. Sources need filled regions, so
+3D runs use `sphere`, `ellipsoid`, `box` and `cylinder` (hollow with
+`inner_radius`), and 2D runs `rectangle` for a rectangle; in 2D the `z = 0`
+slice of an `ellipsoid` is the area inside an ellipse. Older inputs with the
+former names (`circle` and `ellipse` for the filled regions, `box` in 2D,
+`disk`, `annulus` and `rectangle` in 3D) are rewritten by
+[`mallard input upgrade`](input_files.md#inputs-from-older-releases).
+
+Curves and flat surfaces of 3D runs lie in the plane through `center` normal
+to `normal`; `reference` (default: the axis of x, y, z least aligned with
+`normal`) gives the plane's first axis, along which a `rectangle`'s first size
+and an `ellipse`'s first semi-axis lie:
+
+| `type` | Example | Dimension |
+|---|---|---|
+| `circle` | 2D: `{type = "circle", center = [0, 0], radius = 1}`; 3D: `{type = "circle", center = [0, 0, 0], normal = [0, 0, 1], radius = 1}` | curve |
+| `ellipse` | 2D: `{type = "ellipse", center = [0, 0], semi_axes = [1, 0.5]}`; 3D: with `normal` | curve |
+| `disk`, `annulus` (3D) | `{type = "disk", center = [0, 0, 0], normal = [1, 0, 0], radius = 0.5}`; `annulus` with `inner_radius` | surface |
+| `rectangle` (3D) | `{type = "rectangle", center = [0, 0, 0], normal = [0, 0, 1], size = [2, 1], reference = [1, 1, 0]}` | surface |
+| `polygon` (3D) | `{type = "polygon", vertices = [[0, 0, 0], [1, 0, 0], [0, 1, 1]]}`: its normal by the right-hand rule | surface |
 
 In 2D, each region is the `z = 0` slice; Mallard computes the cell volume
 fractions below on a coarse triangle mesh, with the exact outline drawn over them:
 
 ![Cell volume fractions of the 2D primitives on a coarse triangle mesh, with the exact outline](../images/guide/region-primitives-light.svg#gh-light-mode-only)
 ![Cell volume fractions of the 2D primitives on a coarse triangle mesh, with the exact outline](../images/guide/region-primitives-dark.svg#gh-dark-mode-only)
+
+### Regions of the mesh
+
+```toml
+# Total mass, and the temperature away from the heater
+[[probes]]
+name = "total"
+variables = ["RHO"]
+region = "domain"
+
+[[probes]]
+name = "away"
+variables = ["T"]
+region = {type = "difference", regions = ["domain", {type = "sphere", center = [0, 0, 0], radius = 0.05}]}
+```
+
+Every mesh brings regions of its own, by name, without a `[regions]` entry:
+
+- `domain`: every cell, the filled region of the whole domain;
+- each **boundary zone** (`inlet`, `wall`, `left`, ...): its faces, a surface
+  (a curve in 2D) facing out of the domain;
+- each **cell zone** of a mesh file: its cells, a filled region. Cell zones are
+  Gmsh physical groups of cells (physical surfaces in 2D, physical volumes in
+  3D), Fluent cell zones, CGNS families of element sections and OpenFOAM
+  `cellZones`. Generated meshes have none.
+
+They work wherever a region does: as a `region`, as a part of a boolean and as
+the `of` of [`boundary` and `interior`](#boundaries-and-interiors). Their cells
+are entirely inside or outside (fractions 0 or 1), so a boolean of one with
+primitives keeps the primitives' exact fractions where it keeps them:
+`domain` minus a sphere is exactly one minus the sphere's fractions.
+
+On a square mesh with a hole (boundary zones `outer` and `hole`, cell zones
+`left_half` and `right_half`), the domain minus a disk, the cell zone
+`left_half` inside a circle, and the cells inside the zone `outer`:
+
+![Volume fractions of the domain minus a disk, of a cell zone inside a circle, and of the interior of the outer boundary zone, on a square mesh with a hole](../images/guide/region-mesh-regions-light.svg#gh-light-mode-only)
+![Volume fractions of the domain minus a disk, of a cell zone inside a circle, and of the interior of the outer boundary zone, on a square mesh with a hole](../images/guide/region-mesh-regions-dark.svg#gh-dark-mode-only)
+
+Pitfalls:
+
+- A name in `[regions]` that is also a boundary zone, a cell zone or `domain`
+  is an error naming both, and so is a mesh whose cell zone has the name of a
+  boundary zone or `domain`: rename one of them in the mesh file.
+- Regions of the mesh do not move: transforms of a boolean that holds one, and
+  `edge`, are errors.
+- They need no use: unlike named regions, an unused one is not an unused key.
 
 ### Booleans
 
@@ -150,6 +217,164 @@ whose evaluation needs a stack deeper than 16 is an error.
 
 ![Cell volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-light.svg#gh-light-mode-only)
 ![Cell volume fractions of a difference, a union, an intersection and a smooth-edged disk](../images/guide/region-booleans-dark.svg#gh-dark-mode-only)
+
+### Boundaries and interiors
+
+```toml
+# A sphere, as the region its surface encloses
+region = {type = "interior", of = {type = "sphere", center = [0, 0, 0], radius = 1, filled = false}}
+```
+
+```toml
+# The fluid enclosed by the boundary zones "outer" and "inlet" of a mesh
+region = {type = "interior", of = {type = "union", regions = ["outer", "inlet"]}}
+```
+
+`{type = "boundary", of = ...}` is the boundary of a region, one dimension
+lower; `{type = "interior", of = ...}` the filled region a closed surface (a
+closed curve in 2D) encloses, one dimension higher. They are inverses: the
+interior of a region's boundary is the region. `filled = false` on a filled
+region or a flat surface is its boundary: `{type = "sphere", ..., filled = false}`
+is the sphere's surface, and in 2D the same table, or a `disk` with
+`filled = false`, is the circle, `{type = "circle", ...}`.
+
+| `of` | `boundary` | `interior` |
+|---|---|---|
+| a filled region | its closed surface (2D: curve), facing out | error: already filled |
+| a closed surface (2D: closed curve) | error: it has none | the filled region inside |
+| a flat surface (3D: `disk`, `rectangle`, ...) | its edge curve | error: not closed |
+| a closed curve in 3D (`circle`, the edge of a disk) | error: it has none | error: interior takes a surface |
+| boundary zones | their edges (2D: end points) if open | the cells inside if closed |
+
+Boundaries of filled booleans are boundaries too: the boundary of `domain`
+minus a sphere is the domain's boundary zones and the sphere's surface, facing
+into the sphere. `filled = false` on a curve is an error that points to
+`{type = "boundary", of = ...}`, which takes regions by name. The interior of
+boundary zones is found by winding numbers: each connected part of the mesh
+is inside or outside them as a whole, so the interior of the zones around a
+domain is the domain, and that of a body's wall holds no cell.
+
+### Clipping across dimensions
+
+```toml
+# The part of the wall zone inside a box
+region = {type = "intersection", regions = ["wall", {type = "box", center = [0.5, 0, 0], size = [0.2, 1, 1]}]}
+```
+
+```toml
+# A plane's section of a duct, outside a centerbody
+region = {type = "difference", regions = [{type = "half_space", point = [0.3, 0, 0], normal = [1, 0, 0], filled = false}, "centerbody"]}
+```
+
+`intersection` and `difference` of one surface or curve with filled regions
+clip it and keep its dimension: an `intersection` keeps the part inside every
+filled region, a `difference` (the surface or curve first) the part outside
+the others. Clipping keeps the surface's orientation; the boundary of a clipped
+surface is where the clipping regions cut it. Two surfaces or curves combine
+only by `union`, and a `difference` that subtracts a surface from a filled
+region is an error (it would remove nothing).
+
+### Orientation
+
+Surfaces (2D: curves) face one way, which sets the sign of what is measured
+through them:
+
+| Region | Faces |
+|---|---|
+| a closed surface: the boundary of a filled region, `circle` and `ellipse` in 2D | out of the region it encloses |
+| a boundary zone, `domain`'s boundary | out of the domain |
+| a flat surface (3D `disk`, `annulus`, `rectangle`, `polygon`) | along `normal` (`polygon`: by the right-hand rule along its vertices) |
+| the part of a boundary that a `difference` subtracts | into the subtracted region (out of the result) |
+| a 2D curve | to the right of the direction of travel |
+| a 3D curve (`circle`, `ellipse`, the edge of a surface) | runs counterclockwise about its `normal`, or about the normal of the surface it bounds (right-hand rule) |
+
+`flip = true` on any surface or curve reverses it. Points have no orientation.
+
+As `mallard check --view` writes them: a circle and the boundary of a
+rectangle minus a disk (the disk's part facing into the disk), and the part of
+a boundary zone in a box with a flipped ellipse, on a mesh with a hole:
+
+![Normals of an exact circle, of the extracted boundary of a rectangle minus a disk, of a clipped boundary zone and of a flipped ellipse](../images/guide/region-orientation-light.svg#gh-light-mode-only)
+![Normals of an exact circle, of the extracted boundary of a rectangle minus a disk, of a clipped boundary zone and of a flipped ellipse](../images/guide/region-orientation-dark.svg#gh-dark-mode-only)
+
+### Surfaces and curves on a mesh
+
+```toml
+# The area of a sphere's surface and the mean pressure on it
+[[probes]]
+name = "shell"
+variables = ["P"]
+region = {type = "sphere", center = [0, 0, 0], radius = 0.1, filled = false}
+reductions = ["integral", "mean"]
+```
+
+A surface, curve or set of points is a set of elements in the cells it
+crosses: polygons, segments or points, each with its measure (area, length,
+or 1 for a point) and orientation. They are made in one of two ways, and
+`mallard check` reports which:
+
+- **Exact**: the surfaces of primitives (`sphere`, `ellipsoid`, `cylinder`,
+  `cone`, `box`, `torus`; in 2D their circles, ellipses and polygons) and the
+  flat surfaces and curves of 3D runs follow their own parameters, cut into
+  patches about half a cell wide and integrated with Gauss points, so an
+  unclipped surface has its exact area to round-off; planes (`half_space`) are
+  cut from the cells exactly; boundary zones and the faces around regions of
+  the mesh are the mesh's faces.
+- **Extracted**: the boundaries of booleans and of `implicit` regions are cut
+  from the cells as the zero set of the signed distance, linear on each cell's
+  triangles (tetrahedra) subdivided `resolution` times where the surface may
+  cross them (default 3 in 2D, 2 in 3D): second-order accurate in the
+  subdivided size.
+
+Exact surfaces follow these parameters `(u, v)`, with `x_u x x_v` facing
+out; a probe resampling a surface region (`[[probes]]` with `region` and
+`n_points`) takes `n_points = [n_u, n_v]` nodes along each patch, and a parameter that closes a turn
+does not repeat its first node:
+
+| Surface | `u` | `v` |
+|---|---|---|
+| `sphere`, `ellipsoid` | polar angle, from the local +z pole | angle around local z, from +x |
+| `cylinder`, `cone` (side) | angle around the axis | along the axis, from the base |
+| their ends | radius (top), angle (bottom) | angle (top), radius (bottom) |
+| `box` faces | the face's next axis | the one after (cyclic x, y, z) |
+| `torus` | angle around the axis | angle around the tube |
+| `disk`, `annulus` (3D) | radius, from `inner_radius` | angle from `reference` |
+| `rectangle` (3D) | along `reference` | along `normal x reference` |
+| `polygon` (3D) | each triangle of its ear clipping | |
+
+Clipping regions cut exact surfaces where their own surface crosses them:
+along lines of the surface's parameters, the Gauss points fill the kept
+intervals between the clipping region's roots, found to round-off, so a clipped
+area or flux converges at high order (in the tests, errors fall by over 8 per
+halving of the cells, to round-off); patches where the clipping boundary is not
+a graph over one parameter, or that several clipping regions cross, are
+subdivided. Extracted elements and mesh faces are cut linearly between their
+vertices: exactly along planes and mesh-aligned boxes. Only the parts inside the
+domain count. In axisymmetric runs measures are those of the r-z plane, not
+of the revolved surface.
+
+### Checking regions
+
+`mallard check` lists every region a case uses, and the mesh's own, with its
+dimension, measure and cells; surfaces and curves say whether they are exact
+or extracted. A region that covers no cell is an error naming it with its
+extent and the domain's:
+
+```
+  Regions            domain: area 1, 800 cells (of the mesh)
+                     left: curve, length 1, 20 cells (of the mesh)
+                     ring: area 0.0339292, 58 cells
+                     probes[name = "around"].region: curve, length 0.942478, 30 cells, exact
+```
+
+`mallard check input.toml --view view` also writes `view/case.vtkhdf`, the
+case view: one block per region (filled regions as their cells with
+`fraction`; surfaces, curves and points with `normal` or, for 3D curves,
+`tangent`, and their `area`, `length` or `count`) and per boundary zone. Open
+it in ParaView (5.12 or later) and pick blocks in the Multiblock Inspector;
+builds without HDF5 write `view/case.vtm`. More of the case (conditions,
+probes, injectors) is to join it
+([#546](https://github.com/MatthewBonanni/mallard/issues/546)).
 
 ### Transforms
 
@@ -202,7 +427,7 @@ region = {type = "cylinder", center = [0.5, 0.5, 0.5], axis = [1, 1, 0.6], radiu
 
 ### Smooth edges
 
-`edge` (on the outermost region only) replaces the sharp surface by a band of
+`edge` (on the outermost region only, a filled region of primitives) replaces the sharp surface by a band of
 that width, across which the indicator falls from 1 to 0 as a smoothstep.
 A source that switches on gradually excites fewer grid-scale waves. The band
 keeps the volume of a flat surface and changes that of a curved one slightly
@@ -319,7 +544,7 @@ TENO converges at the scheme's order:
 
 Use `point` to compare with references or to measure orders of accuracy, and
 `cell` for robust values across shocks. Details and pitfalls:
-[Output](output.md#probes-probes).
+[Probes and monitors](probes.md#accuracy-and-pitfalls).
 
 ## Boundary zones
 
@@ -368,6 +593,6 @@ with h5py.File("probe_wake.h5") as f:
 
 ## See also
 
-- [Input reference: regions](../input.md#regions), [`[regions]`](../input.md#named-regions-regions), [`[[sources]]`](../input.md#sources), [`[[sponges]]`](../input.md#sponges), [`[[probes]]`](../input.md#probes), [`[mesh]`](../input.md#mesh)
-- [Sources and sponges](sources.md), [Output and diagnostics](output.md#probes-probes), [Meshes](meshes.md#curved-boundaries)
+- [Input reference: regions](../input.md#regions), [regions of the mesh](../input.md#regions-of-the-mesh), [`[regions]`](../input.md#named-regions-regions), [`[[sources]]`](../input.md#sources), [`[[sponges]]`](../input.md#sponges), [`[[probes]]`](../input.md#probes), [`[mesh]`](../input.md#mesh)
+- [Sources and sponges](sources.md), [Probes and monitors](probes.md), [Meshes](meshes.md#curved-boundaries)
 - Figures: [`tools/docs/geometry.py`](../../tools/docs/geometry.py), [`tools/docs/regions.py`](../../tools/docs/regions.py)
