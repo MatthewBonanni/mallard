@@ -2812,19 +2812,8 @@ struct ForceFunctor {
 };
 
 std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
-    // The wall model reads exchange cells of the halo, stale after the last stage
-    if (wall_model_on) halo.exchange(state());
-    const Euler phys = physics;
-    StateView U = conservatives;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    if (is_mixture()) {
-        update_cell_states(state(), false);
-    } else Kokkos::parallel_for("force_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
-        rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
-        phys.compute_W_from_conservatives(W_c, cons);
-        FOR_I_CONSERVATIVE W(i_cell, i) = W_c[i];
-    });
+    // The gradients and the wall model read the halo, stale after the last stage
+    update_cell_W();
     if (is_viscous()) {
         Kokkos::parallel_for("force_gradients", mesh->n_cells, viscous_gradient);
         if (is_mixture()) update_transport();

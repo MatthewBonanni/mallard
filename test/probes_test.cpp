@@ -665,7 +665,10 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
 
 TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
     // Cell sampling takes the forces monitor's wall pressure and gradients;
-    // axisymmetric runs integrate over a radian of the revolved wall, as [[forces]]
+    // axisymmetric runs integrate over a radian of the revolved wall, as
+    // [[forces]]. Two layers of cells and a flow that varies along the walls
+    // and in time: on several ranks, wall cells read halo cells updated by
+    // the last stage
     for (const bool axisymmetric : N_DIM == 2 ? std::vector<bool>{false, true} : std::vector<bool>{false}) {
         SCOPED_TRACE(axisymmetric ? "axisymmetric" : "planar");
         const std::string dir = fresh_dir(axisymmetric ? "forces_axisymmetric" : "forces");
@@ -673,7 +676,9 @@ TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
                                   "[[probes]]\nname = \"top\"\nboundary = \"top\"\nsamples = false\n"
                                   "variables = [\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\nreductions = [\"integral\"]\n"
                                   "reductions_file = \"" + dir + "/top.csv\"\n";
-        std::string input = couette_case(8, extra, "n_steps = 4\ncfl = 0.5\n");
+        std::string input = couette_case(2, extra, "n_steps = 4\ncfl = 0.5\n");
+        const std::string u = "\"0.5 * y\"";
+        input.replace(input.find(u), u.size(), "\"0.5 * y + 0.2 * sin(6.283185307179586 * x)\"");
         if (axisymmetric) {
             // The bottom is the axis
             const std::string bottom = "name = \"bottom\"\ntype = \"wall_isothermal\"\nT = ";
