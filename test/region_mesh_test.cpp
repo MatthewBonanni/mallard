@@ -269,11 +269,11 @@ TEST(RegionMeshTest, FilledRegionsClipSurfacesAndCurves) {
     const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.3, filled = false}"
                                         : "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.3, filled = false}";
     const std::string below = "{type = \"half_space\", point = [0.5, 0.5, 0.5], normal = [0, 1, 0]}";
-    const double half = N_DIM == 2 ? PI * 0.3 : 2.0 * PI * 0.09;
+    const double half_measure = N_DIM == 2 ? PI * 0.3 : 2.0 * PI * 0.09;
     const region::Region cap = f.region("{type = \"intersection\", regions = [" + ball + ", " + below + "]}");
     EXPECT_EQ(cap.dimension(), N_DIM - 1);
     EXPECT_FALSE(cap.closed());
-    EXPECT_NEAR(total(region::elements(*f.mesh, cap)), half, 2e-2 * half);
+    EXPECT_NEAR(total(region::elements(*f.mesh, cap)), half_measure, 2e-2 * half_measure);
     // Its boundary: the equator (2D: two points), running opposite ways for the two halves
     const region::Elements upper = f.elements("{type = \"boundary\", of = {type = \"difference\", regions = [" + ball +
                                               ", " + below + "]}}");
@@ -380,7 +380,9 @@ TEST(RegionMeshTest, ClippedPrimitiveSurfacesConvergeAtHighOrder) {
         EXPECT_LT(errors[0], 1e-5) << clip;
         EXPECT_LT(errors[2], 1e-9) << clip;
         for (size_t k = 1; k < errors.size(); k++) {
-            if (errors[k - 1] > 1e-12) EXPECT_LT(errors[k], errors[k - 1] / 8.0) << clip << " " << k;
+            if (errors[k - 1] > 1e-12) {
+                EXPECT_LT(errors[k], errors[k - 1] / 8.0) << clip << " " << k;
+            }
         }
     }
 }
