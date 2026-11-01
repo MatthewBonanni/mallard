@@ -143,4 +143,5 @@ of it.
   mesh with second-order elements, `gmsh ... -order 2`, lets Mallard curve the wall
   ([curved boundaries](../guide/meshes.md#curved-boundaries)).
 
-Next: [Supersonic flow over a cone](cone.md), in 3D.
+Next: [Supersonic flow over a cone](cone.md), in 3D; or measure this wake further, with regions, fluxes and
+phase averages, in [Measuring a flow](measuring.md).

@@ -99,19 +99,22 @@ variables = ["RHO", "U", "P"]
 # sphere surface carries the wall pressure; written often for animation
 [[write_data]]
 prefix = "./slices/y0"
-geometry = "symmetry_y"
+region = "symmetry_y"
+format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.02
 variables = ["RHO", "U", "P"]
 
 [[write_data]]
 prefix = "./slices/z0"
-geometry = "symmetry_z"
+region = "symmetry_z"
+format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.02
 variables = ["RHO", "U", "P"]
 
 [[write_data]]
 prefix = "./slices/wall"
-geometry = "sphere"
+region = "sphere"
+format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.02
 variables = ["P"]
 

@@ -278,28 +278,7 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
         FOR_I_DIM bc.data[1 + i] = dv[i] / norm;
     }
     if (bc.has(NSCBC)) read_nscbc(input, where, bc);
-    bc.set_dispatch();
     return bc;
-}
-
-void BoundaryCondition::set_dispatch() {
-    using T = BoundaryType;
-    switch (type) {
-        case T::SYMMETRY: dispatch = Dispatch::SYMMETRY; break;
-        case T::WALL_ADIABATIC: dispatch = Dispatch::WALL_ADIABATIC; break;
-        case T::WALL_ISOTHERMAL: dispatch = Dispatch::WALL_ISOTHERMAL; break;
-        case T::WALL_HEAT_FLUX: dispatch = Dispatch::WALL_HEAT_FLUX; break;
-        case T::INLET_STATE: dispatch = has(NSCBC) ? Dispatch::TRANSMISSIVE : Dispatch::STATE; break;
-        case T::OUTLET_PRESSURE:
-            dispatch = has(NSCBC) ? Dispatch::TRANSMISSIVE : has(AVERAGE) ? Dispatch::PRESSURE_AVERAGE : Dispatch::PRESSURE;
-            break;
-        case T::DIRICHLET: dispatch = Dispatch::DIRICHLET; break;
-        case T::FARFIELD: dispatch = Dispatch::FARFIELD; break;
-        case T::INLET_STAGNATION: dispatch = Dispatch::STAGNATION; break;
-        case T::INLET_MASS_FLOW: dispatch = Dispatch::MASS_FLOW; break;
-        case T::OUTLET_EXTRAPOLATION:
-        case T::PARTITION: dispatch = Dispatch::TRANSMISSIVE; break;
-    }
 }
 
 namespace {
@@ -627,10 +606,7 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     std::vector<uint32_t> char_faces;
     std::vector<rtype> char_depth;
     auto h_bcs = Kokkos::create_mirror_view(data.bcs);
-    for (size_t i = 0; i < h_bcs_vec.size(); i++) {
-        h_bcs(i) = h_bcs_vec[i];
-        h_bcs(i).set_dispatch();
-    }
+    for (size_t i = 0; i < h_bcs_vec.size(); i++) h_bcs(i) = h_bcs_vec[i];
 
     // Cells sharing a node with each cell, for the image search
     std::vector<std::vector<uint32_t>> cells_of_node(mesh.n_nodes);

@@ -9,6 +9,7 @@ input file and the Python scripts that set it up and draw its figures, and
 |---|---|
 | `wedge/` | [Oblique shock on a ramp](../docs/tutorials/wedge.md) (2D, generated mesh) against the θ-β-M relation |
 | `cylinder/` | [Vortex shedding behind a cylinder](../docs/tutorials/cylinder.md) (2D, Gmsh) at Re = 100 against reference computations |
+| `measuring/` | [Measuring a flow](../docs/tutorials/measuring.md) (2D, the cylinder's Gmsh mesh): regions, probes, fluxes and phase averages, checked by the wall force and the conservation laws |
 | `cone/` | [Supersonic flow over a cone](../docs/tutorials/cone.md) (3D) against the Taylor-Maccoll solution |
 | `channel_les/` | [Channel LES](../docs/tutorials/channel_les.md): turbulent channel at Re_τ = 180 against DNS |
 | `cluster/` | [Running on a cluster](../docs/tutorials/cluster.md): a coarse double Mach reflection through the job scripts, stopped and resumed |

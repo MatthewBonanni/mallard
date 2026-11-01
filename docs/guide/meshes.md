@@ -206,7 +206,7 @@ type = "file"
 filename = "cylinder.msh"
 ```
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder) and 3 more.
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric) and 4 more.
 
 Mallard reads ASCII Gmsh meshes, format 2.2 or 4.1, of linear triangles and
 quadrilaterals (2D) or tetrahedra, pyramids, prisms and hexahedra (3D).
@@ -335,13 +335,19 @@ files ([compatibility](output.md#formats-and-compatibility)).
 ```toml
 [[mesh.curved]]
 zone = "cylinder"
-shape = "circle"        # 2D; "sphere" or "cylinder" in 3D
+type = "circle"          # a curve (2D)
 center = [0.0, 0.0]
 radius = 0.5
-# axis = [0.0, 0.0, 1.0]  for shape = "cylinder"
+
+[[mesh.curved]]           # 3D: the surface of a sphere
+zone = "ball"
+type = "sphere"
+center = [0.0, 0.0, 0.0]
+radius = 0.5
+filled = false
 ```
 
-*Used in:* the curved-boundary validation (`tools/dev/curved_convergence.py`).
+*Used in:* [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid).
 
 Boundary faces can follow the true geometry instead of straight edges or flat
 facets. Curved faces get quadrature points on the curve with their own normals,
@@ -358,27 +364,73 @@ The geometry comes from either
   `triangle6`, `triangle9`, `triangle10`, `quadrangle8`, `quadrangle9`,
   `quadrangle16` in 3D), e.g. `make_cylinder_mesh.py --order 3` or
   `make_mallard_mesh.py --order 3`; or
-- **an analytic shape** that a zone is projected onto, on any mesh.
+- **a surface [region](geometry.md#regions)** (2D: a curve) that a zone is
+  projected onto, on any mesh: a `[[mesh.curved]]` entry is the zone's name
+  and a region, with the region's `type` and keys beside `zone`.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `[mesh] curved_geometry` | `true` | `false` ignores high-order nodes and `[[mesh.curved]]` |
 | `zone` | required | Boundary zone to curve |
-| `shape` | required | `circle` (2D), `sphere` or `cylinder` (3D) |
-| `center`, `radius` | required | The shape (for a cylinder, a point of its axis) |
-| `axis` | required for `cylinder` | Direction of the cylinder's axis |
+| `type` | required | A surface (2D: a curve) that bounds a region: a filled [primitive](geometry.md#primitives), [boolean](geometry.md#booleans) or [`implicit`](geometry.md#implicit-regions) region with `filled = false`, its `{type = "boundary", of = ...}`, or in 2D a `circle` or `ellipse` |
+| `filled` | `true` | `false` on a filled region: its [boundary](geometry.md#boundaries-and-interiors), which the zone lies on; required for filled types (a filled region is an error) |
+| the region's keys | | `center`, `radius`, `semi_axes`, `axis`, `regions`, `f`, ..., and the [transforms](geometry.md#transforms) `translate`, `rotate`, `scale`, `pivot` |
 
-These shapes are curved boundaries' own; [#407](https://github.com/MatthewBonanni/mallard/issues/407)
-plans to take them from [regions](geometry.md#regions) instead.
+The zone lies on a surface (2D: a curve): the whole boundary of a filled
+region of primitives, booleans or implicit functions, written with
+`filled = false`, or in 2D a `circle` or `ellipse`. Surfaces that only part of
+a boundary forms (flat surfaces of 3D, boundary zones, clipped surfaces) are
+an error. A wing section, a body of revolution or a blended fillet becomes a
+boolean of primitives or an implicit function:
+
+```toml
+# An elliptic cylinder at 10 degrees of incidence (2D)
+[[mesh.curved]]
+zone = "body"
+type = "ellipse"
+center = [0.0, 0.0]
+semi_axes = [0.5, 0.25]
+rotate = -10
+
+# A superellipsoid (3D): any smooth f(x, y, z) = 0
+[[mesh.curved]]
+zone = "capsule"
+type = "implicit"
+f = "x^4 + y^4 + (z / 2)^4 - 1"
+filled = false
+```
+
+![Curved faces of a coarse mesh on a rotated ellipse, a union of two disks and an implicit curve, with their quadrature points and normals](../images/guide/curved_regions-light.svg#gh-light-mode-only)
+![Curved faces of a coarse mesh on a rotated ellipse, a union of two disks and an implicit curve, with their quadrature points and normals](../images/guide/curved_regions-dark.svg#gh-dark-mode-only)
+
+Circles in 2D (`circle`, or `disk` with `filled = false`), and the surfaces
+of spheres and infinite cylinders (no `length` or `inner_radius`) in 3D,
+without transforms, are projected in closed form, radially. Every other surface is projected by closest-point
+iterations on the region's function: Newton steps onto its zero level set
+along the gradient, then along the surface toward the point, with the
+gradient and curvature from fourth-order differences. They converge to round-off
+of the face size, and the faces' geometry with them.
 
 Pitfalls:
 
-- Zone nodes farther than 5% of an edge length from the shape are an error:
+- Zone nodes farther than 5% of an edge length from the surface are an error:
   the mesh must already approximate it.
+- The surface must be smooth where the zone is, with a nonzero gradient of
+  `f` for `implicit` regions (`(x^2 + y^2 - 1)^2` has none on its circle: an
+  error). A face that spans a crease (an edge of a `box`, where the members of
+  a `union` meet) is curved onto one side of it: give each side its own zone,
+  meeting at the crease.
+- In 2D the zone lies in the plane `z = 0`: a region's surface is its slice
+  there.
+- `edge` (smooth region edges) is an error here: the surface is sharp.
 - Not with `[physics] axisymmetric = true` yet.
 - At curved walls TENO-E uses one-sided stencils of limited degree
   (`curved_wall_degree`, default 3), so orders 5 and 6 are fourth order there;
   see [Numerics](numerics.md#teno-e-options).
+- Before 0.9.0 the key `type` was `shape`, and `"sphere"` and `"cylinder"`
+  meant their surfaces. `shape` is read with a warning until 0.10.0 (adding
+  `filled = false` to spheres and cylinders), and `mallard input upgrade`
+  rewrites it ([inputs from older releases](input_files.md#inputs-from-older-releases)).
 
 ## Mesh quality
 

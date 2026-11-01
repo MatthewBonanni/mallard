@@ -25,7 +25,7 @@ Each cell starts from Cantera's solution: axial velocity u(x), radial
 velocity r V(x), T(x), Y(x) at 1 atm, averaged over 16 points along x. The
 run lasts --strain-times / K_ox. Writes RUN_DIR/counterflow.msh,
 RUN_DIR/counterflow.restart and RUN_DIR/input.toml; the run writes the
-symmetry plane z = 0 (series solut/plane, its cells' values) for
+symmetry plane z = 0 (series solut/plane, point values at its faces) for
 examples/counterflow_diffusion/plot_counterflow.py, and restart files (restart/) every
 t_stop / --restarts.
 """
@@ -304,7 +304,8 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/plane"
-geometry = "sym_z"
+region = "sym_z"
+format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = {t_stop / args.outputs:.10g}
 variables = ["RHO", "U", "P", "T", "HRR", "Y_*"]
 

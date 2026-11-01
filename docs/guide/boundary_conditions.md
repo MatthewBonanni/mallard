@@ -23,7 +23,7 @@ p = 1.0
 nscbc = { L = 1.0 }     # an option: non-reflecting
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 41 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -266,7 +266,7 @@ name = "wall"           # a boundary zone of the mesh
 type = "wall_adiabatic"
 ```
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric) and 5 more.
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct), [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall) and 6 more.
 
 **Imposes** zero heat flux and, in viscous runs, the wall velocity (through a
 mirrored ghost velocity, `2 u_w - u`); density and pressure come from the
@@ -649,7 +649,7 @@ p = 1.0
 T = 1.0
 ```
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300).
+*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder) and 1 more.
 
 **Imposes** a characteristic free stream: the outgoing Riemann invariant
 comes from the interior and the incoming one from the free stream, entropy and
@@ -676,7 +676,7 @@ name = "bottom"
 type = "symmetry"
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 27 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 28 more.
 
 **Imposes** zero normal velocity and zero normal gradients (the ghost mirrors
 the interior); under gravity it continues the hydrostatic pressure.

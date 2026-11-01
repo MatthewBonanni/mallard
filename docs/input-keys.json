@@ -5570,6 +5570,18 @@
   ],
   "type": "array"
  },
+ "write_data.boundary": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "write_data.boundary_type": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
  "write_data.chunk_cells": {
   "dims": [
    2,
@@ -5590,7 +5602,14 @@
    "zlib"
   ]
  },
+ "write_data.end": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
  "write_data.format": {
+  "default": "\"vtkhdf\"",
   "dims": [
    2,
    3
@@ -5635,18 +5654,6 @@
    "vtu"
   ]
  },
- "write_data.geometry": {
-  "default": "\"all\"",
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": [
-   "examples/detonation_3d/input.toml",
-   "examples/sedov_3d/input.toml"
-  ],
-  "type": "string"
- },
  "write_data.interval": {
   "dims": [
    2,
@@ -5669,6 +5676,12 @@
    "examples/turbulent_inflow_duct/input.toml"
   ],
   "type": "integer"
+ },
+ "write_data.point": {
+  "dims": [
+   3
+  ],
+  "set_in": []
  },
  "write_data.prefix": {
   "dims": [
@@ -5738,6 +5751,29 @@
   ],
   "type": "string"
  },
+ "write_data.reference": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "write_data.region": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/detonation_3d/input.toml",
+   "examples/sedov_3d/input.toml"
+  ]
+ },
+ "write_data.regions": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "write_data.relative_error": {
   "dims": [
    2,
@@ -5748,6 +5784,12 @@
  "write_data.series": {
   "dims": [
    2,
+   3
+  ],
+  "set_in": []
+ },
+ "write_data.start": {
+  "dims": [
    3
   ],
   "set_in": []
@@ -5818,6 +5860,14 @@
    "tutorials/wedge/input.toml"
   ],
   "type": "number"
+ },
+ "write_data.type": {
+  "default": "\"\"",
+  "dims": [
+   3
+  ],
+  "set_in": [],
+  "type": "string"
  },
  "write_data.variables": {
   "dims": [

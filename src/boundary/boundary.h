@@ -112,29 +112,8 @@ struct BoundaryCondition {
         AVERAGE = 2,  // OUTLET_PRESSURE: the area-averaged pressure is the target
     };
 
-    /**
-     * @brief The ghost state's case, from type and options (set_dispatch): one
-     *        case per variant, so that the device switch of ghost_W is no larger
-     *        than one over the types alone.
-     */
-    enum class Dispatch : uint8_t {
-        SYMMETRY,
-        TRANSMISSIVE,
-        WALL_ADIABATIC,
-        WALL_ISOTHERMAL,
-        WALL_HEAT_FLUX,
-        STATE,
-        PRESSURE,
-        PRESSURE_AVERAGE,
-        DIRICHLET,
-        FARFIELD,
-        STAGNATION,
-        MASS_FLOW,
-    };
-
     BoundaryType type = BoundaryType::OUTLET_EXTRAPOLATION;
     uint8_t options = 0;
-    Dispatch dispatch = Dispatch::TRANSMISSIVE;
     rtype data[N_DIM + 2] = {};
     rtype relax[N_RELAX] = {};
     bool modeled = false;  // walls: a wall model gives the viscous flux, and the ghost is a slip wall's
@@ -186,9 +165,6 @@ struct BoundaryCondition {
      * @brief Parse a [[boundaries]] table entry.
      */
     static BoundaryCondition from_input(const Input & input, const Euler & physics);
-
-    /** @brief Set dispatch from type and options; call after changing either. */
-    void set_dispatch();
 
     /**
      * @brief Ghost state W_g = [rho, u, p] given the interior state W_i.

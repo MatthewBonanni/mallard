@@ -261,19 +261,30 @@ Handle open_or_create_group(hid_t parent, const char * name) {
 
 void DataWriter::build_vtkhdf_cells() {
     const bool distributed = mesh->n_global_cells > 0;
-    const uint32_t n_owned = mesh->n_owned();
-    const uint64_t n_cells = distributed ? mesh->n_global_cells : mesh->n_cells;
-    const uint64_t n_nodes = distributed ? mesh->n_global_nodes : mesh->n_nodes;
-    auto global_node = [&](uint32_t n) { return distributed ? mesh->h_global_node_id[n] : uint64_t(n); };
+    const uint32_t n_out = subset ? static_cast<uint32_t>(subset_cells.size()) : mesh->n_owned();
+    const uint64_t n_cells = subset ? n_subset : distributed ? mesh->n_global_cells : mesh->n_cells;
+    // A subset's points are the nodes of its cells, numbered in global order
+    std::vector<uint64_t> subset_nodes;
+    auto mesh_node = [&](uint32_t n) { return distributed ? mesh->h_global_node_id[n] : uint64_t(n); };
+    if (subset) {
+        for (uint32_t c : subset_cells) {
+            for (uint32_t k = 0; k < mesh->h_n_nodes_of_cell(c); k++) subset_nodes.push_back(mesh_node(mesh->h_node_of_cell(c, k)));
+        }
+        subset_nodes = sorted_unique(subset_nodes);
+        subset_nodes = sorted_unique(distributed ? comm::allgatherv(subset_nodes) : subset_nodes);
+    }
+    const uint64_t n_nodes = subset ? subset_nodes.size() : distributed ? mesh->n_global_nodes : mesh->n_nodes;
+    auto global_node = [&](uint32_t n) { return subset ? index_in(subset_nodes, mesh_node(n)) : mesh_node(n); };
     const curved::Geometry * curves = mesh->curved_geometry.get();
 
     // Owned cells as records: type, corners, their global nodes, the count of
     // further (quadratic) nodes and those nodes' coordinates as raw bits
-    std::vector<uint64_t> ids(n_owned), offsets{0}, records;
+    std::vector<uint64_t> ids(n_out), offsets{0}, records;
     std::vector<bool> used(mesh->n_nodes, false);
     std::vector<uint32_t> corners;
-    for (uint32_t i = 0; i < n_owned; i++) {
-        ids[i] = mesh->h_global_cell(i);
+    for (uint32_t j = 0; j < n_out; j++) {
+        const uint32_t i = subset ? subset_cells[j] : j;
+        ids[j] = subset ? subset_ids[j] : mesh->h_global_cell(i);
         const uint32_t n = mesh->h_n_nodes_of_cell(i);
         corners.resize(n);
         for (uint32_t k = 0; k < n; k++) {
@@ -343,70 +354,10 @@ void DataWriter::build_vtkhdf_cells() {
     m.built = true;
 }
 
-void DataWriter::build_vtkhdf_faces() {
-    const bool distributed = mesh->n_global_cells > 0;
-    auto global_node = [&](uint32_t n) { return distributed ? mesh->h_global_node_id[n] : uint64_t(n); };
-
-    // Faces in the order of their key (their cell's global id and place in it), which no rank count changes
-    std::vector<uint64_t> keys, offsets{0}, nodes;
-    for (uint32_t f : geometry_faces) {
-        const uint32_t cell = static_cast<uint32_t>(mesh->h_cells_of_face(f, 0));
-        uint32_t j = 0;
-        while (mesh->h_face_of_cell(cell, j) != f) j++;
-        keys.push_back(mesh->h_global_cell(cell) * RESTART_FACES_PER_CELL + j);
-        for (uint32_t k = 0; k < mesh->h_n_nodes_of_face(f); k++) nodes.push_back(global_node(mesh->h_node_of_face(f, k)));
-        offsets.push_back(nodes.size());
-    }
-    const std::vector<uint64_t> all_keys = sorted_unique(distributed ? comm::allgatherv(keys) : keys);
-    std::vector<uint64_t> ids;
-    for (uint64_t key : keys) ids.push_back(index_in(all_keys, key));
-    vtkhdf.order = GlobalOrder(ids, all_keys.size(), distributed);
-    const auto [block_offsets, block] = vtkhdf.order.gather_csr(offsets, nodes);
-
-    // Points: the zone's nodes in global order
-    const std::vector<uint64_t> used = sorted_unique(nodes);
-    const std::vector<uint64_t> all_nodes = sorted_unique(distributed ? comm::allgatherv(used) : used);
-    std::vector<uint64_t> point_ids;
-    std::vector<rtype> coords;
-    for (uint32_t f : geometry_faces) {
-        for (uint32_t k = 0; k < mesh->h_n_nodes_of_face(f); k++) {
-            const uint32_t node = mesh->h_node_of_face(f, k);
-            point_ids.push_back(index_in(all_nodes, global_node(node)));
-            for (uint32_t i = 0; i < 3; i++) coords.push_back(i < N_DIM ? mesh->h_node_coords(node, i) : rtype(0));
-        }
-    }
-    VtkhdfMesh & m = vtkhdf;
-    const auto [id_first, id_total] = scan(block.size(), distributed);
-    m.connectivity.clear();
-    m.offsets.clear();
-    for (uint64_t c = 0; c + 1 < block_offsets.size(); c++) {
-        m.offsets.push_back(static_cast<int64_t>(id_first + block_offsets[c]));
-        for (uint64_t k = block_offsets[c]; k < block_offsets[c + 1]; k++) {
-            m.connectivity.push_back(static_cast<int64_t>(index_in(all_nodes, block[k])));
-        }
-    }
-    if (last_rank(distributed)) m.offsets.push_back(static_cast<int64_t>(id_total));
-    m.n_cells = all_keys.size();
-    m.n_ids = id_total;
-    m.n_points = all_nodes.size();
-    m.first_cell = vtkhdf.order.first();
-    m.first_id = id_first;
-    const GlobalOrder point_order(point_ids, m.n_points, distributed);
-    m.points = point_order.gather<rtype>(coords, 3);
-    m.first_point = point_order.first();
-    m.built = true;
-}
-
 void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Values & values) {
     const std::lock_guard<std::mutex> lock(h5::mutex());
     const bool distributed = mesh->n_global_cells > 0;
-    if (!vtkhdf.built) {
-        if (surface) {
-            build_vtkhdf_faces();
-        } else {
-            build_vtkhdf_cells();
-        }
-    }
+    if (!vtkhdf.built) build_vtkhdf_cells();
     const VtkhdfMesh & m = vtkhdf;
     const bool deflate = compression == Compression::ZLIB;
     const bool serial = !distributed;
@@ -427,7 +378,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
         write_int_attribute(root, "version", static_cast<int>(file_format::VTKHDF_OUTPUT.version));
         Handle top(H5Gcreate2(file, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating VTKHDF");
         write_array_attribute(top, "Version", VTKHDF_VERSION);
-        write_string_scalar_attribute(top, "Type", surface ? "PolyData" : "UnstructuredGrid");
+        write_string_scalar_attribute(top, "Type", "UnstructuredGrid");
         write_count(top, "NumberOfPoints", m.n_points, dxpl, distributed);
         write_dataset(top, "Points", m.n_points, 3, m.first_point, m.points.size() / 3, m.points.data(), dxpl, deflate,
                       serial, io_threads);
@@ -444,17 +395,9 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
             write_dataset(group, "Connectivity", n_ids, 1, mine ? m.first_id : n_ids, connectivity.size(),
                           connectivity.data(), dxpl, deflate, serial, io_threads);
         };
-        if (surface) {
-            for (const char * name : {"Vertices", "Lines", "Polygons", "Strips"}) {
-                const bool mine = std::string(name) == (N_DIM == 2 ? "Lines" : "Polygons");
-                Handle group(H5Gcreate2(top, name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, name);
-                topology(group, mine ? m.n_cells : 0, mine ? m.n_ids : 0, mine);
-            }
-        } else {
-            topology(top, m.n_cells, m.n_ids, true);
-            write_dataset(top, "Types", m.n_cells, 1, m.first_cell, m.types.size(), m.types.data(), dxpl, deflate,
-                          serial, io_threads);
-        }
+        topology(top, m.n_cells, m.n_ids, true);
+        write_dataset(top, "Types", m.n_cells, 1, m.first_cell, m.types.size(), m.types.data(), dxpl, deflate,
+                      serial, io_threads);
         for (const char * name : {"CellData", "PointData", "FieldData"}) {
             Handle group(H5Gcreate2(top, name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, name);
             if (!one_file && std::string(name) == "FieldData") {
@@ -466,8 +409,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
     }
     Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
     if (append) {
-        Handle cells(H5Gopen2(top, surface ? (N_DIM == 2 ? "Lines" : "Polygons") : ".", H5P_DEFAULT), H5Gclose,
-                     "opening the cells");
+        Handle cells(H5Gopen2(top, ".", H5P_DEFAULT), H5Gclose, "opening the cells");
         bool same = read_rows<int64_t>(cells, "NumberOfCells", 0, 1, 1, H5P_DEFAULT)[0] == static_cast<int64_t>(m.n_cells);
         Handle cell_data(H5Gopen2(top, "CellData", H5P_DEFAULT), H5Gclose, "opening CellData");
         H5G_info_t info;
@@ -512,9 +454,8 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
     put_rows(steps, "PartOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
     put_rows(steps, "NumberOfParts", k + 1, 1, k, mine, &one, dxpl);
     put_rows(steps, "PointOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
-    const int topologies = surface ? 4 : 1;
-    put_rows(steps, "CellOffsets", k + 1, topologies, k, mine, zeros.data(), dxpl);
-    put_rows(steps, "ConnectivityIdOffsets", k + 1, topologies, k, mine, zeros.data(), dxpl);
+    put_rows(steps, "CellOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
+    put_rows(steps, "ConnectivityIdOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
     for (const char * name : {"PointDataOffsets", "FieldDataOffsets"}) open_or_create_group(steps, name);
     Handle data_offsets = open_or_create_group(steps, "CellDataOffsets");
     const int64_t offset = static_cast<int64_t>(k * m.n_cells);
@@ -529,7 +470,5 @@ void DataWriter::write_vtkhdf(const std::string &, rtype, const Values &) {
 }
 
 void DataWriter::build_vtkhdf_cells() {}
-
-void DataWriter::build_vtkhdf_faces() {}
 
 #endif

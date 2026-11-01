@@ -249,7 +249,17 @@ Dimension input_dimension(const std::string & input_file) {
         Input input = parse_input(input_file);
         input_upgrade::apply(input);
         const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
-        if (type == "file") return mesh_file_dimension(find_value_or<std::string>(input, "mesh", "filename", "mesh.msh"));
+        if (type == "file") {
+            const fs::path mesh = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
+            if (!fs::exists(mesh)) {
+                std::error_code ec;
+                const fs::path cwd = fs::current_path(ec);
+                return unreadable("mesh file '" + mesh.string() + "' not found" +
+                                  (mesh.is_relative() && !ec ? " relative to the working directory (" + cwd.string() + ")"
+                                                             : std::string()));
+            }
+            return mesh_file_dimension(mesh.string());
+        }
         if (type == "cartesian_tri" || type == "wedge") return {2, ""};
         if (type == "cartesian_tet" || type == "cartesian_prism" || type == "cartesian_pyramid" ||
             type == "cartesian_mixed") {

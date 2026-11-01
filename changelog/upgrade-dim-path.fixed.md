@@ -1,0 +1,1 @@
+- `mallard input upgrade` on a case whose dimension it cannot tell names the reason, e.g. a mesh file not found relative to the working directory (with that directory), and what to do: run from the case's directory or pass `--dim 2|3` (#499).

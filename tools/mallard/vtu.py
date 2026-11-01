@@ -26,14 +26,30 @@ def _check_version(path, header):
                          f"Mallard; this script reads versions up to {VTU_FORMAT_VERSION}: update tools/")
 
 
+def vectors(arrays):
+    """Adds the vector NAME (n, 3) of components NAME_X, NAME_Y(, NAME_Z), as
+    probes and region snapshots of surfaces write them, where NAME is absent."""
+    for name in [k for k in arrays if k.endswith("_X")]:
+        base = name[:-2]
+        if base in arrays or base + "_Y" not in arrays:
+            continue
+        x = arrays[name]
+        z = arrays.get(base + "_Z", np.zeros_like(x))
+        arrays[base] = np.column_stack([x, arrays[base + "_Y"], z])
+    return arrays
+
+
 def read_vtu_cells(path):
-    """Read a 2D or 3D volume VTU.
+    """Read a 2D or 3D volume VTU, or the VTK PolyData (.vtp) of a probe or a
+    region snapshot of a boundary zone, cut plane, surface, curve or points.
 
     Returns points (n, 3), connectivity, offsets (end of each cell), VTK cell
-    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". A PVTU
-    (MPI runs) is read as the union of its pieces; an HDF5 snapshot (.h5) is
-    read with mallard.h5, a VTKHDF snapshot (.vtkhdf) with mallard.vtkhdf (the
-    last snapshot of a series file).
+    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". A PolyData
+    gives its polygons (type 7), lines (3) or vertices (1); its arrays are per
+    cell where it has cell data (boundary zones, cut planes) and per point
+    otherwise. A PVTU (MPI runs) is read as the union of its pieces; an HDF5
+    snapshot (.h5) is read with mallard.h5, a VTKHDF file (.vtkhdf) with
+    mallard.vtkhdf (the last snapshot of a series file).
     """
     if path.endswith(".vtkhdf"):
         from .vtkhdf import read_cells
@@ -72,9 +88,13 @@ def read_vtu_cells(path):
             data = data.reshape(-1, ncomp)
         arrays[attrs.get("Name", "Points")] = data
     conn, offs = arrays.pop("connectivity"), arrays.pop("offsets")
-    types = arrays.pop("types")
+    if 'type="PolyData"' in header:
+        kind = re.search(r"<(Polys|Lines|Verts)>", header).group(1)
+        types = np.full(offs.size, {"Polys": 7, "Lines": 3, "Verts": 1}[kind], dtype=np.uint8)
+    else:
+        types = arrays.pop("types")
     pts = arrays.pop("Points").astype(float)
-    out = {k: np.asarray(v, dtype=float) for k, v in arrays.items()}
+    out = vectors({k: np.asarray(v, dtype=float) for k, v in arrays.items()})
     tm = re.search(r'Name="TIME"[^>]*>([^<]*)<', header)
     if tm:
         out["TIME"] = float(tm.group(1))
@@ -99,8 +119,8 @@ def _read_pvtu(path):
 
 def series(directory, pattern="*"):
     """The snapshots of a series in a directory, oldest first: the VTKHDF
-    files, else the PVTU files of an MPI run (not their pieces), else the VTU
-    (or HDF5) files."""
+    files, else the PVTU files of an MPI run (not their pieces), else the VTU,
+    VTP (or HDF5) files."""
     import glob
     files = sorted(glob.glob(os.path.join(directory, pattern)))
     vtkhdf = [f for f in files if f.endswith(".vtkhdf")]
@@ -109,7 +129,7 @@ def series(directory, pattern="*"):
     parallel = [f for f in files if f.endswith(".pvtu")]
     if parallel:
         return parallel
-    return [f for f in files if (f.endswith(".vtu") or f.endswith(".h5"))
+    return [f for f in files if (f.endswith(".vtu") or f.endswith(".vtp") or f.endswith(".h5"))
             and not re.search(r"_p\d{4}\.vtu$", f)]
 
 

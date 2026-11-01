@@ -120,7 +120,8 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/plane"
-geometry = "sym_z"
+region = "sym_z"
+format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 9.135573741e-05
 variables = ["RHO", "U", "P", "T", "HRR", "Y_*"]
 
