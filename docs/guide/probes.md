@@ -191,8 +191,14 @@ follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`),
 `mean` that over `sum f V`, `favre` the density-weighted mean, `rms` the root
 mean square, and `min`, `max` the extremes over the cells with `f > 0`. Rank 0
 sums them in global cell order, so they are the same bit for bit on any number
-of ranks. Each output appends a row to `reductions_file` (default
-`probe_<name>_reductions.csv`):
+of ranks. The region may be one of the mesh's own: `region = "domain"` gives
+the totals of the whole domain (the mass, for `RHO`), a cell zone those of its
+cells ([regions of the mesh](geometry.md#regions-of-the-mesh)). A surface,
+curve or set of points weighs each cell by its area, length or count in the
+cell instead of `f V` ([on a mesh](geometry.md#surfaces-and-curves-on-a-mesh)):
+`integral` is then the surface integral of the cell averages, `mean` their
+area-weighted mean, and the third column is `area`, `length` or `count`. Each output
+appends a row to `reductions_file` (default `probe_<name>_reductions.csv`):
 
 ```
 step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P
@@ -220,8 +226,8 @@ Pitfalls:
 
 - Values are cell averages, so `min` and `max` are those of the cells, not of
   the field inside them, and include cells the region only touches.
-- A region probe has no samples: `type`, `boundary`, `boundary_type`,
-  `sampling`, `format`, `file` and `samples` do not apply to it.
+- A region probe has no samples: `type`, `sampling`, `format`, `file` and
+  `samples` do not apply to it.
 
 ## Wall forces: `[[forces]]`
 
