@@ -2386,6 +2386,10 @@ RestartAttributes Solver::restart_attributes() const {
     if (step_controller.enabled()) {
         for (const auto & a : step_controller.attributes()) attributes.push_back(a);
     }
+    for (const auto & writer : data_writers) {
+        const std::string name = writer->snapshot_attribute();
+        if (!name.empty()) attributes.emplace_back(name, static_cast<double>(writer->snapshots_written()));
+    }
     return attributes;
 }
 
@@ -2401,11 +2405,15 @@ void Solver::write_data(bool force) {
     }
     update_primitives();
     copy_device_to_host();
+    // Snapshots first, so that a restart file at this step counts them
+    for (auto & writer : data_writers) {
+        if (writer->get_format() != DataFormat::RESTART) writer->write(step, t, force);
+    }
     const RestartAttributes attributes = restart_attributes();
     const RestartFaces faces = characteristic_restart_faces();
     const RestartArrays arrays = statistics.arrays();
     for (auto & writer : data_writers) {
-        writer->write(step, t, force, attributes, faces, arrays);
+        if (writer->get_format() == DataFormat::RESTART) writer->write(step, t, force, attributes, faces, arrays);
     }
     statistics.write(step, t);
     if (snapshots) {

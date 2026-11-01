@@ -77,6 +77,17 @@ snapshots after its restart time and continues the file. Read the files in
 Python with `tools/mallard/vtkhdf.py` (or `read_vtu_cells`, which reads every
 format), or with h5py alone.
 
+**Restarted runs continue the series.** A run resumed from a restart file
+numbers its next snapshot after the snapshots up to the restart time, which the
+restart file counts, and keeps those entries of the `.vtkhdf.series`, `.pvd` or
+`.xmf` index; this holds for every `time_interval` writer, regions included
+(`interval` writers are numbered by step). Resuming from an earlier restart file
+than the last one rewinds: the entries after the restart time are dropped and
+their snapshots are overwritten as the run reaches them again. If the index is
+missing, the run says so, still never overwrites an earlier snapshot, and lists
+only the snapshots it writes. Restart files older than this count number from
+the index, as before.
+
 Builds without HDF5 write VTU instead (and say so): one file per snapshot, and
 per rank in parallel, assembled by a `.pvtu`, with a `.pvd` series. Set
 `format = "vtu"` to choose it explicitly. `format = "hdf5"` (a mesh file, one
@@ -460,8 +471,9 @@ build reads. It is never misread.
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
 
 - Restart files are written with the **lowest** version that holds their
-  contents, so a run without statistics, characteristic boundaries or
-  compression still writes version 2, which every release since 0.4 reads.
+  contents, so a run without statistics, characteristic boundaries,
+  compression or `time_interval` snapshots (whose counts are version 3
+  attributes) still writes version 2, which every release since 0.4 reads.
 - A restart file must also match the build's dimension and precision
   (`Mallard_DIM`, `Mallard_USE_DOUBLE`); the message says which differs.
 - Output files gain arrays and attributes within a version. A version changes

@@ -15,6 +15,7 @@
 #include "input.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cerrno>
 #include <cmath>
@@ -414,10 +415,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     if (pending.valid()) pending.get();
     const bool distributed = mesh->n_global_cells > 0;
     const bool root = comm::is_root();
-    std::ostringstream stream;
-    stream << prefix << "_" << std::setw(LEN_STEP) << std::setfill('0')
-           << (interval > 0 || format == DataFormat::RESTART ? step : history.size());
-    const std::string stem = stream.str();
+    const std::string stem = snapshot_stem(interval > 0 || format == DataFormat::RESTART ? step : n_snapshots);
     if (format == DataFormat::RESTART) {
         // Written under another name, so that no file of this name is ever incomplete
         last_file = stem + ".restart";
@@ -494,6 +492,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     } else {
         n_written++;
     }
+    if (format != DataFormat::RESTART) n_snapshots++;
     step_last = step;
     t_last = t;
     n_files++;
@@ -515,7 +514,11 @@ std::string DataWriter::set_time_interval(rtype value, rtype t) {
     return "";
 }
 
-void DataWriter::resume(uint64_t step, rtype t) {
+std::string DataWriter::snapshot_attribute() const {
+    return interval > 0 || format == DataFormat::RESTART ? "" : "snapshots " + prefix;
+}
+
+void DataWriter::resume(uint64_t step, rtype t, const double * n_before) {
     step_last = step;
     t_last = t;
     if (interval > 0) {
@@ -526,12 +529,36 @@ void DataWriter::resume(uint64_t step, rtype t) {
     history.clear();
     if (format == DataFormat::HDF5) {
         resume_xdmf(t);
-        return;
-    }
-    if (format == DataFormat::VTKHDF) {
+    } else if (format == DataFormat::VTKHDF) {
         resume_vtkhdf(t);
-        return;
+    } else {
+        resume_pvd(t);
     }
+    n_snapshots = history.size();
+    if (!n_before || static_cast<uint64_t>(*n_before) <= n_snapshots || one_file) return;
+    // The index lost entries: never overwrite a snapshot still on disk
+    n_snapshots = static_cast<uint64_t>(*n_before);
+    while (snapshot_exists(n_snapshots)) n_snapshots++;
+    if (comm::is_root()) {
+        logging::warning(index_file() + " lists " + std::to_string(history.size()) + " of the " +
+                         std::to_string(static_cast<uint64_t>(*n_before)) +
+                         " snapshots up to the restart time; numbering continues at " + std::to_string(n_snapshots));
+    }
+}
+
+std::string DataWriter::snapshot_stem(uint64_t number) const {
+    std::ostringstream stream;
+    stream << prefix << "_" << std::setw(LEN_STEP) << std::setfill('0') << number;
+    return stream.str();
+}
+
+bool DataWriter::snapshot_exists(uint64_t number) const {
+    const std::string stem = snapshot_stem(number);
+    return std::ranges::any_of(std::array{".vtu", ".pvtu", ".vtkhdf", ".h5"},
+                               [&](const char * extension) { return std::filesystem::exists(stem + extension); });
+}
+
+void DataWriter::resume_pvd(rtype t) {
     // Keep the entries of the previous run's .pvd up to the restart time
     std::ifstream in(prefix + ".pvd");
     std::string line;

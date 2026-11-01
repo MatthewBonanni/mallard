@@ -1,0 +1,1 @@
+- A run resumed from a restart file whose snapshot index (`.vtkhdf.series`, `.pvd`, `.xmf`) was missing, such as one copied to another machine with only its restart file, numbered its snapshots from 0 again and overwrote the earlier ones. Restart files now count each `time_interval` writer's snapshots, so numbering continues after the restart time regardless.
