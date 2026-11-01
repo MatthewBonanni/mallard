@@ -24,8 +24,7 @@ namespace input_upgrade {
 /**
  * @brief A key renamed, moved to another table, or removed. Paths are dotted;
  *        `name[]` stands for every table of the array of tables `name`,
- *        `**` for any number of nested tables and their arrays, and `to`
- *        has the same `[]` steps as `from` (the same element).
+ *        and `to` has the same `[]` steps as `from` (the same element).
  */
 struct KeyRule {
     std::string from;

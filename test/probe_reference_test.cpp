@@ -69,15 +69,15 @@ std::string reference_case(const std::string & dir) {
       << "[physics]\ntype = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\n"
       << "rho_ref = 1.0\n[output]\ncheck_interval = 1000000\n";
     const std::map<std::string, std::string> geometry = {
-        {"points", "shape = \"points\"\npoints = [" + numbers3("0.21", "0.33", "0.17") + ", " +
+        {"points", "type = \"points\"\npoints = [" + numbers3("0.21", "0.33", "0.17") + ", " +
                        numbers3("0.67", "0.52", "0.41") + ", " + numbers3("0.45", "0.71", "0.29") +
                        "]\nvariables = [\"RHO\", \"U\", \"P\", \"T\", \"H\"]\n"},
         {"line", "start = " + numbers3("0.07", "0.11", "0.11") + "\nend = " + numbers3("0.92", "0.66", "0.47") +
                      "\nn_points = 17\nvariables = [\"RHO\", \"U\", \"P\"]\n"},
-        {"circle", "shape = \"circle\"\ncenter = " + numbers3("0.48", "0.41", "0.3") +
+        {"circle", "type = \"circle\"\ncenter = " + numbers3("0.48", "0.41", "0.3") +
                        "\nradius = 0.23\nn_points = 19\n" + (N_DIM == 3 ? "normal = [0.0, 0.0, 1.0]\n" : "") +
                        (N_DIM == 2 ? "variables = [\"P\", \"MASS_FLUX\"]\n" : "variables = [\"P\", \"U\"]\n")},
-        {"cut", "shape = \"cut_plane\"\npoint = " + numbers3("0.47", "0.39", "0.3") + "\nnormal = " +
+        {"cut", "type = \"cut_plane\"\npoint = " + numbers3("0.47", "0.39", "0.3") + "\nnormal = " +
                     numbers3("1.0", "0.7", "0.3") + "\nvariables = [\"RHO\", \"P\", \"MASS_FLUX\"]\n"},
         {"walls", "boundary_type = \"wall\"\nvariables = [\"P\", \"T\", \"CP\", \"CF\", \"TAU_W\", \"Q_W\", \"U_TAU\", "
                   "\"Y_PLUS\"]\nreference = {rho = 1.0, u = " + numbers3("0.3", "0.0", "0.0") + ", p = 1.0}\n"},

@@ -862,8 +862,6 @@ upgrade old.toml > new.toml` rewrites them, keeping comments and layout
 | Old | New |
 |---|---|
 | `upt` | `inlet_state` |
-| `stagnation_inlet` | `inlet_stagnation` |
-| `mass_flow_inlet` | `inlet_mass_flow` |
 | `nscbc_inlet` | `inlet_state` with `nscbc` (its `L`, `sigma`, `beta`, `sigma_T`, `sigma_t` move into the table) |
 | `p_out` | `outlet_pressure` |
 | `p_out_average` | `outlet_pressure` with `average = true` |

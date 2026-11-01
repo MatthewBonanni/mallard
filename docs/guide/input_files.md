@@ -329,21 +329,15 @@ Keys and options changed so far:
 | `[physics]` `p_min`, `p_max` | none: pressures are not clipped | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; until removed, `"hdf5"` still writes XDMF and HDF5 files | 0.9.0 | 0.10.0 |
-| `[[boundaries]]` `type = "upt"`, `"stagnation_inlet"`, `"mass_flow_inlet"`, `"p_out"`, `"extrapolation"` | `"inlet_state"`, `"inlet_stagnation"`, `"inlet_mass_flow"`, `"outlet_pressure"`, `"outlet_extrapolation"` ([boundary conditions](boundary_conditions.md#inputs-from-older-releases)) | 0.9.0 | 0.10.0 |
+| `[[boundaries]]` `type = "upt"`, `"p_out"`, `"extrapolation"` | `"inlet_state"`, `"outlet_pressure"`, `"outlet_extrapolation"` ([boundary conditions](boundary_conditions.md#inputs-from-older-releases)) | 0.9.0 | 0.10.0 |
 | `[[boundaries]]` `type = "p_out_average"` | `"outlet_pressure"` with `average = true` | 0.9.0 | 0.10.0 |
 | `[[boundaries]]` `type = "nscbc_inlet"`, `"nscbc_outlet"` with `L`, `sigma`, `beta`, `sigma_T`, `sigma_t` | `"inlet_state"`, `"outlet_pressure"` with `nscbc = { L, sigma, ... }` | 0.9.0 | 0.10.0 |
-| `[[probes]]` `shape` | `type` | 0.9.0 | 0.10.0 |
 | `[[mesh.curved]]` `shape` | `type`: the zone lies on a [surface region](geometry.md#regions); `"sphere"` and `"cylinder"` (3D) get `filled = false`, their surface | 0.9.0 | 0.10.0 |
-| `[[sources]]` `region` `type = "circle"` (a filled circle) | 2D `"disk"`, 3D `"sphere"`: `circle` is the curve | 0.9.0 | 0.10.0 |
-| `[[sources]]` `region` `type = "ellipse"` (a filled ellipse) | `"ellipsoid"`: `ellipse` is the curve | 0.9.0 | 0.10.0 |
-| `[[sources]]` `region` `type = "disk"`, `"rectangle"` in 3D | `"sphere"`, `"box"`: disks and rectangles are flat | 0.9.0 | 0.10.0 |
-| `[[sources]]` `region` `type = "annulus"` in 3D | `"cylinder"` with `axis = [0, 0, 1]` (added): annuli are flat | 0.9.0 | 0.10.0 |
-| `[[sources]]` `region` `type = "box"` in 2D | `"rectangle"`: boxes are 3D solids | 0.9.0 | 0.10.0 |
 | `[[write_data]]` `geometry = "<zone>"` | `region = "<zone>"`, and `geometry = "all"` becomes `region = "domain"` ([any region](output.md#snapshots-of-regions)) | 0.9.0 | 0.10.0 |
 | `[mesh]` `periodic = ["x", "z"]` | `[[periodic]]` `zones = ["left", "right"]` and `zones = ["back", "front"]` (`y`: `bottom`/`top`, `theta`: `start`/`end`); `[initialize.mesh]` `periodic` likewise becomes `[[initialize.periodic]]` | 0.9.0 | 0.10.0 |
 
 Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
-appears in this table and in `src/common/input_upgrade.cpp`, which is the
+of a key or option that a release shipped appears in this table and in `src/common/input_upgrade.cpp`, which is the
 source of truth. A test fails if a key is removed without a deprecation
 period.
 
