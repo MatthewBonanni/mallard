@@ -48,7 +48,7 @@ if [ -x "$bin/mallard2d" ] && command -v mpirun > /dev/null && links_mpi "$bin/m
     python3 "$here/check.py" "$tools" sod "$case/solut/sod_000010"
 fi
 
-out="$("$bin/mallard" mesh convert 2>&1 || true)"
+out="$("$bin/mallard" mesh convert --help 2>&1 || true)"
 grep -q Usage <<< "$out" || { echo "mallard mesh convert: $out"; exit 1; }
 echo "== mallard mesh convert starts"
 

@@ -95,7 +95,7 @@ jobs:
             export LD_LIBRARY_PATH=/usr/local/cuda/compat:$LD_LIBRARY_PATH
             mallard --version && mallard2d --version && mallard3d --version
             mallard reactor 2>&1 | grep -q Usage
-            mallard mesh convert 2>&1 | grep -q Usage
+            mallard mesh convert --help 2>&1 | grep -q Usage
             ls $MALLARD_SHARE/examples/sod/input.toml'
       - name: Push
         if: env.PUSH == 'true'
