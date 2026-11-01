@@ -33,7 +33,7 @@ p = """\
              : (y >= 0.8 ? 0.3 : 0.029032258064516)"""
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 16 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 17 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -91,7 +91,7 @@ region.rotate = 30
 X = { H2 = 1.0 }
 ```
 
-*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d).
+*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
 
 Each `[[initialize.regions]]` entry sets some of `u`, `rho`, `p`, `T` and the
 composition inside a region, and leaves the rest to the state below it. The
@@ -167,7 +167,7 @@ interpolation = "cubic"
 at = ["hypot(x - 0.6, y)"]   # the distance from the bubble's center
 ```
 
-*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d).
+*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
 
 Each `[[initialize.data]]` entry reads a CSV file (a header of column names,
 then rows of numbers; lines starting with `#` are comments) and gives every
