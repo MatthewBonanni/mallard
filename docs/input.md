@@ -33,7 +33,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.curved.center`, `radius`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
@@ -234,7 +234,8 @@ first in Gmsh order; none for linear faces).
 
 Boundary faces follow the true curved geometry where the mesh file has
 high-order boundary elements, or where `[[mesh.curved]]` projects a zone onto
-an analytic shape (any mesh: generated, linear Gmsh, HDF5). Curved faces get
+the surface of a [region](#regions) (any mesh: generated, linear Gmsh, HDF5).
+Curved faces get
 quadrature points on the curve or surface with their own normals and
 Jacobians, and the cells touching them their exact volumes, centroids and
 TENO moments; in 3D the faces sharing an edge with a curved face (side faces
@@ -246,23 +247,26 @@ edges. This brings orders 3 to 6 to their design accuracy at curved walls
 |---|---|
 | `curved_geometry` | (`[mesh]`) `false` ignores high-order nodes and `[[mesh.curved]]`: straight-sided faces everywhere. Default `true` |
 | `zone` | (`[[mesh.curved]]`) Boundary zone to curve |
-| `shape` | `circle` (2D), `sphere` or `cylinder` (3D) |
-| `center` | A point of the shape's center (cylinders: of their axis) |
-| `radius` | Radius |
-| `axis` | (`cylinder`) Direction of the axis |
+| `type` | The surface (2D: curve) the zone lies on: a filled [region](#regions) with `filled = false` (its whole boundary), `{type = "boundary", of = ...}` of one, or in 2D a `circle` or `ellipse`. A filled region without `filled = false` is an error. Before 0.9.0: `shape` (where `"sphere"` and `"cylinder"` meant their surfaces), read with a warning until 0.10.0 |
+| `center`, `radius`, ... | The region's own keys and transforms beside `zone` (no `edge`) |
 
 ```toml
 [[mesh.curved]]
 zone = "cylinder"
-shape = "circle"
+type = "circle"
 center = [0.0, 0.0]
 radius = 0.5
 ```
 
-Points of a straight face are projected radially onto the shape, minus the
+`circle` (and `disk` with `filled = false`) in 2D, and `sphere` and
+`cylinder` with `filled = false`, without `length` or `inner_radius` (3D),
+without transforms, are projected radially, in closed
+form; every other surface by closest-point iterations on the region's
+function. A point of a straight face is projected onto the surface, minus the
 linear interpolant of its corners' own offsets, so faces still meet at the
-mesh nodes; zone nodes farther than 5% of an edge length from the shape are
-an error. Curved boundaries are not yet supported with `physics.axisymmetric`.
+mesh nodes; zone nodes farther than 5% of an edge length from the surface,
+or where it has no gradient, are an error. Curved boundaries are not yet
+supported with `physics.axisymmetric`.
 
 ## `[[periodic]]`
 
@@ -1224,7 +1228,8 @@ rhou = ["10 * (0.125 - mean_ke / mean_rho) / (mean_ke / mean_rho) * rho * u_x", 
 ## Regions
 
 Regions select parts of space in `[[sources]]`, `[[sponges]]`,
-`[[initialize.regions]]` and `[[probes]]` (explained with figures in the
+`[[initialize.regions]]` and `[[probes]]`, and their surfaces are the curved
+walls of [`[[mesh.curved]]`](#curved-boundaries) (explained with figures in the
 [geometry guide](guide/geometry.md#regions)). Each `region` key takes a table,
 or the name of a region defined once in [`[regions]`](#named-regions-regions)
 or of a [region of the mesh](#regions-of-the-mesh). A region is a primitive, a

@@ -69,11 +69,17 @@ const Rules & rules() {
             {"physics.p_min", "", "0.2.0", "0.2.0", "pressures are not clipped"},
             {"physics.p_max", "", "0.2.0", "0.2.0", "pressures are not clipped"},
             {"probes[].shape", "probes[].type", "0.9.0", "0.10.0", "type selects the kind of every region"},
+            {"mesh.curved[].shape", "mesh.curved[].type", "0.9.0", "0.10.0",
+             "type selects the kind of every region; a curved zone lies on a surface (2D: a curve)"},
         },
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
             {"write_data[].format", "hdf5", "vtkhdf", "0.9.0", "0.10.0",
              "VTKHDF replaces the XDMF and HDF5 files; ParaView 5.12 and later read it", true},
+            {"mesh.curved[].shape", "sphere", "sphere", "0.9.0", "0.10.0",
+             "a sphere is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
+            {"mesh.curved[].shape", "cylinder", "cylinder", "0.9.0", "0.10.0",
+             "a cylinder is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
             {"sources[].region.**.type", "circle", "disk", "0.9.0", "0.10.0",
              "circle is the closed curve, disk the area inside it", false, 2},
             {"sources[].region.**.type", "circle", "sphere", "0.9.0", "0.10.0", "circle is a curve", false, 3},
@@ -275,11 +281,12 @@ Finding option_finding(const OptionRule & rule, const Concrete & key, std::size_
     f.key = to_string(key);
     f.line = line;
     f.removed = is_removed(rule.removed, version);
-    f.suggestion = f.key + " = \"" + rule.to + "\"";
+    const bool kept = rule.from == rule.to;
+    f.suggestion = kept ? rule.add : f.key + " = \"" + rule.to + "\"";
     f.message = f.key + " = \"" + rule.from + "\"" +
                 (f.removed ? " was removed in " + rule.removed
                            : " is deprecated since " + rule.since + " and will be removed in " + rule.removed) +
-                ": use \"" + rule.to + "\" (" + rule.note + ")";
+                (kept ? ": add " + rule.add : ": use \"" + rule.to + "\"") + " (" + rule.note + ")";
     return f;
 }
 
@@ -366,15 +373,39 @@ bool applies(V & root, const OptionRule & rule, const int dim) {
     return false;
 }
 
+/** @brief Whether a rule that keeps its option and only adds a key finds that key set already. */
+template <typename V>
+bool added_already(V & root, const OptionRule & rule, const Concrete & key) {
+    return rule.from == rule.to && entries_of(*at(root, parent(key))).contains(rule.add.substr(0, rule.add.find(' ')));
+}
+
 /**
  * @brief Applies every rule to the parsed input; returns what changed. Throws
- *        if a key is set under both its old and its new name.
+ *        if a key is set under both its old and its new name. Option rules
+ *        come first, so that they can match a key by the old name that a key
+ *        rule then renames.
  *        `setup`: as the run reads it (kept options keep their value).
  */
 template <typename V>
 std::vector<Finding> transform(V & root, const Rules & table, const std::string & version, const int dim,
                                bool setup = false) {
-    std::vector<Finding> findings;
+    std::vector<Finding> findings, option_findings;
+    for (const OptionRule & rule : table.options) {
+        if (!applies(root, rule, dim)) continue;
+        for (const Concrete & key : matches(root, rule.key)) {
+            V & value = *at(root, key);
+            if (!value.is_string() || value.as_string() != rule.from || added_already(root, rule, key)) continue;
+            option_findings.push_back(option_finding(rule, key, line_of(value), version));
+            if (rule.from != rule.to && !(setup && rule.kept && !option_findings.back().removed)) value = rule.to;
+            if (!rule.add.empty()) {
+                const auto added = toml::parse_str<typename V::config_type>(rule.add);
+                auto & beside = entries_of(*at(root, parent(key)));
+                for (const auto & [name, v] : entries_of(added)) {
+                    if (!beside.contains(name)) beside[name] = v;
+                }
+            }
+        }
+    }
     for (const KeyRule & rule : table.keys) {
         for (const Concrete & key : matches(root, rule.from)) {
             V value = *at(root, key);
@@ -398,22 +429,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
             entries_of(*at(root, parent(key))).erase(key.back().first);
         }
     }
-    for (const OptionRule & rule : table.options) {
-        if (!applies(root, rule, dim)) continue;
-        for (const Concrete & key : matches(root, rule.key)) {
-            V & value = *at(root, key);
-            if (!value.is_string() || value.as_string() != rule.from) continue;
-            findings.push_back(option_finding(rule, key, line_of(value), version));
-            if (!(setup && rule.kept && !findings.back().removed)) value = rule.to;
-            if (!rule.add.empty()) {
-                const auto added = toml::parse_str<typename V::config_type>(rule.add);
-                auto & beside = entries_of(*at(root, parent(key)));
-                for (const auto & [name, v] : entries_of(added)) {
-                    if (!beside.contains(name)) beside[name] = v;
-                }
-            }
-        }
-    }
+    findings.insert(findings.end(), option_findings.begin(), option_findings.end());
     for (const ArrayRule & rule : table.arrays) {
         for (const Concrete & key : matches(root, rule.from)) {
             const auto elements = array_elements(root, rule, key);
@@ -612,7 +628,7 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
     OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
     for (const Concrete & key : matches(root, rule.key)) {
         const OrderedValue & value = *at(root, key);
-        if (!value.is_string() || value.as_string() != rule.from) continue;
+        if (!value.is_string() || value.as_string() != rule.from || added_already(root, rule, key)) continue;
         const size_t line = value.location().first_line_number() - 1;
         const size_t v = value.location().first_column_number() - 1;
         const std::string old_text = bare_text(value);
@@ -708,12 +724,12 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
 
     std::vector<std::string> lines = split_lines(text);
     bool impossible = false;
-    for (const KeyRule & rule : table.keys) {
-        for (int guard = 0; guard < 100000 && !impossible && rewrite_one_key(lines, rule, impossible); guard++) {}
-    }
     for (const OptionRule & rule : table.options) {
         if (rule.dim != 0 && rule.dim != dim) continue;
         for (int guard = 0; guard < 100000 && !impossible && rewrite_one_option(lines, rule, impossible); guard++) {}
+    }
+    for (const KeyRule & rule : table.keys) {
+        for (int guard = 0; guard < 100000 && !impossible && rewrite_one_key(lines, rule, impossible); guard++) {}
     }
     for (const ArrayRule & rule : table.arrays) {
         for (int guard = 0; guard < 100000 && !impossible && rewrite_one_array(lines, rule, impossible); guard++) {}
