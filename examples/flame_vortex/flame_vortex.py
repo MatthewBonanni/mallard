@@ -105,7 +105,7 @@ def main():
     # Channel of symmetry planes instead of a periodic one, and the outputs the analysis reads
     path = os.path.join(args.run_dir, "input.toml")
     text = open(path).read()
-    text = text.replace('periodic = ["y"]\n', "")
+    text = text.replace('[[periodic]]\nzones = ["bottom", "top"]\n', "")
     text = text.replace('name = "right"\ntype = "p_out"\np = 101325.0\n',
                         'name = "right"\ntype = "p_out"\np = 101325.0\n\n[[boundaries]]\nname = "bottom"\n'
                         'type = "symmetry"\n\n[[boundaries]]\nname = "top"\ntype = "symmetry"\n')

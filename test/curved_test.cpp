@@ -728,7 +728,6 @@ TEST(CurvedSolver, GasAtRestStaysExactlyAtRest) {
 TEST(CurvedSolver, RestartedRunMatchesUninterruptedRunExactly) {
     const std::string file = write_temp("curved_restart.msh", annulus_gmsh(3, 40, 2));
     const std::string dir = (scratch_dir() / "mallard_curved_restart").string();
-    std::filesystem::remove_all(dir);
     const std::string recon = "type = \"TENO\"\norder = 4\n";
     const std::string output = "[[write_data]]\nprefix = \"" + dir + "/restart\"\nformat = \"restart\"\ninterval = 10\n";
     Solver straight;
@@ -744,7 +743,6 @@ TEST(CurvedSolver, RestartedRunMatchesUninterruptedRunExactly) {
     second.init(parse_toml(input));
     second.run();
     EXPECT_EQ(density(second), density(straight));
-    std::filesystem::remove_all(dir);
 }
 
 TEST(CurvedTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {

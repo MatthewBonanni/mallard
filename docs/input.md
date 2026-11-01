@@ -75,7 +75,7 @@ Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an 
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
-| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, `dirichlet` states of `t`, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
+| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
 
@@ -97,20 +97,21 @@ factor: node `j` of `N` lies at `L/2 (1 + tanh(beta (2j/N - 1)) / tanh(beta))`;
 `y = 0` and `y = Ly`, `stretching = [0, 1.7, 0]` makes the cells next to the
 walls about 8 times thinner than those at the center (with `Ny = 96`).
 
-`periodic = ["x", "y"]` (and `"z"` in 3D) makes a generated mesh (except
-`wedge`) periodic in those directions: `left`/`right`, `bottom`/`top` and
-`back`/`front` are joined into interior faces and disappear as boundary zones.
-Every scheme sees the seam as interior. Each periodic direction needs at least
-3 cells. Zones of mesh files are paired with `[[periodic]]` (below).
+A generated mesh (except `wedge`) is made periodic by [`[[periodic]]`](#periodic)
+entries pairing opposite sides, `["left", "right"]`, `["bottom", "top"]` and
+`["back", "front"]` (3D), which take their translation from the mesh: the
+zones are joined into interior faces and disappear as boundary zones. The
+deprecated `periodic = ["x", "y"]` of `[mesh]` (until 0.10.0) does the same;
+`mallard input upgrade` rewrites it.
 
 `type = "annulus"` generates the annulus `r_inner <= r <= r_outer` about the
 z axis, or its sector `0 <= theta <= angle`, of `Ntheta x Nr` quadrilaterals
 with nodes on equispaced circles and rays (in 3D extruded over `0 <= z <= Lz`
 into `Ntheta x Nr x Nz` hexahedra). Zones: `inner`, `outer`, for a sector
 `start` (theta = 0) and `end` (theta = angle), and in 3D `back` and `front`.
-`periodic = ["theta"]` joins `start` and `end` through the rotation by
-`angle` (rotational periodicity, `[[periodic]]` below), and `"z"` (3D) `back`
-and `front`.
+`[[periodic]]` with `zones = ["start", "end"]` joins them through the rotation
+by `angle` (rotational periodicity, below), and `["back", "front"]` (3D) by
+the translation `Lz`.
 
 | Key | Description |
 |---|---|
@@ -269,8 +270,8 @@ supported with `physics.axisymmetric`.
 
 ## `[[periodic]]`
 
-Pairs two boundary zones of any mesh (e.g. Gmsh physical curves or surfaces,
-or zones of an HDF5 mesh) into a periodic seam, serially and in distributed
+Pairs two boundary zones of any mesh (the sides of a generated mesh, Gmsh
+physical curves or surfaces, zones of an HDF5 mesh) into a periodic seam, serially and in distributed
 runs: zone B must be zone A translated, or rotated about an axis, node by node
 (to 1e-6 of the zones' shortest edge), as Gmsh's `Periodic` constraint
 produces. The faces of both zones become interior faces and take no
@@ -281,8 +282,8 @@ direction needs at least 3 cells.
 | Key | Description |
 |---|---|
 | `zones` | `[A, B]`: the zone names |
-| `translation` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) with B = A + translation |
-| `angle` | Instead of `translation`: B is A rotated by `angle` degrees (right-handed about `axis`; counterclockwise in 2D) |
+| `translation` | `[t_x, t_y]` (`[t_x, t_y, t_z]` in 3D) with B = A + translation. Optional for opposite sides of a generated mesh (`left`/`right`, `bottom`/`top`, `back`/`front`), which are the box length apart; checked against the mesh if set |
+| `angle` | Instead of `translation`: B is A rotated by `angle` degrees (right-handed about `axis`; counterclockwise in 2D). Optional for the `start` and `end` of a generated `annulus` (its `angle`); checked if set |
 | `center` | With `angle`: a point of the axis, `[x, y]` (`[x, y, z]` in 3D); default the origin |
 | `axis` | With `angle`, 3D only: the axis direction (default `[0, 0, 1]`) |
 
@@ -315,6 +316,21 @@ filename = "box.msh"
 [[periodic]]
 zones = ["left", "right"]
 translation = [1.0, 0.0]
+```
+
+```toml
+# A generated channel, periodic in x and z: the mesh gives the translations
+[mesh]
+type = "cartesian"
+Lx = 6.283185307179586
+Ly = 2.0
+Lz = 3.141592653589793
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["back", "front"]
 ```
 
 ## `[physics]`
@@ -470,7 +486,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
 | `n_subdivisions` | (`analytical`, and any state with regions) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
-| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#file-formats-and-compatibility)) |
+| `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#formats-and-compatibility)) |
 
 Expressions, e.g. `"x < 0.5 ? 1.0 : 0.125"`: [Expressions](guide/input_files.md#expressions).
 They read `x`, `y`, `z` and the variables of `[[initialize.data]]`, and are
@@ -488,7 +504,7 @@ priority: see [Initialization: regions](guide/initialization.md#regions).
 | `X` or `Y`, `balance` | (mixtures) The composition inside, as in `[initialize]`; unset keeps the composition below |
 | `priority` | Integer: higher priorities go on top, equal ones in the order listed (default 0) |
 | `cells` | `volume_fraction` (default): cell averages, cut cells mixing by volume; `center`: cells whose centroid is inside take the region's state whole |
-| `name` | Name in the run log; without it, the entry's place, e.g. `initialize.regions[0]` |
+| `name` | Name in the terminal output; without it, the entry's place, e.g. `initialize.regions[0]` |
 
 Cut cells are subdivided and their finest pieces cut along the surface:
 exact for flat surfaces, second order for curved ones. Cells no region
@@ -567,9 +583,9 @@ and the wall velocity marked above may be expressions of `x`, `y`, `z` and
 its own, and those of `t` at every Runge-Kutta stage time, as `dirichlet`'s:
 pulsed or acoustically forced inlets converge at the time integrator's order
 (`nscbc_inlet` at first order, since its boundary point advances once per step).
-Inputs that do not depend on `t` are evaluated once and cost nothing per
-stage; those that do are evaluated on the device at the stage time, inside the
-step's CUDA graph. A number of `t` that leaves its range (`p`, `T`, `p0`, `T0`
+Inputs that do not depend on `t`, these and `dirichlet` states alike, are
+evaluated once and cost nothing per stage; those that do are evaluated on the
+device at the stage time, inside the step's CUDA graph. A number of `t` that leaves its range (`p`, `T`, `p0`, `T0`
 not positive, `mass_flux` negative) stops the run at the next progress check
 with the face, time and value. A string
 with a unit (`"300 K"`) is a quantity, not an expression; expressions are in SI
@@ -712,7 +728,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 | `max_condition` | (`TENO`) Stencils grow until the least-squares system's condition estimate is below this, default 1e8 |
 | `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 18 / 32 KB (hexahedra) or 9 / 13 / 29 / 63 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 8.4 GB for 64³ hexahedra at order 5; reading it takes seconds; the 3D setup takes about 5 s per million hexahedra and 20 s per million tetrahedra on an A100 (order 5), and minutes on CPUs. The cache records whether the device or the host computed it; both give the same tables |
 | `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices (3D: the cells' moments, from which the matrices are formed) of `cache_file` in single precision: about half the size (17 instead of 32 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
-| `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, default false |
+| `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, and (planar single gas) limit the convective fluxes so that every stage keeps density and pressure positive at `cfl` up to 0.5, default false |
 | `single_precision_tables` | (`TENO`, 3D, not with gas mixtures) Keep the pseudo-inverses on the device in single precision: about 40% less device memory for 3D TENO5 (25 instead of 40 KB per hexahedron, 31 instead of 51 KB per tetrahedron on an A100, everything included), so about 1.6 times the cells per GPU, and a 3-8% faster step. Results change at single-precision round-off: below 1e-7 of each field's range for smooth flow, but up to 1e-3 (order 3: 7e-3) behind shocks, where the stencil selection of some cells goes the other way (3D blast on hexahedra, 60-80 steps; [design notes](design/performance.md)); the cache, if any, holds the tables in single precision too. Default false |
 | `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds, which recompute their central coefficients (same results). Default 0.5 in 3D (1 in 2D) |
 | `curved_mirrors` | (`TENO`) Also take mirror images across curved wall and symmetry faces (across each face's plane) into the stencils, default false: stencils are one-sided at curved walls, where mirroring is only second-order consistent (curved far fields and inflows keep their mirror images) |
@@ -943,10 +959,11 @@ ranks. A probe that is not due costs nothing.
 |---|---|
 | `name` | Probe name |
 | `variables` | Any of the `[statistics]` fields, `U` for all velocity components, `Y_*` for every species |
-| `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `rectangle`, `disk`, `sphere`, `cylinder`, `cone`, `surface` (below); without it, `point` or `start`/`end` select a point or a line |
-| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
+| `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `surface` (below); without it, `point` or `start`/`end` select a point or a line |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples (below). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
 | `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
@@ -969,11 +986,6 @@ Types (`[x, y(, z)]` points):
 | `arc` | as `circle`, with `angles = [start, end]` in degrees from the x axis (3D: from `reference`) and `n_points` from start to end, ends included |
 | `curve` | `x`, `y`(, `z`): expressions of the parameter `s` over `s_range = [s0, s1]` (default `[0, 1]`), `n_points` evenly spaced in `s` |
 | `cut_plane` | `point`, `normal`: the exact intersection of the plane (a line in 2D) with the mesh, one sample per cut cell; optional `bounds = [[lo...], [hi...]]` keeps the part inside that box |
-| `rectangle` (3D) | `center`, `normal`, `size = [a, b]` (along `reference` and normal x `reference`), `n_points = [n_a, n_b]` |
-| `disk` (3D) | `center`, `normal`, `radius`, `inner_radius` (default 0: an annulus otherwise), `n_points = [n_radial, n_around]` |
-| `sphere` (3D) | `center`, `radius`, `n_points = [n_polar, n_around]` |
-| `cylinder` (3D) | `center` (of the axis), `axis`, `radius`, `length`, `n_points = [n_axial, n_around]` |
-| `cone` (3D) | `base` (center of the base), `axis` (toward the top), `length`, `base_radius`, `top_radius` (default 0), `n_points = [n_axial, n_around]` |
 | `surface` (3D) | `x`, `y`, `z`: expressions of `u` and `v` over `u_range`, `v_range` (default `[0, 1]`), `n_points = [n_u, n_v]` |
 
 **Point values.** With TENO, `sampling = "point"` evaluates each cell's
@@ -988,10 +1000,17 @@ cell averages. A sample on a face between cells belongs to the cell with the low
 id, so any number of ranks pick the same cell; samples outside the domain take
 the nearest cell's average in both modes.
 
-**Surfaces.** Resampled surfaces (3D) sample a grid of points (`n_points`)
-joined into quadrilaterals, and integrate with 3 x 3 Gauss points per
-quadrilateral of the parameters; spheres, cylinders and cones have outward
-normals, flat shapes `normal`, parametric surfaces `x_u x x_v`. A cut plane
+**Surfaces.** A surface region (3D) with `n_points = [n_u, n_v]`, e.g.
+`region = {type = "sphere", center = [0, 0, 0], radius = 1, filled = false}`
+or `region = {type = "disk", center = [0, 0, 0], normal = [1, 0, 0], radius = 0.5}`,
+is resampled: a grid of points along each patch's parameters (the
+[geometry guide](guide/geometry.md#surfaces-and-curves-on-a-mesh) lists them per
+type; a cylinder's or cone's ends are patches too) joined into quadrilaterals,
+written like a curve's samples, and integrated with 3 x 3 Gauss points per
+quadrilateral; closed surfaces face out, flat ones along `normal`. The
+parametric `type = "surface"` does the same on `x_u x x_v`. Without
+`n_points`, a surface region writes only its reductions, at the quadrature
+points of its elements. A cut plane
 samples one point per cut cell, at the centroid of its cut, weighing the cut's
 area, and integrates with a degree-5 rule on the triangles where the plane cuts
 the cell's tetrahedra (three Gauss points per cut segment in 2D), so its
@@ -1169,7 +1188,7 @@ graphs, except with domain averages, which need a global sum per stage).
 
 | Key | Default | Description |
 |---|---|---|
-| `name` | `sources[i]` | Name in the run log |
+| `name` | `sources[i]` | Name in the terminal output |
 | `region` | everywhere | A [region](#regions), or the name of one in [`[regions]`](#named-regions-regions): the values are multiplied by each cell's volume fraction of it. It must fill space (a volume; an area in 2D) |
 | `total` | `false` | `true`: the values are integrated rates over the region (kg/s, N, W; per unit depth in 2D, per radian in axisymmetric runs), spread over it in proportion to the volume fraction, so that their integral is exact on any mesh; they may then depend on `t` only |
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`rhoE = "5 MW/m^3"`, with `total`: `"50 W"`) or expressions (in SI units) |
@@ -1248,8 +1267,8 @@ units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
 | `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
 | `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
-| `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; curves and surfaces only by `union` |
-| `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b`, both filled |
+| `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
+| `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b`: filled regions, or a surface or curve `a` clipped to outside filled ones |
 | `boundary` | `of`: a region or its name | one dimension lower: a filled region's closed surface (2D: curve), a flat surface's edge curve, the edges of open boundary zones |
 | `interior` | `of`: a closed surface (2D: a closed curve) or its name | the filled region it encloses |
 
@@ -1259,6 +1278,9 @@ least aligned with `normal`).
 
 The parts of a boolean (the entries of `regions`, `a` and `b`) and `of` may be
 names of `[regions]` or of the mesh too.
+
+The parts of a boolean (the entries of `regions`, `a` and `b`) may be names of
+`[regions]` too.
 
 Any region, primitive or boolean, may also have, applied in this order:
 
@@ -1291,6 +1313,29 @@ boundary of a region by name with `{type = "boundary", of = "<name>"}`.
 | open surface (3D), e.g. `disk`, `rectangle` | its edge curve | error: not closed |
 | closed curve in 3D, e.g. `circle` | error: closed | error: needs a surface |
 | boundary zones | the zones' edges (2D: end points), if they are open; error if closed | the cells inside, if the zones are closed; error if open |
+
+Surfaces and curves may also have `flip = true`, which reverses the side they
+face (the direction 3D curves run), and `resolution` (default 3 in 2D, 2 in
+3D, at most 8 in 2D and 5 in 3D): how many times each cell's triangles
+(tetrahedra) are halved where an extracted surface or curve crosses them.
+Orientation: closed surfaces (2D: curves) face out of what they enclose,
+boundary zones out of the domain, flat surfaces along `normal`, 2D curves to
+the right of travel, 3D curves counterclockwise about their `normal` (edges:
+about the surface's); the subtracted part of a difference's boundary faces
+into the subtracted region. `intersection` and `difference` of one surface or
+curve with filled regions clip it: the parts inside them (outside the
+subtracted ones), keeping its dimension and orientation; the surface or curve
+comes first in a `difference`.
+
+The surfaces of primitives (and 3D flat surfaces and curves) are exact: their
+parameters cut into patches about half a cell wide with Gauss points; planes,
+boundary zones and the faces around regions of the mesh are cut or taken
+exactly from the cells; boundaries of booleans and `implicit` regions are
+extracted as the zero set of the signed distance, linear on the subdivided
+simplices. Clipping regions cut exact surfaces at the roots of their signed
+distance along the surface's parameters (high order: the Gauss points fill the
+kept intervals), and other elements linearly between vertices (exact for
+planes).
 
 `interior` and `boundary` are inverses: the interior of a region's boundary is
 the region. The boundary of a boolean with regions of the mesh is assembled
@@ -1385,8 +1430,8 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | Key | Description |
 |---|---|
 | `check_interval` | Print a progress row every this many steps (default 1) |
-| `run_log` | Machine-readable run log, one JSON record per line: a start record with the provenance, a progress record per progress row, file writes, warnings and errors, and an end record ([format](guide/output.md#the-run-log)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
-| `health` | Run health diagnostics at each progress row: admissibility margins, numerics and chemistry activity, output timings, the audit of numerical repairs and the conservation ledger, in the run log's progress records and a summary at the end of the human log ([details](guide/output.md#run-health)). Default `true` |
+| `run_log` | The machine-readable run record, one JSON record per line: a start record with the provenance, a progress record per progress row, file writes, warnings and errors, and an end record ([format](guide/output.md#run-record-mallardjsonl)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
+| `health` | Run health diagnostics at each progress row: admissibility margins, numerics and chemistry activity, output timings, the audit of numerical repairs and the conservation ledger, in the run record's progress records and a summary at the end of the terminal output ([details](guide/output.md#run-health)). Default `true` |
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the provenance; `false` skips reading it again for very large meshes. Default `true` |
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |

@@ -113,7 +113,7 @@ An O-grid between two circles (zones `inner` and `outer`): quadrilaterals, trian
 ### `make_mallard_mesh.py`: a flying mallard
 
 ```sh
-python examples/mallard/make_mallard_mesh.py OUTPUT.msh [--h-wall 0.0015] [--h-far 0.0045] [--preview duck.png]
+python examples/mallard/make_mallard_mesh.py OUTPUT.msh [--h-wall 0.0015] [--h-far 0.0045] [--order 1|2|3] [--preview duck.png]
 ```
 
 Triangles around a duck silhouette (a periodic spline), refined linearly from `--h-wall` on the body to `--h-far`; zones `duck`, `inflow`, `outflow`, `top` and `bottom`. The mesh of the [`mallard`](../examples/mallard) example, and a template for meshing any spline outline with the gmsh Python module.
@@ -354,7 +354,7 @@ python tools/post/insitu_statistics.py compare spectra.csv reference.csv
 python tools/post/insitu_statistics.py phase input.toml probe_wake.csv -o phase.npz
 ```
 
-Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([output guide](../docs/guide/output.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
+Reads and checks the output of `[statistics.spectra]` and `[statistics.phase]` ([statistics guide](../docs/guide/statistics.md)): `plot` draws the spectra and correlations of one pair along each direction; `spectra` recomputes a run's spectra, correlations and plane means from restart files taken at the sampling steps (numpy FFTs, the solver's time weights) in the solver's CSV format, and `compare` gives the largest difference between two such files; `phase` phase-bins a `[[probes]]` series with the solver's phase rule, to compare with the in-situ `PHASE_` fields at the probe point.
 
 ## Performance
 
@@ -383,6 +383,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`heated_duct`](../examples/heated_duct) | | `plot_heated_duct.py`: the steady run against Rayleigh flow, and the closed duct's mass against `mdot t` for `mass_flow_inlet` and `upt`; `--figure` draws the guide's figures | |
 | [`forced_inlet`](../examples/forced_inlet) | | `plot_forced_inlet.py`: x-t diagrams of the velocity and temperature fluctuations (acoustic and entropy waves) and the inlet cell against the forcing; `--figure` draws the guide's figure | |
 | [`poiseuille_pipe`](../examples/poiseuille_pipe) | | `plot_poiseuille.py`: axial velocity against the exact cell averages | |
+| [`pulsed_jet`](../examples/pulsed_jet) | | `plot_pulsed_jet.py`: the vortex rings' core positions, translation speed, diameter and circulation against the slug model, and the inlet cell against `U(t)`; `--png` draws the vorticity and both histories, `--figure` the guide's figure | `animate_pulsed_jet.py` |
 | [`noh_axisymmetric`](../examples/noh_axisymmetric) | | `plot_noh.py`: density and shock radius by direction against the exact solution | |
 | [`sphere_axisymmetric`](../examples/sphere_axisymmetric) | `make_cylinder_mesh.py --half` | `plot_sphere_axisymmetric.py`: drag, separation angle and wake length | |
 | [`sedov_3d`](../examples/sedov_3d) | | `sedov.py` | `animate_sedov.py` |

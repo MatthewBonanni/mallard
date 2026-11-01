@@ -24,6 +24,9 @@
 #include "mesh_block.h"
 #include "mesh_quality.h"
 #include "partition.h"
+#include "case_view.h"
+#include "region.h"
+#include "region_mesh.h"
 
 namespace {
 
@@ -92,6 +95,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_mesh_quality(r, options);
     check_cost(r, options, tracker);
     check_settings(r);
+    check_regions(r, options);
     return r;
 }
 
@@ -314,6 +318,142 @@ void Solver::check_settings(CheckReport & r) const {
     }
 }
 
+namespace {
+
+using Box = std::array<std::array<double, 3>, 2>;
+
+std::string box_text(const Box & b) {
+    auto corner = [](const std::array<double, 3> & x) {
+        std::string t = "(";
+        for (size_t i = 0; i < N_DIM; i++) t += (i ? ", " : "") + logging::real(x[i]);
+        return t + ")";
+    };
+    return corner(b[0]) + " to " + corner(b[1]);
+}
+
+/** @brief A region on the mesh, summed over the ranks: its measure, cells and extent, and its block of the view. */
+struct OnMesh {
+    double measure = 0.0;
+    uint64_t cells = 0;
+    Box box = {std::array<double, 3>{0.0, 0.0, 0.0}, std::array<double, 3>{0.0, 0.0, 0.0}};
+    bool exact = true;
+    case_view::Block block;
+};
+
+OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name) {
+    OnMesh m;
+    m.block.name = name;
+    const bool distributed = !mesh.h_global_cell_id.empty();
+    const double inf = std::numeric_limits<double>::infinity();
+    Box box = {std::array<double, 3>{inf, inf, inf}, std::array<double, 3>{-inf, -inf, -inf}};
+    auto extend = [&](const std::array<double, 3> & x) {
+        for (size_t i = 0; i < 3; i++) {
+            box[0][i] = std::min(box[0][i], x[i]);
+            box[1][i] = std::max(box[1][i], x[i]);
+        }
+    };
+    if (region.dimension() == N_DIM) {
+        const std::vector<double> f = region::cell_fractions(mesh, region);
+        auto & fraction = m.block.field("fraction", 1);
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+            if (f[c] == 0.0) continue;
+            m.measure += f[c] * double(mesh.h_cell_measure(c));
+            m.cells++;
+            std::vector<std::array<double, 3>> nodes;
+            for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
+                std::array<double, 3> x = {0.0, 0.0, 0.0};
+                for (size_t i = 0; i < N_DIM; i++) x[i] = double(mesh.h_node_coords(mesh.h_node_of_cell(c, k), i));
+                nodes.push_back(x);
+                extend(x);
+            }
+            // VTK's types of the cells (Gmsh's node order is VTK's); 2D cells as polygons
+            const size_t n = nodes.size();
+            const uint8_t type = N_DIM == 2 ? case_view::POLYGON : n == 4 ? 10 : n == 5 ? 14 : n == 6 ? 13 : 12;
+            m.block.add_cell(type, nodes);
+            fraction.values.push_back(f[c]);
+        }
+    } else {
+        const region::Elements e = region::elements(mesh, region);
+        m.exact = e.exact;
+        std::vector<uint32_t> cells(e.cell);
+        std::sort(cells.begin(), cells.end());
+        m.cells = static_cast<uint64_t>(std::unique(cells.begin(), cells.end()) - cells.begin());
+        m.block.field(N_DIM == 3 && e.dimension == 1 ? "tangent" : "normal", 3);
+        m.block.field(e.dimension == 2 ? "area" : e.dimension == 1 ? "length" : "count", 1);
+        auto & direction = m.block.fields[0];
+        auto & measure = m.block.fields[1];
+        for (size_t k = 0; k < e.size(); k++) {
+            m.measure += e.measure[k];
+            const std::vector<std::array<double, 3>> v(e.vertices.begin() + e.offsets[k], e.vertices.begin() + e.offsets[k + 1]);
+            for (const auto & x : v) extend(x);
+            m.block.add_cell(v.size() == 1 ? case_view::VERTEX : v.size() == 2 ? case_view::LINE : case_view::POLYGON, v);
+            direction.values.insert(direction.values.end(), e.direction[k].begin(), e.direction[k].end());
+            measure.values.push_back(e.measure[k]);
+        }
+    }
+    if (distributed) {
+        m.measure = comm::allreduce(m.measure, comm::Op::SUM);
+        m.cells = comm::allreduce(m.cells, comm::Op::SUM);
+        box[0] = comm::allreduce(box[0], comm::Op::MIN);
+        box[1] = comm::allreduce(box[1], comm::Op::MAX);
+    }
+    m.box = box;
+    return m;
+}
+
+/** @brief A name a block of the view may have: no slashes. */
+std::string block_name(std::string name) {
+    std::replace(name.begin(), name.end(), '/', '_');
+    return name;
+}
+
+} // namespace
+
+void Solver::check_regions(CheckReport & r, const CheckOptions & options) const {
+    if (!used_regions) return;
+    std::vector<case_view::Block> blocks;
+    auto text = [&](const region::Region & region, const OnMesh & m, const bool of_mesh) {
+        const int d = region.dimension();
+        static const char * kinds[4] = {"points, count ", "curve, length ", "surface, area ", ""};
+        std::string line = d == N_DIM ? std::string(N_DIM == 2 ? "area " : "volume ") : kinds[d];
+        line += logging::real(m.measure) + (mesh->axisymmetric && d == N_DIM ? " per radian" : "") + ", " +
+                logging::count(m.cells) + (m.cells == 1 ? " cell" : " cells");
+        if (d < N_DIM && !of_mesh) {
+            line += m.exact ? ", exact" : ", extracted (resolution " + std::to_string(region.resolution()) + ")";
+        }
+        return line + (of_mesh ? " (of the mesh)" : "");
+    };
+    // The mesh's own regions: the domain, its boundary zones and cell zones
+    const region::MeshRegions & automatic = used_regions->automatic();
+    Box domain;
+    for (const std::string & name : automatic.names()) {
+        const Input value = parse_input_string("r = \"" + name + "\"").at("r");
+        const region::Region region(value, name, nullptr, &automatic);
+        OnMesh m = on_mesh(*mesh, region, block_name(name));
+        if (name == "domain") domain = m.box;
+        r.regions.emplace_back(name, text(region, m, true));
+        if (name != "domain") blocks.push_back(std::move(m.block));
+    }
+    const std::vector<std::string> mesh_names = automatic.names();
+    for (const auto & [label, region] : used_regions->used()) {
+        if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
+        OnMesh m = on_mesh(*mesh, *region, block_name(label));
+        r.regions.emplace_back(label, text(*region, m, false));
+        if (m.cells == 0) {
+            const Box b = region::bounds(*region);
+            bool outside = false;
+            for (size_t i = 0; i < N_DIM; i++) outside = outside || b[1][i] < domain[0][i] || b[0][i] > domain[1][i];
+            r.errors.push_back("region " + label + (outside ? " lies outside the domain" : " covers no cell of the mesh") +
+                               ": it spans " + box_text(b) + ", the domain " + box_text(domain) +
+                               ". See docs/guide/geometry.md#regions-on-a-mesh");
+        }
+        blocks.push_back(std::move(m.block));
+    }
+    if (!options.view_dir.empty()) {
+        r.view_file = case_view::write(options.view_dir + "/case.vtkhdf", blocks);
+    }
+}
+
 void print_check(const CheckReport & r) {
     using logging::count;
     using logging::format;
@@ -329,6 +469,8 @@ void print_check(const CheckReport & r) {
     if (r.setup_done) {
         item("Boundaries", "every boundary face has a condition (" + count(r.boundaries.size()) + " conditions)");
     }
+    for (size_t i = 0; i < r.regions.size(); i++) item(i ? "" : "Regions", r.regions[i].first + ": " + r.regions[i].second);
+    if (!r.view_file.empty()) item("Case view", r.view_file);
     if (r.has_quality) {
         for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
             const QualitySummary & s = r.quality[m];

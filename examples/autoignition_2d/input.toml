@@ -66,7 +66,12 @@ Nx = 400
 Ny = 400
 Lx = 0.0041000000000000003
 Ly = 0.0041000000000000003
-periodic = ["x", "y"]
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
 
 [initialize]
 type = "restart"

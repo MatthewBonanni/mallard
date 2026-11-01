@@ -177,6 +177,7 @@ class Probes {
             ProbeReference reference;
             probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
             bool from_region = false;
+            bool resampled = false;  // a surface region on an n_points grid
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
@@ -191,9 +192,14 @@ class Probes {
             void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
                                   const std::vector<double> & quad) const;
         };
-        /** @brief A region probe's samples: the owned cells the region covers, weighted by f V. */
+        /**
+         * @brief A filled region probe's samples: the owned cells with their weight f V.
+         */
         static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
-                                  const std::vector<double> & fractions, uint32_t n_variables);
+                                  const std::vector<double> & cell_weights, uint32_t n_variables);
+        /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
+        static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
+                                    bool per_cell);
 
         std::vector<std::unique_ptr<Probe>> probes;
         bool resumed = false;

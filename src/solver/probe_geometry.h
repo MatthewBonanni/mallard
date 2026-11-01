@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "input.h"
+#include "region_mesh.h"
 
 #include "common_typedef.h"
 
@@ -69,6 +70,9 @@ struct Geometry {
     std::vector<uint64_t> polygon_offsets;  // polygons + 1
     std::vector<uint32_t> polygon_vertices;
 };
+
+/** @brief A resampled surface's geometry: its grid's nodes with normals, quadrilaterals and Gauss points. */
+Geometry grid_geometry(const region::Grid & grid);
 
 /** @brief The geometry of a [[probes]] entry (key names it in errors). */
 Geometry make_geometry(const Input & entry, const std::string & key);

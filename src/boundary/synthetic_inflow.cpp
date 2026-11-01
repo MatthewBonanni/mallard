@@ -361,6 +361,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     // Geometry: a plane normal to a coordinate axis
     n_faces = static_cast<uint32_t>(faces.size());
     int axis_local = N_DIM;
+    std::string error;
     for (uint32_t f : faces) {
         const double area_f = double(mesh.h_face_area(f));
         int a = -1;
@@ -370,13 +371,16 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
         if (a < 0 || (axis_local < N_DIM && a != axis_local)) {
             Point x;
             FOR_I_DIM x[i] = double(mesh.h_face_coords(f, i));
-            throw InputError(tw + ": synthetic turbulence needs a planar inlet normal to a coordinate axis; the face at " +
-                             point_string(x) + " is not.");
+            error = tw + ": synthetic turbulence needs a planar inlet normal to a coordinate axis; the face at " +
+                    point_string(x) + " is not.";
+            break;
         }
         axis_local = a;
     }
     // A mesh that is not distributed is whole on every rank (also in a serial run under MPI)
     const bool distributed = mesh.n_global_cells > 0;
+    if (distributed) error = comm::first_error(error);
+    if (!error.empty()) throw InputError(error);
     int32_t axis_min = axis_local, axis_max = faces.empty() ? -1 : axis_local;
     if (distributed) {
         axis_min = comm::allreduce(axis_min, comm::Op::MIN);
@@ -417,6 +421,9 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
         for (size_t d = 0; d < N_DIM; d++) x_global[i][d] = geometry[g * (N_DIM + 1) + d];
         area_global[i] = geometry[g * (N_DIM + 1) + N_DIM];
     }
+
+    // Every rank checks the stresses of every face, so that all throw on one that is not semidefinite
+    for (const Point & x : x_global) cholesky(profile.stress_at(x), x, tw);
 
     // Mean flow and convection velocity
     area = 0.0;

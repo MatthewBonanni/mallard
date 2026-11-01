@@ -35,6 +35,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -70,6 +71,7 @@
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
    "examples/forced_inlet/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ],
   "type": "number"
@@ -102,6 +104,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/triple_flame/input.toml",
@@ -259,7 +262,8 @@
   ],
   "required": true,
   "set_in": [
-   "examples/heated_duct/input.toml"
+   "examples/heated_duct/input.toml",
+   "examples/pulsed_jet/input.toml"
   ],
   "type": "number"
  },
@@ -310,6 +314,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -357,6 +362,7 @@
    "examples/noh_axisymmetric/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
@@ -514,6 +520,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -555,10 +562,12 @@
   ]
  },
  "boundaries.u": {
+  "dimension": "velocity (m s^-1)",
   "dims": [
    2,
    3
   ],
+  "required": true,
   "set_in": [
    "examples/double_mach/input.toml",
    "examples/flame_2d/input.toml",
@@ -571,6 +580,7 @@
    "examples/noh_axisymmetric/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/shu_osher/input.toml",
@@ -580,7 +590,8 @@
    "examples/wedge/input.toml",
    "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
-  ]
+  ],
+  "type": "array"
  },
  "boundaries.wall_model": {
   "dims": [
@@ -685,6 +696,7 @@
   "required": true,
   "set_in": [
    "examples/double_mach/input.toml",
+   "examples/pulsed_jet/input.toml",
    "tutorials/cluster/input.toml"
   ],
   "type": "string"
@@ -961,6 +973,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -1000,6 +1013,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
@@ -1269,17 +1283,6 @@
   ],
   "type": "integer"
  },
- "initialize.mesh.periodic": {
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/taylor_green_3d/remap.toml"
-  ],
-  "type": "array"
- },
  "initialize.mesh.stretching": {
   "dims": [
    2,
@@ -1337,6 +1340,7 @@
    "examples/heated_duct/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -1458,6 +1462,18 @@
   ],
   "set_in": []
  },
+ "initialize.regions.region.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.regions.region.flip": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "initialize.regions.region.normal": {
   "dims": [
    2
@@ -1481,6 +1497,12 @@
   "set_in": [
    "examples/shock_bubble_2d/input.toml"
   ]
+ },
+ "initialize.regions.region.resolution": {
+  "dims": [
+   2
+  ],
+  "set_in": []
  },
  "initialize.regions.region.rotate": {
   "dims": [
@@ -1521,15 +1543,18 @@
   "type": "string",
   "values": [
    "annulus",
-   "box",
+   "boundary",
+   "circle",
    "cone",
    "cylinder",
    "difference",
    "disk",
    "ellipse",
    "ellipsoid",
+   "frustum",
    "half_space",
    "implicit",
+   "interior",
    "intersection",
    "polygon",
    "rectangle",
@@ -1613,6 +1638,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -1661,6 +1687,7 @@
    "examples/heated_duct/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -1980,6 +2007,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -2050,6 +2078,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -2117,6 +2146,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -2164,7 +2194,6 @@
    "examples/flame_turbulence/hit.toml",
    "examples/flame_turbulence/input.toml",
    "examples/flame_turbulence/les.toml",
-   "examples/forced_isotropic_turbulence/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/sedov_3d/input.toml",
    "examples/shock_bubble_3d/input.toml",
@@ -2237,6 +2266,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -2302,6 +2332,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -2391,41 +2422,6 @@
   "set_in": [],
   "type": "bool"
  },
- "mesh.periodic": {
-  "dims": [
-   2,
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/autoignition_2d/input.toml",
-   "examples/cbc_les/input.toml",
-   "examples/channel_inflow_retau180/input.toml",
-   "examples/channel_les/input.toml",
-   "examples/channel_les/input_590.toml",
-   "examples/channel_retau180/input.toml",
-   "examples/channel_wmles/lm2000.toml",
-   "examples/channel_wmles/lm5200.toml",
-   "examples/channel_wmles/tl_m1.7.toml",
-   "examples/channel_wmles/tl_m3.0.toml",
-   "examples/flame_2d/input.toml",
-   "examples/flame_2d/unity/input.toml",
-   "examples/flame_turbulence/hit.toml",
-   "examples/flame_turbulence/input.toml",
-   "examples/flame_turbulence/les.toml",
-   "examples/forced_isotropic_turbulence/input.toml",
-   "examples/isotropic_turbulence/input.toml",
-   "examples/poiseuille_pipe/input.toml",
-   "examples/rotational_sector/annulus_3d.toml",
-   "examples/rotational_sector/sector.toml",
-   "examples/rotational_sector/sector_3d.toml",
-   "examples/taylor_green_3d/coarse.toml",
-   "examples/taylor_green_3d/input.toml",
-   "examples/taylor_green_3d/remap.toml",
-   "examples/turbulent_inflow_duct/input.toml"
-  ],
-  "type": "array"
- },
  "mesh.r_inner": {
   "default": "1.0",
   "dimension": "length (m)",
@@ -2512,6 +2508,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -2592,6 +2589,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -2739,6 +2737,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -2881,6 +2880,7 @@
    "examples/explosion_3d/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
    "examples/riemann_2d_quads/input.toml",
@@ -2996,6 +2996,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -3106,6 +3107,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -3173,6 +3175,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -3244,6 +3247,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -3316,6 +3320,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -3381,7 +3386,84 @@
    2,
    3
   ],
+  "required": true,
+  "set_in": [
+   "examples/autoignition_2d/input.toml",
+   "examples/cbc_les/input.toml",
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/channel_les/input.toml",
+   "examples/channel_les/input_590.toml",
+   "examples/channel_retau180/input.toml",
+   "examples/channel_wmles/lm2000.toml",
+   "examples/channel_wmles/lm5200.toml",
+   "examples/channel_wmles/tl_m1.7.toml",
+   "examples/channel_wmles/tl_m3.0.toml",
+   "examples/flame_2d/input.toml",
+   "examples/flame_2d/unity/input.toml",
+   "examples/flame_turbulence/hit.toml",
+   "examples/flame_turbulence/input.toml",
+   "examples/flame_turbulence/les.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
+   "examples/isotropic_turbulence/input.toml",
+   "examples/poiseuille_pipe/input.toml",
+   "examples/rotational_sector/annulus_3d.toml",
+   "examples/rotational_sector/sector.toml",
+   "examples/rotational_sector/sector_3d.toml",
+   "examples/taylor_green_3d/coarse.toml",
+   "examples/taylor_green_3d/input.toml",
+   "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ],
+  "type": "array"
+ },
+ "periodic.angle": {
+  "dims": [
+   2,
+   3
+  ],
   "set_in": []
+ },
+ "periodic.translation": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
+ "periodic.zones": {
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/autoignition_2d/input.toml",
+   "examples/cbc_les/input.toml",
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/channel_les/input.toml",
+   "examples/channel_les/input_590.toml",
+   "examples/channel_retau180/input.toml",
+   "examples/channel_wmles/lm2000.toml",
+   "examples/channel_wmles/lm5200.toml",
+   "examples/channel_wmles/tl_m1.7.toml",
+   "examples/channel_wmles/tl_m3.0.toml",
+   "examples/flame_2d/input.toml",
+   "examples/flame_2d/unity/input.toml",
+   "examples/flame_turbulence/hit.toml",
+   "examples/flame_turbulence/input.toml",
+   "examples/flame_turbulence/les.toml",
+   "examples/forced_isotropic_turbulence/input.toml",
+   "examples/isotropic_turbulence/input.toml",
+   "examples/poiseuille_pipe/input.toml",
+   "examples/rotational_sector/annulus_3d.toml",
+   "examples/rotational_sector/sector.toml",
+   "examples/rotational_sector/sector_3d.toml",
+   "examples/taylor_green_3d/coarse.toml",
+   "examples/taylor_green_3d/input.toml",
+   "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_inflow_duct/input.toml"
+  ],
+  "type": "array"
  },
  "physics": {
   "dims": [
@@ -3422,6 +3504,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -3467,6 +3550,7 @@
    "examples/flame_turbulence/hit.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -3515,6 +3599,7 @@
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
    "examples/riemann_2d_quads/input.toml",
@@ -3547,6 +3632,7 @@
   "set_in": [
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/sedov_axisymmetric/input.toml"
   ],
   "type": "bool"
@@ -3577,6 +3663,7 @@
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
    "examples/riemann_2d_quads/input.toml",
@@ -3687,6 +3774,7 @@
    "examples/flame_turbulence/hit.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
@@ -3722,6 +3810,7 @@
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
    "examples/riemann_2d_quads/input.toml",
@@ -3794,6 +3883,7 @@
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
    "examples/riemann_2d_quads/input.toml",
@@ -3889,6 +3979,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -3959,6 +4050,7 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -4003,7 +4095,9 @@
    2,
    3
   ],
-  "set_in": [],
+  "set_in": [
+   "examples/pulsed_jet/input.toml"
+  ],
   "type": "string"
  },
  "probes.format": {
@@ -4030,6 +4124,7 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -4061,6 +4156,7 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -4080,7 +4176,9 @@
    2,
    3
   ],
-  "set_in": []
+  "set_in": [
+   "examples/pulsed_jet/input.toml"
+  ]
  },
  "probes.reductions": {
   "default": "[]",
@@ -4114,6 +4212,13 @@
   "set_in": [],
   "type": "string"
  },
+ "probes.reference": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "probes.region": {
   "dims": [
    2,
@@ -4135,6 +4240,14 @@
   ],
   "set_in": []
  },
+ "probes.region.center": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
+ },
  "probes.region.edge": {
   "dims": [
    2
@@ -4147,11 +4260,25 @@
   ],
   "set_in": []
  },
+ "probes.region.flip": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "probes.region.pivot": {
   "dims": [
    2
   ],
   "set_in": []
+ },
+ "probes.region.radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ]
  },
  "probes.region.regions": {
   "dims": [
@@ -4170,6 +4297,12 @@
   ]
  },
  "probes.region.regions.filled": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "probes.region.regions.flip": {
   "dims": [
    2
   ],
@@ -4237,6 +4370,12 @@
    "torus",
    "union"
   ]
+ },
+ "probes.region.resolution": {
+  "dims": [
+   2
+  ],
+  "set_in": []
  },
  "probes.region.rotate": {
   "dims": [
@@ -4377,6 +4516,7 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/shock_bubble_3d/input.toml",
    "examples/source_regions/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
@@ -4455,6 +4595,12 @@
   ],
   "set_in": []
  },
+ "regions.<name>.flip": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "regions.<name>.inner_radius": {
   "dims": [
    2
@@ -4482,6 +4628,12 @@
   "set_in": [
    "examples/source_regions/input.toml"
   ]
+ },
+ "regions.<name>.resolution": {
+  "dims": [
+   2
+  ],
+  "set_in": []
  },
  "regions.<name>.rotate": {
   "dims": [
@@ -4572,6 +4724,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -4641,6 +4794,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -4764,6 +4918,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -4938,7 +5093,19 @@
   ],
   "set_in": []
  },
+ "sources.region.flip": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
  "sources.region.pivot": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "sources.region.resolution": {
   "dims": [
    2
   ],
@@ -5050,46 +5217,56 @@
   ],
   "required": true,
   "set_in": [
-   "examples/channel_inflow_retau180/input.toml"
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/pulsed_jet/input.toml"
   ],
   "type": "array"
  },
  "sponges.T": {
   "dims": [
+   2,
    3
   ],
   "set_in": [
-   "examples/channel_inflow_retau180/input.toml"
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/pulsed_jet/input.toml"
   ]
  },
  "sponges.p": {
   "dims": [
+   2,
    3
   ],
   "set_in": [
-   "examples/channel_inflow_retau180/input.toml"
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/pulsed_jet/input.toml"
   ]
  },
  "sponges.region": {
   "dims": [
+   2,
    3
   ],
   "set_in": []
  },
  "sponges.strength": {
   "dims": [
+   2,
    3
   ],
   "set_in": [
-   "examples/channel_inflow_retau180/input.toml"
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/pulsed_jet/input.toml"
   ]
  },
  "sponges.u": {
   "dims": [
+   2,
    3
   ],
   "set_in": [
-   "examples/channel_inflow_retau180/input.toml"
+   "examples/channel_inflow_retau180/input.toml",
+   "examples/pulsed_jet/input.toml"
   ]
  },
  "statistics": {
@@ -5238,6 +5415,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -5399,6 +5577,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -5478,6 +5657,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
@@ -5537,6 +5717,7 @@
    "examples/poiseuille_pipe/input.toml",
    "examples/premixed_flame/ch4/input.toml",
    "examples/premixed_flame/input.toml",
+   "examples/pulsed_jet/input.toml",
    "examples/reactive_shock_tube/input.toml",
    "examples/riemann_2d/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
