@@ -50,6 +50,10 @@ constexpr Option CHECK_OPTIONS[] = {
     {"--catalog", "", "KEYS.json",
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
      "Default: none."},
+    {"--view", "", "DIR",
+     "Write the case view to DIR/case.vtkhdf for ParaView: every region the case uses (filled regions as their "
+     "cells with their fractions, surfaces and curves with their normals or tangents and measures) and every "
+     "boundary zone, one block each (builds without HDF5: DIR/case.vtm). Default: none."},
     KOKKOS,
 };
 
@@ -63,6 +67,8 @@ constexpr Option NEW_OPTIONS[] = {
 
 constexpr Option UPGRADE_OPTIONS[] = {
     {"--check", "", "", "Write nothing: list the changes, with exit status 1 if there are any."},
+    {"--dim", "", "2|3",
+     "The case's dimension, for renames that depend on it. Default: from the input's mesh, as a run finds it."},
 };
 
 constexpr Option REACTOR_OPTIONS[] = {
@@ -112,7 +118,16 @@ int ctl_main(const Args & args) {
     return run_control::ctl(args.positional[0], request);
 }
 
-int upgrade_main(const Args & args) { return input_upgrade::upgrade_file(args.positional[0], args.has("--check")); }
+int upgrade_main(const Args & args) {
+    const std::string & file = args.positional[0];
+    const std::string dim = args.value_or("--dim", "");
+    if (!dim.empty() && dim != "2" && dim != "3") {
+        return cli::usage_error(*cli::command("input upgrade"), "--dim takes 2 or 3, not " + dim);
+    }
+    if (!dim.empty()) return input_upgrade::upgrade_file(file, args.has("--check"), dim[0] - '0');
+    const front_end::Dimension found = front_end::input_dimension(file);
+    return input_upgrade::upgrade_file(file, args.has("--check"), found.dim, found.why);
+}
 
 int version_main(const Args &) {
     std::cout << "Mallard " << mallard_version() << std::endl;
@@ -229,17 +244,23 @@ constexpr Command COMMANDS[] = {
             "keeping its comments and layout, and writes it to standard output; the changes go to standard "
             "error. A renamed key keeps its value and comment, a moved key goes to the end of its new table, "
             "and a removed key is commented out with a note. A file with nothing to change comes back byte for "
-            "byte; one with a changed dotted key or inline table is reformatted, comments kept.\n"
+            "byte; one with a renamed, moved or removed dotted key or key of an inline table is reformatted, "
+            "comments kept; a renamed option changes in place, also inside inline tables.\n"
+            "\n"
+            "Some renames depend on the case's dimension, which the command reads from the input's mesh as a run "
+            "does; when the mesh is not at hand, --dim states it.\n"
             "\n"
             "Renamed keys still work, with a warning, for at least one minor release before they are removed. "
             "mallard check lists deprecated keys as warnings and removed ones as errors.",
         .options = UPGRADE_OPTIONS,
         .arguments = FILE_ARGUMENTS,
         .examples = "$ mallard input upgrade old.toml > new.toml\n"
-                    "$ mallard input upgrade --check input.toml",
+                    "$ mallard input upgrade --check input.toml\n"
+                    "$ mallard input upgrade --dim 3 old.toml > new.toml",
         .exit_status = "0  the file was written (with --check: it is up to date)\n"
                        "1  the file cannot be read or parsed (with --check: or it is out of date)\n"
                        "2  usage error",
+        .dim = Case::front_end,
         .run = upgrade_main,
     },
     {
@@ -251,13 +272,16 @@ constexpr Command COMMANDS[] = {
             "Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial solution) without "
             "time stepping and without writing any file, then reports: unknown or unused keys, boundary zones "
             "without a condition, mesh quality with the worst cells, the stable time step and the cell that "
-            "sets it, memory per rank and, with --throughput or --steps, the cost. Under mpirun -n N it checks "
-            "the run on N ranks.",
+            "sets it, memory per rank and, with --throughput or --steps, the cost. It lists every region the case "
+            "uses and the mesh's own (domain, boundary zones, cell zones) with its dimension, measure and cells, "
+            "and whether a surface or curve is exact or extracted; a region that covers no cell is an error. Under "
+            "mpirun -n N it checks the run on N ranks.",
         .options = CHECK_OPTIONS,
         .arguments = CHECK_ARGUMENTS,
         .examples = "$ mallard check input.toml\n"
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
-                    "$ mpirun -n 4 mallard check input.toml --quality quality",
+                    "$ mpirun -n 4 mallard check input.toml --quality quality\n"
+                    "$ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView",
         .exit_status = "0  no errors (there may be warnings)\n"
                        "1  errors: in the input, the mesh or the setup\n"
                        "2  usage error",

@@ -11,6 +11,14 @@
 
 #include "probe_surface.h"
 
+#include <iomanip>
+#include <map>
+#include <sstream>
+
+#include "input.h"
+#include "region.h"
+#include "region_mesh.h"
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -141,7 +149,7 @@ FaceSet boundary_faces(const Mesh & mesh, const std::vector<std::string> & zones
 
     Geometry & g = set.geometry;
     g.dim = N_DIM - 1;
-    g.shape = "boundary";
+    g.type = "boundary";
     g.revolved = mesh.axisymmetric;
     std::vector<uint64_t> order;  // record of each global sample
     if constexpr (N_DIM == 2) {
@@ -228,38 +236,6 @@ namespace {
 
 using V3 = std::array<double, 3>;
 
-/** @brief An axis-aligned box (on = false: everything). */
-struct Box {
-    bool on = false;
-    V3 lo{}, hi{};
-};
-
-V3 lerp(const V3 & a, const V3 & b, double t) { return {a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2])}; }
-
-double tri_area(const V3 & a, const V3 & b, const V3 & c) {
-    const V3 u = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
-    const V3 n = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
-    return 0.5 * std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-}
-
-/** @brief Radon's seven-point rule (degree 5) on triangle abc: points and weights into x, w. */
-[[maybe_unused]] void triangle_rule(const V3 & a, const V3 & b, const V3 & c, std::vector<V3> & x, std::vector<double> & w) {
-    const double A = tri_area(a, b, c);
-    if (!(A > 0.0)) return;
-    const double s15 = std::sqrt(15.0);
-    const double a1 = (6.0 - s15) / 21.0, a2 = (6.0 + s15) / 21.0;
-    const double w0 = 9.0 / 40.0, w1 = (155.0 - s15) / 1200.0, w2 = (155.0 + s15) / 1200.0;
-    const double bary[7][3] = {{1.0 / 3, 1.0 / 3, 1.0 / 3}, {a1, a1, 1 - 2 * a1}, {a1, 1 - 2 * a1, a1},
-                               {1 - 2 * a1, a1, a1}, {a2, a2, 1 - 2 * a2}, {a2, 1 - 2 * a2, a2}, {1 - 2 * a2, a2, a2}};
-    const double wt[7] = {w0, w1, w1, w1, w2, w2, w2};
-    for (int q = 0; q < 7; q++) {
-        V3 p;
-        for (size_t d = 0; d < 3; d++) p[d] = bary[q][0] * a[d] + bary[q][1] * b[d] + bary[q][2] * c[d];
-        x.push_back(p);
-        w.push_back(wt[q] * A);
-    }
-}
-
 /** @brief A cut cell as packed for rank 0. */
 struct Cut {
     uint64_t key = 0;
@@ -270,87 +246,67 @@ struct Cut {
     std::vector<double> weights;
 };
 
-/** @brief The part of a convex polygon inside the box (all of it without one). */
-[[maybe_unused]] std::vector<V3> clip(std::vector<V3> poly, const Box & box) {
-    if (!box.on) return poly;
-    for (size_t d = 0; d < N_DIM; d++) {
-        for (int side = 0; side < 2; side++) {
-            // Inside: x_d >= lo_d, or x_d <= hi_d
-            auto f = [&](const V3 & x) { return side == 0 ? x[d] - box.lo[d] : box.hi[d] - x[d]; };
-            std::vector<V3> out;
-            for (size_t k = 0; k < poly.size(); k++) {
-                const V3 & a = poly[k];
-                const V3 & b = poly[(k + 1) % poly.size()];
-                const double fa = f(a), fb = f(b);
-                if (fa >= 0.0) out.push_back(a);
-                if ((fa >= 0.0) != (fb >= 0.0)) out.push_back(lerp(a, b, fa / (fa - fb)));
-            }
-            poly = std::move(out);
-            if (poly.empty()) return poly;
-        }
-    }
-    return poly;
+std::string number(const double x) {
+    std::ostringstream s;
+    s << std::setprecision(17) << x;
+    return s.str();
+}
+
+std::string vector_text(const V3 & x) {
+    std::string t = "[";
+    for (size_t d = 0; d < N_DIM; d++) t += (d ? ", " : "") + number(x[d]);
+    return t + "]";
 }
 
 /**
- * @brief Cut of owned cell c by the plane d(x) = (x - p) . n = 0, with d = 0
- *        on the positive side, within the box; false if the plane misses the
- *        cell (or the box).
+ * @brief The plane through p of normal n, within the box, as a region: its
+ *        elements on the owned cells (region_mesh's exact cut of an affine
+ *        level: the plane's parts in each cell's simplices).
  */
-bool cut_cell(const Mesh & mesh, uint32_t c, const V3 & p, const V3 & n, const Box & box, Cut & cut) {
-    // Points within round-off of the plane lie on it, so that no cell gets a sliver of zero area
-    const double snap = 1e-12 * std::pow(static_cast<double>(mesh.h_cell_volume(c)), 1.0 / N_DIM);
-    auto dist = [&](const V3 & x) {
-        const double d = (x[0] - p[0]) * n[0] + (x[1] - p[1]) * n[1] + (x[2] - p[2]) * n[2];
-        return std::fabs(d) < snap ? 0.0 : d;
-    };
-    if constexpr (N_DIM == 2) {
-        const uint32_t m = mesh.h_n_nodes_of_cell(c);
-        std::vector<V3> x(m);
-        for (uint32_t k = 0; k < m; k++) {
-            const uint32_t node = mesh.h_node_of_cell(c, k);
-            x[k] = {double(mesh.h_node_coords(node, 0)), double(mesh.h_node_coords(node, 1)), 0.0};
-        }
-        std::vector<V3> ends;
-        for (uint32_t k = 0; k < m; k++) {
-            const V3 & a = x[k];
-            const V3 & b = x[(k + 1) % m];
-            const double da = dist(a), db = dist(b);
-            if ((da < 0.0) != (db < 0.0)) ends.push_back(lerp(a, b, da / (da - db)));
-        }
-        if (ends.size() != 2) return false;
-        if (box.on) {
-            // The segment's parameter range inside the box
-            double t0 = 0.0, t1 = 1.0;
-            for (size_t d = 0; d < 2; d++) {
-                const double a = ends[0][d], da = ends[1][d] - ends[0][d];
-                if (da == 0.0) {
-                    if (a < box.lo[d] || a > box.hi[d]) return false;
-                    continue;
-                }
-                double ta = (box.lo[d] - a) / da, tb = (box.hi[d] - a) / da;
-                if (ta > tb) std::swap(ta, tb);
-                t0 = std::max(t0, ta);
-                t1 = std::min(t1, tb);
+region::Elements plane_elements(const Mesh & mesh, const V3 & p, const V3 & n, const std::array<Vec3, 2> * bounds) {
+    std::string table = "{type = \"half_space\", point = " + vector_text(p) + ", normal = " + vector_text(n) +
+                        ", filled = false}";
+    if (bounds) {
+        std::string sides;
+        for (size_t d = 0; d < N_DIM; d++) {
+            for (const double side : {-1.0, 1.0}) {
+                V3 normal = {0.0, 0.0, 0.0};
+                normal[d] = side;
+                sides += ", {type = \"half_space\", point = " + vector_text(side < 0.0 ? (*bounds)[0] : (*bounds)[1]) +
+                         ", normal = " + vector_text(normal) + "}";
             }
-            if (!(t1 > t0)) return false;
-            ends = {lerp(ends[0], ends[1], t0), lerp(ends[0], ends[1], t1)};
         }
-        const double L = std::hypot(ends[1][0] - ends[0][0], ends[1][1] - ends[0][1]);
-        if (!(L > 0.0)) return false;
-        cut.polygon = ends;
-        cut.measure = L;
-        cut.centroid = lerp(ends[0], ends[1], 0.5);
-        static const double XI[3] = {-std::sqrt(0.6), 0.0, std::sqrt(0.6)};
-        static const double W[3] = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
-        for (int q = 0; q < 3; q++) {
-            cut.quad.push_back(lerp(ends[0], ends[1], 0.5 * (1.0 + XI[q])));
-            cut.weights.push_back(0.5 * W[q] * L);
+        table = "{type = \"intersection\", regions = [" + table + sides + "]}";
+    }
+    const region::Region r(parse_input_string("r = " + table).at("r"), "cut_plane");
+    return region::elements(mesh, r);
+}
+
+/** @brief The cut of one cell from its elements: measure and centroid from the quadrature, the polygon around them. */
+bool cut_of(const region::Elements & e, const std::vector<size_t> & elements, const V3 & n, Cut & cut) {
+    std::vector<V3> points;
+    for (const size_t k : elements) {
+        for (uint32_t q = e.quad_offsets[k]; q < e.quad_offsets[k + 1]; q++) {
+            cut.quad.push_back(e.quad_points[q]);
+            cut.weights.push_back(e.quad_weights[q]);
         }
+        points.insert(points.end(), e.vertices.begin() + e.offsets[k], e.vertices.begin() + e.offsets[k + 1]);
+    }
+    for (size_t q = 0; q < cut.weights.size(); q++) {
+        cut.measure += cut.weights[q];
+        for (size_t d = 0; d < 3; d++) cut.centroid[d] += cut.weights[q] * cut.quad[q][d];
+    }
+    if (!(cut.measure > 0.0)) return false;
+    for (size_t d = 0; d < 3; d++) cut.centroid[d] /= cut.measure;
+    if constexpr (N_DIM == 2) {
+        // The segment's ends along the line
+        const V3 t = {-n[1], n[0], 0.0};
+        auto along = [&](const V3 & x) { return (x[0] - cut.centroid[0]) * t[0] + (x[1] - cut.centroid[1]) * t[1]; };
+        const auto [lo, hi] = std::minmax_element(points.begin(), points.end(),
+                                                  [&](const V3 & x, const V3 & y) { return along(x) < along(y); });
+        cut.polygon = {*hi, *lo};
         return true;
     } else {
-        std::vector<std::array<std::array<double, 3>, 4>> tets;
-        mesh.h_cell_tetrahedra(c, tets);
         // An orthonormal basis (e1, e2) of the plane, with (e1, e2, n) right-handed
         V3 e1 = std::fabs(n[0]) < 0.9 ? V3{1.0, 0.0, 0.0} : V3{0.0, 1.0, 0.0};
         const double en = e1[0] * n[0] + e1[1] * n[1] + e1[2] * n[2];
@@ -358,39 +314,6 @@ bool cut_cell(const Mesh & mesh, uint32_t c, const V3 & p, const V3 & n, const B
         const double l = std::sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
         for (size_t d = 0; d < 3; d++) e1[d] /= l;
         const V3 e2 = {n[1] * e1[2] - n[2] * e1[1], n[2] * e1[0] - n[0] * e1[2], n[0] * e1[1] - n[1] * e1[0]};
-        auto angle = [&](const V3 & x, const V3 & o) {
-            const V3 r = {x[0] - o[0], x[1] - o[1], x[2] - o[2]};
-            return std::atan2(r[0] * e2[0] + r[1] * e2[1] + r[2] * e2[2], r[0] * e1[0] + r[1] * e1[1] + r[2] * e1[2]);
-        };
-        std::vector<V3> points;
-        for (const auto & t : tets) {
-            std::vector<V3> pts;
-            int below = 0;
-            for (size_t i = 0; i < 4; i++) below += dist(t[i]) < 0.0;
-            if (below == 0 || below == 4) continue;
-            for (size_t i = 0; i < 4; i++) {
-                for (size_t j = i + 1; j < 4; j++) {
-                    const double di = dist(t[i]), dj = dist(t[j]);
-                    if ((di < 0.0) != (dj < 0.0)) pts.push_back(lerp(t[i], t[j], di / (di - dj)));
-                }
-            }
-            // A triangle or a convex quadrilateral, ordered around its center, clipped by the box
-            V3 o = {0.0, 0.0, 0.0};
-            for (const V3 & x : pts) {
-                for (size_t d = 0; d < 3; d++) o[d] += x[d] / double(pts.size());
-            }
-            std::sort(pts.begin(), pts.end(), [&](const V3 & x, const V3 & y) { return angle(x, o) < angle(y, o); });
-            pts = clip(pts, box);
-            for (size_t k = 1; k + 1 < pts.size(); k++) triangle_rule(pts[0], pts[k], pts[k + 1], cut.quad, cut.weights);
-            points.insert(points.end(), pts.begin(), pts.end());
-        }
-        if (cut.weights.empty()) return false;
-        for (size_t q = 0; q < cut.weights.size(); q++) {
-            cut.measure += cut.weights[q];
-            for (size_t d = 0; d < 3; d++) cut.centroid[d] += cut.weights[q] * cut.quad[q][d];
-        }
-        if (!(cut.measure > 0.0)) return false;
-        for (size_t d = 0; d < 3; d++) cut.centroid[d] /= cut.measure;
         // The polygon: the convex hull of the cut points in the plane, counterclockwise
         // about n (Andrew's monotone chain; the cell's decomposition adds points inside it)
         struct Q {
@@ -443,15 +366,16 @@ Point to_point(const V3 & x) {
 CutSet cut_plane(const Mesh & mesh, const Vec3 & point, const Vec3 & normal, bool distributed,
                  const std::array<Vec3, 2> * bounds) {
     CutSet set;
-    Box box;
-    if (bounds) box = Box{true, (*bounds)[0], (*bounds)[1]};
     const double l = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
     const V3 n = {normal[0] / l, normal[1] / l, normal[2] / l};
+    const region::Elements e = plane_elements(mesh, point, n, bounds);
+    std::map<uint32_t, std::vector<size_t>> by_cell;
+    for (size_t k = 0; k < e.size(); k++) by_cell[e.cell[k]].push_back(k);
     std::vector<uint64_t> ids;   // per cut: key, polygon size, quadrature size
     std::vector<double> reals;   // per cut: centroid, measure, polygon, quadrature points and weights
-    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+    for (const auto & [c, elements] : by_cell) {
         Cut cut;
-        if (!cut_cell(mesh, c, point, n, box, cut)) continue;
+        if (!cut_of(e, elements, n, cut)) continue;
         cut.key = mesh.h_global_cell(c);
         set.nodes.cells.push_back(c);
         set.nodes.points.push_back(to_point(cut.centroid));
@@ -500,7 +424,7 @@ CutSet cut_plane(const Mesh & mesh, const Vec3 & point, const Vec3 & normal, boo
     std::sort(order.begin(), order.end(), [&](uint64_t x, uint64_t y) { return cuts[x].key < cuts[y].key; });
     Geometry & g = set.geometry;
     g.dim = N_DIM - 1;
-    g.shape = "cut_plane";
+    g.type = "cut_plane";
     g.polygon_offsets.push_back(0);
     set.nodes.gathered_row.clear();
     set.quadrature.gathered_row.clear();

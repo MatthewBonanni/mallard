@@ -60,11 +60,6 @@ std::string Solver::step_graph_unsupported() const {
     if (boundary_data.char_faces.extent(0) > 0) return "characteristic boundaries";
     if (!inflows.empty()) return "synthetic inflow turbulence";
     if (source_terms && source_terms->uses_means()) return "sources of domain averages";
-    for (const auto & bc : dirichlet_boundaries) {
-        for (const auto & w : bc.W) {
-            if (w.depends_on_time()) return "time-dependent boundary states";
-        }
-    }
     return "";
 #endif
 }
@@ -79,7 +74,7 @@ void Solver::record_step() {
     // calc_dt, with the boundary conditions of t at the step's start as calc_dt has them
     halo.exchange(state());
     halo_current = true;
-    if (!timed_fields.empty()) {
+    if (!timed_fields.empty() || dirichlet_states.depends_on_time()) {
         record_stage_time(0.0_r);
         apply_boundary_fields();
     }

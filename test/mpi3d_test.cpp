@@ -229,30 +229,23 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
 }
 
 TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
-    // Ranks whose part of the mesh does not touch the zone write empty pieces
+    // Ranks whose part of the mesh does not touch the zone have no faces to send
     const std::string dir = (scratch_dir() / "mallard_mpi3d_faces").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     Solver solver;
     solver.init(parse_toml(blast_input("cartesian", "type = \"FO\"\n") +
-                           "[[write_data]]\nprefix = \"" + dir + "/left\"\nformat = \"vtu\"\ngeometry = \"left\"\n"
+                           "[[write_data]]\nprefix = \"" + dir + "/left\"\nformat = \"vtu\"\nregion = \"left\"\n"
                            "interval = 3\nvariables = [\"RHO\"]\n"));
     solver.run();
     comm::barrier();
-    uint64_t total = 0;
-    for (int r = 0; r < comm::size(); r++) {
-        std::ostringstream piece;
-        piece << dir << "/left_000003";
-        if (comm::size() > 1) piece << "_p" << std::setw(4) << std::setfill('0') << r;
-        std::ifstream in(piece.str() + ".vtu");
-        std::stringstream ss;
-        ss << in.rdbuf();
-        const std::string text = ss.str();
-        const size_t k = text.find("NumberOfCells=\"");
-        ASSERT_NE(k, std::string::npos) << piece.str();
-        total += std::stoull(text.substr(k + 15));
-    }
-    EXPECT_EQ(total, 12u * 12u);
+    std::ifstream in(dir + "/left_000003.vtp");
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string text = ss.str();
+    const size_t k = text.find("NumberOfPolys=\"");
+    ASSERT_NE(k, std::string::npos);
+    EXPECT_EQ(std::stoull(text.substr(k + 15)), 12u * 12u);
 }
 
 TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
@@ -265,7 +258,7 @@ TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
                "[[probes]]\nname = \"walls\"\nboundary = [\"bottom\", \"left\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
                sub + "/walls.pvd\"\nvariables = [\"P\", \"TAU_W\", \"Q_W\", \"MASS_FLUX\"]\ninterval = 4\n"
                "reductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub + "/walls.csv\"\n"
-               "[[probes]]\nname = \"cut\"\nshape = \"cut_plane\"\npoint = [0.5, 0.4, 0.3]\nnormal = [1.0, 0.6, 0.3]\n"
+               "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\npoint = [0.5, 0.4, 0.3]\nnormal = [1.0, 0.6, 0.3]\n"
                "variables = [\"P\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub + "/cut.pvd\"\n"
                "interval = 8\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/cut.csv\"\n";
     };
@@ -320,8 +313,8 @@ TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     const std::string file = write_temp_shared("mallard_mpi_vtkhdf_shell.msh", shell_gmsh(4, 3, true, false));
     expect_vtkhdf_output_matches_serial(
         "[run]\nn_steps = 2\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
-        "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
-        "[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
+        "[[mesh.curved]]\nzone = \"inner\"\ntype = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\ntype = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
         "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n"
         "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n[[boundaries]]\nname = \"outer\"\n"
         "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
@@ -332,17 +325,21 @@ TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
 }
 
 TEST(MPI3DTest, CurvedWallsMatchSerial) {
-    // A spherical shell of prisms: walls projected onto the spheres, or from
-    // triangle6 faces of the file
-    const std::string shapes = "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\n"
-                               "radius = 1.0\n[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\n"
-                               "center = [0.0, 0.0, 0.0]\nradius = 1.5\n";
-    for (bool quadratic : {false, true}) {
+    // A spherical shell of prisms: walls projected onto the spheres (in closed form, and by
+    // closest points on an implicit sphere and an ellipsoid of equal axes), or from triangle6
+    // faces of the file
+    const std::string closed = "[[mesh.curved]]\nzone = \"inner\"\n"
+                               "type = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
+                               "[[mesh.curved]]\nzone = \"outer\"\n"
+                               "type = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n";
+    const std::string general = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"implicit\"\nfilled = false\nf = \"x^2 + y^2 + z^2 - 1\"\n"
+                                "[[mesh.curved]]\nzone = \"outer\"\n"
+                                "type = \"ellipsoid\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nsemi_axes = [1.5, 1.5, 1.5]\n";
+    for (const auto & [quadratic, shapes] : {std::pair{false, closed}, std::pair{false, general}, std::pair{true, std::string()}}) {
         const std::string file = write_temp_shared(std::string("mallard_mpi_shell_") + (quadratic ? "p2" : "p1") + ".msh",
                                                    shell_gmsh(4, 3, true, quadratic));
         const std::string input =
-            "[run]\nn_steps = 6\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" +
-            (quadratic ? "" : shapes) +
+            "[run]\nn_steps = 6\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n" + shapes +
             "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * exp(-4 * ((x - 1.2)^2 + y^2 + z^2))\"\n"
             "u = [\"0.0\", \"0.3 * z\", \"-0.3 * y\"]\np = \"1.0\"\n"
             "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"

@@ -52,14 +52,17 @@ inline std::string write_temp_shared(const std::string & name, const std::string
 
 /**
  * @brief Gmsh 2.2 file of the unit square: columns alternate between quads and
- *        pairs of triangles, and interior nodes are randomly displaced.
+ *        pairs of triangles, and interior nodes are randomly displaced. With
+ *        cell_zones, the cells of the left and right halves of the columns
+ *        are the physical groups "left_half" and "right_half".
  */
-inline std::string jittered_mixed_mesh(uint32_t n) {
+inline std::string jittered_mixed_mesh(uint32_t n, bool cell_zones = false) {
     std::mt19937 rng(42);
     std::uniform_real_distribution<double> jitter(-0.2, 0.2);
     std::ostringstream s;
-    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n4\n"
-      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n$EndPhysicalNames\n";
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n" << (cell_zones ? 6 : 4) << "\n"
+      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n"
+      << (cell_zones ? "2 5 \"left_half\"\n2 6 \"right_half\"\n" : "") << "$EndPhysicalNames\n";
     auto id = [&](uint32_t i, uint32_t j) { return j * (n + 1) + i + 1; };
     s << "$Nodes\n" << (n + 1) * (n + 1) << "\n";
     for (uint32_t j = 0; j <= n; j++) {
@@ -81,11 +84,12 @@ inline std::string jittered_mixed_mesh(uint32_t n) {
         for (uint32_t i = 0; i < n; i++) {
             const auto a = std::to_string(id(i, j)), b = std::to_string(id(i + 1, j));
             const auto c = std::to_string(id(i + 1, j + 1)), d = std::to_string(id(i, j + 1));
+            const std::string tags = !cell_zones ? "2 0 1 " : 2 * i < n ? "2 5 1 " : "2 6 1 ";
             if (i % 2 == 0) {
-                elements.push_back("3 2 0 1 " + a + " " + b + " " + c + " " + d);
+                elements.push_back("3 " + tags + a + " " + b + " " + c + " " + d);
             } else {
-                elements.push_back("2 2 0 1 " + a + " " + b + " " + c);
-                elements.push_back("2 2 0 1 " + a + " " + c + " " + d);
+                elements.push_back("2 " + tags + a + " " + b + " " + c);
+                elements.push_back("2 " + tags + a + " " + c + " " + d);
             }
         }
     }
@@ -275,6 +279,80 @@ inline std::string jittered_periodic_mesh_3d(uint32_t n, double amplitude = 0.15
                                            " " + v[1][b] + " " + v[1][c]);
                     }
                 }
+            }
+        }
+    }
+    s << "$EndNodes\n$Elements\n" << elements.size() << "\n";
+    for (size_t k = 0; k < elements.size(); k++) s << k + 1 << " " << elements[k] << "\n";
+    s << "$EndElements\n";
+    return s.str();
+}
+
+/**
+ * @brief Gmsh 2.2 file of the unit cube with zones left/right (x),
+ *        bottom/top (y) and back/front (z): n^3 cubes of six tetrahedra each
+ *        (Kuhn's split along the cube diagonal), with every node randomly
+ *        displaced along the axes it is not held on a boundary plane by.
+ */
+inline std::string jittered_tetrahedral_mesh(uint32_t n, double amplitude = 0.15) {
+    std::mt19937 rng(2);
+    std::uniform_real_distribution<double> jitter(-amplitude, amplitude);
+    auto id = [&](uint32_t i, uint32_t j, uint32_t k) { return std::to_string((k * (n + 1) + j) * (n + 1) + i + 1); };
+    std::ostringstream s;
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n6\n"
+      << "2 1 \"left\"\n2 2 \"right\"\n2 3 \"bottom\"\n2 4 \"top\"\n2 5 \"back\"\n2 6 \"front\"\n"
+      << "$EndPhysicalNames\n$Nodes\n" << (n + 1) * (n + 1) * (n + 1) << "\n";
+    s.precision(17);
+    for (uint32_t k = 0; k <= n; k++) {
+        for (uint32_t j = 0; j <= n; j++) {
+            for (uint32_t i = 0; i <= n; i++) {
+                const uint32_t idx[3] = {i, j, k};
+                s << id(i, j, k);
+                for (size_t a = 0; a < 3; a++) {
+                    const double d = jitter(rng);
+                    s << " " << (idx[a] + (idx[a] % n ? d : 0.0)) / n;
+                }
+                s << "\n";
+            }
+        }
+    }
+    std::vector<std::string> elements;
+    // Each cube face is split along the diagonal from its lowest corner, as the tetrahedra split it
+    for (uint32_t p = 0; p < n; p++) {
+        for (uint32_t q = 0; q < n; q++) {
+            for (const uint32_t e : {0u, n}) {
+                const std::array<std::array<std::string, 4>, 3> faces = {{
+                    {id(e, p, q), id(e, p + 1, q), id(e, p + 1, q + 1), id(e, p, q + 1)},
+                    {id(p, e, q), id(p + 1, e, q), id(p + 1, e, q + 1), id(p, e, q + 1)},
+                    {id(p, q, e), id(p + 1, q, e), id(p + 1, q + 1, e), id(p, q + 1, e)},
+                }};
+                for (int a = 0; a < 3; a++) {
+                    const std::string tag = std::to_string(2 * a + (e ? 2 : 1));
+                    const auto & v = faces[size_t(a)];
+                    elements.push_back("2 2 " + tag + " " + tag + " " + v[0] + " " + v[1] + " " + v[2]);
+                    elements.push_back("2 2 " + tag + " " + tag + " " + v[0] + " " + v[2] + " " + v[3]);
+                }
+            }
+        }
+    }
+    for (uint32_t k = 0; k < n; k++) {
+        for (uint32_t j = 0; j < n; j++) {
+            for (uint32_t i = 0; i < n; i++) {
+                // One tetrahedron per path from the lowest corner to the highest
+                // along the three axes, ordered for a positive volume
+                std::array<size_t, 3> axes = {0, 1, 2};
+                do {
+                    const int inversions = (axes[0] > axes[1]) + (axes[0] > axes[2]) + (axes[1] > axes[2]);
+                    uint32_t c[3] = {i, j, k};
+                    std::array<std::string, 4> v;
+                    v[0] = id(c[0], c[1], c[2]);
+                    for (size_t l = 0; l < 3; l++) {
+                        c[axes[l]]++;
+                        v[l + 1] = id(c[0], c[1], c[2]);
+                    }
+                    if (inversions % 2) std::swap(v[1], v[2]);
+                    elements.push_back("4 2 0 1 " + v[0] + " " + v[1] + " " + v[2] + " " + v[3]);
+                } while (std::next_permutation(axes.begin(), axes.end()));
             }
         }
     }

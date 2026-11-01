@@ -62,6 +62,6 @@ time_interval = 2.0e-6
 # tool saves it, so this wall output is only overwritten by every segment
 [[write_data]]
 prefix = "./wall_2d/bottom"
-geometry = "bottom"
+region = "bottom"
 time_interval = 6.0e-6
 variables = ["P_MAX"]

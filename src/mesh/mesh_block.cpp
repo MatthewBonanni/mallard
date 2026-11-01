@@ -559,6 +559,10 @@ void write_mesh_h5(const std::string & filename, const MeshBlock & block) {
         write_rows(group, "offsets", total[CELLS] + 1, 1, first[CELLS], cell_offsets.size(), cell_offsets.data(), dxpl);
         write_rows(group, "nodes", total[CELL_NODES], 1, first[CELL_NODES], block.cell_nodes.size(),
                    block.cell_nodes.data(), dxpl);
+        if (!block.cell_zone_names.empty()) {
+            write_rows(group, "zone", total[CELLS], 1, first[CELLS], block.n_cells(), block.cell_zone.data(), dxpl);
+            write_strings_attribute(group, "zone_names", block.cell_zone_names);
+        }
     }
     {
         Handle group(H5Gcreate2(file, "boundary", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
@@ -654,6 +658,15 @@ MeshBlock read_mesh_h5(const std::string & filename, bool whole) {
         block.first_cell = block_begin(n, r, p);
         read_csr(group, block.first_cell, block_begin(n, r + 1, p) - block.first_cell, block.cell_offsets,
                  block.cell_nodes);
+        if (H5Lexists(group, "zone", H5P_DEFAULT) > 0) {
+            block.cell_zone = read_rows<uint32_t>(group, "zone", block.first_cell, block.n_cells(), 1, dxpl);
+            block.cell_zone_names = read_strings_attribute(group, "zone_names");
+            for (uint32_t z : block.cell_zone) {
+                if (z >= block.cell_zone_names.size() && z != Mesh::NO_CELL_ZONE) {
+                    throw std::runtime_error(filename + ": cell zone out of range.");
+                }
+            }
+        }
     }
     {
         Handle group(H5Gopen2(file, "nodes", H5P_DEFAULT), H5Gclose, "opening nodes");

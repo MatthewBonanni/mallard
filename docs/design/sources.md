@@ -112,7 +112,7 @@ cell's triangles (2D fan) or tetrahedra (`Mesh::h_cell_tetrahedra`), each
 subdivided by midpoints only where the surface (or the smooth band) can cross
 it: a simplex whose centroid is farther from the surface than the simplex's
 radius is uniform, by the Lipschitz bound. Up to 8 levels in 2D and 5 in 3D,
-the volumes of the tests' shapes come out within 2e-5 (2D) and 2e-4 (3D) on
+the volumes of the tests' regions come out within 2e-5 (2D) and 2e-4 (3D) on
 meshes of 8 and 5 cells across. A cell entirely inside gets exactly 1. Implicit
 regions have no bound; they subdivide where `f` may change sign over a simplex
 by twice its slope there.

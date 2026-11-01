@@ -224,8 +224,12 @@ Mallard <version>, keeping its comments and layout, and writes it to standard
 output; the changes go to standard error. A renamed key keeps its value and
 comment, a moved key goes to the end of its new table, and a removed key is
 commented out with a note. A file with nothing to change comes back byte for
-byte; one with a changed dotted key or inline table is reformatted, comments
-kept.
+byte; one with a renamed, moved or removed dotted key or key of an inline table
+is reformatted, comments kept; a renamed option changes in place, also inside
+inline tables.
+
+Some renames depend on the case's dimension, which the command reads from the
+input's mesh as a run does; when the mesh is not at hand, --dim states it.
 
 Renamed keys still work, with a warning, for at least one minor release before
 they are removed. mallard check lists deprecated keys as warnings and removed
@@ -234,11 +238,14 @@ ones as errors.
 Options:
   --check     Write nothing: list the changes, with exit status 1 if there are
               any.
+  --dim 2|3   The case's dimension, for renames that depend on it. Default: from
+              the input's mesh, as a run finds it.
   -h, --help  Show this page.
 
 Examples:
   $ mallard input upgrade old.toml > new.toml
   $ mallard input upgrade --check input.toml
+  $ mallard input upgrade --dim 3 old.toml > new.toml
 
 Exit status:
   0  the file was written (with --check: it is up to date)
@@ -257,8 +264,11 @@ Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial
 solution) without time stepping and without writing any file, then reports:
 unknown or unused keys, boundary zones without a condition, mesh quality with
 the worst cells, the stable time step and the cell that sets it, memory per rank
-and, with --throughput or --steps, the cost. Under mpirun -n N it checks the run
-on N ranks.
+and, with --throughput or --steps, the cost. It lists every region the case uses
+and the mesh's own (domain, boundary zones, cell zones) with its dimension,
+measure and cells, and whether a surface or curve is exact or extracted; a
+region that covers no cell is an error. Under mpirun -n N it checks the run on N
+ranks.
 
 Options:
   -i FILE                   The input file, instead of the argument.
@@ -280,6 +290,12 @@ Options:
   --catalog KEYS.json       Write every key the setup looked up, with its type,
                             unit, default and accepted values, as JSON. Default:
                             none.
+  --view DIR                Write the case view to DIR/case.vtkhdf for ParaView:
+                            every region the case uses (filled regions as their
+                            cells with their fractions, surfaces and curves with
+                            their normals or tangents and measures) and every
+                            boundary zone, one block each (builds without HDF5:
+                            DIR/case.vtm). Default: none.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).
@@ -289,6 +305,7 @@ Examples:
   $ mallard check input.toml
   $ mallard check input.toml --ranks 64 --throughput 5e7
   $ mpirun -n 4 mallard check input.toml --quality quality
+  $ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView
 
 Exit status:
   0  no errors (there may be warnings)

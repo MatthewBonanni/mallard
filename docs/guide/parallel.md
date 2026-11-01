@@ -28,7 +28,7 @@ and launch with `mpirun`; the input file is unchanged:
 mpirun -n 4 build/src/mallard -i input.toml --kokkos-num-threads=2
 ```
 
-Each rank owns a piece of the mesh, plus as many layers of halo cells as its reconstruction needs (one for first order, two for MUSCL and viscous terms, more for TENO, which Mallard determines from the stencils themselves). The log reports the split:
+Each rank owns a piece of the mesh, plus as many layers of halo cells as its reconstruction needs (one for first order, two for MUSCL and viscous terms, more for TENO, which Mallard determines from the stencils themselves). The terminal output reports the split:
 
 ```text
 > Distributed over 3 ranks: 160000 cells, at most 53334 per rank, 2 halo layers
@@ -56,7 +56,7 @@ curve, multi-jagged ones are slabs cut along each axis in turn.*
 - `hilbert` (the default before 0.8.0): cells split along a Hilbert curve through their centroids.
 - `graph`: [dKaMinPar](https://github.com/KaHIP/KaMinPar) on the cell connectivity, which minimizes the number of faces between ranks; needs a build with `-DMallard_ENABLE_KAMINPAR=ON` (and oneTBB).
 
-On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo data then goes between GPUs directly instead of through host memory. On NVIDIA GPUs, `-DMallard_ENABLE_NCCL=ON` exchanges halos with NCCL on the GPU's stream, with no host synchronization per exchange (`[parallel] halo_exchange = "nccl"`, the default in such builds). CUDA builds also run each step as one CUDA graph (`[run] cuda_graphs`, on by default), except where the host takes part in the step: gas mixtures, characteristic boundaries, expressions of `t`, average-pressure outlets and MPI (not NCCL) halo exchanges. Exchanges carry only the halo cells the stencils read.
+On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo data then goes between GPUs directly instead of through host memory. On NVIDIA GPUs, `-DMallard_ENABLE_NCCL=ON` exchanges halos with NCCL on the GPU's stream, with no host synchronization per exchange (`[parallel] halo_exchange = "nccl"`, the default in such builds). CUDA builds also run each step as one CUDA graph (`[run] cuda_graphs`, on by default), except where the host takes part in the step: gas mixtures, characteristic boundaries, average-pressure outlets, sources of domain averages and MPI (not NCCL) halo exchanges. Exchanges carry only the halo cells the stencils read.
 
 Every rank builds the same stencils as a serial run and sums each cell's face fluxes in a fixed order, so the solution is bitwise identical on any number of ranks: after 100 steps of the 2D Riemann problem on 400 × 400 quadrilaterals with fifth-order TENO-E, the restart files of runs on 1 and 3 ranks are byte for byte the same. Sums over the whole domain that are written to output files, such as force monitors, are reduced across ranks and can differ in the last digits.
 
@@ -83,7 +83,7 @@ solut/r_000100_p0001.vtu
 solut/r_000100_p0002.vtu
 ```
 
-Boundary-zone output (`geometry = "<zone>"`) likewise holds each rank's own faces. Force monitors are summed over the ranks and written by rank 0.
+A volume region's VTU (`region = ...`) likewise holds each rank's own cells of it; boundary zones, cut planes and other regions of lower dimension are gathered and written by rank 0, as probes are. Force monitors are summed over the ranks and written by rank 0.
 
 ### Restarts
 

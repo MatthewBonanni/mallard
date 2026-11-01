@@ -102,19 +102,22 @@ variables = ["RHO", "P"]
 # Density on the three symmetry planes, for the animation
 [[write_data]]
 prefix = "./planes/x0"
-geometry = "left"
+region = "left"
+format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.005
 variables = ["RHO"]
 
 [[write_data]]
 prefix = "./planes/y0"
-geometry = "bottom"
+region = "bottom"
+format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.005
 variables = ["RHO"]
 
 [[write_data]]
 prefix = "./planes/z0"
-geometry = "back"
+region = "back"
+format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.005
 variables = ["RHO"]
 

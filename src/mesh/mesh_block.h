@@ -42,6 +42,8 @@ struct MeshBlock {
     std::vector<uint64_t> face_nodes;
     std::vector<uint32_t> face_zone;        // index into zone_names
     std::vector<std::string> zone_names;    // every zone, on every rank
+    std::vector<uint32_t> cell_zone;          // per cell, index into cell_zone_names; empty without cell zones
+    std::vector<std::string> cell_zone_names; // every rank
     // High-order boundary faces: CSR per boundary face (empty if none at all)
     // into the coordinates of all its nodes, corners first in Gmsh order;
     // linear faces have none

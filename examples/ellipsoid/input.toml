@@ -1,0 +1,146 @@
+# Inviscid flow past a prolate spheroid at Mach 0.3 (3D build), with the wall
+# faces curved onto the analytic ellipsoid, against the same mesh with flat
+# faces ([mesh] curved_geometry = false). The exact steady solution has no
+# drag (d'Alembert) and uniform entropy, and its surface pressure is close to
+# incompressible potential flow, Cp = 1 - (1 + k)^2 (1 - n_x^2) with
+# k = 0.2100 for a 2:1 spheroid (Lamb, Hydrodynamics, ch. V; n is the wall
+# normal): any drag and entropy rise are numerical errors, which flat facets
+# make at the wall and the curved faces remove.
+#
+# compare_ellipsoid.py --scales 2 2.8 4 (82,153, 218,167 and 627,507
+# tetrahedra, t = 40), cells near the body:
+#
+#   curved faces   scale 2     2.8      4
+#     Cd                1.9e-4  3.7e-4   1.9e-4
+#     entropy error     3.1e-6  2.1e-6   4.0e-6
+#     Cp error          0.0138  0.0122   0.0120
+#
+# (Cd from the late-time mean force; entropy error: volume-weighted RMS of
+# s / s_inf - 1 within the spheroid scaled by 3; Cp error: RMS against the
+# incompressible potential flow over the wall faces). The flow on the curved
+# faces is steady and its wall pressure lies on the potential-flow curve. The
+# Cp error stops falling at about 0.012 because the reference is
+# incompressible and the run is at Mach 0.3 (at the stagnation points the
+# compressible Cp is 1 + M^2 / 4 = 1.023, not 1). The entropy error has its
+# maximum (2e-4 to 4e-3, unsteady, not converging) only in the few cells at the
+# rear stagnation point, where the axis, both symmetry planes and the curved
+# wall meet; elsewhere near the body it is below 5e-5 at scale 4.
+#
+# Flat facets are corners for the inviscid flow: it separates and turns
+# unsteady at every scale, with Cd of order 1e-2 oscillating about zero
+# by about 0.1, an entropy error a thousand times the curved one and wall Cp
+# scattered by about 1.5 about the potential-flow curve.
+#
+# Mesh: tetrahedra of the quarter y >= 0, z >= 0 of the box [-6, 8] x [-6, 6]^2
+# (y = 0 and z = 0 are symmetry planes), spheroid of length 2 and diameter 1,
+# 627,507 tetrahedra at --scale 4. Generate it first:
+#   python make_ellipsoid_mesh.py ellipsoid.msh --scale 4
+# Nondimensionalization: free-stream density and sound speed 1, so U = M = 0.3.
+#
+# Run, then compare with the flat faces:
+#   ../../build3d/src/mallard -i input.toml
+#   python compare_ellipsoid.py runs --mallard ../../build3d/src/mallard -o ellipsoid.png
+# (compare_ellipsoid.py runs both geometries on meshes of the given scales and
+# plots the drag, entropy error and wall pressure).
+#
+# Cost: 9.0 hours on one A100 (147,514 steps; flat faces 11.4 hours, 150,114
+# steps). examples/ellipsoid/animate_ellipsoid.py animates both runs.
+
+[run]
+t_stop = 40.0
+cfl = 0.4
+
+[mesh]
+type = "file"
+filename = "ellipsoid.msh"
+
+[[mesh.curved]]
+zone = "ellipsoid"
+type = "ellipsoid"
+filled = false
+center = [0.0, 0.0, 0.0]
+semi_axes = [1.0, 0.5, 0.5]
+
+[initialize]
+type = "constant"
+u = [0.3, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "ellipsoid"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "inflow"
+type = "farfield"
+u = [0.3, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "lateral"
+type = "farfield"
+u = [0.3, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "outflow"
+type = "farfield"
+u = [0.3, 0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "symmetry_y"
+type = "symmetry"
+
+[[boundaries]]
+name = "symmetry_z"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+
+[output]
+check_interval = 500
+
+[[forces]]
+zone = "ellipsoid"
+interval = 10
+file = "./solut/forces_ellipsoid.csv"
+
+[[write_data]]
+prefix = "./solut/ellipsoid"
+format = "vtu"
+time_interval = 10.0
+variables = ["RHO", "U", "P"]
+
+# The wall and the meridian plane y = 0, often enough for an animation
+[[write_data]]
+prefix = "./solut/wall"
+format = "vtu"
+geometry = "ellipsoid"
+time_interval = 0.25
+variables = ["P"]
+
+[[write_data]]
+prefix = "./solut/y0"
+format = "vtu"
+geometry = "symmetry_y"
+time_interval = 0.25
+variables = ["RHO", "U", "P"]

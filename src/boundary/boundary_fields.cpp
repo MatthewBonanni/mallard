@@ -11,6 +11,7 @@
 
 #include "boundary_fields.h"
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
 
@@ -403,6 +404,77 @@ void TimedBoundaryFields::check() const {
     const std::string key = fields.slot_key(slot);
     throw InputError(fields.get_where() + "." + key + " must be " +
                      (slot == BoundaryFields::SLOT_FLUX ? "non-negative" : "positive") + " (" + real(h_error(1)) + at + ").");
+}
+
+void DirichletStates::add(const std::vector<std::shared_ptr<const expr::Program>> & W,
+                          const std::vector<int32_t> & states, const std::vector<Point> & x) {
+    const uint32_t set = static_cast<uint32_t>(set_timed.size());
+    const bool timed = std::any_of(W.begin(), W.end(), [](const auto & w) { return w->uses(3); });
+    set_timed.push_back(timed);
+    host_programs.insert(host_programs.end(), W.begin(), W.end());
+    for (size_t k = 0; k < states.size(); k++) faces_host.push_back({states[k], set, x[k]});
+    if (timed) n_timed += static_cast<uint32_t>(states.size());
+}
+
+namespace {
+
+struct DirichletStatesFunctor {
+    Kokkos::View<int32_t *> face_state_index;
+    Kokkos::View<uint32_t *> face_set;
+    Kokkos::View<double *[3]> face_x;
+    expr::ProgramTable<> programs;
+    Kokkos::View<rtype> time;
+    Kokkos::View<rtype *[N_DIM + 2]> face_state;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k) const {
+        constexpr uint32_t N_W = N_DIM + 2;
+        const double vars[4] = {face_x(k, 0), face_x(k, 1), face_x(k, 2), static_cast<double>(time())};
+        for (uint32_t i = 0; i < N_W; i++) {
+            face_state(face_state_index(k), i) =
+                static_cast<rtype>(programs(face_set(k) * N_W + i, expr::ArrayVariables{vars}));
+        }
+    }
+};
+
+} // namespace
+
+void DirichletStates::finish(const Kokkos::View<rtype *[N_DIM + 2]> & face_state) {
+    std::stable_partition(faces_host.begin(), faces_host.end(), [&](const FaceHost & f) { return set_timed[f.set]; });
+    const size_t n = faces_host.size();
+    face_state_index = Kokkos::View<int32_t *>("dirichlet_face_state_index", n);
+    face_set = Kokkos::View<uint32_t *>("dirichlet_face_set", n);
+    face_x = Kokkos::View<double *[3]>("dirichlet_face_x", n);
+    auto h_index = Kokkos::create_mirror_view(face_state_index);
+    auto h_set = Kokkos::create_mirror_view(face_set);
+    auto h_x = Kokkos::create_mirror_view(face_x);
+    for (size_t k = 0; k < n; k++) {
+        h_index(k) = faces_host[k].state;
+        h_set(k) = faces_host[k].set;
+        for (size_t d = 0; d < 3; d++) h_x(k, d) = d < N_DIM ? faces_host[k].x[d] : 0.0;
+    }
+    Kokkos::deep_copy(face_state_index, h_index);
+    Kokkos::deep_copy(face_set, h_set);
+    Kokkos::deep_copy(face_x, h_x);
+    std::vector<const expr::Program *> all;
+    for (const auto & p : host_programs) all.push_back(p.get());
+    programs = expr::ProgramTable<>(all);
+    if (n == n_timed) return;
+    Kokkos::parallel_for("dirichlet_states", Kokkos::RangePolicy<>(n_timed, n),
+                         DirichletStatesFunctor{face_state_index, face_set, face_x, programs,
+                                                Kokkos::View<rtype>("dirichlet_time"), face_state});
+}
+
+void DirichletStates::apply(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM + 2]> & face_state) const {
+    if (n_timed == 0) return;
+    Kokkos::parallel_for("dirichlet_states", n_timed,
+                         DirichletStatesFunctor{face_state_index, face_set, face_x, programs, time, face_state});
+}
+
+void DirichletStates::check() const {
+    if (faces_host.empty()) return;
+    if (const uint32_t stopped = programs.stopped(); stopped > 0) {
+        throw InputError(host_programs[stopped - 1]->runaway_error());
+    }
 }
 
 bool TimedInletTargets::depends_on_time(const Input & u, const std::string & where) {

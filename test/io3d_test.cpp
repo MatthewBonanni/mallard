@@ -467,8 +467,8 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
         solver.set_distributed(false);
         solver.init(parse_toml(
             "[run]\nn_steps = 1\ncfl = 0.3\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
-            "[[mesh.curved]]\nzone = \"inner\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
-            "[[mesh.curved]]\nzone = \"outer\"\nshape = \"sphere\"\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
+            "[[mesh.curved]]\nzone = \"inner\"\ntype = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.0\n"
+            "[[mesh.curved]]\nzone = \"outer\"\ntype = \"sphere\"\nfilled = false\ncenter = [0.0, 0.0, 0.0]\nradius = 1.5\n"
             "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\", \"0.0\"]\np = \"1.0\"\n"
             "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
             "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"
@@ -540,37 +540,33 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
 #endif
 }
 
-TEST(IO3DTest, BoundaryZoneOutputWritesTrianglesAndQuads) {
-    const std::string dir = (scratch_dir() / "mallard_vtu3d_faces").string();
+TEST(IO3DTest, RegionOutputWritesItsCellsAndOnlyTheirNodes) {
+    const std::string dir = (scratch_dir() / "mallard_vtu3d_subset").string();
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO"});
+    CellSubset prisms{"prisms", {}, std::vector<double>(mesh->n_cells, 0.0)};
+    std::set<uint32_t> nodes;
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        if (mesh->h_n_nodes_of_cell(c) != 6) continue;
+        prisms.cells.push_back(c);
+        prisms.fractions[c] = 0.5;
+        for (uint32_t k = 0; k < 6; k++) nodes.insert(mesh->h_node_of_cell(c, k));
+    }
+    ASSERT_FALSE(prisms.cells.empty());
+    ASSERT_LT(nodes.size(), size_t(mesh->n_nodes));
     DataWriter writer;
-    writer.init(parse_toml("prefix = \"" + dir + "/sides\"\nformat = \"vtu\"\ninterval = 1\n"
-                           "geometry = \"sides\"\nvariables = [\"RHO\"]\n"), fields.data, mesh);
+    writer.init(parse_toml("prefix = \"" + dir + "/p\"\nformat = \"vtu\"\ninterval = 1\nvariables = [\"RHO\"]\n"),
+                fields.data, mesh, {}, &prisms);
     writer.write(0, 0.0);
     comm::barrier();  // Rank 0 writes the files
-
-    std::ifstream in(dir + "/sides_000000.vtu");
+    std::ifstream in(dir + "/p_000000.vtu");
     std::stringstream buffer;
     buffer << in.rdbuf();
     const std::string text = buffer.str();
-    auto array = [&](const std::string & name) {
-        const size_t start = text.find(">", text.find("Name=\"" + name + "\"")) + 1;
-        std::istringstream values(text.substr(start, text.find("</DataArray>", start) - start));
-        return std::vector<double>(std::istream_iterator<double>(values), std::istream_iterator<double>());
-    };
-    // 4 quads and 2 triangles on the hex and prism sides, 4 * 4 + 2 * 3 nodes
-    std::map<int, int> n_of_type;
-    for (double t : array("types")) n_of_type[static_cast<int>(t)]++;
-    EXPECT_EQ(n_of_type, (std::map<int, int>{{5, 2}, {9, 4}}));
-    EXPECT_EQ(array("offsets").back(), 22.0);
-    EXPECT_NE(text.find("NumberOfPoints=\"10\""), std::string::npos);
-    // Points keep their z coordinate (the prism top edge 6-7 is at z = 1)
-    const size_t start = text.find(">", text.find("<Points>") + 9) + 1;
-    std::istringstream coords(text.substr(start, text.find("</DataArray>", start) - start));
-    double x, y, z, z_max = 0.0;
-    while (coords >> x >> y >> z) z_max = std::max(z_max, z);
-    EXPECT_EQ(z_max, 1.0);
+    EXPECT_NE(text.find("NumberOfPoints=\"" + std::to_string(nodes.size()) + "\" NumberOfCells=\"" +
+                        std::to_string(prisms.cells.size()) + "\""),
+              std::string::npos);
+    EXPECT_NE(text.find("Name=\"REGION_FRACTION\""), std::string::npos);
 }
 
 TEST(IO3DTest, RestartRoundTripCarriesAllConservatives) {

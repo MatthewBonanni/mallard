@@ -7,7 +7,8 @@
     perf_suite.py update-baselines perf.json [--hardware NAME]
 
 `run` runs each case once to warm up, then --repeats times, and records every
-run's throughput (cells/s: the solver's time stepping, or the chemistry
+run's throughput (cells/s: the solver's time stepping, with "metric": "with_output"
+also its diagnostics and output, where probes sample; or the chemistry
 benchmark's cells per second at each dt), the best and the spread
 ((best - worst) / best). `compare` reads benchmarks/perf/baselines.csv and
 exits 1 if a metric is slower than its baseline by more than both the
@@ -77,6 +78,19 @@ def stage_input(case_input, work):
     return staged
 
 
+def seconds(text):
+    """A duration as Mallard's log writes it ("320 ms", "13.8 s", "2m 05s", "1h 02m") in seconds."""
+    text = text.strip()
+    m = re.fullmatch(r"([0-9.]+) (us|ms|s)", text)
+    if m:
+        return float(m.group(1)) * {"us": 1e-6, "ms": 1e-3, "s": 1.0}[m.group(2)]
+    m = re.fullmatch(r"(\d+)([hm]) (\d+)([ms])", text)
+    if not m:
+        raise RuntimeError(f"unknown duration {text!r}")
+    big = 3600 if m.group(2) == "h" else 60
+    return int(m.group(1)) * big + int(m.group(3)) * (60 if m.group(4) == "m" else 1)
+
+
 def run_once(case, binary, launcher, work, log=None):
     staged = stage_input((PERF_DIR / case["input"]).resolve(), work)
     command = [case["command"]] if "command" in case else []
@@ -91,7 +105,16 @@ def run_once(case, binary, launcher, work, log=None):
         m = re.search(r"Throughput\s+([0-9.]+)([kMGT]?) cells/s", out.stdout)
         if not m:
             raise RuntimeError(f"{case['name']}: no throughput in the output\n{out.stdout[-3000:]}")
-        return {case["name"]: float(m.group(1)) * SI[m.group(2)]}
+        throughput = float(m.group(1)) * SI[m.group(2)]
+        if case.get("metric") == "with_output":
+            # Probes sample in the output phase: cells per second over time stepping, diagnostics and output
+            w = re.search(r"Wall time\s+.*?: setup (.+?), time stepping (.+?), diagnostics (.+?), output (.+?)$",
+                          out.stdout, flags=re.M)
+            if not w:
+                raise RuntimeError(f"{case['name']}: no wall time in the output\n{out.stdout[-3000:]}")
+            stepping, diagnostics, output = (seconds(w.group(k)) for k in (2, 3, 4))
+            throughput *= stepping / (stepping + diagnostics + output)
+        return {case["name"]: throughput}
     result = {}
     csv_files = sorted(work.glob("*.csv"))
     if not csv_files:

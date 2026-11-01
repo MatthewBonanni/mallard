@@ -71,7 +71,7 @@ table = "sponges"
 about = "sponge layers that absorb outgoing waves"
 [[tables]]
 table = "output"
-about = "how often the log prints a progress line"
+about = "how often the terminal output shows a progress row"
 [[tables]]
 table = "write_data"
 about = "snapshots (VTKHDF for ParaView and tools/, VTU, restart files)"
@@ -254,6 +254,18 @@ cost = "128 quadrilaterals, a minute on one thread"
 post = ["plot_poiseuille.py poiseuille.png $(last solut/pipe)"]
 results = "poiseuille.png, the axial velocity against the exact profile"
 quick = ["run.t_stop = 1.0", "write_data.time_interval = 1.0"]
+
+[[templates]]
+name = "pulsed_jet"
+group = "axisymmetric"
+summary = "A pulsed round jet launching a train of vortex rings (a nozzle split from the wall, inflow as an expression of t)"
+source = "examples/pulsed_jet"
+files = ["input.toml", "plot_pulsed_jet.py"]
+dim = 2
+cost = "442,368 quadrilaterals, about 5 minutes on one A100"
+post = ["plot_pulsed_jet.py solut/jet solut/probe_inlet.csv --png pulsed_jet.png"]
+results = "pulsed_jet.png, the vorticity, the rings' core positions and the inlet velocity against U(t)"
+quick = ["mesh.Nx = 96", "mesh.Ny = 32", "physics.mu = 8.0e-4", "run.t_stop = 15.0"]
 
 [[templates]]
 name = "noh_axisymmetric"
