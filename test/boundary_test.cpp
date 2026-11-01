@@ -207,6 +207,7 @@ struct FarfieldCase {
 
     FarfieldCase(const rtype * W_i) {
         bc.type = BoundaryType::FARFIELD;
+        bc.set_dispatch();
         const rtype W_inf[N_CONSERVATIVE] = {1.0_r, 0.3_r, -0.1_r, 1.0_r / G};
         FOR_I_CONSERVATIVE bc.data[i] = W_inf[i];
         bc.ghost_W(W_i, n, G, 1.0, false, W_g);

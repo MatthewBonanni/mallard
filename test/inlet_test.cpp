@@ -74,6 +74,7 @@ std::array<rtype, N_CONSERVATIVE> perfect_ghost(double gamma, double R, double T
                                                 const std::array<rtype, N_CONSERVATIVE> & W_i, const Vec & n) {
     BoundaryCondition bc;
     bc.type = BoundaryType::INLET_STAGNATION;
+    bc.set_dispatch();
     bc.data[0] = rtype(T0);
     FOR_I_DIM bc.data[1 + i] = d[i];
     bc.data[N_DIM + 1] = rtype(p0);
@@ -547,6 +548,7 @@ TEST(MassFlowInletTest, GhostCarriesTheMassFluxAndTheOutgoingWave) {
             W_i[N_DIM + 1] = rtype(1.0e5 * rho_i);
             BoundaryCondition bc;
             bc.type = BoundaryType::INLET_MASS_FLOW;
+            bc.set_dispatch();
             bc.data[0] = rtype(T);
             FOR_I_DIM bc.data[1 + i] = d[i];
             bc.data[N_DIM + 1] = rtype(G);

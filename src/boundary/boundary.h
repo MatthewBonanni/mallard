@@ -112,8 +112,29 @@ struct BoundaryCondition {
         AVERAGE = 2,  // OUTLET_PRESSURE: the area-averaged pressure is the target
     };
 
+    /**
+     * @brief The ghost state's case, from type and options (set_dispatch): one
+     *        case per variant, so that the device switch of ghost_W is no larger
+     *        than one over the types alone.
+     */
+    enum class Dispatch : uint8_t {
+        SYMMETRY,
+        TRANSMISSIVE,
+        WALL_ADIABATIC,
+        WALL_ISOTHERMAL,
+        WALL_HEAT_FLUX,
+        STATE,
+        PRESSURE,
+        PRESSURE_AVERAGE,
+        DIRICHLET,
+        FARFIELD,
+        STAGNATION,
+        MASS_FLOW,
+    };
+
     BoundaryType type = BoundaryType::OUTLET_EXTRAPOLATION;
     uint8_t options = 0;
+    Dispatch dispatch = Dispatch::TRANSMISSIVE;
     rtype data[N_DIM + 2] = {};
     rtype relax[N_RELAX] = {};
     bool modeled = false;  // walls: a wall model gives the viscous flux, and the ghost is a slip wall's
@@ -166,6 +187,9 @@ struct BoundaryCondition {
      */
     static BoundaryCondition from_input(const Input & input, const Euler & physics);
 
+    /** @brief Set dispatch from type and options; call after changing either. */
+    void set_dispatch();
+
     /**
      * @brief Ghost state W_g = [rho, u, p] given the interior state W_i.
      * @param W_i Interior state.
@@ -184,16 +208,15 @@ struct BoundaryCondition {
         constexpr uint8_t E = N_DIM + 1;
         for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = W_i[i];
         const rtype u_n = dot<N_DIM>(W_i + 1, n);
-        switch (type) {
-            case BoundaryType::OUTLET_EXTRAPOLATION:
-            case BoundaryType::PARTITION:
+        switch (dispatch) {
+            case Dispatch::TRANSMISSIVE:
                 break;
-            case BoundaryType::WALL_ADIABATIC:
-            case BoundaryType::WALL_ISOTHERMAL:
-            case BoundaryType::WALL_HEAT_FLUX:
+            case Dispatch::WALL_ADIABATIC:
+            case Dispatch::WALL_ISOTHERMAL:
+            case Dispatch::WALL_HEAT_FLUX:
                 if (viscous && !modeled) {
                     FOR_I_DIM W_g[1 + i] = 2.0_r * data[1 + i] - W_i[1 + i];
-                    if (type == BoundaryType::WALL_ISOTHERMAL && wall_temperature) {
+                    if (dispatch == Dispatch::WALL_ISOTHERMAL && wall_temperature) {
                         const rtype T_i = W_i[E] / (W_i[0] * R);
                         const rtype T_g = Kokkos::fmax(2.0_r * data[0] - T_i, 0.1_r * data[0]);
                         W_g[0] = W_i[E] / (R * T_g);
@@ -201,25 +224,24 @@ struct BoundaryCondition {
                     break;
                 }
                 [[fallthrough]];
-            case BoundaryType::SYMMETRY:
+            case Dispatch::SYMMETRY:
                 FOR_I_DIM W_g[1 + i] = W_i[1 + i] - 2.0_r * u_n * n[i];
                 break;
-            case BoundaryType::INLET_STATE:
-                if (is_characteristic()) break;
+            case Dispatch::STATE:
                 for (uint8_t i = 0; i < N_DIM + 2; i++) W_g[i] = data[i];
                 break;
-            case BoundaryType::INLET_STAGNATION:
+            case Dispatch::STAGNATION:
                 inflow::perfect_stagnation_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1,
                                                  W_i, n, W_g);
                 break;
-            case BoundaryType::INLET_MASS_FLOW:
+            case Dispatch::MASS_FLOW:
                 inflow::mass_flow_state(double(gamma), double(R), double(data[0]), double(data[E]), data + 1, W_i, n,
                                         W_g);
                 break;
-            case BoundaryType::DIRICHLET:
+            case Dispatch::DIRICHLET:
                 // Handled per face by BoundaryData
                 break;
-            case BoundaryType::FARFIELD: {
+            case Dispatch::FARFIELD: {
                 // Characteristic far field: the outgoing Riemann invariant comes from
                 // the interior, the incoming one from the free stream, and entropy and
                 // tangential velocity from the upwind side
@@ -244,20 +266,23 @@ struct BoundaryCondition {
                 W_g[E] = W_g[0] * a_b * a_b / gamma;
                 break;
             }
-            case BoundaryType::OUTLET_PRESSURE: {
-                if (is_characteristic()) break;
+            case Dispatch::PRESSURE: {
                 const rtype a = Kokkos::sqrt(gamma * W_i[E] / W_i[0]);
-                if (u_n >= a) break;
-                if (has(AVERAGE)) {
+                if (u_n < a) {
+                    // Subsonic: impose pressure, keep temperature
+                    W_g[0] = W_i[0] * data[E] / W_i[E];
+                    W_g[E] = data[E];
+                }
+                break;
+            }
+            case Dispatch::PRESSURE_AVERAGE: {
+                const rtype a = Kokkos::sqrt(gamma * W_i[E] / W_i[0]);
+                if (u_n < a) {
                     // Subsonic: shift the local pressure so the boundary average
                     // matches the target, keeping temperature
                     const rtype p_g = Kokkos::fmax(W_i[E] + data[0], 1e-3_r * W_i[E]);
                     W_g[0] = W_i[0] * p_g / W_i[E];
                     W_g[E] = p_g;
-                } else {
-                    // Subsonic: impose pressure, keep temperature
-                    W_g[0] = W_i[0] * data[E] / W_i[E];
-                    W_g[E] = data[E];
                 }
                 break;
             }
