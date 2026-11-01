@@ -18,7 +18,7 @@ if [ "${1:-}" = --one ]; then
         gmsh) for f in "$root"/test/data/meshes/*.msh; do
                   case $f in *fluent*) ;; *) cp "$f" "$seeds" ;; esac
               done ;;
-        fluent) cp "$root"/test/data/meshes/*fluent*.msh "$seeds" ;;
+        fluent) cp "$root"/test/data/meshes/*fluent*.msh "$root"/test/fuzz/corpus/fluent/* "$seeds" ;;
         openfoam) for d in "$root"/test/data/meshes/*_foam*; do
                       for f in points faces owner neighbour boundary; do
                           cat "$d/constant/polyMesh/$f"
