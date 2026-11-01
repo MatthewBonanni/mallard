@@ -265,8 +265,8 @@ TEST(CliTest, InputUpgradeSaysWhereItLookedForTheMesh) {
     const fs::path dir = "upgrade_case";
     fs::create_directories(dir);
     fs::copy_file(source_dir() + "/test/data/meshes/cyl3d.msh", dir / "mesh.msh", fs::copy_options::overwrite_existing);
-    std::ofstream(dir / "input.toml") << "[mesh]\nfilename = \"mesh.msh\"\n[[sources]]\nrhoE = 1\n"
-                                         "region = {type = \"circle\", center = [0, 0, 0], radius = 1}\n";
+    std::ofstream(dir / "input.toml") << "[mesh]\nfilename = \"mesh.msh\"\n[[mesh.curved]]\nzone = \"wall\"\n"
+                                         "shape = \"sphere\"\ncenter = [0, 0, 0]\nradius = 1\n";
     const std::string input = (dir / "input.toml").string();
     const Result r = run({"input", "upgrade", input});
     EXPECT_EQ(r.status, 1);
@@ -276,5 +276,5 @@ TEST(CliTest, InputUpgradeSaysWhereItLookedForTheMesh) {
         << r.err;
     const Result stated = run({"input", "upgrade", "--dim", "3", input});
     EXPECT_EQ(stated.status, 0) << stated.err;
-    EXPECT_TRUE(contains(stated.out, "type = \"sphere\"")) << stated.out;
+    EXPECT_TRUE(contains(stated.out, "type = \"sphere\"\nfilled = false")) << stated.out;
 }
