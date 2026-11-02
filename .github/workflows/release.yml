@@ -157,7 +157,7 @@ jobs:
           cat "$RUNNER_TEMP/env/spack.yaml"
           spack -e "$RUNNER_TEMP/env" concretize
           spack -e "$RUNNER_TEMP/env" install --fail-fast
-      - name: Concretize the README's other variants
+      - name: Concretize the other variants in docs/installation.md
         run: |
           spack -e "$RUNNER_TEMP/env" spec mallard +cuda cuda_arch=80
           spack -e "$RUNNER_TEMP/env" spec mallard +rocm amdgpu_target=gfx90a
