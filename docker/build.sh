@@ -9,6 +9,11 @@ set -euo pipefail
 src="$1"
 prefix="$2"
 shift 2
+# .dockerignore leaves tracked files (docs, CI) out of the context; without this the
+# version would read as modified
+if git -C "$src" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$src" ls-files -z --deleted | xargs -0r git -C "$src" update-index --skip-worktree
+fi
 for dim in 2 3; do
     cmake -S "$src" -B "/tmp/build-$dim" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" \
         -DUSE_SYSTEM_KOKKOS=OFF -DMallard_ENABLE_TESTS=OFF \

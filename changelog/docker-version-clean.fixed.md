@@ -1,0 +1,2 @@
+- Container images and the Spack package pass their release smoke tests; 0.9.0 published no images (#625).
+- Container images report their version without a `-dirty` suffix.
