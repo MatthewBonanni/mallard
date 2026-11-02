@@ -28,22 +28,23 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 
 **Physics** ([guide](docs/guide/physics.md))
 - Compressible Euler and Navier-Stokes
-- Thermally perfect mixtures and finite-rate chemistry from [Cantera](https://cantera.org) files; ignition delays match Cantera up to 1268 species
+- Thermally perfect mixtures and finite-rate chemistry from [Cantera](https://cantera.org) mechanism files
 - Detailed transport, Soret diffusion, optically thin radiation
 - Source terms and sponges as expressions over named [regions](docs/guide/geometry.md#regions)
 
 **Large-eddy simulation** ([guide](docs/guide/les.md))
 - Sigma, WALE, Vreman and Smagorinsky models; kinetic-energy-preserving hybrid flux
 - Thickened flames with dynamic efficiency; synthetic turbulent inflow
-- Wall models: C<sub>f</sub> within 2.1% of DNS at Re<sub>τ</sub> = 5200 on 12 cells per half-height
+- Wall models: Griffin-Fu-Moin compressible and equilibrium ODE
 
 **Boundary conditions** ([guide](docs/guide/boundary_conditions.md))
 - Walls, inlets, outlets, far field and symmetry, with composable options (NSCBC, averaging, turbulence, wall models)
 - Every value a number or an expression of x, y, z and t
 
 **Performance** ([guide](docs/guide/performance.md))
-- CPUs, and NVIDIA and AMD GPUs; 50M cell updates per second on one A100
-- MPI with GPU-aware or NCCL halo exchange: 91-93% weak-scaling efficiency on 16 A100s
+- CPUs (OpenMP, threads) and NVIDIA and AMD GPUs; single or double precision
+- MPI with GPU-aware or NCCL halo exchange overlapped with computation; multi-jagged, Hilbert-curve or graph partitions
+- The whole time step as one CUDA graph
 - Bitwise-identical results on any number of ranks; restarts bit for bit
 
 **Input and output** ([guide](docs/guide/input_files.md))
@@ -52,12 +53,12 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - VTKHDF output for ParaView
 - Probes on points, curves, surfaces, boundaries and regions; statistics, spectra and phase averages
 
-**Validation**
-- 40 [examples](examples) against exact solutions, theory, DNS and Cantera
-- Over 500 tests; a [verification manual](https://matthewbonanni.github.io/mallard/docs/verification/) of 149 convergence studies
+**Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
+- 40 [examples](examples), compared with exact solutions, other codes, DNS and experiments
+- Over 500 tests; a [verification manual](https://matthewbonanni.github.io/mallard/docs/verification/) of measured convergence orders
 - CPU and GPU CI before every merge; a [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/)
 
-Every method and validation source is cited in [docs/references.md](docs/references.md).
+Every method and reference is cited in [docs/references.md](docs/references.md).
 
 ## Installing
 

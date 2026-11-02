@@ -40,7 +40,7 @@ budget = true              # model vs numerical dissipation in integrals.csv
 The `les` [preset](numerics.md#presets) is the setup of the `channel_les`
 and `cbc_les` examples: the channel at
 Re<sub>τ</sub> = 395 and 590 lands within 0.7% and 1.6% of the DNS
-([validation](https://matthewbonanni.github.io/mallard/validation/#les-channel)),
+([benchmark](https://matthewbonanni.github.io/mallard/validation/#les-channel)),
 decaying grid turbulence within the measured spectra
 ([validation](https://matthewbonanni.github.io/mallard/validation/#les-cbc)).
 
@@ -149,7 +149,7 @@ a test filter removes, so there is no model constant. A sensor `Ω` confines it 
 
 Output: `TF_F`, `TF_E`, `TF_OMEGA`, and `tf_beta` in the integrals file. Validated on a premixed H2/air flame in
 decaying turbulence against its DNS
-([validation](https://matthewbonanni.github.io/mallard/validation/#les-flame)).
+([benchmark](https://matthewbonanni.github.io/mallard/validation/#les-flame)).
 The dynamic efficiency keeps the turbulent flame speed within 8% of two DNS
 at cells of 0.4–1.6 `delta_L`. Pitfalls: `beta`, `subgrid_velocity` and `C_u`
 are input errors with `dynamic` (they belong to `charlette`); with
@@ -171,7 +171,7 @@ are scaled by its reacting fraction `kappa = tau_c / (tau_c + tau_mix)`,
 `tau_mix = C_mix Delta^2 / (nu + nu_t)` (key `C_mix`, default 1; output
 `PASR_KAPPA`). It corrects the right way at moderate filter widths and
 overcorrects on coarse meshes; validated on one case only
-([validation](https://matthewbonanni.github.io/mallard/validation/#les-pasr)).
+([benchmark](https://matthewbonanni.github.io/mallard/validation/#les-pasr)).
 
 ## Wall models: `wall_model`
 
@@ -222,5 +222,5 @@ Pitfalls:
 ## See also
 
 - [Input reference: `[les]`](../input.md#les), [`[les.combustion]`](../input.md#lescombustion), [`[numerics.hybrid]`](../input.md#numericshybrid)
-- [Validation: large-eddy simulation](https://matthewbonanni.github.io/mallard/validation/#les)
+- [Benchmarks: large-eddy simulation](https://matthewbonanni.github.io/mallard/validation/#les)
 - Design notes: [large-eddy simulation](../design/les.md), [wall models](../design/wall_model.md)

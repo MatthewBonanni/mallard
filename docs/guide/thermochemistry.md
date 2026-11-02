@@ -121,7 +121,7 @@ Chemistry and flow are split:
   integrates over the whole step with the flow's right-hand side as a constant
   source, so steady flames stay exactly steady at any step; the detonation's
   induction length stays within 5% at `cfl = 1.0`
-  ([validation](https://matthewbonanni.github.io/mallard/validation/#simpler)).
+  ([verification](https://matthewbonanni.github.io/mallard/validation/#simpler)).
   Not with `fuse_half_steps`, `double_flux` or the `hybrid` flux.
 
 | Key | Default | Meaning |
@@ -178,7 +178,7 @@ outputs `QRAD` [W/m³].
 | `species` | those of H2O, CO2, CO, CH4 in the mechanism | Radiating species |
 
 Cantera's `radiation_enabled` flames are `species = ["H2O", "CO2"]` with
-`T_ambient = 0` ([validation](https://matthewbonanni.github.io/mallard/validation/#radiation)).
+`T_ambient = 0` ([benchmark](https://matthewbonanni.github.io/mallard/validation/#radiation)).
 
 ## 0D reactors: `mallard reactor`
 
@@ -217,7 +217,7 @@ cd examples/h2_ignition
 
 *`examples/h2_ignition` with `mallard reactor`: the ignition delay (maximum of
 dT/dt) is 44.2 µs, as Cantera's
-([validation](https://matthewbonanni.github.io/mallard/validation/#ignition)).*
+([benchmark](https://matthewbonanni.github.io/mallard/validation/#ignition)).*
 
 | `[reactor]` key | Default | Meaning |
 |---|---|---|
@@ -256,6 +256,6 @@ composition) and leaves through `outlet_pressure`, periodic across the channel.*
 ## See also
 
 - [Input reference: `[chemistry]`](../input.md#chemistry), [`[radiation]`](../input.md#radiation), [`mallard reactor`](../input.md#mallard-reactor)
-- [Validation: reacting flow](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)
+- [Benchmarks: reacting flow](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)
 - [Large-eddy simulation](les.md): thickened flames and PaSR
 - Design notes: [finite-rate chemistry](../design/chemistry.md)

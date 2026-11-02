@@ -846,7 +846,7 @@ bitwise the same on any number of ranks and across restarts.
 The inlet must be planar and normal to a coordinate axis. Examples:
 `turbulent_inflow_duct`, `channel_inflow_retau180` (statistics from the
 periodic channel via `profile`), `volvo_bluff_body`
-([validation](https://matthewbonanni.github.io/mallard/validation/#synthetic-inflow)).
+([benchmark](https://matthewbonanni.github.io/mallard/validation/#synthetic-inflow)).
 
 **Not supported (yet):** turbulence on inlets without `nscbc`, and precursor
 or recycling inflow, planned in

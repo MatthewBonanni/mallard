@@ -43,7 +43,7 @@ Why each, and what it passes (each check runs in the test suite,
   convected density wave on triangles, 16² to 32² cells, at its own `cfl`)
   and ENO at discontinuities: the examples `sod`, `riemann_2d`,
   `explosion_3d`, `taylor_green_3d` and `isotropic_turbulence` use exactly
-  these keys ([validation](https://matthewbonanni.github.io/mallard/validation/#accuracy)).
+  these keys ([verification](https://matthewbonanni.github.io/mallard/validation/#accuracy)).
   It costs a stencil setup (seconds per million cells on a GPU, minutes on
   CPUs) and memory, and is not bound preserving: add
   `bound_preserving = true` and a smaller `cfl` for blasts.
@@ -54,9 +54,9 @@ Why each, and what it passes (each check runs in the test suite,
   hence the unlimited MUSCL states
   ([LES design](../design/les.md#81-decaying-isotropic-turbulence-comte-bellot-corrsin-1971)).
   These are the keys of `cbc_les` and `channel_les`, within 0.7–1.6% of the
-  DNS ([validation](https://matthewbonanni.github.io/mallard/validation/#les)).
+  DNS ([benchmark](https://matthewbonanni.github.io/mallard/validation/#les)).
 - **`reacting`**: the scheme of the validated flames and detonations
-  ([validation](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)).
+  ([benchmark](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)).
   `cfl = 0.35` keeps the Strang splitting error of a CJ detonation's
   induction length within 5% (25% at 1.0). A stoichiometric H2/air flame at
   700 K, 6 cells per thermal thickness, propagates within 0.7% of Cantera's
@@ -296,4 +296,4 @@ controller rejects them once the error grows). Measured limits and costs:
 
 - [Input reference: `[numerics]`](../input.md#numerics), [`[numerics.face_reconstruction]`](../input.md#numericsface_reconstruction)
 - [Numerical methods](../numerics/overview.md) and [TENO-E details](../numerics/teno_e.md)
-- [Validation: order of accuracy](https://matthewbonanni.github.io/mallard/validation/#accuracy), [shocks](https://matthewbonanni.github.io/mallard/validation/#shocks)
+- [Verification: order of accuracy](https://matthewbonanni.github.io/mallard/validation/#accuracy), [shocks](https://matthewbonanni.github.io/mallard/validation/#shocks)

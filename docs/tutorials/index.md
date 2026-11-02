@@ -22,7 +22,7 @@ the commands stay working.
 Tutorials 1 to 4, 7 and 8 run on a laptop CPU; 8 follows on from 3. For more cases, the
 [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are a catalog of ready-to-run inputs,
 each with what it demonstrates and how long it takes, and the
-[validation](https://matthewbonanni.github.io/mallard/validation/) page shows the accuracy to expect.
+[verification and validation](https://matthewbonanni.github.io/mallard/validation/) page shows the accuracy to expect.
 
 The tutorials assume a build of Mallard (see the
 [first simulation](first_simulation.md)), here with MPI for the
