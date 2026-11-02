@@ -1,1 +1,0 @@
-- `[[forces]]` on several ranks exchanges the halo before computing the wall gradients: the viscous force read halo cells left from the last stage of the step and differed from the integral of a wall probe's tractions (by 4e-7 in C_D in the measuring tutorial).

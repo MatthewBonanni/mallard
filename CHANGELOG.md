@@ -14,6 +14,14 @@ Unreleased`); release notes start from `python3 tools/dev/changelog.py notes X.Y
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-01
+
+### Fixed
+
+- Container images and the Spack package pass their release smoke tests; 0.9.0 published no images (#625).
+- Container images report their version without a `-dirty` suffix.
+- `[[forces]]` on several ranks exchanges the halo before computing the wall gradients: the viscous force read halo cells left from the last stage of the step and differed from the integral of a wall probe's tractions (by 4e-7 in C_D in the measuring tutorial).
+
 ## [0.9.0] - 2026-11-01
 
 ### Added
@@ -320,7 +328,8 @@ HDF5 output and AMD GPUs.
 Versions 0.1.0–0.5.0 are described in their
 [GitHub releases](https://github.com/MatthewBonanni/mallard/releases).
 
-[Unreleased]: https://github.com/MatthewBonanni/mallard/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/MatthewBonanni/mallard/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/MatthewBonanni/mallard/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/MatthewBonanni/mallard/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/MatthewBonanni/mallard/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/MatthewBonanni/mallard/compare/v0.6.0...v0.7.0
