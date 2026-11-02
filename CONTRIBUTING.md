@@ -34,7 +34,7 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Building and testing
 
-The [README](README.md#building) covers building in full. For development:
+[Installation](docs/installation.md) covers building in full. For development:
 
 ```sh
 git clone --recursive https://github.com/MatthewBonanni/mallard.git
