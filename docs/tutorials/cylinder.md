@@ -23,7 +23,7 @@ equations, so the stream also has a Mach number. At Mach 0.2 compressibility cha
 | Mean drag coefficient C_D | 1.33-1.35 |
 | Lift amplitude C_L' | 0.33-0.34 |
 
-The [validation](https://matthewbonanni.github.io/mallard/validation/#cylinder-at-re-100) page lists the
+The [verification and validation](https://matthewbonanni.github.io/mallard/validation/#cylinder-at-re-100) page lists the
 computations behind these ranges, and runs the same case on a much finer mesh.
 
 ## 2. Mesh
@@ -116,7 +116,7 @@ of the lift (its upward zero crossings) after t = 60.
 
 The frequency and the drag fall within the references. The lift amplitude is 5% low: this mesh is coarse
 around the cylinder, and the 384 × 128 O-grid of the
-[validation](https://matthewbonanni.github.io/mallard/validation/#cylinder-at-re-100) page gets 0.331.
+[verification and validation](https://matthewbonanni.github.io/mallard/validation/#cylinder-at-re-100) page gets 0.331.
 
 ## 6. The vortex street
 

@@ -147,7 +147,7 @@ build3d/src/mallard new explosion_3d runs/explosion_3d
 runs/explosion_3d/run.sh -t 6
 ```
 
-The [validation page](https://matthewbonanni.github.io/mallard/validation/#spherical-explosion) compares it with a one-dimensional radial solution, and also shows the Sod shock tube in 3D and the Taylor–Green vortex.
+The [verification page](https://matthewbonanni.github.io/mallard/validation/#spherical-explosion) compares it with a one-dimensional radial solution, and also shows the Sod shock tube in 3D and the Taylor–Green vortex.
 
 ## 7. Templates
 
