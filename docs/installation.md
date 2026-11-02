@@ -60,7 +60,7 @@ spack install mallard
 spack load mallard
 ```
 
-`spack repo add` also takes a local checkout's package repository, `spack repo add mallard/spack/spack_repo/mallard`; `spack repo update mallard` pulls a newer package. The default is OpenMP (C++ threads on macOS), MPI, HDF5, CGNS and zlib, in 2D and 3D, double precision. Other builds name their variants:
+`spack install mallard` builds the latest release, `mallard@0.9.0` an earlier one (0.9.0 or newer), and `mallard@main` the development version. `spack repo add` also takes a local checkout's package repository, `spack repo add mallard/spack/spack_repo/mallard`; `spack repo update mallard` pulls a newer package, with newer releases. The default is OpenMP (C++ threads on macOS), MPI, HDF5, CGNS and zlib, in 2D and 3D, double precision. Other builds name their variants:
 
 ```sh
 spack install mallard +cuda cuda_arch=80                 # NVIDIA A100 (90: H100)
