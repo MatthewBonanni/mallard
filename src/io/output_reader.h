@@ -26,7 +26,7 @@ namespace output {
 
 /** @brief What a file holds. */
 enum class Kind {
-    mesh,      ///< a mesh: a mesh file, or the mesh file of HDF5 output
+    mesh,      ///< a mesh: a mesh file, or the mesh file of XDMF output
     snapshot,  ///< fields on the cells of a mesh or a region, at one time or a series of times
     restart,   ///< the state a run continues from
     probe,     ///< fields at sample points, on curves or on surfaces, at a series of times
@@ -82,12 +82,12 @@ struct Contents {
     std::vector<Field> fields;
     /**
      * @brief Whether cell values come in the global cell order of the mesh
-     *        the run read or generated (restart, HDF5 and VTKHDF output of the
+     *        the run read or generated (restart, XDMF and VTKHDF output of the
      *        whole mesh): values that map onto the case's own mesh, cell by
      *        cell, as the post-processing commands need.
      */
     bool global_order = false;
-    std::string mesh_file;        ///< HDF5 output: its mesh file
+    std::string mesh_file;        ///< XDMF output: its mesh file
     std::string provenance;       ///< the provenance block (JSON), empty if the file has none
     RestartHeader restart;        ///< restart files: the header
     std::vector<std::string> notes;  ///< what a reader of the file should know (no units, newer provenance, ...)

@@ -970,7 +970,7 @@ Contents open_h5(const std::string & path) {
     if (kind == "mallard-solution-mesh") {
         file_format::check_version(file_format::HDF5_OUTPUT, path, c.version);
         c.kind = Kind::mesh;
-        c.format = "HDF5 output mesh";
+        c.format = "XDMF output mesh";
         c.global_order = true;
         read_output_mesh(c.mesh, file);
         return c;
@@ -978,7 +978,7 @@ Contents open_h5(const std::string & path) {
     if (kind == "mallard-solution") {
         file_format::check_version(file_format::HDF5_OUTPUT, path, c.version);
         c.kind = Kind::snapshot;
-        c.format = "HDF5 output";
+        c.format = "XDMF output";
         c.global_order = true;
         const auto mesh = root_strings(file, "mesh");
         if (!mesh.empty()) c.mesh_file = sibling(path, mesh[0]);

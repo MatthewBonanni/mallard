@@ -23,7 +23,7 @@ page is [Command line](../guide/cli.md#mallard-info).
 whatever precision wrote them, and `read_ranges` their extrema.
 
 Formats: VTKHDF (unstructured grids and the poly data of probes and region
-snapshots, one file per snapshot or a series file), HDF5 output and its
+snapshots, one file per snapshot or a series file), XDMF output (HDF5 files) and its
 mesh file and XDMF indexes, VTU, PVTU, PVD, VTP, restart files of every
 version (compressed too), probe HDF5, CSV, and the mesh files a run reads
 (Gmsh, Fluent, CGNS, OpenFOAM, Mallard HDF5 meshes).
@@ -53,7 +53,7 @@ and times for every format a run writes.
 ## What later commands need from it
 
 - **Cell order.** `Contents::global_order` says whether cell values come in
-  the global cell order of the mesh the run used (restart, HDF5 and VTKHDF
+  the global cell order of the mesh the run used (restart, XDMF and VTKHDF
   output of the whole mesh). Such values map onto the case's mesh cell by
   cell, as `post derive` needs to evaluate fields with the solver's
   reconstruction. VTU pieces and region snapshots are in their own order.

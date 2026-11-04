@@ -63,7 +63,7 @@ std::string every_format(const std::string & dir) {
     std::vector<std::string> probe_formats = {"csv", "vtp"};
     if (have_hdf5()) {
         writer("flow", "format = \"vtkhdf\"\n" + fields);
-        writer("flow", "format = \"hdf5\"\n" + fields);
+        writer("flow", "format = \"xdmf\"\n" + fields);
         writer("series", "series = true\n" + fields);
         writer("region", "region = " + REGION + "\nvariables = [\"RHO\"]\n");
         if (compression::have_zlib()) writer("zlib/flow", "compression = \"zlib\"\n" + fields);

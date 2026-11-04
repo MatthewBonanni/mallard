@@ -367,7 +367,7 @@ Examples:
 
 Exit status:
   0  the file was read
-  1  it cannot be read: missing, not a Mallard file, a newer format version, or (--input) no provenance; in a run directory, a file that does not open
+  1  a file cannot be read (missing, not Mallard's, newer), or --input finds no provenance
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-info
