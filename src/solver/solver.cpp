@@ -1589,6 +1589,7 @@ void Solver::init_output(region::Regions & regions) {
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous());
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
+    divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
     if (run_log_on) {
         const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                             std::filesystem::exists(run_log_file);
@@ -2017,6 +2018,7 @@ constexpr int HEADER_EVERY = 25;
 int Solver::run() {
     logging::section("Run");
     step_run_start = step;
+    progress_history.clear();
     step_last_check = step;
     t_wall_run_start = timer.seconds();
     t_stepping_last_check = t_wall_stepping;
@@ -2219,6 +2221,9 @@ void Solver::print_progress() {
     }
     logging::line(row);
 
+    progress_history.push_back({step, double(t), double(dt), dt_cfl1 > 0.0_r ? double(dt / dt_cfl1) : 0.0, double(mins[0]),
+                                double(mins[1]), is_mixture() ? double(mix[3]) : divergence::UNKNOWN});
+    if (progress_history.size() > 8) progress_history.pop_front();
     monitor_values = {{"monitors_step", std::to_string(step)}};
     for (const auto & [name, value] : status.monitors) monitor_values.emplace_back(name, format("%.6g", value));
 
