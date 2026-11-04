@@ -14,7 +14,7 @@
 #define PASR_H
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "log.h"
 
@@ -33,7 +33,7 @@ struct PartiallyStirredReactor {
     double C_mix = 1.0;
 
     /** @brief [les.combustion] of an input with model = "pasr". */
-    static PartiallyStirredReactor from_input(const toml::value & table);
+    static PartiallyStirredReactor from_input(const Input & table);
 
     logging::Items summary() const;
 

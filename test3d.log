@@ -1,0 +1,122 @@
+[==========] Running 769 tests from 115 test suites.
+[----------] Global test environment set-up.
+[----------] 40 tests from CommonMathTest
+[ RUN      ] CommonMathTest.Dot
+[       OK ] CommonMathTest.Dot (0 ms)
+[ RUN      ] CommonMathTest.Dot3
+[       OK ] CommonMathTest.Dot3 (0 ms)
+[ RUN      ] CommonMathTest.Norm2
+[       OK ] CommonMathTest.Norm2 (0 ms)
+[ RUN      ] CommonMathTest.Unit
+[       OK ] CommonMathTest.Unit (0 ms)
+[ RUN      ] CommonMathTest.UnitNegative
+[       OK ] CommonMathTest.UnitNegative (0 ms)
+[ RUN      ] CommonMathTest.Transpose2
+[       OK ] CommonMathTest.Transpose2 (0 ms)
+[ RUN      ] CommonMathTest.TransposeWide
+[       OK ] CommonMathTest.TransposeWide (0 ms)
+[ RUN      ] CommonMathTest.TransposeTall
+[       OK ] CommonMathTest.TransposeTall (0 ms)
+[ RUN      ] CommonMathTest.InvertMatrix2
+[       OK ] CommonMathTest.InvertMatrix2 (0 ms)
+[ RUN      ] CommonMathTest.InvertMatrix3
+[       OK ] CommonMathTest.InvertMatrix3 (0 ms)
+[ RUN      ] CommonMathTest.GEMV2
+[       OK ] CommonMathTest.GEMV2 (0 ms)
+[ RUN      ] CommonMathTest.GEMV2InPlace
+[       OK ] CommonMathTest.GEMV2InPlace (0 ms)
+[ RUN      ] CommonMathTest.GEMV3
+[       OK ] CommonMathTest.GEMV3 (0 ms)
+[ RUN      ] CommonMathTest.GEMV3InPlace
+[       OK ] CommonMathTest.GEMV3InPlace (0 ms)
+[ RUN      ] CommonMathTest.GEMM2
+[       OK ] CommonMathTest.GEMM2 (0 ms)
+[ RUN      ] CommonMathTest.GEMM2InPlace
+[       OK ] CommonMathTest.GEMM2InPlace (0 ms)
+[ RUN      ] CommonMathTest.GEMM234
+[       OK ] CommonMathTest.GEMM234 (0 ms)
+[ RUN      ] CommonMathTest.GEMM2TransposeA
+[       OK ] CommonMathTest.GEMM2TransposeA (0 ms)
+[ RUN      ] CommonMathTest.GEMM234TransposeA
+[       OK ] CommonMathTest.GEMM234TransposeA (0 ms)
+[ RUN      ] CommonMathTest.GEMM2TransposeB
+[       OK ] CommonMathTest.GEMM2TransposeB (0 ms)
+[ RUN      ] CommonMathTest.GEMM234TransposeB
+[       OK ] CommonMathTest.GEMM234TransposeB (0 ms)
+[ RUN      ] CommonMathTest.GEMM2TransposeAB
+[       OK ] CommonMathTest.GEMM2TransposeAB (0 ms)
+[ RUN      ] CommonMathTest.GEMM234TransposeAB
+[       OK ] CommonMathTest.GEMM234TransposeAB (0 ms)
+[ RUN      ] CommonMathTest.QRHouseholder3x3
+[       OK ] CommonMathTest.QRHouseholder3x3 (0 ms)
+[ RUN      ] CommonMathTest.QRHouseholder3x4
+[       OK ] CommonMathTest.QRHouseholder3x4 (0 ms)
+[ RUN      ] CommonMathTest.ForwardSubstitution331
+[       OK ] CommonMathTest.ForwardSubstitution331 (0 ms)
+[ RUN      ] CommonMathTest.ForwardSubstitution332
+[       OK ] CommonMathTest.ForwardSubstitution332 (0 ms)
+[ RUN      ] CommonMathTest.ForwardSubstitution332TransposeL
+[       OK ] CommonMathTest.ForwardSubstitution332TransposeL (0 ms)
+[ RUN      ] CommonMathTest.ForwardSubstitution332TransposeB
+[       OK ] CommonMathTest.ForwardSubstitution332TransposeB (0 ms)
+[ RUN      ] CommonMathTest.ForwardSubstitution332TransposeLB
+[       OK ] CommonMathTest.ForwardSubstitution332TransposeLB (0 ms)
+[ RUN      ] CommonMathTest.BackSubstitution331
+[       OK ] CommonMathTest.BackSubstitution331 (0 ms)
+[ RUN      ] CommonMathTest.BackSubstitution332
+[       OK ] CommonMathTest.BackSubstitution332 (0 ms)
+[ RUN      ] CommonMathTest.BackSubstitution332TransposeU
+[       OK ] CommonMathTest.BackSubstitution332TransposeU (0 ms)
+[ RUN      ] CommonMathTest.BackSubstitution332TransposeB
+[       OK ] CommonMathTest.BackSubstitution332TransposeB (0 ms)
+[ RUN      ] CommonMathTest.BackSubstitution332TransposeUB
+[       OK ] CommonMathTest.BackSubstitution332TransposeUB (0 ms)
+[ RUN      ] CommonMathTest.TriangleArea2
+[       OK ] CommonMathTest.TriangleArea2 (0 ms)
+[ RUN      ] CommonMathTest.TriangleArea2NegativeCoordinates
+[       OK ] CommonMathTest.TriangleArea2NegativeCoordinates (0 ms)
+[ RUN      ] CommonMathTest.TriangleArea2ZeroArea
+[       OK ] CommonMathTest.TriangleArea2ZeroArea (0 ms)
+[ RUN      ] CommonMathTest.TriangleJJinvTranslate
+[       OK ] CommonMathTest.TriangleJJinvTranslate (0 ms)
+[ RUN      ] CommonMathTest.TriangleJJinvUnit
+[       OK ] CommonMathTest.TriangleJJinvUnit (0 ms)
+[----------] 40 tests from CommonMathTest (10 ms total)
+
+[----------] 8 tests from CompiledExpressionTest
+[ RUN      ] CompiledExpressionTest.ArithmeticMatchesExprtkBitwise
+[       OK ] CompiledExpressionTest.ArithmeticMatchesExprtkBitwise (166 ms)
+[ RUN      ] CompiledExpressionTest.FunctionsMatchExprtkBitwise
+[       OK ] CompiledExpressionTest.FunctionsMatchExprtkBitwise (56 ms)
+[ RUN      ] CompiledExpressionTest.ControlFlowMatchesExprtkBitwise
+[       OK ] CompiledExpressionTest.ControlFlowMatchesExprtkBitwise (203 ms)
+[ RUN      ] CompiledExpressionTest.DeviceMatchesHost
+[       OK ] CompiledExpressionTest.DeviceMatchesHost (1 ms)
+[ RUN      ] CompiledExpressionTest.VariablesAreCaseSensitiveAndTracked
+[       OK ] CompiledExpressionTest.VariablesAreCaseSensitiveAndTracked (0 ms)
+[ RUN      ] CompiledExpressionTest.RejectsInvalidExpressions
+[       OK ] CompiledExpressionTest.RejectsInvalidExpressions (0 ms)
+[ RUN      ] CompiledExpressionTest.HostExpressionsAcceptTheSameLanguage
+[       OK ] CompiledExpressionTest.HostExpressionsAcceptTheSameLanguage (0 ms)
+[ RUN      ] CompiledExpressionTest.LoopsStopAtTheIterationCap
+[       OK ] CompiledExpressionTest.LoopsStopAtTheIterationCap (3 ms)
+[----------] 8 tests from CompiledExpressionTest (435 ms total)
+
+[----------] 16 tests from RegionTest
+[ RUN      ] RegionTest.MembershipMatchesTheShapes
+[       OK ] RegionTest.MembershipMatchesTheShapes (2 ms)
+[ RUN      ] RegionTest.DistancesAreOneLipschitzLowerBounds
+[       OK ] RegionTest.DistancesAreOneLipschitzLowerBounds (0 ms)
+[ RUN      ] RegionTest.DeviceMatchesHost
+[       OK ] RegionTest.DeviceMatchesHost (2 ms)
+[ RUN      ] RegionTest.VolumeFractionsIntegrateToTheVolumeOnCoarseUnstructuredMeshes
+[       OK ] RegionTest.VolumeFractionsIntegrateToTheVolumeOnCoarseUnstructuredMeshes (378 ms)
+[ RUN      ] RegionTest.FractionsAreExactlyOneInsideAndZeroOutside
+[       OK ] RegionTest.FractionsAreExactlyOneInsideAndZeroOutside (49 ms)
+[ RUN      ] RegionTest.SmoothEdgesFollowTheSmoothstepAndKeepTheVolume
+[       OK ] RegionTest.SmoothEdgesFollowTheSmoothstepAndKeepTheVolume (57 ms)
+[ RUN      ] RegionTest.RejectsInvalidRegions
+[       OK ] RegionTest.RejectsInvalidRegions (0 ms)
+[ RUN      ] RegionTest.EachTypeHasOneDimension
+[       OK ] RegionTest.EachTypeHasOneDimension (0 ms)
+[ RUN      ] RegionTest.BoundaryAndInteriorAreInverses

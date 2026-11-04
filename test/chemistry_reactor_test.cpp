@@ -22,18 +22,20 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "kinetics.h"
 #include "mechanism.h"
 #include "reactor.h"
 #include "rosenbrock.h"
 #include "sparse_lu.h"
 #include "thermo.h"
+#include "verification.h"
 
 using namespace chemistry;
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 
 // Row-major on every backend: kernels take pointers to rows
 template <typename T>
@@ -309,13 +311,11 @@ TEST(ChemistryReactorTest, RodasIsFourthOrderWithThirdOrderEmbeddedSolution) {
         const auto y = van_der_pol(32u << i, estimate[i]);
         error[i] = std::hypot(y[0] - reference[0], y[1] - reference[1]);
     }
-    const double order = std::log2(error[0] / error[1]);
-    EXPECT_GT(order, 3.8);
-    EXPECT_LT(order, 4.3);
+    verification::expect_order({"time", "RODAS (chemistry)", "", "error, Van der Pol oscillator", {32, 64},
+                                {error[0], error[1]}, 4.0, 3.8, 4.3});
     // Local error of the order-3 embedded solution: h^4
-    const double estimate_order = std::log2(estimate[0] / estimate[1]);
-    EXPECT_GT(estimate_order, 3.8);
-    EXPECT_LT(estimate_order, 4.3);
+    verification::expect_order({"time", "RODAS error estimate", "", "local error estimate, Van der Pol oscillator",
+                                {32, 64}, {estimate[0], estimate[1]}, 4.0, 3.8, 4.3});
 }
 
 TEST(ChemistryReactorTest, RodasSolvesTheStiffRobertsonProblem) {

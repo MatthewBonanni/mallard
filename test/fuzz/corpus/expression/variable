@@ -1,0 +1,1 @@
+var r := hypot(x, y); 300 + 1700*exp(-r*r/4e-6)

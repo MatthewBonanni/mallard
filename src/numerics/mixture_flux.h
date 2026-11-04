@@ -58,7 +58,6 @@ struct MixtureFluxFunctor {
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<rtype **[2][2]> face_thermo;
     BoundaryData boundaries;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
     Kokkos::View<rtype **, Kokkos::LayoutStride> cell_thermo;  // (cell, [gamma, e0])
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype **> face_mdot;  // (face, q)
@@ -107,8 +106,13 @@ struct MixtureFluxFunctor {
                 th_r[0] = face_thermo(i_face, i_quad, 1, 0);
                 th_r[1] = face_thermo(i_face, i_quad, 1, 1);
             } else {
-                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_l, n_point, W_cells, face_solution,
+                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_l, n_point, face_solution,
                                             face_thermo, cell_thermo, W_r, th_r);
+                if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) {
+                    FOR_I_CONSERVATIVE W_l[i] = W_r[i];
+                    th_l[0] = th_r[0];
+                    th_l[1] = th_r[1];
+                }
             }
             const riemann::SideThermo side_l{th_l[0], th_l[1]}, side_r{th_r[0], th_r[1]};
             rtype central[N_CONSERVATIVE] = {};
@@ -154,7 +158,6 @@ struct MixtureDoubleFluxFunctor {
     Kokkos::View<rtype **> face_weights;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
     Kokkos::View<rtype *[2]> frozen;  // (cell, [gamma, e0])
     Kokkos::View<rtype **[2][2]> face_thermo;
     Kokkos::View<rtype **, Kokkos::LayoutStride> cell_thermo;
@@ -207,8 +210,9 @@ struct MixtureDoubleFluxFunctor {
             } else {
                 const rtype th_i[2] = {th_0.gamma, th_0.e0};
                 rtype th_g[2];
-                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_point, W_cells, face_solution,
+                boundaries.exterior_mixture(i_face, i_quad, n_quad, W_l, th_i, n_point, face_solution,
                                             face_thermo, cell_thermo, W_r, th_g);
+                if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) FOR_I_CONSERVATIVE W_l[i] = W_r[i];
             }
             // Each side's central flux with its own frozen thermodynamics on both sides
             rtype K_0[N_CONSERVATIVE] = {}, K_1[N_CONSERVATIVE] = {};
@@ -261,6 +265,8 @@ struct DoubleFluxSumFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype *> face_energy_1;
     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_cell) const {
@@ -271,7 +277,10 @@ struct DoubleFluxSumFunctor {
             if (cells_of_face(i_face, 0) == static_cast<int32_t>(i_cell)) {
                 FOR_I_CONSERVATIVE sum[i] += face_flux(i_face, i);
             } else {
-                for (uint8_t i = 0; i < E; i++) sum[i] -= face_flux(i_face, i);
+                rtype F[N_CONSERVATIVE];
+                for (uint8_t i = 0; i < E; i++) F[i] = face_flux(i_face, i);
+                if (periodic.rotated()) periodic.rotate_state(face_shift(i_face), F, true);
+                for (uint8_t i = 0; i < E; i++) sum[i] -= F[i];
                 sum[E] -= face_energy_1(i_face);
             }
         }
@@ -325,10 +334,9 @@ struct SpeciesSlotFunctor {
     void exterior_Y(const uint32_t f, const uint32_t k, const rtype * interior, rtype * out) const {
         const uint8_t nq = n_quad();
         const int32_t i_bc = boundaries.face_bc(f);
-        const BoundaryType type = boundaries.bcs(i_bc).type;
         const int32_t image_face = boundaries.face_image_face(f);
         const int32_t image = boundaries.face_image(f);
-        if (type == BoundaryType::NSCBC_INLET) {
+        if (boundaries.bcs(i_bc).prescribes_composition()) {
             for (uint8_t q = 0; q < nq; q++) out[q] = boundaries.bc_Y(i_bc, k);
             return;
         }
@@ -351,8 +359,6 @@ struct SpeciesSlotFunctor {
         for (uint8_t q = 0; q < nq; q++) {
             if (image >= 0) {
                 out[q] = values.scalars(image, k);
-            } else if (type == BoundaryType::UPT) {
-                out[q] = boundaries.bc_Y(i_bc, k);
             } else {
                 out[q] = interior[q];
             }

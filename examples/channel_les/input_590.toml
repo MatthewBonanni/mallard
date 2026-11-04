@@ -25,8 +25,8 @@
 # Cost: about 900,000 steps of 2.3e-4 h/U_b, 14 ms each on one A100: 3.5 hours.
 #
 # Run:
-#   python ../../tools/channel_init.py input_590.toml init.restart
-#   ../../build3d/src/Mallard -i input_590.toml
+#   python ../../tools/setup/channel_init.py input_590.toml init.restart
+#   ../../build3d/src/mallard -i input_590.toml
 
 [run]
 t_stop = 200.0
@@ -41,7 +41,12 @@ Lx = 6.283185307179586
 Ly = 2.0
 Lz = 3.141592653589793
 stretching = [0.0, 2.5, 0.0]
-periodic = ["x", "z"]
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["back", "front"]
 
 [initialize]
 type = "restart"
@@ -107,7 +112,6 @@ file = "forces_top.csv"
 
 [[write_data]]
 prefix = "./stats/channel"
-format = "vtu"
 time_interval = 50.0
 variables = ["MEAN_*", "COV_*"]
 

@@ -76,30 +76,30 @@ p = T = 1/γ with a gas constant of 1 (`p_ref = T_ref = 1/γ`, `rho_ref = 1`).
 | `[run]` | `t_stop = 3`, five passes of the flow over the cone, at CFL 1 |
 | `[mesh]` | `type = "file"`, `cone.msh` |
 | `[initialize]` | The free stream everywhere (`type = "constant"`) |
-| `[[boundaries]]` | `cone`: wall (`wall_adiabatic`, a slip wall for the Euler equations); `inlet`: `upt`, the free stream imposed (all characteristics enter); `outer`: `farfield`; `outlet`: `extrapolation` (all leave); `symmetry_y`, `symmetry_z`: `symmetry` |
+| `[[boundaries]]` | `cone`: wall (`wall_adiabatic`, a slip wall for the Euler equations); `inlet`: `inlet_state`, the free stream imposed (all characteristics enter); `outer`: `farfield`; `outlet`: `outlet_extrapolation` (all leave); `symmetry_y`, `symmetry_z`: `symmetry` |
 | `[numerics]` | HLLC, SSPRK3, MUSCL with the Venkatakrishnan limiter |
 | `[physics]` | `euler`, γ = 1.4 |
 | `[[forces]]` | The force on the cone, every 10 steps, `forces_cone.csv` |
 | `[[probes]]` | 40 points across the shock layer at x = 0.8 in the plane y = z, every 20 steps, `probe_layer.csv` |
-| `[[write_data]]` | Every 0.5: the volume (`solut/flow`), the cone's faces (`geometry = "cone"`) and the symmetry plane z = 0 (`geometry = "symmetry_z"`) with the values of their cells |
+| `[[write_data]]` | Every 0.5: the volume (`solut/flow`), the cone's faces (`region = "cone"`) and the symmetry plane z = 0 (`region = "symmetry_z"`), point values at their faces |
 
 ## 4. Run
 
 On a CPU with 8 threads (6,500 steps; minutes for h = 0.02):
 
 ```bash
-$MALLARD/build-3d/src/Mallard -i input.toml --kokkos-num-threads=8
+$MALLARD/build-3d/src/mallard -i input.toml --kokkos-num-threads=8
 ```
 
 On several MPI ranks, which split the mesh between them (results are the
 same bit for bit):
 
 ```bash
-mpirun -n 4 $MALLARD/build-3d/src/Mallard -i input.toml
+mpirun -n 4 $MALLARD/build-3d/src/mallard -i input.toml
 ```
 
 On a GPU, with a CUDA build of the 3D solver (`-DMallard_DIM=3`, see the
-[first simulation](../guide/first_simulation.md)), the same input runs
+[first simulation](first_simulation.md)), the same input runs
 unchanged: h = 0.02 takes under 2 minutes on one A100, h = 0.01 (13,800
 steps) about 10.
 
@@ -115,7 +115,7 @@ The probes and forces are written as the run goes, so they can be plotted
 at any time. `plot_results.py` (next section) draws them over time: the
 pressure at two probe points, one inside the shock layer and one just
 outside the shock, and the cone's pressure drag coefficient,
-(F_x − p∞ A) / (q∞ A) with A the base area of the quarter cone, which for a
+$(F_x - p_\infty A)/(q_\infty A)$ with $A$ the base area of the quarter cone, which for a
 cone of uniform surface pressure equals the surface Cp.
 
 ![Pressure at two probe points and the drag coefficient against time: steady after t = 1](../images/tutorials/cone_history-light.svg#gh-light-mode-only)
@@ -130,7 +130,7 @@ on to t = 3 to be sure.
 python3 $MALLARD/tutorials/cone/plot_results.py . --out .
 ```
 
-reads the last snapshot of each output series (`solut/*.pvd`) and the probe
+reads the last snapshot of each output series (`solut/*.vtkhdf.series`) and the probe
 and force files, prints the measured shock angle (where the probe line
 crosses halfway up the exact pressure jump) and the surface pressure
 coefficient averaged over 0.3 ≤ x ≤ 0.95, and draws the figures of this

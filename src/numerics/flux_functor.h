@@ -16,6 +16,7 @@
 
 #include "common.h"
 #include "boundary.h"
+#include "periodic_maps.h"
 #include "riemann_solver.h"
 
 /**
@@ -123,7 +124,6 @@ struct ConvectiveFluxFunctor {
     Kokkos::View<rtype **> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     rtype gamma;
     rtype low_mach_cutoff;  // 1 disables the low-Mach correction
@@ -132,6 +132,14 @@ struct ConvectiveFluxFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
+        rtype out[N_CONSERVATIVE];
+        flux(i_face, out);
+        FOR_I_CONSERVATIVE face_flux(i_face, i) = out[i];
+    }
+
+    /** @brief The face's flux from cell 0 into cell 1 (into the domain at boundary faces), times its area. */
+    KOKKOS_INLINE_FUNCTION
+    void flux(const uint32_t i_face, rtype * out) const {
         uint8_t n_quad;
         if constexpr (N_DIM == 2) {
             n_quad = static_cast<uint8_t>(quad_weights.extent(0));
@@ -148,7 +156,7 @@ struct ConvectiveFluxFunctor {
         const rtype phi =
             hybrid ? face_upwind_fraction(upwind, boundaries, cells_of_face(i_face, 0), c1, i_face) : 1.0_r;
 
-        rtype flux[N_CONSERVATIVE] = {};
+        rtype total[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
             rtype n_q[N_DIM];
             const rtype * n_point = quad_normal(quad_normals, i_face, i_quad, n_unit, n_q);
@@ -164,7 +172,8 @@ struct ConvectiveFluxFunctor {
             if (c1 >= 0) {
                 FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
             } else {
-                boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, W_cells, face_solution, W_r);
+                boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, face_solution, W_r);
+                if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) FOR_I_CONSERVATIVE W_l[i] = W_r[i];
             }
             rtype central[N_CONSERVATIVE] = {};
             if (hybrid) riemann::KEEP::calc_flux(central, n_point, W_l, W_r, gamma);
@@ -178,13 +187,13 @@ struct ConvectiveFluxFunctor {
             } else {
                 FOR_I_CONSERVATIVE flux_q[i] = central[i];
             }
-            FOR_I_CONSERVATIVE flux[i] += w_q * flux_q[i];
+            FOR_I_CONSERVATIVE total[i] += w_q * flux_q[i];
         }
 
         // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D), on curved faces
         // to twice their area over face_area
         const rtype scale = 0.5_r * face_area(i_face);
-        FOR_I_CONSERVATIVE face_flux(i_face, i) = -scale * flux[i];
+        FOR_I_CONSERVATIVE out[i] = -scale * total[i];
     }
 };
 
@@ -198,13 +207,24 @@ struct FaceFluxSumFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
     Kokkos::View<rtype *[N_CONSERVATIVE]> rhs;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_cell) const {
         rtype sum[N_CONSERVATIVE] = {};
+        const bool rotated = periodic.rotated();
         for (uint32_t k = offsets_faces_of_cell(i_cell); k < offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t i_face = faces_of_cell(k);
             const rtype sign = (cells_of_face(i_face, 0) == static_cast<int32_t>(i_cell)) ? 1.0 : -1.0;
+            if (rotated && sign < 0.0_r) {
+                // The flux is in the face's (cell 0's) frame
+                rtype F[N_CONSERVATIVE];
+                FOR_I_CONSERVATIVE F[i] = face_flux(i_face, i);
+                periodic.rotate_state(face_shift(i_face), F, true);
+                FOR_I_CONSERVATIVE sum[i] -= F[i];
+                continue;
+            }
             FOR_I_CONSERVATIVE sum[i] += sign * face_flux(i_face, i);
         }
         FOR_I_CONSERVATIVE rhs(i_cell, i) = sum[i];

@@ -29,7 +29,7 @@ type = "symmetry"
 
 [[boundaries]]
 name = "right"
-type = "upt"
+type = "inlet_state"
 u = [-487.34, 0.0]
 p = 35594.0
 T = 747.672441
@@ -62,6 +62,5 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/rst"
-format = "vtu"
 time_interval = 1.0e-5
 variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*"]

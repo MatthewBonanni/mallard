@@ -22,7 +22,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "quadrature.h"
@@ -59,10 +59,95 @@ void FaceReconstruction::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVA
 
 void FaceReconstruction::set_mesh(std::shared_ptr<Mesh> mesh_in) {
     this->mesh = mesh_in;
+    rotated_faces_found = false;
+    image_points_found = false;
+}
+
+void FaceReconstruction::rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
+    if (!mesh->is_rotational()) return;
+    if (!rotated_faces_found) {
+        std::vector<uint32_t> faces;
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            if (mesh->h_cells_of_face(f, 1) >= 0 && mesh->h_rotated_row(mesh->h_face_shift(f))) faces.push_back(f);
+        }
+        rotated_faces = Kokkos::View<uint32_t *>("rotated_faces", faces.size());
+        Kokkos::deep_copy(rotated_faces, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(faces.data(), faces.size()));
+        rotated_faces_found = true;
+    }
+    const auto faces = rotated_faces;
+    const auto face_shift = mesh->face_shift;
+    const PeriodicMaps periodic = mesh->periodic_maps();
+    const uint32_t n_quad = static_cast<uint32_t>(face_solution.extent(1));
+    Kokkos::parallel_for("rotate_periodic_faces", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+        const uint32_t f = faces(k);
+        for (uint32_t q = 0; q < n_quad; q++) {
+            rtype u[N_DIM];
+            FOR_I_DIM u[i] = face_solution(f, q, 1, 1 + i);
+            periodic.rotate(face_shift(f), u);
+            FOR_I_DIM face_solution(f, q, 1, 1 + i) = u[i];
+        }
+    });
+}
+
+void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+                                            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
+    const uint32_t n_quad = static_cast<uint32_t>(face_solution.extent(1));
+    if (!image_points_found) {
+        auto h_face_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image);
+        auto h_image_face = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_face);
+        auto h_offset = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image_offset);
+        auto h_quad_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
+        std::vector<uint32_t> faces, cells;
+        std::vector<std::array<rtype, N_DIM>> offsets;
+        for (uint32_t f = 0; f < mesh->n_faces; f++) {
+            const int32_t c = mesh->h_cells_of_face(f, 0);
+            if (mesh->h_cells_of_face(f, 1) >= 0 || c >= static_cast<int32_t>(mesh->n_owned()) || h_face_image(f) < 0 ||
+                h_image_face(f) >= 0) {
+                continue;
+            }
+            const uint32_t image = static_cast<uint32_t>(h_face_image(f));
+            faces.push_back(f);
+            cells.push_back(image);
+            for (uint32_t q = 0; q < n_quad; q++) {
+                std::array<rtype, N_DIM> x;
+                if (h_quad_points.extent(0) > 0) {
+                    FOR_I_DIM x[i] = h_quad_points(f, q, i);
+                } else {
+                    const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
+                    const rtype s_q = 0.5_r * quadrature_face.h_points(q, 0);
+                    FOR_I_DIM x[i] = mesh->h_face_coords(f, i) + s_q * (mesh->h_node_coords(b, i) - mesh->h_node_coords(a, i));
+                }
+                FOR_I_DIM x[i] -= h_offset(f, i) + mesh->h_cell_coords(image, i);
+                offsets.push_back(x);
+            }
+        }
+        image_point_faces = Kokkos::View<uint32_t *>("image_point_faces", faces.size());
+        image_point_cells = Kokkos::View<uint32_t *>("image_point_cells", cells.size());
+        image_point_offsets = Kokkos::View<rtype *[N_DIM]>("image_point_offsets", offsets.size());
+        image_point_W = Kokkos::View<rtype *[N_CONSERVATIVE]>("image_point_W", offsets.size());
+        Kokkos::deep_copy(image_point_faces, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(faces.data(), faces.size()));
+        Kokkos::deep_copy(image_point_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(cells.data(), cells.size()));
+        auto h_point_offsets = Kokkos::create_mirror_view(image_point_offsets);
+        for (size_t k = 0; k < offsets.size(); k++) FOR_I_DIM h_point_offsets(k, i) = offsets[k][i];
+        Kokkos::deep_copy(image_point_offsets, h_point_offsets);
+        image_points_found = true;
+    }
+    if (image_point_faces.extent(0) == 0) return;
+    const auto faces = image_point_faces;
+    const auto cells = image_point_cells;
+    const auto W = image_point_W;
+    Kokkos::parallel_for("image_point_averages", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
+        FOR_I_CONSERVATIVE W(p, i) = solution(cells(p / n_quad), i);
+    });
+    point_values(solution, cells, image_point_offsets, W);
+    Kokkos::parallel_for("image_point_values", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
+        FOR_I_CONSERVATIVE face_solution(faces(p / n_quad), p % n_quad, 1, i) = W(p, i);
+    });
 }
 
 void FaceReconstruction::set_boundaries(const BoundaryData & boundaries_in) {
     this->boundaries = boundaries_in;
+    image_points_found = false;
 }
 
 void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
@@ -264,7 +349,7 @@ FirstOrder::~FirstOrder() {
     // Empty
 }
 
-void FirstOrder::init(const toml::value & input) {
+void FirstOrder::init(const Input & input) {
     (void)(input);
     if constexpr (N_DIM == 3) init_face_quadrature_3d(1);
     init_face_quadrature_2d_curved();
@@ -325,14 +410,11 @@ MUSCL::~MUSCL() {
     // Empty
 }
 
-void MUSCL::init(const toml::value & input) {
-    const std::string limiter_str = toml::find_or<std::string>(input, "limiter", "venkatakrishnan");
-    auto it = LIMITER_TYPES.find(limiter_str);
-    if (it == LIMITER_TYPES.end()) {
-        throw unknown_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
-    }
+void MUSCL::init(const Input & input) {
+    const std::string limiter_str = find_value_or<std::string>(input, "limiter", "venkatakrishnan");
+    auto it = find_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
     limiter = it->second;
-    venkat_K = find_real_or(input, "venkatakrishnan_K", 5.0);
+    venkat_K = find_real_or(input, "venkatakrishnan_K", dim::none, 5.0);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
     limiters = Kokkos::View<rtype *[N_CONSERVATIVE]>("limiters", mesh->n_cells);
     gradient = make_vertex_gradient(make_gradient(*mesh, boundaries, {}, gradients), *mesh, false);
@@ -442,8 +524,10 @@ struct LimiterFunctor {
                 const uint32_t i_face = neighbors.faces_of_cell(k);
                 // The face centroid is in its cell 0's frame
                 const uint8_t s = (neighbors.cells_of_face(i_face, 1) == static_cast<int32_t>(i_cell)) ? neighbors.face_shift(i_face) : 0;
-                rtype r[N_DIM];
-                FOR_I_DIM r[i] = (neighbors.face_coords(i_face, i) - neighbors.shifts(s, i)) - neighbors.cell_coords(i_cell, i);
+                rtype x_f[N_DIM], r[N_DIM];
+                FOR_I_DIM x_f[i] = neighbors.face_coords(i_face, i);
+                neighbors.periodic.backward(s, x_f, r);
+                FOR_I_DIM r[i] = r[i] - neighbors.cell_coords(i_cell, i);
                 FOR_I_CONSERVATIVE {
                     rtype grad[N_DIM];
                     for (uint8_t d = 0; d < N_DIM; d++) grad[d] = neighbors.gradients(i_cell, i, d);
@@ -473,7 +557,7 @@ struct MUSCLFaceFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
-    Kokkos::View<rtype *[N_DIM]> shifts;
+    PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
@@ -490,10 +574,13 @@ struct MUSCLFaceFunctor {
     KOKKOS_INLINE_FUNCTION
     void side(const uint32_t i_face, const uint8_t side) const {
         const int32_t c = cells_of_face(i_face, side);
-        // The face centroid is in cell 0's frame
+        // The face centroid is in cell 0's frame; side 1 is in cell 1's until
+        // FaceReconstruction::rotate_periodic_faces
         const uint8_t s = side ? face_shift(i_face) : 0;
-        rtype r[N_DIM];
-        FOR_I_DIM r[i] = (face_coords(i_face, i) - shifts(s, i)) - cell_coords(c, i);
+        rtype x_f[N_DIM], r[N_DIM];
+        FOR_I_DIM x_f[i] = face_coords(i_face, i);
+        periodic.backward(s, x_f, r);
+        FOR_I_DIM r[i] = r[i] - cell_coords(c, i);
         rtype W_f[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE {
             rtype grad[N_DIM];
@@ -562,8 +649,9 @@ void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
     g.faces = make_gradient(*mesh, boundaries, solution, gradients);
     MUSCLCellFunctor functor{MUSCLGradientFunctor{g},
                              LimiterFunctor{g.faces, mesh->cell_volume, limiters, limiter, venkat_K},
-                             MUSCLFaceFunctor{mesh->cells_of_face, mesh->cell_coords, mesh->face_coords, mesh->shifts,
-                                              mesh->face_shift, solution, gradients, limiters, face_solution},
+                             MUSCLFaceFunctor{mesh->cells_of_face, mesh->cell_coords, mesh->face_coords,
+                                              mesh->periodic_maps(), mesh->face_shift, solution, gradients, limiters,
+                                              face_solution},
                              cells};
     const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : mesh->n_cells;
     Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, n),
@@ -587,7 +675,7 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
     MUSCLFaceFunctor face_functor{mesh->cells_of_face,
                                   mesh->cell_coords,
                                   mesh->face_coords,
-                                  mesh->shifts,
+                                  mesh->periodic_maps(),
                                   mesh->face_shift,
                                   solution,
                                   gradients,

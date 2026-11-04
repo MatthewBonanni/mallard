@@ -28,7 +28,7 @@ type = "symmetry"
 
 [[boundaries]]
 name = "right"
-type = "upt"
+type = "inlet_state"
 u = [-487.34, 0.0]
 p = 35594.0
 T = 747.672441

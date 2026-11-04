@@ -95,6 +95,80 @@ inline void expect_hdf5_output_matches_serial(const std::string & input, const s
     comm::barrier();
 }
 
+/** @brief The bytes, as stored, of every dataset of a file, by path (e.g. "VTKHDF/CellData/RHO"). */
+inline std::map<std::string, std::vector<char>> h5_all_datasets(const std::string & filename) {
+    using h5::Handle;
+    Handle file(H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + filename);
+    std::vector<std::string> paths;
+    H5L_iterate_t visit = [](hid_t, const char * name, const auto *, void * out) -> herr_t {
+        static_cast<std::vector<std::string> *>(out)->push_back(name);
+        return 0;
+    };
+    h5::check(H5Lvisit(file, H5_INDEX_NAME, H5_ITER_INC, visit, &paths), "H5Lvisit");
+    std::map<std::string, std::vector<char>> datasets;
+    for (const auto & path : paths) {
+        Handle object(H5Oopen(file, path.c_str(), H5P_DEFAULT), H5Oclose, path);
+        if (H5Iget_type(object) != H5I_DATASET) continue;
+        Handle dset(H5Dopen2(file, path.c_str(), H5P_DEFAULT), H5Dclose, path);
+        Handle type(H5Dget_type(dset), H5Tclose, "H5Dget_type");
+        Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
+        std::vector<char> bytes(static_cast<size_t>(H5Sget_simple_extent_npoints(space)) * H5Tget_size(type) + 1);
+        h5::check(H5Dread(dset, type, H5S_ALL, H5S_ALL, H5P_DEFAULT, bytes.data()), path);
+        bytes.pop_back();
+        datasets[path] = std::move(bytes);
+    }
+    return datasets;
+}
+
+/** @brief Every value of a dataset (all its rows), as T. */
+template <typename T>
+std::vector<T> h5_values(const std::string & filename, const std::string & path) {
+    using h5::Handle;
+    Handle file(H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + filename);
+    Handle dset(H5Dopen2(file, path.c_str(), H5P_DEFAULT), H5Dclose, path);
+    Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
+    std::vector<T> values(static_cast<size_t>(H5Sget_simple_extent_npoints(space)) + 1);
+    h5::check(H5Dread(dset, h5::memory_type<T>(), H5S_ALL, H5S_ALL, H5P_DEFAULT, values.data()), path);
+    values.pop_back();
+    return values;
+}
+
+/**
+ * @brief Run the input distributed and serially, each writing VTKHDF output
+ *        with writer (a [[write_data]] body without prefix); the files (stems
+ *        after the prefix, e.g. "_000003" or "" for a series) must hold the
+ *        same datasets, byte for byte.
+ */
+inline void expect_vtkhdf_output_matches_serial(const std::string & input, const std::string & writer,
+                                                const std::string & dir, const std::vector<std::string> & stems) {
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    auto with_writer = [&](const std::string & name) {
+        return input + "[[write_data]]\nprefix = \"" + dir + "/" + name + "\"\nformat = \"vtkhdf\"\n" + writer;
+    };
+    Solver distributed;
+    distributed.init(parse_toml(with_writer("d")));
+    distributed.run();
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(with_writer("s")));
+    serial.run();
+    comm::barrier();
+    if (comm::is_root()) {
+        for (const auto & stem : stems) {
+            const auto a = h5_all_datasets(dir + "/d" + stem + ".vtkhdf");
+            const auto b = h5_all_datasets(dir + "/s" + stem + ".vtkhdf");
+            EXPECT_GT(b.size(), 8u) << stem;
+            EXPECT_EQ(a.size(), b.size()) << stem;
+            for (const auto & [name, bytes] : b) {
+                EXPECT_TRUE(a.count(name) && a.at(name) == bytes) << stem << " " << name << " on " << comm::size()
+                                                                   << " ranks";
+            }
+        }
+    }
+    comm::barrier();
+}
+
 #endif // Mallard_HAS_HDF5
 
 #endif // HDF5_OUTPUT_H

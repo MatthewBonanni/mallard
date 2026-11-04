@@ -1,0 +1,105 @@
+# Performance set (3D build): sampling cost. The teno5_3d case (the
+# Taylor-Green vortex on 96^3 hexahedra, TENO5, HLLC, SSPRK3, viscous) with
+# probes sampled every step: an exact cut plane, a sphere's surface with its
+# mass flux, a boundary zone with its mass flux and wall shear, and region
+# probes over a ball and over a sphere's surface, all reduced (no sample
+# files), so the throughput includes setting up and evaluating the samples.
+# See benchmarks/README.md.
+[run]
+n_steps = 100
+cfl = 0.4
+
+[mesh]
+type = "cartesian"
+Nx = 96
+Ny = 96
+Nz = 96
+Lx = 3.141592653589793
+Ly = 3.141592653589793
+Lz = 3.141592653589793
+
+[initialize]
+type = "analytical"
+u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"]
+p = "71.42857142857143 + (cos(2 * x) + cos(2 * y)) * (cos(2 * z) + 2) / 16"
+T = "1.0"
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.000625
+Pr = 0.71
+
+[output]
+check_interval = 50
+
+[[probes]]
+name = "cut"
+type = "cut_plane"
+point = [1.0, 1.5, 1.6]
+normal = [1.0, 0.3, 0.2]
+variables = ["P", "MASS_FLUX"]
+sampling = "point"
+samples = false
+reductions = ["integral", "mean"]
+
+[[probes]]
+name = "sphere"
+region = {type = "sphere", center = [1.57, 1.57, 1.57], radius = 0.8, filled = false}
+n_points = [48, 96]
+variables = ["P", "MASS_FLUX"]
+sampling = "point"
+samples = false
+reductions = ["integral"]
+
+[[probes]]
+name = "wall"
+boundary = "bottom"
+variables = ["P", "MASS_FLUX", "TAU_W"]
+samples = false
+reductions = ["integral", "max"]
+
+[[probes]]
+name = "ball"
+region = {type = "sphere", center = [1.57, 1.57, 1.57], radius = 0.8}
+variables = ["RHO", "P"]
+
+[[probes]]
+name = "shell"
+region = {type = "sphere", center = [1.57, 1.57, 1.57], radius = 0.8, filled = false}
+variables = ["RHO", "P"]

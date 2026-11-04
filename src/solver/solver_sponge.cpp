@@ -11,55 +11,59 @@
 
 #include "solver.h"
 
-#include <iomanip>
-#include <sstream>
-
 #include <Kokkos_Core.hpp>
 
 #include "characteristic.h"
 #include "input.h"
+#include "region.h"
 
 namespace {
 
-/** @brief An expression in x, y, z from a number or a string. */
-Expression number_or_expression(const toml::value & value, const std::string & name) {
-    if (value.is_string()) return Expression(name, value.as_string());
-    std::ostringstream text;
-    text << std::setprecision(17) << static_cast<double>(as_real(value, name));
-    return Expression(name, text.str());
+/** @brief An expression in x, y, z from a number, a quantity with a unit or an expression. */
+Expression number_or_expression(const Input & value, const std::string & name, const Dimension & dimension) {
+    return Expression(name, quantity_or_expression(value, name, dimension));
 }
 
 } // namespace
 
-void Solver::init_sponges() {
+void Solver::init_sponges(region::Regions & regions) {
     sponge_cells = Kokkos::View<uint32_t *>();
     sponge_dt_max = std::numeric_limits<rtype>::infinity();
     if (!input.contains("sponges")) return;
-    const std::vector<toml::value> sponges = toml::find<std::vector<toml::value>>(input, "sponges");
+    const std::vector<Input> sponges = find_value<std::vector<Input>>(input, "sponges");
     const uint32_t n_owned = mesh->n_owned();
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());
     const uint32_t n_vars = N_CONSERVATIVE + n_species;
     std::vector<double> strength(n_owned, 0.0);
     std::vector<double> target(size_t(n_owned) * n_vars, 0.0);
     for (size_t i_s = 0; i_s < sponges.size(); i_s++) {
-        const toml::value & sponge = sponges[i_s];
+        const Input & sponge = sponges[i_s];
         const std::string where = "sponges[" + std::to_string(i_s) + "]";
         for (const char * key : {"strength", "u", "p", "T"}) {
             if (!sponge.contains(key)) throw InputError(where + ": missing " + key + ".");
         }
-        const Expression sigma = number_or_expression(sponge.at("strength"), where + ".strength");
+        const Expression sigma = number_or_expression(sponge.at("strength"), where + ".strength", dim::rate);
         const auto & u_in = sponge.at("u").as_array();
         if (u_in.size() != N_DIM) throw InputError(where + ".u must have " + std::to_string(N_DIM) + " components.");
         std::vector<Expression> u;
-        FOR_I_DIM u.push_back(number_or_expression(u_in[i], where + ".u[" + std::to_string(i) + "]"));
-        const Expression p = number_or_expression(sponge.at("p"), where + ".p");
-        const Expression T = number_or_expression(sponge.at("T"), where + ".T");
+        FOR_I_DIM u.push_back(number_or_expression(u_in[i], where + ".u[" + std::to_string(i) + "]", dim::velocity));
+        const Expression p = number_or_expression(sponge.at("p"), where + ".p", dim::pressure);
+        const Expression T = number_or_expression(sponge.at("T"), where + ".T", dim::temperature);
+
+        const std::vector<double> * fractions = nullptr;
+        if (sponge.contains("region")) {
+            region::require_full_dimension(regions.get(sponge.at("region"), where + ".region"), sponge.at("region"),
+                                           where + ".region");
+            fractions = &regions.fractions(sponge.at("region"), where + ".region");
+        }
 
         std::vector<uint32_t> cells;
         std::vector<double> sigma_cells;
         for (uint32_t c = 0; c < n_owned; c++) {
-            const double s = sigma.at(Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL()), N_DIM);
+            if (fractions && (*fractions)[c] == 0.0) continue;
+            double s = sigma.at(Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL()), N_DIM);
             if (!(s >= 0.0)) throw InputError(where + ".strength must be non-negative.");
+            if (fractions) s *= (*fractions)[c];
             if (s == 0.0) continue;
             cells.push_back(c);
             sigma_cells.push_back(s);
@@ -140,6 +144,7 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
     }
     // Inlet targets at the end of the step, whose change enters the incoming wave
     for (auto & inflow : inflows) inflow->fill(double(t + dt), boundary_data.char_target_next);
+    timed_inlets.fill(double(t + dt), boundary_data.char_target_next);
     const CharacteristicStateFunctor state{boundary_data,
                                            mesh->face_normals,
                                            face_solution,

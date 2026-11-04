@@ -38,9 +38,9 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 
 ## Cell numbering {#cell-numbering}
 
-Each rank (and a serial run) numbers its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so memory locality no longer depends on how the mesh file numbers its cells (`[mesh] cell_order`, default `hilbert`). Results and output files are bitwise the same with either numbering. Milliseconds per step on one A100 (four in parentheses), 0.9.0:
+Each rank (and a serial run) numbers its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so memory locality no longer depends on how the mesh file numbers its cells (`[mesh] cell_order`, default `hilbert`). Results and output files are bitwise the same with either numbering. Milliseconds per step on one A100 (four in parentheses):
 
-| Case | x-first (generated) | Hilbert | random file numbering, before 0.9.0 |
+| Case | x-first (generated) | Hilbert | random file numbering, before 0.10.0 |
 |---|---:|---:|---:|
 | 2D TENO5, 1M quadrilaterals | 19.9 (6.39) | 19.3 (6.19) | 52.8 (10.7) |
 | 2D MUSCL, 1M quadrilaterals | 3.61 (1.44) | 3.57 (1.39) | 20.7 (2.90) |

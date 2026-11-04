@@ -6,13 +6,13 @@
 # at U_b = 16.6 m/s (Re_D = 45,000 with Sutherland's viscosity) and passes an
 # equilateral triangle of edge D = 0.04 m, apex upstream, base at x = 0. The
 # rig is 6 D wide; here the span is periodic over 2 D = 0.08 m, as in the
-# workshop's computations. Inlet 5 D upstream of the base (nscbc_inlet with
+# workshop's computations. Inlet 5 D upstream of the base (inlet_state with nscbc, with
 # digital-filter turbulence: u' = 5% U_b, isotropic, integral length 10 mm),
-# outlet 17 D downstream (the rig's exit; nscbc_outlet), no-slip adiabatic
+# outlet 17 D downstream (the rig's exit; outlet_pressure with nscbc), no-slip adiabatic
 # walls (channel walls and bluff body, not wall-resolved: no wall model).
 #
 # LES: Sigma model with Scotti's filter width, hybrid KEEP / HLLC flux, MUSCL
-# without limiter, SSPRK3. Mesh (tools/make_volvo_mesh.py --ds 1.25e-3 --nz 64):
+# without limiter, SSPRK3. Mesh (examples/volvo_bluff_body/make_volvo_mesh.py --ds 1.25e-3 --nz 64):
 # 2.7M hexahedra, Delta = 1.25 mm = D / 32 in the shear layers and the near
 # wake (x < 5 D), 0.6 mm at the separation corners, growing to 5 mm at
 # x = 10 D and 10 mm at the outlet; dz = 1.25 mm. The mesh lines leave the
@@ -33,12 +33,12 @@
 #                                       feeds energy, the model removes it)
 #
 # Run:
-#   python ../../tools/make_volvo_mesh.py volvo.msh --ds 1.25e-3 --nz 64
-#   python ../../tools/volvo.py probes >> cold.toml   # optional: mid-span plane for a movie
-#   mpirun -n 4 ../../build3d/src/Mallard -i cold.toml --kokkos-map-device-id-by=mpi_rank
-#   python ../../tools/volvo.py profiles stats/cold_000003.pvtu --u-bulk 16.6 --out cold.npz
-#   python ../../tools/volvo.py plot cold.npz --exp reference --out cold.png
-#   python ../../tools/volvo.py budget integrals.csv --t0 0.08
+#   python make_volvo_mesh.py volvo.msh --ds 1.25e-3 --nz 64
+#   python volvo.py probes >> cold.toml   # optional: mid-span plane for a movie
+#   mpirun -n 4 ../../build3d/src/mallard -i cold.toml --kokkos-map-device-id-by=mpi_rank
+#   python volvo.py profiles stats/cold_000003.vtkhdf --u-bulk 16.6 --out cold.npz
+#   python volvo.py plot cold.npz --exp reference --out cold.png
+#   python volvo.py budget integrals.csv --t0 0.08
 # Cost: 626,000 steps, 14 ms each on four A100s (2.8 hours).
 
 [run]
@@ -61,10 +61,12 @@ T = 288.0
 
 [[boundaries]]
 name = "inlet"
-type = "nscbc_inlet"
+type = "inlet_state"
 u = [16.6, 0.0, 0.0]
 p = 101325.0
 T = 288.0
+
+[boundaries.nscbc]
 L = 0.88
 
 [boundaries.turbulence]
@@ -73,8 +75,10 @@ length_scale = 0.01
 
 [[boundaries]]
 name = "outlet"
-type = "nscbc_outlet"
+type = "outlet_pressure"
 p = 101325.0
+
+[boundaries.nscbc]
 L = 0.88
 
 [[boundaries]]
@@ -132,12 +136,10 @@ time_interval = 0.02
 
 [[write_data]]
 prefix = "stats/cold"
-format = "vtu"
 time_interval = 0.1
 variables = ["MEAN_*", "COV_*", "MU_T"]
 
 [[write_data]]
 prefix = "snap/cold"
-format = "vtu"
 time_interval = 0.15
 variables = ["U", "Q", "MU_T"]

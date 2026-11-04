@@ -20,8 +20,10 @@
 #include <tuple>
 #include <vector>
 
+#include "data_paths.h"
 #include "input.h"
 #include "test_fixtures.h"
+#include "verification.h"
 #include "solver.h"
 
 namespace {
@@ -45,7 +47,7 @@ std::string input(const Case & c) {
     std::ostringstream s;
     s << "[run]\n" << c.run
       << "[mesh]\ntype = \"" << c.mesh << "\"\nNx = " << c.n << "\nNy = " << c.n << "\nLx = 1.0\nLy = 1.0\n";
-    if (c.sides.empty()) s << "periodic = [\"x\"]\n";
+    if (c.sides.empty()) s << "[[periodic]]\nzones = [\"left\", \"right\"]\n";
     s << "[initialize]\n" << c.init
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"top\"\n" << c.top << "\n";
@@ -85,6 +87,7 @@ double max_speed(Solver & solver) {
 
 TEST(AxisymmetricTest, RevolvedGeometryOfCellsAndFaces) {
     Solver solver;
+    solver.set_distributed(false);
     Case c;
     c.mesh = "cartesian_tri";
     c.n = 8;
@@ -115,6 +118,7 @@ TEST(AxisymmetricTest, RevolvedGeometryOfCellsAndFaces) {
 TEST(AxisymmetricTest, CellCentersAreRWeightedCentroids) {
     // A linear function equals its r-weighted cell average at the cell center
     Solver solver;
+    solver.set_distributed(false);
     Case c;
     c.mesh = "cartesian_tri";
     c.n = 4;
@@ -130,6 +134,7 @@ TEST(AxisymmetricTest, CellCentersAreRWeightedCentroids) {
 
 TEST(AxisymmetricTest, AxisMustBeSymmetry) {
     Solver solver;
+    solver.set_distributed(false);
     Case c;
     c.init = "type = \"constant\"\nu = [0.0, 0.0]\np = 1.0\nT = 1.0\n";
     std::string text = input(c);
@@ -153,6 +158,7 @@ TEST_P(AxisymmetricQuiescent, GasAtUniformPressureStaysAtRest) {
     const std::string rho = physics == "type = \"euler\"" ? "1 + 0.3 * cos(3 * x) * cos(2 * y)" : "1";
     c.init = "type = \"analytical\"\nrho = \"" + rho + "\"\nu = [\"0\", \"0\"]\np = \"1\"\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(c)));
     solver.run();
     EXPECT_LT(max_speed(solver), precision_tol<double>(1e-13, 1e-5));
@@ -170,7 +176,7 @@ TEST(AxisymmetricTest, GasMixtureAtRestStaysAtRest) {
     // The mixture flux, its pressure in the geometric source and, viscous, its
     // transport. (Cell averages of a gas whose temperature or composition varies
     // are not at uniform pressure, in planar runs too.)
-    const std::string mechanism = "gas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR "/mechanisms/h2o2.yaml\"\n";
+    const std::string mechanism = "gas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n";
     for (const std::string type : {"euler", "navier_stokes"}) {
         for (const std::string reconstruction : {"type = \"MUSCL\"", "type = \"TENO\"\norder = 3"}) {
             Case c;
@@ -183,6 +189,7 @@ TEST(AxisymmetricTest, GasMixtureAtRestStaysAtRest) {
             const std::string constants = "gamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
             text.replace(text.find(constants), constants.size(), "");
             Solver solver;
+            solver.set_distributed(false);
             solver.init(parse_toml(text));
             solver.run();
             EXPECT_LT(max_speed(solver), precision_tol<double>(1e-10, 1e-3)) << type << " " << reconstruction;
@@ -201,6 +208,7 @@ TEST(AxisymmetricTest, ConservesMassAxialMomentumAndEnergy) {
     c.init = "type = \"analytical\"\nrho = \"1\"\nu = [\"0.2 * (1 - y * y)\", \"0.1 * y * sin(6.283185307179586 * x)\"]\n"
              "p = \"1 + 0.5 * exp(-20 * ((x - 0.5)^2 + y^2))\"\n";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(c)));
     const auto before = solver.integrate_conservatives();
     solver.run();
@@ -231,6 +239,7 @@ std::array<double, 2> poiseuille_residual(uint32_t n) {
     g << "gravity = [" << 4.0 * mu * U << ", 0.0]\n";
     c.source = g.str();
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(c)));
     const auto rhs = host_rhs(solver);
     const Mesh & mesh = *solver.get_mesh();
@@ -259,7 +268,8 @@ TEST(AxisymmetricTest, PoiseuilleResidualConvergesAtSecondOrderUpToTheAxis) {
     const double forcing = 4.0 * 0.01 * 0.1;
     const auto e1 = poiseuille_residual(8);
     const auto e2 = poiseuille_residual(16);
-    EXPECT_GT(std::log2(e1[0] / e2[0]), 1.8);
+    verification::expect_order({"axisymmetric", "Poiseuille pipe flow", "quadrilaterals",
+                                "mean axial momentum residual", {8, 16}, {e1[0], e2[0]}, 2.0, 1.8});
     EXPECT_LT(e2[0], 1e-3 * forcing);
     EXPECT_LT(e2[1], 1e-3 * forcing);
 }
@@ -344,8 +354,9 @@ double mms_residual_error(const std::string & mesh, uint32_t n, const std::strin
              "rho = \"1 + 0.2 * sin(2 * pi * x) * cos(pi * y)\"\n"
              "u = [\"0.3 + 0.1 * cos(2 * pi * x) * cos(pi * y)\", \"0.1 * sin(pi * y) * (1 + 0.5 * sin(2 * pi * x))\"]\n"
              "p = \"1 + 0.2 * cos(2 * pi * x) * cos(pi * y)\"\n";
-    c.top = "type = \"extrapolation\"";
+    c.top = "type = \"outlet_extrapolation\"";
     Solver solver;
+    solver.set_distributed(false);
     solver.init(parse_toml(input(c)));
     const auto rhs = host_rhs(solver);
     const auto exact = mms_exact_rhs(*solver.get_mesh());
@@ -370,9 +381,10 @@ TEST_P(AxisymmetricOrder, ManufacturedResidualConvergesAtDesignOrder) {
     // manufactured state, up to and including the axis cells
     const auto [mesh, order] = GetParam();
     const std::string teno = "type = \"TENO\"\norder = " + std::to_string(order);
-    const double e1 = mms_residual_error(mesh, 16, teno);
-    const double e2 = mms_residual_error(mesh, 32, teno);
-    EXPECT_GT(std::log2(e1 / e2), order - 1 - 0.3) << e1 << " " << e2;
+    verification::expect_order({"axisymmetric", "TENO" + std::to_string(order), verification::cells_of(mesh),
+                                "mean residual error, manufactured solution", {16, 32},
+                                {mms_residual_error(mesh, 16, teno), mms_residual_error(mesh, 32, teno)},
+                                order - 1.0, order - 1 - 0.3});
 }
 
 INSTANTIATE_TEST_SUITE_P(Axisymmetric, AxisymmetricOrder,

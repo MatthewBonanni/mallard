@@ -1,0 +1,4 @@
+# This example's card on the website's Examples page; its title, results, cells and run
+# time come from examples/README.md, its settings from the input file.
+build = "3d"
+demonstrates = ["flame in turbulence", "DNS and thickened-flame LES"]

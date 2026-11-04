@@ -2,14 +2,14 @@
 # downstream (3D build): direct numerical simulation, no turbulence model.
 #
 # Physics. Mean flow U = 1, rho = 1, sound speed 5 (Mach 0.2). The
-# nscbc_inlet at x = 0 adds isotropic digital-filter turbulence
+# inlet_state with nscbc at x = 0 adds isotropic digital-filter turbulence
 # ([boundaries.turbulence]): u' = 0.1 U, integral length L = 0.25 in every
 # direction and, by Taylor's hypothesis, integral time L / U. Re_L =
-# u' L / nu = 100. The nscbc_outlet at x = 6 lets it leave.
+# u' L / nu = 100. The outlet_pressure with nscbc at x = 6 lets it leave.
 #
 # Mesh: 384 x 128 x 128 hexahedra (dx = L / 16). Statistics over
 # t = 8-30 (3.7 flow-through times), averaged over y and z with
-# tools/plane_average.py.
+# tools/post/plane_average.py.
 #
 # Results (docs/design/synthetic_inflow.md):
 #   cells at the inlet       R_uu, R_vv, R_ww = 0.0097, 0.0106, 0.0094 (target 0.01)
@@ -18,8 +18,8 @@
 #   zero_net_flux = false    p'_rms / (rho u'^2) = 7.8 everywhere (a plane acoustic wave)
 #
 # Run:
-#   mpirun -n 1 ../../build3d/src/Mallard -i input.toml
-#   python ../../tools/plane_average.py stats/duct_000003.vtu --average y z --out profile.csv
+#   mpirun -n 1 ../../build3d/src/mallard -i input.toml
+#   python ../../tools/post/plane_average.py stats/duct_000003.vtkhdf --average y z --out profile.csv
 #
 # Cost: 65,000 steps, 85 ms each on one A100 (1.5 hours).
 
@@ -35,7 +35,12 @@ Nz = 128
 Lx = 6.0
 Ly = 2.0
 Lz = 2.0
-periodic = ["y", "z"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[[periodic]]
+zones = ["back", "front"]
 
 [initialize]
 type = "constant"
@@ -45,10 +50,12 @@ T = 1.0
 
 [[boundaries]]
 name = "left"
-type = "nscbc_inlet"
+type = "inlet_state"
 u = [1.0, 0.0, 0.0]
 p = 17.857142857142858
 T = 1.0
+
+[boundaries.nscbc]
 L = 6.0
 
 [boundaries.turbulence]
@@ -58,8 +65,10 @@ zero_net_flux = true
 
 [[boundaries]]
 name = "right"
-type = "nscbc_outlet"
+type = "outlet_pressure"
 p = 17.857142857142858
+
+[boundaries.nscbc]
 L = 6.0
 
 [numerics]
@@ -127,6 +136,5 @@ interval = 10000
 
 [[write_data]]
 prefix = "stats/duct"
-format = "vtu"
 time_interval = 11.0
 variables = ["MEAN_*", "COV_*", "U", "P"]

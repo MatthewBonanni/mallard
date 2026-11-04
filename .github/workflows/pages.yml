@@ -1,4 +1,5 @@
-# Publish the website (matthewbonanni.github.io/mallard) for each release.
+# Publish the website (matthewbonanni.github.io/mallard) for each release, and when
+# the documentation on main changes.
 # The site's source lives in MatthewBonanni/mallard-website; this workflow builds it
 # against the release and deploys it to this repository's GitHub Pages.
 name: Pages
@@ -6,6 +7,15 @@ name: Pages
 on:
   release:
     types: [published]
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "examples/**"
+      - "tutorials/**"
+      - "tools/README.md"
+      - "README.md"
+      - "templates/manifest.toml"
   workflow_dispatch:
     inputs:
       ref:

@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-#include <toml.hpp>
+#include "input.h"
 
 /** @brief The timed calls of one splitting step dt (the best one's time, the last one's sub-steps). */
 struct ChemistryBenchmarkStep {
@@ -41,12 +41,12 @@ struct ChemistryBenchmark {
 };
 
 /**
- * @brief The [benchmark] mode of MallardReactor: states sampled along the
+ * @brief The [benchmark] mode of `mallard reactor`: states sampled along the
  *        trajectory of [reactor] (fresh, igniting and burnt), replicated
  *        over the cells and advanced over each splitting step dt, every call
  *        from the sampled states; logs and returns cells per second and the
  *        sub-step distribution.
  */
-ChemistryBenchmark run_chemistry_benchmark(const toml::value & input);
+ChemistryBenchmark run_chemistry_benchmark(const Input & input);
 
 #endif // CHEMISTRY_BENCHMARK_H

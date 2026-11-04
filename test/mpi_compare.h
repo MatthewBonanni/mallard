@@ -39,7 +39,7 @@ inline void expect_matches_serial(const std::string & input,
     if (check_distributed) check_distributed(distributed);
 
     // The reference keeps the global numbering; the distributed run numbers its cells by locality
-    toml::value serial_input = parse_toml(input);
+    Input serial_input = parse_toml(input);
     serial_input["mesh"]["cell_order"] = "input";
     Solver serial;
     serial.set_distributed(false);

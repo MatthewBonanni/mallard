@@ -15,27 +15,27 @@ flux is the Riemann solver applied to the interior face state
 $\mathbf{W}^L$ and an exterior state $\mathbf{W}^b$
 (`BoundaryData::exterior_W`, `src/boundary/boundary.h`), with the unit
 normal $\mathbf{n}$ pointing out of the domain. Ghost states also feed the
-least-squares gradients ([chapter 5](finite_volume.md#muscl)) and the
+least-squares gradients ([chapter 6](finite_volume.md#muscl)) and the
 mirror images of TENO-E stencils. The viscous fluxes of each boundary type
-are in [chapter 6](fluxes.md#face-values-and-gradients). With
+are in [chapter 7](fluxes.md#face-values-and-gradients). With
 $u_n = \mathbf{u}^L\cdot\mathbf{n}$, the exterior states $\mathbf{W}^b = [\rho, \mathbf{u}, p]^b$ are:
 
 - `symmetry`, inviscid walls: $[\rho^L,\ \mathbf{u}^L - 2u_n\mathbf{n},\ p^L]$;
 - `wall_adiabatic`, `wall_heat_flux` (viscous): $[\rho^L,\ 2\mathbf{u}_w - \mathbf{u}^L,\ p^L]$;
 - `wall_isothermal` (viscous, single gas): as above, with $\rho^b = p^L/(R\,T^b)$, $T^b = \max(2T_w - T^L,\ 0.1\,T_w)$;
-- `upt`, `dirichlet`: the prescribed state (`dirichlet`: per face, from expressions);
+- `inlet_state`, `dirichlet`: the prescribed state (`dirichlet`: per face, from expressions);
 - `farfield`: eq. $\eqref{eq:far-field}$;
-- `p_out`: subsonic ($u_n < a^L$): $[\rho^L p_b/p^L,\ \mathbf{u}^L,\ p_b]$, keeping $T$; supersonic: $\mathbf{W}^L$;
-- `p_out_average`: as `p_out` with $p^L + \Delta p$, $\Delta p$ the target minus the area average of the adjacent cells' pressure, updated at every stage (and $p \ge 10^{-3}p^L$);
-- `extrapolation`: the image-face state, below;
-- `nscbc_outlet`, `nscbc_inlet`: eq. $\eqref{eq:characteristic-boundaries-3}$.
+- `outlet_pressure`: subsonic ($u_n < a^L$): $[\rho^L p_b/p^L,\ \mathbf{u}^L,\ p_b]$, keeping $T$; supersonic: $\mathbf{W}^L$;
+- `outlet_pressure` with `average`: as `outlet_pressure` with $p^L + \Delta p$, $\Delta p$ the target minus the area average of the adjacent cells' pressure, updated at every stage (and $p \ge 10^{-3}p^L$);
+- `outlet_extrapolation`: the image-face state, below;
+- `outlet_pressure` with `nscbc`, `inlet_state` with `nscbc`: eq. $\eqref{eq:characteristic-boundaries-3}$.
 
 $\mathbf{u}_w$ is the wall velocity and $T_w$ the wall temperature. Under
 gravity, walls and symmetry planes continue the hydrostatic pressure in
 their ghosts: a ghost at distance $\delta$ beyond the face has
 $p^b = p^L + \rho^L(\mathbf{g}\cdot\mathbf{n})\,\delta$. For gas mixtures
 the exterior state also carries the mass fractions and $(\gamma, e_0)$: the
-prescribed ones at `upt` faces, the image's at transmissive faces, the
+prescribed ones at `inlet_state` faces, the image's at transmissive faces, the
 interior's elsewhere. Walls are adiabatic and non-catalytic for mixtures
 (`wall_isothermal` is not available).
 
@@ -62,33 +62,50 @@ outflow.
 
 ### Transmissive boundaries
 
-`extrapolation` faces, and characteristic faces before their
+`outlet_extrapolation` faces, and characteristic faces before their
 characteristic treatment, take the state of an *image face*: the interior
 face reached by translating the boundary face inward by the depth of the
-boundary cell, with its reconstructed state on the far side at the
-matching quadrature point; without one, the state of the image cell, else
-the interior state. This is exactly what an interior face sees for a
-solution that does not vary normal to the boundary, at any order. A
+boundary cell (or, where no face lies there, as for pyramids, whose apex is
+halfway, by the smallest distance at which a neighboring cell has one), with
+its reconstructed state on the far side at the
+matching quadrature point. Without one (as on most faces of unstructured
+triangles and tetrahedra), each quadrature point is translated the same way
+into the image cell and takes the value of that cell's reconstruction
+polynomial there (TENO-E's central polynomial; the image cell's average with
+MUSCL and first order, at troubled cells and where the value is not
+admissible). This is exactly what an interior face sees for a solution that
+does not vary normal to the boundary, at any order. The image cell's
+average instead is first order against the high-order interior state: with
+TENO-E it amplified round-off at subsonic inflows on unstructured triangles
+to vacuum states within a few flow-through times. A
 zero-gradient copy of the boundary cell would feed the cell back to itself
 at inflow boundaries, and on triangles, whose centroids are offset from the
-face, create an O(1) mass imbalance at moving shocks.
+face, create an O(1) mass imbalance at moving shocks. The gradient stencils
+of `outlet_extrapolation` boundaries continue across them the same way, through the
+image cells ([chapter 6](finite_volume.md#gradients-for-the-viscous-terms)).
 
 ### Periodic boundaries
 
 Periodic zone pairs are joined into interior faces whose second cell is
-translated next to the first (`src/mesh/periodic.cpp`), so every scheme
-treats the seam as interior.
+moved next to the first (`src/mesh/periodic.cpp`), so every scheme
+treats the seam as interior. A pair moves by a translation $\mathbf{t}$ or
+by a rotation $Q$ about an axis: a neighbor's point $\mathbf{x}$ is seen at
+$Q\mathbf{x} + \mathbf{t}$, and across a rotation its velocity (momentum) as
+$Q\mathbf{u}$, its gradients as $Q\,\nabla\phi$ and $Q\,\nabla\mathbf{u}\,Q^T$,
+while scalars carry over unchanged (`src/mesh/periodic_maps.h`).
 
 ### Walls
 
 The ghost states above, together with the viscous wall fluxes of
-[chapter 6](fluxes.md#face-values-and-gradients), give no-slip walls with
+[chapter 7](fluxes.md#face-values-and-gradients), give no-slip walls with
 one-sided wall gradients. In LES the wall faces carry the molecular fluxes
-only, with no SGS stress, heat or species flux.
+only, with no SGS stress, heat or species flux. Walls with a wall model
+take a slip wall's exterior state and the model's stress and heat flux
+([chapter 5](wall_models.md#coupling-to-the-les)).
 
 ## Characteristic boundaries
 
-`nscbc_outlet` and `nscbc_inlet` are the non-reflecting boundaries of
+`outlet_pressure` with `nscbc` and `inlet_state` with `nscbc` are the non-reflecting boundaries of
 [Poinsot & Lele 1992](../references.md#poinsot-lele-1992) in a weak,
 finite-volume form (`src/numerics/characteristic.h`;
 [design notes](../design/nscbc.md)). Each face keeps its own pressure and
@@ -167,7 +184,7 @@ $a = 1$, by default), and $\rho^b = p^b/(R_t T^b)$ at the target's gas
 constant. Supersonic outflow takes $\mathbf{W}^L$, supersonic inflow the
 target. The low-Mach correction applies at characteristic faces, and
 MUSCL boundary cells there reconstruct without the zero-gradient ghosts
-([chapter 5](finite_volume.md#muscl)). An inlet's target velocity is per
+([chapter 6](finite_volume.md#muscl)). An inlet's target velocity is per
 face and may carry synthetic turbulence ([chapter 4](les.md#synthetic-inflow-turbulence)).
 
 ![Waves at characteristic boundaries](../images/theory/characteristics-light.svg#gh-light-mode-only)
@@ -236,4 +253,4 @@ by strength. The time step is limited to $\Delta t \le 1/\max_i\sigma_i$.
 
 Axisymmetric runs add the radial momentum source of
 [chapter 1](governing_equations.md#axisymmetric-flows), integrated as in
-[chapter 5](finite_volume.md#axisymmetric-cells).
+[chapter 6](finite_volume.md#axisymmetric-cells).

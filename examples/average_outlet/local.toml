@@ -1,0 +1,63 @@
+# The flow of input.toml leaving through a local outlet_pressure at 0.9 bar
+# (no average): its subsonic faces are held at 0.9 bar and the supersonic
+# core leaves at its own pressure, so the outlet's area-averaged pressure
+# rises to 2% above the target by 5 ms. See input.toml.
+
+[run]
+t_stop = 0.005
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 80
+Ny = 40
+Lx = 0.2
+Ly = 0.1
+
+[initialize]
+type = "analytical"
+rho = "1.1614401858304297"
+u = ["150 + 225 * (tanh((y - 0.025) / 0.004) - tanh((y - 0.075) / 0.004))", "0.0"]
+p = "1.0e5"
+
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = ["150 + 225 * (tanh((y - 0.025) / 0.004) - tanh((y - 0.075) / 0.004))", "0.0"]
+p = 1.0e5
+T = 300.0
+
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 0.9e5
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0e5
+T_ref = 300.0
+rho_ref = 1.1614401858304297
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/local"
+format = "vtu"
+time_interval = 2.5e-4
+variables = ["RHO", "U_X", "P", "T"]

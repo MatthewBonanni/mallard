@@ -5,7 +5,7 @@ milestone 10 as implemented, for the numbers and the hardware).
 
 ## `chemistry/`: chemistry throughput
 
-`MallardReactor -i <case>.toml` samples states along a constant-volume
+`mallard reactor -i <case>.toml` samples states along a constant-volume
 ignition (fresh, igniting and burnt gas), replicates them over many cells and
 advances them with the solver's chemistry kernels over splitting steps of
 1e-8 s (detonations) and 1e-6 s (flames); it prints cells per second and a
@@ -17,7 +17,7 @@ CSV.
 | `h2o2.toml` | H2/air, h2o2 | 10 | 29 |
 | `gri30.toml` | CH4/air, GRI-Mech 3.0 | 53 | 325 |
 | `ndodecane.toml` | n-dodecane/air, Wang et al. (2014) | 100 | 432 |
-| `nhexane.toml` | n-hexane/air, NUIG (Zhang et al. 2015); copy it first with `python tools/cantera_mechanisms.py` | 1268 | 5336 |
+| `nhexane.toml` | n-hexane/air, NUIG (Zhang et al. 2015); copy it first with `python tools/setup/cantera_mechanisms.py` | 1268 | 5336 |
 
 `[benchmark]` keys: `cells`, `samples` (trajectory states), `dt` (list),
 `repeats` (the best is reported, after a warm-up call), `igniting_fraction`
@@ -29,8 +29,8 @@ cells whose last call took 16 or more sub-steps), `shared` (-1 automatic, 0: wor
 and `bin_by_cost` (GPUs: order the queue by the cells' last cost, most
 expensive first; default true, ignored on CPUs).
 `[chemistry] sparse = true/false` chooses the LU (by default sparse from 30 species
-when it pays: GRI-3.0 and larger). V3 with the large mechanism: `python tools/v3_check.py
-<build>/src/MallardReactor` against `chemistry/nhexane_ignition.csv`.
+when it pays: GRI-3.0 and larger). V3 with the large mechanism: `python tools/dev/v3_check.py
+<build>/src/mallard reactor` against `chemistry/nhexane_ignition.csv`.
 
 ## `perf/`: performance set
 
@@ -43,17 +43,19 @@ A fixed set for tracking performance across commits, defined in
 | `teno5_2d` | 2D | 2D Riemann problem (configuration 3) on 1024 x 1024 quads, TENO5, 300 steps |
 | `muscl_2d` | 2D | the same with MUSCL |
 | `teno5_3d` | 3D | Taylor-Green vortex (Navier-Stokes) on 96^3 hexes, TENO5, 100 steps |
+| `probes_3d` | 3D | `teno5_3d` with probes every step: an exact cut plane and a sphere's surface with mass fluxes (point values), a wall zone with its shear, and region probes over a ball and a sphere's surface; reductions only. Its gap to `teno5_3d` is the cost of sampling |
 | `flame_3d` | 3D | reacting LES in the Volvo combustor's configuration without the bluff body: premixed propane-air (two-step mechanism, mixture-averaged transport, TFLES, Sigma), 96 x 48 x 48 hexes, MUSCL, hybrid flux, Strang-split chemistry, 100 steps |
 | `air_3d` | 3D | the same flow of air (single gas): the reference of the mixture's cost per cell and step |
 | `h2o2@dt=...`, `gri30@dt=...` | 2D | `chemistry/h2o2.toml` and `chemistry/gri30.toml` at each `dt` |
 
 The solver cases report the throughput over the time stepping (the run's
-summary), the chemistry cases `MallardReactor`'s cells per second.
+summary); `probes_3d` over its time stepping, diagnostics and output, where
+probes sample; the chemistry cases `mallard reactor`'s cells per second.
 
 ```bash
-python tools/perf_suite.py run --build-2d build --build-3d build3d --out perf.json --csv perf.csv
-python tools/perf_suite.py compare perf.json            # exit 1 on a regression
-python tools/perf_suite.py update-baselines perf.json   # record new baselines
+python tools/perf/perf_suite.py run --build-2d build --build-3d build3d --out perf.json --csv perf.csv
+python tools/perf/perf_suite.py compare perf.json            # exit 1 on a regression
+python tools/perf/perf_suite.py update-baselines perf.json   # record new baselines
 ```
 
 `run` runs each case once to warm up, then `--repeats` times (default 3),

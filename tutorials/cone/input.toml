@@ -26,7 +26,7 @@ type = "wall_adiabatic"
 
 [[boundaries]]
 name = "inlet"
-type = "upt"
+type = "inlet_state"
 u = [2.0, 0.0, 0.0]
 p = 0.7142857142857143
 T = 0.7142857142857143
@@ -40,7 +40,7 @@ T = 0.7142857142857143
 
 [[boundaries]]
 name = "outlet"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "symmetry_y"
@@ -85,20 +85,17 @@ interval = 20
 
 [[write_data]]
 prefix = "./solut/flow"
-format = "vtu"
 time_interval = 0.5
 variables = ["RHO", "U", "P"]
 
 [[write_data]]
 prefix = "./solut/cone"
-format = "vtu"
-geometry = "cone"
+region = "cone"
 time_interval = 0.5
 variables = ["P"]
 
 [[write_data]]
 prefix = "./solut/plane"
-format = "vtu"
-geometry = "symmetry_z"
+region = "symmetry_z"
 time_interval = 0.5
 variables = ["RHO", "U", "P"]

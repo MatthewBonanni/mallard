@@ -1,0 +1,77 @@
+# Area-averaged outlet: a 2D channel whose inflow has a supersonic core
+# (600 m/s, Mach 1.7) between subsonic streams (150 m/s, Mach 0.4), leaving
+# through outlet_pressure with average = true at 0.9 bar. The outlet mixes
+# subsonic and supersonic faces: average shifts the subsonic faces' pressure
+# so that the area average over the whole outlet is the target, and leaves
+# the transverse profile free. local.toml is the same flow with a local
+# outlet_pressure, which fixes the subsonic faces at 0.9 bar and lets the
+# supersonic core leave at its own pressure.
+#
+# Run (seconds on one CPU thread):
+#   ../../build/src/mallard -i input.toml
+#   ../../build/src/mallard -i local.toml
+#   python check_average_outlet.py solut/outlet solut/local
+#
+# Result (t = 2.5-5 ms): the area-averaged pressure of the outlet cells is
+# within 0.05% of 0.9 bar while the pressure varies by 6% across the outlet;
+# the local outlet's average is 2% above the target at 5 ms, and rising.
+
+[run]
+t_stop = 0.005
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 80
+Ny = 40
+Lx = 0.2
+Ly = 0.1
+
+[initialize]
+type = "analytical"
+rho = "1.1614401858304297"
+u = ["150 + 225 * (tanh((y - 0.025) / 0.004) - tanh((y - 0.075) / 0.004))", "0.0"]
+p = "1.0e5"
+
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = ["150 + 225 * (tanh((y - 0.025) / 0.004) - tanh((y - 0.075) / 0.004))", "0.0"]
+p = 1.0e5
+T = 300.0
+
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 0.9e5
+average = true
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0e5
+T_ref = 300.0
+rho_ref = 1.1614401858304297
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "./solut/outlet"
+format = "vtu"
+time_interval = 2.5e-4
+variables = ["RHO", "U_X", "P", "T"]

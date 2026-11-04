@@ -1,0 +1,57 @@
+# Format fixture: reacting H2/air mixture (species and the chemistry state in
+# restart files). See README.md.
+[run]
+n_steps = 2
+cfl = 0.2
+
+[mesh]
+type = "cartesian"
+Nx = 6
+Ny = 5
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+p = "101325.0 * (1.0 + 0.1 * x * y)"
+T = "300.0 + 900.0 * x"
+u = ["10.0 + 20.0 * y", "-10.0 * x"]
+X = { H2 = "2", O2 = "1", N2 = "3.76" }
+
+[[boundaries]]
+name = "left"
+type = "extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../../mechanisms/h2o2.yaml"
+
+[chemistry]
+
+[output]
+check_interval = 1000
+
+[[write_data]]
+prefix = "mixture"
+format = "restart"
+interval = 1

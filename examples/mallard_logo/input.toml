@@ -1,0 +1,108 @@
+# The Mallard logo as an initial condition (2D): a Mach 1.5 shock runs through
+# the logo painted in gas and around the logo's duck, a solid wall, set up
+# without a restart file.
+#
+# - The logo is a table: make_logo_table.py samples docs/images/mallard_light.png
+#   into the fractions of ink (the frame and the wordmark), flame (the trail)
+#   and cream (the duck's halo) on a grid, and [[initialize.data]] gives them
+#   to the density as logo_ink, logo_flame and logo_cream. Ink is three times
+#   denser than the air around it, cream twice, the flames a quarter as dense
+#   (hot gas), all at the same pressure.
+# - The duck is the mesh's curved wall: the logo's duck, from
+#   ../mallard/make_mallard_mesh.py, in a longer channel that holds the
+#   wordmark. The table places the icon's duck on it.
+# - The shocked gas is a region: the half-space x < -0.3 takes the
+#   Rankine-Hugoniot state behind a Mach 1.5 shock (rho, u, p).
+#
+# The shock crosses the frame, wraps around the duck and leaves a wake behind
+# it, then runs through the flames and the letters: their edges roll up
+# (Richtmyer-Meshkov), the heavy letters lag the light flames, and the whole
+# logo drifts downstream at the speed of the shocked gas, 0.69.
+#
+# At full size (1,255,115 cubic triangles) the run takes 109,291 steps to
+# t = 5 at 64 ms each on one A100-80GB (19.5M cells/s): 1.9 hours of time
+# stepping, about 2 hours of wall time (t = 0-1.7 took 42 min 51 s and
+# t = 3.30-5 42 min 05 s, each with 1.4 min of setup). The density stays
+# positive (at least 0.14, at the duck's tail at t = 1.03), and mass, momentum
+# and energy balance the boundary fluxes to 2e-15.
+#
+# Generate the mesh and the table first (gmsh, scipy and pillow: pip install
+# gmsh scipy pillow):
+#   python ../mallard/make_mallard_mesh.py logo.msh --order 3 --domain -0.5 6.5 -0.85 0.7
+#   python make_logo_table.py logo.csv
+# Run, then animate (the gallery's video and poster):
+#   mallard -i input.toml
+#   python animate_mallard_logo.py logo.mp4 solut --poster logo_poster.jpg
+# Nondimensionalization: ambient density and sound speed 1, duck length 1.1,
+# bill tip at the origin.
+
+[run]
+t_stop = 5.0
+cfl = 0.3
+
+[mesh]
+type = "file"
+filename = "logo.msh"
+
+[initialize]
+type = "analytical"
+rho = "1 + 2 * logo_ink + logo_cream - 0.75 * logo_flame"
+u = ["0", "0"]
+p = "0.7142857142857143"
+
+[[initialize.data]]
+name = "logo"
+file = "logo.csv"
+coordinates = ["x", "y"]
+
+[[initialize.regions]]
+name = "shocked gas"
+region = {type = "half_space", point = [-0.3, 0.0], normal = [1.0, 0.0]}
+rho = 1.8620689655172413
+u = [0.6944444444444444, 0.0]
+p = 1.7559523809523810
+
+[[boundaries]]
+name = "duck"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "inflow"
+type = "extrapolation"
+
+[[boundaries]]
+name = "outflow"
+type = "extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+bound_preserving = true
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+
+[output]
+check_interval = 500
+
+[[write_data]]
+prefix = "./solut/logo"
+time_interval = 0.02
+variables = ["RHO", "U_X", "U_Y", "P"]

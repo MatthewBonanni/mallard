@@ -18,9 +18,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <toml.hpp>
-
 #include "common_typedef.h"
+#include "input.h"
 
 /** @brief How a rank numbers its cells (see docs/design/mpi.md, section 6). */
 enum class CellOrder {
@@ -32,7 +31,7 @@ static const std::unordered_map<std::string, CellOrder> CELL_ORDERS = {{"input",
                                                                        {"hilbert", CellOrder::HILBERT}};
 
 /** @brief [mesh] cell_order (default hilbert). */
-CellOrder cell_order_of_input(const toml::value & input);
+CellOrder cell_order_of_input(const Input & input);
 
 /**
  * @brief Permutation (new -> old) of the cells that keeps every group

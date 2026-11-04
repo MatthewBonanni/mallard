@@ -1,0 +1,59 @@
+name: Bug report
+description: Mallard crashes, gives a wrong result, or does not do what the docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The smaller the input that shows the problem, the faster it gets fixed.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: For wrong results, say what you compared with (exact solution, reference data, another code).
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input file
+      description: The smallest input.toml that shows the problem. Prefer a generated mesh; attach a mesh file if one is needed.
+      render: toml
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The exact command (with mpirun, if used) and the end of the log, including the full error message.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mallard version or git commit
+      description: "`git rev-parse --short HEAD` in your checkout, or the release."
+    validations:
+      required: true
+  - type: textarea
+    id: build
+    attributes:
+      label: Build
+      description: Dimension (2D/3D), Kokkos backend (Threads, OpenMP, CUDA, HIP, ...), precision, MPI ranks, compiler and OS, GPU model if any, and the CMake options you used.
+      placeholder: |
+        3D, OpenMP, double, 4 MPI ranks, GCC 13, Ubuntu 24.04
+        cmake -S . -B build -DMallard_DIM=3 -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_MPI=ON
+    validations:
+      required: true
+  - type: textarea
+    id: provenance
+    attributes:
+      label: Provenance block
+      description: If your output files (restart, VTU/HDF5, CSV headers) contain a provenance block, paste it here; it records the version, build and input.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Did it work in an earlier version? Does it depend on the number of ranks or threads, or the backend?

@@ -7,12 +7,12 @@
 # first, from this directory (flame_reference.py computes all twenty V8
 # flames, a few minutes):
 #
-#   python ../../tools/flame_reference.py reference full
-#   python ../../tools/flame_restart.py full/h2_phi1.0_mix_full.csv \
+#   python ../../tools/setup/flame_reference.py reference full
+#   python ../../tools/setup/flame_restart.py full/h2_phi1.0_mix_full.csv \
 #       ../../mechanisms/h2o2.yaml ohmech 20 . --flame-times 2
 #
 # then run and measure the flame speed with
-#   python ../../tools/flame_speed.py . 2.33170
+#   python ../../tools/post/flame_speed.py . 2.33170
 
 [run]
 t_stop = 0.00028228726308100434
@@ -31,7 +31,7 @@ file = "flame.restart"
 
 [[boundaries]]
 name = "left"
-type = "upt"
+type = "inlet_state"
 u = [2.3317049705236128, 0.0]
 p = 101325.0
 T = 300
@@ -39,7 +39,7 @@ X = { "H2" = 0.29585798816567666, "O2" = 0.14792899408283733, "N2" = 0.556213017
 
 [[boundaries]]
 name = "right"
-type = "p_out"
+type = "outlet_pressure"
 p = 101325.0
 
 [[boundaries]]
@@ -73,6 +73,5 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/flame"
-format = "vtu"
 time_interval = 9.409575436033478e-06
 variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

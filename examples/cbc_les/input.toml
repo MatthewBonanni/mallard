@@ -33,18 +33,17 @@
 # spectrum, and at 128^3 1.35 does (1.8 then dissipates 5-8% too much).
 #
 # Run (N = 64; for 32 or 128 set Nx, Ny, Nz and the file names):
-#   python ../../tools/cbc_les.py init 64 cbc_64.restart     # prints p_ref
+#   python cbc_les.py init 64 cbc_64.restart     # prints p_ref
 #   (two pre-runs of 0.1 s, each followed by
-#    python ../../tools/cbc_les.py rescale restart/END.restart cbc_64.restart)
-#   ../../build3d/src/Mallard -i input.toml --kokkos-num-threads=8
-#   python ../../tools/cbc_les.py spectra cbc_64.restart restart/station*.restart -o spectra.csv
-#   python ../../tools/cbc_les.py compare spectra.csv --budget integrals.csv --plot spectra.png
+#    python cbc_les.py rescale restart/END.restart cbc_64.restart)
+#   ../../build3d/src/mallard -i input.toml --kokkos-num-threads=8
+#   python cbc_les.py spectra cbc_64.restart restart/station*.restart -o spectra.csv
+#   python cbc_les.py compare spectra.csv --budget integrals.csv --plot spectra.png
 # Cost: 64^3, 2,035 steps, 3 minutes on 4 CPU threads; 128^3, 2,286 steps,
 # 2 minutes on one A100.
 
 [run]
 t_stop = 0.65532
-cfl = 0.8
 
 [mesh]
 type = "cartesian"
@@ -54,21 +53,23 @@ Nz = 64
 Lx = 0.5588
 Ly = 0.5588
 Lz = 0.5588
-periodic = ["x", "y", "z"]
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[[periodic]]
+zones = ["back", "front"]
 
 [initialize]
 type = "restart"
 file = "cbc_64.restart"
 
 [numerics]
-riemann_solver = "HLLC"
-convective_flux = "hybrid"
-time_integrator = "SSPRK3"
+preset = "les"  # MUSCL without limiter, hybrid KEEP / HLLC flux, SSPRK3, CFL 0.8
 check_nan = true
-
-[numerics.face_reconstruction]
-type = "MUSCL"
-limiter = "none"
 
 [physics]
 type = "navier_stokes"

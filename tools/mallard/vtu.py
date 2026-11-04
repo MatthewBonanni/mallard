@@ -1,0 +1,335 @@
+"""Minimal reader for Mallard's raw-appended VTU files, and (through
+mallard.vtkhdf and mallard.h5, which need h5py) its VTKHDF and HDF5 snapshots:
+every function also takes a snapshot .vtkhdf or .h5 file. provenance() reads the
+provenance block of any output file, units() and long_names() the units and
+descriptions of its fields."""
+import json
+import os
+import re
+import struct
+
+import numpy as np
+
+_DTYPES = {"Float32": "<f4", "Float64": "<f8", "UInt32": "<u4", "Int32": "<i4",
+           "Int64": "<i8", "UInt64": "<u8", "UInt8": "u1"}
+
+# Newest MALLARD_FORMAT_VERSION this reader knows (files before Mallard 0.9 have none)
+VTU_FORMAT_VERSION = 1
+
+VTK_3D_TYPES = {10: "tetra", 12: "hexahedron", 13: "wedge", 14: "pyramid"}
+
+
+def _check_version(path, header):
+    m = re.search(r'Name="MALLARD_FORMAT_VERSION"[^>]*>\s*(-?\d+)\s*<', header)
+    if m and int(m.group(1)) > VTU_FORMAT_VERSION:
+        raise ValueError(f"{path} is a VTU file of Mallard format version {m.group(1)}, written by a newer "
+                         f"Mallard; this script reads versions up to {VTU_FORMAT_VERSION}: update tools/")
+
+
+def vectors(arrays):
+    """Adds the vector NAME (n, 3) of components NAME_X, NAME_Y(, NAME_Z), as
+    probes and region snapshots of surfaces write them, where NAME is absent."""
+    for name in [k for k in arrays if k.endswith("_X")]:
+        base = name[:-2]
+        if base in arrays or base + "_Y" not in arrays:
+            continue
+        x = arrays[name]
+        z = arrays.get(base + "_Z", np.zeros_like(x))
+        arrays[base] = np.column_stack([x, arrays[base + "_Y"], z])
+    return arrays
+
+
+def read_vtu_cells(path):
+    """Read a 2D or 3D volume VTU, or the VTK PolyData (.vtp) of a probe or a
+    region snapshot of a boundary zone, cut plane, surface, curve or points.
+
+    Returns points (n, 3), connectivity, offsets (end of each cell), VTK cell
+    types, and the cell arrays (vectors as (n_cells, 3)) plus "TIME". A PolyData
+    gives its polygons (type 7), lines (3) or vertices (1); its arrays are per
+    cell where it has cell data (boundary zones, cut planes) and per point
+    otherwise. A PVTU (MPI runs) is read as the union of its pieces; an HDF5
+    snapshot (.h5) is read with mallard.h5, a VTKHDF file (.vtkhdf) with
+    mallard.vtkhdf (the last snapshot of a series file).
+    """
+    if path.endswith(".vtkhdf"):
+        from .vtkhdf import read_cells
+        return read_cells(path)
+    if path.endswith(".h5") or path.endswith(".xmf"):
+        from .h5 import read_h5_cells
+        return read_h5_cells(path)
+    if path.endswith(".pvtu"):
+        return _read_pvtu(path)
+    raw = open(path, "rb").read()
+    if b"<AppendedData" not in raw:
+        text = raw.decode("latin-1")
+        _check_version(path, text)
+        return _read_ascii(text)
+    start = raw.index(b"<AppendedData")
+    start = raw.index(b"_", start) + 1
+    header = raw[:start].decode("latin-1")
+    _check_version(path, header)
+    hdr_type = re.search(r'header_type="(\w+)"', header)
+    hdr_dt = np.dtype(_DTYPES[hdr_type.group(1)] if hdr_type else "<u4")
+    zlib_blocks = 'compressor="vtkZLibDataCompressor"' in header
+    arrays = {}
+    for m in re.finditer(r"<DataArray([^>]*)>", header):
+        attrs = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
+        if "offset" not in attrs:
+            continue
+        off = start + int(attrs["offset"])
+        dt = np.dtype(_DTYPES[attrs["type"]])
+        if zlib_blocks:
+            data = np.frombuffer(_inflate_blocks(raw, off, hdr_dt), dt)
+        else:
+            nbytes = int(np.frombuffer(raw, hdr_dt, 1, off)[0])
+            data = np.frombuffer(raw, dt, nbytes // dt.itemsize, off + hdr_dt.itemsize)
+        ncomp = int(attrs.get("NumberOfComponents", 1))
+        if ncomp > 1:
+            data = data.reshape(-1, ncomp)
+        arrays[attrs.get("Name", "Points")] = data
+    conn, offs = arrays.pop("connectivity"), arrays.pop("offsets")
+    if 'type="PolyData"' in header:
+        kind = re.search(r"<(Polys|Lines|Verts)>", header).group(1)
+        types = np.full(offs.size, {"Polys": 7, "Lines": 3, "Verts": 1}[kind], dtype=np.uint8)
+    else:
+        types = arrays.pop("types")
+    pts = arrays.pop("Points").astype(float)
+    out = vectors({k: np.asarray(v, dtype=float) for k, v in arrays.items()})
+    tm = re.search(r'Name="TIME"[^>]*>([^<]*)<', header)
+    if tm:
+        out["TIME"] = float(tm.group(1))
+    return pts, conn, offs, types, out
+
+
+def _read_pvtu(path):
+    pieces = re.findall(r'Source="([^"]+)"', open(path).read())
+    parts = [read_vtu_cells(os.path.join(os.path.dirname(path), p)) for p in pieces]
+    n_pts = np.cumsum([0] + [len(p[0]) for p in parts[:-1]])
+    n_conn = np.cumsum([0] + [len(p[1]) for p in parts[:-1]])
+    # Nodes on the boundaries between pieces appear in each: keep one copy
+    pts, inverse = np.unique(np.concatenate([p[0] for p in parts]), axis=0, return_inverse=True)
+    conn = inverse.ravel()[np.concatenate([p[1].astype(np.int64) + n for p, n in zip(parts, n_pts)])]
+    offs = np.concatenate([p[2].astype(np.int64) + n for p, n in zip(parts, n_conn)])
+    types = np.concatenate([p[3] for p in parts])
+    arrays = {k: np.concatenate([p[4][k] for p in parts]) for k in parts[0][4] if k != "TIME"}
+    if "TIME" in parts[0][4]:
+        arrays["TIME"] = parts[0][4]["TIME"]
+    return pts, conn, offs, types, arrays
+
+
+def series(directory, pattern="*"):
+    """The snapshots of a series in a directory, oldest first: the VTKHDF
+    files, else the PVTU files of an MPI run (not their pieces), else the VTU,
+    VTP (or HDF5) files."""
+    import glob
+    files = sorted(glob.glob(os.path.join(directory, pattern)))
+    vtkhdf = [f for f in files if f.endswith(".vtkhdf")]
+    if vtkhdf:
+        return vtkhdf
+    parallel = [f for f in files if f.endswith(".pvtu")]
+    if parallel:
+        return parallel
+    return [f for f in files if (f.endswith(".vtu") or f.endswith(".vtp") or f.endswith(".h5"))
+            and not re.search(r"_p\d{4}\.vtu$", f)]
+
+
+def snapshot(stem):
+    """The snapshot file of a stem PREFIX_NNNNNN: its .vtkhdf (the default
+    format), else its .pvtu (an MPI run's VTU) or .vtu (builds without HDF5)."""
+    for ext in (".vtkhdf", ".pvtu", ".vtu", ".h5"):
+        if os.path.exists(stem + ext):
+            return stem + ext
+    raise FileNotFoundError(f"no snapshot {stem}.vtkhdf (or .pvtu, .vtu, .h5)")
+
+
+def read_index(series):
+    """(time, file) of every snapshot of a series: its index, PREFIX.vtkhdf.series
+    or PREFIX.pvd (VTU, builds without HDF5), or PREFIX for whichever exists."""
+    if not series.endswith((".series", ".pvd")):
+        series += ".vtkhdf.series" if os.path.exists(series + ".vtkhdf.series") else ".pvd"
+    if series.endswith(".series"):
+        from .vtkhdf import read_series
+        return read_series(series)
+    text = open(series).read()
+    return [(float(t), os.path.join(os.path.dirname(series), f))
+            for t, f in re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)]
+
+
+def _inflate_blocks(raw, off, hdr_dt):
+    """An appended array of vtkZLibDataCompressor blocks (compression = "zlib"), decompressed."""
+    import zlib
+    n_blocks = int(np.frombuffer(raw, hdr_dt, 1, off)[0])
+    sizes = np.frombuffer(raw, hdr_dt, 3 + n_blocks, off)[3:]
+    at = off + (3 + n_blocks) * hdr_dt.itemsize
+    chunks = []
+    for size in sizes:
+        chunks.append(zlib.decompress(raw[at:at + int(size)]))
+        at += int(size)
+    return b"".join(chunks)
+
+
+def _read_ascii(text):
+    """read_vtu_cells for ASCII VTU files (Mallard's boundary-zone output)."""
+    arrays = {}
+    time = None
+    for m in re.finditer(r"<DataArray([^>]*)>([^<]*)</DataArray>", text):
+        attrs = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
+        name = attrs.get("Name", "Points")
+        if name == "TIME":
+            time = float(m.group(2))
+            continue
+        if name == "MALLARD_FORMAT_VERSION":
+            continue
+        data = np.array(m.group(2).split(), dtype=_DTYPES[attrs["type"]])
+        ncomp = int(attrs.get("NumberOfComponents", 1))
+        arrays[name] = data.reshape(-1, ncomp) if ncomp > 1 else data
+    conn, offs, types = arrays.pop("connectivity"), arrays.pop("offsets"), arrays.pop("types")
+    pts = arrays.pop("Points").astype(float)
+    out = {k: np.asarray(v, dtype=float) for k, v in arrays.items()}
+    if time is not None:
+        out["TIME"] = time
+    return pts, conn, offs, types, out
+
+
+# Boundary of quadratic 2D cells (VTK Lagrange triangle, quadrilateral): corners and edge nodes in turn
+_OUTLINE = {69: [0, 3, 1, 4, 2, 5], 70: [0, 4, 1, 5, 2, 6, 3, 7]}
+
+
+def outlines(conn, offs, types):
+    """{(cells, outline): node ids} of 2D cells grouped by shape: the cells
+    (indices) and each one's boundary nodes in order, the edge nodes of
+    curved (quadratic) cells between their corners."""
+    starts = np.concatenate([[0], offs[:-1]])
+    sizes = offs - starts
+    groups = []
+    for t, n in sorted(set(zip(types.tolist(), sizes.tolist()))):
+        sel = np.nonzero((types == t) & (sizes == n))[0]
+        local = _OUTLINE.get(t, list(range(n)))
+        groups.append((sel, conn[starts[sel, None] + np.array(local)]))
+    return groups
+
+
+def read_vtu(path):
+    """Read a 2D VTU (or VTKHDF) snapshot as points (n, 2), a triangle fan of
+    each cell (of its outline, for curved cells), the cell of each triangle,
+    and the cell arrays plus "TIME"."""
+    pts, conn, offs, types, arrays = read_vtu_cells(path)
+    if np.isin(types, list(VTK_3D_TYPES) + [71, 72, 73, 27]).any():
+        raise ValueError(f"{path} is a 3D mesh; use read_vtu_cells")
+    tri_parts, idx_parts = [], []
+    for sel, cells in outlines(conn, offs, types):
+        n = cells.shape[1]
+        for k in range(1, n - 1):
+            tri_parts.append(cells[:, [0, k, k + 1]])
+            idx_parts.append(sel)
+    tris = np.vstack(tri_parts).astype(np.int64)
+    tri_cell = np.concatenate(idx_parts)
+    return pts[:, :2], tris, tri_cell, arrays
+
+
+def read_quads(path, names):
+    """Cell centers and fields of a quad mesh VTU, or of all pieces of a PVTU."""
+    if path.endswith(".pvtu"):
+        pieces = re.findall(r'Source="([^"]+)"', open(path).read())
+        parts = [read_quads(os.path.join(os.path.dirname(path), p), names) for p in pieces]
+        return (parts[0][0], np.concatenate([q[1] for q in parts]),
+                {n: np.concatenate([q[2][n] for q in parts]) for n in names})
+    pts, conn, offs, _, arrays = read_vtu_cells(path)
+    n_nodes = np.diff(np.concatenate([[0], offs]))
+    if not np.all(n_nodes == 4):
+        raise ValueError(f"{path}: expected a quad mesh")
+    return arrays["TIME"], pts[conn.reshape(-1, 4)].mean(axis=1), {n: arrays[n] for n in names}
+
+
+def grid_fields(path, names):
+    """Cell fields of a generated quad mesh as (nx, ny) arrays, with x and y of the cell centers."""
+    time, c, arrays = read_quads(path, names)
+    xs, ys = np.unique(np.round(c[:, 0], 12)), np.unique(np.round(c[:, 1], 12))
+    dx, dy = xs[1] - xs[0], ys[1] - ys[0]
+    i = np.rint((c[:, 0] - xs[0]) / dx).astype(int)
+    j = np.rint((c[:, 1] - ys[0]) / dy).astype(int)
+    out = {}
+    for name in names:
+        f = np.empty((xs.size, ys.size))
+        f[i, j] = arrays[name]
+        out[name] = f
+    return time, xs, ys, out
+
+
+_PROVENANCE_MAGIC = b"MLRD-PROVENANCE\0"
+
+
+def provenance(path):
+    """The provenance block (docs/guide/output.md) of any Mallard output file,
+    as a dict: of the first run that wrote to it for CSV files and run records,
+    None if the file has none."""
+    if path.endswith(".h5") or path.endswith(".vtkhdf"):
+        from .h5 import provenance as h5_provenance
+        return h5_provenance(path)
+    if path.endswith(".jsonl"):
+        for line in open(path):
+            record = json.loads(line)
+            if record["type"] == "start":
+                return record["provenance"]
+        return None
+    raw = open(path, "rb").read()
+    if raw.endswith(_PROVENANCE_MAGIC):
+        (length,) = struct.unpack("<Q", raw[-24:-16])
+        return json.loads(raw[-24 - length:-24])
+    head = raw[:1 << 20].decode("utf-8", "replace")
+    m = re.search(r"<!-- provenance (.*?) -->", head, re.S)
+    if m:
+        return json.loads(m.group(1))
+    m = re.search(r"^# provenance (.*)$", head, re.M)
+    return json.loads(m.group(1)) if m else None
+
+
+def _string_arrays(text):
+    """The VTK XML String arrays of a file's header, as {name: [strings]}."""
+    out = {}
+    for m in re.finditer(r'<Array type="String" Name="([^"]+)"[^>]*>([^<]*)</Array>', text):
+        codes = [int(v) for v in m.group(2).split()]
+        strings, current = [], []
+        for c in codes:
+            if c == 0:
+                strings.append(bytes(current).decode("utf-8"))
+                current = []
+            else:
+                current.append(c)
+        out[m.group(1)] = strings
+    return out
+
+
+def field_metadata(path):
+    """{field: (units, long_name)} of any Mallard output file: VTKHDF, VTU,
+    PVTU (its first piece), VTP, HDF5 (or its .xmf) and CSV (long names empty)."""
+    if path.endswith(".xmf"):
+        path = path[:-4] + ".h5"
+    if path.endswith(".h5"):
+        from .h5 import field_metadata as h5_metadata
+        return h5_metadata(path)
+    if path.endswith(".vtkhdf"):
+        from .vtkhdf import field_metadata as vtkhdf_metadata
+        return vtkhdf_metadata(path)
+    if path.endswith(".csv"):
+        from .tables import units as csv_units
+        return {name: (u, "") for name, u in csv_units(path).items()}
+    if path.endswith(".pvtu"):
+        piece = re.search(r'Source="([^"]+)"', open(path).read()).group(1)
+        return field_metadata(os.path.join(os.path.dirname(path), piece))
+    raw = open(path, "rb").read()
+    end = raw.find(b"<AppendedData")
+    arrays = _string_arrays(raw[:end if end >= 0 else len(raw)].decode("latin-1"))
+    names = arrays.get("MALLARD_FIELD_NAMES", [])
+    return dict(zip(names, zip(arrays.get("MALLARD_FIELD_UNITS", []), arrays.get("MALLARD_FIELD_LONG_NAMES", []))))
+
+
+def units(path):
+    """{field: units} (UDUNITS syntax, "1" for dimensionless) of any Mallard
+    output file; empty for files written before Mallard recorded units."""
+    return {name: u for name, (u, _) in field_metadata(path).items()}
+
+
+def long_names(path):
+    """{field: description} of any Mallard output file (empty for CSV files)."""
+    return {name: d for name, (_, d) in field_metadata(path).items()}

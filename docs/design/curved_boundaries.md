@@ -28,16 +28,52 @@ DG).
    3D) in the physical groups. Cells may be of order 1 to 3; only their
    corners are kept, so interior faces are straight unless they share a
    curved edge. High-order edges whose nodes lie on their chord stay straight
-   (Gmsh writes planes at the mesh's order too). `mallard-mesh-convert` keeps
+   (Gmsh writes planes at the mesh's order too). `mallard mesh convert` keeps
    the high-order boundary faces in the HDF5 file (`boundary/high_order`).
-2. **Analytic projection** for meshes without high-order nodes (generated, P1
-   Gmsh, HDF5): `[[mesh.curved]]` names a zone and a shape (`circle` in 2D;
-   `sphere` or `cylinder` with an axis in 3D). A point of the straight face is
-   projected radially onto the shape, minus the linear interpolant of the
-   corners' own projection offsets, so faces still meet at the mesh nodes.
+2. **Projection onto a region's surface** for meshes without high-order nodes
+   (generated, P1 Gmsh, HDF5): `[[mesh.curved]]` names a zone and a surface
+   [region](../guide/geometry.md#regions) (#407; 2D: a curve), the boundary
+   of a filled region of primitives, booleans or implicit functions
+   (`filled = false`), or in 2D a `circle` or `ellipse`.
+   A point of the straight face is projected onto the surface, minus the
+   linear interpolant of the corners' own projection offsets, so faces still
+   meet at the mesh nodes.
 
 `[mesh] curved_geometry = false` ignores both, for straight-versus-curved
 comparisons on the same file.
+
+## Projection onto region surfaces
+
+The filled region that the surface bounds is known by its signed distance,
+or for `implicit` regions by any function `phi` negative inside
+(`src/common/region.h`), on the host; the zone lies on `phi = 0`. The
+projection of a point `x` is its closest point `p` on `phi = 0`, with the
+Jacobian `dp/dx` that the face map's derivatives need:
+
+- **Closed forms.** `circle` and `disk` (2D), `sphere` and `cylinder`
+  without `length` or `inner_radius` (3D), with `filled = false` where they
+  are filled and no transforms, are projected
+  radially as before regions existed: the same operations on the same
+  numbers, so these walls are bitwise unchanged. Everything else, including
+  a transformed sphere, takes the general path.
+- **Closest-point iterations.** From `p = x`: a Newton step onto the level
+  set along the gradient, `-phi g / |g|^2`, plus the tangential part of the
+  remaining offset toward `x`. The fixed point is the foot of the normal
+  through `x`. The steps stop at round-off (`4 eps (|x| + h)`, `h` the
+  face's longest side) or, below `1e-10 h`, once they stop halving, so `p`
+  is a smooth function of `x` to round-off; 100 steps or a point farther than
+  `h` from `x` is an error naming the zone and the point.
+- **Derivatives.** Gradient and Hessian by fourth-order central differences
+  of step `1e-2 h`, divided by 4 (up to 4 times) until two gradients agree to
+  1e-8, so that stencils do not straddle the creases of booleans and
+  polygons. Then `dp/dx = (I + lambda K)^-1 (I - n n^T)`, with `n` the unit
+  normal, `lambda = (x - p) . n` and `K = T H T / |g|` the shape operator
+  (`T = I - n n^T`). A root where `phi` does not change sign at about
+  `|g| h` across `p` (a double root such as `(x^2 + y^2 - 1)^2`) is an error.
+- **Corner offsets** of a face and the end offsets of its curved edges are
+  projected once, when the face is set up, instead of at every evaluation.
+
+In 2D the surface is the slice `z = 0`, and only `x`, `y` are differenced.
 
 ## Representation
 
@@ -90,8 +126,7 @@ operations, so the geometry does not depend on the partition.
 - **No mirror images across curved walls and symmetry faces.** A reflection
   across the face's plane matches a curved wall only to `O(h^2)`; in the
   vortex below, mirrored stencils do not converge (orders 3-6, errors 1e-2 to
-  1e-1). In 3D every face of a curved wall would also be a mirror plane of its
-  own, beyond the setup's 32 planes per stencil search. Stencils are one-sided
+  1e-1). Stencils are one-sided
   there (`curved_mirrors = false`). Curved far fields and inflows keep their
   mirror images: one-sided far fields made the order-5 cylinder's drag noisy
   (high-frequency rms 2.5e-3 against 6e-5).
@@ -111,7 +146,7 @@ operations, so the geometry does not depend on the partition.
 
 ### Steady vortex between circular walls
 
-`tools/curved_convergence.py`: the irrotational vortex `u_theta = M / r` in
+`tools/dev/curved_convergence.py`: the irrotational vortex `u_theta = M / r` in
 the annulus `1 <= r <= 1.384` (`M` at the inner wall), an exact steady Euler
 solution, with slip walls (`symmetry`) on both circles and no other boundary.
 Quadrilateral O-grids of `n_r x 16 n_r` cells (triangles: each split in two),
@@ -140,6 +175,16 @@ node and do not converge (L1 0.05 to 0.26). Curved: L1 rates 3.64, 4.86, 5.00,
 5.57 for orders 3-6 (Linf 2.80, 3.99, 4.07, 4.18), L1 at `n_r = 64` 7.7e-6,
 1.5e-7, 1.0e-7, 1.0e-7.
 
+The same circles projected by closest-point iterations (`--geometry
+curved_general`: the inner wall an `implicit` circle, the outer one an
+`ellipse` of equal semi-axes) give the closed form's errors to 3e-10 relative
+(L1, orders 3-6, `n_r` = 4, 8, 16, `M = 2.25`), and the closed form itself
+is bitwise unchanged by #407. Ellipses, ellipsoids, tori, cones, unions and
+implicit surfaces are checked in `test/curved_test.cpp` and
+`test/curved3d_test.cpp`: closest points and their Jacobians, exact areas,
+volumes and centroids of the curved cells, and TENO wall values at the design
+order on ellipses (2D) and ellipsoids (3D) as on circles and spheres.
+
 P3 walls from the Gmsh file (`line4`) match the projected walls to three
 digits at every level. With mirror images across the curved walls
 (`curved_mirrors = true`), orders 3-6 do not converge (L1 1e-2 to 1e-1).
@@ -161,7 +206,7 @@ digits at every level. With mirror images across the curved walls
 
 At Re = 100 the viscous layer is resolved by many cells, so curving the wall
 moves the drag by 0.1-0.3% (toward the incompressible 1.33-1.35). On the fine
-mesh, order 5 with straight walls is unstable (drag fluctuations of +-2.9);
+mesh, order 5 with straight walls is unstable (drag fluctuations of ±2.9);
 with curved walls it runs, with residual drag noise of rms 7e-4 from the far
 field (the instability noted in `docs/numerics/teno_e.md`, also there with
 mirrored far fields).
@@ -170,7 +215,8 @@ mirrored far fields).
 
 `examples/sphere_mach3` (Euler, Mach 3, `make_sphere_mesh.py` resolution,
 810k tetrahedra) in a quarter box instead of the quarter cylinder, whose
-faceted lateral far field exceeds the 3D setup's 32 mirror planes, at t = 3:
+faceted lateral far field exceeded the 3D setup's former limit of 32 mirror
+planes per stencil search (#388), at t = 3:
 
 | Scheme | Walls | Delta / R (Billig 0.205) | Cd (pressure) |
 |---|---|---|---|
@@ -179,8 +225,8 @@ faceted lateral far field exceeds the 3D setup's 32 mirror planes, at t = 3:
 | TENO5, bound-preserving | curved | 0.2213 | 0.9790 |
 
 With 0.02 D cells on the wall the facets sit 1e-4 D inside the sphere, so the
-standoff does not move. TENO5 with straight walls cannot run here: the
-sphere's facets are mirror planes of their own, beyond the setup's limit.
+standoff does not move. TENO5 with straight walls could not run here then:
+the sphere's facets are mirror planes of their own, beyond that limit.
 
 ## Alternatives considered
 
@@ -202,10 +248,14 @@ sphere's facets are mirror planes of their own, beyond the setup's limit.
 
 - Orders 5 and 6 are fourth order at curved walls (degree cap, above).
 - Axisymmetric runs reject curved boundaries.
+- A face that spans a crease of a region's surface (a box's edge, where the
+  members of a union meet) is curved onto one side of it; zones should meet
+  at creases.
 - An edge shared by two different analytic shapes takes the first shape's
   curve; the other face's own projection then differs along that edge (the
   closure shift keeps every cell closed).
-- Main's 3D TENO setup accepts at most 32 mirror planes per stencil search:
-  faceted curved far fields (e.g. the quarter-cylinder domain of
-  `examples/sphere_mach3`, or a straight-walled sphere) exceed it. Curved
-  walls take no mirror images, so they do not.
+- Every facet of a straight-sided curved boundary with mirror images (a
+  faceted far field, or a straight-walled sphere) is a mirror plane of its
+  own: stencil searches next to it meet 20-60 planes, and image every visited
+  cell across each, which doubles the setup time per cell on the coarse
+  `make_sphere_mesh.py` meshes. A 3D search holds at most 255 planes.

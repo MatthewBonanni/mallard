@@ -1,0 +1,1 @@
+- Each rank, and a serial run, numbers its cells along a Hilbert curve for memory locality, so a mesh file's numbering no longer sets the speed of a run (a file numbered without locality was 2-6x slower on one GPU); results and output files are unchanged. `[mesh] cell_order = "input"` keeps the mesh's own order (#478, #277).

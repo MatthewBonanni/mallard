@@ -1,0 +1,69 @@
+# Mallard on one GPU node: the case on the volume of pvc.yaml, one MPI rank per GPU.
+# A pod stopped by preemption, eviction or `kubectl delete pod` writes a restart file,
+# and the Job's next pod resumes from the newest one.
+#
+#   kubectl apply -f pvc.yaml -f job.yaml
+#   kubectl logs -f job/mallard
+#   kubectl exec job/mallard -- bash -c 'mallard ctl "$CASE" status'
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mallard
+spec:
+  backoffLimit: 2
+  podFailurePolicy:
+    rules:
+      # Stopped on request (exit status 3) or disrupted: a new pod resumes, uncounted
+      - action: Ignore
+        onExitCodes: {containerName: mallard, operator: In, values: [3]}
+      - action: Ignore
+        onPodConditions: [{type: DisruptionTarget}]
+  template:
+    spec:
+      restartPolicy: Never
+      # Longer than a step plus writing a restart file
+      terminationGracePeriodSeconds: 600
+      # imagePullSecrets: [{name: ghcr}]   # while the images are private
+      containers:
+        - name: mallard
+          image: ghcr.io/matthewbonanni/mallard:cuda
+          env:
+            # The case's directory on the volume; the examples are copied there on the first start
+            - {name: CASE, value: /data/examples/riemann_2d}
+            - {name: RANKS, value: "1"}             # MPI ranks: as many as nvidia.com/gpu
+            - {name: OMP_NUM_THREADS, value: "8"}   # host threads per rank
+          command: [bash, -c]
+          args:
+            - |
+              set -eu
+              [ -d /data/examples ] || cp -r "$MALLARD_SHARE/examples" "$MALLARD_SHARE/mechanisms" /data
+              cd "$CASE"
+              [ -e .started ] || touch .started
+              input=input.toml
+              restart=$(find . -name '*.restart' -newer .started -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d ' ' -f 2-)
+              if [ -n "$restart" ]; then
+                  echo "Resuming from $restart"
+                  awk '/^\[+initialize[].]/ {skip = 1; next} /^\[/ {skip = 0} !skip' input.toml > resume.toml
+                  printf '\n[initialize]\ntype = "restart"\nfile = "%s"\n' "$restart" >> resume.toml
+                  input=resume.toml
+              fi
+              if [ "$RANKS" -gt 1 ]; then
+                  exec mpirun -n "$RANKS" --bind-to none mallard -i "$input"
+              fi
+              exec mallard -i "$input"
+          lifecycle:
+            # mpirun ends its ranks on SIGTERM without a restart file; ask the run to stop first
+            preStop:
+              exec:
+                command: [bash, -c, 'mallard ctl "$CASE" stop || true']
+          resources:
+            requests: {nvidia.com/gpu: "1", cpu: "8", memory: 32Gi}
+            limits: {nvidia.com/gpu: "1", memory: 32Gi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: dshm, mountPath: /dev/shm}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: mallard-data}
+        - name: dshm
+          emptyDir: {medium: Memory, sizeLimit: 8Gi}

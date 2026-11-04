@@ -17,7 +17,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "log.h"
@@ -88,13 +88,16 @@ class MixtureModel {
          *        "unity_lewis" or "constant_lewis" with lewis = { species = Le }),
          *        and soret = true for thermal diffusion (mixture_averaged).
          */
-        static MixtureModel from_input(const toml::value & input);
+        static MixtureModel from_input(const Input & input);
 
         const chemistry::Mechanism & mechanism() const { return mech; }
         const Mixture & device() const { return gas; }
         bool viscous() const { return gas.viscous; }
         uint32_t n_species() const { return gas.n_species; }
         std::vector<std::string> species_names() const { return mech.species_names(); }
+
+        /** @brief The error of a species name, key (in table) of the input, that the mechanism lacks. */
+        InputError unknown_species(const Input & table, const std::string & key, const std::string & name) const;
 
         /**
          * @brief Mass fractions from a table of the input holding X (mole
@@ -103,13 +106,13 @@ class MixtureModel {
          * @param table Table holding X or Y.
          * @param where Name of the table for error messages.
          */
-        std::vector<double> mass_fractions(const toml::value & table, const std::string & where) const;
+        std::vector<double> mass_fractions(const Input & table, const std::string & where) const;
 
         /**
          * @brief Whether the X or Y of a table varies in space: some value is
          *        an expression (a string) or a balance species is named.
          */
-        static bool composition_varies(const toml::value & table);
+        static bool composition_varies(const Input & table);
 
         /** @brief Mass fractions from mole fractions. */
         std::vector<double> mass_fractions_from_mole(const std::vector<double> & X) const;
@@ -148,6 +151,6 @@ class MixtureModel {
  *        rtol, atol (on mass fractions), max_steps (sub-steps per call),
  *        sparse (the linear solver; automatic by default, see use_sparse_lu).
  */
-chemistry::ReactorOptions reactor_options(const toml::value & input);
+chemistry::ReactorOptions reactor_options(const Input & input);
 
 #endif // MIXTURE_H

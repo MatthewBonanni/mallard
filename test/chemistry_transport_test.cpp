@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "data_paths.h"
 #include "mechanism.h"
 #include "thermo.h"
 #include "transport.h"
@@ -26,7 +27,7 @@ using namespace chemistry;
 
 namespace {
 
-const std::string SOURCE_DIR = MALLARD_SOURCE_DIR;
+const std::string SOURCE_DIR = source_dir();
 
 struct Case {
     std::string name, file, phase;

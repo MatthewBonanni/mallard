@@ -20,7 +20,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
-#include <toml.hpp>
+#include "input.h"
 
 #include "common.h"
 #include "expression.h"
@@ -34,24 +34,26 @@ constexpr uint8_t N_STRESS = N_DIM * (N_DIM + 1) / 2;
 using Point = std::array<double, N_DIM>;
 
 /**
- * @brief Mean velocity and Reynolds stress of an `nscbc_inlet` at given points:
- *        `u` (numbers or expressions in x, y, z), and with a
+ * @brief Mean velocity and Reynolds stress of an `inlet_state` with `nscbc` at
+ *        given points: `u` (components or a speed along `direction`, numbers or
+ *        expressions in x, y, z), and with a
  *        `[boundaries.turbulence]` table its `reynolds_stress` (numbers or
  *        expressions), or both from its `profile`, a CSV file of plane
- *        averages (tools/plane_average.py: a coordinate column, `MEAN_U_*` and
+ *        averages (tools/post/plane_average.py: a coordinate column, `MEAN_U_*` and
  *        `COV_U_*_U_*`) interpolated linearly along that coordinate.
  */
 class InletProfile {
     public:
-        InletProfile(const toml::value & boundary, const std::string & where);
+        InletProfile(const Input & boundary, const std::string & where);
 
         /** @brief Whether the boundary has a [boundaries.turbulence] table. */
-        static bool turbulent(const toml::value & boundary) { return boundary.contains("turbulence"); }
+        static bool turbulent(const Input & boundary) { return boundary.contains("turbulence"); }
 
         /** @brief Whether the mean velocity is the same everywhere. */
         bool uniform() const { return uniform_; }
 
-        std::array<double, N_DIM> velocity(const Point & x) const;
+        /** @brief The mean velocity at x on a face of unit inward normal n_in (the direction of a speed without one). */
+        std::array<double, N_DIM> velocity(const Point & x, const Point & n_in) const;
 
         /** @brief Reynolds stress in N_STRESS order (zero without turbulence). */
         std::array<double, N_STRESS> stress_at(const Point & x) const;
@@ -64,19 +66,21 @@ class InletProfile {
             double at(const Point & x) const;
         };
         bool uniform_ = true;
-        std::vector<Field> u;       // per component
+        std::vector<Field> u;       // per component, or the speed alone
+        bool speed = false, directed = false;
+        Point direction{};
         std::vector<Field> stress;  // per N_STRESS component, empty without turbulence
         // Profile table: coordinate axis, sorted coordinates, and N_DIM mean + N_STRESS stress columns
         int axis = -1;
         std::vector<double> coordinate;
         std::vector<std::vector<double>> columns;
 
-        void read_table(const toml::value & turbulence, const std::string & where);
+        void read_table(const Input & turbulence, const std::string & where);
         double table(size_t column, double s) const;
 };
 
 /**
- * @brief Synthetic turbulence for one `nscbc_inlet`: the digital filter of
+ * @brief Synthetic turbulence for one `inlet_state` with `nscbc`: the digital filter of
  *        Klein, Sadiki & Janicka (2003), with the inlet's Reynolds stress
  *        imposed by the Cholesky factor of Lund, Wu & Squires (1998)
  *        (docs/design/synthetic_inflow.md).
@@ -104,7 +108,7 @@ class SyntheticInflow {
          * @param faces The inlet's faces on this rank.
          * @param char_index Index of each face into BoundaryData::char_*.
          */
-        SyntheticInflow(const toml::value & boundary, const std::string & where, uint64_t stream, const Mesh & mesh,
+        SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream, const Mesh & mesh,
                         const std::vector<uint32_t> & faces, const std::vector<int32_t> & char_index);
 
         /** @brief Write the target velocity (mean plus fluctuation) of the inlet's faces at time t into target(k). */

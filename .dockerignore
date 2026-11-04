@@ -1,0 +1,9 @@
+.github
+.venv
+build
+build-*
+**/solut
+**/__pycache__
+src/external/hdf5
+docs
+benchmarks

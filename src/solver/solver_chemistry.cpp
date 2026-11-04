@@ -38,31 +38,31 @@ struct MaxCostFunctor {
 void Solver::init_chemistry() {
     reacting = false;
     if (!input.contains("chemistry")) return;
-    const toml::value & table = input.at("chemistry");
-    if (!toml::find_or<bool>(table, "enabled", true)) return;
-    const std::string integrator = toml::find_or<std::string>(table, "integrator", "rosenbrock");
+    const Input & table = input.at("chemistry");
+    if (!find_value_or<bool>(table, "enabled", true)) return;
+    const std::string integrator = find_value_or<std::string>(table, "integrator", "rosenbrock");
     if (integrator != "rosenbrock") {
         throw InputError("chemistry.integrator = \"" + integrator + "\" is not one of: rosenbrock.");
     }
-    const std::string coupling = toml::find_or<std::string>(table, "coupling", "strang");
+    const std::string coupling = find_value_or<std::string>(table, "coupling", "strang");
     if (coupling != "strang" && coupling != "simpler") {
         throw InputError("chemistry.coupling = \"" + coupling + "\" is not one of: strang, simpler.");
     }
     simpler = coupling == "simpler";
-    chemistry_load_balance = toml::find_or<bool>(table, "load_balance", false);
+    chemistry_load_balance = find_value_or<bool>(table, "load_balance", false);
     const chemistry::Mechanism & mech = mixture_model->mechanism();
     if (mech.reactions.empty()) {
         throw InputError("[chemistry]: the mechanism " + mech.file + " has no reactions.");
     }
     chemistry_options = reactor_options(input);
-    T_frozen = find_double_or(table, "T_frozen", 0.0);
-    fuse_chemistry = toml::find_or<bool>(table, "fuse_half_steps", false);
+    T_frozen = find_double_or(table, "T_frozen", dim::temperature, 0.0);
+    fuse_chemistry = find_value_or<bool>(table, "fuse_half_steps", false);
     if (simpler && fuse_chemistry) {
         throw InputError("chemistry.fuse_half_steps applies to Strang splitting; coupling = \"simpler\" makes one "
                          "chemistry call per step already.");
     }
     if (table.contains("lanes")) {
-        const toml::value & v = table.at("lanes");
+        const Input & v = table.at("lanes");
         if (!v.is_integer() || v.as_integer() < 0 || v.as_integer() > 1024 ||
             (v.as_integer() & (v.as_integer() - 1)) != 0) {
             throw InputError(toml::format_error("chemistry.lanes must be 0 (automatic) or a power of 2", v, "here"));
@@ -95,12 +95,21 @@ void Solver::allocate_chemistry() {
 }
 
 void Solver::advance_chemistry(const double dt_chem) {
+    const bool audit = run_health.clip_site != HealthState::NONE;
+    const Kokkos::View<double *> clipped =
+        audit ? run_health.repairs.recorder(run_health.clip_site).change : Kokkos::View<double *>();
+    if (audit) run_health.ledger.chemistry_begin(species, clipped);
     const double start = timer.seconds();
     const CellChemistry::Statistics stats =
         cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(), dt_chem,
                                tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>());
     check_chemistry(stats, start);
     t_wall_chemistry += timer.seconds() - start;
+    if (audit) {
+        run_health.ledger.chemistry_end(species, clipped);
+        run_health.repairs.touch(run_health.clip_site, run_health.clip_flags);
+        Kokkos::deep_copy(run_health.clip_flags, uint8_t(0));
+    }
 }
 
 void Solver::check_chemistry(const CellChemistry::Statistics & stats, const double start) {
@@ -151,8 +160,12 @@ void Solver::take_simpler_step() {
                                &forcing);
     check_chemistry(stats, start);
     t_wall_chemistry += timer.seconds() - start;
+    if (run_health.clip_site != HealthState::NONE) {
+        run_health.repairs.touch(run_health.clip_site, run_health.clip_flags);
+        Kokkos::deep_copy(run_health.clip_flags, uint8_t(0));
+    }
     halo_current = false;
-    const RHSFunction corrected = [this](State solution, State rhs, rtype t_stage) {
+    const RHSFunction corrected = [this](State solution, State rhs, rtype t_stage, rtype) {
         calc_rhs(solution, rhs, t_stage);
         subtract_transport_rate(rhs);
     };

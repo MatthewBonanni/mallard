@@ -1,5 +1,5 @@
 # Chemistry throughput, H2/air with h2o2 (10 species, 29 reactions): run with
-#   MallardReactor -i h2o2.toml
+#   mallard reactor -i h2o2.toml
 # States sampled along the constant-volume ignition below (fresh, igniting and
 # burnt; ignition delay 44 us), replicated over the cells and advanced over
 # each splitting step dt; writes h2o2.csv. See README.md.

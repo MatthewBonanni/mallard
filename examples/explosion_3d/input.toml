@@ -6,7 +6,7 @@
 # 3D build (cmake -DMallard_DIM=3).
 #
 # Run:
-#   ../../build3d/src/Mallard -i input.toml --kokkos-num-threads=8
+#   ../../build3d/src/mallard -i input.toml --kokkos-num-threads=8
 #
 # Expected result at t = 0.25: an outgoing spherical shock near r = 0.80, a
 # contact near r = 0.6 and a rarefaction running into the center, with density
@@ -47,15 +47,15 @@ type = "symmetry"
 
 [[boundaries]]
 name = "right"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "front"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [numerics]
 riemann_solver = "HLLC"
@@ -78,6 +78,5 @@ check_interval = 20
 
 [[write_data]]
 prefix = "./solut/explosion"
-format = "vtu"
 time_interval = 0.025
 variables = ["RHO", "U_X", "U_Y", "U_Z", "P"]

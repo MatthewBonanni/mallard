@@ -35,16 +35,18 @@ std::vector<T> exchange(std::vector<std::vector<T>> && send, bool distributed) {
 
 } // namespace
 
-GlobalOrder::GlobalOrder(std::span<const uint64_t> ids, uint64_t n_global, bool distributed_in)
+GlobalOrder::GlobalOrder(std::span<const uint64_t> ids, uint64_t n_global, bool distributed_in, uint64_t align)
     : distributed(distributed_in), n_global_(n_global) {
     const int p = distributed ? comm::size() : 1, r = distributed ? comm::rank() : 0;
-    first_ = block_begin(n_global, r, p);
-    n_block = block_begin(n_global, r + 1, p) - first_;
+    const uint64_t n_runs = (n_global + align - 1) / align;
+    auto begin = [&](int q) { return std::min(n_global, align * block_begin(n_runs, q, p)); };
+    first_ = begin(r);
+    n_block = begin(r + 1) - first_;
     send_items.assign(static_cast<size_t>(p), {});
     std::vector<std::vector<uint64_t>> send(static_cast<size_t>(p));
     for (uint32_t i = 0; i < ids.size(); i++) {
         if (ids[i] >= n_global) throw std::logic_error("GlobalOrder: id out of range.");
-        const size_t q = static_cast<size_t>(block_of(ids[i], n_global, p));
+        const size_t q = static_cast<size_t>(block_of(ids[i] / align, n_runs, p));
         send_items[q].push_back(i);
         send[q].push_back(ids[i]);
     }

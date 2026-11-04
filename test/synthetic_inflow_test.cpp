@@ -24,6 +24,7 @@
 #include "solver.h"
 #include "synthetic_inflow.h"
 #include "test_fixtures.h"
+#include "scratch.h"
 
 namespace {
 
@@ -47,8 +48,8 @@ std::shared_ptr<Mesh> inlet_mesh(uint32_t n, double width) {
     std::ostringstream s;
     s.precision(17);
     s << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = " << n << "\nLx = 0.5\nLy = " << width << "\n";
-    if constexpr (N_DIM == 3) s << "Nz = " << n << "\nLz = " << width << "\nperiodic = [\"y\", \"z\"]\n";
-    else s << "periodic = [\"y\"]\n";
+    if constexpr (N_DIM == 3) s << "Nz = " << n << "\nLz = " << width << "\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    else s << "[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
     auto mesh = std::make_shared<Mesh>();
     mesh->init(parse_toml(s.str()));
     mesh->copy_host_to_device();
@@ -106,8 +107,8 @@ TEST(SyntheticInflowTest, InletPlaneReproducesTargetStressesAndScales) {
     const double R_xx = 0.04, R_yy = 0.01, R_zz = 0.02, R_xy = -0.012;
     std::ostringstream b;
     b.precision(17);
-    b << "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [" << U0 << ", 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
-      << "p = 1.0\nT = 1.0\nL = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(R_xx, R_yy, R_zz, R_xy)
+    b << "name = \"left\"\ntype = \"inlet_state\"\nu = [" << U0 << ", 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
+      << "p = 1.0\nT = 1.0\nnscbc.L = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(R_xx, R_yy, R_zz, R_xy)
       // The plane mode removed by zero_net_flux carries about 4 L_y L_z / A of R_xx (2 L_y / W in 2D)
       << "\nzero_net_flux = false\n";
     if constexpr (N_DIM == 3) {
@@ -189,8 +190,8 @@ namespace {
 
 std::string isotropic_inlet(bool zero_net_flux) {
     std::ostringstream b;
-    b << "name = \"left\"\ntype = \"nscbc_inlet\"\nu = [1.0, 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
-      << "p = 1.0\nT = 1.0\nL = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(0.01, 0.01, 0.01, 0.0) << "\n"
+    b << "name = \"left\"\ntype = \"inlet_state\"\nu = [1.0, 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
+      << "p = 1.0\nT = 1.0\nnscbc.L = 1.0\n[turbulence]\nreynolds_stress = " << stress_list(0.01, 0.01, 0.01, 0.0) << "\n"
       << "length_scale = 0.3\nzero_net_flux = " << (zero_net_flux ? "true" : "false") << "\n";
     return b.str();
 }
@@ -211,19 +212,19 @@ std::vector<double> net_flux(const Sampled & s, const Mesh & mesh) {
 
 constexpr double P_DUCT = 1.0 / 1.4 / 0.09;  // Mach 0.3 at u = 1, rho = 1
 
-/** @brief Box with a turbulent nscbc_inlet at x = 0 and an nscbc_outlet at x = Lx, periodic across. */
+/** @brief Box with a turbulent inlet_state with nscbc at x = 0 and an outlet_pressure with nscbc at x = Lx, periodic across. */
 std::string duct_input(const std::string & dir, const std::string & init, uint32_t n_steps) {
     std::ostringstream s;
     s.precision(17);
     s << "[run]\nn_steps = " << n_steps << "\ncfl = 0.5\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = 10\nNy = 6\nLx = 1.0\nLy = 0.6\n"
-      << (N_DIM == 3 ? "Nz = 6\nLz = 0.6\nperiodic = [\"y\", \"z\"]\n" : "periodic = [\"y\"]\n")
+      << (N_DIM == 3 ? "Nz = 6\nLz = 0.6\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "[[periodic]]\nzones = [\"bottom\", \"top\"]\n")
       << "[initialize]\n" << init
-      << "[[boundaries]]\nname = \"left\"\ntype = \"nscbc_inlet\"\nu = [\"1.0 + 0.1 * y\", 0.0"
-      << (N_DIM == 3 ? ", 0.0" : "") << "]\np = " << P_DUCT << "\nT = 1.0\nL = 1.0\n"
+      << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [\"1.0 + 0.1 * y\", 0.0"
+      << (N_DIM == 3 ? ", 0.0" : "") << "]\np = " << P_DUCT << "\nT = 1.0\nnscbc.L = 1.0\n"
       << "[boundaries.turbulence]\nreynolds_stress = " << stress_list(0.01, 0.005, 0.005, -0.002)
       << "\nlength_scale = 0.2\nseed = 7\n"
-      << "[[boundaries]]\nname = \"right\"\ntype = \"nscbc_outlet\"\np = " << P_DUCT << "\nL = 1.0\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = " << P_DUCT << "\nnscbc.L = 1.0\n"
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
       << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
       << "[physics]\ntype = \"navier_stokes\"\nmu = 0.002\nPr = 0.72\ngamma = 1.4\np_ref = " << P_DUCT
@@ -286,17 +287,19 @@ TEST(SyntheticInflowTest, FieldDependsOnlyOnTimeAndSeed) {
 
 TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     // The generator has no state; the characteristic faces' state goes into the restart file
-    const std::string dir = (std::filesystem::temp_directory_path() / "mallard_inflow_restart_test").string();
-    std::filesystem::remove_all(dir);
+    const std::string dir = (scratch_dir() / "mallard_inflow_restart_test").string();
     Solver straight;
+    straight.set_distributed(false);
     straight.init(parse_toml(duct_input(dir + "/a", duct_constant(), 40)));
     straight.run();
     straight.copy_device_to_host();
 
     Solver first;
+    first.set_distributed(false);
     first.init(parse_toml(duct_input(dir + "/b", duct_constant(), 20)));
     first.run();
     Solver second;
+    second.set_distributed(false);
     second.init(parse_toml(
         duct_input(dir + "/b", "type = \"restart\"\nfile = \"" + dir + "/b/restart_000020.restart\"\n", 40)));
     second.run();
@@ -311,7 +314,6 @@ TEST(SyntheticInflowTest, RestartedRunMatchesUninterruptedRunExactly) {
     }
     // The turbulence has entered the domain
     EXPECT_GT(v_max, 0.01);
-    std::filesystem::remove_all(dir);
 }
 
 TEST(SyntheticInflowTest, InvalidInputIsRejected) {

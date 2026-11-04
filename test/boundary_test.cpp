@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 
+#include "data_paths.h"
 #include "test_fixtures.h"
 #include "solver.h"
 
@@ -28,7 +29,7 @@ std::string strip_input(const std::string & left, const std::string & bottom, co
       << "[mesh]\ntype = \"cartesian\"\nNx = " << nx << "\nNy = 4\nLx = 1.0\nLy = 0.04\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"1.0\", \"0.0\"]\np = \"1.0\"\n"
       << "[[boundaries]]\nname = \"left\"\n" << left
-      << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+      << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
       << bottom
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
@@ -53,7 +54,7 @@ TEST(BoundaryTest, TimeDependentDirichletInflowIsAdvected) {
     solver.copy_device_to_host();
     auto m = solver.get_mesh();
     double max_err = 0.0;
-    for (uint32_t i = 0; i < m->n_cells; i++) {
+    for (uint32_t i = 0; i < m->n_owned(); i++) {
         const double x = double(m->h_cell_coords(i, 0));
         if (x > 0.7) continue;  // Beyond the entering front
         const double h = 0.01;
@@ -70,7 +71,7 @@ TEST(BoundaryTest, WhereSplitsAZoneBetweenConditions) {
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\nwhere = \"x < 0.5\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\nwhere = \"x >= 0.5\"\n";
     Solver solver;
-    EXPECT_NO_THROW(solver.init(parse_toml(strip_input("type = \"extrapolation\"\n", bottom, "n_steps = 1\ncfl = 0.2\n", 20))));
+    EXPECT_NO_THROW(solver.init(parse_toml(strip_input("type = \"outlet_extrapolation\"\n", bottom, "n_steps = 1\ncfl = 0.2\n", 20))));
 }
 
 TEST(BoundaryTest, OverlappingOrMissingAssignmentsAreRejected) {
@@ -81,9 +82,9 @@ TEST(BoundaryTest, OverlappingOrMissingAssignmentsAreRejected) {
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\nwhere = \"x < 0.3\"\n"
         "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\nwhere = \"x >= 0.5\"\n";
     Solver a, b;
-    EXPECT_THROW(a.init(parse_toml(strip_input("type = \"extrapolation\"\n", overlap, "n_steps = 1\ncfl = 0.2\n", 20))),
+    EXPECT_THROW(a.init(parse_toml(strip_input("type = \"outlet_extrapolation\"\n", overlap, "n_steps = 1\ncfl = 0.2\n", 20))),
                  std::runtime_error);
-    EXPECT_THROW(b.init(parse_toml(strip_input("type = \"extrapolation\"\n", gap, "n_steps = 1\ncfl = 0.2\n", 20))),
+    EXPECT_THROW(b.init(parse_toml(strip_input("type = \"outlet_extrapolation\"\n", gap, "n_steps = 1\ncfl = 0.2\n", 20))),
                  std::runtime_error);
 }
 
@@ -114,11 +115,11 @@ double outlet_profile_error(const std::string & outlet) {
     solver.copy_device_to_host();
     auto m = solver.get_mesh();
     double err = 0.0;
-    for (uint32_t i = 0; i < m->n_cells; i++) {
+    for (uint32_t i = 0; i < m->n_owned(); i++) {
         if (m->h_cell_coords(i, 0) < 0.95_r) continue;
         err = std::max(err, std::abs(double(solver.h_primitives(i, 2)) - std::exp(-double(m->h_cell_coords(i, 1)))));
     }
-    return err;
+    return comm::allreduce(err, comm::Op::MAX);
 }
 
 } // namespace
@@ -127,8 +128,8 @@ TEST(BoundaryTest, AveragePressureOutletKeepsTransversePressureProfile) {
     // The mean of exp(-y) over [0, 1] is 1 - 1/e. A uniform back pressure
     // fights the hydrostatic profile; imposing only its average does not.
     const std::string target = "p = 0.6321205588285577\n";
-    const double uniform = outlet_profile_error("type = \"p_out\"\n" + target);
-    const double average = outlet_profile_error("type = \"p_out_average\"\n" + target);
+    const double uniform = outlet_profile_error("type = \"outlet_pressure\"\n" + target);
+    const double average = outlet_profile_error("type = \"outlet_pressure\"\naverage = true\n" + target);
     EXPECT_GT(uniform, 0.1);
     EXPECT_LT(average, 0.03);
 }
@@ -149,7 +150,7 @@ JetStart jet_into_rest(const std::string & left, const std::string & gas) {
           << "[mesh]\ntype = \"cartesian\"\nNx = 40\nNy = 4\nLx = 1.0\nLy = 0.1\n"
           << "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0]\np = 1.0e5\nT = 300.0\n" << (gas.empty() ? "" : "Y = { AIR = 1.0 }\n")
           << "[[boundaries]]\nname = \"left\"\n" << left << (gas.empty() ? "" : "Y = { AIR = 1.0 }\n")
-          << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+          << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
           << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
           << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
           << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
@@ -185,11 +186,11 @@ TEST(BoundaryTest, FastInflowIntoGasAtRestStartsAtTheTargetCFL) {
     const double dt_expected = 0.8 * 2.0 * h * h / (h * (u + c) + 3.0 * h * c);
     const std::string jet = "u = [" + std::to_string(u) + ", 0.0]\np = 1.0e5\nT = 300.0\n";
     const std::string perfect_air =
-        "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" MALLARD_SOURCE_DIR
-        "/test/data/chemistry/perfect_air.yaml\"\nphase = \"air\"\n";
-    for (const auto & [left, gas] : {std::pair<std::string, std::string>{"type = \"upt\"\n" + jet, ""},
-                                     {"type = \"nscbc_inlet\"\nL = 1.0\n" + jet, ""},
-                                     {"type = \"upt\"\n" + jet, perfect_air}}) {
+        "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
+"/test/data/chemistry/perfect_air.yaml\"\nphase = \"air\"\n";
+    for (const auto & [left, gas] : {std::pair<std::string, std::string>{"type = \"inlet_state\"\n" + jet, ""},
+                                     {"type = \"inlet_state\"\nnscbc.L = 1.0\n" + jet, ""},
+                                     {"type = \"inlet_state\"\n" + jet, perfect_air}}) {
         const JetStart r = jet_into_rest(left, gas);
         EXPECT_NEAR(r.dt_first, dt_expected, 1e-4 * dt_expected) << left << gas;
         EXPECT_GT(r.min_p, 0.5e5) << left << gas;
@@ -206,7 +207,7 @@ struct FarfieldCase {
 
     FarfieldCase(const rtype * W_i) {
         bc.type = BoundaryType::FARFIELD;
-        const rtype W_inf[N_CONSERVATIVE] = {1.0_r, 0.3_r, -0.1_r, 1.0_r / G};
+                const rtype W_inf[N_CONSERVATIVE] = {1.0_r, 0.3_r, -0.1_r, 1.0_r / G};
         FOR_I_CONSERVATIVE bc.data[i] = W_inf[i];
         bc.ghost_W(W_i, n, G, 1.0, false, W_g);
     }
@@ -286,4 +287,33 @@ TEST(BoundaryTest, FarfieldLetsAPressurePulseLeave) {
     }
     // upt leaves 1.8e-4, extrapolation 5e-4; single precision adds ~1e-6 of round-off
     EXPECT_LT(dp_max, precision_tol<double>(1.2e-4, 1.3e-4));
+}
+
+TEST(BoundaryTest, ExtrapolationKeepsAPerturbedUniformFlowOnTrianglesWithTENO) {
+    // A uniform subsonic flow with a tiny transverse velocity crosses a Delaunay
+    // triangle mesh with extrapolation sides. Image cells' averages as the
+    // exterior state against TENO's face values grew it 15-fold every 250 steps
+    // at the inflow, from round-off up to vacuum states
+    const double a = precision_tol<double>(1e-10, 1e-4);
+    std::ostringstream s;
+    s << "[run]\nn_steps = 1000\ncfl = 0.3\n"
+      << "[mesh]\ntype = \"file\"\nfilename = \"" << source_dir() << "/test/data/meshes/square_delaunay.msh\"\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n"
+      << "u = [\"0.7\", \"" << a << " * sin(23 * x + 41 * y)\"]\np = \"0.7142857142857143\"\n";
+    for (const char * name : {"left", "right", "top", "bottom"}) {
+        s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"outlet_extrapolation\"\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    solver.run();
+    solver.copy_device_to_host();
+    double v_max = 0.0;
+    for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
+        v_max = std::max(v_max, std::abs(double(solver.h_conservatives(i, 2) / solver.h_conservatives(i, 0))));
+    }
+    EXPECT_LT(v_max, a);
 }

@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 #include <type_traits>
 
@@ -105,10 +106,32 @@ template <typename T>
 Received<T> exchange(std::vector<std::vector<T>> && send);
 
 /**
+ * @brief Rank 0's value, on every rank.
+ */
+std::string broadcast(const std::string & value);
+
+/** @brief Every rank's string, in rank order, on every rank (collective). */
+std::vector<std::string> allgather(const std::string & value);
+
+/**
+ * @brief The error of the lowest rank that has one (non-empty), on every rank;
+ *        empty if none has. For checks of rank-local data, so that every rank
+ *        throws and none waits in a later collective.
+ */
+std::string first_error(const std::string & error);
+
+/**
  * @brief Concatenation of every rank's local vector, in rank order.
  */
 template <typename T>
 std::vector<T> allgatherv(const std::vector<T> & local);
+
+/**
+ * @brief Concatenation of every rank's local vector, in rank order, on rank 0
+ *        (empty on the others).
+ */
+template <typename T>
+std::vector<T> gatherv(const std::vector<T> & local);
 
 #ifdef Mallard_HAS_MPI
 /** @brief The world communicator. */

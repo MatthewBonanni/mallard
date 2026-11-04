@@ -17,11 +17,11 @@
 #include "input.h"
 #include "partition.h"
 
-CellOrder cell_order_of_input(const toml::value & input) {
-    const std::string name = toml::find_or<std::string>(input, "mesh", "cell_order", "hilbert");
-    const auto it = CELL_ORDERS.find(name);
-    if (it == CELL_ORDERS.end()) throw unknown_option(CELL_ORDERS, "mesh.cell_order", name);
-    return it->second;
+CellOrder cell_order_of_input(const Input & input) {
+    const std::string name = find_value_or<std::string>(input, "mesh", "cell_order", "hilbert");
+    return find_option(CELL_ORDERS, "mesh.cell_order", name,
+                       input.contains("mesh") ? line_of(input.at("mesh"), "cell_order") : size_t(0))
+        ->second;
 }
 
 std::vector<uint32_t> locality_order(CellOrder kind, const std::vector<std::array<rtype, N_DIM>> & nodes,
