@@ -41,8 +41,8 @@ struct CaseConfig {
     std::string recon = "FO";
     std::string limiter = "barth_jespersen";
     std::string riemann = "HLLC";
-    std::string bc_lr = "extrapolation";
-    std::string bc_tb = "extrapolation";
+    std::string bc_lr = "outlet_extrapolation";
+    std::string bc_tb = "outlet_extrapolation";
     std::string init;
     std::string run = "n_steps = 20\ncfl = 0.25\n";
 };
@@ -182,8 +182,8 @@ double sod_error(const std::string & mesh, const std::string & recon, uint32_t n
     c.recon = recon;
     c.nx = along_y ? 4 : n;
     c.ny = along_y ? n : 4;
-    c.bc_lr = along_y ? "symmetry" : "extrapolation";
-    c.bc_tb = along_y ? "extrapolation" : "symmetry";
+    c.bc_lr = along_y ? "symmetry" : "outlet_extrapolation";
+    c.bc_tb = along_y ? "outlet_extrapolation" : "symmetry";
     c.run = "t_stop = 0.2\ncfl = 0.25\n";
     const std::string s = along_y ? "y" : "x";
     c.init = "type = \"analytical\"\n"

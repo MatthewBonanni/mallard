@@ -765,8 +765,8 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
     }
     const std::string input =
         "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
-        "[[mesh.curved]]\nzone = \"inner\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
-        "[[mesh.curved]]\nzone = \"outer\"\nshape = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
+        "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n"
         "[initialize]\ntype = \"analytical\"\nrho = \"(1 + 0.2 * 0.8^2 * (1 - 1 / (x^2 + y^2)))^2.5\"\n"
         "u = [\"-0.8 * y / (x^2 + y^2)\", \"0.8 * x / (x^2 + y^2)\"]\n"
         "p = \"(1 + 0.2 * 0.8^2 * (1 - 1 / (x^2 + y^2)))^3.5 / 1.4\"\n"
@@ -819,7 +819,7 @@ TEST(ProbesTest, Hdf5ProbesAndAsynchronousHdf5OutputShareTheLibrary) {
                               "variables = [\"RHO\", \"U\", \"P\"]\ntype = \"circle\"\ncenter = " +
                               numbers3("0.5", "0.5", "0.5") + "\nradius = 0.3\nn_points = 64\n" +
                               (N_DIM == 3 ? "normal = [0.0, 0.0, 1.0]\n" : "") +
-                              "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"hdf5\"\ninterval = 1\n"
+                              "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"xdmf\"\ninterval = 1\n"
                               "variables = [\"RHO\", \"P\"]\n";
     std::string input = box_case(12, SINE_RHO, "type = \"MUSCL\"\n", extra,
                                  "n_steps = " + std::to_string(n_steps) + "\ncfl = 0.3\n");

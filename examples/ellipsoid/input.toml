@@ -134,13 +134,13 @@ variables = ["RHO", "U", "P"]
 [[write_data]]
 prefix = "./solut/wall"
 format = "vtu"
-geometry = "ellipsoid"
+region = "ellipsoid"
 time_interval = 0.25
 variables = ["P"]
 
 [[write_data]]
 prefix = "./solut/y0"
 format = "vtu"
-geometry = "symmetry_y"
+region = "symmetry_y"
 time_interval = 0.25
 variables = ["RHO", "U", "P"]

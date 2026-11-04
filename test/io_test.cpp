@@ -137,7 +137,7 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     auto mesh = make_mesh("cartesian_tri", 3, 2);
     Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
     std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
-    const std::string input = "prefix = \"" + dir + "/f\"\nformat = \"hdf5\"\ntime_interval = 0.1\n"
+    const std::string input = "prefix = \"" + dir + "/f\"\nformat = \"xdmf\"\ntime_interval = 0.1\n"
                               "variables = [\"RHO\"]\n";
     {
         DataWriter first;
@@ -213,7 +213,7 @@ std::string output_case(const std::string & dir, const std::string & output_keys
       << "region = {type = \"disk\", center = [0.4, 0.5], radius = 0.3}\nvariables = [\"P\"]\n" << snapshot_keys
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 6\n" << restart_keys;
     if (have_hdf5()) {
-        s << "[[write_data]]\nprefix = \"" << dir << "/h5/flow\"\nformat = \"hdf5\"\ninterval = 4\n"
+        s << "[[write_data]]\nprefix = \"" << dir << "/h5/flow\"\nformat = \"xdmf\"\ninterval = 4\n"
           << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
           << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/flow\"\nformat = \"vtkhdf\"\ninterval = 4\n"
           << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
@@ -783,7 +783,7 @@ TEST(IOTest, ResumedRunsContinueSnapshotNumberingAndSeries) {
     std::vector<Output> outputs = {{"vtu/f", "vtu", ".vtu", ".pvd"}, {"region/f", "vtu", ".vtu", ".pvd"}};
     if (have_hdf5()) {
         outputs.push_back({"vtkhdf/f", "vtkhdf", ".vtkhdf", ".vtkhdf.series"});
-        outputs.push_back({"hdf5/f", "hdf5", ".h5", ".xmf"});
+        outputs.push_back({"xdmf/f", "xdmf", ".h5", ".xmf"});
     }
     auto input = [&](const std::string & t_stop, const std::string & restart) {
         std::ostringstream s;
@@ -794,8 +794,8 @@ TEST(IOTest, ResumedRunsContinueSnapshotNumberingAndSeries) {
         } else {
             s << "[initialize]\ntype = \"restart\"\nfile = \"" << dir << "/restart_" << restart << ".restart\"\n";
         }
-        s << "[[boundaries]]\nname = \"left\"\ntype = \"extrapolation\"\n"
-          << "[[boundaries]]\nname = \"right\"\ntype = \"extrapolation\"\n"
+        s << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+          << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
           << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
           << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
           << "[numerics.face_reconstruction]\ntype = \"FO\"\n"

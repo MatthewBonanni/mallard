@@ -39,14 +39,14 @@ enum class DataFormat {
 static const std::unordered_map<std::string, DataFormat> FORMAT_TYPES = {
     {"vtu", DataFormat::VTU},
     {"restart", DataFormat::RESTART},
-    {"hdf5", DataFormat::HDF5},
+    {"xdmf", DataFormat::HDF5},
     {"vtkhdf", DataFormat::VTKHDF},
 };
 
 static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
     {DataFormat::VTU, "vtu"},
     {DataFormat::RESTART, "restart"},
-    {DataFormat::HDF5, "hdf5"},
+    {DataFormat::HDF5, "xdmf"},
     {DataFormat::VTKHDF, "vtkhdf"},
 };
 

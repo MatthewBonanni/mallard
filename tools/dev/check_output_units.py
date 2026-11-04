@@ -71,7 +71,7 @@ interval = 2
 variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[write_data]]
 prefix = "flow"
-format = "hdf5"
+format = "xdmf"
 interval = 2
 variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[write_data]]

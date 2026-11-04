@@ -442,7 +442,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             };
             run(std::move(job), !collective);
         }
-        logging::event(step, double(t), "hdf5", stem + ".h5");
+        logging::event(step, double(t), "xdmf", stem + ".h5");
     } else if (format == DataFormat::VTKHDF) {
         const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
         last_file = filename;

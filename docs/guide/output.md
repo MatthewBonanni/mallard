@@ -42,14 +42,14 @@ variables = ["P", "T"]
 | Key | Default | Meaning |
 |---|---|---|
 | `prefix` | required | Output path prefix |
-| `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, with a `.vtkhdf.series` index), `vtu` (ParaView, with a `.pvd` time series), `restart`, or the deprecated `hdf5` (with XDMF). Builds without HDF5 write `vtu`, with a warning |
+| `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, with a `.vtkhdf.series` index), `vtu` (ParaView, with a `.pvd` time series), `xdmf` (XDMF indexes over HDF5 files) or `restart`; see [which format](#which-format). Builds without HDF5 write `vtu`, with a warning |
 | `series` | `false` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf` |
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
 | `variables` | required (all but `restart`) | Variables to write, below; `Y_*` selects every variable with that prefix |
-| `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (deprecated; `mallard input upgrade` rewrites it) |
+| `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (removed in 0.10.0; `mallard input upgrade` rewrites it) |
 | `regions` | none | Instead of `region`: a list of regions, each written as its own series, `PREFIX_<name>` (inline ones: `PREFIX_<place in the list>`) |
-| `compression` | `"none"` | `"zlib"`: lossless compression of `vtkhdf`, `vtu`, `hdf5` and `restart` files (below) |
-| `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `hdf5` with `compression = "zlib"`: lossy, each cell value within this relative error |
+| `compression` | `"none"` | `"zlib"`: lossless compression of `vtkhdf`, `vtu`, `xdmf` and `restart` files (below) |
+| `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `xdmf` with `compression = "zlib"`: lossy, each cell value within this relative error |
 | `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
 
 **Variables:**
@@ -65,6 +65,19 @@ variables = ["P", "T"]
 | LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
 | [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
+
+### Which format
+
+| `format` | Opens in | Files |
+|---|---|---|
+| `vtkhdf` (default) | ParaView 5.12+, PyVista, h5py | One file per snapshot, or one for the series (`series = true`) |
+| `xdmf` | VisIt, meshio, ParaView of any version; h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
+| `vtu` | Anything with a VTK XML reader (e.g. Tecplot); builds without HDF5 | One file per rank per snapshot, with a `.pvtu` and a `.pvd` series |
+| `restart` | Mallard, to continue or remap a run | One file per snapshot |
+
+`vtkhdf` and `xdmf` need a build with HDF5 (parallel HDF5 on several ranks).
+Before 0.10.0, `xdmf` was called `format = "hdf5"`, which is now an error since
+VTKHDF is HDF5 too; `mallard input upgrade` rewrites it to `"vtkhdf"`.
 
 **VTKHDF, the default.** `format = "vtkhdf"` writes VTK's HDF5 format, which
 ParaView 5.12 and later open directly: open `PREFIX.vtkhdf.series` for the time
@@ -90,9 +103,10 @@ the index, as before.
 
 Builds without HDF5 write VTU instead (and say so): one file per snapshot, and
 per rank in parallel, assembled by a `.pvtu`, with a `.pvd` series. Set
-`format = "vtu"` to choose it explicitly. `format = "hdf5"` (a mesh file, one
-HDF5 file of fields per snapshot and XDMF indexes) is deprecated and will be
-removed in 0.10.0; `mallard input upgrade` rewrites it to `"vtkhdf"`.
+`format = "vtu"` to choose it explicitly. `format = "xdmf"` writes the mesh
+once (`PREFIX_mesh.h5`), one HDF5 file of fields per snapshot and XDMF
+indexes (`PREFIX.xmf` for the series), all in global cell order; read it in
+Python with `tools/mallard/h5.py`.
 
 **Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
 
@@ -185,8 +199,7 @@ Pitfalls:
 - A boundary zone's samples lie at the face centroids, on the wall: `P` is the
   reconstruction's wall pressure, not the first cell's average. Cell fields
   such as `P_MAX` are still the cell's.
-- Regions are written as `vtkhdf` or `vtu` only, not as the deprecated `hdf5`
-  (XDMF) format.
+- Regions are written as `vtkhdf` or `vtu` only, not as `xdmf`.
 - `compression` on a region of lower dimension, alone in its entry, is an
   unused key: those files are small and written uncompressed.
 
@@ -244,7 +257,7 @@ Each record has a `type`:
 |---|---|---|
 | `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
 | `progress` | Every progress row | as below |
-| `event` | A file written, or a request acted on (the rows between progress rows) | `step`, `t`, `kind` (`vtkhdf`, `surface`, `vtu`, `hdf5`, `restart`, ...; `checkpoint`, `stop`, `set` and `diverged` from [run control](running.md)), `text` |
+| `event` | A file written, or a request acted on (the rows between progress rows) | `step`, `t`, `kind` (`vtkhdf`, `surface`, `vtu`, `xdmf`, `restart`, ...; `checkpoint`, `stop`, `set` and `diverged` from [run control](running.md)), `text` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |
 | `end` | The end of the run | `reason`, `step`, `t`, `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
 
@@ -469,7 +482,7 @@ build reads. It is never misread.
 | Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9) | Mallard: all |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
-| HDF5 output (`format = "hdf5"`, deprecated) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
+| XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard/vtu.py` |
 | Run record (`mallard.jsonl`, `[output] run_log`) | `version` of each `start` record | 1 (0.9) | Your scripts (records only gain fields within a version) |
 | Provenance block (every output file) | its `version` | 1 (0.9) | `tools/mallard/vtu.py` (`provenance()`); in restart files a trailer that every restart reader skips, so it changes no restart version |
