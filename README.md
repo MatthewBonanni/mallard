@@ -102,7 +102,7 @@ If you use Mallard, please cite it ([doi:10.5281/zenodo.23112953](https://doi.or
 
 Mallard is licensed under the [Apache License, Version 2.0](LICENSE). Redistributions and derivative works must keep the attribution in [NOTICE](NOTICE). Versions 0.1.0 to 0.6.0 were released under the AGPL v3.0.
 
-Mallard includes code and data derived from [Cantera](https://cantera.org) under the BSD 3-Clause License ([licenses/Cantera-BSD-3-Clause.txt](licenses/Cantera-BSD-3-Clause.txt)).
+Mallard includes code and data derived from [Cantera](https://cantera.org) under the BSD 3-Clause License ([licenses/Cantera-BSD-3-Clause.txt](licenses/Cantera-BSD-3-Clause.txt)), and an expression language derived from [exprtk](https://www.partow.net/programming/exprtk/) under the MIT License ([licenses/exprtk-MIT.txt](licenses/exprtk-MIT.txt)).
 
 ---
 

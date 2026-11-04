@@ -220,7 +220,7 @@ TEST(Units, ExpressionsTakeQuantitiesWholeAndAreOtherwiseSI) {
     };
     EXPECT_EQ(text("v = \"20 1/s\"", dim::rate), "20");
     EXPECT_EQ(text("v = \"1 atm\"", dim::pressure), "101325");
-    EXPECT_EQ(text("v = \"0.1\"", dim::pressure), "0.1");  // exprtk reads plain numbers as before
+    EXPECT_EQ(text("v = \"0.1\"", dim::pressure), "0.1");  // plain numbers are read as before
     EXPECT_EQ(text("v = \"x < 0.5 ? 1.0 : 0.125\"", dim::density), "x < 0.5 ? 1.0 : 0.125");
     EXPECT_EQ(text("v = 2", dim::pressure), "2");
     EXPECT_THROW(text("v = \"1 atm\"", dim::temperature), InputError);
