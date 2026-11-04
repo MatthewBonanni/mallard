@@ -88,7 +88,7 @@ constexpr Rule RULES[] = {
     // Halo exchange
     {"halo_", true, C::HALO},
     // Setup
-    {"init_", true, C::SETUP}, {"data_", true, C::SETUP}, {"region_", true, C::SETUP},
+    {"init_", true, C::SETUP}, {"data_", true, C::SETUP}, {"region_", true, C::SETUP}, {"expression_", true, C::SETUP},
     // Kokkos
     {"Kokkos::", true, C::RUNTIME},
 };

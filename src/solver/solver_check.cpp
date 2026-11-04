@@ -220,10 +220,6 @@ uint64_t outside_kokkos([[maybe_unused]] const uint64_t kokkos_bytes) {
     return used > kokkos_bytes ? used - kokkos_bytes : 0;
 }
 
-} // namespace
-
-namespace {
-
 /** @brief A snapshot's bytes: proportional to the rank's cells, except those sized by the device. */
 struct Model {
     double per_cell = 0.0;
@@ -328,7 +324,8 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
         return;
     }
     if (r.sizing_gpu) {
-        r.overhead_measured = r.outside_kokkos > 0;
+        // Before any step, the step kernels' local memory is not reserved yet
+        r.overhead_measured = r.outside_kokkos > 0 && (r.steps_timed > 0 || r.outside_kokkos >= CUDA_CONTEXT_BYTES);
         r.sizing_overhead = r.overhead_measured ? r.outside_kokkos : CUDA_CONTEXT_BYTES;
     }
     const double overhead = static_cast<double>(r.sizing_overhead);
@@ -677,7 +674,7 @@ void print_sizing(const CheckReport & r) {
 } // namespace
 
 std::string set_memory_target(const std::string & text, CheckOptions & options) {
-    // Memory as the driver reports it (cudaGetDeviceProperties, hipGetDeviceProperties)
+    // Memory as the driver reports it (cudaGetDeviceProperties, hipGetDeviceProperties; measured on the A100-80GB)
     struct Gpu {
         const char * key;
         const char * name;
