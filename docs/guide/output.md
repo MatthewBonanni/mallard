@@ -451,6 +451,9 @@ json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
 ```
 
 or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
+`mallard info FILE` summarises the block, and `mallard info --input FILE`
+prints the input that produced the file, ready to run again
+([Command line](cli.md#mallard-info)).
 
 ### Formats and compatibility
 
@@ -487,6 +490,11 @@ build reads. It is never misread.
   [README](../../test/data/formats/README.md)).
 
 ## Post-processing
+
+`mallard info` tells what any of these files holds, without an input file:
+its kind, format version, mesh, times, fields with their units and ranges, and
+provenance; `mallard info solut` does so for each file a run wrote
+([Command line](cli.md#mallard-info)).
 
 The Python scripts in `tools/` (numpy, matplotlib; see
 [Tools](https://matthewbonanni.github.io/mallard/docs/tools/)) read Mallard's output directly:

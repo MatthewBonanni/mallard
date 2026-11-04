@@ -43,6 +43,7 @@ set(MALLARD_TEST_SOURCES
     input_upgrade_test.cpp
     field_units_test.cpp
     format_compat_test.cpp
+    output_reader_test.cpp
     wall_model_test.cpp
     units_test.cpp
     periodic_pairs_test.cpp

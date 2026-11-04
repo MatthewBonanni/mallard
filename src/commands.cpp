@@ -330,8 +330,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard info wing.msh --quality quality\n"
                     "$ mallard info runs/cylinder",
         .exit_status = "0  the file was read\n"
-                       "1  it cannot be read: missing, not a Mallard file, a newer format version, or (--input) no "
-                       "provenance; in a run directory, a file that does not open\n"
+                       "1  a file cannot be read (missing, not Mallard's, newer), or --input finds no provenance\n"
                        "2  usage error",
         .dim = Case::file,
         .run = info_main,

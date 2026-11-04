@@ -24,7 +24,8 @@ Maintain  mallard test | completion | --version
 | `check input.toml` | Inspect | available |
 | `check --view DIR` (the case view) | Inspect | regions and boundary zones available; the rest planned ([#546](https://github.com/MatthewBonanni/mallard/issues/546)) |
 | `check` with no input | Inspect | planned ([#508](https://github.com/MatthewBonanni/mallard/issues/508)) |
-| `info <file>`, `info <run-dir> [--html]` (the run report) | Inspect | planned ([#504](https://github.com/MatthewBonanni/mallard/issues/504), [#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
+| `info <file>`, `info <run-dir>` | Inspect | available; on the [output reader](output_reader.md) |
+| `info <run-dir> --html` (the run report) | Inspect | planned ([#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
 | `list fields\|species\|templates\|keys` | Inspect | planned ([#502](https://github.com/MatthewBonanni/mallard/issues/502)) |
 | `diff` | Inspect | planned ([#506](https://github.com/MatthewBonanni/mallard/issues/506)) |
 | `mesh convert` | Mesh | available |
