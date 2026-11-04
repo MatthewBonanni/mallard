@@ -1033,39 +1033,34 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
 #endif
 }
 
-RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells) {
-    std::ifstream in(filename, std::ios::binary);
-    if (!in.good()) {
-        throw cannot_read("the restart file", filename);
-    }
+RestartHeader read_restart_header(std::ifstream & in, const std::string & filename) {
     char magic[16];
-    uint32_t version, real_size;
-    uint64_t n_vars, n_faces = 0, chunk_cells = 0;
-    RestartData data;
+    uint64_t n_vars = 0;
+    RestartHeader h;
     in.read(magic, sizeof(magic));
-    in.read(reinterpret_cast<char *>(&version), sizeof(version));
-    in.read(reinterpret_cast<char *>(&real_size), sizeof(real_size));
-    in.read(reinterpret_cast<char *>(&data.n_cells), sizeof(data.n_cells));
+    in.read(reinterpret_cast<char *>(&h.version), sizeof(h.version));
+    in.read(reinterpret_cast<char *>(&h.real_size), sizeof(h.real_size));
+    in.read(reinterpret_cast<char *>(&h.n_cells), sizeof(h.n_cells));
     in.read(reinterpret_cast<char *>(&n_vars), sizeof(n_vars));
-    in.read(reinterpret_cast<char *>(&data.step), sizeof(data.step));
-    in.read(reinterpret_cast<char *>(&data.t), sizeof(data.t));
+    in.read(reinterpret_cast<char *>(&h.step), sizeof(h.step));
+    in.read(reinterpret_cast<char *>(&h.t), sizeof(h.t));
     magic[sizeof(magic) - 1] = '\0';
     if (!in.good() || std::string(magic) != RESTART_MAGIC) {
         throw std::runtime_error("Not a Mallard restart file: " + filename + ".");
     }
-    file_format::check_version(file_format::RESTART, filename, version);
-    if (real_size != sizeof(rtype)) {
-        throw std::runtime_error("Restart file " + filename + " was written with a different floating-point precision.");
+    file_format::check_version(file_format::RESTART, filename, h.version);
+    if (h.real_size != 4 && h.real_size != 8) {
+        throw std::runtime_error("Restart file " + filename + " has a corrupt header.");
     }
-    if (version == 1) {
-        // Version 1 holds the flow block only; its size gives the dimension
-        if (n_vars != N_CONSERVATIVE) {
+    if (h.version == 1) {
+        // Version 1 holds the flow block only, of the run's dimension
+        if (n_vars != 4 && n_vars != 5) {
             throw std::runtime_error("Restart file " + filename + " has " + std::to_string(n_vars) +
-                                     " variables per cell (a " + std::to_string(n_vars - 2) +
-                                     "D run), but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) +
-                                     " (" + std::to_string(N_CONSERVATIVE) + " variables).");
+                                     " variables per cell; version 1 files hold 4 (2D) or 5 (3D).");
         }
-        data.names.assign(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+        h.names = {"RHO", "RHOU_X", "RHOU_Y"};
+        if (n_vars == 5) h.names.push_back("RHOU_Z");
+        h.names.push_back("RHOE");
     } else {
         constexpr uint32_t MAX_NAME = 256;
         auto read_name = [&]() {
@@ -1078,40 +1073,36 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
             in.read(name.data(), length);
             return name;
         };
-        for (uint64_t v = 0; v < n_vars && in.good(); v++) data.names.push_back(read_name());
-        if (version >= 3) {
+        for (uint64_t v = 0; v < n_vars && in.good(); v++) h.names.push_back(read_name());
+        if (h.version >= 3) {
             uint64_t n_attributes = 0;
             in.read(reinterpret_cast<char *>(&n_attributes), sizeof(n_attributes));
             for (uint64_t a = 0; a < n_attributes && in.good(); a++) {
                 std::string name = read_name();
                 double value = 0.0;
                 in.read(reinterpret_cast<char *>(&value), sizeof(value));
-                data.attributes.emplace_back(std::move(name), value);
+                h.attributes.emplace_back(std::move(name), value);
             }
         }
-        if (version >= 4) {
+        if (h.version >= 4) {
             uint32_t width = 0;
-            in.read(reinterpret_cast<char *>(&n_faces), sizeof(n_faces));
+            in.read(reinterpret_cast<char *>(&h.n_faces), sizeof(h.n_faces));
             in.read(reinterpret_cast<char *>(&width), sizeof(width));
             if (in.good() && width != RestartFaces::WIDTH) {
                 throw std::runtime_error("Restart file " + filename + " has " + std::to_string(width) +
                                          " values per face, not " + std::to_string(RestartFaces::WIDTH) + ".");
             }
         }
-        if (version >= 5) {
+        if (h.version >= 5) {
             uint32_t codec = 0;
             in.read(reinterpret_cast<char *>(&codec), sizeof(codec));
-            in.read(reinterpret_cast<char *>(&chunk_cells), sizeof(chunk_cells));
-            const bool uncompressed = version >= 6 && codec == 0 && chunk_cells == 0;
-            if (in.good() && !uncompressed && (codec != RESTART_CODEC_ZLIB || chunk_cells == 0)) {
+            in.read(reinterpret_cast<char *>(&h.chunk_cells), sizeof(h.chunk_cells));
+            const bool uncompressed = h.version >= 6 && codec == 0 && h.chunk_cells == 0;
+            if (in.good() && !uncompressed && (codec != RESTART_CODEC_ZLIB || h.chunk_cells == 0)) {
                 throw std::runtime_error("Restart file " + filename + " has an unknown compression.");
             }
-            if (chunk_cells > 0 && !compression::have_zlib()) {
-                throw std::runtime_error("Restart file " + filename +
-                                         " is compressed, which needs a build with zlib (Mallard_ENABLE_ZLIB=ON).");
-            }
         }
-        if (version >= 6) {
+        if (h.version >= 6) {
             uint64_t n_arrays = 0;
             in.read(reinterpret_cast<char *>(&n_arrays), sizeof(n_arrays));
             for (uint64_t a = 0; a < n_arrays && in.good(); a++) {
@@ -1123,9 +1114,59 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
                 }
                 std::vector<double> values(n);
                 in.read(reinterpret_cast<char *>(values.data()), static_cast<std::streamsize>(n * sizeof(double)));
-                data.arrays.emplace_back(std::move(name), std::move(values));
+                h.arrays.emplace_back(std::move(name), std::move(values));
             }
         }
+    }
+    if (!in.good()) {
+        throw std::runtime_error("Restart file " + filename + " is truncated.");
+    }
+    h.data_offset = static_cast<uint64_t>(in.tellg());
+    if (h.chunk_cells > 0) {
+        const uint64_t n_chunks = (h.n_cells + h.chunk_cells - 1) / h.chunk_cells;
+        h.chunk_at.resize(h.names.size() * n_chunks + 1);
+        in.read(reinterpret_cast<char *>(h.chunk_at.data()),
+                static_cast<std::streamsize>(h.chunk_at.size() * sizeof(uint64_t)));
+        if (!in.good() || !std::is_sorted(h.chunk_at.begin(), h.chunk_at.end())) {
+            throw std::runtime_error("Restart file " + filename + " has a corrupt chunk table.");
+        }
+    }
+    h.faces_offset = h.chunk_cells > 0 ? h.chunk_at.back() : h.data_offset + h.names.size() * h.n_cells * h.real_size;
+    h.provenance = read_provenance_trailer(in);
+    in.clear();
+    in.seekg(static_cast<std::streamoff>(h.data_offset));
+    return h;
+}
+
+RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells) {
+    std::ifstream in(filename, std::ios::binary);
+    if (!in.good()) {
+        throw cannot_read("the restart file", filename);
+    }
+    const RestartHeader h = read_restart_header(in, filename);
+    if (h.real_size != sizeof(rtype)) {
+        throw std::runtime_error("Restart file " + filename + " was written with a different floating-point precision.");
+    }
+    const uint64_t n_vars = h.names.size(), n_faces = h.n_faces, chunk_cells = h.chunk_cells;
+    if (h.version == 1 && n_vars != N_CONSERVATIVE) {
+        throw std::runtime_error("Restart file " + filename + " has " + std::to_string(n_vars) +
+                                 " variables per cell (a " + std::to_string(n_vars - 2) +
+                                 "D run), but Mallard was built with Mallard_DIM = " + std::to_string(N_DIM) +
+                                 " (" + std::to_string(N_CONSERVATIVE) + " variables).");
+    }
+    if (chunk_cells > 0 && !compression::have_zlib()) {
+        throw std::runtime_error("Restart file " + filename +
+                                 " is compressed, which needs a build with zlib (Mallard_ENABLE_ZLIB=ON).");
+    }
+    RestartData data;
+    data.step = h.step;
+    data.t = h.t;
+    data.n_cells = h.n_cells;
+    data.names = h.names;
+    data.attributes = h.attributes;
+    data.arrays = h.arrays;
+    data.provenance = h.provenance;
+    if (h.version > 1) {
         const bool has_z = std::find(data.names.begin(), data.names.end(), "RHOU_Z") != data.names.end();
         if (has_z != (N_DIM == 3)) {
             throw std::runtime_error("Restart file " + filename + " holds a " + std::string(has_z ? "3" : "2") +
@@ -1137,19 +1178,8 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
             }
         }
     }
-    if (!in.good()) {
-        throw std::runtime_error("Restart file " + filename + " is truncated.");
-    }
-    const std::streamoff header = in.tellg();
-    std::vector<uint64_t> chunk_at;  // version 5: file offset of each chunk, then of the faces
-    if (chunk_cells > 0) {
-        const uint64_t n_chunks = (data.n_cells + chunk_cells - 1) / chunk_cells;
-        chunk_at.resize(n_vars * n_chunks + 1);
-        in.read(reinterpret_cast<char *>(chunk_at.data()), static_cast<std::streamsize>(chunk_at.size() * sizeof(uint64_t)));
-        if (!in.good() || !std::is_sorted(chunk_at.begin(), chunk_at.end())) {
-            throw std::runtime_error("Restart file " + filename + " has a corrupt chunk table.");
-        }
-    }
+    const std::streamoff header = static_cast<std::streamoff>(h.data_offset);
+    const std::vector<uint64_t> & chunk_at = h.chunk_at;
     // Chunk c of variable v of a version 5 file, decompressed
     std::vector<char> compressed;
     auto read_chunk = [&](uint64_t v, uint64_t c, std::vector<rtype> & out) {
@@ -1209,8 +1239,7 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
         }
     }
     // Every rank reads all faces: they are few, and any cell may have one
-    in.seekg(chunk_cells > 0 ? static_cast<std::streamoff>(chunk_at.back())
-                             : header + static_cast<std::streamoff>(n_vars * data.n_cells * sizeof(rtype)));
+    in.seekg(static_cast<std::streamoff>(h.faces_offset));
     data.faces.keys.resize(n_faces);
     data.faces.values.resize(n_faces * RestartFaces::WIDTH);
     in.read(reinterpret_cast<char *>(data.faces.keys.data()), static_cast<std::streamsize>(n_faces * sizeof(uint64_t)));
@@ -1222,7 +1251,6 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     if (!in.good()) {
         throw std::runtime_error("Restart file " + filename + " is truncated.");
     }
-    data.provenance = read_provenance_trailer(in);
     return data;
 }
 

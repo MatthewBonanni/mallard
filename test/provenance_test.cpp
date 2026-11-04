@@ -19,7 +19,7 @@
 #include "compression.h"
 #include "comm.h"
 #include "data_writer.h"
-#include "json_reader.h"
+#include "json.h"
 #include "mesh_block.h"
 #include "provenance.h"
 #include "run_log.h"
@@ -32,7 +32,7 @@
 
 namespace {
 
-using json_reader::Value;
+using json::Value;
 
 std::string read_file(const std::string & path) {
     std::ifstream in(path, std::ios::binary);
@@ -134,7 +134,7 @@ TEST(ProvenanceTest, XmlCommentsHoldNoDoubleDashAndReadBack) {
     EXPECT_EQ(inner.find("--"), std::string::npos);
     EXPECT_EQ(provenance::parse_comment("<?xml?>\n" + comment + "\n<VTKFile>"), provenance::json());
     EXPECT_EQ(provenance::parse_comment("step,t\n" + provenance::csv_comment() + "\n1,0\n"), provenance::json());
-    EXPECT_EQ(json_reader::parse(provenance::json())["input"]["text"].string, "# x -- y ---\n");
+    EXPECT_EQ(json::parse(provenance::json())["input"]["text"].string, "# x -- y ---\n");
 }
 
 TEST(RunLogTest, RecordsFollowTheSchema) {
@@ -144,7 +144,7 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
     if (!comm::is_root()) return;
 
     std::vector<Value> records;
-    for (const auto & line : lines(dir + "/run.jsonl")) records.push_back(json_reader::parse(line));
+    for (const auto & line : lines(dir + "/run.jsonl")) records.push_back(json::parse(line));
     ASSERT_GE(records.size(), 4u);
 
     // The first record names the format and holds the provenance
@@ -234,7 +234,7 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     if (!comm::is_root()) return;
 
     // What the block says about this run
-    const Value p = json_reader::parse(expected);
+    const Value p = json::parse(expected);
     EXPECT_EQ(p["schema"].string, provenance::SCHEMA);
     EXPECT_EQ(p["version"].number, provenance::VERSION);
     EXPECT_EQ(p["mallard"]["version"].string, mallard_version());
@@ -269,7 +269,7 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
         EXPECT_EQ(rows[1].rfind("# units: ", 0), 0u) << csv;
         EXPECT_EQ(provenance::parse_comment(rows[2]), expected) << csv;
     }
-    EXPECT_EQ(json_reader::parse(lines(dir + "/run.jsonl").front())["provenance"].keys(), p.keys());
+    EXPECT_EQ(json::parse(lines(dir + "/run.jsonl").front())["provenance"].keys(), p.keys());
     EXPECT_NE(lines(dir + "/run.jsonl").front().find(expected), std::string::npos);
 #ifdef Mallard_HAS_HDF5
     for (const char * h5 : {"/h_000004.h5", "/h_mesh.h5"}) {
@@ -302,7 +302,7 @@ TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
     EXPECT_EQ(blocks, (std::vector<std::string>{first, second}));
     std::vector<std::string> starts;
     for (const auto & line : lines(dir + "/run.jsonl")) {
-        const Value r = json_reader::parse(line);
+        const Value r = json::parse(line);
         if (r["type"].string == "start") starts.push_back(r["provenance"]["input"]["file"].string);
     }
     EXPECT_EQ(starts, (std::vector<std::string>{dir + "/input_4.toml", dir + "/input_8.toml"}));
@@ -321,7 +321,7 @@ TEST(RunLogTest, ResumedRunsAppendAndMarkRewinds) {
     std::vector<Value> starts;
     std::vector<std::vector<double>> steps;
     for (const auto & line : lines(dir + "/run.jsonl")) {
-        const Value r = json_reader::parse(line);
+        const Value r = json::parse(line);
         if (r["type"].string == "start") {
             starts.push_back(r);
             steps.emplace_back();
@@ -354,7 +354,7 @@ TEST(ProvenanceTest, RecordsTheResolvedNumericsPreset) {
     input.replace(input.find("[numerics]\n"), 11, "[numerics]\npreset = \"robust\"\n");
     Solver solver;
     solver.init(parse_toml(input));
-    const Value p = json_reader::parse(provenance::json());
+    const Value p = json::parse(provenance::json());
     const auto & resolved = solver.get_numerics_preset();
     EXPECT_EQ(p["preset"]["name"].string, "robust");
     ASSERT_EQ(p["preset"]["settings"].array.size(), resolved.settings.size());
