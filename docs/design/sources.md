@@ -82,7 +82,13 @@ on, which rewrites a few patterns of division (`(a / b) / c → a / (b * c)`,
 `a / (b / c) → (a * c) / b`, ...); expressions of those forms now round as
 written. Of the 77 expressions in the examples and tutorials, only one would
 round differently (by up to 34 ulp, through `cos` of a rewritten argument),
-and it is a boundary value, compiled since 0.9. The tests check the engine
+and it is a boundary value, compiled since 0.9. Where the host compiler
+contracts multiply-adds (Apple silicon by default), exprtk's fused nodes such
+as `a * b + c` also rounded once; the engine never contracts. In a 2D test
+case with a sponge, `where` filters and a mass-flow profile free of such
+divisions, 20 steps of the
+solution are bitwise the same as before without contraction, and differ in
+the last bits (relative 1e-15) with it. The tests check the engine
 against hand-written references of each expression and the device against
 the host.
 
