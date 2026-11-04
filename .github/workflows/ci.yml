@@ -64,6 +64,8 @@ jobs:
         run: |
           python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q --break-system-packages pyyaml
           python3 tools/dev/check_workflow_triggers.py
+      - name: Check that the support matrix names every CI job
+        run: python3 tools/dev/check_support_matrix.py
       - name: Check the documented input defaults against the key catalog
         run: python3 tools/dev/input_catalog.py docs
       - name: Check that the TOML snippets of the docs parse
