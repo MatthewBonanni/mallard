@@ -386,6 +386,25 @@ INSTANTIATE_TEST_SUITE_P(Rotational, RotationalSector,
     ::testing::Values(SchemeParam{"MUSCL", "Euler"}, SchemeParam{"MUSCL", "NS"}, SchemeParam{"TENO3", "Euler"},
                       SchemeParam{"TENO5", "Euler"}, SchemeParam{"TENO5", "NS"}));
 
+TEST(RotationalPeriodicSetup, TENOStateDoesNotDependOnTheTroubledCellsOfARound) {
+    // Most cells of the swirl are troubled, so the two capacities put different
+    // cells in the first round. Fails where the smooth pass and the troubled
+    // central pass contract the turned entries' arithmetic into different FMAs
+    // (GPUs, -ffp-contract=fast) if a cell's coefficients depend on its round (#612)
+    auto state = [](const std::string & capacity) {
+        Annulus a;
+        a.n_theta = 8;
+        a.n_steps = 2;
+        a.recon = "type = \"TENO\"\norder = 5\ntroubled_capacity = " + capacity + "\n";
+        auto solver = start(a);
+        solver->run();
+        solver->copy_device_to_host();
+        const auto & U = solver->h_conservatives;
+        return std::vector<rtype>(U.data(), U.data() + U.span());
+    };
+    EXPECT_TRUE(state("0.5") == state("0.02"));
+}
+
 TEST(RotationalPeriodicSetup, SectorConservesMassAndEnergy) {
     // Slip walls and the seam: no mass or energy leaves the sector
     for (const std::string recon : {"type = \"MUSCL\"\n", "type = \"TENO\"\norder = 5\n"}) {
