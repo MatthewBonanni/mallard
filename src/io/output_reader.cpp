@@ -773,11 +773,10 @@ std::vector<std::string> datasets(hid_t group) {
         const ssize_t n = H5Lget_name_by_idx(group, ".", H5_INDEX_NAME, H5_ITER_INC, i, nullptr, 0, H5P_DEFAULT);
         std::string name(static_cast<size_t>(n), '\0');
         H5Lget_name_by_idx(group, ".", H5_INDEX_NAME, H5_ITER_INC, i, name.data(), name.size() + 1, H5P_DEFAULT);
-        H5O_info2_t object;
-        if (H5Oget_info_by_name3(group, name.c_str(), &object, H5O_INFO_BASIC, H5P_DEFAULT) >= 0 &&
-            object.type == H5O_TYPE_DATASET) {
-            out.push_back(name);
-        }
+        const hid_t object = H5Oopen(group, name.c_str(), H5P_DEFAULT);
+        if (object < 0) continue;
+        if (H5Iget_type(object) == H5I_DATASET) out.push_back(name);
+        H5Oclose(object);
     }
     return out;
 }

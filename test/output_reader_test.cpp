@@ -329,7 +329,9 @@ TEST(OutputReaderTest, MeshFilesAreReadWithThisBuildsDimension) {
     for (const auto & [zone, n] : file.mesh.boundary_zones) zoned += n;
     EXPECT_GT(zoned, 0u);
     EXPECT_FALSE(output::is_mesh_file(source_dir() + "/test/data/formats/v0.8.0/gas_000002.restart"));
-    if (have_hdf5()) EXPECT_TRUE(output::is_mesh_file(source_dir() + "/test/data/formats/v0.8.0/mesh.h5"));
+    if (have_hdf5()) {
+        EXPECT_TRUE(output::is_mesh_file(source_dir() + "/test/data/formats/v0.8.0/mesh.h5"));
+    }
 }
 
 TEST(OutputReaderTest, FilesItCannotReadAreNamedInTheError) {
