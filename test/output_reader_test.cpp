@@ -38,7 +38,7 @@ const std::string REGION = N_DIM == 2 ? "{type = \"rectangle\", center = [0.45, 
                                       : "{type = \"box\", center = [0.45, 0.45, 0.5], size = [0.5, 0.3, 0.6]}";
 
 /** @brief Four steps on a periodic box, every writer every two steps (each probe format every step). */
-std::string every_format(const std::string & dir) {
+std::string every_format(const std::string & dir, bool hdf5 = have_hdf5()) {
     std::ostringstream s;
     s << "[run]\nn_steps = 4\ndt = 2.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = 10\nNy = 10\nLx = 1.0\nLy = 1.0\n";
     if (N_DIM == 3) s << "Nz = 5\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
@@ -61,7 +61,7 @@ std::string every_format(const std::string & dir) {
         writer("zlib/flow", "format = \"vtu\"\ncompression = \"zlib\"\n" + fields);
     }
     std::vector<std::string> probe_formats = {"csv", "vtp"};
-    if (have_hdf5()) {
+    if (hdf5) {
         writer("flow", "format = \"vtkhdf\"\n" + fields);
         writer("flow", "format = \"xdmf\"\n" + fields);
         writer("series", "series = true\n" + fields);
@@ -199,6 +199,26 @@ TEST(OutputReaderTest, SeriesIndexesListEverySnapshotOfTheirFiles) {
             EXPECT_EQ(run.in_global_order(file, output::read(file, "RHO", i)), output::read(restart, "RHO", 0))
                 << name << " " << i;
         }
+    }
+}
+
+TEST(OutputReaderTest, PiecesOfARunOnSeveralRanksHoldEveryCellOnce) {
+    if (comm::size() == 1) GTEST_SKIP() << "a run on several ranks";
+    const std::string dir = (scratch_dir() / "output_reader_pieces").string();
+    Solver solver;
+    solver.init(parse_toml(every_format(dir, false)));
+    solver.run();
+    comm::barrier();
+    if (!comm::is_root()) return;
+    const output::Contents restart = output::open(dir + "/restart_000004.restart");
+    std::vector<double> expected = output::read(restart, "RHO", 0);
+    std::sort(expected.begin(), expected.end());
+    for (const std::string & name : {dir + "/flow_000004.pvtu", dir + "/flow.pvd"}) {
+        const output::Contents file = output::open(name);
+        EXPECT_EQ(file.mesh.n_cells, expected.size()) << name;
+        std::vector<double> rho = output::read(file, "RHO", file.snapshots.size() - 1);
+        std::sort(rho.begin(), rho.end());
+        EXPECT_EQ(rho, expected) << name;
     }
 }
 
