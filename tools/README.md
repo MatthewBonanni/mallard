@@ -261,7 +261,7 @@ The similarity solution behind a strong spherical shock, from its ODEs: the refe
 
 ## Post-processing
 
-Mallard writes VTKHDF files that ParaView opens (the `.vtkhdf.series` file is the series), VTU files in builds without HDF5 (the `.pvd` file is the series), or, before 0.10, HDF5 files with XDMF indexes; these scripts read each of them.
+Mallard writes VTKHDF files that ParaView opens (the `.vtkhdf.series` file is the series), VTU files in builds without HDF5 (the `.pvd` file is the series), or HDF5 files with XDMF indexes (`format = "xdmf"`); these scripts read each of them.
 
 ### `mallard`: readers
 
@@ -276,7 +276,7 @@ rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] i
 pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtkhdf")  # 2D or 3D cells
 ```
 
-`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads the `format = "hdf5"` output of releases before 0.10: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
+`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "xdmf"` output (`"hdf5"` before 0.10): the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
 
 ### `plot_vtu.py`: one field of a snapshot
 

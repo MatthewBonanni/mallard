@@ -231,8 +231,8 @@ TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
 }
 
 TEST(InputUpgradeTest, KeptOptionsWorkAsBeforeButAreRewritten) {
-    // format = "hdf5" wrote XDMF and HDF5 while deprecated (0.9); the
-    // upgraded file asks for VTKHDF
+    // format = "hdf5" wrote XDMF and HDF5 while deprecated (0.9), as "xdmf"
+    // does now; the upgraded file asks for VTKHDF, the default
     const std::string text = "[[write_data]]\nprefix = 'f'\nformat = \"hdf5\"  # ParaView\n";
     Input input = parse_input_string(text);
     const std::vector<Finding> findings = input_upgrade::apply(input, "0.9.0");
@@ -333,7 +333,7 @@ TEST(InputUpgradeTest, NamesDeprecatedIn090AreRemoved) {
               "use \"outlet_pressure\" with average = true"},
              {"[[boundaries]]\nname = \"a\"\ntype = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n",
               "boundaries[0].L was removed in 0.10.0: use boundaries[0].nscbc.L"},
-             {"[[write_data]]\nprefix = \"f\"\nformat = \"hdf5\"\n", "use \"vtkhdf\""},
+             {"[[write_data]]\nprefix = \"f\"\nformat = \"hdf5\"\n", "use \"vtkhdf\" (the default, for ParaView 5.12 and later; or \"xdmf\""},
              {"[[write_data]]\nprefix = \"f\"\ngeometry = \"all\"\n", "use write_data[0].region"},
              {"[[mesh.curved]]\nzone = \"w\"\nshape = \"circle\"\n", "use mesh.curved[0].type"},
              {"[mesh]\ntype = \"cartesian\"\nperiodic = [\"x\"]\n",

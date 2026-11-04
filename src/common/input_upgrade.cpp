@@ -87,7 +87,8 @@ const Rules & rules() {
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
             {"write_data[].format", "hdf5", "vtkhdf", "0.9.0", "0.10.0",
-             "VTKHDF replaces the XDMF and HDF5 files; ParaView 5.12 and later read it", true},
+             "the default, for ParaView 5.12 and later; or \"xdmf\", the XDMF indexes over HDF5 files, for VisIt, "
+             "meshio and older ParaView", true},
             {"boundaries[].type", "upt", "inlet_state", "0.9.0", "0.10.0", TYPES},
             {"boundaries[].type", "p_out", "outlet_pressure", "0.9.0", "0.10.0", TYPES},
             {"boundaries[].type", "p_out_average", "outlet_pressure", "0.9.0", "0.10.0", TYPES, false, 0,

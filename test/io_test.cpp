@@ -128,6 +128,44 @@ TEST(IOTest, ZeroCheckIntervalIsRejected) {
     EXPECT_THROW(Solver().init(parse_toml(input + "[output]\ncheck_interval = 0\n")), std::runtime_error);
 }
 
+TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
+    // A run restarted at t = 0.1 rewrites the later snapshots: the XDMF time
+    // series lists each time once, and numbering continues from the restart
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1) GTEST_SKIP() << "a writer of one rank's whole mesh";
+    const std::string dir = (scratch_dir() / "mallard_h5_resume").string();
+    auto mesh = make_mesh("cartesian_tri", 3, 2);
+    Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
+    std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
+    const std::string input = "prefix = \"" + dir + "/f\"\nformat = \"xdmf\"\ntime_interval = 0.1\n"
+                              "variables = [\"RHO\"]\n";
+    {
+        DataWriter first;
+        first.init(parse_toml(input), data, mesh);
+        for (uint64_t step = 0; step < 4; step++) first.write(10 * step, static_cast<rtype>(0.1 * static_cast<double>(step)));
+    }
+    DataWriter second;
+    second.init(parse_toml(input), data, mesh);
+    second.resume(10, 0.1_r);
+    second.write(25, 0.2_r);
+
+    std::ifstream in(dir + "/f.xmf");
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    const std::string text = buffer.str();
+    std::vector<std::string> grids;
+    for (size_t at = 0; (at = text.find("<Grid Name=\"f_", at)) != std::string::npos; at++) {
+        grids.push_back(text.substr(at + 12, 8));
+    }
+    EXPECT_EQ(grids, (std::vector<std::string>{"f_000000", "f_000001", "f_000002"}));
+    std::vector<double> times;
+    for (size_t at = 0; (at = text.find("<Time Value=\"", at)) != std::string::npos; at++) {
+        times.push_back(std::stod(text.substr(at + 13)));
+    }
+    EXPECT_EQ(times, (std::vector<double>{0.0, double(rtype(0.1)), double(rtype(0.2))}));
+    EXPECT_TRUE(std::filesystem::exists(dir + "/f_mesh.h5"));
+}
+
 namespace {
 
 std::string file_contents(const std::string & filename) {
@@ -175,7 +213,9 @@ std::string output_case(const std::string & dir, const std::string & output_keys
       << "region = {type = \"disk\", center = [0.4, 0.5], radius = 0.3}\nvariables = [\"P\"]\n" << snapshot_keys
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 6\n" << restart_keys;
     if (have_hdf5()) {
-        s << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/flow\"\nformat = \"vtkhdf\"\ninterval = 4\n"
+        s << "[[write_data]]\nprefix = \"" << dir << "/h5/flow\"\nformat = \"xdmf\"\ninterval = 4\n"
+          << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
+          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/flow\"\nformat = \"vtkhdf\"\ninterval = 4\n"
           << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
           << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/series\"\nseries = true\ninterval = 4\n"
           << "variables = [\"RHO\", \"U\"]\n" << snapshot_keys
@@ -310,11 +350,15 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
         run_case(output_case(dir + "/sync", "async = false\n", snapshot_keys, restart_keys));
         run_case(output_case(dir + "/async", "io_threads = 3\n", snapshot_keys, restart_keys));
         const auto sync = files_under(dir + "/sync"), async = files_under(dir + "/async");
-        EXPECT_EQ(sync.size(), have_hdf5() ? 24u : 13u) << snapshot_keys;
+        EXPECT_EQ(sync.size(), have_hdf5() ? 34u : 13u) << snapshot_keys;
         ASSERT_EQ(async.size(), sync.size()) << snapshot_keys;
         for (const auto & [name, bytes] : sync) {
             ASSERT_TRUE(async.count(name)) << name;
 #ifdef Mallard_HAS_HDF5
+            if (name.ends_with(".h5")) {
+                EXPECT_EQ(h5_datasets(dir + "/async/" + name), h5_datasets(dir + "/sync/" + name)) << name;
+                continue;
+            }
             if (name.ends_with(".vtkhdf")) {
                 EXPECT_EQ(h5_all_datasets(dir + "/async/" + name), h5_all_datasets(dir + "/sync/" + name)) << name;
                 continue;
@@ -421,6 +465,16 @@ TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
     for (size_t a = 4; a < raw.size(); a++) EXPECT_EQ(lossy[a], raw[a]) << "mesh array " << a;
 
 #ifdef Mallard_HAS_HDF5
+    const auto h5_raw = h5_datasets(dir + "/raw/h5/flow_000008.h5");
+    EXPECT_EQ(h5_datasets(dir + "/zlib/h5/flow_000008.h5"), h5_raw);
+    EXPECT_EQ(h5_datasets(dir + "/lossy/h5/flow_mesh.h5"), h5_datasets(dir + "/raw/h5/flow_mesh.h5"));
+    const auto h5_lossy = h5_datasets(dir + "/lossy/h5/flow_000008.h5");
+    ASSERT_EQ(h5_lossy.size(), h5_raw.size());
+    for (const auto & [name, bytes] : h5_raw) {
+        expect_within_relative_error(as_reals(std::string(h5_lossy.at(name).begin(), h5_lossy.at(name).end())),
+                                     as_reals(std::string(bytes.begin(), bytes.end())), 1e-3, name);
+    }
+
     // VTKHDF: deflated datasets with the same values; rounding changes only the cell values
     for (const char * file : {"/vtkhdf/flow_000008.vtkhdf", "/vtkhdf/series.vtkhdf", "/vtkhdf/near_000008.vtkhdf"}) {
         const auto raw_file = h5_all_datasets(dir + "/raw" + file);
@@ -698,6 +752,7 @@ TEST(IOTest, ResumedRunsContinueSnapshotNumberingAndSeries) {
     std::vector<Output> outputs = {{"vtu/f", "vtu", ".vtu", ".pvd"}, {"region/f", "vtu", ".vtu", ".pvd"}};
     if (have_hdf5()) {
         outputs.push_back({"vtkhdf/f", "vtkhdf", ".vtkhdf", ".vtkhdf.series"});
+        outputs.push_back({"xdmf/f", "xdmf", ".h5", ".xmf"});
     }
     auto input = [&](const std::string & t_stop, const std::string & restart) {
         std::ostringstream s;

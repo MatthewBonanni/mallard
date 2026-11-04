@@ -259,11 +259,6 @@ Handle open_or_create_group(hid_t parent, const char * name) {
 
 } // namespace
 
-bool have_hdf5_deflate() {
-    const std::lock_guard<std::mutex> lock(h5::mutex());
-    return H5Zfilter_avail(H5Z_FILTER_DEFLATE) > 0 && H5Zfilter_avail(H5Z_FILTER_SHUFFLE) > 0;
-}
-
 void DataWriter::build_vtkhdf_cells() {
     const bool distributed = mesh->n_global_cells > 0;
     const uint32_t n_out = subset ? static_cast<uint32_t>(subset_cells.size()) : mesh->n_owned();
@@ -469,8 +464,6 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
 }
 
 #else
-
-bool have_hdf5_deflate() { return false; }
 
 void DataWriter::write_vtkhdf(const std::string &, rtype, const Values &) {
     throw std::logic_error("DataWriter: VTKHDF output without HDF5");

@@ -289,6 +289,17 @@ TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
     comm::barrier();
 }
 
+TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
+    // Tetrahedra, pyramids, prisms and hexahedra at their global ids
+    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
+    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
+#ifdef Mallard_HAS_HDF5
+    const std::string dir = (scratch_dir() / "mallard_mpi3d_hdf5").string();
+    expect_hdf5_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
+                                      "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
+#endif
+}
+
 TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     // Tetrahedra, pyramids, prisms and hexahedra, and the quadratic cells of
     // a curved shell, at their global places

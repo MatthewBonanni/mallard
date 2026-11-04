@@ -5650,7 +5650,8 @@
   "values": [
    "restart",
    "vtkhdf",
-   "vtu"
+   "vtu",
+   "xdmf"
   ]
  },
  "write_data.interval": {

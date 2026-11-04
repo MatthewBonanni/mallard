@@ -819,7 +819,7 @@ TEST(ProbesTest, Hdf5ProbesAndAsynchronousHdf5OutputShareTheLibrary) {
                               "variables = [\"RHO\", \"U\", \"P\"]\ntype = \"circle\"\ncenter = " +
                               numbers3("0.5", "0.5", "0.5") + "\nradius = 0.3\nn_points = 64\n" +
                               (N_DIM == 3 ? "normal = [0.0, 0.0, 1.0]\n" : "") +
-                              "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"vtkhdf\"\ninterval = 1\n"
+                              "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"xdmf\"\ninterval = 1\n"
                               "variables = [\"RHO\", \"P\"]\n";
     std::string input = box_case(12, SINE_RHO, "type = \"MUSCL\"\n", extra,
                                  "n_steps = " + std::to_string(n_steps) + "\ncfl = 0.3\n");
