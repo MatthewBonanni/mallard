@@ -346,8 +346,8 @@ free. Small meshes are overestimated, on the safe side:
 - The memory outside Kokkos, measured after the steps: 1.48-1.54 GB in 2D and 2.05-2.13 GB in 3D, of which CUDA's
   context is 0.45-0.50 GB at the first allocation and the rest the local memory CUDA reserves for kernels with
   large stacks at their first launch. The setup's peak comes before those launches (TENO6 at 32^3), but sizing
-  counts all of it at every peak. A check on a CPU counts 1.6 GB (2D) or 2.2 GB (3D); a check on the GPU measures
-  it.
+  counts all of it at every peak. A check on a CPU counts 1.6 GB (2D) or 2.2 GB (3D); a check on the GPU with
+  `--steps` measures it.
 - The chemistry's work memory has a row per cell in flight, `max(4096, 4 x concurrency)` rows of 1 GiB at most: 8 MB
   on 2 CPU threads, 423 MB for the 221k cells of `flame_3d` and 1.07 GB from about 550k cells on an A100. A check
   on a CPU counts the 1 GiB bound for a GPU.
