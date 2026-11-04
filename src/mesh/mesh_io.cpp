@@ -73,13 +73,16 @@ void Mesh::init_from_connectivity(const std::vector<std::array<rtype, N_DIM>> & 
     n_cells = static_cast<uint32_t>(input_cells.size());
     // A mesh without global ids is whole: its input order becomes the global order
     std::vector<std::vector<uint32_t>> ordered_cells;
-    if (h_global_cell_id.empty() && cell_order != CellOrder::INPUT && n_cells > 1) {
-        const std::vector<uint32_t> order = locality_order(cell_order, nodes, input_cells, {n_cells});
-        ordered_cells.resize(n_cells);
-        h_global_cell_id.resize(n_cells);
-        for (uint32_t c = 0; c < n_cells; c++) {
-            ordered_cells[c] = input_cells[order[c]];
-            h_global_cell_id[c] = order[c];
+    if (h_global_cell_id.empty() && cell_order.order != CellOrder::INPUT && n_cells > 1) {
+        const LocalityOrder numbered = locality_order(cell_order, nodes, input_cells, {n_cells});
+        cell_order_choice = numbered.choice;
+        if (numbered.choice.order == CellOrder::HILBERT) {
+            ordered_cells.resize(n_cells);
+            h_global_cell_id.resize(n_cells);
+            for (uint32_t c = 0; c < n_cells; c++) {
+                ordered_cells[c] = input_cells[numbered.order[c]];
+                h_global_cell_id[c] = numbered.order[c];
+            }
         }
     }
     const std::vector<std::vector<uint32_t>> & cells = ordered_cells.empty() ? input_cells : ordered_cells;

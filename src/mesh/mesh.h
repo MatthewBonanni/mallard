@@ -497,7 +497,9 @@ class Mesh {
         uint32_t n_complete() const { return n_complete_cells ? n_complete_cells : n_cells; }
         // Numbering of the cells of a whole mesh (init_from_connectivity); distributed meshes are numbered by
         // DistributedMesh
-        CellOrder cell_order = CellOrder::INPUT;
+        CellNumbering cell_order;
+        // The order the cells were numbered in
+        CellOrderChoice cell_order_choice;
         // Global id of every local cell (empty if the local order is the global one). Distributed runs: also of
         // every local node, and the global counts (0 otherwise)
         std::vector<uint64_t> h_global_cell_id;

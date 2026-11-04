@@ -381,7 +381,7 @@ void Solver::init_mesh() {
                               : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
                                                              : partition_hilbert(*setup, comm::size()));
         }
-        mesh = setup->build_local_mesh(halo_layers, distribution, cell_order_of_input(input));
+        mesh = setup->build_local_mesh(halo_layers, distribution, cell_numbering_of_input(input));
         if (exchange == "nccl" && !comm::nccl_available()) {
             throw InputError({.key = "parallel.halo_exchange",
                               .line = line_of(input.at("parallel"), "halo_exchange"),
@@ -433,6 +433,25 @@ void Solver::init_mesh() {
                                                   logging::count(min_owned).c_str(),
                                                   logging::count(max_owned).c_str(), static_cast<double>(max_owned) / mean,
                                                   logging::count(max_halo).c_str()));
+    }
+    {
+        const CellOrderChoice & choice = mesh->cell_order_choice;
+        const bool hilbert = choice.order == CellOrder::HILBERT;
+        std::string text = hilbert ? "Hilbert curve" : "input order";
+        if (is_distributed()) {
+            const int n_hilbert = comm::allreduce(int(hilbert), comm::Op::SUM);
+            if (n_hilbert > 0 && n_hilbert < comm::size()) {
+                text = logging::format("Hilbert curve on %d of %d ranks, input order on the others", n_hilbert, comm::size());
+            } else {
+                text = n_hilbert > 0 ? "Hilbert curve" : "input order";
+            }
+        } else if (choice.input_lines > 0.0) {
+            text += logging::format(" (auto: %.3g cache lines per cell, %.3g %s)",
+                                    hilbert ? choice.hilbert_lines : choice.input_lines,
+                                    hilbert ? choice.input_lines : choice.hilbert_lines,
+                                    hilbert ? "in the input order" : "along the Hilbert curve");
+        }
+        mesh_summary.emplace_back("Cell order", text);
     }
     if (mesh->curved_geometry) {
         // Curved boundary faces of owned cells, and curved faces in all

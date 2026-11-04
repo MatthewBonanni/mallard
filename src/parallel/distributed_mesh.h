@@ -90,7 +90,7 @@ class DistributedMesh {
          *        exchange plan (collective; after distribute()).
          */
         std::shared_ptr<Mesh> build_local_mesh(int halo_layers, Distribution & dist,
-                                               CellOrder cell_order = CellOrder::INPUT);
+                                               const CellNumbering & cell_order = {});
 
     private:
         /** @brief The cells this rank holds: owned cells, then halo layers. */

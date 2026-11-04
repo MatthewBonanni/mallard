@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <random>
 #include <set>
 #include <unordered_map>
 #include <string>
@@ -256,14 +257,60 @@ TEST(DistributedMeshTest, LocalMeshesMatchTheSetupFromTheGlobalMesh) {
     }
 }
 
-/** @brief cell_order = "auto" numbers mesh files along the curve and keeps a generated mesh's order. */
-TEST(DistributedMeshTest, AutoCellOrderFollowsWhereTheMeshCameFrom) {
-    EXPECT_EQ(cell_order_of_input(parse_toml("[mesh]\nfilename = \"m.msh\"\n")), CellOrder::HILBERT);
-    EXPECT_EQ(cell_order_of_input(parse_toml("[mesh]\ntype = \"cartesian\"\n")), CellOrder::INPUT);
-    EXPECT_EQ(cell_order_of_input(parse_toml("[mesh]\ntype = \"annulus\"\ncell_order = \"hilbert\"\n")),
-              CellOrder::HILBERT);
-    EXPECT_EQ(cell_order_of_input(parse_toml("[mesh]\ntype = \"file\"\ncell_order = \"input\"\n")),
-              CellOrder::INPUT);
+/** @brief Auto's footprint is the reconstruction's: one vertex layer, (order - 1) / 2 for TENO. */
+TEST(DistributedMeshTest, AutoCellOrderReadsTheReconstructionsLayers) {
+    const auto numbering = [](const std::string & numerics) {
+        return cell_numbering_of_input(parse_toml("[mesh]\ntype = \"cartesian\"\n" + numerics));
+    };
+    EXPECT_EQ(numbering("").order, CellOrder::AUTO);
+    EXPECT_EQ(numbering("").layers, 1u);
+    EXPECT_EQ(numbering("[numerics.face_reconstruction]\ntype = \"MUSCL\"\n").layers, 1u);
+    EXPECT_EQ(numbering("[numerics.face_reconstruction]\ntype = \"TENO\"\n").layers, 2u);
+    EXPECT_EQ(numbering("[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 7\n").layers, 3u);
+}
+
+/** @brief Auto renumbers a shuffled box along the curve and keeps one already numbered along it. */
+TEST(DistributedMeshTest, AutoCellOrderRenumbersOnlyWhenItSavesCacheLines) {
+    // A box of m^N_DIM cells, numbered x first
+    const uint32_t m = N_DIM == 2 ? 64 : 16, k = N_DIM == 2 ? 1 : m + 1;
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    for (uint32_t z = 0; z < k; z++) {
+        for (uint32_t y = 0; y <= m; y++) {
+            for (uint32_t x = 0; x <= m; x++) {
+                std::array<rtype, N_DIM> p{};
+                p[0] = rtype(x);
+                p[1] = rtype(y);
+                if constexpr (N_DIM == 3) p[2] = rtype(z);
+                nodes.push_back(p);
+            }
+        }
+    }
+    const auto node = [&](uint32_t x, uint32_t y, uint32_t z) { return (z * (m + 1) + y) * (m + 1) + x; };
+    std::vector<std::vector<uint32_t>> cells;
+    for (uint32_t z = 0; z < std::max(1u, k - 1); z++) {
+        for (uint32_t y = 0; y < m; y++) {
+            for (uint32_t x = 0; x < m; x++) {
+                std::vector<uint32_t> c = {node(x, y, z), node(x + 1, y, z), node(x + 1, y + 1, z), node(x, y + 1, z)};
+                if constexpr (N_DIM == 3) {
+                    for (uint32_t i = 0; i < 4; i++) c.push_back(c[i] + (m + 1) * (m + 1));
+                }
+                cells.push_back(c);
+            }
+        }
+    }
+    std::mt19937 rng(7);
+    std::shuffle(cells.begin(), cells.end(), rng);
+    const uint32_t n = static_cast<uint32_t>(cells.size());
+    const LocalityOrder shuffled = locality_order({CellOrder::AUTO, 1}, nodes, cells, {n});
+    EXPECT_EQ(shuffled.choice.order, CellOrder::HILBERT);
+    EXPECT_LT(shuffled.choice.hilbert_lines, 0.5 * shuffled.choice.input_lines);
+    EXPECT_EQ(shuffled.order, locality_order({CellOrder::HILBERT}, nodes, cells, {n}).order);
+
+    std::vector<std::vector<uint32_t>> along(n);
+    for (uint32_t c = 0; c < n; c++) along[c] = cells[shuffled.order[c]];
+    const LocalityOrder kept = locality_order({CellOrder::AUTO, 1}, nodes, along, {n});
+    EXPECT_EQ(kept.choice.order, CellOrder::INPUT);
+    for (uint32_t c = 0; c < n; c++) ASSERT_EQ(kept.order[c], c);
 }
 
 /**
@@ -278,7 +325,7 @@ TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
         DistributedMesh distributed(read_mesh_block(parse_toml("[mesh]\n" + mesh_input)));
         distributed.distribute(partition_hilbert(distributed, comm::size()));
         Distribution ref_dist;
-        const auto ref = distributed.build_local_mesh(3, ref_dist, CellOrder::INPUT);
+        const auto ref = distributed.build_local_mesh(3, ref_dist, {CellOrder::INPUT});
         std::unordered_map<uint64_t, uint32_t> ref_cell;
         for (uint32_t c = 0; c < ref->n_cells; c++) ref_cell[ref->h_global_cell(c)] = c;
         // A face by the global ids of its cells (-1 outside) and its node coordinates
@@ -300,7 +347,7 @@ TEST(DistributedMeshTest, CellOrdersPermuteEachLayerAndKeepTheMeshByGlobalId) {
 
         {
             Distribution dist;
-            const auto mesh = distributed.build_local_mesh(3, dist, CellOrder::HILBERT);
+            const auto mesh = distributed.build_local_mesh(3, dist, {CellOrder::HILBERT});
             ASSERT_EQ(mesh->n_cells, ref->n_cells);
             EXPECT_EQ(mesh->n_owned(), ref->n_owned());
             EXPECT_EQ(mesh->n_reconstructed(), ref->n_reconstructed());

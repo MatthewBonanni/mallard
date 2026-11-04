@@ -46,7 +46,7 @@ void Mesh::init(const Input & input) {
 
     const std::vector<PeriodicPair> periodic = periodic_pairs(input);
     const MeshTransform transform = mesh_transform(input);
-    cell_order = cell_order_of_input(input);
+    cell_order = cell_numbering_of_input(input);
     h_global_cell_id.clear();
     if (get_type() == MeshType::FROM_FILE) {
         this->init_file(mesh_filename(input), periodic, transform);

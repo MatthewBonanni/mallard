@@ -87,7 +87,7 @@ At least one stop condition is required.
 | `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), ASCII Gmsh mesh (format 2.2 or 4.1), CGNS file (`.cgns`), ANSYS Fluent mesh or case file (`.msh`, `.cas`; ASCII or binary), or OpenFOAM polyMesh (a directory: the case, its `constant/polyMesh`, or anything between), of triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D); see mesh files below |
 | `Nx`, `Ny` | Number of quads in x and y (default 100) |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` (default 1) |
-| `cell_order` | How each rank numbers its cells in memory: `auto` (default), which is `hilbert` for a mesh file and `input` for a generated mesh, already numbered x first; `hilbert` (along a Hilbert curve, owned cells and each halo layer separately) or `input` (the mesh's order); see [cell numbering](guide/performance.md#cell-numbering). Results, restart and output files do not depend on it |
+| `cell_order` | How each rank numbers its cells in memory: `auto` (default), which counts the cache lines that blocks of cells read, over the vertex layers the reconstruction reads around each cell (one; TENO of order p: (p - 1) / 2), in both orders and takes `hilbert` when it needs a tenth fewer, else `input`; `hilbert` (along a Hilbert curve, owned cells and each halo layer separately) or `input` (the mesh's order); see [cell numbering](guide/performance.md#cell-numbering). Results, restart and output files do not depend on it |
 
 Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
 

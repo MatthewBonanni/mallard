@@ -732,7 +732,7 @@ void DistributedMesh::grow_layer() {
     layers = layer;
 }
 
-std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distribution & dist, CellOrder cell_order) {
+std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distribution & dist, const CellNumbering & cell_order) {
     while (layers < halo_layers) grow_layer();
     const uint32_t n_local = static_cast<uint32_t>(std::count_if(cells.layer.begin(), cells.layer.end(),
                                            [&](uint8_t l) { return l <= halo_layers; }));
@@ -787,7 +787,8 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     for (uint32_t i = 0; i < n_local; i++) {
         if (i + 1 == n_local || cells.layer[i + 1] != cells.layer[i]) group_ends.push_back(i + 1);
     }
-    const std::vector<uint32_t> order = locality_order(cell_order, nodes, local_cells, group_ends);
+    const LocalityOrder numbered = locality_order(cell_order, nodes, local_cells, group_ends);
+    const std::vector<uint32_t> & order = numbered.order;
     std::vector<std::vector<uint32_t>> ordered_cells(n_local);
     std::vector<int> owners(n_local);
     dist = Distribution();
@@ -805,6 +806,7 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
 
     auto mesh = std::make_shared<Mesh>();
     // Global ids first: they order the faces and neighbor lists like the serial mesh's
+    mesh->cell_order_choice = numbered.choice;
     mesh->h_global_cell_id = dist.global_cell;
     mesh->n_global_cells = n_global_cells();
     mesh->h_global_node_id = std::move(node_ids);
