@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -59,5 +60,22 @@ struct QualitySummary {
 /** @brief Over all ranks: largest, mean, cells over the limit and the n_worst worst cells of each metric. */
 std::array<QualitySummary, MeshQuality::N_METRICS> summarize(const Mesh & mesh, const MeshQuality & quality,
                                                               size_t n_worst);
+
+/** @brief A point as the quality report prints it: "(0.5, 1.25)". */
+std::string quality_point(const std::array<double, N_DIM> & x);
+
+/**
+ * @brief The quality report of mallard check and mallard info: per metric its
+ *        maximum, mean and cells above the limit, and the worst cells where it
+ *        is notable; key-value lines of the current section.
+ */
+void print_quality(const std::array<QualitySummary, MeshQuality::N_METRICS> & summary);
+
+/**
+ * @brief Writes the quality fields as a snapshot PREFIX_000000 in the default
+ *        format (collective).
+ * @return The file written.
+ */
+std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & quality, const std::string & prefix);
 
 #endif // MESH_QUALITY_H

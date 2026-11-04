@@ -86,6 +86,7 @@ add_library(MallardCore STATIC
     io/compression.cpp
     io/field_units.cpp
     io/file_format.cpp
+    io/output_reader.cpp
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     io/data_writer_vtkhdf.cpp
@@ -202,7 +203,7 @@ if(Mallard_ENABLE_CGNS)
 endif()
 
 # The commands of the mallard executable (cli.h), which the test suite also runs
-add_library(MallardCommands STATIC cli.cpp commands.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp)
+add_library(MallardCommands STATIC cli.cpp commands.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp)
 target_link_libraries(MallardCommands PUBLIC MallardCore)
 mallard_target_warnings(MallardCommands)
 

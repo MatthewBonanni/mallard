@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "data_writer.h"
+#include "mesh_block.h"
 
 namespace output {
 
@@ -58,6 +59,7 @@ struct Snapshot {
 struct MeshSummary {
     uint64_t n_cells = 0;
     uint64_t n_points = 0;
+    uint64_t n_faces = 0;                                        ///< mesh files, once built as a Mesh
     uint64_t n_boundary_faces = 0;                               ///< mesh files
     std::vector<std::pair<std::string, uint64_t>> cell_types;    ///< "triangle", "hexahedron", ...: count
     bool has_bounds = false;
@@ -97,11 +99,11 @@ struct Contents {
 };
 
 /**
- * @brief Whether a path is a mesh file this build reads by its name: .msh,
- *        .cas, .cgns, an OpenFOAM case, or .h5/.hdf5 (also HDF5 output, which
- *        open() tells apart).
+ * @brief Whether a path is a mesh file a run reads (.msh, .cas, .cgns, an
+ *        OpenFOAM case, a Mallard HDF5 mesh), not output: read with this
+ *        build's dimension. HDF5 files are told apart by their format attribute.
  */
-bool is_mesh_path(const std::string & path);
+bool is_mesh_file(const std::string & path);
 
 /**
  * @brief Reads what a file holds, not its field values: snapshots
@@ -113,6 +115,15 @@ bool is_mesh_path(const std::string & path);
  *         other dimension
  */
 Contents open(const std::string & path);
+
+/**
+ * @brief The whole mesh of a mesh file, read by this rank alone: what open()
+ *        reads a mesh file with, for callers that also build a Mesh from it.
+ */
+MeshBlock read_mesh(const std::string & path);
+
+/** @brief The contents of a mesh file, from its block (read_mesh). */
+Contents mesh_contents(const std::string & path, const MeshBlock & block);
 
 /**
  * @brief Values of a field at a snapshot, as stored (the cells' or points'
