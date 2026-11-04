@@ -38,7 +38,7 @@
 #include "field_units.h"
 #include "log.h"
 #include "mesh_block.h"
-#include "region.h"
+#include "region_input.h"
 #include "partition.h"
 #include "provenance.h"
 #include "run_log.h"
@@ -754,7 +754,7 @@ void Solver::init_boundaries() {
             const auto & u = bound.at("u").as_array();
             auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
                 dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables()));
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(), expression_unit_hint));
             };
             add_state(bound.at("rho"), name + ".rho", dim::density);
             FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);

@@ -56,7 +56,7 @@
 #include "numerics_preset.h"
 #include "run_status.h"
 #include "input_upgrade.h"
-#include "region.h"
+#include "region_input.h"
 
 struct ForceMonitor {
     std::string zone;

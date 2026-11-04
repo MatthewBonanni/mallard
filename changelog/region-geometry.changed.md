@@ -1,0 +1,1 @@
+- In the code, region geometry (`src/common/geometry.h`) no longer depends on kexpr or on inputs: implicit shapes come in as a callable, regions are built from plain `region::Definition`s that `region_input.h` parses, and kexpr takes the unit hint for unknown symbols as an argument instead of reading `units.h`. Results are unchanged.
