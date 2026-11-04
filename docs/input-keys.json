@@ -2481,6 +2481,19 @@
   "type": "number",
   "unit": "deg"
  },
+ "mesh.cell_order": {
+  "default": "\"hilbert\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "hilbert",
+   "input"
+  ]
+ },
  "mesh.curved": {
   "dims": [
    2,
