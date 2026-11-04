@@ -1,7 +1,7 @@
 /**
- * @file compiled_expression.cpp
+ * @file kexpr.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Parser of compiled expressions: exprtk's grammar and precedences
+ * @brief Parser of kexpr expressions: exprtk's grammar and precedences
  *        (precedence climbing) and its statements, constants folded, emitted
  *        as a stack program with jumps. The grammar, operator semantics and
  *        numerics (literal conversion, integer powers) follow exprtk
@@ -13,7 +13,7 @@
  *
  */
 
-#include "compiled_expression.h"
+#include "kexpr.h"
 
 #include <algorithm>
 #include <cctype>
@@ -27,7 +27,7 @@
 
 #include "units.h"
 
-namespace expr {
+namespace kexpr {
 
 namespace {
 
@@ -997,4 +997,4 @@ double Program::operator()(const double * vars) const {
     return v;
 }
 
-} // namespace expr
+} // namespace kexpr

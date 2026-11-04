@@ -1,5 +1,5 @@
 /**
- * @file compiled_expression_test.cpp
+ * @file kexpr_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Compiled expressions against hand-written references, and device
  *        against host.
@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "compiled_expression.h"
+#include "kexpr.h"
 #include "expression.h"
 
 namespace {
@@ -290,7 +290,7 @@ bool same(const double a, const double b) {
 void expect_matches_references(const std::vector<Case> & cases) {
     const auto points = sample_points();
     for (const Case & c : cases) {
-        const expr::Program program("test", c.text, VARIABLES);
+        const kexpr::Program program("test", c.text, VARIABLES);
         for (const auto & p : points) {
             const double ours = program(p.data());
             const double reference = c.value(p[0], p[1], p[2], p[3]);
@@ -307,11 +307,11 @@ void expect_matches_references(const std::vector<Case> & cases) {
  */
 std::vector<double> device_ulps(const std::vector<std::string> & texts) {
     const auto points = sample_points();
-    std::vector<expr::Program> programs;
+    std::vector<kexpr::Program> programs;
     for (const auto & text : texts) programs.emplace_back("test", text, VARIABLES);
-    std::vector<const expr::Program *> pointers;
+    std::vector<const kexpr::Program *> pointers;
     for (const auto & p : programs) pointers.push_back(&p);
-    const expr::ProgramTable<> table(pointers);
+    const kexpr::ProgramTable<> table(pointers);
     const uint32_t n_points = static_cast<uint32_t>(points.size());
     const uint32_t n_programs = static_cast<uint32_t>(programs.size());
     Kokkos::View<double *[4]> d_points("points", n_points);
@@ -343,12 +343,12 @@ std::vector<double> device_ulps(const std::vector<std::string> & texts) {
 }
 
 /** @brief Values of the table's programs at the point p, evaluated on the device. */
-std::vector<double> device_values(const expr::ProgramTable<> & table, const double p[4]) {
+std::vector<double> device_values(const kexpr::ProgramTable<> & table, const double p[4]) {
     Kokkos::View<double *> values("values", table.size());
     const double x = p[0], y = p[1], z = p[2], t = p[3];
     Kokkos::parallel_for("evaluate", 1, KOKKOS_LAMBDA(const int) {
         const double v[4] = {x, y, z, t};
-        for (uint32_t k = 0; k < table.size(); k++) values(k) = table(k, expr::ArrayVariables{v});
+        for (uint32_t k = 0; k < table.size(); k++) values(k) = table(k, kexpr::ArrayVariables{v});
     });
     auto h_values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
     return std::vector<double>(h_values.data(), h_values.data() + h_values.extent(0));
@@ -356,24 +356,24 @@ std::vector<double> device_values(const expr::ProgramTable<> & table, const doub
 
 double literal(const std::string & text) {
     const double none[4] = {0.0, 0.0, 0.0, 0.0};
-    return expr::Program("test", text, VARIABLES)(none);
+    return kexpr::Program("test", text, VARIABLES)(none);
 }
 
 } // namespace
 
-TEST(CompiledExpressionTest, ArithmeticMatchesReferencesBitwise) {
+TEST(KexprTest, ArithmeticMatchesReferencesBitwise) {
     expect_matches_references(ARITHMETIC);
 }
 
-TEST(CompiledExpressionTest, FunctionsMatchReferencesBitwise) {
+TEST(KexprTest, FunctionsMatchReferencesBitwise) {
     expect_matches_references(FUNCTIONS);
 }
 
-TEST(CompiledExpressionTest, ControlFlowMatchesReferencesBitwise) {
+TEST(KexprTest, ControlFlowMatchesReferencesBitwise) {
     expect_matches_references(CONTROL_FLOW);
 }
 
-TEST(CompiledExpressionTest, LiteralsConvertAsExprtk) {
+TEST(KexprTest, LiteralsConvertAsExprtk) {
     // Integer and fraction digits accumulate on their own; the fraction is scaled by its digit count, then the exponent
     EXPECT_TRUE(same(literal("0.1"), 1.0 / 10.0));
     EXPECT_TRUE(same(literal("123.456"), 123.0 + 456.0 / 1000.0));
@@ -388,7 +388,7 @@ TEST(CompiledExpressionTest, LiteralsConvertAsExprtk) {
     EXPECT_TRUE(same(literal("0.1234567890123456789"), 0x1.f9add3746f661p-4));
     for (const std::string text : {"1.2.3", "1e309", "1e-309", "1e01234", "1e12345", "5e-324"}) {
         try {
-            const expr::Program program("test", text, VARIABLES);
+            const kexpr::Program program("test", text, VARIABLES);
             ADD_FAILURE() << text << " compiled";
         } catch (const std::invalid_argument & e) {
             EXPECT_NE(std::string(e.what()).find("invalid number"), std::string::npos) << text << ": " << e.what();
@@ -396,7 +396,7 @@ TEST(CompiledExpressionTest, LiteralsConvertAsExprtk) {
     }
 }
 
-TEST(CompiledExpressionTest, DeviceMatchesHost) {
+TEST(KexprTest, DeviceMatchesHost) {
     for (const double ulp : device_ulps(texts(ARITHMETIC))) EXPECT_EQ(ulp, 0.0);
     const std::vector<double> control_ulps = device_ulps(texts(CONTROL_FLOW));
     for (size_t i = 0; i < control_ulps.size(); i++) EXPECT_EQ(control_ulps[i], 0.0) << CONTROL_FLOW[i].text;
@@ -411,18 +411,18 @@ TEST(CompiledExpressionTest, DeviceMatchesHost) {
     }
 }
 
-TEST(CompiledExpressionTest, VariablesAreCaseSensitiveAndTracked) {
-    const expr::Program program("test", "T * t + rho", {"t", "T", "rho", "p"});
+TEST(KexprTest, VariablesAreCaseSensitiveAndTracked) {
+    const kexpr::Program program("test", "T * t + rho", {"t", "T", "rho", "p"});
     EXPECT_TRUE(program.uses(0));
     EXPECT_TRUE(program.uses(1));
     EXPECT_TRUE(program.uses(2));
     EXPECT_FALSE(program.uses(3));
     const double vars[] = {2.0, 300.0, 1.5, 7.0};
     EXPECT_EQ(program(vars), 601.5);
-    EXPECT_TRUE(expr::Program("test", "2 * pi * sin(1)", VARIABLES).is_constant());
+    EXPECT_TRUE(kexpr::Program("test", "2 * pi * sin(1)", VARIABLES).is_constant());
 }
 
-TEST(CompiledExpressionTest, RejectsInvalidExpressions) {
+TEST(KexprTest, RejectsInvalidExpressions) {
     const std::vector<std::pair<std::string, std::string>> cases = {
         {"x +", "unexpected end of expression"},
         {"foo(x)", "unknown symbol 'foo'"},
@@ -452,7 +452,7 @@ TEST(CompiledExpressionTest, RejectsInvalidExpressions) {
     };
     for (const auto & [text, error] : cases) {
         try {
-            const expr::Program program("test", text, VARIABLES);
+            const kexpr::Program program("test", text, VARIABLES);
             ADD_FAILURE() << text << " compiled";
         } catch (const std::invalid_argument & e) {
             EXPECT_NE(std::string(e.what()).find(error), std::string::npos) << text << ": " << e.what();
@@ -460,7 +460,7 @@ TEST(CompiledExpressionTest, RejectsInvalidExpressions) {
     }
 }
 
-TEST(CompiledExpressionTest, ExpressionDerivativeIsTheFourthOrderCentralDifference) {
+TEST(KexprTest, ExpressionDerivativeIsTheFourthOrderCentralDifference) {
     const Expression e("e", "s^3 - 2 * s", {"s"});
     const double s = 0.7, h = 1e-8;
     auto f = [](const double v) { return v * v * v - 2.0 * v; };
@@ -470,20 +470,20 @@ TEST(CompiledExpressionTest, ExpressionDerivativeIsTheFourthOrderCentralDifferen
     EXPECT_NEAR(e.derivative(0, p), 3.0 * s * s - 2.0, 1e-7);
 }
 
-TEST(CompiledExpressionTest, LoopsStopAtTheIterationCap) {
-    const std::string cap = std::to_string(expr::MAX_ITERATIONS);
+TEST(KexprTest, LoopsStopAtTheIterationCap) {
+    const std::string cap = std::to_string(kexpr::MAX_ITERATIONS);
     const double p[4] = {0.3, -0.7, 0.25, 0.5};
-    EXPECT_EQ(expr::Program("test", "var i := 0; while (i < " + cap + ") { i += 1 }", VARIABLES)(p),
-              double(expr::MAX_ITERATIONS));
+    EXPECT_EQ(kexpr::Program("test", "var i := 0; while (i < " + cap + ") { i += 1 }", VARIABLES)(p),
+              double(kexpr::MAX_ITERATIONS));
     const std::string runaway = "var i := 0; while (i <= " + cap + ") { i += 1 }";
-    const expr::Program stopped("test", runaway, VARIABLES);
+    const kexpr::Program stopped("test", runaway, VARIABLES);
     EXPECT_TRUE(stopped.has_loops());
     EXPECT_THROW(stopped(p), std::invalid_argument);
     EXPECT_THROW(Expression("test", runaway)(0.3, -0.7, 0.25, 0.5), std::runtime_error);
 
-    const expr::Program fine("test", "x + y", VARIABLES);
+    const kexpr::Program fine("test", "x + y", VARIABLES);
     EXPECT_FALSE(fine.has_loops());
-    const expr::ProgramTable<> table({&fine, &stopped});
+    const kexpr::ProgramTable<> table({&fine, &stopped});
     const std::vector<double> values = device_values(table, p);
     EXPECT_EQ(values[0], fine(p));
     EXPECT_TRUE(std::isnan(values[1]));

@@ -95,7 +95,7 @@ struct KineticEnergyBudget {
  */
 struct DirichletBoundary {
     std::vector<uint32_t> faces;
-    std::vector<std::shared_ptr<const expr::Program>> W;
+    std::vector<std::shared_ptr<const kexpr::Program>> W;
 };
 
 /** @brief Thrown inside the time loop when the state stops being valid; run() handles it. */

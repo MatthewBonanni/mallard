@@ -59,7 +59,7 @@ builds), one cell per thread.
 ![A triangle with one and with sixteen sub-triangles for the cell average of an analytical state](../images/guide/subdivisions-dark.svg#gh-dark-mode-only)
 
 Expressions may use local variables, conditionals and loops
-([Expressions](input_files.md#expressions)), and read
+([Expressions](expressions.md)), and read
 [tabulated data](#tabulated-data-and-point-clouds); a comparison such as
 `hypot(x, y) < 0.2` draws a region ([Geometry](geometry.md#who-uses-what)). Pitfall:
 TOML requires the expressions to be strings, also for constants: `u =

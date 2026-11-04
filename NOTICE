@@ -16,7 +16,7 @@ licenses/Cantera-BSD-3-Clause.txt.
 This product includes software derived from exprtk, the C++ Mathematical
 Expression Toolkit Library by Arash Partow
 (https://www.partow.net/programming/exprtk/): the expression language in
-src/common/compiled_expression.{h,cpp} and src/common/expression.h follows
+src/common/kexpr.{h,cpp} and src/common/expression.h follows
 exprtk's grammar, operator semantics and numerics, and ports its literal
 conversion, integer powers and numerical derivative. exprtk is distributed
 under the MIT License; see licenses/exprtk-MIT.txt.

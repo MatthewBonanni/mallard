@@ -1,7 +1,7 @@
 /**
- * @file compiled_expression.h
+ * @file kexpr.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Expressions compiled once on the host into a stack program with
+ * @brief kexpr (Kokkos expressions): expressions compiled once on the host into a stack program with
  *        jumps that kernels evaluate on the device (and the host) with the
  *        same code. The language follows exprtk (Arash Partow, MIT License;
  *        see licenses/exprtk-MIT.txt and NOTICE).
@@ -12,8 +12,8 @@
  *
  */
 
-#ifndef COMPILED_EXPRESSION_H
-#define COMPILED_EXPRESSION_H
+#ifndef KEXPR_H
+#define KEXPR_H
 
 #include <cstdint>
 #include <string>
@@ -21,7 +21,7 @@
 
 #include <Kokkos_Core.hpp>
 
-namespace expr {
+namespace kexpr {
 
 /** @brief Slots for a program's local variables and its deepest evaluation stack. */
 constexpr int MAX_STACK = 32;
@@ -295,7 +295,7 @@ struct ArrayVariables {
  *        with strength reduction off: the same operations in the same order,
  *        integer powers by exprtk's multiplications, constants folded.
  *        Unlike exprtk, names are case sensitive (T is not t). See
- *        docs/guide/input_files.md#expressions.
+ *        docs/guide/expressions.md.
  */
 class Program {
     public:
@@ -382,6 +382,6 @@ struct ProgramTable {
     }
 };
 
-} // namespace expr
+} // namespace kexpr
 
-#endif // COMPILED_EXPRESSION_H
+#endif // KEXPR_H
