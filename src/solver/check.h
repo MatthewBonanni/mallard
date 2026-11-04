@@ -16,6 +16,7 @@
 
 #include "input.h"
 #include "log.h"
+#include "memory_tracker.h"
 #include "mesh_quality.h"
 
 struct CheckOptions {
@@ -27,6 +28,9 @@ struct CheckOptions {
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
     std::string input_file;     // named before input errors, as a run names it, or empty
+    uint64_t memory = 0;        // memory per rank to size the run for (bytes); 0: the device's, if any
+    std::string memory_name;    // what it is ("A100-80GB", "40GB")
+    bool memory_gpu = false;    // a GPU's memory: CUDA's context comes on top of Kokkos' allocations
 };
 
 struct CheckReport {
@@ -62,6 +66,24 @@ struct CheckReport {
     uint64_t target_owned = 0, target_halo = 0;  // largest part at target_ranks
     uint64_t target_bytes = 0, target_bytes_peak = 0;
     uint64_t device_capacity = 0;  // bytes, 0 if unknown
+    memory::Bytes setup_bytes{};   // largest rank by category: at the setup's peak
+    memory::Bytes steady_bytes{};  // after setup, or at the peak of the timed steps
+    uint64_t outside_kokkos = 0;   // device memory beyond Kokkos' allocations (CUDA context, libraries), measured
+
+    // Sizing for options.memory (or the device): the largest rank's peak against the memory per rank
+    std::string sizing_name;       // empty: no sizing
+    bool sizing_gpu = false;
+    uint64_t sizing_memory = 0;    // bytes per rank
+    uint64_t sizing_overhead = 0;  // outside Kokkos per rank (CUDA context), measured or nominal
+    bool overhead_measured = false;
+    double bytes_per_cell = 0.0;   // of the peak that limits the cells per rank, cell-proportional categories
+    uint64_t fixed_bytes = 0;      // the rest: sized by the device, not the mesh
+    bool sizing_setup = false;     // the setup's peak limits the cells per rank, else the steady state
+    uint64_t max_local_cells = 0;  // owned and halo cells per rank that fit
+    int min_ranks = 0;             // fewest ranks the mesh fits on, 0 if not found
+    uint64_t min_owned = 0, min_halo = 0, min_peak = 0;  // largest part there and its predicted peak
+    bool min_partitioned = false;  // the part comes from the partitioner (serial checks), else from this halo ratio
+    int halo_ranks = 0;            // most ranks (doubling from min_ranks) with halo below 10% of owned, 0 if none
 
     // Cost at target_ranks
     uint64_t n_cells = 0;
@@ -75,6 +97,12 @@ struct CheckReport {
 
     bool ok() const { return errors.empty() && unused.empty(); }
 };
+
+/**
+ * @brief Set options.memory from --memory: a size with its unit (40GB, 512MiB) or a GPU of the table
+ *        (a100-40, a100-80, h100-80, h200, mi250x, mi300x). Returns an error, or empty.
+ */
+std::string set_memory_target(const std::string & text, CheckOptions & options);
 
 /** @brief Print a report on rank 0. */
 void print_check(const CheckReport & report);

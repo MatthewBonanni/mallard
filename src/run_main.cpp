@@ -135,6 +135,8 @@ int check_main(const cli::Args & args) {
     options.catalog_file = args.value_or("--catalog", "");
     options.view_dir = args.value_or("--view", "");
     std::string error;
+    if (args.has("--memory")) error = set_memory_target(args.value_or("--memory", ""), options);
+    if (!error.empty()) return cli::usage_error(command, error);
     if (!number(args, "--ranks", options.ranks, error) || !number(args, "--throughput", options.throughput, error) ||
         !number(args, "--steps", options.steps, error)) {
         return cli::usage_error(command, error);
