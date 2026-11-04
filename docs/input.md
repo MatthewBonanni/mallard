@@ -13,7 +13,7 @@ The spatial dimension is fixed at build time with the CMake option
 `mallard` runs the one of the case's mesh ([Meshes](guide/meshes.md)). Vectors in the input (`u`, `gravity`,
 `rhou`) have that many components, and expressions are in `x`, `y`, `z`
 (`z` is 0 in 2D) and, where noted, `t`, in one language for every section:
-[Expressions](guide/input_files.md#expressions). Below, `[u_x, u_y]` reads
+[Expressions](guide/expressions.md). Below, `[u_x, u_y]` reads
 `[u_x, u_y, u_z]` in 3D.
 
 Every key in the file must be one the run reads: a key that is misspelled,
@@ -488,7 +488,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `n_subdivisions` | (`analytical`, and any state with regions) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages or the snapshot counts of `time_interval` writers, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#formats-and-compatibility)) |
 
-Expressions, e.g. `"x < 0.5 ? 1.0 : 0.125"`: [Expressions](guide/input_files.md#expressions).
+Expressions, e.g. `"x < 0.5 ? 1.0 : 0.125"`: [Expressions](guide/expressions.md).
 They read `x`, `y`, `z` and the variables of `[[initialize.data]]`, and are
 integrated over each cell on the device.
 
@@ -1410,7 +1410,7 @@ region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 
 ```
 
 Expressions in regions are those of every section:
-[Expressions](guide/input_files.md#expressions).
+[Expressions](guide/expressions.md).
 
 ### Regions of the mesh
 

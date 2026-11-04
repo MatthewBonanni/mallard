@@ -23,7 +23,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
-#include "compiled_expression.h"
+#include "kexpr.h"
 #include "curved.h"
 #include "log.h"
 #include "mesh.h"
@@ -201,7 +201,7 @@ struct Evaluator {
     uint32_t n_layers = 1;
     Kokkos::View<const region::Node *> nodes;
     Kokkos::View<const double *> vertices;
-    expr::ProgramTable<> programs;
+    kexpr::ProgramTable<> programs;
     Kokkos::View<const uint8_t *> constant;  // per program: a constant, read without the interpreter
     Kokkos::View<const double *> constant_value;
     Kokkos::View<const uint32_t *[2]> fractions;
@@ -251,7 +251,7 @@ struct Evaluator {
         if (m.n_nodes > 0) {
             q[0] = distance(m.nodes, m.n_nodes, x);
         } else {
-            for (uint32_t d = 0; d < m.dims; d++) q[d] = programs(static_cast<uint32_t>(m.at[d]), expr::ArrayVariables{x});
+            for (uint32_t d = 0; d < m.dims; d++) q[d] = programs(static_cast<uint32_t>(m.at[d]), kexpr::ArrayVariables{x});
         }
         return data(var.set, var.field, q);
     }
@@ -928,7 +928,7 @@ struct InitialState::Impl {
     const MixtureModel * mixture = nullptr;
     bool from_cells = false;
     uint32_t n_sub = 1;
-    std::vector<expr::Program> programs;
+    std::vector<kexpr::Program> programs;
     std::vector<Layer> layers;
     std::vector<region::Node> nodes;
     std::vector<double> vertices;
@@ -1394,9 +1394,9 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
     e.n_layers = static_cast<uint32_t>(impl->layers.size());
     e.nodes = upload(impl->nodes, "init_region_nodes");
     e.vertices = upload(impl->vertices, "init_region_vertices");
-    std::vector<const expr::Program *> pointers;
+    std::vector<const kexpr::Program *> pointers;
     for (const auto & p : impl->programs) pointers.push_back(&p);
-    e.programs = expr::ProgramTable<>(pointers);
+    e.programs = kexpr::ProgramTable<>(pointers);
     {
         std::vector<uint8_t> constant;
         std::vector<double> values;

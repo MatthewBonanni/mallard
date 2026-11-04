@@ -329,7 +329,7 @@ class CompositionExpressions {
             auto c = std::make_shared<CompositionPrograms>();
             for (size_t i = 0; i < listed.size(); i++) {
                 c->species.push_back(static_cast<uint32_t>(listed[i]));
-                c->fractions.push_back(std::make_shared<expr::Program>(where + ".composition", texts[i],
+                c->fractions.push_back(std::make_shared<kexpr::Program>(where + ".composition", texts[i],
                                                                        BoundaryValue::variables()));
             }
             c->balance = balance;

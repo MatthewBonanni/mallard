@@ -1,7 +1,7 @@
 /**
  * @file expression.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Analytical expressions from input files, compiled by expr::Program
+ * @brief Analytical expressions from input files, compiled by kexpr::Program
  *        and evaluated by its code: on the host one point at a time, or on
  *        the device at many mesh points at once.
  * @version 0.1
@@ -24,7 +24,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common_typedef.h"
-#include "compiled_expression.h"
+#include "kexpr.h"
 
 /**
  * @brief An expression of named variables (by default x, y, z and t), so
@@ -45,7 +45,7 @@ class Expression {
         bool depends_on_time() const { return time_dependent; }
 
         /** @brief The compiled program, for evaluation in kernels. */
-        const expr::Program & program() const { return m_program; }
+        const kexpr::Program & program() const { return m_program; }
 
         /** @brief Evaluate with the variables' values v, by index (missing ones 0). */
         double value(std::span<const double> v) const {
@@ -109,16 +109,16 @@ class Expression {
             }
         }
 
-        static expr::Program check(const std::string & name, const std::string & text,
+        static kexpr::Program check(const std::string & name, const std::string & text,
                                    const std::vector<std::string> & variables) {
             try {
-                return expr::Program(name, text, variables);
+                return kexpr::Program(name, text, variables);
             } catch (const std::invalid_argument & e) {
                 throw std::runtime_error(e.what());
             }
         }
 
-        expr::Program m_program;
+        kexpr::Program m_program;
         size_t n_variables;
         bool time_dependent = false;
 };
@@ -127,7 +127,7 @@ class Expression {
  * @brief Values of expressions of x, y, z, t (as Expression::at) at the
  *        points coords(rows[k]) and time t, evaluated on the device:
  *        values[k * expressions.size() + e]. Throws std::runtime_error if an
- *        evaluation stopped at expr::MAX_ITERATIONS.
+ *        evaluation stopped at kexpr::MAX_ITERATIONS.
  */
 std::vector<double> evaluate_at(const std::vector<const Expression *> & expressions,
                                 const Kokkos::View<rtype *[N_DIM]> & coords, const std::vector<uint32_t> & rows,

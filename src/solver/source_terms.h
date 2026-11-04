@@ -21,7 +21,7 @@
 
 #include <Kokkos_Core.hpp>
 #include "common.h"
-#include "compiled_expression.h"
+#include "kexpr.h"
 #include "input.h"
 #include "log.h"
 #include "mesh.h"
@@ -132,7 +132,7 @@ class SourceTerms {
 
         /**
          * @brief Throws the error of an expression whose evaluation on any
-         *        rank stopped at expr::MAX_ITERATIONS (and gave NaN), if any.
+         *        rank stopped at kexpr::MAX_ITERATIONS (and gave NaN), if any.
          *        Collective; copies from the device only if some expression has loops.
          */
         void check_loops() const;
@@ -142,8 +142,8 @@ class SourceTerms {
         CellFields fields;
         uint32_t n_species = 0;
         bool m_empty = true, m_time = false, m_means = false;
-        std::vector<expr::Program> programs;
-        expr::ProgramTable<> table;
+        std::vector<kexpr::Program> programs;
+        kexpr::ProgramTable<> table;
         Kokkos::View<Term *> dynamic_terms;
         Kokkos::View<rtype **, Kokkos::LayoutRight> static_field;  // (cell, column), per unit volume; empty if none
         Kokkos::View<double **, Kokkos::LayoutRight> weights;      // (row, cell)

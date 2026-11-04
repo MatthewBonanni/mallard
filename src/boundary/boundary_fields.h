@@ -21,7 +21,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "boundary.h"
-#include "compiled_expression.h"
+#include "kexpr.h"
 #include "input.h"
 #include "synthetic_inflow.h"
 #include "thermo.h"
@@ -43,10 +43,10 @@ class BoundaryValue {
         double at(const Point & x, double t) const;
 
         /** @brief The compiled value (a constant for a number); null if absent. */
-        const std::shared_ptr<expr::Program> & compiled() const { return program; }
+        const std::shared_ptr<kexpr::Program> & compiled() const { return program; }
 
     private:
-        std::shared_ptr<expr::Program> program;
+        std::shared_ptr<kexpr::Program> program;
 };
 
 /**
@@ -153,7 +153,7 @@ class BoundaryFields {
  */
 struct CompositionPrograms {
     std::vector<uint32_t> species;
-    std::vector<std::shared_ptr<expr::Program>> fractions;
+    std::vector<std::shared_ptr<kexpr::Program>> fractions;
     int32_t balance = -1;
     bool mole = false;
 
@@ -219,8 +219,8 @@ class TimedBoundaryFields {
         Kokkos::View<int32_t *[4]> set_composition;                 // first, count, balance, mole
         Kokkos::View<uint32_t *> composition_species;
         Kokkos::View<uint32_t *> composition_program;
-        expr::ProgramTable<> programs;
-        std::vector<const expr::Program *> program_list;  // host, in the table's order
+        kexpr::ProgramTable<> programs;
+        std::vector<const kexpr::Program *> program_list;  // host, in the table's order
         Kokkos::View<int32_t> error_face;   // 1 + the first face whose number was not positive, 0 if none
         Kokkos::View<double[3]> error;      // its time, value and slot
 };
@@ -234,7 +234,7 @@ class TimedBoundaryFields {
 class DirichletStates {
     public:
         /** @brief Face states `states` (indices into BoundaryData::face_state) at x take the programs W. */
-        void add(const std::vector<std::shared_ptr<const expr::Program>> & W, const std::vector<int32_t> & states,
+        void add(const std::vector<std::shared_ptr<const kexpr::Program>> & W, const std::vector<int32_t> & states,
                  const std::vector<Point> & x);
 
         /** @brief Copy what add() gathered to the device and write the states that do not depend on t. */
@@ -254,7 +254,7 @@ class DirichletStates {
             uint32_t set;
             Point x;
         };
-        std::vector<std::shared_ptr<const expr::Program>> host_programs;  // N_DIM + 2 per set
+        std::vector<std::shared_ptr<const kexpr::Program>> host_programs;  // N_DIM + 2 per set
         std::vector<bool> set_timed;
         std::vector<FaceHost> faces_host;
         uint32_t n_timed = 0;  // faces whose states depend on t, first on the device
@@ -262,7 +262,7 @@ class DirichletStates {
         Kokkos::View<int32_t *> face_state_index;
         Kokkos::View<uint32_t *> face_set;
         Kokkos::View<double *[3]> face_x;
-        expr::ProgramTable<> programs;
+        kexpr::ProgramTable<> programs;
 };
 
 /**
@@ -289,7 +289,7 @@ class TimedInletTargets {
         void check() const;
 
     private:
-        std::vector<std::shared_ptr<expr::Program>> host_programs;
+        std::vector<std::shared_ptr<kexpr::Program>> host_programs;
         std::vector<std::array<uint32_t, N_DIM>> host_slots;
         std::vector<Point> host_scale;  // 1, or the direction of a speed
         std::vector<int32_t> host_chars;
@@ -299,7 +299,7 @@ class TimedInletTargets {
         Kokkos::View<double *[3]> x;
         Kokkos::View<uint32_t *[N_DIM]> slots;
         Kokkos::View<double *[N_DIM]> scale;
-        expr::ProgramTable<> programs;
+        kexpr::ProgramTable<> programs;
 };
 
 #endif // BOUNDARY_FIELDS_H
