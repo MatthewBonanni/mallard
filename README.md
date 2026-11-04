@@ -77,7 +77,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-[Installation](docs/installation.md) covers containers, Spack, GPU and MPI builds and every CMake option.
+[Installation](docs/installation.md) covers containers, Spack, GPU and MPI builds and every CMake option; [supported platforms](docs/guide/support.md) lists what CI builds and runs.
 
 ## Running
 
