@@ -18,7 +18,7 @@ Maintain  mallard test | completion | --version
 | Command | Group | Status |
 |---|---|---|
 | `mallard -i input.toml`, `ctl`, `reactor` | Run | available |
-| `--restart latest` | Run | planned ([#510](https://github.com/MatthewBonanni/mallard/issues/510)) |
+| `--restart latest` | Run | available |
 | `new`, `input upgrade` | Set up | available |
 | `input resolve` | Set up | planned ([#509](https://github.com/MatthewBonanni/mallard/issues/509)) |
 | `check input.toml` | Inspect | available |

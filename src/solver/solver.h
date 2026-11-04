@@ -123,7 +123,11 @@ class Solver {
          */
         int init(const std::string & input_file_name, const std::string & restart_file = {});
 
-        /** @brief Replaces the input's [initialize] by a start from restart_file (`--restart`). */
+        /**
+         * @brief Replaces the input's [initialize] by a start from restart_file (`--restart`).
+         *        "latest" is the newest complete restart file the input's restart writers
+         *        wrote (newest_restart), or, if there is none, the input's [initialize].
+         */
         static void start_from_restart(Input & input, const std::string & restart_file);
 
         /**
