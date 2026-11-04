@@ -53,9 +53,19 @@ std::string mallard() {
     return fs::exists(front_end) ? front_end.string() : solver.string();
 }
 
-/** @brief Runs mallard with these arguments, outside any MPI launcher this test runs under; killed after a minute. */
-Result run(const std::vector<std::string> & args) {
-    std::vector<std::string> command = {mallard()};
+/**
+ * @brief Runs mallard with these arguments, outside any MPI launcher this test runs under; killed after a minute.
+ *        launched: under the MPI launcher of the build, for commands that start MPI (an MPI library need not
+ *        start a process without its launcher).
+ */
+Result run(const std::vector<std::string> & args, bool launched = false) {
+    std::vector<std::string> command;
+#ifdef MALLARD_MPIEXEC
+    if (launched) command = {MALLARD_MPIEXEC, "-n", "1"};
+#else
+    (void)launched;
+#endif
+    command.push_back(mallard());
     command.insert(command.end(), args.begin(), args.end());
     std::vector<std::string> env;
     for (char ** e = environ; *e; e++) {
@@ -294,7 +304,7 @@ Result small_run() {
         << "p = \"1.0\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         << "[[write_data]]\nprefix = \"case/flow\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\", \"U\"]\n"
         << "[[write_data]]\nprefix = \"case/restart\"\nformat = \"restart\"\ninterval = 2\n";
-    return run({"-i", "small.toml", "--kokkos-num-threads=1"});
+    return run({"-i", "small.toml", "--kokkos-num-threads=1"}, true);
 }
 
 } // namespace
@@ -302,13 +312,13 @@ Result small_run() {
 TEST(CliTest, InfoOfAPastReleasesRestartFileSaysWhatIsInIt) {
     SKIP_UNDER_MPI();
     const std::string file = source_dir() + "/test/data/formats/v0.8.0/gas_000002.restart";
-    const Result r = run({"info", file});
+    const Result r = run({"info", file}, true);
     EXPECT_EQ(r.status, 0) << r.err;
     for (const char * part : {"restart, version 2", "2D, double precision", "30 cells", "step 2",
                               "no provenance: written before Mallard 0.9", "RHOE", "kg m-1 s-2"}) {
         EXPECT_TRUE(contains(r.out, part)) << part << "\n" << r.out;
     }
-    const Result input = run({"info", "--input", file});
+    const Result input = run({"info", "--input", file}, true);
     EXPECT_EQ(input.status, 1);
     EXPECT_TRUE(contains(input.err, "has no provenance block")) << input.err;
 }
@@ -317,19 +327,19 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
     SKIP_UNDER_MPI();
     const Result ran = small_run();
     ASSERT_EQ(ran.status, 0) << ran.err;
-    const Result input = run({"info", "--input", "case/flow_000002.vtu"});
+    const Result input = run({"info", "--input", "case/flow_000002.vtu"}, true);
     EXPECT_EQ(input.status, 0) << input.err;
     EXPECT_EQ(input.out, read_file("small.toml"));
-    EXPECT_EQ(run({"info", "--input", "case/restart_000002.restart"}).out, read_file("small.toml"));
+    EXPECT_EQ(run({"info", "--input", "case/restart_000002.restart"}, true).out, read_file("small.toml"));
 
-    const Result described = run({"info", "--json", "case/flow_000002.vtu"});
+    const Result described = run({"info", "--json", "case/flow_000002.vtu"}, true);
     ASSERT_EQ(described.status, 0) << described.err;
     const json::Value v = json::parse(described.out);
     EXPECT_EQ(v["kind"].string, "snapshot");
     EXPECT_EQ(v["format"].string, "VTU");
     EXPECT_EQ(v["dim"].number, Mallard_DIM);
     EXPECT_EQ(v["mesh"]["cells"].number, Mallard_DIM == 3 ? 36 : 12);
-    EXPECT_EQ(v["snapshots"].array.at(0)["t"].number, 2.0e-3);
+    EXPECT_NEAR(v["snapshots"].array.at(0)["t"].number, 2.0e-3, 1e-8);
     const auto & fields = v["fields"].array;
     ASSERT_EQ(fields.size(), 2u);
     EXPECT_EQ(fields[0]["name"].string, "RHO");
@@ -343,29 +353,32 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
 TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {
     SKIP_UNDER_MPI();
     ASSERT_EQ(small_run().status, 0);
-    const Result r = run({"info", "."});
+    const Result r = run({"info", "."}, true);
     EXPECT_EQ(r.status, 0) << r.err;
     for (const char * part : {"n_steps = 2 reached at step 2", "case/flow.pvd", "t = 0 to 0.002",
                               "case/restart_000002.restart"}) {
         EXPECT_TRUE(contains(r.out, part)) << part << "\n" << r.out;
     }
     EXPECT_FALSE(contains(r.out, "flow_000002.vtu")) << r.out;
-    EXPECT_EQ(run({"info", "--input", "."}).out, read_file("small.toml"));
+    EXPECT_EQ(run({"info", "--input", "."}, true).out, read_file("small.toml"));
 }
 
 TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     SKIP_UNDER_MPI();
     const std::string mesh =
         source_dir() + (Mallard_DIM == 3 ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh");
-    const Result r = run({"info", "--quality", "quality", mesh});
+    const Result r = run({"info", "--quality", "quality", mesh}, true);
     EXPECT_EQ(r.status, 0) << r.err;
     for (const char * part : {"Gmsh", "non-orthogonality", "skewness", "aspect ratio", "wall"}) {
         EXPECT_TRUE(contains(r.out, part)) << part << "\n" << r.out;
     }
     size_t written = 0;
-    for (const auto & entry : fs::directory_iterator(".")) written += entry.path().filename().string().starts_with("quality_");
+    for (const auto & entry : fs::directory_iterator(".")) {
+        written += entry.path().filename().string().starts_with("quality_");
+    }
     EXPECT_EQ(written, 1u);
-    const Result not_a_mesh = run({"info", "--quality", "quality", source_dir() + "/test/data/formats/gas.toml"});
+    const Result not_a_mesh =
+        run({"info", "--quality", "quality", source_dir() + "/test/data/formats/gas.toml"}, true);
     EXPECT_EQ(not_a_mesh.status, 2);
     EXPECT_TRUE(contains(not_a_mesh.err, "--quality takes a mesh file")) << not_a_mesh.err;
 }

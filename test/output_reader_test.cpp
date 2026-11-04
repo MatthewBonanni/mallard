@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
@@ -29,6 +30,10 @@
 namespace {
 
 namespace fs = std::filesystem;
+
+// Times are stored as rtype values of the accumulated time; CSV holds text of 10 significant digits
+constexpr double TIME_TOLERANCE = 1e-6 * 8.0e-3;
+constexpr double TEXT_TOLERANCE = std::max(1e-9, 10.0 * double(std::numeric_limits<rtype>::epsilon()));
 
 std::string coords(const char * x, const char * y, const char * z) {
     return std::string("[") + x + ", " + y + (N_DIM == 3 ? std::string(", ") + z : "") + "]";
@@ -162,7 +167,7 @@ TEST(OutputReaderTest, EverySnapshotFormatHoldsTheSameValuesAndUnits) {
         EXPECT_EQ(file.kind, output::Kind::snapshot) << name;
         EXPECT_EQ(file.mesh.n_cells, run.rho.size()) << name;
         ASSERT_EQ(file.snapshots.size(), 1u) << name;
-        EXPECT_DOUBLE_EQ(file.snapshots[0].t, 8.0e-3) << name;
+        EXPECT_NEAR(file.snapshots[0].t, 8.0e-3, TIME_TOLERANCE) << name;
         std::vector<std::string> names;
         for (const output::Field & f : file.fields) names.push_back(f.name);
         std::sort(names.begin(), names.end());
@@ -194,7 +199,7 @@ TEST(OutputReaderTest, SeriesIndexesListEverySnapshotOfTheirFiles) {
         const output::Contents file = output::open(name);
         ASSERT_EQ(file.snapshots.size(), 3u) << name;
         for (size_t i = 0; i < steps.size(); i++) {
-            EXPECT_NEAR(file.snapshots[i].t, 4.0e-3 * double(i), 1e-15) << name << " " << i;
+            EXPECT_NEAR(file.snapshots[i].t, 4.0e-3 * double(i), TIME_TOLERANCE) << name << " " << i;
             const output::Contents restart = output::open(run.dir + "/restart_" + steps[i] + ".restart");
             EXPECT_EQ(run.in_global_order(file, output::read(file, "RHO", i)), output::read(restart, "RHO", 0))
                 << name << " " << i;
@@ -263,11 +268,12 @@ TEST(OutputReaderTest, EveryProbeFormatHoldsTheSameSamples) {
         ASSERT_TRUE(file.field("RHO")) << name;
         EXPECT_EQ(file.field("RHO")->units, "kg m-3") << name;
         for (size_t i = 0; i < file.snapshots.size(); i++) {
-            EXPECT_NEAR(file.snapshots[i].t, 2.0e-3 * double(i), 1e-12) << name << " " << i;
+            EXPECT_NEAR(file.snapshots[i].t, 2.0e-3 * double(i), TIME_TOLERANCE) << name << " " << i;
             const std::vector<double> rho = output::read(file, "RHO", i), expected = output::read(reference, "RHO", i);
             ASSERT_EQ(rho.size(), 6u) << name << " " << i;
             for (size_t p = 0; p < rho.size(); p++) {
-                EXPECT_NEAR(rho[p], expected[p], 1e-9 * std::abs(expected[p])) << name << " " << i << " " << p;
+                EXPECT_NEAR(rho[p], expected[p], TEXT_TOLERANCE * std::abs(expected[p]))
+                    << name << " " << i << " " << p;
             }
         }
     }
@@ -315,7 +321,8 @@ TEST(OutputReaderTest, RestartFilesOfPastReleasesAreRead) {
 }
 
 TEST(OutputReaderTest, MeshFilesAreReadWithThisBuildsDimension) {
-    const std::string mesh = source_dir() + (N_DIM == 2 ? "/test/data/meshes/cyl2d.msh" : "/test/data/meshes/cyl3d.msh");
+    const std::string mesh =
+        source_dir() + (N_DIM == 2 ? "/test/data/meshes/cyl2d.msh" : "/test/data/meshes/cyl3d.msh");
     ASSERT_TRUE(output::is_mesh_file(mesh));
     const MeshBlock block = output::read_mesh(mesh);
     const output::Contents file = output::mesh_contents(mesh, block);
