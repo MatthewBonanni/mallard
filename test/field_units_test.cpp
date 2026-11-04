@@ -173,8 +173,7 @@ std::string channel(const std::string & dir) {
       << "region = {type = \"sphere\", center = " << SIDE_POINT << ", radius = 0.3}\n";
 #ifdef Mallard_HAS_HDF5
     if (comm::size() == 1 || have_parallel_hdf5()) {
-        s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"hdf5\"\ninterval = 2\n" << variables
-          << "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/probe.h5\"\nstart = "
+        s << "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/probe.h5\"\nstart = "
           << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
           << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nvariables = [\"RHO\", \"U\"]\n"
           << "[[probes]]\nname = \"wall_h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/wall_probe.h5\"\n"
@@ -371,23 +370,7 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
 
 #ifdef Mallard_HAS_HDF5
     if (comm::size() == 1 || have_parallel_hdf5()) {
-        // HDF5: CF attributes on each dataset
-        h5::Handle file(H5Fopen((dir + "/h_000002.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "h5");
-        h5::Handle group(H5Gopen2(file, "fields", H5P_DEFAULT), H5Gclose, "fields");
-        H5G_info_t info;
-        h5::check(H5Gget_info(group, &info), "H5Gget_info");
-        EXPECT_EQ(info.nlinks, names.size()) << "the same fields as the VTU";
-        for (const auto & name : names) {
-            h5::Handle dset(H5Dopen2(group, name.c_str(), H5P_DEFAULT), H5Dclose, name);
-            EXPECT_EQ(h5::read_string_attribute(dset, "units"), units_of(name)) << name;
-            EXPECT_EQ(h5::read_string_attribute(dset, "long_name"), field_units::describe(name).long_name) << name;
-            EXPECT_LE(H5Aexists(dset, "standard_name"), 0) << name;
-        }
-        h5::Handle mesh(H5Fopen((dir + "/h_mesh.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "mesh");
-        h5::Handle coordinates(H5Dopen2(mesh, "nodes/coordinates", H5P_DEFAULT), H5Dclose, "coordinates");
-        EXPECT_EQ(h5::read_string_attribute(coordinates, "units"), "m");
-
-        // VTKHDF: the same CF attributes on the cell arrays, points and times
+        // VTKHDF: CF attributes on the cell arrays, points and times
         for (const char * k : {"/k_000002.vtkhdf", "/ks.vtkhdf"}) {
             h5::Handle vtkhdf(H5Fopen((dir + k).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, k);
             for (const auto & name : names) {
@@ -395,6 +378,7 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
                 EXPECT_EQ(h5::read_string_attribute(dset, "units"), units_of(name)) << k << " " << name;
                 EXPECT_EQ(h5::read_string_attribute(dset, "long_name"), field_units::describe(name).long_name)
                     << k << " " << name;
+                EXPECT_LE(H5Aexists(dset, "standard_name"), 0) << k << " " << name;
             }
             h5::Handle points(H5Dopen2(vtkhdf, "VTKHDF/Points", H5P_DEFAULT), H5Dclose, "Points");
             EXPECT_EQ(h5::read_string_attribute(points, "units"), "m") << k;
@@ -468,24 +452,6 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
         if (H5Lexists(cut_probe, "vertices", H5P_DEFAULT) > 0) {
             h5::Handle dset(H5Dopen2(cut_probe, "vertices", H5P_DEFAULT), H5Dclose, "vertices");
             EXPECT_EQ(h5::read_string_attribute(dset, "units"), "m");
-        }
-
-        // XDMF: an Information element per Attribute, in both indexes
-        for (const char * xmf : {"/h_000002.xmf", "/h.xmf"}) {
-            const std::string text = read_file(dir + xmf);
-            const std::regex attribute_re("<Attribute Name=\"([^\"]+)\"[^>]*>\\s*<Information Name=\"units\" Value=\"([^\"]*)\"/>"
-                                          "\\s*<Information Name=\"long_name\" Value=\"([^\"]*)\"/>");
-            size_t n = 0;
-            for (auto it = std::sregex_iterator(text.begin(), text.end(), attribute_re); it != std::sregex_iterator(); ++it) {
-                EXPECT_EQ((*it)[2].str(), units_of((*it)[1])) << xmf;
-                EXPECT_EQ((*it)[3].str(), field_units::describe((*it)[1]).long_name) << xmf;
-                n++;
-            }
-            const std::regex any_attribute("<Attribute ");
-            const size_t attributes = static_cast<size_t>(std::distance(
-                std::sregex_iterator(text.begin(), text.end(), any_attribute), std::sregex_iterator()));
-            EXPECT_EQ(n, attributes) << xmf;
-            EXPECT_GE(n, names.size()) << xmf;
         }
     }
 #endif

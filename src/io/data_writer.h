@@ -31,21 +31,18 @@
 enum class DataFormat {
     VTU,
     RESTART,
-    HDF5,
     VTKHDF,
 };
 
 static const std::unordered_map<std::string, DataFormat> FORMAT_TYPES = {
     {"vtu", DataFormat::VTU},
     {"restart", DataFormat::RESTART},
-    {"hdf5", DataFormat::HDF5},
     {"vtkhdf", DataFormat::VTKHDF},
 };
 
 static const std::unordered_map<DataFormat, std::string> FORMAT_NAMES = {
     {DataFormat::VTU, "vtu"},
     {DataFormat::RESTART, "restart"},
-    {DataFormat::HDF5, "hdf5"},
     {DataFormat::VTKHDF, "vtkhdf"},
 };
 
@@ -200,7 +197,7 @@ class DataWriter {
         rtype next_time() const;
 
         /**
-         * @brief Continue numbering and the .pvd (.xmf) series of a previous
+         * @brief Continue numbering and the .pvd series of a previous
          *        run that stopped at (step, t), whose snapshot at t was already written.
          *        n_snapshots, that run's count of snapshots up to t from its restart
          *        file, numbers on when the series index lists fewer.
@@ -219,7 +216,7 @@ class DataWriter {
         DataFormat get_format() const { return format; }
         const std::string & get_prefix() const { return prefix; }
         uint64_t files_written() const { return n_files; }
-        /** @brief The file ParaView opens for the whole series: .pvd, .vtkhdf.series, .vtkhdf or .xmf. */
+        /** @brief The file ParaView opens for the whole series: .pvd, .vtkhdf.series or .vtkhdf. */
         std::string index_file() const;
         /** @brief The file written last, or empty. */
         const std::string & last_written() const { return last_file; }
@@ -258,17 +255,6 @@ class DataWriter {
         void write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
                                        const RestartAttributes & attributes, const RestartFaces & faces,
                                        const RestartArrays & arrays);
-
-        /**
-         * @brief HDF5 output: the mesh once (<prefix>_mesh.h5), then per
-         *        snapshot a file of cell fields, every array in global-id
-         *        order, and the XDMF indexes that let ParaView read them.
-         */
-        void write_hdf5_mesh();
-        void write_hdf5(const std::string & stem, uint64_t step, rtype t, const Values & values);
-        void write_xdmf(const std::string & stem, const std::vector<std::pair<rtype, std::string>> & series) const;
-        std::string xdmf_grid(const std::string & stem, double t, const std::string & indent) const;
-        void resume_xdmf(rtype t);
 
         /**
          * @brief VTKHDF output: an UnstructuredGrid of the owned cells (curved
@@ -338,10 +324,6 @@ class DataWriter {
         // Restart files of a distributed mesh: the owned cells in global order, in runs of chunks
         GlobalOrder restart_order;
         bool restart_order_built = false;
-        // HDF5 output: owned cells in global order, and the sizes of the mesh written
-        GlobalOrder cell_order;
-        bool hdf5_mesh_written = false;
-        uint64_t hdf5_n_nodes = 0, hdf5_topology_size = 0;
         // VTKHDF output: this rank's block of the topology, in global order, built by the first snapshot
         struct VtkhdfMesh {
             bool built = false;

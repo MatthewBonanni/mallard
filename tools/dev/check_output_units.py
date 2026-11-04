@@ -69,10 +69,6 @@ interval = 2
 variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[write_data]]
 prefix = "flow"
-format = "hdf5"
-interval = 2
-variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"][[write_data]]
-prefix = "flow"
 interval = 2
 variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[probes]]
@@ -95,20 +91,16 @@ def main():
             return os.path.join(work, name)
 
         vtu = units(path("flow_000002.vtu"))
-        h5 = units(path("flow_000002.h5"))
-        xmf = units(path("flow_000002.xmf"))
         vtkhdf = units(path("flow_000002.vtkhdf"))
-        assert vtu == h5 == xmf == vtkhdf, (vtu, h5, vtkhdf)
+        assert vtu == vtkhdf, (vtu, vtkhdf)
         assert long_names(path("flow_000002.vtkhdf")) == long_names(path("flow_000002.vtu"))
         assert vtu["RHO"] == "kg m-3" and vtu["U"] == "m s-1" and vtu["COV_U_X_P"] == "kg s-3", vtu
-        assert long_names(path("flow_000002.vtu")) == long_names(path("flow_000002.h5"))
         # h5py alone: the CF attributes are plain strings
-        with h5py.File(path("flow_000002.h5")) as f:
-            for name, dataset in f["fields"].items():
+        with h5py.File(path("flow_000002.vtkhdf")) as f:
+            for name, dataset in f["VTKHDF/CellData"].items():
                 assert dataset.attrs["units"] == vtu[name], name
                 assert isinstance(dataset.attrs["long_name"], str) and dataset.attrs["long_name"], name
-        with h5py.File(path("flow_mesh.h5")) as f:
-            assert f["nodes/coordinates"].attrs["units"] == "m"
+            assert f["VTKHDF/Points"].attrs["units"] == "m"
         assert units(path("probe_vtkhdf.vtkhdf"))["T"] == vtu["T"]
         probe = units(path("probe_h5.h5"))
         assert probe["time"] == "s" and probe["RHO"] == vtu["RHO"], probe
@@ -121,7 +113,7 @@ def main():
         assert read_csv(path("forces_bottom.csv"))[1]["Fx_pressure"] == "kg s-2"
         assert read_csv(path("integrals.csv"))[1]["kinetic_energy"] == "kg m s-2"
         assert len(read_csv(path("integrals.csv"))[0]["t"]) == 3
-    print("output units: consistent across VTKHDF, VTU, HDF5, XDMF and CSV")
+    print("output units: consistent across VTKHDF, VTU, HDF5 probes and CSV")
 
 
 if __name__ == "__main__":

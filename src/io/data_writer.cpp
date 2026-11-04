@@ -197,7 +197,7 @@ void DataWriter::init(const Input & input,
         fields.push_back(field);
     }
 
-    if (format == DataFormat::HDF5 || format == DataFormat::VTKHDF) {
+    if (format == DataFormat::VTKHDF) {
         const std::string name = FORMAT_NAMES.at(format);
         if (!have_hdf5()) {
             throw InputError({.key = "write_data.format",
@@ -248,7 +248,7 @@ void DataWriter::init(const Input & input,
         find_option(COMPRESSION_TYPES, "write_data.compression", compression_str, line_of(input, "compression"));
     compression = compression_it->second;
     if (compression != Compression::NONE) {
-        const bool hdf5 = format == DataFormat::HDF5 || format == DataFormat::VTKHDF;
+        const bool hdf5 = format == DataFormat::VTKHDF;
         if (hdf5 ? !have_hdf5_deflate() : !compression::have_zlib()) {
             throw std::runtime_error(hdf5
                                          ? "DataWriter: compression = \"zlib\" needs an HDF5 library with the deflate filter."
@@ -281,7 +281,6 @@ void DataWriter::init(const Input & input,
 
 std::pair<std::string, std::string> DataWriter::summary() const {
     std::string text = prefix + (format == DataFormat::RESTART  ? "_*.restart"
-                                 : format == DataFormat::HDF5   ? "_*.h5"
                                  : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
                                                                 : "_*.vtu");
     if (subset) text += " (" + region_name + ", " + logging::count(n_subset) + " cells)";
@@ -300,7 +299,6 @@ std::pair<std::string, std::string> DataWriter::summary() const {
 std::string DataWriter::index_file() const {
     switch (format) {
         case DataFormat::VTKHDF: return prefix + (one_file ? ".vtkhdf" : ".vtkhdf.series");
-        case DataFormat::HDF5: return prefix + ".xmf";
         case DataFormat::VTU: return prefix + ".pvd";
         default: return last_file;
     }
@@ -423,26 +421,6 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         partial_file = last_file + ".partial";
         publish_restart(false);
         logging::event(step, double(t), "restart", stem + ".restart");
-    } else if (format == DataFormat::HDF5) {
-        last_file = stem + ".h5";
-        history.emplace_back(t, last_file);
-        // Parallel HDF5 writes collectively through MPI, which only the main thread calls
-        const bool collective = distributed && comm::size() > 1;
-        if (distributed || root) {
-            auto job = [this, stem, step, t, root, values = capture(mesh->n_owned()), series = history]() {
-                if (!hdf5_mesh_written) {
-                    write_hdf5_mesh();
-                    if (root) n_bytes += file_bytes(prefix + "_mesh.h5");
-                }
-                write_hdf5(stem, step, t, values);
-                if (root) {
-                    n_bytes += file_bytes(stem + ".h5");
-                    write_xdmf(stem, series);
-                }
-            };
-            run(std::move(job), !collective);
-        }
-        logging::event(step, double(t), "hdf5", stem + ".h5");
     } else if (format == DataFormat::VTKHDF) {
         const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
         last_file = filename;
@@ -527,9 +505,7 @@ void DataWriter::resume(uint64_t step, rtype t, const double * n_before) {
         n_written = static_cast<uint64_t>(std::floor(t / time_interval + precision_tol(1e-9, 1e-5))) + 1;
     }
     history.clear();
-    if (format == DataFormat::HDF5) {
-        resume_xdmf(t);
-    } else if (format == DataFormat::VTKHDF) {
+    if (format == DataFormat::VTKHDF) {
         resume_vtkhdf(t);
     } else {
         resume_pvd(t);

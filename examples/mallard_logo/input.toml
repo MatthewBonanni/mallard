@@ -68,11 +68,11 @@ type = "wall_adiabatic"
 
 [[boundaries]]
 name = "inflow"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "outflow"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"

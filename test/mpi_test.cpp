@@ -911,32 +911,10 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     EXPECT_NE(read(dir + "/f.pvd").find("f_000002.pvtu"), std::string::npos);
 }
 
-TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
-    // Cells and nodes of every rank land at their global ids: triangles and
-    // quads, vectors, statistics and species
-    if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
-    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
-#ifdef Mallard_HAS_HDF5
-    const std::string file = write_temp_shared("mallard_mpi_h5_output.msh", jittered_mixed_mesh(16));
-    std::string input = box_input("cartesian", "type = \"MUSCL\"\n", EULER,
-                                  bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
-                                      "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 6);
-    const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
-    input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
-    expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
-                                      "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
-                                      io_dir() + "_hdf5", {0, 3, 6});
-    std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "", "euler");
-    mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 4");
-    expect_hdf5_output_matches_serial(mixture, "interval = 4\nvariables = [\"T\", \"Y_*\"]\n",
-                                      io_dir() + "_hdf5_species", {0, 4});
-#endif
-}
-
 TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     // Every rank writes its cells and zone faces at their global places:
     // triangles and quads, a region's cells, a boundary zone, a cut plane, a
-    // series of one file, compression, and curved cells with their quadratic nodes
+    // series of one file, compression, curved cells with their quadratic nodes, and species
     if (!have_hdf5()) GTEST_SKIP() << "built without HDF5";
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
 #ifdef Mallard_HAS_HDF5
@@ -968,6 +946,10 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
         "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n",
         "interval = 2\nvariables = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
+    std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "", "euler");
+    mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 4");
+    expect_vtkhdf_output_matches_serial(mixture, "interval = 4\nvariables = [\"T\", \"Y_*\"]\n",
+                                        io_dir() + "_vtkhdf_species", {"_000000", "_000004"});
 #endif
 }
 

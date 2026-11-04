@@ -42,11 +42,11 @@ variables = ["P", "T"]
 | Key | Default | Meaning |
 |---|---|---|
 | `prefix` | required | Output path prefix |
-| `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, with a `.vtkhdf.series` index), `vtu` (ParaView, with a `.pvd` time series), `restart`, or the deprecated `hdf5` (with XDMF). Builds without HDF5 write `vtu`, with a warning |
+| `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, with a `.vtkhdf.series` index), `vtu` (ParaView, with a `.pvd` time series) or `restart`. Builds without HDF5 write `vtu`, with a warning |
 | `series` | `false` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf` |
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
 | `variables` | required (all but `restart`) | Variables to write, below; `Y_*` selects every variable with that prefix |
-| `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (deprecated; `mallard input upgrade` rewrites it) |
+| `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (removed in 0.10.0; `mallard input upgrade` rewrites it) |
 | `regions` | none | Instead of `region`: a list of regions, each written as its own series, `PREFIX_<name>` (inline ones: `PREFIX_<place in the list>`) |
 | `compression` | `"none"` | `"zlib"`: lossless compression of `vtkhdf`, `vtu`, `hdf5` and `restart` files (below) |
 | `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `hdf5` with `compression = "zlib"`: lossy, each cell value within this relative error |
@@ -79,8 +79,8 @@ format), or with h5py alone.
 
 **Restarted runs continue the series.** A run resumed from a restart file
 numbers its next snapshot after the snapshots up to the restart time, which the
-restart file counts, and keeps those entries of the `.vtkhdf.series`, `.pvd` or
-`.xmf` index; this holds for every `time_interval` writer, regions included
+restart file counts, and keeps those entries of the `.vtkhdf.series` or `.pvd`
+index; this holds for every `time_interval` writer, regions included
 (`interval` writers are numbered by step). Resuming from an earlier restart file
 than the last one rewinds: the entries after the restart time are dropped and
 their snapshots are overwritten as the run reaches them again. If the index is
@@ -91,8 +91,8 @@ the index, as before.
 Builds without HDF5 write VTU instead (and say so): one file per snapshot, and
 per rank in parallel, assembled by a `.pvtu`, with a `.pvd` series. Set
 `format = "vtu"` to choose it explicitly. `format = "hdf5"` (a mesh file, one
-HDF5 file of fields per snapshot and XDMF indexes) is deprecated and will be
-removed in 0.10.0; `mallard input upgrade` rewrites it to `"vtkhdf"`.
+HDF5 file of fields per snapshot and XDMF indexes) was removed in 0.10.0;
+`mallard input upgrade` rewrites it to `"vtkhdf"`.
 
 **Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
 
@@ -185,8 +185,6 @@ Pitfalls:
 - A boundary zone's samples lie at the face centroids, on the wall: `P` is the
   reconstruction's wall pressure, not the first cell's average. Cell fields
   such as `P_MAX` are still the cell's.
-- Regions are written as `vtkhdf` or `vtu` only, not as the deprecated `hdf5`
-  (XDMF) format.
 - `compression` on a region of lower dimension, alone in its entry, is an
   unused key: those files are small and written uncompressed.
 
@@ -362,16 +360,15 @@ units by definition, for Mallard to read back.
 
 | File | Where the units are |
 |---|---|
-| VTKHDF, HDF5 (snapshots, their mesh file, probes) | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres) |
-| XDMF (`.xmf`) | `<Information Name="units" Value="..."/>` and `<Information Name="long_name" .../>` in each `<Attribute>` |
+| VTKHDF (snapshots, probes), HDF5 probes | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres) |
 | VTU, VTP (each piece of a PVTU) | Field data: the string arrays `MALLARD_FIELD_NAMES`, `MALLARD_FIELD_UNITS` and `MALLARD_FIELD_LONG_NAMES`, entry *i* of each for the same array (VTK has no units attribute) |
 | CSV (forces, integrals, probes) | A line `# units: ...` after the header, one entry per column |
 | Spectra CSV (`[statistics.spectra]`) | A last column `units`: the units of each row's `value` |
 
 ```python
 import h5py
-f = h5py.File("solut/flow_000100.h5")
-f["fields/P"].attrs["units"], f["fields/P"].attrs["long_name"]   # ('kg m-1 s-2', 'pressure')
+f = h5py.File("solut/flow_000100.vtkhdf")
+f["VTKHDF/CellData/P"].attrs["units"], f["VTKHDF/CellData/P"].attrs["long_name"]   # ('kg m-1 s-2', 'pressure')
 
 import sys; sys.path.insert(0, "tools")
 from mallard.vtu import units, long_names        # any output file: .vtkhdf, .vtu, .pvtu, .vtp, .h5, .xmf, .csv
@@ -423,7 +420,7 @@ Files written before Mallard 0.9 have no units; the readers return them empty.
 
 Every output file records where it came from: the provenance block, one
 JSON object, is written into restart files (a trailer after the data, also of
-compressed files, which older readers skip), VTU, `.pvtu`, `.pvd`, XDMF and probe `.vtp` files (an XML comment
+compressed files, which older readers skip), VTU, `.pvtu`, `.pvd` and probe `.vtp` files (an XML comment
 `<!-- provenance {...} -->` after the XML declaration), VTKHDF and HDF5 files, probe files included (the
 string attribute `provenance` of the root group; a continued run's probe file holds the latest run's), CSV files of forces,
 integrals and probes (a line `# provenance {...}` after the header and its
@@ -447,7 +444,7 @@ the block in Python:
 
 ```python
 import json, h5py
-json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
+json.loads(h5py.File("solut/flow_000100.vtkhdf")["/"].attrs["provenance"][0])
 ```
 
 or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
@@ -466,7 +463,7 @@ build reads. It is never misread.
 | Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9) | Mallard: all |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
-| HDF5 output (`format = "hdf5"`, deprecated) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
+| HDF5 output (`format = "hdf5"`, removed in 0.10) | root attribute `version` of both files | 1 (0.6 to 0.9) | ParaView, `tools/mallard/h5.py` |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard/vtu.py` |
 | Run record (`mallard.jsonl`, `[output] run_log`) | `version` of each `start` record | 1 (0.9) | Your scripts (records only gain fields within a version) |
 | Provenance block (every output file) | its `version` | 1 (0.9) | `tools/mallard/vtu.py` (`provenance()`); in restart files a trailer that every restart reader skips, so it changes no restart version |
@@ -500,7 +497,7 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 | `post/insitu_statistics.py` | Plots `[statistics.spectra]` output; recomputes it, or phase-bins a probe series, to check the in-situ values |
 | `plot_<case>.py` | Each validation case against its reference |
 
-ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` (HDF5) series directly. `read_vtu_cells` reads any snapshot file, and `mallard.vtu.snapshot("solut/flow_000100")` finds it whichever format the build wrote.
+ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), and `.pvd` (VTU) series directly. `read_vtu_cells` reads any snapshot file, and `mallard.vtu.snapshot("solut/flow_000100")` finds it whichever format the build wrote.
 
 ## See also
 

@@ -66,7 +66,7 @@ std::string box(const std::string & dir, uint32_t n_steps, const std::string & i
       << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 5\nvariables = [\"RHO\"]\n"
       << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 4\nvariables = [\"RHO\"]\n"
       << "[[write_data]]\nprefix = \"" << dir << "/r\"\nformat = \"restart\"\ninterval = 4\n";
-    if (hdf5) s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"hdf5\"\ninterval = 4\nvariables = [\"RHO\"]\n";
+    if (hdf5) s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"vtkhdf\"\ninterval = 4\nvariables = [\"RHO\"]\n";
     return s.str();
 }
 
@@ -272,14 +272,10 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     EXPECT_EQ(json_reader::parse(lines(dir + "/run.jsonl").front())["provenance"].keys(), p.keys());
     EXPECT_NE(lines(dir + "/run.jsonl").front().find(expected), std::string::npos);
 #ifdef Mallard_HAS_HDF5
-    for (const char * h5 : {"/h_000004.h5", "/h_mesh.h5"}) {
-        if (!writes_hdf5()) break;
-        h5::Handle file(H5Fopen((dir + h5).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, h5);
-        h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-        EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), expected) << h5;
-    }
     if (writes_hdf5()) {
-        EXPECT_EQ(provenance::parse_comment(read_file(dir + "/h.xmf")), expected);
+        h5::Handle file(H5Fopen((dir + "/h_000004.vtkhdf").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "vtkhdf");
+        h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
+        EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), expected);
     }
 #endif
     std::filesystem::remove_all(dir);
@@ -415,7 +411,7 @@ TEST(ProvenanceTest, LargeProvenanceFitsInHdf5Attributes) {
     solver.run();
     comm::barrier();
     if (!comm::is_root()) return;
-    h5::Handle file(H5Fopen((dir + "/h_000004.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "h5");
+    h5::Handle file(H5Fopen((dir + "/h_000004.vtkhdf").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "vtkhdf");
     h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
     EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), provenance::json());
     EXPECT_GT(provenance::json().size(), 100000u);

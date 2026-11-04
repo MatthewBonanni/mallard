@@ -247,7 +247,8 @@ Dimension mesh_file_dimension(const std::string & path) {
 Dimension input_dimension(const std::string & input_file) {
     try {
         Input input = parse_input(input_file);
-        input_upgrade::apply(input);
+        // As its own release read it, removed keys too: `mallard input upgrade` needs the case's mesh
+        input_upgrade::apply(input, "0.0.0");
         const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
         if (type == "file") {
             const fs::path mesh = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");

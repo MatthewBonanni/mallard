@@ -328,7 +328,7 @@ Keys and options changed so far:
 | `basis_type`, `max_stencil_size_factor`, `quadrature_type`, `quadrature_order`, `quadrature_type_cell`, `quadrature_order_cell`, `quadrature_type_face`, `quadrature_order_face` (same table) | none: TENO-E sets them | 0.2.0 | 0.2.0 |
 | `[physics]` `p_min`, `p_max` | none: pressures are not clipped | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
-| `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; until removed, `"hdf5"` still writes XDMF and HDF5 files | 0.9.0 | 0.10.0 |
+| `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; while deprecated, `"hdf5"` still wrote XDMF and HDF5 files | 0.9.0 | 0.10.0 |
 | `[[boundaries]]` `type = "upt"`, `"p_out"`, `"extrapolation"` | `"inlet_state"`, `"outlet_pressure"`, `"outlet_extrapolation"` ([boundary conditions](boundary_conditions.md#inputs-from-older-releases)) | 0.9.0 | 0.10.0 |
 | `[[boundaries]]` `type = "p_out_average"` | `"outlet_pressure"` with `average = true` | 0.9.0 | 0.10.0 |
 | `[[boundaries]]` `type = "nscbc_inlet"`, `"nscbc_outlet"` with `L`, `sigma`, `beta`, `sigma_T`, `sigma_t` | `"inlet_state"`, `"outlet_pressure"` with `nscbc = { L, sigma, ... }` | 0.9.0 | 0.10.0 |
