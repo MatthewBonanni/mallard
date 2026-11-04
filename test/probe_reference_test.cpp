@@ -50,8 +50,9 @@ constexpr const char * EVERY_REDUCTION = "reductions = [\"integral\", \"mean\", 
 /**
  * @brief A smooth viscous flow on simplices between an isothermal and an
  *        adiabatic wall, with a fixed step, every probe kind with point values
- *        and every reduction, a region with a smooth edge, and [statistics]
- *        averages and time-averaged wall quantities.
+ *        and every reduction, the boundaries' diffusive fluxes and moments,
+ *        a region with a smooth edge, and [statistics] averages and
+ *        time-averaged wall quantities.
  */
 std::string reference_case(const std::string & dir) {
     std::ostringstream s;
@@ -98,6 +99,10 @@ std::string reference_case(const std::string & dir) {
           << dir << "/" << name << "_reductions.csv\"\nsampling = \"point\"\ninterval = 3\n" << EVERY_REDUCTION
           << geometry.at(name);
     }
+    s << "[[probes]]\nname = \"fluxes\"\nboundary = [\"left\", \"right\", \"bottom\", \"top\"]\nfile = \"" << dir
+      << "/fluxes.csv\"\nreductions_file = \"" << dir << "/fluxes_reductions.csv\"\nsampling = \"point\"\ninterval = 3\n"
+      << "variables = [\"ENERGY_DIFFUSIVE_FLUX\", \"ENERGY_TOTAL_FLUX\", \"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\n"
+      << "reductions = [\"integral\", \"moment\"]\nmoment_center = " << numbers3("0.4", "0.3", "0.2") << "\n";
     s << "[[probes]]\nname = \"ball\"\nreductions_file = \"" << dir << "/ball_reductions.csv\"\ninterval = 3\n"
       << EVERY_REDUCTION << "variables = [\"RHO\", \"U\", \"P\", \"T\"]\nregion = {type = \"sphere\", center = "
       << numbers3("0.45", "0.35", "0.3") << ", radius = 0.3, edge = 0.1}\n";
@@ -190,7 +195,7 @@ TEST(ProbesTest, EveryBackendReproducesTheCpuReference) {
         std::filesystem::path(source_dir()) / "test" / "data" / "probes" / (std::to_string(N_DIM) + "d");
     const bool update = std::getenv("MALLARD_UPDATE_PROBE_REFERENCE") != nullptr;
     if (update) std::filesystem::create_directories(reference);
-    std::vector<std::string> files = {"ball_reductions.csv"};
+    std::vector<std::string> files = {"ball_reductions.csv", "fluxes.csv", "fluxes_reductions.csv"};
     for (const auto & name : PROBES) {
         files.push_back(name + ".csv");
         files.push_back(name + "_reductions.csv");
