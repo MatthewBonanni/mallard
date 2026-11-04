@@ -18,10 +18,14 @@
 #include "partition.h"
 
 CellOrder cell_order_of_input(const Input & input) {
-    const std::string name = find_value_or<std::string>(input, "mesh", "cell_order", "hilbert");
-    return find_option(CELL_ORDERS, "mesh.cell_order", name,
-                       input.contains("mesh") ? line_of(input.at("mesh"), "cell_order") : size_t(0))
-        ->second;
+    const std::string name = find_value_or<std::string>(input, "mesh", "cell_order", "auto");
+    const std::optional<CellOrder> order =
+        find_option(CELL_ORDERS, "mesh.cell_order", name,
+                    input.contains("mesh") ? line_of(input.at("mesh"), "cell_order") : size_t(0))
+            ->second;
+    if (order) return *order;
+    // Generated meshes are numbered row by row, which is already local
+    return find_value_or<std::string>(input, "mesh", "type", "file") == "file" ? CellOrder::HILBERT : CellOrder::INPUT;
 }
 
 std::vector<uint32_t> locality_order(CellOrder kind, const std::vector<std::array<rtype, N_DIM>> & nodes,

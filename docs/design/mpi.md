@@ -65,7 +65,7 @@ One `alltoallv` sends each cell to its owner: its global id, owner, node ids and
 ### 6. Halo
 
 - **Local numbering:**
-  - Cells: `[owned | halo layer 1 | ... | halo layer k]`, each group along the Hilbert curve of its cells' vertex averages (`[mesh] cell_order = "hilbert"`, the default; `"input"` keeps global order). Serial runs number their cells the same way, the mesh's order becoming the global ids.
+  - Cells: `[owned | halo layer 1 | ... | halo layer k]`, each group along the Hilbert curve of its cells' vertex averages (`[mesh] cell_order = "hilbert"`) or in global order (`"input"`); the default `"auto"` is `"hilbert"` for a mesh file and `"input"` for a generated mesh, whose x-first order is already local. Serial runs number their cells the same way, the mesh's order becoming the global ids.
   - Faces: in the order the local cells reach them, so faces of owned cells come first; each face keeps the orientation of the global numbering (cell 0 is the cell with the lower global id).
   - Nothing that results depend on follows the local numbering: faces, neighbor lists and stencils are ordered by global ids, and so are the sums that mix cells (characteristic boundaries' transverse fits, the mass-flow force, by fixed-point sums), the image-cell search and the rows of periodic translations. Restart, HDF5 and VTU files are written in global order. Measurements: `performance.md`, "Cell numbering".
   - Every cell and node keeps its global id.

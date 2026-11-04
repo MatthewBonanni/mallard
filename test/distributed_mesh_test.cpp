@@ -256,6 +256,16 @@ TEST(DistributedMeshTest, LocalMeshesMatchTheSetupFromTheGlobalMesh) {
     }
 }
 
+/** @brief cell_order = "auto" numbers mesh files along the curve and keeps a generated mesh's order. */
+TEST(DistributedMeshTest, AutoCellOrderFollowsWhereTheMeshCameFrom) {
+    EXPECT_EQ(cell_order_of_input(parse_toml("[mesh]\nfilename = \"m.msh\"\n")), CellOrder::HILBERT);
+    EXPECT_EQ(cell_order_of_input(parse_toml("[mesh]\ntype = \"cartesian\"\n")), CellOrder::INPUT);
+    EXPECT_EQ(cell_order_of_input(parse_toml("[mesh]\ntype = \"annulus\"\ncell_order = \"hilbert\"\n")),
+              CellOrder::HILBERT);
+    EXPECT_EQ(cell_order_of_input(parse_toml("[mesh]\ntype = \"file\"\ncell_order = \"input\"\n")),
+              CellOrder::INPUT);
+}
+
 /**
  * @brief Numbering a rank's cells by locality permutes the owned cells and
  *        each halo layer among themselves and renumbers the faces, but every

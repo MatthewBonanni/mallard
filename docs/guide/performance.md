@@ -38,7 +38,7 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 
 ## Cell numbering {#cell-numbering}
 
-Each rank (and a serial run) numbers its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so memory locality no longer depends on how the mesh file numbers its cells (`[mesh] cell_order`, default `hilbert`). Results and output files are bitwise the same with either numbering. Milliseconds per step on one A100 (four in parentheses):
+Each rank (and a serial run) numbers the cells of a mesh file along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so memory locality no longer depends on how the file numbers its cells; generated meshes keep their x-first order (`[mesh] cell_order`, default `auto`; `hilbert` or `input` force either). Results and output files are bitwise the same with either numbering. Milliseconds per step on one A100 (four in parentheses):
 
 | Case | x-first (generated) | Hilbert | random file numbering, before 0.10.0 |
 |---|---:|---:|---:|
@@ -47,7 +47,7 @@ Each rank (and a serial run) numbers its cells along a Hilbert curve through the
 | 3D TENO5, 96³ hexahedra | 150 (40.9) | 143 (39.6) | 294 (72.2) |
 | 3D MUSCL, 1M tetrahedra | 33.0 (10.4) | 36.8 (11.3) | 198 (32.3) |
 
-On generated boxes, already numbered x first, the curve is within a few percent either way; MUSCL on structured tetrahedra is up to 11% faster with `cell_order = "input"`. Details: [design notes](../design/performance.md#cell-numbering).
+On generated boxes, already numbered x first, the curve is within a few percent either way, and up to 11% slower for MUSCL on structured tetrahedra, which is why `auto` keeps their order. Details: [design notes](../design/performance.md#cell-numbering).
 
 ## Chemistry {#chemistry}
 

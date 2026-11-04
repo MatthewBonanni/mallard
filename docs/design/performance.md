@@ -391,7 +391,8 @@ Notes:
 ## Cell numbering
 
 Each rank numbers its owned cells and each halo layer along the Hilbert curve of their vertex averages, and
-its faces in the order those cells reach them (`mpi.md`, section 6; `[mesh] cell_order`, default `hilbert`).
+its faces in the order those cells reach them (`mpi.md`, section 6; `[mesh] cell_order`). The default, `auto`,
+does so for mesh files and keeps the x-first order of generated meshes, which the table shows is as fast or faster.
 Before, a rank kept the global order, so a mesh file's numbering set the memory locality of every kernel.
 
 A100-80GB, ms per step (1 GPU / 4 GPUs of one node), the cases of the performance set at 1M cells and their
@@ -414,8 +415,8 @@ for locality and for a numbering against the partition; Hilbert gives the same o
   on four, where each rank's cells are fewer. The Hilbert numbering removes that dependence on the mesh file.
 - Against the x-first numbering of a generated box, the curve is 1-5% faster for TENO on hexahedra and
   quadrilaterals and up to 11% slower for MUSCL on tetrahedra: along x, consecutive cells' neighbors are
-  consecutive too, so a warp's loads coalesce, which a curve gives up at its turns. `cell_order = "input"` keeps
-  the generated order.
+  consecutive too, so a warp's loads coalesce, which a curve gives up at its turns. Hence `auto` keeps the
+  generated order.
 - Tried and not kept: reverse Cuthill-McKee on the vertex-neighbor graph (2-10% slower than the curve, e.g. 155 /
   43.8 ms for 3D TENO5 on hexahedra and 39.1 / 11.9 ms for MUSCL on tetrahedra), and the curve over tiles of 512
   or 4096 cells with the input order within each (MUSCL on tetrahedra 36.3 and 34.2 ms, others as the curve).

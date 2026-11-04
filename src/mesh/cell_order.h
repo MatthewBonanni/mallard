@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -27,10 +28,11 @@ enum class CellOrder {
     HILBERT  // along the Hilbert curve of the vertex averages
 };
 
-static const std::unordered_map<std::string, CellOrder> CELL_ORDERS = {{"input", CellOrder::INPUT},
-                                                                       {"hilbert", CellOrder::HILBERT}};
+// "auto" (nullopt) is hilbert for a mesh file and input for a generated mesh
+static const std::unordered_map<std::string, std::optional<CellOrder>> CELL_ORDERS = {
+    {"auto", std::nullopt}, {"input", CellOrder::INPUT}, {"hilbert", CellOrder::HILBERT}};
 
-/** @brief [mesh] cell_order (default hilbert). */
+/** @brief [mesh] cell_order (default auto). */
 CellOrder cell_order_of_input(const Input & input);
 
 /**

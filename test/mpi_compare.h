@@ -32,13 +32,15 @@
  */
 inline void expect_matches_serial(const std::string & input,
                                   const std::function<void(const Solver &)> & check_distributed = {}) {
+    Input distributed_input = parse_toml(input);
+    if (!distributed_input["mesh"].contains("cell_order")) distributed_input["mesh"]["cell_order"] = "hilbert";
     Solver distributed;
-    distributed.init(parse_toml(input));
+    distributed.init(distributed_input);
     distributed.run();
     distributed.copy_device_to_host();
     if (check_distributed) check_distributed(distributed);
 
-    // The reference keeps the global numbering; the distributed run numbers its cells by locality
+    // The reference keeps the global numbering; the distributed run numbers its cells along the curve
     Input serial_input = parse_toml(input);
     serial_input["mesh"]["cell_order"] = "input";
     Solver serial;
