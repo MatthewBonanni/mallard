@@ -289,6 +289,37 @@ void expect_within_relative_error(const std::vector<rtype> & rounded, const std:
 
 } // namespace
 
+TEST(IOTest, FinalSnapshotAtTStopOnTheSnapshotGridIsWrittenOnce) {
+    // 11 * 0.03 rounds below 0.33 in double and in single precision: the
+    // snapshot at that time is the one at t_stop, with no second one a
+    // round-off later
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    const std::string dir = (scratch_dir() / "mallard_final_snapshot").string();
+    std::filesystem::remove_all(dir);
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(
+        "[run]\nt_stop = 0.33\ndt = 0.01\n"
+        "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 2\nLx = 1.0\nLy = 1.0\n"
+        "[initialize]\ntype = \"constant\"\nu = [0.1, 0.0]\np = 1.0\nT = 1.0\n"
+        "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
+        "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+        "[numerics.face_reconstruction]\ntype = \"FO\"\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n"
+        "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\ntime_interval = 0.03\nvariables = [\"RHO\"]\n"));
+    solver.run();
+    EXPECT_TRUE(std::filesystem::exists(dir + "/f_000011.vtu"));
+    EXPECT_FALSE(std::filesystem::exists(dir + "/f_000012.vtu"));
+    const std::string pvd = file_contents(dir + "/f.pvd");
+    size_t n_listed = 0;
+    for (size_t at = 0; (at = pvd.find("<DataSet", at)) != std::string::npos; at++) n_listed++;
+    EXPECT_EQ(n_listed, 12u);
+    EXPECT_NEAR(solver.get_time(), 0.33, roundoff(1e-12));
+}
+
 TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
     // Uniform flow u = 0.1, a = sqrt(1.4) on 0.25 x 0.5 cells: the CFL = 1 time
     // step is 2 V / sum_f (|u_n| + a) A_f = 0.25 / (0.1 + 1.5 a)

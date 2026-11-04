@@ -2092,7 +2092,10 @@ int Solver::run() {
 std::string Solver::stop_reason() const {
     if (!control_stop.empty()) return control_stop;
     if (n_steps > 0 && step >= n_steps) return "n_steps = " + logging::count(n_steps) + " reached";
-    if (t_stop > 0 && t >= t_stop) return "t_stop = " + logging::real(double(t_stop)) + " reached";
+    // Within round-off: an output time n * time_interval that rounds just below t_stop lands there
+    if (t_stop > 0 && t >= t_stop - precision_tol(1e-9, 1e-5) * t_stop) {
+        return "t_stop = " + logging::real(double(t_stop)) + " reached";
+    }
     if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) {
         return "t_wall_stop = " + logging::duration(double(t_wall_stop)) + " reached";
     }
