@@ -20,6 +20,7 @@
 
 #include "example_inputs.h"
 #include "input.h"
+#include "memory_tracker.h"
 #include "numerics_preset.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -283,11 +284,14 @@ TEST(ExampleUnderPreset, EveryExampleHasAPreset) {
 TEST_P(ExampleUnderPreset, RunsAFewSteps) {
     const ExampleCase & c = GetParam();
     const Input input = example_under_preset(c, 3, N_DIM == 3 ? 8 : 16);
+    memory::Tracker tracker;
     Solver solver;
     solver.init(input);
     EXPECT_EQ(solver.get_numerics_preset().name, c.preset);
     solver.run();
     EXPECT_EQ(solver.get_step(), 3u);
+    // mallard check's memory breakdown names every allocation: give new labels a rule in memory_tracker.cpp
+    EXPECT_EQ(tracker.unclassified(), std::vector<std::string>{});
 }
 
 INSTANTIATE_TEST_SUITE_P(Examples, ExampleUnderPreset, ::testing::ValuesIn(examples_of_this_build()), param_name);

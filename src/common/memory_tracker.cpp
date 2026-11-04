@@ -47,10 +47,10 @@ constexpr Rule RULES[] = {
     {"teno_n_troubled", false, C::FACES}, {"teno_selection", false, C::FACES}, {"cell_transport", false, C::FACES},
     {"cell_diffusion", false, C::FACES}, {"transport_values", false, C::FACES},
     {"transport_gradients", false, C::FACES},
-    // TENO setup: device-sized batches and scratch, then its other workspace
-    {"teno_batch_", true, C::SETUP_BATCHES}, {"teno_setup_", true, C::SETUP}, {"teno_moments_rows", false, C::SETUP},
+    // TENO setup's workspace
+    {"teno_batch_", true, C::SETUP}, {"teno_setup_", true, C::SETUP}, {"teno_moments_rows", false, C::SETUP},
     {"teno_rows", false, C::SETUP}, {"teno_boxes", false, C::SETUP}, {"teno_cell_rule", false, C::SETUP},
-    {"teno_pack_starts", false, C::SETUP}, {"teno_large_size_rows", false, C::SETUP},
+    {"teno_pack_", true, C::SETUP}, {"teno_large_size_rows", false, C::SETUP},
     {"teno_small_size_rows", false, C::SETUP}, {"teno_scale_rows", false, C::SETUP},
     {"teno_basis_mean_rows", false, C::SETUP}, {"teno_si_rows", false, C::SETUP},
     {"teno_entry_rotations", false, C::SETUP}, {"teno_boundary_faces", false, C::SETUP},
@@ -70,10 +70,10 @@ constexpr Rule RULES[] = {
     {"timed_", true, C::MODELS}, {"average_pressure_faces", false, C::MODELS}, {"outlet_", true, C::MODELS},
     {"sponge_", true, C::MODELS}, {"source_", true, C::MODELS}, {"SOURCE", false, C::MODELS},
     {"les_", true, C::MODELS}, {"dynamic_halo", true, C::HALO}, {"dynamic_", true, C::MODELS},
-    {"tfles_halo", true, C::HALO}, {"tfles_", true, C::MODELS}, {"budget_", true, C::MODELS},
+    {"tfles_halo", true, C::HALO}, {"tfles_", true, C::MODELS}, {"budget_", true, C::MODELS}, {"mass_flow_", true, C::MODELS},
     {"inflow_", true, C::MODELS}, {"wall_", true, C::MODELS}, {"expr_", true, C::MODELS},
     // Chemistry, thermodynamics and transport
-    {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_", true, C::CHEMISTRY},
+    {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", false, C::WORK}, {"chem_pivot", false, C::WORK}, {"chem_", true, C::CHEMISTRY},
     {"chemistry_", true, C::CHEMISTRY}, {"thermo_", true, C::CHEMISTRY}, {"transport_", true, C::CHEMISTRY},
     {"production", false, C::CHEMISTRY}, {"hrr", false, C::CHEMISTRY}, {"radiation_", true, C::CHEMISTRY},
     // Statistics, probes and run health
@@ -96,13 +96,19 @@ constexpr Rule RULES[] = {
 constexpr const char * NAMES[N_CATEGORIES] = {
     "solution and stages",  "faces and gradients",  "reconstruction tables", "mesh and geometry",
     "boundaries and models", "chemistry",           "diagnostics",           "output staging",
-    "halo buffers",          "setup",               "setup batches",         "Kokkos runtime",
+    "halo buffers",          "work memory",         "setup",                 "Kokkos runtime",
     "other",
+};
+
+struct Space {
+    Usage usage;
+    uint64_t phase_peak = 0;
+    Bytes at_phase_peak{};
 };
 
 struct State {
     bool active = false;
-    Usage spaces[2];  // device, host
+    Space spaces[2];  // device, host
     std::unordered_map<const void *, std::pair<int, std::pair<uint64_t, Category>>> live;
     std::set<std::string> unclassified;
     Kokkos::Tools::Experimental::EventSet previous{};
@@ -125,12 +131,17 @@ void on_allocate(const Kokkos::Profiling::SpaceHandle handle, const char * label
     const Category c = category(label);
     if (c == Category::OTHER) state.unclassified.insert(label);
     state.live[ptr] = {s, {size, c}};
-    Usage & u = state.spaces[s];
+    Space & space = state.spaces[s];
+    Usage & u = space.usage;
     u.current += size;
     u.by_category[static_cast<size_t>(c)] += size;
     if (u.current > u.peak) {
         u.peak = u.current;
         u.at_peak = u.by_category;
+    }
+    if (u.current > space.phase_peak) {
+        space.phase_peak = u.current;
+        space.at_phase_peak = u.by_category;
     }
 }
 
@@ -139,7 +150,7 @@ void on_deallocate(const Kokkos::Profiling::SpaceHandle handle, const char * lab
     if (state.previous.deallocate_data) state.previous.deallocate_data(handle, label, ptr, size);
     const auto it = state.live.find(ptr);
     if (it == state.live.end()) return;
-    Usage & u = state.spaces[it->second.first];
+    Usage & u = state.spaces[it->second.first].usage;
     u.current -= it->second.second.first;
     u.by_category[static_cast<size_t>(it->second.second.second)] -= it->second.second.first;
     state.live.erase(it);
@@ -149,7 +160,7 @@ void on_deallocate(const Kokkos::Profiling::SpaceHandle handle, const char * lab
 
 const char * category_name(const Category c) { return NAMES[static_cast<size_t>(c)]; }
 
-bool scales_with_cells(const Category c) { return c != Category::SETUP_BATCHES && c != Category::RUNTIME; }
+bool scales_with_cells(const Category c) { return c != Category::SETUP && c != Category::WORK && c != Category::RUNTIME; }
 
 Category category(const std::string_view label) {
     // Host copies of device views (create_mirror, create_mirror_view in device builds)
@@ -177,14 +188,39 @@ Tracker::~Tracker() {
     state = State();
 }
 
-Usage Tracker::device() const { return state.spaces[0]; }
+namespace {
 
-Usage Tracker::host() const { return state.spaces[1]; }
+Usage usage(const Space & space) {
+    Usage u = space.usage;
+    u.phases.push_back(space.at_phase_peak);
+    return u;
+}
+
+void start_phase(Space & space) {
+    space.phase_peak = space.usage.current;
+    space.at_phase_peak = space.usage.by_category;
+}
+
+} // namespace
+
+void end_phase() {
+    if (!state.active) return;
+    for (Space & space : state.spaces) {
+        space.usage.phases.push_back(space.at_phase_peak);
+        start_phase(space);
+    }
+}
+
+Usage Tracker::device() const { return usage(state.spaces[0]); }
+
+Usage Tracker::host() const { return usage(state.spaces[1]); }
 
 void Tracker::reset_peak() {
-    for (Usage & u : state.spaces) {
-        u.peak = u.current;
-        u.at_peak = u.by_category;
+    for (Space & space : state.spaces) {
+        space.usage.peak = space.usage.current;
+        space.usage.at_peak = space.usage.by_category;
+        space.usage.phases.clear();
+        start_phase(space);
     }
 }
 

@@ -19,6 +19,9 @@
 #include "memory_tracker.h"
 #include "mesh_quality.h"
 
+/** @brief The share of the memory per rank that sizing keeps free (fragmentation, allocations in the run). */
+constexpr double SIZING_MARGIN = 0.05;
+
 struct CheckOptions {
     int ranks = 0;              // ranks to estimate memory and cost for (0: this run's)
     double throughput = 0.0;    // cells/s (cell updates per wall second) per rank; 0: steps or none
@@ -68,6 +71,7 @@ struct CheckReport {
     uint64_t device_capacity = 0;  // bytes, 0 if unknown
     memory::Bytes setup_bytes{};   // largest rank by category: at the setup's peak
     memory::Bytes steady_bytes{};  // after setup, or at the peak of the timed steps
+    std::vector<memory::Bytes> setup_phases;  // at the peak of each phase of the setup
     uint64_t outside_kokkos = 0;   // device memory beyond Kokkos' allocations (CUDA context, libraries), measured
 
     // Sizing for options.memory (or the device): the largest rank's peak against the memory per rank
@@ -77,7 +81,7 @@ struct CheckReport {
     uint64_t sizing_overhead = 0;  // outside Kokkos per rank (CUDA context), measured or nominal
     bool overhead_measured = false;
     double bytes_per_cell = 0.0;   // of the peak that limits the cells per rank, cell-proportional categories
-    uint64_t fixed_bytes = 0;      // the rest: sized by the device, not the mesh
+    uint64_t fixed_bytes = 0;      // the rest (memory::scales_with_cells)
     bool sizing_setup = false;     // the setup's peak limits the cells per rank, else the steady state
     uint64_t max_local_cells = 0;  // owned and halo cells per rank that fit
     int min_ranks = 0;             // fewest ranks the mesh fits on, 0 if not found
@@ -103,6 +107,13 @@ struct CheckReport {
  *        (a100-40, a100-80, h100-80, h200, mi250x, mi300x). Returns an error, or empty.
  */
 std::string set_memory_target(const std::string & text, CheckOptions & options);
+
+/**
+ * @brief The peak of Kokkos allocations predicted for a rank of local_cells owned and halo cells: the largest
+ *        of the peaks of the setup's phases and the steady state, each proportional to the cells but for the categories
+ *        that are not (memory::scales_with_cells); for a GPU from a host check, without the output staging.
+ */
+double predicted_peak(const CheckReport & report, double local_cells);
 
 /** @brief Print a report on rank 0. */
 void print_check(const CheckReport & report);

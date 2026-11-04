@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <numeric>
 #include <numbers>
 #include <sstream>
 #include <string>
@@ -258,6 +259,82 @@ TEST(CheckMemory, MeasuresAllocationsAndScalesThemToTheTargetRanks) {
     EXPECT_NEAR(double(r.target_bytes), per_cell * double(r.target_owned + r.target_halo), 1.0);
 }
 
+namespace {
+
+/** @brief The box at Nx x Ny cells (x 2 in 3D), with TENO3 or first order. */
+std::string sized_box(const int nx, const int ny, const bool teno = true) {
+    std::string input =
+        box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
+            teno ? "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n" : "");
+    const std::string mesh = "Nx = 16\nNy = 8\n";
+    input.replace(input.find(mesh), mesh.size(), "Nx = " + std::to_string(nx) + "\nNy = " + std::to_string(ny) + "\n");
+    return input;
+}
+
+uint64_t sum(const memory::Bytes & b) { return std::accumulate(b.begin(), b.end(), uint64_t(0)); }
+
+} // namespace
+
+TEST(CheckMemory, CategoriesSumToTheTotalsAndNameEveryAllocation) {
+    if (comm::size() > 1) GTEST_SKIP() << "one rank's allocations";
+    const CheckReport r = check(sized_box(16, 8));
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_EQ(sum(r.setup_bytes), r.bytes_peak);
+    EXPECT_EQ(sum(r.steady_bytes), r.bytes);
+    EXPECT_EQ(r.setup_bytes[size_t(memory::Category::OTHER)], 0u);
+    EXPECT_GT(r.steady_bytes[size_t(memory::Category::TABLES)], 0u);
+    // The setup's workspace is freed by the time stepping
+    EXPECT_GT(r.setup_bytes[size_t(memory::Category::SETUP)], 0u);
+    EXPECT_EQ(r.steady_bytes[size_t(memory::Category::SETUP)], 0u);
+}
+
+TEST(CheckMemory, PeakPredictedFromACoarseMeshMatchesTheMeasuredOne) {
+    if (comm::size() > 1) GTEST_SKIP() << "one rank's allocations";
+    // From 16,384 cells, the size of the initial solution's chunks, to four times as many along x (the same
+    // share of cells near the walls across y and z, whose TENO stencils are smaller)
+    const int ny = N_DIM == 2 ? 128 : 64;
+    const CheckReport coarse = check(sized_box(128, ny)), fine = check(sized_box(512, ny));
+    ASSERT_TRUE(coarse.ok() && fine.ok());
+    const double predicted = predicted_peak(coarse, double(fine.local_cells));
+    EXPECT_NEAR(predicted, double(fine.bytes_peak), 0.05 * double(fine.bytes_peak));
+}
+
+TEST(CheckSizing, FewestRanksTheMeshFitsOn) {
+    if (comm::size() > 1) GTEST_SKIP() << "partitions the whole mesh";
+    const std::string input = sized_box(256, 64, false);
+    CheckOptions options;
+    options.memory = 1ull << 40;
+    options.memory_name = "1TiB";
+    const CheckReport whole = check(input, options);
+    ASSERT_TRUE(whole.ok());
+    EXPECT_EQ(whole.min_ranks, 1);
+    EXPECT_GT(whole.max_local_cells, whole.n_cells);
+    // Room for a third of the cells: three parts with their halos do not fit, four do
+    const double third = predicted_peak(whole, double(whole.n_cells) / 3.0);
+    options.memory = static_cast<uint64_t>(third / (1.0 - SIZING_MARGIN));
+    const CheckReport r = check(input, options);
+    ASSERT_TRUE(r.ok());
+    EXPECT_EQ(r.min_ranks, 4);
+    EXPECT_GT(r.min_halo, 0u);
+    EXPECT_LE(double(r.min_peak), third);
+    EXPECT_NEAR(double(r.min_peak), predicted_peak(r, double(r.min_owned + r.min_halo)), 1.0);
+    EXPECT_NEAR(double(r.max_local_cells), double(whole.n_cells) / 3.0, 1.0);
+}
+
+TEST(CheckSizing, MemoryIsASizeWithItsUnitOrAGpu) {
+    CheckOptions options;
+    EXPECT_EQ(set_memory_target("40GB", options), "");
+    EXPECT_EQ(options.memory, 40'000'000'000u);
+    EXPECT_EQ(set_memory_target("512MiB", options), "");
+    EXPECT_EQ(options.memory, 512u << 20);
+    EXPECT_EQ(set_memory_target("A100-80", options), "");
+    EXPECT_EQ(options.memory_name, "A100-80GB");
+    EXPECT_TRUE(options.memory_gpu);
+    EXPECT_NE(set_memory_target("40", options).find("a100-40"), std::string::npos);
+    EXPECT_NE(set_memory_target("-3GB", options), "");
+    EXPECT_NE(set_memory_target("a100", options), "");
+}
+
 TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     const std::filesystem::path dir = scratch_dir() / "mallard_check_files";
     if (comm::is_root()) std::filesystem::remove_all(dir);
@@ -404,6 +481,11 @@ TEST(MemoryTracker, CountsLiveAllocationsAndThePeak) {
     }
     EXPECT_EQ(usage().current, 0u);
     EXPECT_GE(usage().peak, 32000u);
+    EXPECT_EQ(tracker.unclassified(), (std::vector<std::string>{"a", "b"}));
+    Kokkos::View<double *> c("conservatives", 500);
+    tracker.reset_peak();
+    EXPECT_EQ(usage().peak, usage().current);
+    EXPECT_GE(usage().at_peak[size_t(memory::Category::STATE)], 4000u);
 }
 
 TEST(CheckRegions, ListsEveryRegionWithItsDimensionMeasureAndCells) {

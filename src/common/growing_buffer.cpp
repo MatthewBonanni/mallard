@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include <Kokkos_Core.hpp>
 
@@ -86,7 +87,9 @@ CUmemAllocationProp properties(const int device) {
 
 bool GrowingBuffer::supported() { return true; }
 
-GrowingBuffer::GrowingBuffer(const size_t max_bytes) {
+Kokkos::Tools::SpaceHandle device_space() { return Kokkos::Tools::make_space_handle(Kokkos::CudaSpace::name()); }
+
+GrowingBuffer::GrowingBuffer(const size_t max_bytes, std::string label_) : label(std::move(label_)) {
     if (cudaGetDevice(&device) != cudaSuccess) throw std::runtime_error("GrowingBuffer: cudaGetDevice failed");
     const CUmemAllocationProp prop = properties(device);
     check(driver().granularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), "cuMemGetAllocationGranularity");
@@ -101,6 +104,7 @@ GrowingBuffer::~GrowingBuffer() {
     Kokkos::fence("GrowingBuffer");
     size_t offset = 0;
     for (size_t k = 0; k < handles.size(); k++) {
+        Kokkos::Tools::deallocateData(device_space(), label, reinterpret_cast<void *>(base + offset), sizes[k]);
         driver().unmap(base + offset, sizes[k]);
         driver().release(handles[k]);
         offset += sizes[k];
@@ -122,6 +126,7 @@ void GrowingBuffer::ensure(const size_t bytes) {
     access.location = prop.location;
     access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     check(driver().set_access(base + mapped, size, &access, 1), "cuMemSetAccess");
+    Kokkos::Tools::allocateData(device_space(), label, reinterpret_cast<void *>(base + mapped), size);
     mapped += size;
 }
 
@@ -129,7 +134,7 @@ void GrowingBuffer::ensure(const size_t bytes) {
 
 bool GrowingBuffer::supported() { return false; }
 
-GrowingBuffer::GrowingBuffer(size_t) { throw std::logic_error("GrowingBuffer: CUDA builds only"); }
+GrowingBuffer::GrowingBuffer(size_t, std::string) { throw std::logic_error("GrowingBuffer: CUDA builds only"); }
 
 GrowingBuffer::~GrowingBuffer() {}
 

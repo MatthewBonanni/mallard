@@ -13,6 +13,7 @@
 #define GROWING_BUFFER_H
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 /**
@@ -21,14 +22,15 @@
  *        demand (CUDA virtual memory management). A table whose final size
  *        is known only once it is complete can then go to the device piece
  *        by piece, without being staged whole on the host or copied when it
- *        grows. Only CUDA builds have it (supported()).
+ *        grows. Its pages count as allocations of label for Kokkos' tools
+ *        (memory::Tracker). Only CUDA builds have it (supported()).
  */
 class GrowingBuffer {
     public:
         static bool supported();
 
         /** @brief Reserve addresses for up to max_bytes; nothing is mapped yet. */
-        explicit GrowingBuffer(size_t max_bytes);
+        GrowingBuffer(size_t max_bytes, std::string label);
         ~GrowingBuffer();
         GrowingBuffer(const GrowingBuffer &) = delete;
         GrowingBuffer & operator=(const GrowingBuffer &) = delete;
@@ -39,6 +41,7 @@ class GrowingBuffer {
         void * data() const { return reinterpret_cast<void *>(base); }
 
     private:
+        std::string label;
         unsigned long long base = 0;
         [[maybe_unused]] size_t reserved = 0;
         [[maybe_unused]] size_t mapped = 0;

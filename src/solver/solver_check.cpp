@@ -40,10 +40,10 @@ std::string error_text(const std::exception & e) {
 
 std::string bytes(const double b) { return logging::si(b) + "B"; }
 
-// Sizing: CUDA's context and libraries outside Kokkos when not measured (A100, CUDA 12.9; see
-// docs/design/performance.md), the memory kept free, and the halo the recommended ranks stay below
-constexpr uint64_t CUDA_CONTEXT_BYTES = 600'000'000;
-constexpr double SIZING_MARGIN = 0.05;
+// Sizing: the device memory outside Kokkos when not measured, CUDA's context and the local memory of
+// kernels with large stacks (A100, CUDA 12.9: 1.5 GB in 2D, 2.1 GB in 3D; see docs/design/performance.md),
+// and the halo the recommended ranks stay below
+constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'000;
 constexpr double HALO_FRACTION = 0.1;
 
 std::string point(const std::array<double, N_DIM> & x) {
@@ -208,7 +208,7 @@ memory::Bytes of_largest_rank(const memory::Bytes & local, const uint64_t key) {
     return comm::allreduce(mine, comm::Op::SUM);
 }
 
-/** @brief Device memory in use beyond Kokkos' own allocations: CUDA's context and libraries. */
+/** @brief Device memory in use beyond Kokkos' own allocations: CUDA's context, libraries and kernels' local memory. */
 uint64_t outside_kokkos([[maybe_unused]] const uint64_t kokkos_bytes) {
     size_t free_bytes = 0, total_bytes = 0;
 #if defined(KOKKOS_ENABLE_CUDA)
@@ -221,6 +221,41 @@ uint64_t outside_kokkos([[maybe_unused]] const uint64_t kokkos_bytes) {
 }
 
 } // namespace
+
+namespace {
+
+/** @brief A snapshot's bytes: proportional to the rank's cells, except those sized by the device. */
+struct Model {
+    double per_cell = 0.0;
+    double fixed = 0.0;
+    double at(const double n) const { return per_cell * n + fixed; }
+};
+
+Model model(const CheckReport & r, const memory::Bytes & b) {
+    const double cells = static_cast<double>(std::max<uint64_t>(r.local_cells, 1));
+    Model m;
+    for (size_t c = 0; c < memory::N_CATEGORIES; c++) {
+        // A GPU keeps the output staging in host memory, and sizes its work memory for its many threads
+        const bool host_for_gpu = r.sizing_gpu && !r.device_memory;
+        if (host_for_gpu && memory::Category(c) == memory::Category::OUTPUT) continue;
+        if (host_for_gpu && memory::Category(c) == memory::Category::WORK && b[c] > 0) {
+            m.fixed += static_cast<double>(std::max(b[c], memory::MAX_WORK_BYTES));
+        } else if (memory::scales_with_cells(memory::Category(c))) {
+            m.per_cell += static_cast<double>(b[c]) / cells;
+        } else {
+            m.fixed += static_cast<double>(b[c]);
+        }
+    }
+    return m;
+}
+
+} // namespace
+
+double predicted_peak(const CheckReport & r, const double local_cells) {
+    double peak = model(r, r.steady_bytes).at(local_cells);
+    for (const memory::Bytes & phase : r.setup_phases) peak = std::max(peak, model(r, phase).at(local_cells));
+    return peak;
+}
 
 PartSize Solver::check_part(const DistributedMesh & whole, const int n_ranks) const {
     const std::string method = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
@@ -242,6 +277,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
     r.bytes_peak = comm::allreduce(usage.peak, comm::Op::MAX);
     r.setup_bytes = of_largest_rank(usage.at_peak, usage.peak);
     r.steady_bytes = of_largest_rank(usage.by_category, usage.peak);
+    for (const memory::Bytes & phase : usage.phases) r.setup_phases.push_back(of_largest_rank(phase, usage.peak));
     r.local_cells = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_cells) : 0, comm::Op::MAX);
     r.ranks = comm::size();
     r.target_ranks = options.ranks > 0 ? options.ranks : r.ranks;
@@ -295,35 +331,20 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
         r.overhead_measured = r.outside_kokkos > 0;
         r.sizing_overhead = r.overhead_measured ? r.outside_kokkos : CUDA_CONTEXT_BYTES;
     }
-    // Each snapshot's bytes: proportional to the rank's cells, except those sized by the device
-    struct Model {
-        double per_cell = 0.0;
-        double fixed = 0.0;
-        double at(const double n) const { return per_cell * n + fixed; }
-    };
-    auto model = [&](const memory::Bytes & b) {
-        Model m;
-        for (size_t c = 0; c < memory::N_CATEGORIES; c++) {
-            if (memory::scales_with_cells(memory::Category(c))) {
-                m.per_cell += static_cast<double>(b[c]) / static_cast<double>(r.local_cells);
-            } else {
-                m.fixed += static_cast<double>(b[c]);
-            }
-        }
-        return m;
-    };
-    const Model at_setup = model(r.setup_bytes), at_steady = model(r.steady_bytes);
     const double overhead = static_cast<double>(r.sizing_overhead);
-    auto peak = [&](const double n) { return std::max(at_setup.at(n), at_steady.at(n)) + overhead; };
+    auto peak = [&](const double n) { return predicted_peak(r, n) + overhead; };
     const double usable = (1.0 - SIZING_MARGIN) * static_cast<double>(r.sizing_memory);
     double n_max = std::numeric_limits<double>::infinity();
-    for (const Model * m : {&at_setup, &at_steady}) {
-        const double n_fit = (usable - overhead - m->fixed) / m->per_cell;
-        if (m->per_cell <= 0.0 || n_fit >= n_max) continue;
+    std::vector<memory::Bytes> snapshots = r.setup_phases;
+    snapshots.push_back(r.steady_bytes);
+    for (size_t k = 0; k < snapshots.size(); k++) {
+        const Model m = model(r, snapshots[k]);
+        const double n_fit = (usable - overhead - m.fixed) / m.per_cell;
+        if (m.per_cell <= 0.0 || n_fit >= n_max) continue;
         n_max = n_fit;
-        r.bytes_per_cell = m->per_cell;
-        r.fixed_bytes = static_cast<uint64_t>(m->fixed);
-        r.sizing_setup = m == &at_setup;
+        r.bytes_per_cell = m.per_cell;
+        r.fixed_bytes = static_cast<uint64_t>(m.fixed);
+        r.sizing_setup = k + 1 < snapshots.size();
     }
     if (!(n_max >= 1.0)) return;
     r.max_local_cells = static_cast<uint64_t>(n_max);
@@ -386,6 +407,11 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
         const memory::Usage usage = r.device_memory ? tracker.device() : tracker.host();
         const uint64_t peak = comm::allreduce(usage.peak, comm::Op::MAX);
         r.steady_bytes = of_largest_rank(usage.at_peak, usage.peak);
+        // The time stepping's kernels add their local memory to CUDA's reservation
+        if (r.device_memory) {
+            r.outside_kokkos =
+                std::max(r.outside_kokkos, comm::allreduce(outside_kokkos(usage.current), comm::Op::MAX));
+        }
         if (peak > r.bytes_peak) {
             r.target_bytes_peak = static_cast<uint64_t>(static_cast<double>(r.target_bytes_peak) *
                                                         static_cast<double>(peak) / static_cast<double>(r.bytes_peak));
@@ -595,11 +621,11 @@ void print_breakdown(const CheckReport & r) {
         item("", format("%-22s %7s / %-7s", memory::category_name(memory::Category(c)), bytes(a).c_str(),
                         bytes(b).c_str()) +
                      (per_cell ? format("  %s / %s per cell", bytes(a / cells).c_str(), bytes(b / cells).c_str())
-                               : std::string("  sized by the device")));
+                               : std::string("  not proportional to the cells")));
     }
     if (r.outside_kokkos > 0) {
         item("", format("%-22s %7s", "outside Kokkos", bytes(double(r.outside_kokkos)).c_str()) +
-                     "  CUDA's context and libraries, after setup");
+                     "  CUDA's context and kernels' local memory, the most measured");
     }
 }
 
@@ -613,7 +639,7 @@ void print_sizing(const CheckReport & r) {
     std::string what = r.sizing_name + ": " + bytes(double(r.sizing_memory)) + " per " + unit + ", " +
                        format("%.0f%%", 100.0 * SIZING_MARGIN) + " kept free";
     if (r.sizing_gpu) {
-        what += ", " + bytes(double(r.sizing_overhead)) + " for CUDA's context" +
+        what += ", " + bytes(double(r.sizing_overhead)) + " outside Kokkos" +
                 (r.overhead_measured ? " (measured)" : " (typical)");
     }
     item(r.sizing_gpu ? "GPU sizing" : "Rank sizing", what);
@@ -623,7 +649,7 @@ void print_sizing(const CheckReport & r) {
     }
     item("", "at most " + count(r.max_local_cells) + " cells per " + unit + ", halo included (" +
                  bytes(r.bytes_per_cell) + " per cell" +
-                 (r.fixed_bytes > 0 ? " + " + bytes(double(r.fixed_bytes)) + " sized by the device" : "") +
+                 (r.fixed_bytes > 0 ? " + " + bytes(double(r.fixed_bytes)) : "") +
                  (r.sizing_setup ? " at the setup's peak)" : " in the steady state)"));
     if (r.min_ranks == 0) {
         item("", logging::style("no partition into a few thousand parts fits", logging::Style::RED));
