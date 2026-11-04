@@ -385,13 +385,13 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
 
 TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
     SKIP_UNDER_MPI();
-    const Result catalog = run({"list", "fields"});
+    const Result catalog = run({"list", "fields"}, true);
     EXPECT_EQ(catalog.status, 0) << catalog.err;
     for (const char * part : {"== Fields: conservative", "MEAN_<A>", "MU_T", "needs [les]", "kg m-3"}) {
         EXPECT_TRUE(contains(catalog.out, part)) << part << "\n" << catalog.out;
     }
     ASSERT_EQ(small_run().status, 0);
-    const Result listed = run({"list", "fields", "small.toml", "--json"});
+    const Result listed = run({"list", "fields", "small.toml", "--json"}, true);
     ASSERT_EQ(listed.status, 0) << listed.err;
     const json::Value v = json::parse(listed.out);
     EXPECT_EQ(v["dim"].number, Mallard_DIM);
@@ -415,14 +415,14 @@ TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
     ASSERT_NE(mixture.find(relative), std::string::npos);
     mixture.replace(mixture.find(relative), relative.size(), "\"" + source_dir() + "/mechanisms/h2o2.yaml\"");
     std::ofstream("mixture.toml") << mixture;
-    const Result r = run({"list", "species", "mixture.toml"});
+    const Result r = run({"list", "species", "mixture.toml"}, true);
     EXPECT_EQ(r.status, 0) << r.err;
     EXPECT_EQ(r.out, "H2\nH\nO\nO2\nOH\nH2O\nHO2\nH2O2\nAR\nN2\n");
     ASSERT_EQ(small_run().status, 0);
-    const Result gas = run({"list", "species", "small.toml"});
+    const Result gas = run({"list", "species", "small.toml"}, true);
     EXPECT_EQ(gas.status, 0) << gas.err;
     EXPECT_TRUE(contains(gas.out, "a single gas, no species")) << gas.out;
-    const Result broken = run({"list", "species", "missing.toml"});
+    const Result broken = run({"list", "species", "missing.toml"}, true);
     EXPECT_EQ(broken.status, 1);
 }
 
