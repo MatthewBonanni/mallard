@@ -28,7 +28,6 @@ set -u
 
 MALLARD=mallard                    # <mallard, or the path to it>
 INPUT=input.toml
-RESTARTS='restart_*.restart'       # <the restart files the run writes; the newest is resumed from>
 MAX_JOBS=20                        # resubmit at most this many times
 
 # module load <the compiler, MPI and CUDA that Mallard was built with>
@@ -42,9 +41,8 @@ MAX_JOBS=20                        # resubmit at most this many times
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=spread OMP_PLACES=threads
 
-args=(-i "$INPUT")
-latest=$(ls -1t $RESTARTS 2>/dev/null | head -n 1)
-[ -n "$latest" ] && args+=(--restart "$latest")
+# The newest complete restart file, or the input's [initialize] on the first job
+args=(-i "$INPUT" --restart latest)
 
 # Every rank sees every GPU of the node (no --gpus-per-task): Mallard picks
 # one per rank, and GPU-aware MPI can copy between them directly

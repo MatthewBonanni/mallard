@@ -480,7 +480,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 
 | Key | Description |
 |---|---|
-| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh). `Mallard -i input.toml --restart FILE` replaces the whole table by `type = "restart"`, `file = FILE`, so one input serves both the first run and its continuations |
+| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh). `mallard -i input.toml --restart FILE` replaces the whole table by `type = "restart"`, `file = FILE`, so one input serves both the first run and its continuations; `--restart latest` takes the newest complete restart file the run wrote, or keeps the table if there is none ([resuming](guide/initialization.md#resuming-from-the-newest-restart)) |
 | `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
