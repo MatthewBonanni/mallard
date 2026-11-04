@@ -33,7 +33,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
@@ -1023,7 +1023,8 @@ ranks. A probe that is not due costs nothing.
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
 | `file` | Output file, default `probe_<name>.csv`, `.h5`, `.vtkhdf` or `.pvd` |
 | `samples` | `false` writes only the reductions (default `true`) |
-| `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below); default none, and `["integral", "mean", "min", "max"]` with `region` |
+| `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms`, and for boundary probes `moment` (below); default none, and `["integral", "mean", "min", "max"]` with `region` |
+| `moment_center` | Point about which `moment` takes the moments, default the origin |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
 | `scale`, `rotate`, `pivot`, `translate` | Transform of the geometry, as for [regions](#regions): scaled (a factor, or one per axis), then rotated (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`), both about `pivot` (default the origin), then translated |
 
@@ -1124,12 +1125,24 @@ have:
 | `CP` | `(p - p_ref) / q_ref` |
 | `Q_W` | Heat flux into the fluid, `kappa dT/dn` (the convention of `wall_heat_flux`): zero on adiabatic walls, `q` on heat-flux walls |
 | `U_TAU`, `Y_PLUS` | `sqrt(TAU_W / rho_w)` and `rho_w U_TAU d / mu_w`, `d` the distance from the face to its cell's centroid |
+| `ENERGY_DIFFUSIVE_FLUX` | `-(u . tau . n + kappa dT/dn) + sum_k h_k j_k . n`, the scheme's molecular diffusive energy flux out of the domain: viscous work, conduction and, for mixtures, the enthalpy the species carry |
+| `ENERGY_TOTAL_FLUX` | `ENTHALPY_FLUX + ENERGY_DIFFUSIVE_FLUX` |
+| `SPECIES_DIFFUSIVE_FLUX_<species>` (`SPECIES_DIFFUSIVE_FLUX_*`) | `j_k . n`, the scheme's molecular diffusive mass flux out of the domain (mixture-averaged with the correction velocity, Soret included; see [Thermochemistry](guide/thermochemistry.md)); they sum to zero over the species |
+| `SPECIES_TOTAL_FLUX_<species>` (`SPECIES_TOTAL_FLUX_*`) | `SPECIES_FLUX_<species> + SPECIES_DIFFUSIVE_FLUX_<species>` |
+| `WALL_MODEL_U`, `WALL_MODEL_T`, `WALL_MODEL_H` | On walls with a [`wall_model`](#wall-models-wall_model): the tangential speed relative to the wall and the temperature at the exchange point, and its height; 0 on other faces |
 
 The gradients are the least-squares ones of the viscous flux, with its wall
 treatment (normal derivatives from the wall velocity and temperature), and
 the viscosity and conductivity those of the face (mixtures: of the cell), so
 that `integral` of `TRACTION_PRESSURE` and `TRACTION_VISCOUS` with
-`sampling = "cell"` gives the forces of `[[forces]]`. In axisymmetric runs a
+`sampling = "cell"` gives the forces of `[[forces]]`. On walls with a wall
+model, `TRACTION_VISCOUS`, `TAU_W`, `CF`, `U_TAU`, `Y_PLUS` and `Q_W` are the
+model's, on the current state (`integral` of `Q_W` is `[[forces]]`'s `Q`). The
+diffusive fluxes are those of the viscous flux on each face, with its
+boundary treatment: walls and symmetry planes carry no species flux,
+transmissive faces their image face's, `inlet_state` faces the cell's
+gradients, and outflow faces without an image none; they are molecular (no
+SGS part with LES). In axisymmetric runs a
 face's `area` and the `integral` reductions are per radian of the revolved
 wall (`area` is `r` times the face length, the reductions' column `area`), as
 `[[forces]]` is. `TAU_W`, `Q_W` and the
@@ -1172,7 +1185,12 @@ continues them.
 `<reduction>_<variable>` for each reduction and variable: `integral` is
 `int q ds`, `mean` `int q ds / int ds`, `favre` the density-weighted mean
 `int rho q ds / int rho ds`, `rms` `sqrt(int q^2 ds / int ds)`, and `min`, `max`
-the extrema over the samples and the integration points. Curves integrate
+the extrema over the samples and the integration points. `moment` (boundary
+probes) gives, for each vector variable listed with all its components
+(`TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `MOMENTUM_FLUX`, `TAU_W_*`), its moment
+`int (x - moment_center) x q ds` over the faces with their one-point rule, in
+columns `moment_<variable>_<X,Y,Z>` (2D: `_Z` only), so that the moments of
+the tractions are those of the `[[forces]]` forces. Curves integrate
 with three Gauss points on each element between consecutive samples (exact for
 polynomials of degree 5 along straight elements), boundaries with one point
 per face (the face measure), points with unit weights

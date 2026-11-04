@@ -16,6 +16,8 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <iomanip>
 #include <map>
 #include <numbers>
 #include <sstream>
@@ -24,9 +26,11 @@
 #include <vector>
 
 #include "comm.h"
+#include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "file_format.h"
 #include "input.h"
+#include "mechanism.h"
 #include "probe_geometry.h"
 #include "region.h"
 #include "region_mesh.h"
@@ -35,6 +39,7 @@
 #include "solver.h"
 #include "test_fixtures.h"
 #include "test_utils.h"
+#include "transport.h"
 
 #ifdef Mallard_HAS_HDF5
 #include "hdf5_output.h"
@@ -618,20 +623,25 @@ const char * const MEASURE = N_DIM == 2 ? "length" : "area";
 TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
     // The wall values are the walls'; the shear stress and the heat flux,
     // from the one-sided wall gradients of the viscous flux, converge at first
-    // order (the shear stress's only error is u = <rho u> / <rho> of the cells)
+    // order (the shear stress's only error is u = <rho u> / <rho> of the cells),
+    // and so does the diffusive energy flux out of the fluid: the heat it loses
+    // to the walls less the work the moving wall does on it
+    // (u . tau . n + q), whose two walls balance
     const double q_bottom = -COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
     const double q_top = COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
     const double tau = COUETTE_MU * COUETTE_U, q_ref = 0.5 * COUETTE_U * COUETTE_U;
-    std::vector<double> e_tau, e_q;
+    const double e_bottom = -q_bottom, e_top = -(COUETTE_MU * COUETTE_U * COUETTE_U + q_top);
+    std::vector<double> e_tau, e_q, e_energy;
     for (uint32_t n : {8u, 16u, 32u}) {
         const std::string dir = fresh_dir("couette");
         const std::string probe = "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/walls.csv\"\nboundary_type = \"wall\"\n"
-                                  "variables = [\"CF\", \"TAU_W\", \"TAU_W_X\", \"Q_W\", \"U_TAU\", \"Y_PLUS\", \"T\", \"U_X\", \"RHO\"]\n"
+                                  "variables = [\"CF\", \"TAU_W\", \"TAU_W_X\", \"Q_W\", \"U_TAU\", \"Y_PLUS\", \"T\", \"U_X\", \"RHO\", "
+                                  "\"ENERGY_DIFFUSIVE_FLUX\", \"ENERGY_TOTAL_FLUX\"]\n"
                                   "reference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n";
         Solver solver;
         solver.init(parse_toml(couette_case(n, probe)));
         run(solver);
-        double error_tau = 0.0, error_q = 0.0;
+        double error_tau = 0.0, error_q = 0.0, error_energy = 0.0;
         size_t n_faces = 0;
         const double tol = precision_tol<double>(1e-12, 1e-5);
         for (const auto & row : read_csv(dir + "/walls.csv")) {
@@ -652,15 +662,23 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
             error_tau = std::max(error_tau, std::fabs(row.at("TAU_W") - tau) / tau);
             const double q = top ? q_top : q_bottom;
             error_q = std::max(error_q, std::fabs(row.at("Q_W") - q) / std::fabs(q));
+            const double e = top ? e_top : e_bottom;
+            error_energy = std::max(error_energy, std::fabs(row.at("ENERGY_DIFFUSIVE_FLUX") - e) / std::fabs(e));
+            // No flow through the walls: the total is the diffusive flux
+            EXPECT_EQ(row.at("ENERGY_TOTAL_FLUX"), row.at("ENERGY_DIFFUSIVE_FLUX"));
+            if (!top) EXPECT_NEAR(row.at("ENERGY_DIFFUSIVE_FLUX"), -row.at("Q_W"), tol * std::fabs(q));
         }
         EXPECT_EQ(n_faces, (N_DIM == 2 ? 2u * 4u : 2u * 12u));
         e_tau.push_back(error_tau);
         e_q.push_back(error_q);
+        e_energy.push_back(error_energy);
     }
     EXPECT_LT(e_tau[0], 0.01);
     EXPECT_GT(std::log2(e_tau[1] / e_tau[2]), 0.8) << e_tau[1] << " " << e_tau[2];
     EXPECT_LT(e_q.back(), 0.05);
     EXPECT_GT(std::log2(e_q[1] / e_q[2]), 0.8) << e_q[1] << " " << e_q[2];
+    EXPECT_LT(e_energy.back(), 0.05);
+    EXPECT_GT(std::log2(e_energy[1] / e_energy[2]), 0.8) << e_energy[1] << " " << e_energy[2];
 }
 
 TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
@@ -1057,3 +1075,183 @@ TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
     }
 }
 #endif
+
+namespace {
+
+/** @brief The rows of a probe file at one step. */
+std::vector<std::map<std::string, double>> rows_at(const std::string & file, double step) {
+    std::vector<std::map<std::string, double>> rows;
+    for (const auto & row : read_csv(file)) {
+        if (row.at("step") == step) rows.push_back(row);
+    }
+    return rows;
+}
+
+/**
+ * @brief Runs input("ranks") on every rank and input("serial") on each rank
+ *        alone; the files of the two (file + "_ranks", file + "_serial") must agree.
+ */
+void expect_rank_count_independent(const std::function<std::string(const std::string &)> & input,
+                                   const std::vector<std::string> & files) {
+    for (const bool distributed : {true, false}) {
+        Solver solver;
+        if (!distributed) solver.set_distributed(false);
+        solver.init(parse_toml(input(distributed ? "ranks" : "serial")));
+        run(solver);
+    }
+    if (!comm::is_root()) return;
+    for (const auto & file : files) {
+        const std::string a = without_provenance(read_all(file + "_serial"));
+        EXPECT_FALSE(a.empty()) << file;
+        EXPECT_EQ(without_provenance(read_all(file + "_ranks")), a) << file;
+    }
+}
+
+} // namespace
+
+TEST(ProbesTest, ModeledWallsTakeTheWallModelsStressHeatFluxAndExchangeState) {
+    // Couette flow over a wall-modeled bottom wall, from its exact linear
+    // profile: the model reads the exchange point at h = 0.3 (u = U h, the
+    // exact T there) and, with h+ = 2 inside the viscous sublayer, returns the
+    // laminar shear mu U. The probe's tractions and heat flux are the model's,
+    // so their integrals are [[forces]]'s modeled viscous force and Q
+    const double h = 0.3;
+    const std::string dir = fresh_dir("wall_model");
+    auto input = [&](const std::string & sub) {
+        const std::string extra = "[[forces]]\nzone = \"bottom\"\nfile = \"" + dir + "/forces.csv_" + sub + "\"\n"
+                                  "[[probes]]\nname = \"bottom\"\nboundary = \"bottom\"\nfile = \"" + dir + "/bottom.csv_" + sub +
+                                  "\"\nvariables = [\"TRACTION_VISCOUS\", \"Q_W\", \"TAU_W\", \"U_TAU\", \"WALL_MODEL_U\", "
+                                  "\"WALL_MODEL_T\", \"WALL_MODEL_H\"]\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
+                                  "/bottom_red.csv_" + sub + "\"\n";
+        std::string s = couette_case(8, extra, "n_steps = 3\ncfl = 0.4\n");
+        const std::string wall = "name = \"bottom\"\ntype = \"wall_isothermal\"\nT = ";
+        const size_t end = s.find('\n', s.find(wall) + wall.size());
+        s.insert(end + 1, "wall_model = { model = \"equilibrium\", exchange_distance = 0.3 }\n");
+        return s;
+    };
+    expect_rank_count_independent(input, {dir + "/bottom.csv", dir + "/bottom_red.csv", dir + "/forces.csv"});
+    if (!comm::is_root()) return;
+    const double tau = COUETTE_MU * COUETTE_U;
+    const double T_h = COUETTE_T0 + (COUETTE_T1 - COUETTE_T0) * h +
+                       COUETTE_MU * COUETTE_U * COUETTE_U / (2.0 * COUETTE_KAPPA) * h * (1.0 - h);
+    const auto start = rows_at(dir + "/bottom.csv_serial", 0.0);
+    ASSERT_EQ(start.size(), N_DIM == 2 ? 4u : 12u);
+    for (const auto & row : start) {
+        EXPECT_NEAR(row.at("WALL_MODEL_H"), h, 1e-12);
+        EXPECT_NEAR(row.at("WALL_MODEL_U"), COUETTE_U * h, 1e-3 * COUETTE_U * h);
+        EXPECT_NEAR(row.at("WALL_MODEL_T"), T_h, 1e-3);
+        EXPECT_NEAR(row.at("TAU_W"), tau, 0.02 * tau);
+        // The fluid drags the wall at rest along +x
+        EXPECT_NEAR(row.at("TRACTION_VISCOUS_X"), row.at("TAU_W"), 1e-14);
+        EXPECT_NEAR(row.at("U_TAU"), std::sqrt(row.at("TAU_W") * COUETTE_T0), 1e-3 * std::sqrt(tau));
+    }
+    const auto forces = read_csv(dir + "/forces.csv_serial");
+    std::map<double, std::map<std::string, double>> reduced;
+    for (const auto & row : read_csv(dir + "/bottom_red.csv_serial")) reduced[row.at("step")] = row;
+    ASSERT_EQ(forces.size(), 3u);
+    for (const auto & f : forces) {
+        const auto & r = reduced.at(f.at("step"));
+        // [[forces]] writes 12 significant digits
+        for (size_t d = 0; d < N_DIM; d++) {
+            const double F = f.at(std::string("F") + "xyz"[d] + "_viscous");
+            EXPECT_NEAR(r.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), F, 1e-11 * tau) << d;
+        }
+        EXPECT_NEAR(r.at("integral_Q_W"), f.at("Q"), 1e-11 * std::fabs(f.at("Q")) + 1e-15);
+    }
+}
+
+TEST(ProbesTest, SpeciesDiffusiveFluxesAreFicksLawThroughTransmissiveBoundaries) {
+    // Two gases of equal molar mass and thermodynamics, at uniform T and p
+    // and at rest, with a linear composition: their mixture-averaged fluxes
+    // with the correction velocity are Fick's law with the binary coefficient,
+    // j_1 = -rho D dY_1/dx, the same through each end (transmissive faces take
+    // their image face's flux), and carry no energy at uniform T
+    SKIP_IN_SINGLE_PRECISION("the binary coefficient is compared to round-off");
+    const std::string mechanism = source_dir() + "/test/data/chemistry/test_transport.yaml";
+    const double p = 1000.0, T = 300.0, L = 1e-3, a = 0.2, b = 0.5;  // Y_N2 = a + b x / L
+    const std::string dir = fresh_dir("species_diffusion");
+    auto input = [&](const std::string & sub) {
+        std::ostringstream s;
+        s << std::setprecision(17) << "[run]\nn_steps = 1\ndt = 1.0e-12\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 3\n"
+          << "Lx = " << L << "\nLy = " << 3 * L / 8 << "\n";
+        if (N_DIM == 3) s << "Nz = 3\nLz = " << 3 * L / 8 << "\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+        s << "[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+          << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
+          << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
+          << "[initialize]\ntype = \"analytical\"\np = \"" << p << "\"\nT = \"" << T << "\"\nu = " << vector3("0", "0", "0")
+          << "\nX = { N2 = \"" << a << " + " << b / L << " * x\", N2B = \"" << 1.0 - a << " - " << b / L << " * x\" }\n"
+          << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" << mechanism
+          << "\"\ntransport = \"mixture_averaged\"\n[numerics]\nriemann_solver = \"HLLC\"\n"
+          << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n[output]\ncheck_interval = 1000000\n"
+          << "[[probes]]\nname = \"ends\"\nboundary = [\"left\", \"right\"]\nfile = \"" << dir << "/ends.csv_" << sub
+          << "\"\nvariables = [\"SPECIES_DIFFUSIVE_FLUX_*\", \"SPECIES_TOTAL_FLUX_*\", \"SPECIES_FLUX_*\", "
+          << "\"ENERGY_DIFFUSIVE_FLUX\"]\nreductions = [\"integral\"]\nreductions_file = \"" << dir << "/ends_red.csv_"
+          << sub << "\"\n";
+        return s.str();
+    };
+    expect_rank_count_independent(input, {dir + "/ends.csv", dir + "/ends_red.csv"});
+    if (!comm::is_root()) return;
+    const auto mech = chemistry::read_mechanism(mechanism);
+    const auto table = chemistry::make_transport_table<Kokkos::HostSpace>(mech, chemistry::TransportModel::MIXTURE_AVERAGED);
+    const double rho = p * mech.species[0].molecular_weight / (chemistry::GAS_CONSTANT * T);
+    const double j = -rho * table.binary_diffusion(0, 1, T, p) * b / L;  // along +x
+    const auto rows = rows_at(dir + "/ends.csv_serial", 0.0);
+    ASSERT_EQ(rows.size(), N_DIM == 2 ? 6u : 18u);
+    for (const auto & row : rows) {
+        const double n_x = row.at("nx");
+        EXPECT_NEAR(std::fabs(n_x), 1.0, 1e-14);
+        EXPECT_NEAR(row.at("SPECIES_DIFFUSIVE_FLUX_N2"), j * n_x, 1e-9 * std::fabs(j));
+        EXPECT_NEAR(row.at("SPECIES_DIFFUSIVE_FLUX_N2B"), -j * n_x, 1e-9 * std::fabs(j));
+        EXPECT_NEAR(row.at("SPECIES_FLUX_N2"), 0.0, 1e-12 * std::fabs(j));
+        EXPECT_EQ(row.at("SPECIES_TOTAL_FLUX_N2"), row.at("SPECIES_FLUX_N2") + row.at("SPECIES_DIFFUSIVE_FLUX_N2"));
+        // h_k j_k sums to h sum_k j_k = 0 (h ~ 3e5 J/kg)
+        EXPECT_NEAR(row.at("ENERGY_DIFFUSIVE_FLUX"), 0.0, 1e-9 * std::fabs(j) * 3e5);
+    }
+    // What leaves through the right end enters through the left
+    const auto r = rows_at(dir + "/ends_red.csv_serial", 0.0).at(0);
+    EXPECT_NEAR(r.at("integral_SPECIES_DIFFUSIVE_FLUX_N2"), 0.0, 1e-9 * std::fabs(j) * r.at(MEASURE));
+}
+
+TEST(ProbesTest, MomentsOfTractionsHaveTheirClosedForm) {
+    // A gas at rest in a closed unit box under a linear pressure p = 1 + g . x:
+    // each wall face carries its cell's pressure, so each pair of opposite
+    // walls sums to (1 - h) times its gradient component, and the moment of
+    // the pressure traction about c is (1 - h) (x_mean - c) x g: the closed
+    // forms of the force and moment of the box's grad p, x_mean its center,
+    // at the walls' one-point rule
+    const uint32_t n = 8;
+    const double h = 1.0 / n;
+    const double g[3] = {0.3, -0.2, 0.1}, c[3] = {0.1, 0.7, 0.4};
+    const std::string dir = fresh_dir("moments");
+    std::ostringstream s;
+    s << std::setprecision(17) << "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"cartesian\"\nNx = " << n
+      << "\nNy = " << n << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = 8\nLz = 1.0\n" : "")
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = " << vector3("0", "0", "0") << "\np = \"1 + " << g[0]
+      << " * x + " << g[1] << " * y + " << g[2] << " * " << (N_DIM == 3 ? "z" : "0") << "\"\n";
+    for (const char * zone : {"left", "right", "bottom", "top", "back", "front"}) {
+        if (N_DIM == 2 && (std::string(zone) == "back" || std::string(zone) == "front")) continue;
+        s << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"wall_adiabatic\"\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n[numerics.face_reconstruction]\n"
+      << "type = \"MUSCL\"\n" << PERFECT_GAS << "[output]\ncheck_interval = 1000000\n"
+      << "[[probes]]\nname = \"box\"\nboundary_type = \"wall\"\nsamples = false\n"
+      << "variables = [\"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"moment\"]\nmoment_center = "
+      << numbers3("0.1", "0.7", "0.4") << "\nreductions_file = \"" << dir << "/box.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(s.str()));
+    run(solver);
+    const auto r = rows_at(dir + "/box.csv", 0.0).at(0);
+    double x[3] = {0.0, 0.0, 0.0}, F[3] = {0.0, 0.0, 0.0};
+    for (size_t d = 0; d < N_DIM; d++) {
+        x[d] = 0.5 - c[d];
+        F[d] = (1.0 - h) * g[d];
+    }
+    const double M[3] = {x[1] * F[2] - x[2] * F[1], x[2] * F[0] - x[0] * F[2], x[0] * F[1] - x[1] * F[0]};
+    const double tol = precision_tol<double>(1e-13, 1e-5);
+    for (size_t d = 0; d < N_DIM; d++) {
+        EXPECT_NEAR(r.at(std::string("integral_TRACTION_PRESSURE_") + "XYZ"[d]), F[d], tol) << d;
+    }
+    for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) {
+        EXPECT_NEAR(r.at(std::string("moment_TRACTION_PRESSURE_") + "XYZ"[a]), M[a], tol) << a;
+    }
+}

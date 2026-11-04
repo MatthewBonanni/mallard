@@ -591,7 +591,10 @@ class Solver {
         void write_integrals();
         void write_probes();
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
-        ProbeFields probe_fields();
+        /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
+        ProbeFields probe_fields(ProbeFluxes & fluxes);
+        /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
+        void update_probe_gradients();
 
     private:
         /**

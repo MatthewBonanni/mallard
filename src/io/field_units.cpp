@@ -72,6 +72,11 @@ const Entry NAMED[] = {
     {"Q_W", dim::heat_flux, "wall heat flux into the fluid"},
     {"U_TAU", dim::velocity, "friction velocity"},
     {"Y_PLUS", dim::none, "first-cell y+"},
+    {"ENERGY_DIFFUSIVE_FLUX", dim::heat_flux, "normal diffusive energy flux (conduction, viscous work, species enthalpy)"},
+    {"ENERGY_TOTAL_FLUX", dim::heat_flux, "normal total energy flux (convective and diffusive)"},
+    {"WALL_MODEL_U", dim::velocity, "wall model exchange-point tangential speed"},
+    {"WALL_MODEL_T", dim::temperature, "wall model exchange-point temperature"},
+    {"WALL_MODEL_H", dim::length, "wall model exchange-point height"},
     // Mesh quality (mallard check --quality)
     {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", "degree"},
     {"SKEWNESS", dim::none, "largest face skewness"},
@@ -88,6 +93,8 @@ const Entry SPECIES[] = {
     {"DT_", thermal_diffusion, "thermal diffusion coefficient of "},
     {"OMEGA_", dim::mass_source, "net production rate of "},
     {"SPECIES_FLUX_", dim::mass_flux, "normal mass flux of "},
+    {"SPECIES_DIFFUSIVE_FLUX_", dim::mass_flux, "normal diffusive mass flux of "},
+    {"SPECIES_TOTAL_FLUX_", dim::mass_flux, "normal total mass flux of "},
 };
 
 bool starts_with(const std::string & s, const std::string & prefix) { return s.rfind(prefix, 0) == 0; }

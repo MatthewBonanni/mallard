@@ -66,7 +66,7 @@ reductions = ["mean", "rms"]
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
 | `format` | `csv` | `csv`, `hdf5` (one extensible file), `vtkhdf` (one VTKHDF file of every output, which ParaView opens as a time series) or `vtp` (one file per output and a `.pvd` series) |
-| `reductions` | none (`region`: `integral`, `mean`, `min`, `max`) | `integral`, `mean`, `favre`, `min`, `max`, `rms` over the geometry |
+| `reductions` | none (`region`: `integral`, `mean`, `min`, `max`) | `integral`, `mean`, `favre`, `min`, `max`, `rms` over the geometry; boundaries also `moment` (about `moment_center`, default the origin) |
 | `samples` | `true` | `false` writes only the reductions |
 | `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
 
@@ -134,6 +134,25 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 | `CF`, `CP` | Skin friction and pressure coefficients of `reference` |
 | `Q_W` | Heat flux into the fluid |
 | `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
+| `ENERGY_DIFFUSIVE_FLUX`, `SPECIES_DIFFUSIVE_FLUX_*` | The viscous flux's diffusive energy flux (conduction, viscous work, species enthalpy) and species mass fluxes, positive out of the domain |
+| `ENERGY_TOTAL_FLUX`, `SPECIES_TOTAL_FLUX_*` | Convective plus diffusive |
+| `WALL_MODEL_U`, `WALL_MODEL_T`, `WALL_MODEL_H` | On [modeled walls](les.md#wall-models-wall_model): the exchange point's tangential speed, temperature and height |
+
+On walls with a [wall model](les.md#wall-models-wall_model), the shear stress,
+the tractions and `Q_W` are the model's, so `integral` of
+`TRACTION_VISCOUS` and `Q_W` are the `[[forces]]` force and `Q`. The
+`moment` reduction gives the moment of each vector variable about
+`moment_center`, from the same faces as the forces:
+
+```toml
+[[probes]]
+name = "wing"
+boundary = "wing"
+samples = false
+variables = ["TRACTION_PRESSURE", "TRACTION_VISCOUS"]
+reductions = ["integral", "moment"]   # forces and moments
+moment_center = [0.25, 0.0, 0.0]      # quarter chord
+```
 
 Around a cylinder at Re = 40: the wall probe's `CP`, `CF` and `Y_PLUS`, the
 `mean` and `max` of `Y_PLUS`, the `integral` of the tractions (the drag) and
@@ -167,8 +186,10 @@ Pitfalls:
   walls. `CF` is signed along `reference.u`.
 - A cut plane is exact for the mesh's straight-sided cells (curved cells are
   cut as their straight versions); `bounds` clips it to a box.
-- Fluxes of boundary probes are those of the face states, not the scheme's
-  numerical fluxes: they agree as the mesh is refined.
+- Convective fluxes of boundary probes are those of the face states, not the
+  scheme's numerical fluxes: they agree as the mesh is refined. The diffusive
+  ones are the scheme's own (molecular: without the SGS part of LES); walls
+  carry no species flux, outflows without an image face none at all.
 - Reductions of points weigh each point 1 (`integral` is a sum); curves
   integrate with three Gauss points per element between samples.
 
