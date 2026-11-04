@@ -60,7 +60,7 @@ TEST(FrontEndTest, GeneratedMeshIs3DWithAThirdDirection) {
     EXPECT_EQ(input_dim("type = \"cartesian\"\nLz = 2.0\n"), 3);
     EXPECT_EQ(input_dim("type = \"cartesian\"\n[[periodic]]\nzones = [\"back\", \"front\"]\n"), 3);
     EXPECT_EQ(input_dim("type = \"cartesian\"\n[[periodic]]\nzones = [\"left\", \"right\"]\n"), 2);
-    // The deprecated [mesh] periodic
+    // [mesh] periodic of inputs from before 0.9, for mallard input upgrade
     EXPECT_EQ(input_dim("type = \"cartesian\"\nperiodic = [\"x\", \"z\"]\n"), 3);
     EXPECT_EQ(input_dim("type = \"annulus\"\nNz = 4\n"), 3);
     EXPECT_EQ(input_dim("type = \"cartesian_tet\"\n"), 3);

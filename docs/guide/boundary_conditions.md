@@ -854,9 +854,8 @@ or recycling inflow, planned in
 
 ## Inputs from older releases
 
-Types renamed in 0.9.0 still run, with a warning naming the replacement, and
-give bitwise the same results; they are removed in 0.10.0. `mallard input
-upgrade old.toml > new.toml` rewrites them, keeping comments and layout
+Types renamed in 0.9.0 were removed in 0.10.0: a run with one stops, naming
+the replacement. `mallard input upgrade old.toml > new.toml` rewrites them, keeping comments and layout
 ([inputs from older releases](input_files.md#inputs-from-older-releases)).
 
 | Old | New |

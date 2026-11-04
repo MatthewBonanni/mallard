@@ -87,7 +87,8 @@ const Rules & rules() {
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
             {"write_data[].format", "hdf5", "vtkhdf", "0.9.0", "0.10.0",
-             "VTKHDF replaces the XDMF and HDF5 files; ParaView 5.12 and later read it", true},
+             "the default, for ParaView 5.12 and later; or \"xdmf\", the XDMF indexes over HDF5 files, for VisIt, "
+             "meshio and older ParaView", true},
             {"boundaries[].type", "upt", "inlet_state", "0.9.0", "0.10.0", TYPES},
             {"boundaries[].type", "p_out", "outlet_pressure", "0.9.0", "0.10.0", TYPES},
             {"boundaries[].type", "p_out_average", "outlet_pressure", "0.9.0", "0.10.0", TYPES, false, 0,
@@ -252,6 +253,11 @@ bool is_removed(const std::string & removed, const std::string & version) {
     return parse_version(version) >= parse_version(removed);
 }
 
+// The release whose removals this source has made, which rejects them before its version bump
+constexpr const char * REMOVALS = "0.10.0";
+
+std::string this_release() { return is_removed(REMOVALS, MALLARD_VERSION) ? MALLARD_VERSION : REMOVALS; }
+
 Finding key_finding(const KeyRule & rule, const Concrete & key, std::size_t line, const std::string & version) {
     Finding f;
     f.key = to_string(key);
@@ -274,7 +280,9 @@ Finding option_finding(const OptionRule & rule, const Concrete & key, std::size_
     f.message = f.key + " = \"" + rule.from + "\"" +
                 (f.removed ? " was removed in " + rule.removed
                            : " is deprecated since " + rule.since + " and will be removed in " + rule.removed) +
-                (kept ? ": add " + rule.add : ": use \"" + rule.to + "\"") + " (" + rule.note + ")";
+                (kept ? ": add " + rule.add
+                      : ": use \"" + rule.to + "\"" + (rule.add.empty() ? "" : " with " + rule.add)) +
+                " (" + rule.note + ")";
     return f;
 }
 
@@ -706,7 +714,7 @@ bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule,
 } // namespace
 
 std::string advice(const Finding & finding) {
-    return describe(finding) + "; `mallard input upgrade FILE > NEW_FILE` rewrites the file";
+    return describe(finding) + "; `mallard input upgrade old.toml > new.toml` rewrites the file";
 }
 
 std::string describe(const Finding & finding) {
@@ -714,14 +722,14 @@ std::string describe(const Finding & finding) {
 }
 
 std::vector<Finding> apply(Input & input, const std::string & version, const Rules & table) {
-    std::vector<Finding> findings = transform(input, table, version.empty() ? MALLARD_VERSION : version, N_DIM, true);
+    std::vector<Finding> findings = transform(input, table, version.empty() ? this_release() : version, N_DIM, true);
     std::string removed;
     for (const Finding & f : findings) {
         if (f.removed) removed += "\n  " + describe(f);
     }
     if (!removed.empty()) {
         throw InputError("the input uses keys or options that this release no longer reads:" + removed +
-                         "\n`mallard input upgrade FILE > NEW_FILE` rewrites them.");
+                         "\n`mallard input upgrade old.toml > new.toml` rewrites them.");
     }
     return findings;
 }
@@ -731,7 +739,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
                          const std::string & unknown_dimension) {
     reformatted = false;
     Input expected = parse_input_string(text);
-    findings = transform(expected, table, MALLARD_VERSION, dim, false, unknown_dimension);
+    findings = transform(expected, table, this_release(), dim, false, unknown_dimension);
     if (findings.empty()) return text;
 
     std::vector<std::string> lines = split_lines(text);
@@ -754,7 +762,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     }
     reformatted = true;
     OrderedValue ordered = toml::parse_str<toml::ordered_type_config>(text);
-    transform(ordered, table, MALLARD_VERSION, dim);
+    transform(ordered, table, this_release(), dim);
     return toml::format(ordered);
 }
 

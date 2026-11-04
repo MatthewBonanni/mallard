@@ -248,7 +248,7 @@ TEST_P(MixedMesh, UniformFlowIsPreserved) {
     Solver solver;
     solver.init(parse_toml(file_mesh_input(file, GetParam(),
         "type = \"analytical\"\nrho = \"1.2\"\nu = [\"0.4\", \"-0.3\"]\np = \"0.8\"\n",
-        "extrapolation", "n_steps = 20\ncfl = 0.25\n")));
+        "outlet_extrapolation", "n_steps = 20\ncfl = 0.25\n")));
     solver.run();
     solver.update_primitives();
     solver.copy_device_to_host();
