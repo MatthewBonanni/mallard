@@ -357,9 +357,10 @@ loop has opened it). Open MPI then reports that a rank exited with status 3;
 that is the stop, not an error. A scheduler's grace period between its
 `SIGTERM` and the kill must cover a step plus a restart write.
 
-Resuming is running the same script again. It finds the newest restart file
-and adds `--restart restart_000339.restart` to the command line, which
-replaces the input's `[initialize]` table:
+Resuming is running the same script again. Its command line has `--restart
+latest`, which on the first run found no restart file and started from
+`[initialize]`; now it finds the newest complete one, `restart_000339.restart`,
+and starts from it in place of the input's `[initialize]` table:
 
 ```bash
 NRANKS=2 THREADS=2 ./mpirun.sh > run.log 2>&1 &
@@ -435,12 +436,10 @@ where each was written). A run can also resume on a different number of ranks
 queue has free.
 
 Restart files pile up, one per interval and per stop: keep the newest two
-(the newest may be cut short if the job is killed while writing it) and delete
-the others as the run goes.
-
-A `--restart latest` option, which finds the newest complete restart file
-itself so the scripts need not, is planned
-([#510](https://github.com/MatthewBonanni/mallard/issues/510)).
+and delete the others as the run goes. A job killed while writing one leaves
+a `.restart.partial` file, which `--restart latest` ignores; it also skips,
+with a warning, a `.restart` file that does not read completely
+([resuming](../guide/initialization.md#resuming-from-the-newest-restart)).
 
 ## 6. On a real cluster
 

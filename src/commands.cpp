@@ -27,15 +27,16 @@ constexpr Option KOKKOS = {"--kokkos-*", "", "",
 
 constexpr Option RUN_OPTIONS[] = {
     {"-i", "", "FILE", "The input file (TOML). Required."},
-    {"--restart", "", "FILE",
-     "Start from this restart file: replaces the input's [initialize] with type = \"restart\". "
-     "Default: as [initialize] says."},
+    {"--restart", "", "FILE|latest",
+     "Start from this restart file: replaces the input's [initialize] with type = \"restart\". latest: the "
+     "newest complete restart file of the input's restart writers (of the run that started last, then of the "
+     "highest step), or [initialize] if there is none. Default: as [initialize] says."},
     KOKKOS,
 };
 
 constexpr Option CHECK_OPTIONS[] = {
     {"-i", "", "FILE", "The input file, instead of the argument."},
-    {"--restart", "", "FILE", "Check the run as started from this restart file."},
+    {"--restart", "", "FILE|latest", "Check the run as started from this restart file, or as --restart latest would."},
     {"--ranks", "", "N",
      "Memory and cost per rank for a run on N ranks; from a serial check, memory is scaled to the "
      "largest part the run's partitioner would make. Default: the ranks of this check."},
@@ -145,7 +146,7 @@ constexpr Command COMMANDS[] = {
         .name = "",
         .group = "Run",
         .summary = "Run a case",
-        .synopsis = "mallard -i input.toml [--restart FILE] [Kokkos options]\n"
+        .synopsis = "mallard -i input.toml [--restart FILE|latest] [Kokkos options]\n"
                     "mallard <command> [options]",
         .description =
             "Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations on unstructured "
@@ -157,13 +158,18 @@ constexpr Command COMMANDS[] = {
             "\n"
             "Parallel runs start under MPI, with one rank per GPU or per group of cores: mpirun -n 4 mallard -i "
             "input.toml. Kokkos options set the threads and devices of each rank; on OpenMP builds, so do "
-            "OMP_NUM_THREADS, OMP_PROC_BIND and OMP_PLACES.",
+            "OMP_NUM_THREADS, OMP_PROC_BIND and OMP_PLACES.\n"
+            "\n"
+            "--restart latest resumes a run from where it stopped, whatever stopped it: a job script runs the "
+            "same command for the first job and every continuation. It skips, with a warning, a restart file "
+            "that does not read completely, and fails if no restart file does.",
         .options = RUN_OPTIONS,
         .arguments = {},
         .examples = "$ mallard -i input.toml\n"
                     "$ mallard -i input.toml --kokkos-num-threads=8\n"
                     "$ mpirun -n 4 mallard -i input.toml\n"
-                    "$ mallard -i input.toml --restart solut/restart_010000.restart",
+                    "$ mallard -i input.toml --restart solut/restart_010000.restart\n"
+                    "$ mpirun -n 4 mallard -i input.toml --restart latest",
         .exit_status = "0  the run reached a stop condition (n_steps, t_stop, t_wall_stop)\n"
                        "1  an error, divergence included\n"
                        "2  usage error: an unknown option or command, no -i\n"

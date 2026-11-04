@@ -1,0 +1,1 @@
+- The expression language is named kexpr (Kokkos expressions) and has its own guide page, [Expressions](docs/guide/expressions.md); in the code, `expr::` is now `kexpr::` and `compiled_expression.{h,cpp}` are `kexpr.{h,cpp}`.

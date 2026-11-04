@@ -169,7 +169,7 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   runs the CUDA builds on every push. `-f device=true` forces all three.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
-  on the GPU (including the CUDA-graph and NCCL paths), the MPI tests on 2 ranks, and
+  on the GPU (including the CUDA-graph path; NCCL is not built), the MPI tests on 2 ranks, and
   the [performance suite](benchmarks/README.md) against per-hardware baselines. It
   posts the commit statuses `gpu/tests` and `gpu/perf` on the PR's head commit, so
   its results show on the PR next to `CI`. A PR that changes device code merges only
@@ -178,6 +178,8 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   numbers from the performance suite or a real case, before and after.
 - Sanitizers (AddressSanitizer and UndefinedBehaviorSanitizer) run nightly on
   `main`.
+- **Support matrix.** [Supported platforms](docs/guide/support.md) lists every CI job and
+  what it builds and runs; a PR that adds, removes or renames a job updates it (CI checks).
 
 By contributing, you agree that your contributions are licensed under the
 [Apache License, Version 2.0](LICENSE).
