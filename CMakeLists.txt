@@ -29,7 +29,7 @@ function(mallard_target_warnings target)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         list(APPEND warnings -Wduplicated-cond -Wlogical-op)
     else()
-        # GCC's -Wnull-dereference flags code inlined from toml11 and exprtk, which SYSTEM cannot silence
+        # GCC's -Wnull-dereference flags code inlined from toml11, which SYSTEM cannot silence
         list(APPEND warnings -Wnull-dereference)
     endif()
     if(${PROJECT_NAME}_WARNINGS_AS_ERRORS)
@@ -219,7 +219,6 @@ endif()
 
 # Include other external libraries
 include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/toml11/include")
-include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/external/exprtk")
 
 if(DEFINED ${PROJECT_NAME}_EXECUTABLE_SUFFIX)
     message(WARNING "Mallard_EXECUTABLE_SUFFIX is gone: the executables are mallard${Mallard_DIM}d and "

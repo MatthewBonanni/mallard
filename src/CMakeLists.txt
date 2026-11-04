@@ -2,6 +2,7 @@
 add_library(MallardCore STATIC
     common/common_math.cpp
     common/compiled_expression.cpp
+    common/expression.cpp
     common/region.cpp
     common/region_mesh.cpp
     io/case_view.cpp

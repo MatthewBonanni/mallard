@@ -19,8 +19,9 @@ callable index → value, so a cell, a face or a point binds its own values
 without copying them into an array. `expr::ProgramTable` packs many programs
 into one device array.
 
-The values are exprtk's to the last bit on the host (tested on 22 expressions ×
-203 points), which needs exprtk's own semantics, not just its grammar:
+The values are exprtk's to the last bit on the host (tested against exprtk on
+45 expressions × 203 points until exprtk was removed), which needs exprtk's own
+semantics, not just its grammar:
 
 - precedence climbing with exprtk's levels: `^` right-associative, unary
   minus binding below `^` (`-x^2 = -(x^2)`), comparisons left-associative,
@@ -63,10 +64,27 @@ per-thread state is an iteration counter: after `expr::MAX_ITERATIONS`
 program stopped in a device flag of its `ProgramTable`. The flag is read only
 where the host already waits (setup, output, a diverged step), and only for
 tables that have loops, so a runaway loop becomes an input error instead of a
-hung kernel without a synchronization per stage. Host sites that still
-evaluate exprtk (`Expression`) first compile the text with `expr::Program`,
-so every section accepts the same language with the same messages, and give
-exprtk a loop check with the same cap.
+hung kernel without a synchronization per stage.
+
+### One evaluation path, without exprtk (#449)
+
+Since 0.10 exprtk is no longer part of Mallard. The remaining host sites
+(`Expression`: sponges, boundary `where`, mass-flow profiles, compositions,
+synthetic-inflow profiles, parametric probes) evaluate the same `expr::Program`;
+those that evaluate at many mesh points (sponges and their compositions,
+`where`, mass-flow profiles, boundary compositions) do so in one kernel
+(`evaluate_at`), and parametric probes and synthetic-inflow profiles, which
+evaluate at a few points on the host, call the same `expr::evaluate`. The
+literal conversion is a port of exprtk's `string_to_real` and `derivative`
+(probe curves) of exprtk's fourth-order difference, so no value changed
+where exprtk ran with strength reduction off. exprtk ran these sites with it
+on, which rewrites a few patterns of division (`(a / b) / c → a / (b * c)`,
+`a / (b / c) → (a * c) / b`, ...); expressions of those forms now round as
+written. Of the 77 expressions in the examples and tutorials, only one would
+round differently (by up to 34 ulp, through `cos` of a rewritten argument),
+and it is a boundary value, compiled since 0.9. The tests check the engine
+against hand-written references of each expression and the device against
+the host.
 
 Measured on the host (Apple M4 Pro, 2 threads, 2M points, best of 7), the
 expressions of the tests and the source below compile to the same

@@ -775,11 +775,15 @@ void Solver::init_boundaries() {
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
         std::string twice, outward;
+        std::vector<double> selected;
+        if (where && zone) {
+            std::vector<uint32_t> zone_faces(zone->n_faces());
+            for (uint32_t i = 0; i < zone->n_faces(); i++) zone_faces[i] = zone->h_faces(i);
+            selected = evaluate_at({where.get()}, mesh->face_coords, zone_faces);
+        }
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
-            if (where && where->at(Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL()), N_DIM) == 0.0) {
-                continue;
-            }
+            if (where && selected[i] == 0.0) continue;
             if (face_bc[i_face] != -1 && twice.empty()) {
                 const auto & first = input_boundaries[static_cast<size_t>(face_bc[i_face])];
                 std::string at;
