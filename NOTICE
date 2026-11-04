@@ -12,3 +12,11 @@ src/chemistry/transport.cpp is a port of Cantera 3.2.0's GasTransport and
 MMCollisionInt, and the mechanism files in mechanisms/ are taken from
 Cantera 3.2.0. Cantera is distributed under the BSD 3-Clause License; see
 licenses/Cantera-BSD-3-Clause.txt.
+
+This product includes software derived from exprtk, the C++ Mathematical
+Expression Toolkit Library by Arash Partow
+(https://www.partow.net/programming/exprtk/): the expression language in
+src/common/compiled_expression.{h,cpp} and src/common/expression.h follows
+exprtk's grammar, operator semantics and numerics, and ports its literal
+conversion, integer powers and numerical derivative. exprtk is distributed
+under the MIT License; see licenses/exprtk-MIT.txt.

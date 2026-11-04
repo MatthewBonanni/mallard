@@ -337,13 +337,25 @@ class CompositionExpressions {
             return c;
         }
 
-        /** @brief Mass fractions at the point with coordinates x[0..N_DIM). */
-        template <typename T>
-        std::vector<double> mass_fractions(const T & x) const {
+        /** @brief Mass fractions at the points coords(rows[k]), the expressions evaluated on the device. */
+        std::vector<std::vector<double>> mass_fractions(const Kokkos::View<rtype *[N_DIM]> & coords,
+                                                        const std::vector<uint32_t> & rows) const {
+            std::vector<const Expression *> expressions;
+            for (const Expression & e : values) expressions.push_back(&e);
+            const std::vector<double> v = evaluate_at(expressions, coords, rows);
+            std::vector<std::vector<double>> Y;
+            Y.reserve(rows.size());
+            for (size_t k = 0; k < rows.size(); k++) Y.push_back(mass_fractions(v.data() + k * values.size()));
+            return Y;
+        }
+
+    private:
+        /** @brief Mass fractions from the listed species' values. */
+        std::vector<double> mass_fractions(const double * value) const {
             std::vector<double> f(mixture.n_species(), 0.0);
             double sum = 0.0;
             for (size_t i = 0; i < listed.size(); i++) {
-                f[static_cast<size_t>(listed[i])] = std::max(values[i].at(x, N_DIM), 0.0);
+                f[static_cast<size_t>(listed[i])] = std::max(value[i], 0.0);
                 if (listed[i] != balance) sum += f[static_cast<size_t>(listed[i])];
             }
             if (balance >= 0) {
@@ -355,7 +367,6 @@ class CompositionExpressions {
             return mole ? mixture.mass_fractions_from_mole(f) : f;
         }
 
-    private:
         const MixtureModel & mixture;
         std::string where;
         bool mole = false;
@@ -668,11 +679,7 @@ std::vector<rtype> Solver::integrate_species() {
 
 std::vector<std::vector<double>> Solver::composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const {
-    const CompositionExpressions composition(*mixture_model, table, where);
-    std::vector<std::vector<double>> Y;
-    Y.reserve(cells.size());
-    for (uint32_t c : cells) Y.push_back(composition.mass_fractions(Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL())));
-    return Y;
+    return CompositionExpressions(*mixture_model, table, where).mass_fractions(mesh->cell_coords, cells);
 }
 
 void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries,
@@ -729,14 +736,21 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
                     if (!T_varies) prescribe(i_bc, Y_uniform, T_uniform);
                 }
                 on_every_rank([&] {
+                    std::vector<size_t> profiled;
+                    std::vector<uint32_t> faces;
                     for (size_t k = 0; k < profiled_faces.size(); k++) {
                         if (profiled_faces[k][0] != i_bc) continue;
-                        const auto center = Kokkos::subview(mesh->h_face_coords, profiled_faces[k][1], Kokkos::ALL());
+                        profiled.push_back(k);
+                        faces.push_back(profiled_faces[k][1]);
+                    }
+                    const std::vector<std::vector<double>> Y =
+                        composition ? composition->mass_fractions(mesh->face_coords, faces) : std::vector<std::vector<double>>();
+                    for (size_t j = 0; j < profiled.size(); j++) {
+                        const auto center = Kokkos::subview(mesh->h_face_coords, faces[j], Kokkos::ALL());
                         Point x{};
                         FOR_I_DIM x[i] = static_cast<double>(center(i));
                         const double T = T_varies ? fields->temperature(x, 0.0) : T_uniform;
-                        prescribe(input_boundaries.size() + k, composition ? composition->mass_fractions(center) : Y_uniform,
-                                  T);
+                        prescribe(input_boundaries.size() + profiled[j], composition ? Y[j] : Y_uniform, T);
                     }
                 });
                 break;

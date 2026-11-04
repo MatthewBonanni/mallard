@@ -70,6 +70,12 @@ std::string xml_comment();
  */
 std::string parse_comment(std::string_view text);
 
+/**
+ * @brief The string value of key in a top-level object of a block (e.g.
+ *        "mesh", "sha256"), as written (escapes kept), or "" if there is none.
+ */
+std::string find_string(std::string_view block, std::string_view object, std::string_view key);
+
 } // namespace provenance
 
 #endif // PROVENANCE_H

@@ -2784,9 +2784,9 @@ struct TENOFunctor {
         return end > round_begin ? (end - round_begin) * per_cell : 0;
     }
 
-    // Central coefficients of the queued cells after the first round, which
-    // the smooth pass did not keep: TroubledCentralPass with SmoothPass's
-    // arithmetic, TroubledCentralTeamPass with SmoothTeamPass's
+    // Central coefficients of the queued cells of every round, when there can be
+    // more than one (TENO::launch_reconstruction): TroubledCentralPass with
+    // SmoothPass's arithmetic, TroubledCentralTeamPass with SmoothTeamPass's
     struct TroubledCentralPass {};
     struct TroubledCentralTeamPass {};
 
@@ -3127,7 +3127,14 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                     solution, face_solution, cells, {}, cell_gamma, cell_molar_mass, selection, entry_rotations, boundary_faces};
     using Dynamic = Kokkos::Schedule<Kokkos::Dynamic>;
     using Space = Kokkos::DefaultExecutionSpace;
+    // A cell's place in the queue follows the order of the atomic increments.
+    // When the queue can take more than one round, every round recomputes the
+    // central coefficients of its cells, so that none depend on whether the
+    // smooth pass kept them: two kernels need not round the same arithmetic alike
+    const uint32_t capacity = static_cast<uint32_t>(troubled_coeffs.extent(0));
+    const bool rounds = capacity < mesh->n_reconstructed();
     if (!troubled_pass) {
+        if (rounds) functor.coeffs = {};
         const uint32_t n = cells.extent(0) ? static_cast<uint32_t>(cells.extent(0)) : mesh->n_reconstructed();
         if constexpr (!Functor::USE_TEAM || Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space::memory_space>::accessible) {
             Kokkos::parallel_for("teno_smooth",
@@ -3148,7 +3155,6 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
     // could need, up to TROUBLED_THREADS, so the queue length stays on the
     // device; rounds past the queue's end find no work
     const uint32_t n = mesh->n_reconstructed();
-    const uint32_t capacity = static_cast<uint32_t>(troubled_coeffs.extent(0));
     if (n > 0 && capacity > 0) {
         auto launch = [&](const char * label, auto tag, uint32_t per_cell) {
             functor.stride = static_cast<uint32_t>(std::min<uint64_t>(TROUBLED_THREADS, uint64_t(capacity) * per_cell));
@@ -3158,7 +3164,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
         constexpr bool host = Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space::memory_space>::accessible;
         for (uint32_t begin = 0; begin < n; begin += capacity) {
             functor.round_begin = begin;
-            if (begin > 0) {
+            if (rounds) {
                 if constexpr (Functor::USE_TEAM && !host) {
                     using Policy = Kokkos::TeamPolicy<Space, typename Functor::TroubledCentralTeamPass,
                                                       Kokkos::LaunchBounds<Functor::TEAM_SIZE, 2>>;

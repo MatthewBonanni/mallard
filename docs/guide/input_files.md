@@ -213,11 +213,13 @@ rho = "var r2 := (x - 0.5)^2 + (y - 0.5)^2; 1 + 0.2 * exp(-r2 / 0.01)"
 ```
 
 Wherever a key takes an expression, Mallard compiles it once when it reads
-the input, with the syntax of [exprtk](https://www.partow.net/programming/exprtk/).
-Every section accepts the same language and reports the same errors, with the
-expression and the position of the problem, and `mallard check` reports them
-before a run. The values are exprtk's to the last bit on CPUs, and the same
-on GPUs up to the last bits of library functions such as `sin` and `exp`.
+the input, in a language that follows the syntax and arithmetic of
+[exprtk](https://www.partow.net/programming/exprtk/). Every section accepts the
+same language and reports the same errors, with the expression and the
+position of the problem, and `mallard check` reports them before a run. Every
+section also evaluates it with the same code, on the device where the solver
+runs: the values on GPUs are those on CPUs up to the last bits of library
+functions such as `sin` and `exp`.
 
 **Variables.** `x`, `y`, `z` in meters (`z` is 0 in 2D) and, where the key
 says so, the time `t` in seconds; sources also read the local and
@@ -328,7 +330,7 @@ Keys and options changed so far:
 | `basis_type`, `max_stencil_size_factor`, `quadrature_type`, `quadrature_order`, `quadrature_type_cell`, `quadrature_order_cell`, `quadrature_type_face`, `quadrature_order_face` (same table) | none: TENO-E sets them | 0.2.0 | 0.2.0 |
 | `[physics]` `p_min`, `p_max` | none: pressures are not clipped | 0.2.0 | 0.2.0 |
 | `[[write_data]]` `format = "tecplot"` | `"vtu"` | 0.2.0 | 0.2.0 |
-| `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"`; until removed, `"hdf5"` still writes XDMF and HDF5 files | 0.9.0 | 0.10.0 |
+| `[[write_data]]` `format = "hdf5"` (XDMF) | `"vtkhdf"` (the default), or `"xdmf"` for the same XDMF and HDF5 files ([which format](output.md#which-format)) | 0.9.0 | 0.10.0 |
 | `[[boundaries]]` `type = "upt"`, `"p_out"`, `"extrapolation"` | `"inlet_state"`, `"outlet_pressure"`, `"outlet_extrapolation"` ([boundary conditions](boundary_conditions.md#inputs-from-older-releases)) | 0.9.0 | 0.10.0 |
 | `[[boundaries]]` `type = "p_out_average"` | `"outlet_pressure"` with `average = true` | 0.9.0 | 0.10.0 |
 | `[[boundaries]]` `type = "nscbc_inlet"`, `"nscbc_outlet"` with `L`, `sigma`, `beta`, `sigma_T`, `sigma_t` | `"inlet_state"`, `"outlet_pressure"` with `nscbc = { L, sigma, ... }` | 0.9.0 | 0.10.0 |

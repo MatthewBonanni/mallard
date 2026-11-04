@@ -3,7 +3,8 @@
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Expressions compiled once on the host into a stack program with
  *        jumps that kernels evaluate on the device (and the host) with the
- *        same code.
+ *        same code. The language follows exprtk (Arash Partow, MIT License;
+ *        see licenses/exprtk-MIT.txt and NOTICE).
  * @version 0.1
  * @date 2026-10-15
  *

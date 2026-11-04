@@ -377,7 +377,7 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     const std::string dir = (scratch_dir() / "mallard_h5_3d").string();
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
-    for (const char * format : {"vtu", "hdf5"}) {
+    for (const char * format : {"vtu", "xdmf"}) {
         DataWriter writer;
         writer.init(parse_toml("prefix = \"" + dir + "/" + format + "\"\nformat = \"" + format +
                                "\"\ninterval = 1\nvariables = [\"RHO\", \"U\"]\n"),
@@ -386,8 +386,8 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     }
     comm::barrier();  // Rank 0 writes the files
     auto vtu = read_appended_arrays(dir + "/vtu_000000.vtu");
-    const auto mesh_h5 = h5_datasets(dir + "/hdf5_mesh.h5");
-    const auto fields_h5 = h5_datasets(dir + "/hdf5_000000.h5");
+    const auto mesh_h5 = h5_datasets(dir + "/xdmf_mesh.h5");
+    const auto fields_h5 = h5_datasets(dir + "/xdmf_000000.h5");
 
     // Each XDMF record is its cell type code, then the VTU cell's nodes in VTK
     // order (XDMF Tetrahedron 6, Pyramid 7, Wedge 8, Hexahedron 9)

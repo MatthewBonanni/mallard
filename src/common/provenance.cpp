@@ -464,4 +464,28 @@ std::string parse_comment(std::string_view text) {
     return std::string(text.substr(a, b == std::string_view::npos ? std::string_view::npos : b - a));
 }
 
+std::string find_string(std::string_view block, std::string_view object, std::string_view key) {
+    // Outside strings, "<object>":{ can only be the object's key: inside one, its quotes are escaped
+    const std::string open = json::quote(object) + ":{";
+    const std::string name = json::quote(key) + ":\"";
+    size_t i = block.find(open);
+    if (i == std::string_view::npos) return "";
+    int depth = 0;
+    for (i += open.size(); i < block.size(); i++) {
+        if (block[i] == '{') {
+            depth++;
+        } else if (block[i] == '}') {
+            if (depth-- == 0) return "";
+        } else if (block[i] == '"') {
+            const bool found = depth == 0 && block.substr(i, name.size()) == name;
+            const size_t first = found ? i + name.size() : i + 1;
+            for (i = first; i < block.size() && block[i] != '"'; i++) {
+                if (block[i] == '\\') i++;
+            }
+            if (found) return i < block.size() ? std::string(block.substr(first, i - first)) : "";
+        }
+    }
+    return "";
+}
+
 } // namespace provenance

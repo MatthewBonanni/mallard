@@ -28,6 +28,7 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <string_view>
 #include <unistd.h>
 #include <unordered_map>
 
@@ -442,7 +443,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             };
             run(std::move(job), !collective);
         }
-        logging::event(step, double(t), "hdf5", stem + ".h5");
+        logging::event(step, double(t), "xdmf", stem + ".h5");
     } else if (format == DataFormat::VTKHDF) {
         const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
         last_file = filename;
@@ -1222,8 +1223,54 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     if (!in.good()) {
         throw std::runtime_error("Restart file " + filename + " is truncated.");
     }
+    const std::streamoff end = in.tellg();
     data.provenance = read_provenance_trailer(in);
+    in.seekg(0, std::ios::end);
+    const size_t trailer =
+        data.provenance.empty() ? 0 : data.provenance.size() + sizeof(uint64_t) + sizeof(PROVENANCE_MAGIC);
+    data.complete = in.tellg() == end + static_cast<std::streamoff>(trailer);
     return data;
+}
+
+FoundRestart newest_restart(const std::vector<std::string> & prefixes, std::vector<std::string> & skipped) {
+    namespace fs = std::filesystem;
+    constexpr std::string_view EXTENSION = ".restart";
+    FoundRestart best;
+    std::string best_started;
+    const std::vector<uint64_t> no_cells;
+    for (const std::string & prefix : prefixes) {
+        const fs::path path(prefix);
+        const std::string stem = path.filename().string() + "_";
+        std::vector<std::string> files;
+        std::error_code error;
+        for (fs::directory_iterator it(path.has_parent_path() ? path.parent_path() : fs::path("."), error), end;
+             !error && it != end; it.increment(error)) {
+            const std::string name = it->path().filename().string();
+            if (name.size() <= stem.size() + EXTENSION.size() || !name.starts_with(stem) ||
+                !name.ends_with(EXTENSION)) {
+                continue;
+            }
+            const std::string_view digits =
+                std::string_view(name).substr(stem.size(), name.size() - stem.size() - EXTENSION.size());
+            if (!std::ranges::all_of(digits, [](char c) { return c >= '0' && c <= '9'; })) continue;
+            files.push_back(prefix + "_" + std::string(digits) + std::string(EXTENSION));
+        }
+        std::sort(files.begin(), files.end());
+        for (const std::string & file : files) {
+            try {
+                const RestartData data = read_restart(file, &no_cells);
+                if (!data.complete) throw std::runtime_error("Restart file " + file + " is truncated.");
+                const std::string started = provenance::find_string(data.provenance, "run", "start_time");
+                if (best.file.empty() || started > best_started || (started == best_started && data.step > best.step)) {
+                    best = {file, data.step, data.t};
+                    best_started = started;
+                }
+            } catch (const std::exception & e) {
+                skipped.emplace_back(e.what());
+            }
+        }
+    }
+    return best;
 }
 
 void DataWriter::write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const {

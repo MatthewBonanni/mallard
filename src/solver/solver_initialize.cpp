@@ -20,7 +20,10 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "comm.h"
 #include "initial_state.h"
+#include "log.h"
+#include "provenance.h"
 #include "remap.h"
 
 enum class InitType {
@@ -95,7 +98,18 @@ void Solver::init_solution_restart() {
                           .docs = "docs/input.md#type--remap"});
     }
     apply_restart(restart, file, true);
-    initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) + ")";
+    initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t));
+    // The mesh file's hash is known on rank 0 only
+    auto differs = [&](const char * object) {
+        const std::string then = provenance::find_string(restart.provenance, object, "sha256");
+        const std::string now = provenance::find_string(provenance::json(), object, "sha256");
+        return !then.empty() && !now.empty() && then != now;
+    };
+    if (comm::is_root() && differs("mesh")) {
+        logging::warning("Restart file " + file + " was written on a mesh file of other contents (the sha256 in its "
+                         "provenance differs) with as many cells: check that it is the mesh of this run.");
+    }
+    initial_state += comm::is_root() && differs("input") ? "; written by another input)" : ")";
 }
 
 void Solver::init_solution_remap() {

@@ -33,15 +33,13 @@ spec:
       terminationGracePeriodSeconds: 600        # longer than a step plus a restart write
       containers:
         - name: mallard
-          image: ghcr.io/matthewbonanni/mallard:0.9.0-cuda   # CPU only: ghcr.io/matthewbonanni/mallard:0.9.0
+          image: ghcr.io/matthewbonanni/mallard:0.10.0-cuda   # CPU only: ghcr.io/matthewbonanni/mallard:0.10.0
           workingDir: /work/case                # <the case directory on the volume>
           env:
             - name: MALLARD
               value: mallard                    # <mallard, or the path to it>
             - name: INPUT
               value: input.toml
-            - name: RESTARTS
-              value: restart_*.restart          # <the restart files the run writes; the newest is resumed from>
             - name: NRANKS
               value: "4"                        # <GPUs below>
             - name: THREADS
@@ -50,11 +48,9 @@ spec:
           args:
             - |
               set -u
-              args=(-i "$INPUT")
-              latest=$(ls -1t $RESTARTS 2>/dev/null | head -n 1)
-              [ -n "$latest" ] && args+=(--restart "$latest")
+              # The newest complete restart file, or the input's [initialize] in the first pod
               mpirun -n "$NRANKS" --map-by "slot:PE=$THREADS" --bind-to core \
-                  "$MALLARD" "${args[@]}" --kokkos-num-threads="$THREADS" &
+                  "$MALLARD" -i "$INPUT" --restart latest --kokkos-num-threads="$THREADS" &
               pid=$!
               # The pod's TERM: write a restart and stop after the current step, asked
               # through Mallard's control socket (mpirun would end the ranks at once),

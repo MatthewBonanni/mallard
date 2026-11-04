@@ -12,6 +12,7 @@ mallard new cylinder && cd cylinder     # a ready-to-run case
 mallard check input.toml                # set it up without running: keys, mesh, time step, cost
 mallard -i input.toml                   # run it
 mallard ctl . status                    # from another terminal: how far it is
+mallard -i input.toml --restart latest  # after a stop: resume from the newest restart file
 ```
 
 A few things hold for every command:
@@ -35,7 +36,7 @@ How the commands are laid out, and which are planned:
 ### mallard
 
 ```text
-Usage: mallard -i input.toml [--restart FILE] [Kokkos options]
+Usage: mallard -i input.toml [--restart FILE|latest] [Kokkos options]
        mallard <command> [options]
 
 Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations
@@ -51,6 +52,11 @@ Parallel runs start under MPI, with one rank per GPU or per group of cores:
 mpirun -n 4 mallard -i input.toml. Kokkos options set the threads and devices of
 each rank; on OpenMP builds, so do OMP_NUM_THREADS, OMP_PROC_BIND and
 OMP_PLACES.
+
+--restart latest resumes a run from where it stopped, whatever stopped it: a job
+script runs the same command for the first job and every continuation. It skips,
+with a warning, a restart file that does not read completely, and fails if no
+restart file does.
 
 Commands:
   Run
@@ -74,14 +80,17 @@ Commands:
     mallard --version      Print the version
 
 Options:
-  -i FILE         The input file (TOML). Required.
-  --restart FILE  Start from this restart file: replaces the input's
-                  [initialize] with type = "restart". Default: as [initialize]
-                  says.
-  --kokkos-*      Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank)
-                  or --kokkos-device-id=1 (the GPU; by default each rank gets
-                  its own).
-  -h, --help      Show this page.
+  -i FILE                The input file (TOML). Required.
+  --restart FILE|latest  Start from this restart file: replaces the input's
+                         [initialize] with type = "restart". latest: the newest
+                         complete restart file of the input's restart writers
+                         (of the run that started last, then of the highest
+                         step), or [initialize] if there is none. Default: as
+                         [initialize] says.
+  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                         per rank) or --kokkos-device-id=1 (the GPU; by default
+                         each rank gets its own).
+  -h, --help             Show this page.
 
 Options of mallard before any command:
   --dim 2|3  --dim 2 runs mallard2d, --dim 3 mallard3d, for any command.
@@ -92,6 +101,7 @@ Examples:
   $ mallard -i input.toml --kokkos-num-threads=8
   $ mpirun -n 4 mallard -i input.toml
   $ mallard -i input.toml --restart solut/restart_010000.restart
+  $ mpirun -n 4 mallard -i input.toml --restart latest
 
 Exit status:
   0  the run reached a stop condition (n_steps, t_stop, t_wall_stop)
@@ -312,7 +322,8 @@ ranks.
 
 Options:
   -i FILE                   The input file, instead of the argument.
-  --restart FILE            Check the run as started from this restart file.
+  --restart FILE|latest     Check the run as started from this restart file, or
+                            as --restart latest would.
   --ranks N                 Memory and cost per rank for a run on N ranks; from
                             a serial check, memory is scaled to the largest part
                             the run's partitioner would make. Default: the ranks
