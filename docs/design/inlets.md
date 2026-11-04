@@ -219,7 +219,7 @@ expressions (`BoundaryFields`, `src/boundary/boundary_fields.h`).
 - **Per face.** A condition with an expression gets a copy for each of its
   faces, as composition profiles already did, holding the values at the
   face center.
-- **Per stage.** The expressions are compiled (`expr::Program`). Copies with
+- **Per stage.** The expressions are compiled (`kexpr::Program`). Copies with
   expressions of `t` are re-evaluated by one kernel at each stage time
   (`TimedBoundaryFields`), which reads the time from the device scalar
   `stage_time`, so the step's CUDA graph replays it. For mixtures the kernel

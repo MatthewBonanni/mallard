@@ -196,12 +196,12 @@ type = "file"
 filename = "annulus.msh"
 [[mesh.curved]]
 zone = "inner"
-shape = "circle"
+type = "circle"
 center = [0.0, 0.0]
 radius = {R_IN}
 [[mesh.curved]]
 zone = "outer"
-shape = "circle"
+type = "circle"
 center = [0.0, 0.0]
 radius = {R_OUT}
 [initialize]
@@ -480,7 +480,7 @@ type = "file"
 filename = "cylinder.msh"
 [[mesh.curved]]
 zone = "inner"
-shape = "circle"
+type = "circle"
 center = [0.0, 0.0]
 radius = {0.5 * D}
 [initialize]

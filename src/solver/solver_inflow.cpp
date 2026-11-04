@@ -80,10 +80,10 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
             where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none));
     }
     if (shape && shape->depends_on_time()) throw InputError(where + ".profile cannot depend on t.");
-    std::vector<double> value(faces.size(), 1.0);
+    std::vector<double> value = shape ? evaluate_at({shape.get()}, mesh->face_coords, faces)
+                                      : std::vector<double>(faces.size(), 1.0);
     std::string error;
     for (size_t k = 0; shape && k < faces.size(); k++) {
-        value[k] = shape->at(Kokkos::subview(mesh->h_face_coords, faces[k], Kokkos::ALL()), N_DIM);
         if (!(value[k] >= 0.0)) error = where + ": the mass flux must be non-negative at every face.";
     }
     if (const std::string first = comm::first_error(error); !first.empty()) throw InputError(first);

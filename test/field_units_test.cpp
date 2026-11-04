@@ -173,7 +173,7 @@ std::string channel(const std::string & dir) {
       << "region = {type = \"sphere\", center = " << SIDE_POINT << ", radius = 0.3}\n";
 #ifdef Mallard_HAS_HDF5
     if (comm::size() == 1 || have_parallel_hdf5()) {
-        s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"hdf5\"\ninterval = 2\n" << variables
+        s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"xdmf\"\ninterval = 2\n" << variables
           << "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/probe.h5\"\nstart = "
           << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
           << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nvariables = [\"RHO\", \"U\"]\n"

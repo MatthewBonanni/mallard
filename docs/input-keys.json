@@ -5662,10 +5662,10 @@
   ],
   "type": "string",
   "values": [
-   "hdf5",
    "restart",
    "vtkhdf",
-   "vtu"
+   "vtu",
+   "xdmf"
   ]
  },
  "write_data.interval": {

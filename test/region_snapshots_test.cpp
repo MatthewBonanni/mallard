@@ -72,7 +72,7 @@ std::string box_case(const std::string & mesh, const std::string & recon, const 
     const char * zones[6] = {"left", "right", "bottom", "top", "back", "front"};
     for (int k = 0; k < 2 * N_DIM; k++) {
         s << "[[boundaries]]\nname = \"" << zones[k] << "\"\ntype = \""
-          << (k == 2 ? "symmetry" : "extrapolation") << "\"\n";
+          << (k == 2 ? "symmetry" : "outlet_extrapolation") << "\"\n";
     }
     s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n[numerics.face_reconstruction]\n" << recon
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"

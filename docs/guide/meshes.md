@@ -152,8 +152,7 @@ one pair. Periodic meshes work in distributed runs, and with every
 reconstruction ([design order across seams](https://matthewbonanni.github.io/mallard/validation/#periodic-seams)).
 
 Before 0.9.0, generated meshes took `periodic = ["x", "z"]` in `[mesh]`; it
-still works until 0.10.0, with a warning, and `mallard input upgrade`
-rewrites it into `[[periodic]]` entries (`x`: `left`/`right`, `y`:
+was removed in 0.10.0, and `mallard input upgrade` rewrites it into `[[periodic]]` entries (`x`: `left`/`right`, `y`:
 `bottom`/`top`, `z`: `back`/`front`, `theta`: `start`/`end`).
 
 ### Rotational periodicity
@@ -428,9 +427,8 @@ Pitfalls:
   (`curved_wall_degree`, default 3), so orders 5 and 6 are fourth order there;
   see [Numerics](numerics.md#teno-e-options).
 - Before 0.9.0 the key `type` was `shape`, and `"sphere"` and `"cylinder"`
-  meant their surfaces. `shape` is read with a warning until 0.10.0 (adding
-  `filled = false` to spheres and cylinders), and `mallard input upgrade`
-  rewrites it ([inputs from older releases](input_files.md#inputs-from-older-releases)).
+  meant their surfaces. `shape` was removed in 0.10.0, and `mallard input
+  upgrade` rewrites it (adding `filled = false` to spheres and cylinders) ([inputs from older releases](input_files.md#inputs-from-older-releases)).
 
 ## Mesh quality
 

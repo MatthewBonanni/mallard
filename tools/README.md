@@ -261,7 +261,7 @@ The similarity solution behind a strong spherical shock, from its ODEs: the refe
 
 ## Post-processing
 
-Mallard writes VTKHDF files that ParaView opens (the `.vtkhdf.series` file is the series), VTU files in builds without HDF5 (the `.pvd` file is the series), or HDF5 files with XDMF indexes; these scripts read each of them.
+Mallard writes VTKHDF files that ParaView opens (the `.vtkhdf.series` file is the series), VTU files in builds without HDF5 (the `.pvd` file is the series), or HDF5 files with XDMF indexes (`format = "xdmf"`); these scripts read each of them.
 
 ### `mallard`: readers
 
@@ -276,7 +276,7 @@ rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] i
 pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtkhdf")  # 2D or 3D cells
 ```
 
-`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "hdf5"` output: the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
+`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "xdmf"` output (`"hdf5"` before 0.10): the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
 
 ### `plot_vtu.py`: one field of a snapshot
 
@@ -419,6 +419,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
 | `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard` that every snapshot and monitor format carries the same units for each field; the `openmp` job of `ci.yml` runs it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
+| `dev/check_support_matrix.py` | Fails if a test or build job of the GitHub workflows is missing from the [support matrix](../docs/guide/support.md), or the matrix names a job no workflow has; the first job of `ci.yml` runs it |
 | `docs/make_figures.py` | The figures of the user guide (`docs/images/guide/`) and the theory manual (`docs/images/theory/`), light and dark: schematics, domains from the example inputs, and short Mallard runs (`--mallard build/src/mallard`; `--mallard3d` for the 3D region and probe figures) |
 | `docs/regions.py` | The region figures alone: cell volume fractions of every primitive and boolean on coarse unstructured meshes, from one-step runs |
 | `docs/geometry.py` | The figures of the [geometry guide](../docs/guide/geometry.md): schematics of the region primitives, booleans, transforms and signed distance, and from one-step runs the volume fractions on a Cartesian and an O-grid, the probe samples, and the convergence of cell-average and point probe values |

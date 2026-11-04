@@ -59,7 +59,7 @@ builds), one cell per thread.
 ![A triangle with one and with sixteen sub-triangles for the cell average of an analytical state](../images/guide/subdivisions-dark.svg#gh-dark-mode-only)
 
 Expressions may use local variables, conditionals and loops
-([Expressions](input_files.md#expressions)), and read
+([Expressions](expressions.md)), and read
 [tabulated data](#tabulated-data-and-point-clouds); a comparison such as
 `hypot(x, y) < 0.2` draws a region ([Geometry](geometry.md#who-uses-what)). Pitfall:
 TOML requires the expressions to be strings, also for constants: `u =
@@ -243,7 +243,35 @@ the total.
 - `[statistics] reset = true` starts the averages afresh instead of
   continuing them.
 - Probes and force monitors append to their files on a restart.
-- A restart file is written as `<name>.restart.partial` (in the background with `[output] async`) and renamed to `<name>.restart` once every rank has written its part and it is flushed to storage, so a `.restart` file is always complete. A `.partial` file is what a run killed while writing left behind; resume from the newest `.restart` file instead, as the [job scripts](running.md) do.
+- A restart file is written as `<name>.restart.partial` (in the background with `[output] async`) and renamed to `<name>.restart` once every rank has written its part and it is flushed to storage, so a `.restart` file is always complete. A `.partial` file is what a run killed while writing left behind; resume from the newest `.restart` file instead, as `--restart latest` does.
+- A restart on a mesh file whose contents differ from those the file was written on (the hashes in the files' [provenance](output.md#provenance)) warns, even with as many cells; the log's *Initial state* says when the input differs from the one that wrote the file.
+
+### Resuming from the newest restart
+
+```sh
+mallard -i input.toml --restart latest
+```
+
+`--restart latest` resumes the run from the newest restart file it wrote, or
+starts it from `[initialize]` if there is none, so the same command starts a
+run and continues it after every stop, as the [job scripts](parallel.md#job-scripts)
+do. `mallard check input.toml --restart latest` checks the run it would start.
+
+- It looks at the files `<prefix>_<step>.restart` of the input's
+  `[[write_data]]` writers with `format = "restart"` (not those of a region),
+  or at `restart_<step>.restart`, where restarts on request go, if there is
+  none. `.partial` files are ignored.
+- Newest is the file of the run that started last (the start time in the
+  files' provenance), then of the highest step, then of the first writer: after
+  a rewind, it resumes from the rewound run's files, not from higher steps
+  the abandoned run left behind. Modification times do not count.
+- A file that does not read completely (cut short by a full disk or a copy)
+  is skipped with a warning naming it. If no file reads completely, the run
+  stops with an error instead of starting afresh: name a file with `--restart
+  FILE`, or delete them.
+- The log says which file it picked, under *Initial state*, or that there was
+  none. With MPI, rank 0 decides for every rank.
+- A file named `latest` is given as `./latest`.
 - Restart files of every earlier release are read, back to 0.1, and files from a newer Mallard are rejected clearly ([compatibility](output.md#formats-and-compatibility)).
 - `compression = "zlib"` writes compressed restart files (version 5, losslessly: they restart bit for bit), about a third smaller for smooth flows; reading them needs a build with `Mallard_ENABLE_ZLIB`, and the Python tools in `tools/` read only uncompressed ones.
 

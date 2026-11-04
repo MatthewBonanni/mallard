@@ -136,7 +136,7 @@ class Parser {
         std::vector<std::string> resolving;  // the named regions being parsed, outermost first
         std::vector<Node> nodes;             // of every placed filled region of shapes
         std::vector<double> vertices;
-        std::vector<expr::Program> programs;
+        std::vector<kexpr::Program> programs;
         std::vector<Filled> filled;
         bool bounded = true;
         int max_depth = 0;
@@ -1101,9 +1101,9 @@ RegionView<Kokkos::HostSpace> Region::host(const Filled & shapes) const {
     RegionView<Kokkos::HostSpace> r;
     r.nodes = Kokkos::View<const Node *, Kokkos::HostSpace>(m_nodes.data() + shapes.first, shapes.count);
     r.vertices = Kokkos::View<const double *, Kokkos::HostSpace>(m_vertices.data(), m_vertices.size());
-    std::vector<const expr::Program *> programs;
+    std::vector<const kexpr::Program *> programs;
     for (const auto & p : m_programs) programs.push_back(&p);
-    r.programs = expr::ProgramTable<Kokkos::HostSpace>(programs);
+    r.programs = kexpr::ProgramTable<Kokkos::HostSpace>(programs);
     return r;
 }
 
@@ -1117,11 +1117,11 @@ RegionView<> Region::device() const {
     Kokkos::View<double *, Space> vertices("region_vertices", m_vertices.size());
     Kokkos::deep_copy(vertices, Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
                                     m_vertices.data(), m_vertices.size()));
-    std::vector<const expr::Program *> programs;
+    std::vector<const kexpr::Program *> programs;
     for (const auto & p : m_programs) programs.push_back(&p);
     r.nodes = nodes;
     r.vertices = vertices;
-    r.programs = expr::ProgramTable<>(programs);
+    r.programs = kexpr::ProgramTable<>(programs);
     r.edge = m_host.edge;
     return r;
 }

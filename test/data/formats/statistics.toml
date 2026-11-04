@@ -19,11 +19,11 @@ p = "1.0 + 0.1 * x * y"
 
 [[boundaries]]
 name = "left"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "right"
-type = "extrapolation"
+type = "outlet_extrapolation"
 
 [[boundaries]]
 name = "top"

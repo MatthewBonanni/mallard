@@ -13,7 +13,7 @@ The spatial dimension is fixed at build time with the CMake option
 `mallard` runs the one of the case's mesh ([Meshes](guide/meshes.md)). Vectors in the input (`u`, `gravity`,
 `rhou`) have that many components, and expressions are in `x`, `y`, `z`
 (`z` is 0 in 2D) and, where noted, `t`, in one language for every section:
-[Expressions](guide/input_files.md#expressions). Below, `[u_x, u_y]` reads
+[Expressions](guide/expressions.md). Below, `[u_x, u_y]` reads
 `[u_x, u_y, u_z]` in 3D.
 
 Every key in the file must be one the run reads: a key that is misspelled,
@@ -102,7 +102,7 @@ A generated mesh (except `wedge`) is made periodic by [`[[periodic]]`](#periodic
 entries pairing opposite sides, `["left", "right"]`, `["bottom", "top"]` and
 `["back", "front"]` (3D), which take their translation from the mesh: the
 zones are joined into interior faces and disappear as boundary zones. The
-deprecated `periodic = ["x", "y"]` of `[mesh]` (until 0.10.0) does the same;
+`periodic = ["x", "y"]` of `[mesh]` before 0.9.0 was removed in 0.10.0;
 `mallard input upgrade` rewrites it.
 
 `type = "annulus"` generates the annulus `r_inner <= r <= r_outer` about the
@@ -248,7 +248,7 @@ edges. This brings orders 3 to 6 to their design accuracy at curved walls
 |---|---|
 | `curved_geometry` | (`[mesh]`) `false` ignores high-order nodes and `[[mesh.curved]]`: straight-sided faces everywhere. Default `true` |
 | `zone` | (`[[mesh.curved]]`) Boundary zone to curve |
-| `type` | The surface (2D: curve) the zone lies on: a filled [region](#regions) with `filled = false` (its whole boundary), `{type = "boundary", of = ...}` of one, or in 2D a `circle` or `ellipse`. A filled region without `filled = false` is an error. Before 0.9.0: `shape` (where `"sphere"` and `"cylinder"` meant their surfaces), read with a warning until 0.10.0 |
+| `type` | The surface (2D: curve) the zone lies on: a filled [region](#regions) with `filled = false` (its whole boundary), `{type = "boundary", of = ...}` of one, or in 2D a `circle` or `ellipse`. A filled region without `filled = false` is an error. Before 0.9.0: `shape` (where `"sphere"` and `"cylinder"` meant their surfaces), removed in 0.10.0; `mallard input upgrade` rewrites it |
 | `center`, `radius`, ... | The region's own keys and transforms beside `zone` (no `edge`) |
 
 ```toml
@@ -481,7 +481,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 
 | Key | Description |
 |---|---|
-| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh). `Mallard -i input.toml --restart FILE` replaces the whole table by `type = "restart"`, `file = FILE`, so one input serves both the first run and its continuations |
+| `type` | `constant` (default), `analytical`, `restart`, or `remap` (a restart file of another mesh). `mallard -i input.toml --restart FILE` replaces the whole table by `type = "restart"`, `file = FILE`, so one input serves both the first run and its continuations; `--restart latest` takes the newest complete restart file the run wrote, or keeps the table if there is none ([resuming](guide/initialization.md#resuming-from-the-newest-restart)) |
 | `u` | `constant`: `[u_x, u_y]`; `analytical`: one expression in `x`, `y`, `z` per component |
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
@@ -489,7 +489,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `n_subdivisions` | (`analytical`, and any state with regions) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages or the snapshot counts of `time_interval` writers, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#formats-and-compatibility)) |
 
-Expressions, e.g. `"x < 0.5 ? 1.0 : 0.125"`: [Expressions](guide/input_files.md#expressions).
+Expressions, e.g. `"x < 0.5 ? 1.0 : 0.125"`: [Expressions](guide/expressions.md).
 They read `x`, `y`, `z` and the variables of `[[initialize.data]]`, and are
 integrated over each cell on the device.
 
@@ -570,7 +570,7 @@ type that takes them; which options each type takes is the guide's
 | `symmetry` | Slip wall / symmetry plane | |
 | `dirichlet` | Exterior state from expressions in `x`, `y`, `z`, `t`, evaluated at face centers at every stage (single gases) | `rho`, `u` (one expression per component), `p` |
 
-Types renamed in 0.9.0 (removed in 0.10.0; `mallard input upgrade` rewrites
+Types renamed in 0.9.0 and removed in 0.10.0 (`mallard input upgrade` rewrites
 them): `upt` is `inlet_state`, `p_out` `outlet_pressure`,
 `p_out_average` `outlet_pressure` with `average = true`, `extrapolation`
 `outlet_extrapolation`, and `nscbc_inlet` / `nscbc_outlet` `inlet_state` /
@@ -1411,7 +1411,7 @@ region = {type = "box", center = [1, 0, 0], size = [0.4, 0.2, 0.2], pivot = [1, 
 ```
 
 Expressions in regions are those of every section:
-[Expressions](guide/input_files.md#expressions).
+[Expressions](guide/expressions.md).
 
 ### Regions of the mesh
 
@@ -1508,15 +1508,15 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | Key | Description |
 |---|---|
 | `prefix` | Output path prefix; directories are created as needed |
-| `format` | `vtkhdf` (default: VTK's HDF5 format, see below), `vtu` (with a `.pvd` series next to it), `restart`, or the deprecated `hdf5` (XDMF indexes over HDF5 files; removed in 0.10.0, `mallard input upgrade` rewrites it to `vtkhdf`). Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
+| `format` | Which to choose: [output](guide/output.md#which-format). `vtkhdf` (default: VTK's HDF5 format, see below; ParaView 5.12+, PyVista, h5py), `vtu` (with a `.pvd` series next to it; any VTK XML reader, e.g. Tecplot, and builds without HDF5), `xdmf` (XDMF indexes over HDF5 files, see below; VisIt, meshio, ParaView of any version) or `restart`. `hdf5`, the name of `xdmf` before 0.10.0, is an error (VTKHDF is HDF5 too); `mallard input upgrade` rewrites it to `vtkhdf`. Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
 | `series` | (`vtkhdf`) `false` (default): one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`; `true`: every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtkhdf`, `vtu`, `hdf5`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
-| `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it; a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `variables` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for the deprecated `hdf5` format |
+| `variables` | (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `Q` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs) and `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), with the velocity gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*` |
+| `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it; a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `variables` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for `xdmf` |
 | `regions` | (`vtkhdf`, `vtu`) Instead of `region`: a list of regions, each written as `region` writes it, to `PREFIX_<name>` (a named region or zone) or `PREFIX_<index>` (inline, from 0) |
-| `geometry` | Deprecated (0.9.0; removed in 0.10.0) for `region`, which `mallard input upgrade` writes in its place (`"all"` as `"domain"`) |
-| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Filled regions only: boundary zones and other regions of lower dimension are written uncompressed |
-| `relative_error` | (`vtkhdf`, `vtu`, `hdf5`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
+| `geometry` | Removed in 0.10.0 (deprecated in 0.9.0) for `region`, which `mallard input upgrade` writes in its place (`"all"` as `"domain"`) |
+| `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and XDMF's HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Filled regions only: boundary zones and other regions of lower dimension are written uncompressed |
+| `relative_error` | (`vtkhdf`, `vtu`, `xdmf`, with `compression = "zlib"`) Error bound of lossy compression: each cell value is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤ `relative_error` · \|x\|; zeros, subnormals, infinities and NaNs are kept), and the zeroed trailing bits compress well. The mesh stays exact. Restart files are always lossless |
 | `chunk_cells` | (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank reading some cells decompresses only the chunks that hold them |
 
 `format = "vtkhdf"` (builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
@@ -1540,7 +1540,7 @@ the units and descriptions are HDF5 attributes of each dataset (`units`,
 `version` as HDF5 attributes, which VTK ignores.
 `tools/mallard/vtkhdf.py` reads the files.
 
-`format = "hdf5"` (deprecated; builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
+`format = "xdmf"` (`"hdf5"` before 0.10.0; builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
 parallel HDF5) scales to large runs: every rank writes its part of one file per
 snapshot with collective I/O instead of a VTU piece of its own. It writes
 

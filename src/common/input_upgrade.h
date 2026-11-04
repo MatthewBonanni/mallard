@@ -97,7 +97,8 @@ std::string advice(const Finding & finding);
  * @brief Rewrites the deprecated keys and options of `input` in place, as the
  *        setup reads them (kept options stay), and returns them. Throws an InputError listing the
  *        removed ones, with what to do (`mallard input upgrade`). `version`
- *        is this release's (MALLARD_VERSION when empty).
+ *        is this release's (when empty, MALLARD_VERSION, or the release whose
+ *        removals this source has made if that is later).
  */
 std::vector<Finding> apply(Input & input, const std::string & version = "", const Rules & table = rules());
 
