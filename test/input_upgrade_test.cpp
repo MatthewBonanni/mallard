@@ -231,8 +231,8 @@ TEST(InputUpgradeTest, ARenamedOptionCanAddAKeyBesideIt) {
 }
 
 TEST(InputUpgradeTest, KeptOptionsWorkAsBeforeButAreRewritten) {
-    // format = "hdf5" still writes XDMF and HDF5 while deprecated; the
-    // upgraded file asks for VTKHDF
+    // format = "hdf5" wrote XDMF and HDF5 while deprecated (0.9), as "xdmf"
+    // does now; the upgraded file asks for VTKHDF, the default
     const std::string text = "[[write_data]]\nprefix = 'f'\nformat = \"hdf5\"  # ParaView\n";
     Input input = parse_input_string(text);
     const std::vector<Finding> findings = input_upgrade::apply(input, "0.9.0");
@@ -307,9 +307,9 @@ TEST(InputUpgradeTest, OldBoundaryTypesBecomeTypesWithOptions) {
     EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), expected);
     EXPECT_FALSE(reformatted);
     EXPECT_EQ(findings.size(), 5u);
-    // The setup reads the old form as the new one
+    // The setup of 0.9 read the old form as the new one
     Input old_form = parse_input_string(text);
-    input_upgrade::apply(old_form);
+    input_upgrade::apply(old_form, "0.9.0");
     const Input & left = old_form.at("boundaries").at(0);
     EXPECT_EQ(left.at("type").as_string(), "inlet_state");
     EXPECT_FALSE(left.contains("L"));
@@ -318,8 +318,36 @@ TEST(InputUpgradeTest, OldBoundaryTypesBecomeTypesWithOptions) {
     EXPECT_TRUE(old_form.at("boundaries").at(1).at("average").as_boolean());
     // An nscbc type without its parameters still gets an nscbc table, so that the missing L is reported
     Input bare = parse_input_string("[[boundaries]]\nname = \"a\"\ntype = \"nscbc_outlet\"\np = 1.0\n");
-    input_upgrade::apply(bare);
+    input_upgrade::apply(bare, "0.9.0");
     EXPECT_TRUE(bare.at("boundaries").at(0).at("nscbc").is_table());
+}
+
+// The names deprecated in 0.9.0 are rejected by this source, before its
+// version reaches 0.10.0, with the replacement and the command that rewrites
+// them. Fails if a run reads one again.
+TEST(InputUpgradeTest, NamesDeprecatedIn090AreRemoved) {
+    for (const auto & [text, error] : std::vector<std::pair<std::string, std::string>>{
+             {"[[boundaries]]\nname = \"a\"\ntype = \"upt\"\n",
+              "boundaries[0].type = \"upt\" was removed in 0.10.0: use \"inlet_state\""},
+             {"[[boundaries]]\nname = \"a\"\ntype = \"p_out_average\"\np = 1.0\n",
+              "use \"outlet_pressure\" with average = true"},
+             {"[[boundaries]]\nname = \"a\"\ntype = \"nscbc_outlet\"\np = 1.0\nL = 1.0\n",
+              "boundaries[0].L was removed in 0.10.0: use boundaries[0].nscbc.L"},
+             {"[[write_data]]\nprefix = \"f\"\nformat = \"hdf5\"\n", "use \"vtkhdf\" (the default, for ParaView 5.12 and later; or \"xdmf\""},
+             {"[[write_data]]\nprefix = \"f\"\ngeometry = \"all\"\n", "use write_data[0].region"},
+             {"[[mesh.curved]]\nzone = \"w\"\nshape = \"circle\"\n", "use mesh.curved[0].type"},
+             {"[mesh]\ntype = \"cartesian\"\nperiodic = [\"x\"]\n",
+              "use [[periodic]] zones = [\"left\", \"right\"]"}}) {
+        Input input = parse_input_string(text);
+        try {
+            input_upgrade::apply(input);
+            ADD_FAILURE() << "accepted:\n" << text;
+        } catch (const InputError & e) {
+            const std::string what = e.what();
+            EXPECT_NE(what.find(error), std::string::npos) << what;
+            EXPECT_NE(what.find("mallard input upgrade"), std::string::npos) << what;
+        }
+    }
 }
 
 TEST(InputUpgradeTest, MeshPeriodicBecomesPeriodicZonePairsAfterTheMesh) {

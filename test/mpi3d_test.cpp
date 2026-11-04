@@ -40,7 +40,7 @@ std::string blast_input(const std::string & mesh, const std::string & recon) {
       << "u = [\"0.3\", \"-0.1\", \"0.2\"]\np = \"1.0 + 0.8 * " << blob << "\"\n";
     for (int k = 0; k < 6; k++) {
         s << "[[boundaries]]\nname = \"" << ZONES[k] << "\"\ntype = \""
-          << (k % 2 ? "extrapolation" : "symmetry") << "\"\n";
+          << (k % 2 ? "outlet_extrapolation" : "symmetry") << "\"\n";
     }
     s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
       << "[numerics.face_reconstruction]\n" << recon
@@ -176,7 +176,7 @@ TEST(MPI3DTest, DynamicFlameEfficiencyOnTetrahedraMatchesSerial) {
       << "T = \"1300 + 1000 * tanh((x - 0.004 - 0.001 * sin(1200 * y) * cos(900 * z)) / 0.0008)\"\n"
       << "u = [\"3 * sin(1500 * y)\", \"2 * sin(1300 * z)\", \"0.0\"]\nX = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\n";
     for (int k = 0; k < 6; k++) {
-        s << "[[boundaries]]\nname = \"" << ZONES[k] << "\"\ntype = \"" << (k == 0 ? "p_out\"\np = 101325.0" : "symmetry\"")
+        s << "[[boundaries]]\nname = \"" << ZONES[k] << "\"\ntype = \"" << (k == 0 ? "outlet_pressure\"\np = 101325.0" : "symmetry\"")
           << "\n";
     }
     s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"

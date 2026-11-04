@@ -1,4 +1,4 @@
-"""Reader for Mallard's HDF5 solution output (format = "hdf5"; needs h5py).
+"""Reader for Mallard's XDMF/HDF5 solution output (format = "xdmf", "hdf5" before 0.10; needs h5py).
 
 A series is PREFIX_mesh.h5 (written once) and one PREFIX_NNNNNN.h5 of cell
 fields per snapshot, every array in global cell order, with the XDMF indexes

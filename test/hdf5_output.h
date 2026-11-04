@@ -63,7 +63,7 @@ inline void expect_hdf5_output_matches_serial(const std::string & input, const s
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     auto with_writer = [&](const std::string & name) {
-        return input + "[[write_data]]\nprefix = \"" + dir + "/" + name + "\"\nformat = \"hdf5\"\n" + writer;
+        return input + "[[write_data]]\nprefix = \"" + dir + "/" + name + "\"\nformat = \"xdmf\"\n" + writer;
     };
     Solver distributed;
     distributed.init(parse_toml(with_writer("d")));

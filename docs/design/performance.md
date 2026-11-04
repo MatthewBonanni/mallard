@@ -282,7 +282,9 @@ outputs) and team scratch set a peak 30% above the steady state.
   operations and roundings (no FMA): the selection runs one cell per team, whose threads form the matrix in team
   scratch, four entries per thread at a time.
 - The troubled passes' scratch holds half the cells (`troubled_capacity`); more troubled cells are done in further
-  rounds, which recompute their central coefficients with the smooth pass's arithmetic.
+  rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
+  the smooth pass's arithmetic. Which cells fall in the first round follows the order of the queue's atomic
+  increments, and two kernels need not contract the same arithmetic into the same FMAs (#612).
 - The setup takes its team scratch from a pool with one slot per team that can be resident (0.3 GB instead of
   1.7-2.2 GB), freed with the setup, bounds its batches by 2 KB per cell, and hands its moments to TENO instead of
   a copy: the setup peak no longer exceeds the steady state.

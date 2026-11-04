@@ -88,9 +88,9 @@ cell-to-face distance for the hydrostatic ghost pressure.
   `start`/`end`) take it from the mesh, which also checks a value set by hand
   (`Mesh::periodic_pairs`); one syntax for both kinds of mesh means one
   vocabulary in the docs and the examples.
-- The deprecated `[mesh] periodic = ["x", "y", "z"]` is rewritten into those
-  entries when the input is read (`src/common/input_upgrade.cpp`), so the setup
-  reads one form only.
+- The `[mesh] periodic = ["x", "y", "z"]` of 0.8 (removed in 0.10.0) is
+  rewritten into those entries by `mallard input upgrade`
+  (`src/common/input_upgrade.cpp`), so the setup reads one form only.
 - `[[boundaries]]` is optional, since a fully periodic box has no boundary
   faces; naming a periodic zone there is an error.
 
