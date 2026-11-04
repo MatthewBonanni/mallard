@@ -52,7 +52,9 @@ variables = ["P", "T"]
 | `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `xdmf` with `compression = "zlib"`: lossy, each cell value within this relative error |
 | `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
 
-**Variables:**
+**Variables:** `mallard list fields input.toml` lists exactly those of a case, and
+`mallard list fields` all of them with their units and what each needs
+([Command line](cli.md#mallard-list-fields)).
 
 | Group | Names |
 |---|---|

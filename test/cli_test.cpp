@@ -369,3 +369,57 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     EXPECT_EQ(not_a_mesh.status, 2);
     EXPECT_TRUE(contains(not_a_mesh.err, "--quality takes a mesh file")) << not_a_mesh.err;
 }
+
+TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
+    SKIP_UNDER_MPI();
+    const Result catalog = run({"list", "fields"});
+    EXPECT_EQ(catalog.status, 0) << catalog.err;
+    for (const char * part : {"== Fields: conservative", "MEAN_<A>", "MU_T", "needs [les]", "kg m-3"}) {
+        EXPECT_TRUE(contains(catalog.out, part)) << part << "\n" << catalog.out;
+    }
+    ASSERT_EQ(small_run().status, 0);
+    const Result listed = run({"list", "fields", "small.toml", "--json"});
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value v = json::parse(listed.out);
+    EXPECT_EQ(v["dim"].number, Mallard_DIM);
+    std::vector<std::string> names;
+    for (const auto & f : v["fields"].array) names.push_back(f["name"].string);
+    for (const char * name : {"RHO", "U_X", "P", "Q", "P_MAX"}) {
+        EXPECT_NE(std::find(names.begin(), names.end(), name), names.end()) << name;
+    }
+    EXPECT_EQ(std::count(names.begin(), names.end(), "U_Z"), Mallard_DIM == 3 ? 1 : 0);
+    std::vector<std::string> missing;
+    for (const auto & f : v["missing"].array) missing.push_back(f["name"].string + ": " + f["needs"].string);
+    EXPECT_NE(std::find(missing.begin(), missing.end(), "MU_T: [les]"), missing.end());
+    EXPECT_NE(std::find(missing.begin(), missing.end(), "Y_<s>: a mixture"), missing.end());
+}
+
+TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
+    SKIP_UNDER_MPI();
+    if (Mallard_DIM != 2) GTEST_SKIP() << "the mixture fixture is a 2D case";
+    std::string mixture = read_file(source_dir() + "/test/data/formats/mixture.toml");
+    const std::string relative = "\"../../../mechanisms/h2o2.yaml\"";
+    ASSERT_NE(mixture.find(relative), std::string::npos);
+    mixture.replace(mixture.find(relative), relative.size(), "\"" + source_dir() + "/mechanisms/h2o2.yaml\"");
+    std::ofstream("mixture.toml") << mixture;
+    const Result r = run({"list", "species", "mixture.toml"});
+    EXPECT_EQ(r.status, 0) << r.err;
+    EXPECT_EQ(r.out, "H2\nH\nO\nO2\nOH\nH2O\nHO2\nH2O2\nAR\nN2\n");
+    ASSERT_EQ(small_run().status, 0);
+    const Result gas = run({"list", "species", "small.toml"});
+    EXPECT_EQ(gas.status, 0) << gas.err;
+    EXPECT_TRUE(contains(gas.out, "a single gas, no species")) << gas.out;
+    const Result broken = run({"list", "species", "missing.toml"});
+    EXPECT_EQ(broken.status, 1);
+}
+
+TEST(CliTest, ListTemplatesIsWhatNewListShowedWhichStillWorks) {
+    SKIP_UNDER_MPI();
+    const Result listed = run({"list", "templates"});
+    EXPECT_EQ(listed.status, 0) << listed.err;
+    EXPECT_TRUE(contains(listed.out, "cylinder")) << listed.out;
+    const Result old = run({"new", "--list"});
+    EXPECT_EQ(old.status, 0);
+    EXPECT_EQ(old.out, listed.out);
+    EXPECT_TRUE(contains(old.err, "use mallard list templates")) << old.err;
+}

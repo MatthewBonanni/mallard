@@ -19,6 +19,7 @@
 
 #include "comm.h"
 #include "field_units.h"
+#include "output_reader.h"
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -531,4 +532,60 @@ TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
     EXPECT_EQ(integrals["kinetic_energy"], "kg m2 s-2 rad-1");
     EXPECT_EQ(integrals["temperature"], "m3 K rad-1");
     if (!::testing::Test::HasFailure()) std::filesystem::remove_all(dir);
+}
+
+TEST(FieldUnitsTest, EveryFieldACaseListsIsWrittenAndNoOther) {
+    // mallard list fields input.toml lists Solver::output_fields(): a writer of all of them writes exactly them
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    const std::string dir = (scratch_dir() / "listed_fields").string();
+    std::ostringstream s;
+    s << "[run]\nn_steps = 1\ndt = 1.0e-4\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n";
+    if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\n"
+      << "u = " << (N_DIM == 2 ? "[\"0.2\", \"0.0\"]" : "[\"0.2\", \"0.0\", \"0.0\"]") << "\np = \"1.0\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[statistics]\nfields = [\"P\"]\n[output]\ncheck_interval = 1000000\n";
+    const std::string base = s.str();
+    Solver listing;
+    listing.set_distributed(false);
+    listing.init(parse_toml(base));
+    const std::vector<std::string> listed = listing.output_fields();
+    for (const char * name : {"RHO", "U_X", "P", "CFL", "Q", "P_MAX", "TENO_SIGMA", "MEAN_P"}) {
+        EXPECT_NE(std::find(listed.begin(), listed.end(), name), listed.end()) << name;
+    }
+    EXPECT_EQ(std::find(listed.begin(), listed.end(), "MU_T"), listed.end());
+
+    std::string variables = "[";
+    for (const auto & name : listed) variables += (variables.size() > 1 ? ", \"" : "\"") + name + "\"";
+    Solver writing;
+    writing.set_distributed(false);
+    writing.init(parse_toml(base + "[[write_data]]\nprefix = \"" + dir + "/all\"\nformat = \"vtu\"\ninterval = 1\n"
+                            "variables = " + variables + "]\n"));
+    writing.run();
+    std::vector<std::string> written;
+    for (const auto & f : output::open(dir + "/all_000001.vtu").fields) written.push_back(f.name);
+    std::vector<std::string> expected = listed;
+    std::sort(expected.begin(), expected.end());
+    std::sort(written.begin(), written.end());
+    EXPECT_EQ(written, expected);
+
+    Solver unlisted;
+    unlisted.set_distributed(false);
+    EXPECT_THROW(unlisted.init(parse_toml(base + "[[write_data]]\nprefix = \"" + dir + "/mu\"\nformat = \"vtu\"\n"
+                                          "variables = [\"MU_T\"]\n")),
+                 InputError);
+}
+
+TEST(FieldUnitsTest, CatalogGroupsHoldEveryNamedField) {
+    // Every field a case can list has a group, so mallard list fields input.toml files it under one
+    for (const char * name : {"RHO", "RHOU_X", "U", "VORTICITY_Z", "MU_T", "Y_H2", "OMEGA_OH", "SOURCE_RHO",
+                              "MEAN_P", "COV_U_X_P", "PHASE_3_P", "TENO_SIGMA", "P_MAX", "T_SEED"}) {
+        EXPECT_FALSE(field_units::group(name).empty()) << name;
+    }
+    EXPECT_EQ(field_units::group("NOT_A_FIELD"), "");
+    std::vector<size_t> ranks;
+    for (const CatalogField & f : field_units::catalog()) ranks.push_back(field_units::group_rank(f.group));
+    EXPECT_TRUE(std::is_sorted(ranks.begin(), ranks.end()));
 }

@@ -54,24 +54,28 @@ OMP_PLACES.
 
 Commands:
   Run
-    mallard -i input.toml  Run a case
-    mallard ctl            Ask a running case for its status, a restart file or
-                           a stop, or change its settings
-    mallard reactor        Integrate a 0D reactor, or benchmark the chemistry
+    mallard -i input.toml   Run a case
+    mallard ctl             Ask a running case for its status, a restart file or
+                            a stop, or change its settings
+    mallard reactor         Integrate a 0D reactor, or benchmark the chemistry
   Set up
-    mallard new            Create a ready-to-run case from a template
-    mallard input upgrade  Bring an input file from an older release up to date
+    mallard new             Create a ready-to-run case from a template
+    mallard input upgrade   Bring an input file from an older release up to date
   Inspect
-    mallard check          Set up a case without running it and report on it:
-                           keys, mesh, time step, memory, cost
-    mallard info           What a mesh, snapshot, restart, probe or CSV file, or
-                           a run directory, holds
+    mallard check           Set up a case without running it and report on it:
+                            keys, mesh, time step, memory, cost
+    mallard info            What a mesh, snapshot, restart, probe or CSV file,
+                            or a run directory, holds
+    mallard list fields     The output fields there are, or exactly those of one
+                            case
+    mallard list species    The species of a case
+    mallard list templates  The case templates of mallard new
   Mesh
-    mallard mesh convert   Write a mesh file, or the mesh of an input file, as a
-                           Mallard HDF5 mesh
+    mallard mesh convert    Write a mesh file, or the mesh of an input file, as
+                            a Mallard HDF5 mesh
   Maintain
-    mallard test           Run the unit and regression tests
-    mallard --version      Print the version
+    mallard test            Run the unit and regression tests
+    mallard --version       Print the version
 
 Options:
   -i FILE         The input file (TOML). Required.
@@ -173,27 +177,27 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 
 ```text
 Usage: mallard new <template> [directory] [--quick] [--force]
-       mallard new --list
+       mallard list templates
 
 Creates a ready-to-run case from one of Mallard's examples or tutorials:
 input.toml, run.sh, the mesh or initial-state script it needs, post.sh and a
 README. The directory defaults to the template's name. Without a template, lists
-them.
+them, as mallard list templates does.
 
 Options:
-  -l, --list  List the templates, with what each shows and what it costs.
+  -l, --list  Deprecated: mallard list templates. List the templates.
   --quick     A coarse, short version that runs in seconds to a minute: for
               trying the steps, not for the physical result.
   --force     Write into a directory that is not empty.
   -h, --help  Show this page.
 
 Examples:
-  $ mallard new --list
+  $ mallard list templates
   $ mallard new cylinder
   $ mallard new cylinder runs/cyl --quick
 
 Exit status:
-  0  the case was created, or --list
+  0  the case was created, or the templates were listed
   1  the case could not be written
   2  usage error, no template given, or no template of that name
 
@@ -208,7 +212,7 @@ Usage: mallard input <command> [options]
 Commands on input files.
 
 Commands:
-  mallard input upgrade    Bring an input file from an older release up to date
+  mallard input upgrade     Bring an input file from an older release up to date
 
 mallard input <command> --help shows the page of a command.
 
@@ -373,6 +377,106 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-info
 ```
 
+### mallard list
+
+```text
+Usage: mallard list <command> [options]
+
+Catalogs: the fields, species and case templates there are.
+
+Commands:
+  mallard list fields       The output fields there are, or exactly those of one
+                            case
+  mallard list species      The species of a case
+  mallard list templates    The case templates of mallard new
+
+mallard list <command> --help shows the page of a command.
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list
+```
+
+### mallard list fields
+
+```text
+Usage: mallard list fields [INPUT] [--json]
+
+Without an input file, lists every field the [[write_data]] variables,
+[[probes]] and [statistics] take, by group, with its units, its description and
+what a case needs to have it, and the patterns (Y_<s>, MEAN_<A>, COV_<A>_<B>,
+...).
+
+With an input file, sets the case up as mallard check does (reading its mesh,
+writing nothing) and lists exactly the fields [[write_data]] variables accept
+for it: its species, its physics, chemistry, LES and statistics, and its
+dimension; then the common fields it does not have, with what they need.
+
+Options:
+  --json      Print the list as one JSON object, for scripts. Default: text.
+  --kokkos-*  Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank) or
+              --kokkos-device-id=1 (the GPU; by default each rank gets its own).
+  -h, --help  Show this page.
+
+Examples:
+  $ mallard list fields
+  $ mallard list fields input.toml
+  $ mallard list fields input.toml --json
+
+Exit status:
+  0  listed
+  1  the case cannot be set up (the errors are printed)
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-fields
+```
+
+### mallard list species
+
+```text
+Usage: mallard list species INPUT [--json]
+
+Sets the case up as mallard check does and lists its species, one per line, in
+the order of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s> fields. A
+single gas has none.
+
+Options:
+  --json      Print the list as one JSON object, for scripts. Default: text.
+  --kokkos-*  Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank) or
+              --kokkos-device-id=1 (the GPU; by default each rank gets its own).
+  -h, --help  Show this page.
+
+Examples:
+  $ mallard list species flame.toml
+  $ mallard list species flame.toml --json
+
+Exit status:
+  0  listed
+  1  the case cannot be set up (the errors are printed)
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-species
+```
+
+### mallard list templates
+
+```text
+Usage: mallard list templates
+
+Lists the templates mallard new creates cases from, with what each shows and
+what it costs.
+
+Options:
+  -h, --help  Show this page.
+
+Examples:
+  $ mallard list templates
+  $ mallard new cylinder
+
+Exit status:
+  0  listed
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-templates
+```
+
 ### mallard mesh
 
 ```text
@@ -381,8 +485,8 @@ Usage: mallard mesh <command> [options]
 Commands on meshes.
 
 Commands:
-  mallard mesh convert     Write a mesh file, or the mesh of an input file, as a
-                           Mallard HDF5 mesh
+  mallard mesh convert      Write a mesh file, or the mesh of an input file, as
+                            a Mallard HDF5 mesh
 
 mallard mesh <command> --help shows the page of a command.
 

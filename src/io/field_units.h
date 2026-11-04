@@ -9,6 +9,7 @@
 #ifndef FIELD_UNITS_H
 #define FIELD_UNITS_H
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -26,7 +27,25 @@ struct FieldDescription {
     std::string units() const { return non_si_units.empty() ? dimension.udunits() : non_si_units; }
 };
 
+/** @brief A field, or a pattern of fields (Y_<s>, MEAN_<A>), of the catalog mallard list fields shows. */
+struct CatalogField {
+    std::string name;
+    std::string units;
+    std::string long_name;
+    std::string group;  ///< "conservative", "primitive", "derived", "transport", "mixture", "chemistry", ...
+    std::string needs;  ///< what a case needs for it, empty if every case has it
+};
+
 namespace field_units {
+
+/** @brief The catalog group of a field ("primitive", "statistics", ...); empty if the table has no such field. */
+std::string group(const std::string & name);
+
+/** @brief The place of a group in the catalog's order. */
+size_t group_rank(const std::string & group);
+
+/** @brief Every field of the table and the patterns of per-species and derived fields, by group. */
+std::vector<CatalogField> catalog();
 
 /**
  * @brief The description of an output field by name: a named field (RHO,

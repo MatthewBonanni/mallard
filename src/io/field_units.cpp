@@ -9,7 +9,9 @@
 
 #include "common_typedef.h"
 
+#include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 
@@ -19,6 +21,8 @@ struct Entry {
     const char * name;
     Dimension dimension;
     const char * long_name;
+    const char * group;
+    const char * needs;  // what a case needs for the field, "" if every case has it
     const char * non_si_units = "";
 };
 
@@ -28,66 +32,80 @@ constexpr Dimension thermal_conductivity = dim::of(1, 1, -3, -1);
 constexpr Dimension diffusivity = dim::of(0, 2, -1);
 constexpr Dimension thermal_diffusion = dim::of(1, -1, -1);
 
+constexpr const char * CONSERVATIVE = "conservative";
+constexpr const char * PRIMITIVE = "primitive";
+constexpr const char * DERIVED = "derived";
+constexpr const char * TRANSPORT = "transport";
+constexpr const char * MIXTURE = "mixture";
+constexpr const char * CHEMISTRY = "chemistry";
+constexpr const char * LES = "LES";
+constexpr const char * SURFACE = "surface probes";
+constexpr const char * QUALITY = "mesh quality";
+constexpr const char * WALLS = "[[probes]] on a wall zone";
+constexpr const char * SURFACES = "[[probes]] on a surface or boundary zone";
+
 // Vectors (RHOU, U, VORTICITY in 3D) also name their components <name>_X, _Y, _Z
 const Entry VECTORS[] = {
-    {"RHOU", momentum_density, "momentum density"},
-    {"U", dim::velocity, "velocity"},
-    {"VORTICITY", dim::rate, "vorticity"},
-    // Probes: fluxes through surfaces, wall quantities
-    {"MOMENTUM_FLUX", dim::pressure, "normal momentum flux"},
-    {"TRACTION_PRESSURE", dim::pressure, "pressure traction on the boundary"},
-    {"TRACTION_VISCOUS", dim::pressure, "viscous traction on the boundary"},
-    {"TAU_W", dim::pressure, "wall shear stress"},
+    {"RHOU", momentum_density, "momentum density", CONSERVATIVE, ""},
+    {"U", dim::velocity, "velocity", PRIMITIVE, ""},
+    {"VORTICITY", dim::rate, "vorticity", DERIVED, ""},
+    {"MOMENTUM_FLUX", dim::pressure, "normal momentum flux", SURFACE, SURFACES},
+    {"TRACTION_PRESSURE", dim::pressure, "pressure traction on the boundary", SURFACE, WALLS},
+    {"TRACTION_VISCOUS", dim::pressure, "viscous traction on the boundary", SURFACE, WALLS},
+    {"TAU_W", dim::pressure, "wall shear stress", SURFACE, WALLS},
 };
 
 const Entry NAMED[] = {
-    {"RHO", dim::density, "density"},
-    {"RHOE", energy_density, "total energy density"},
-    {"P", dim::pressure, "pressure"},
-    {"T", dim::temperature, "temperature"},
-    {"H", dim::velocity_squared, "specific enthalpy"},
-    {"CFL", dim::none, "local CFL number"},
-    {"Q", dim::rate.times(dim::rate), "Q-criterion"},
-    {"TENO_SIGMA", dim::none, "TENO troubled-cell indicator"},
-    {"MU", dim::dynamic_viscosity, "dynamic viscosity"},
-    {"LAMBDA", thermal_conductivity, "thermal conductivity"},
-    {"T_SEED", dim::temperature, "temperature guess of the thermodynamic state"},
-    {"HRR", dim::power_density, "heat release rate"},
-    {"CHEM_H", dim::time, "last chemistry sub-step"},
-    {"CHEM_COST", dim::none, "chemistry sub-steps in the last step"},
-    {"QRAD", dim::power_density, "radiative heat source"},
-    {"MU_T", dim::dynamic_viscosity, "eddy viscosity"},
-    {"TF_F", dim::none, "flame thickening factor"},
-    {"TF_E", dim::none, "flame wrinkling efficiency"},
-    {"TF_OMEGA", dim::none, "flame sensor"},
-    {"PASR_KAPPA", dim::none, "PaSR reacting fraction"},
-    {"P_MAX", dim::pressure, "largest pressure seen"},
-    {"REGION_FRACTION", dim::none, "volume fraction of the region in the cell"},
-    // Probes: fluxes through surfaces, wall quantities
-    {"MASS_FLUX", dim::mass_flux, "normal mass flux"},
-    {"ENTHALPY_FLUX", dim::heat_flux, "normal total enthalpy flux"},
-    {"TAU_W", dim::pressure, "wall shear stress magnitude"},
-    {"CF", dim::none, "skin friction coefficient"},
-    {"CP", dim::none, "pressure coefficient"},
-    {"Q_W", dim::heat_flux, "wall heat flux into the fluid"},
-    {"U_TAU", dim::velocity, "friction velocity"},
-    {"Y_PLUS", dim::none, "first-cell y+"},
-    // Mesh quality (mallard check --quality)
-    {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", "degree"},
-    {"SKEWNESS", dim::none, "largest face skewness"},
-    {"ASPECT_RATIO", dim::none, "cell aspect ratio"},
-    {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor"},
+    {"RHO", dim::density, "density", CONSERVATIVE, ""},
+    {"RHOE", energy_density, "total energy density", CONSERVATIVE, ""},
+    {"P", dim::pressure, "pressure", PRIMITIVE, ""},
+    {"T", dim::temperature, "temperature", PRIMITIVE, ""},
+    {"H", dim::velocity_squared, "specific enthalpy", PRIMITIVE, ""},
+    {"CFL", dim::none, "local CFL number", DERIVED, ""},
+    {"Q", dim::rate.times(dim::rate), "Q-criterion", DERIVED, ""},
+    {"P_MAX", dim::pressure, "largest pressure seen", DERIVED, ""},
+    {"TENO_SIGMA", dim::none, "TENO troubled-cell indicator", DERIVED, "face_reconstruction type = \"TENO\""},
+    {"MU", dim::dynamic_viscosity, "dynamic viscosity", TRANSPORT, "a mixture with navier_stokes"},
+    {"LAMBDA", thermal_conductivity, "thermal conductivity", TRANSPORT,
+     "a mixture with navier_stokes"},
+    {"T_SEED", dim::temperature, "temperature guess of the thermodynamic state", MIXTURE, "a mixture"},
+    {"HRR", dim::power_density, "heat release rate", CHEMISTRY, "a mixture with [chemistry]"},
+    {"CHEM_H", dim::time, "last chemistry sub-step", CHEMISTRY, "a mixture with [chemistry]"},
+    {"CHEM_COST", dim::none, "chemistry sub-steps in the last step", CHEMISTRY, "a mixture with [chemistry]"},
+    {"QRAD", dim::power_density, "radiative heat source", CHEMISTRY, "[radiation]"},
+    {"MU_T", dim::dynamic_viscosity, "eddy viscosity", LES, "[les]"},
+    {"TF_F", dim::none, "flame thickening factor", LES, "[les.combustion] (TFLES)"},
+    {"TF_E", dim::none, "flame wrinkling efficiency", LES, "[les.combustion] (TFLES)"},
+    {"TF_OMEGA", dim::none, "flame sensor", LES, "[les.combustion] (TFLES)"},
+    {"PASR_KAPPA", dim::none, "PaSR reacting fraction", LES, "[les.combustion] model = \"pasr\""},
+    {"REGION_FRACTION", dim::none, "volume fraction of the region in the cell", DERIVED,
+     "a [[write_data]] region, which writes it"},
+    {"MASS_FLUX", dim::mass_flux, "normal mass flux", SURFACE, SURFACES},
+    {"ENTHALPY_FLUX", dim::heat_flux, "normal total enthalpy flux", SURFACE, SURFACES},
+    {"TAU_W", dim::pressure, "wall shear stress magnitude", SURFACE, WALLS},
+    {"CF", dim::none, "skin friction coefficient", SURFACE, WALLS},
+    {"CP", dim::none, "pressure coefficient", SURFACE, WALLS},
+    {"Q_W", dim::heat_flux, "wall heat flux into the fluid", SURFACE, WALLS},
+    {"U_TAU", dim::velocity, "friction velocity", SURFACE, WALLS},
+    {"Y_PLUS", dim::none, "first-cell y+", SURFACE, WALLS},
+    {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", QUALITY,
+     "mallard check or info --quality", "degree"},
+    {"SKEWNESS", dim::none, "largest face skewness", QUALITY, "mallard check or info --quality"},
+    {"ASPECT_RATIO", dim::none, "cell aspect ratio", QUALITY, "mallard check or info --quality"},
+    {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor", QUALITY, "mallard check or info --quality"},
 };
 
 // <prefix><species>
 const Entry SPECIES[] = {
-    {"Y_", dim::none, "mass fraction of "},
-    {"X_", dim::none, "mole fraction of "},
-    {"RHOY_", dim::density, "partial density of "},
-    {"D_", diffusivity, "diffusion coefficient of "},
-    {"DT_", thermal_diffusion, "thermal diffusion coefficient of "},
-    {"OMEGA_", dim::mass_source, "net production rate of "},
-    {"SPECIES_FLUX_", dim::mass_flux, "normal mass flux of "},
+    {"Y_", dim::none, "mass fraction of ", MIXTURE, "a mixture"},
+    {"X_", dim::none, "mole fraction of ", MIXTURE, "a mixture"},
+    {"RHOY_", dim::density, "partial density of ", CONSERVATIVE, "a mixture"},
+    {"D_", diffusivity, "diffusion coefficient of ", TRANSPORT, "a mixture with navier_stokes"},
+    {"DT_", thermal_diffusion, "thermal diffusion coefficient of ", TRANSPORT,
+     "a mixture with navier_stokes and soret = true"},
+    {"OMEGA_", dim::mass_source, "net production rate of ", CHEMISTRY, "a mixture with [chemistry]"},
+    {"SPECIES_FLUX_", dim::mass_flux, "normal mass flux of ", SURFACE,
+     "a mixture; [[probes]] on a surface or boundary zone"},
 };
 
 bool starts_with(const std::string & s, const std::string & prefix) { return s.rfind(prefix, 0) == 0; }
@@ -166,6 +184,64 @@ std::optional<FieldDescription> find(const std::string & name) {
         return FieldDescription{of->dimension, "phase average of " + of->long_name + " in bin " + bin, "", ""};
     }
     return std::nullopt;
+}
+
+size_t group_rank(const std::string & group) {
+    const char * order[] = {CONSERVATIVE, PRIMITIVE, DERIVED, TRANSPORT, MIXTURE, CHEMISTRY, LES,
+                            "sources", "statistics", SURFACE, QUALITY};
+    for (size_t i = 0; i < std::size(order); i++) {
+        if (group == order[i]) return i;
+    }
+    return std::size(order);
+}
+
+std::string group(const std::string & name) {
+    for (const auto & e : NAMED) {
+        if (name == e.name) return e.group;
+    }
+    for (const auto & e : VECTORS) {
+        const std::string stem = e.name;
+        for (const char * suffix : {"", "_X", "_Y", "_Z"}) {
+            if (name == stem + suffix) return e.group;
+        }
+    }
+    for (const auto & e : SPECIES) {
+        if (starts_with(name, e.name) && name.size() > std::string(e.name).size()) return e.group;
+    }
+    if (starts_with(name, "SOURCE_")) return "sources";
+    for (const char * prefix : {"MEAN_", "COV_", "PHASE_"}) {
+        if (starts_with(name, prefix)) return "statistics";
+    }
+    return "";
+}
+
+std::vector<CatalogField> catalog() {
+    std::vector<CatalogField> out;
+    auto add = [&](const std::string & name, const Entry & e, const std::string & long_name) {
+        const std::string units = e.non_si_units[0] ? e.non_si_units : e.dimension.udunits();
+        out.push_back({name, units, long_name, e.group, e.needs});
+    };
+    for (const auto & e : NAMED) add(e.name, e, e.long_name);
+    for (const auto & e : VECTORS) {
+        if (find_base(e.name)->long_name == e.long_name) add(e.name, e, e.long_name + std::string(" (vector)"));
+    }
+    for (const auto & e : SPECIES) add(e.name + std::string("<s>"), e, e.long_name + std::string("species s"));
+    const Entry derived[] = {
+        {"SOURCE_<A>", dim::none, "", "sources", "[[sources]] or [source]"},
+        {"MEAN_<A>", dim::none, "", "statistics", "[statistics] fields with A"},
+        {"COV_<A>_<B>", dim::none, "", "statistics", "[statistics] products with A*B"},
+        {"PHASE_<bin>_<A>", dim::none, "", "statistics", "[statistics.phase]"},
+    };
+    const char * long_names[] = {"source of A, per second", "time average of A", "covariance of A and B",
+                                 "phase average of A in a bin"};
+    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's"};
+    for (size_t i = 0; i < std::size(derived); i++) {
+        out.push_back({derived[i].name, units[i], long_names[i], derived[i].group, derived[i].needs});
+    }
+    std::stable_sort(out.begin(), out.end(), [](const CatalogField & a, const CatalogField & b) {
+        return group_rank(a.group) < group_rank(b.group);
+    });
+    return out;
 }
 
 FieldDescription describe(const std::string & name) {

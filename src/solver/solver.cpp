@@ -1935,6 +1935,21 @@ void Solver::register_data() {
     }
 }
 
+std::vector<std::string> Solver::output_fields() const {
+    std::vector<std::string> names;
+    for (const auto & d : data) names.push_back(d.name());
+    std::vector<std::string> on_request = {"P_MAX", "Q"};
+    if constexpr (N_DIM == 2) {
+        on_request.emplace_back("VORTICITY");
+    } else {
+        FOR_I_DIM on_request.push_back(std::string("VORTICITY_") + "XYZ"[i]);
+    }
+    for (const auto & name : on_request) {
+        if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
+    }
+    return names;
+}
+
 std::vector<std::string> Solver::restart_variables() const {
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     for (const auto & name : species_names) names.push_back("RHOY_" + name);

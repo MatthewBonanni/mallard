@@ -11,7 +11,7 @@ cd examples/sod && ../../build/src/mallard -i input.toml
 
 The last line runs the Sod shock tube in about a second and writes `solut/sod.pvd` (VTU: this build has no
 HDF5; with `-DMallard_ENABLE_HDF5=ON` it writes VTKHDF, `solut/sod.vtkhdf.series`), which ParaView
-opens. `build/src/mallard new --list` lists ready-to-run cases to copy (`mallard new cylinder` creates
+opens. `build/src/mallard list templates` lists ready-to-run cases to copy (`mallard new cylinder` creates
 one with its mesh, run and post-processing scripts). GPU builds (CUDA, HIP), MPI and the other options are in [Installation](https://matthewbonanni.github.io/mallard/docs/installation/).
 
 ## Where next
