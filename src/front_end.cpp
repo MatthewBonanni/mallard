@@ -223,7 +223,7 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
             if (first.empty()) return dimension_free();
             return {fs::path(first).extension() == ".toml" ? input_dimension(first) : mesh_file_dimension(first), first};
         case cli::Case::file:
-            if (first.empty() || !output::is_mesh_file(first)) return free;
+            if (first.empty() || !output::is_mesh_file(first)) return dimension_free();
             return {mesh_file_dimension(first), first};
         default:
             return dimension_free();
