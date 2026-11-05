@@ -1113,7 +1113,8 @@ void expect_time_averages(const std::string & every_step, const std::string & av
         ASSERT_GT(weight, 0.0) << "a row before the first sample";
         for (const auto & c : columns) {
             const double expected = sum[c] / weight;
-            EXPECT_NEAR(mean.at(mean_of(c)), expected, 1e-12 * (std::fabs(expected) + 1e-3))
+            const double tol = precision_tol<double>(1e-12, 1e-6) * (std::fabs(expected) + 1e-3);
+            EXPECT_NEAR(mean.at(mean_of(c)), expected, tol)
                 << c << " at step " << mean.at("step");
         }
     }
@@ -1154,10 +1155,10 @@ TEST(ProbesTest, StatisticsAveragesAreProbeVariablesAtTheirSamplesCells) {
             for (size_t i = 0; i < N_DIM; i++) d += std::pow(double(mesh.h_cell_coords(c, i)) - row.at(std::string(1, "xyz"[i])), 2);
             if (d < best) best = d, cell = c;
         }
-        EXPECT_EQ(row.at("MEAN_P"), double(mean(cell, 0)));
-        EXPECT_EQ(row.at("MEAN_U_X"), double(mean(cell, 1)));
-        EXPECT_EQ(row.at("MEAN_U_Y"), double(mean(cell, 2)));
-        EXPECT_EQ(row.at("COV_RHO_P"), double(cov(cell, 0)));
+        EXPECT_EQ(static_cast<rtype>(row.at("MEAN_P")), mean(cell, 0));
+        EXPECT_EQ(static_cast<rtype>(row.at("MEAN_U_X")), mean(cell, 1));
+        EXPECT_EQ(static_cast<rtype>(row.at("MEAN_U_Y")), mean(cell, 2));
+        EXPECT_EQ(static_cast<rtype>(row.at("COV_RHO_P")), cov(cell, 0));
     }
     // Reductions take them at their own quadrature points: after the first
     // sample the mean is the sample itself
