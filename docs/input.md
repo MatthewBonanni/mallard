@@ -46,7 +46,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dynamic viscosity (Pa s) | `physics.mu` |
 | Heat flux (W/m^2) | `boundaries.q` |
 | Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
-| Mass flow (kg/s; per metre of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
+| Mass flow (kg/s; per meter of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
 | Sources (per unit volume) | `source.rho` (kg/(m^3 s)), `rhou` (N/m^3), `rhoE` (W/m^3), and the same of `[[sources]]` with `rhoY` (kg/(m^3 s)); with `total = true` integrated rates (kg/s, N, W) |
 | Concentration (plain numbers in kmol/m^3) | `chemistry.C_reg` |
 
