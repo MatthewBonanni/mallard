@@ -352,8 +352,8 @@ TEST_P(Couette3D, LinearVelocityAndWallForces) {
     }
     EXPECT_LT(max_err, 1e-3 * 0.1);
     // Shear mu U / H on the unit-area plates opposes the relative motion; p = 1 pushes outward
-    const auto front = solver->calc_force(m->get_face_zone("front")->faces);
-    const auto back = solver->calc_force(m->get_face_zone("back")->faces);
+    const auto front = solver->calc_force(device_zone_faces(*m, "front"));
+    const auto back = solver->calc_force(device_zone_faces(*m, "back"));
     EXPECT_NEAR(front[2], 1.0, 1e-3);
     EXPECT_NEAR(back[2], -1.0, 1e-3);
     EXPECT_NEAR(front[0], 0.0, 1e-12);
