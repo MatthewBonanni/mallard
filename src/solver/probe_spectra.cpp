@@ -243,7 +243,7 @@ bool ProbeSpectra::needs_reductions() const {
     return std::any_of(series.begin(), series.end(), [](const Series & s) { return !s.per_sample; });
 }
 
-bool ProbeSpectra::takes(double t) const { return t >= t_start - precision_tol(1e-9, 1e-5) * dt; }
+bool ProbeSpectra::takes(double t) const { return t >= t_start - precision_tol<double>(1e-9, 1e-5) * dt; }
 
 double ProbeSpectra::resolution() const {
     return 1.0 / (static_cast<double>(probe_spectra::segment_length(n_history, segments)) * dt);
@@ -251,7 +251,7 @@ double ProbeSpectra::resolution() const {
 
 bool ProbeSpectra::add(double t, bool keep, const std::vector<double> & nodes, size_t n_cols,
                        const std::vector<double> & reductions) {
-    if (held > 0 && std::fabs(t - t_last - dt) > precision_tol(1e-6, 1e-3) * dt) {
+    if (held > 0 && std::fabs(t - t_last - dt) > precision_tol<double>(1e-6, 1e-3) * dt) {
         logging::warning("probes[name = \"" + name + "\"].spectra: the sample at t = " + logging::real(t) +
                          " is not dt = " + logging::real(dt) + " after the last (t = " + logging::real(t_last) +
                          "); the history starts afresh.");
@@ -277,7 +277,7 @@ bool ProbeSpectra::add(double t, bool keep, const std::vector<double> & nodes, s
     }
     count++;
     t_last = t;
-    const double tol = precision_tol(1e-9, 1e-5) * time_interval;
+    const double tol = precision_tol<double>(1e-9, 1e-5) * time_interval;
     const bool due = time_interval > 0.0 && t >= static_cast<double>(n_written) * time_interval - tol;
     if (due) {
         while (static_cast<double>(n_written) * time_interval <= t + tol) n_written++;
