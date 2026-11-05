@@ -7,6 +7,7 @@ measuring() {
         -setnumber dn0 0.02 -setnumber h_wake 0.3 -o cylinder.msh > gmsh.log
     set_key input.toml t_stop 6.0
     set_key input.toml t_start 2.0
+    set_key input.toml length 4.0
     mpi "$mallard" -i input.toml > run.log
     python3 "$here/measuring/plot_measurements.py" . --t-start 2 --out figures
 }

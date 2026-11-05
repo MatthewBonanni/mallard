@@ -2107,8 +2107,9 @@ int Solver::run() {
                 t_wall_checks += check_timer.seconds();
             }
             output_timer.reset();
-            write_data();
+            // Probes first, so that a restart file at this step holds their samples (spectra histories)
             write_probes();
+            write_data();
             if (checkpoint_requested) write_checkpoint();
             t_wall_output += output_timer.seconds();
             poll_control_files();
@@ -2125,6 +2126,7 @@ int Solver::run() {
     check_timed_boundaries();
     if (step != step_last_check) print_progress();
     Kokkos::Timer output_timer;
+    probes.finish(step, t);
     copy_device_to_host();
     write_data(true);
     const std::string restart_file = control_stop.empty() ? std::string() : write_restarts();
@@ -2255,6 +2257,7 @@ void Solver::print_progress() {
             if (!monitor.last.name.empty()) status.monitored.push_back(monitor.last);
         }
         if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
+        for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
         run_log::write(status.record());
     }
 

@@ -4592,6 +4592,13 @@
   ],
   "set_in": []
  },
+ "probes.spectra": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
+ },
  "probes.start": {
   "dims": [
    2,

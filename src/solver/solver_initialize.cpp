@@ -175,6 +175,7 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     t = static_cast<rtype>(restart.t);
     statistics.restore(restart, file, t);
     probes.restore_averages(restart, file, t, statistics.resets());
+    probes.restore_spectra(restart, file, statistics.resets());
     if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
     if (!resume_output) return;
