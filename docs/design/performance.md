@@ -345,7 +345,8 @@ any tool loaded with `KOKKOS_TOOLS_LIBS`) and gives each label a category (`src/
 examples' test fails on a label no rule names). It keeps the peak of each setup phase and of the steady state,
 each as bytes proportional to the cells plus bytes that are not (the setup's chunks and batches, the chemistry's
 work memory, Kokkos' scratch), and sizes a rank by the largest of these at its cell count. TENO's packed stencils
-live in CUDA virtual memory outside Kokkos; their pages are reported to the tools as allocations.
+live in CUDA virtual memory outside Kokkos; the bytes they fill are reported to the tools as allocations, and the
+rest of the last 2 MB page as bytes that are not proportional to the cells (9 of the 53 MB of 2D TENO3 tables at 16k cells).
 
 Measured: each case run on one A100-80GB (5 steps) with a Kokkos Tools library that records the peak of the
 Kokkos allocations and the largest `cudaMemGetInfo` use over the run. Predicted: `mallard check --memory a100-80`

@@ -97,7 +97,7 @@ constexpr Rule RULES[] = {
 constexpr const char * NAMES[N_CATEGORIES] = {
     "solution and stages",  "faces and gradients",  "reconstruction tables", "mesh and geometry",
     "boundaries and models", "chemistry",           "diagnostics",           "output staging",
-    "halo buffers",          "work memory",         "setup",                 "Kokkos runtime",
+    "halo buffers",          "work memory",         "setup",                 "runtime and pages",
     "other",
 };
 
@@ -173,6 +173,8 @@ bool scales_with_cells(const Category c) { return c != Category::SETUP && c != C
 Category category(const std::string_view label) {
     // Host copies of device views (create_mirror, create_mirror_view in device builds)
     if (ends_with(label, "_mirror")) return Category::OUTPUT;
+    // GrowingBuffer: the rest of its last page
+    if (ends_with(label, "_pages")) return Category::RUNTIME;
     for (const Rule & rule : RULES) {
         if (rule.prefix ? label.substr(0, std::strlen(rule.label)) == rule.label : label == rule.label) {
             return rule.category;

@@ -102,9 +102,12 @@ GrowingBuffer::GrowingBuffer(const size_t max_bytes, std::string label_) : label
 GrowingBuffer::~GrowingBuffer() {
     // Freed while the device is idle, as cudaFree would
     Kokkos::fence("GrowingBuffer");
+    report_rounding(false);
+    for (const auto & [offset, size] : filled) {
+        Kokkos::Tools::deallocateData(device_space(), label, reinterpret_cast<void *>(base + offset), size);
+    }
     size_t offset = 0;
     for (size_t k = 0; k < handles.size(); k++) {
-        Kokkos::Tools::deallocateData(device_space(), label, reinterpret_cast<void *>(base + offset), sizes[k]);
         driver().unmap(base + offset, sizes[k]);
         driver().release(handles[k]);
         offset += sizes[k];
@@ -112,9 +115,28 @@ GrowingBuffer::~GrowingBuffer() {
     if (base != 0) driver().address_free(base, reserved);
 }
 
+void GrowingBuffer::report_rounding(const bool allocate) const {
+    if (mapped == used) return;
+    void * p = reinterpret_cast<void *>(base + used);
+    if (allocate) {
+        Kokkos::Tools::allocateData(device_space(), label + "_pages", p, mapped - used);
+    } else {
+        Kokkos::Tools::deallocateData(device_space(), label + "_pages", p, mapped - used);
+    }
+}
+
 void GrowingBuffer::ensure(const size_t bytes) {
-    if (bytes <= mapped) return;
+    if (bytes <= used) return;
     if (bytes > reserved) throw std::length_error("GrowingBuffer: more than the reserved size");
+    report_rounding(false);
+    if (bytes > mapped) map(bytes);
+    Kokkos::Tools::allocateData(device_space(), label, reinterpret_cast<void *>(base + used), bytes - used);
+    filled.emplace_back(used, bytes - used);
+    used = bytes;
+    report_rounding(true);
+}
+
+void GrowingBuffer::map(const size_t bytes) {
     const size_t size = std::min((bytes - mapped + granularity - 1) / granularity * granularity, reserved - mapped);
     const CUmemAllocationProp prop = properties(device);
     CUmemGenericAllocationHandle handle;
@@ -126,7 +148,6 @@ void GrowingBuffer::ensure(const size_t bytes) {
     access.location = prop.location;
     access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     check(driver().set_access(base + mapped, size, &access, 1), "cuMemSetAccess");
-    Kokkos::Tools::allocateData(device_space(), label, reinterpret_cast<void *>(base + mapped), size);
     mapped += size;
 }
 

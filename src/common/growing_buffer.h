@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 /**
@@ -22,8 +23,9 @@
  *        demand (CUDA virtual memory management). A table whose final size
  *        is known only once it is complete can then go to the device piece
  *        by piece, without being staged whole on the host or copied when it
- *        grows. Its pages count as allocations of label for Kokkos' tools
- *        (memory::Tracker). Only CUDA builds have it (supported()).
+ *        grows. For Kokkos' tools (memory::Tracker) the bytes ensured are
+ *        allocations of label, and the rest of the last page of label_pages.
+ *        Only CUDA builds have it (supported()).
  */
 class GrowingBuffer {
     public:
@@ -41,10 +43,15 @@ class GrowingBuffer {
         void * data() const { return reinterpret_cast<void *>(base); }
 
     private:
+        void map(size_t bytes);
+        void report_rounding(bool allocate) const;
+
         std::string label;
         unsigned long long base = 0;
         [[maybe_unused]] size_t reserved = 0;
         [[maybe_unused]] size_t mapped = 0;
+        [[maybe_unused]] size_t used = 0;  // the most bytes ensured
+        std::vector<std::pair<size_t, size_t>> filled;  // offset and size of each ensure's new bytes
         [[maybe_unused]] size_t granularity = 0;
         [[maybe_unused]] int device = 0;
         std::vector<unsigned long long> handles;

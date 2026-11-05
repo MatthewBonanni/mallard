@@ -31,7 +31,7 @@ enum class Category : uint8_t {
     HALO,            ///< Halo exchange buffers
     WORK,            ///< Work memory in rows of a number set by the device, MAX_WORK_BYTES at most: chemistry's
     SETUP,           ///< Setup workspace, freed after setup: the initial solution's chunks, TENO's batches
-    RUNTIME,         ///< Kokkos' own scratch
+    RUNTIME,         ///< Kokkos' own scratch, and GrowingBuffer pages beyond what it holds
     OTHER,           ///< A label no rule names: give it a category in memory_tracker.cpp
 };
 constexpr size_t N_CATEGORIES = static_cast<size_t>(Category::OTHER) + 1;
