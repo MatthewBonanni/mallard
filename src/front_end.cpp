@@ -224,6 +224,13 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
         case cli::Case::file:
             if (first.empty() || !output::is_mesh_file(first)) return free;
             return {mesh_file_dimension(first), first};
+        case cli::Case::output:
+            try {
+                const int dim = first.empty() || output::is_mesh_file(first) ? 0 : output::open(first).dim;
+                return dim == 0 ? free : Need{{dim, ""}, first, true};
+            } catch (const std::exception &) {
+                return free;
+            }
         default:
             return free;
     }
@@ -334,6 +341,7 @@ int main(int argc, char ** argv) {
     const Need need = stated ? Need{{dim, ""}, "", false}
                              : command_need(command, {args.begin() + std::ptrdiff_t(words), args.end()});
     dim = need.dimension.dim;
+    if (!stated && command && command->dim == cli::Case::output && !fs::exists(solver(bin, dim))) dim = 0;
     if (dim == 0) {
         if (!need.dimension_free && !need.dimension.unreadable && installed.size() > 1) {
             std::cerr << "mallard: cannot tell whether " << need.what << " is 2D or 3D: " << need.dimension.why
