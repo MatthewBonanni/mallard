@@ -93,6 +93,14 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `[les] dynamic = true`, the least-squares constant `<L:M> / <M:M>`.
 - <a id="moin-1991"></a>P. Moin, K. Squires, W. Cabot and S. Lee, A dynamic subgrid-scale model for compressible turbulence and scalar transport, *Phys. Fluids A* 3, 2746–2757 (1991). [doi:10.1063/1.858164](https://doi.org/10.1063/1.858164)
   Used in: `[les] dynamic = true`, the Favre-weighted test-filtered stresses.
+- <a id="moura-2015"></a>R. C. Moura, S. J. Sherwin and J. Peiró, Linear dispersion–diffusion analysis and its application to under-resolved turbulence simulations using discontinuous Galerkin spectral/hp methods, *J. Comput. Phys.* 298, 695–710 (2015). [doi:10.1016/j.jcp.2015.06.020](https://doi.org/10.1016/j.jcp.2015.06.020)
+  Used in: the effective wavenumber of `[les] effective_width` (the 1% rule).
+- <a id="pirozzoli-2006"></a>S. Pirozzoli, On the spectral properties of shock-capturing schemes, *J. Comput. Phys.* 219, 489–497 (2006). [doi:10.1016/j.jcp.2006.07.009](https://doi.org/10.1016/j.jcp.2006.07.009)
+  Used in: the modified wavenumbers of the nonlinear reconstructions (`tools/docs/effective_resolution.py`).
+- <a id="chow-moin-2003"></a>F. K. Chow and P. Moin, A further study of numerical errors in large-eddy simulations, *J. Comput. Phys.* 184, 366–380 (2003). [doi:10.1016/S0021-9991(02)00020-7](https://doi.org/10.1016/S0021-9991(02)00020-7)
+  Used in: the filter-to-grid ratios of `[les] effective_width` (design notes).
+- <a id="garnier-1999"></a>E. Garnier, M. Mossi, P. Sagaut, P. Comte and M. Deville, On the use of shock-capturing schemes for large-eddy simulation, *J. Comput. Phys.* 153, 273–311 (1999). [doi:10.1006/jcph.1999.6268](https://doi.org/10.1006/jcph.1999.6268)
+  Used in: explicit models on top of upwind schemes (design notes, `effective_width`).
 - <a id="scotti-1993"></a>A. Scotti, C. Meneveau and D. K. Lilly, Generalized Smagorinsky model for anisotropic grids, *Phys. Fluids A* 5, 2306–2308 (1993). [doi:10.1063/1.858537](https://doi.org/10.1063/1.858537)
   Used in: `[les] filter_width = "scotti"`.
 - <a id="vreman-geurts-kuerten-1995"></a>B. Vreman, B. Geurts and H. Kuerten, Subgrid-modelling in LES of compressible flow, *Appl. Sci. Res.* 54, 191–203 (1995). [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)

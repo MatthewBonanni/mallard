@@ -12,6 +12,7 @@ import argparse
 import sys
 
 import domains
+import effective_resolution
 import geometry
 import inlets
 import probes
@@ -33,6 +34,7 @@ def main():
     inlets.figures()
     theory.figures()
     teno.figures()
+    effective_resolution.figures()
     geometry.figures(args.mallard, args.mallard3d)
     if args.mallard:
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]

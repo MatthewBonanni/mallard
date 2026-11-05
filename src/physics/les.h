@@ -42,8 +42,12 @@ struct LES {
     rtype C = 1.35_r;
     rtype Pr_t = 0.9_r;
     rtype Sc_t = 0.9_r;
-    bool scotti = false;
-    bool dynamic = false;  // C from the Germano identity over the whole domain, once per step (see Solver)  // the eddy viscosity's width V^(1/3) f(a_1, a_2) (Scotti, Meneveau & Lilly 1993)
+    bool scotti = false;   // the eddy viscosity's width V^(1/3) f(a_1, a_2) (Scotti, Meneveau & Lilly 1993)
+    bool dynamic = false;  // C from the Germano identity over the whole domain, once per step (see Solver)
+    bool effective_width = false;  // widths times each cell's effective-resolution ratio (TENO; see width_ratio)
+
+    /** @brief Steps over which a cell's width ratio relaxes toward a smaller target (it rises at once). */
+    static constexpr rtype WIDTH_RELAXATION_STEPS = 10.0_r;
 
     /** @brief The [les] table of an input (see in_input). */
     static LES from_input(const Input & input);
@@ -58,6 +62,20 @@ struct LES {
 
     /** @brief Model constant by default: Lilly's C_s, Nicoud & Ducros's C_w, Vreman's c, Nicoud et al.'s C_sigma. */
     static rtype default_constant(SGSModel model);
+
+    /**
+     * @brief Width ratio Delta_eff / Delta of a cell whose TENO reconstruction of the given order uses its
+     *        central polynomial: the effective filter width of the linear central stencil over that of MUSCL,
+     *        both from the 1% rule of their modified wavenumbers on uniform quadrilaterals (2D) or hexahedra
+     *        (3D) (tools/docs/effective_resolution.py), at most 1. Troubled cells take 1.
+     */
+    static rtype width_ratio(int order);
+
+    /** @brief A cell's next width ratio: target at once if it is larger, else 1 / WIDTH_RELAXATION_STEPS of the way. */
+    KOKKOS_INLINE_FUNCTION
+    static rtype relaxed_width_ratio(const rtype ratio, const rtype target) {
+        return target >= ratio ? target : ratio + (target - ratio) / WIDTH_RELAXATION_STEPS;
+    }
 
     logging::Items summary() const;
 

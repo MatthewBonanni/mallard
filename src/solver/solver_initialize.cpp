@@ -132,8 +132,8 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     };
     for (const auto & name : restart.names) {
         // Averages carry over only into a run that keeps them
-        if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0 ||
-            name.rfind("PHASE_", 0) == 0) continue;
+        if (name == "CHEM_H" || name == "P_MAX" || name == "LES_WIDTH_RATIO" || name.rfind("MEAN_", 0) == 0 ||
+            name.rfind("COV_", 0) == 0 || name.rfind("PHASE_", 0) == 0) continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
@@ -145,6 +145,13 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
         if (expected[v] == "P_MAX") {
             for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
                 h_p_max(i_cell) = values ? (*values)[i_cell] : 0.0_r;
+            }
+            continue;
+        }
+        if (expected[v] == "LES_WIDTH_RATIO") {
+            // A restart from a run without it starts at the cell widths
+            for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
+                effective_width.h_ratio(i_cell) = values ? (*values)[i_cell] : 1.0_r;
             }
             continue;
         }

@@ -1831,6 +1831,10 @@ void Solver::copy_host_to_device() {
     if (is_mixture()) Kokkos::deep_copy(T_seed, h_T_seed);
     if (reacting) Kokkos::deep_copy(chem_h, h_chem_h);
     if (p_max.is_allocated()) Kokkos::deep_copy(p_max, h_p_max);
+    if (les.effective_width) {
+        Kokkos::deep_copy(effective_width.ratio, effective_width.h_ratio);
+        apply_effective_width();
+    }
     Kokkos::deep_copy(primitives, h_primitives);
 }
 
@@ -1893,6 +1897,7 @@ void Solver::copy_device_to_host() {
     if (pasr_on) Kokkos::deep_copy(h_chem_time_scale, chem_time_scale);
     statistics.copy_device_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
+    if (les.effective_width) Kokkos::deep_copy(effective_width.h_ratio, effective_width.ratio);
     if (vortex_fields.is_allocated()) {
         update_vortex_fields();
         Kokkos::deep_copy(h_vortex_fields, vortex_fields);
@@ -1967,6 +1972,7 @@ void Solver::register_data() {
     if (pasr_on) data.push_back(Data("PASR_KAPPA", h_chem_time_scale));
     statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
+    if (les.effective_width) data.push_back(Data("LES_WIDTH_RATIO", effective_width.h_ratio));
     if (vortex_fields.is_allocated()) {
         data.push_back(Data("Q", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
         if constexpr (N_DIM == 2) {
@@ -1991,6 +1997,7 @@ std::vector<std::string> Solver::restart_variables() const {
     if (is_mixture()) names.push_back("T_SEED");
     if (reacting) names.push_back("CHEM_H");
     if (p_max.is_allocated()) names.push_back("P_MAX");
+    if (les.effective_width) names.push_back("LES_WIDTH_RATIO");
     for (const auto & name : statistics.variables()) names.push_back(name);
     return names;
 }
@@ -2530,6 +2537,7 @@ ProbeFields Solver::probe_fields() {
 void Solver::take_step() {
     if (simpler) {
         take_simpler_step();
+        if (les.effective_width) update_effective_width();
         halo_current = false;
         Kokkos::fence();
         step++;
@@ -2570,6 +2578,7 @@ void Solver::take_step() {
             advance_chemistry(0.5 * static_cast<double>(dt));
         }
     }
+    if (les.effective_width) update_effective_width();
     halo_current = false;
     Kokkos::fence();
     step++;

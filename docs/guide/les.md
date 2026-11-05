@@ -67,6 +67,7 @@ model = "wale"     # sigma (default in 3D), wale, vreman or smagorinsky
 | `Pr_t`, `Sc_t` | 0.9, 0.9 | Turbulent Prandtl and Schmidt numbers |
 | `filter_width` | `scotti` (3D), `volume` (2D) | `scotti` corrects `V^(1/3)` for anisotropic cells; `volume` is `V^(1/d)` |
 | `dynamic` | `false` | Constant from the global dynamic procedure (Germano/Lilly), once per step; written to `integrals.csv` as `les_C` |
+| `effective_width` | `false` | (TENO, experimental) Scale every model's width by the reconstruction's effective resolution in the cells where TENO uses its central polynomial; [below](#effective-filter-width) |
 
 Pitfalls:
 
@@ -77,6 +78,35 @@ Pitfalls:
 - `[les]` needs `navier_stokes`, works for single gases and mixtures, in planar
   runs (not `axisymmetric`). Wall faces keep their molecular fluxes.
 - Output `MU_T` (the eddy viscosity) to see where the model acts.
+
+### Effective filter width
+
+`V^(1/d)` is the same width for every reconstruction, yet a fifth-order
+reconstruction resolves smaller scales than a second-order one on the same
+cells. With `effective_width = true` (TENO only, off by default while it is
+being validated), each cell's width is multiplied by a ratio `Delta_eff /
+Delta` below 1 where TENO uses its central polynomial, and by 1 where it
+selects stencils (troubled cells): the eddy viscosity, the PaSR mixing time
+and the thickened flame's `F_max` and efficiency all see the smaller width.
+
+```toml
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[les]
+effective_width = true   # 0.74 (2D) or 0.56 (3D) of V^(1/d) in smooth cells at order 5
+```
+
+The ratio is the effective resolution of the TENO central stencil over that of
+MUSCL (whose width stays `V^(1/d)`), from their modified wavenumbers: 0.63 /
+0.74 / 0.50 in 2D and 0.89 / 0.62 / 0.56 / 0.49 in 3D at orders 3 to 6 (order
+3 in 2D: 1). A cell turning troubled takes 1 at once; a smooth one relaxes
+toward its ratio over about 10 steps. Output `LES_WIDTH_RATIO` to see it;
+restart files carry it. How the ratios are measured and what they did to
+decaying isotropic turbulence: [theory](../theory/les.md#effective-filter-width)
+and [design notes](../design/les.md#31-effective-resolution-of-the-reconstructions).
+With MUSCL or first order, the key is an error.
 
 ## Low-dissipation flux and the budget
 

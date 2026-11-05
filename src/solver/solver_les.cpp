@@ -896,6 +896,7 @@ void Solver::init_les() {
         }
         Kokkos::deep_copy(les_width, h_width);
     }
+    if (les.effective_width) init_effective_width();
     if (les.dynamic) {
         dynamic_halo = State("dynamic_halo", mesh->n_cells, 9);
         dynamic_terms = Kokkos::View<double *[2]>("dynamic_terms", mesh->n_owned());
@@ -928,6 +929,57 @@ void Solver::init_les() {
     }
     tfles_vorticity = Kokkos::View<rtype *[3]>("tfles_vorticity", mesh->n_cells);
     tfles_gradients = Kokkos::View<rtype *[3][N_DIM]>("tfles_gradients", mesh->n_cells);
+}
+
+void Solver::init_effective_width() {
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    if (teno == nullptr) {
+        throw InputError("les.effective_width = true scales the filter width by the effective resolution of a TENO "
+                         "reconstruction, but this run reconstructs with " +
+                         FACE_RECONSTRUCTION_NAMES.at(face_reconstruction->get_type()) +
+                         ". Set [numerics.face_reconstruction] type = \"TENO\", or remove the key: V^(1/d) is "
+                         "already the width of second-order schemes (docs/guide/les.md).");
+    }
+    EffectiveWidth & e = effective_width;
+    e.smooth = LES::width_ratio(teno->degree + 1);
+    e.base_delta = les_delta;
+    e.base_width = les_width;
+    les_delta = Kokkos::View<rtype *>("les_delta_effective", mesh->n_cells);
+    les_width = les.scotti ? Kokkos::View<rtype *>("les_width_effective", mesh->n_cells) : les_delta;
+    // Runs start at the cell widths; restarts at the ratios they saved (copy_host_to_device)
+    e.ratio = Kokkos::View<rtype *>("les_width_ratio", mesh->n_cells);
+    e.h_ratio = Kokkos::create_mirror_view(e.ratio);
+    Kokkos::deep_copy(e.h_ratio, 1.0_r);
+    Kokkos::deep_copy(e.ratio, 1.0_r);
+    if (halo.active()) e.halo = State("les_width_ratio_halo", mesh->n_cells, 1);
+    apply_effective_width();
+}
+
+void Solver::update_effective_width() {
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    Kokkos::View<rtype *> ratio = effective_width.ratio, sigma = teno->troubled;
+    const rtype threshold = teno->sigma_threshold, smooth = effective_width.smooth;
+    Kokkos::parallel_for("les_width_ratio", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+        ratio(c) = LES::relaxed_width_ratio(ratio(c), sigma(c) < threshold ? smooth : 1.0_r);
+    });
+    if (halo.active()) {
+        SpeciesView packed = effective_width.halo.species;
+        Kokkos::parallel_for("halo_pack", mesh->n_owned(),
+                             KOKKOS_LAMBDA(const uint32_t c) { packed(c, 0) = ratio(c); });
+        halo.exchange(effective_width.halo);
+        Kokkos::parallel_for("halo_unpack", mesh->n_cells,
+                             KOKKOS_LAMBDA(const uint32_t c) { ratio(c) = packed(c, 0); });
+    }
+    apply_effective_width();
+}
+
+void Solver::apply_effective_width() {
+    Kokkos::View<rtype *> ratio = effective_width.ratio, delta = les_delta, width = les_width;
+    Kokkos::View<rtype *> base_delta = effective_width.base_delta, base_width = effective_width.base_width;
+    Kokkos::parallel_for("les_effective_width", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        delta(c) = base_delta(c) * ratio(c);
+        width(c) = base_width(c) * ratio(c);
+    });
 }
 
 void Solver::update_eddy_viscosity(const uint32_t n) {

@@ -14,9 +14,11 @@
 
 #include <array>
 #include <cmath>
+#include <complex>
 #include <filesystem>
 #include <functional>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -24,6 +26,7 @@
 #include "exact_riemann.h"
 #include "input.h"
 #include "les.h"
+#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -502,6 +505,135 @@ TEST(LESSolver, InputErrors) {
     if constexpr (N_DIM == 2) {
         EXPECT_THROW(make_solver(periodic_box(MESH, 4, "[les]\nmodel = \"sigma\"\n")), InputError);
     }
+}
+
+namespace {
+
+/** @brief periodic_box with a TENO reconstruction of the given options and effective_width (if on). */
+std::string teno_box(uint32_t n, const std::string & teno, bool effective, const std::string & run, const std::string & extra = "") {
+    std::string s = periodic_box("cartesian", n, LES_DEFAULT + (effective ? "effective_width = true\n" : ""), extra, run);
+    const std::string muscl = "type = \"MUSCL\"\nlimiter = \"none\"\n";
+    s.replace(s.find(muscl), muscl.size(), "type = \"TENO\"\norder = 5\n" + teno);
+    return s;
+}
+
+/**
+ * @brief k_eff Delta of a reconstruction: the wavenumber at which the numerical dissipation of linear advection
+ *        reaches 1% per cell, -Im(k~) Delta = 0.01, measured as tools/docs/effective_resolution.py does: one
+ *        right-hand side of a density wave of every resolved wavenumber superposed (along x, uniform velocity
+ *        and pressure, HLLC: the exact upwind flux of the reconstructed density) on uniform periodic cells.
+ */
+double effective_wavenumber(const std::string & reconstruction) {
+    const uint32_t nx = N_DIM == 2 ? 128 : 64, ny = 6;
+    const double h = 1.0 / nx, a = 0.5;
+    std::ostringstream s;
+    s << std::setprecision(17) << "[run]\nn_steps = 0\ndt = 1e-5\n[mesh]\ntype = \"cartesian\"\nNx = " << nx
+      << "\nNy = " << ny << "\nLx = 1.0\nLy = " << ny * h << "\n"
+      << (N_DIM == 3 ? "Nz = 6\nLz = " + std::to_string(ny * h) + "\n" : std::string())
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "") << "[initialize]\ntype = \"analytical\"\nrho = \"1.0";
+    for (uint32_t m = 1; m < nx / 2; m++) s << " + 0.01 * cos(" << TWO_PI * m << " * x + " << 0.7 * m << ")";
+    s << "\"\nu = " << (N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") << "\np = \"1.0\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n" << reconstruction
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(s.str()));
+    const auto mesh = solver.get_mesh();
+    State rhs("rhs", mesh->n_cells, 0);
+    solver.calc_rhs(solver.state(), rhs, 0.0_r);
+    solver.copy_device_to_host();
+    const auto R = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), rhs.flow);
+    double previous = 0.0;
+    for (uint32_t m = 1; m < nx / 2; m++) {
+        const double k = TWO_PI * m;
+        std::complex<double> response = 0.0, wave = 0.0;
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+            const std::complex<double> e = std::polar(1.0, -k * double(mesh->h_cell_coords(c, 0)));
+            response += double(R(c, 0)) * e;
+            wave += (double(solver.h_conservatives(c, 0)) - 1.0) * e;
+        }
+        // d rho / dt = -i a k~ rho
+        const double damping = -std::imag(std::complex<double>(0.0, 1.0) * response / wave / a) * h;
+        if (damping >= 0.01) return (k - TWO_PI) * h + (0.01 - previous) / (damping - previous) * TWO_PI * h;
+        previous = damping;
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+} // namespace
+
+TEST(LESEffectiveWidth, RatioIsThatOfTheModifiedWavenumbersOfTENOAndMUSCL) {
+    // r = Delta_eff / Delta = pi / (k_eff Delta): the ratio the solver applies in smooth cells must be what the
+    // reconstructions do now; a change of the TENO stencils, of the face quadrature or of MUSCL moves it
+    const double muscl = effective_wavenumber("type = \"MUSCL\"\nlimiter = \"none\"\n");
+    const double teno = effective_wavenumber("type = \"TENO\"\norder = 5\ntroubled_threshold = 1e30\n");
+    EXPECT_NEAR(muscl, 0.535, 0.02);
+    EXPECT_NEAR(double(LES::width_ratio(5)), muscl / teno, 0.005);
+    EXPECT_LT(LES::width_ratio(5), 0.8_r);
+}
+
+TEST(LESEffectiveWidth, TroubledCellsKeepTheCellWidthAndSmoothOnesRelaxToTheRatio) {
+    const uint32_t n = N_DIM == 2 ? 12 : 8, steps = 4;
+    const std::string run = "n_steps = " + std::to_string(steps) + "\ncfl = 0.5\n";
+    auto delta_V = [](const Solver & solver, uint32_t c) {
+        return std::pow(double(solver.get_mesh()->h_cell_volume(c)), 1.0 / N_DIM);
+    };
+    // Every cell troubled (sigma >= 0): the width V^(1/d), and the run of the cell widths exactly
+    auto troubled = make_solver(teno_box(n, "troubled_threshold = 0.0\n", true, run));
+    auto reference = make_solver(teno_box(n, "troubled_threshold = 0.0\n", false, run));
+    troubled->run();
+    reference->run();
+    troubled->copy_device_to_host();
+    reference->copy_device_to_host();
+    auto h_delta = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), troubled->get_les_delta());
+    for (uint32_t c = 0; c < troubled->get_mesh()->n_owned(); c++) {
+        EXPECT_EQ(troubled->get_les_width_ratio()(c), 1.0_r) << "cell " << c;
+        EXPECT_NEAR(double(h_delta(c)), delta_V(*troubled, c), 1e-12 * delta_V(*troubled, c));
+        FOR_I_CONSERVATIVE EXPECT_EQ(troubled->h_conservatives(c, i), reference->h_conservatives(c, i));
+    }
+    // Every cell smooth: from 1 toward LES::width_ratio by 1 / WIDTH_RELAXATION_STEPS of the gap per step
+    auto smooth = make_solver(teno_box(n, "troubled_threshold = 1e30\n", true, run));
+    smooth->run();
+    smooth->copy_device_to_host();
+    const double target = double(LES::width_ratio(5)), keep = 1.0 - 1.0 / double(LES::WIDTH_RELAXATION_STEPS);
+    const double ratio = target + (1.0 - target) * std::pow(keep, steps);
+    h_delta = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), smooth->get_les_delta());
+    for (uint32_t c = 0; c < smooth->get_mesh()->n_owned(); c++) {
+        EXPECT_NEAR(double(smooth->get_les_width_ratio()(c)), ratio, precision_tol<double>(1e-14, 1e-6)) << "cell " << c;
+        EXPECT_NEAR(double(h_delta(c)), ratio * delta_V(*smooth, c), precision_tol<double>(1e-12, 1e-6) * delta_V(*smooth, c));
+    }
+}
+
+TEST(LESEffectiveWidth, RestartContinuesTheRelaxationExactly) {
+    const std::string dir = (scratch_dir() / "les_effective_width").string();
+    const uint32_t n = N_DIM == 2 ? 10 : 6;
+    auto input = [&](const std::string & sub, uint32_t steps, const std::string & init) {
+        std::string s = teno_box(n, "troubled_threshold = 1e30\n", true, "n_steps = " + std::to_string(steps) + "\ncfl = 0.5\n",
+                                 "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/restart\"\nformat = \"restart\"\ninterval = 3\n");
+        if (!init.empty()) {
+            const size_t a = s.find("[initialize]"), b = s.find("[numerics]");
+            s.replace(a, b - a, "[initialize]\ntype = \"restart\"\nfile = \"" + init + "\"\n");
+        }
+        return s;
+    };
+    auto straight = make_solver(input("a", 6, ""));
+    straight->run();
+    auto first = make_solver(input("b", 3, ""));
+    first->run();
+    auto second = make_solver(input("b", 6, dir + "/b/restart_000003.restart"));
+    second->run();
+    straight->copy_device_to_host();
+    second->copy_device_to_host();
+    for (uint32_t c = 0; c < straight->get_mesh()->n_owned(); c++) {
+        EXPECT_EQ(second->get_les_width_ratio()(c), straight->get_les_width_ratio()(c)) << "cell " << c;
+        FOR_I_CONSERVATIVE EXPECT_EQ(second->h_conservatives(c, i), straight->h_conservatives(c, i)) << "cell " << c;
+    }
+}
+
+TEST(LESEffectiveWidth, NeedsTENO) {
+    EXPECT_THROW(make_solver(periodic_box(MESH, 4, LES_DEFAULT + "effective_width = true\n")), InputError);
 }
 
 #if Mallard_DIM == 2

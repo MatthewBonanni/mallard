@@ -408,6 +408,7 @@ the [LES guide](guide/les.md) ([design notes](design/les.md)).
 | `Pr_t` | Turbulent Prandtl number, default 0.9 |
 | `Sc_t` | Turbulent Schmidt number, default 0.9 |
 | `filter_width` | `scotti` (default in 3D): `V^(1/3) f(a_1, a_2)`, Scotti, Meneveau & Lilly's correction for anisotropic cells, `f = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))` of the ratios `a_1 = h_1 / h_3`, `a_2 = h_2 / h_3` of the cell's extents (`V` over the eigenvalues of its projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular cells); `volume` (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity only (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau` within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume` |
+| `effective_width` | (`TENO` only; experimental) `true`: every width of the subgrid models (the eddy viscosity's, the PaSR mixing time's, the thickened flame's `F_max` and efficiency) times each cell's ratio `Delta_eff / Delta`: the effective resolution of the TENO central polynomial over that of MUSCL, from the 1% rule of their modified wavenumbers (2D, orders 3 to 6: 1, 0.631, 0.740, 0.497; 3D: 0.893, 0.624, 0.560, 0.488), in cells where TENO uses it, and 1 in troubled cells. A ratio rises to 1 at once and relaxes down by a tenth of the gap per step; output variable `LES_WIDTH_RATIO`, carried by restart files. See the [LES guide](guide/les.md#effective-filter-width). Default false |
 | `dynamic` | `true`: the constant from the global dynamic procedure (Germano et al. 1991; Lilly 1992), once per step from the state: `C^2 = <L^d : M> / <M : M>` (Vreman's `c` without the square) summed over the domain, `L = (rho u u)^ - (rho u)^ (rho u)^ / rho^`, `M = 2 ((rho Delta^2 D(g) S^d)^ - rho^ Delta_hat^2 D(g^) S^d(g^))`, with `^` the volume-weighted average over a cell and its vertex neighbors, of width `Delta_hat^2 = Delta^2 + 12 / d tr(cov)` from the covariance of the neighbors' centroids (`3 Delta` on uniform hexahedra), and filtered gradients for the gradients of the filtered field. Clipped at zero; `C` is the value until the first step. The sums are exact (fixed point), so the constant is independent of the rank count. `integrals.csv` gets the column `les_C`. Default `false` |
 
 | `model` | `nu_t` | Zero for |
@@ -417,7 +418,8 @@ the [LES guide](guide/les.md) ([design notes](design/les.md)).
 | `vreman` (Vreman 2004) | `c Delta^2 sqrt(B / (g:g))`, `B` the second invariant of `g g^T` | pure shear |
 | `smagorinsky` (Smagorinsky 1963) | `(C Delta)^2 sqrt(2 S:S)` | solid rotation (no wall damping: for comparisons only) |
 
-`MU_T` (output variable) is the eddy viscosity. `[integrals] budget = true`
+`MU_T` (output variable) is the eddy viscosity, `LES_WIDTH_RATIO` (with
+`effective_width`) the ratio of each cell's width. `[integrals] budget = true`
 measures how much of the kinetic-energy dissipation comes from the model and
 how much from the scheme.
 
