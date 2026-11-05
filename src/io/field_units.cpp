@@ -21,8 +21,8 @@ struct Entry {
     const char * name;
     Dimension dimension;
     const char * long_name;
-    const char * group;
-    const char * needs;  // what a case needs for the field, "" if every case has it
+    const char * group = "";  // where mallard list fields files it; empty is an error (FieldUnitsTest)
+    const char * needs = "";  // what a case needs for the field, "" if every case has it
     const char * non_si_units = "";
 };
 
@@ -93,6 +93,10 @@ const Entry NAMED[] = {
     {"SKEWNESS", dim::none, "largest face skewness", QUALITY, "mallard check or info --quality"},
     {"ASPECT_RATIO", dim::none, "cell aspect ratio", QUALITY, "mallard check or info --quality"},
     {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor", QUALITY, "mallard check or info --quality"},
+    {"DELTA_OVER_ETA", dim::none, "cell size over the estimated Kolmogorov length", QUALITY,
+     "mallard check --quality (resolution estimates)"},
+    {"CELLS_PER_DELTA_L", dim::none, "cells across the laminar flame thickness", QUALITY,
+     "mallard check --quality (resolution estimates) with [les.combustion] (TFLES)"},
     {"DIVERGED", dim::none, "1 in the cells that became invalid", DERIVED,
      "a run that diverges, whose divergence report snapshot writes it"},
 };
@@ -158,7 +162,9 @@ std::optional<FieldDescription> find(const std::string & name) {
         return FieldDescription{of->dimension.times(dim::time, -1), "source of " + of->long_name, "", ""};
     }
     if (starts_with(name, "MEAN_")) {
+        // Of a [statistics] field, or the time average of a probe variable
         auto of = find_sampled(name.substr(5));
+        if (!of) of = find_base(name.substr(5));
         if (!of) return std::nullopt;
         return FieldDescription{of->dimension, "time average of " + of->long_name, "", ""};
     }
@@ -230,7 +236,7 @@ std::vector<CatalogField> catalog() {
     for (const auto & e : SPECIES) add(e.name + std::string("<s>"), e, e.long_name + std::string("species s"));
     const Entry derived[] = {
         {"SOURCE_<A>", dim::none, "", "sources", "[[sources]] or [source]"},
-        {"MEAN_<A>", dim::none, "", "statistics", "[statistics] fields with A"},
+        {"MEAN_<A>", dim::none, "", "statistics", "[statistics] fields with A, or [[probes]] averaging A"},
         {"COV_<A>_<B>", dim::none, "", "statistics", "[statistics] products with A*B"},
         {"PHASE_<bin>_<A>", dim::none, "", "statistics", "[statistics.phase]"},
     };

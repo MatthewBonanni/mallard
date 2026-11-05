@@ -97,7 +97,8 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_memory(r, options, tracker);
     r.boundaries = boundary_summary;
     check_time_step(r);
-    check_mesh_quality(r, options);
+    const CheckFields resolution = check_resolution(r);
+    check_mesh_quality(r, options, resolution);
     check_cost(r, options, tracker);
     check_sizing(r, options);
     check_settings(r);
@@ -105,7 +106,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     return r;
 }
 
-void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) const {
+void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, const CheckFields & extra) const {
     const MeshQuality quality = mesh_quality(*mesh);
     r.quality = summarize(*mesh, quality, options.n_worst);
     r.has_quality = true;
@@ -118,7 +119,7 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) c
                              "); such cells limit the time step and accuracy and can make a run diverge: improve "
                              "the mesh there (--quality shows where). See docs/guide/meshes.md#mesh-quality");
     }
-    if (!options.quality_file.empty()) write_quality(mesh, quality, options.quality_file);
+    if (!options.quality_file.empty()) write_quality(mesh, quality, options.quality_file, extra);
 }
 
 void Solver::check_time_step(CheckReport & r) {
@@ -471,7 +472,7 @@ struct OnMesh {
 OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name) {
     OnMesh m;
     m.block.name = name;
-    const bool distributed = !mesh.h_global_cell_id.empty();
+    const bool distributed = mesh.n_global_cells > 0;
     const double inf = std::numeric_limits<double>::infinity();
     Box box = {std::array<double, 3>{inf, inf, inf}, std::array<double, 3>{-inf, -inf, -inf}};
     auto extend = [&](const std::array<double, 3> & x) {
@@ -728,6 +729,7 @@ void print_check(const CheckReport & r) {
                          point(r.region_hi));
         }
     }
+    for (const auto & [label, text] : r.resolution) item(label, text);
     if (r.bytes > 0) {
         item("Memory", bytes(double(r.bytes)) + (r.device_memory ? " device memory" : "") +
                            " per rank after setup (peak " + bytes(double(r.bytes_peak)) + "), " +

@@ -172,6 +172,38 @@ Pitfalls:
 - Reductions of points weigh each point 1 (`integral` is a sum); curves
   integrate with three Gauss points per element between samples.
 
+### Time averages
+
+`[statistics]` keeps time averages per cell. A probe reads them: `MEAN_P`,
+`COV_U_X_U_Y` and the other averages are probe variables, each sample the
+value of its cell, so a line probe of `MEAN_P` writes the `[statistics]`
+field along the line. For what has no per-cell average, such as wall
+quantities, fluxes and point values, `average = true` averages the probe's own
+samples in time instead:
+
+```toml
+[statistics]
+t_start = 0.2            # also the start of the probe averages
+interval = 5             # and their sampling
+
+[[probes]]
+name = "wall_mean"
+boundary_type = "wall"
+variables = ["CF", "Q_W", "Y_PLUS"]
+reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}
+average = true
+interval = 1000          # writes the means so far every 1000 steps
+reductions = ["integral", "mean"]
+```
+
+The probe samples on the `[statistics]` schedule, each sample weighted by the
+time since the last, and writes `MEAN_CF`, `MEAN_Q_W`, ... every `interval`,
+with reductions of the averaged samples (`integral_MEAN_CF`). Rank 0 keeps the
+means in sample order, so they are the same on any number of ranks, and
+restart files carry them: a restarted run continues them bit for bit.
+`statistics.reset = true` starts them afresh. An averaging probe evaluates
+its samples at every sampling step, not only at its outputs.
+
 ### Region probes
 
 ```toml

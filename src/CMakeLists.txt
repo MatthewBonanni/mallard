@@ -23,6 +23,7 @@ add_library(MallardCore STATIC
     common/run_log.cpp
     common/run_status.cpp
     common/input_upgrade.cpp
+    mesh/cell_order.cpp
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
@@ -67,6 +68,7 @@ add_library(MallardCore STATIC
     solver/probes.cpp
     solver/solver.cpp
     solver/solver_check.cpp
+    solver/solver_resolution.cpp
     solver/solver_chemistry.cpp
     solver/solver_control.cpp
     solver/solver_divergence.cpp

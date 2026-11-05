@@ -585,6 +585,14 @@ TEST(FieldUnitsTest, CatalogGroupsHoldEveryNamedField) {
         EXPECT_FALSE(field_units::group(name).empty()) << name;
     }
     EXPECT_EQ(field_units::group("NOT_A_FIELD"), "");
+    // An entry added to the table in its form before the catalog, without a known group, lists under none
+    for (const CatalogField & f : field_units::catalog()) {
+        EXPECT_LT(field_units::group_rank(f.group), field_units::group_rank("")) << f.name << ": group " << f.group;
+    }
+    for (const char * name : {"DELTA_OVER_ETA", "CELLS_PER_DELTA_L", "MEAN_MASS_FLUX", "MEAN_Y_PLUS"}) {
+        EXPECT_TRUE(field_units::find(name).has_value()) << name;
+        EXPECT_FALSE(field_units::group(name).empty()) << name;
+    }
     std::vector<size_t> ranks;
     for (const CatalogField & f : field_units::catalog()) ranks.push_back(field_units::group_rank(f.group));
     EXPECT_TRUE(std::is_sorted(ranks.begin(), ranks.end()));

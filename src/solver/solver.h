@@ -257,7 +257,8 @@ class Solver {
         void record_stage_time(rtype c);
         /** @brief Inside a captured step: the step's dt on the device. */
         const rtype * step_dt_device() const;
-        void update_average_pressure_outlets(StateView solution, rtype t_eval);
+        /** @brief bc.data[0] of each average-pressure outlet: its target p (of t, from timed_fields) less the mean p. */
+        void update_average_pressure_outlets(StateView solution);
         /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
         void set_stage_time(rtype t_stage, rtype c);
         /**
@@ -537,7 +538,11 @@ class Solver {
         void init_boundaries();
         std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
         void setup_from_input();
-        void check_mesh_quality(CheckReport & report, const CheckOptions & options) const;
+        void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
+        /** @brief The mesh against the case's physical scales; the fields of where it falls short. */
+        CheckFields check_resolution(CheckReport & report);
+        void check_viscous_scales(CheckReport & report, CheckFields & fields, const std::vector<double> & delta,
+                                  double delta_mean, const std::array<double, N_DIM> & coarsest);
         void check_time_step(CheckReport & report);
         void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
         void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);
@@ -610,6 +615,10 @@ class Solver {
         void write_forces();
         void write_integrals();
         void write_probes();
+        /** @brief Adds the current samples to the averaging probes' time averages. */
+        void sample_probe_averages();
+        /** @brief The named arrays of restart files: averaged spectra and probes (collective). */
+        RestartArrays restart_arrays() const;
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
         ProbeFields probe_fields();
 
@@ -775,7 +784,7 @@ class Solver {
             int32_t i_bc;
             Kokkos::View<uint32_t *> faces;   // Faces of owned cells
             std::vector<uint32_t> sum_order;  // Order of the gathered faces of all ranks by global key
-            std::shared_ptr<const BoundaryFields> fields;  // the target p, a number or an expression of t
+            std::shared_ptr<const BoundaryFields> fields;  // the target p, a number or an expression of t (in timed_fields)
         };
         std::vector<AveragePressureOutlet> average_pressure_outlets;
         // The numbers of each input boundary, per face where they vary; for mixtures, the composition per input
