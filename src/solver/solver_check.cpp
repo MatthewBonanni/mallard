@@ -25,7 +25,7 @@
 #include "mesh_quality.h"
 #include "partition.h"
 #include "case_view.h"
-#include "region.h"
+#include "region_input.h"
 #include "region_mesh.h"
 
 namespace {
@@ -407,7 +407,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     Box domain;
     for (const std::string & name : automatic.names()) {
         const Input value = parse_input_string("r = \"" + name + "\"").at("r");
-        const region::Region region(value, name, nullptr, &automatic);
+        const region::Region region = region::read(value, name, nullptr, &automatic);
         OnMesh m = on_mesh(*mesh, region, block_name(name));
         if (name == "domain") domain = m.box;
         r.regions.emplace_back(name, text(region, m, true));
