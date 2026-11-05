@@ -164,21 +164,27 @@ void Solver::diverged() {
     logging::event(step, double(t), "diverged", invalid);
     std::string message = "Solution diverged at step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
                           ": " + invalid + ".";
-    if (last_good_set && last_good_step < step) {
-        restore_last_good();
+    const bool has_valid = last_good_set && last_good_step < step;
+    std::vector<int> failed;
+    MeshQuality quality;
+    divergence::Evidence evidence = diagnose_divergence(has_valid, failed, quality);
+    if (has_valid) {
         if (chemistry_pending > 0.0) {
             advance_chemistry(chemistry_pending);
             chemistry_pending = 0.0;
         }
         write_data(true);
-        const std::string file = write_restarts();
+        evidence.restart_file = write_restarts();
         message += " The last valid state (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
-                   ") is in " + file + ".";
+                   ") is in " + evidence.restart_file + ".";
     }
-    message += " Common causes: a time step too large for the scheme (lower run.cfl), an initial state or "
-               "boundary values far from the flow (check units and signs), or poor cells near the first one listed "
-               "(mallard check reports mesh quality); a more dissipative scheme (numerics.preset = \"robust\") "
-               "helps. See docs/guide/running.md#divergence.";
+    const std::vector<divergence::Cause> causes = write_divergence_report(evidence, failed, quality);
+    const divergence::Cause & top = causes.front();
+    message += " Most likely cause: " + top.title + (top.evidence.empty() ? "" : " (" + top.evidence.front() + ")") +
+               (top.fix.empty() ? "" : "; try: " + top.fix) + ".";
+    message += evidence.report_file.empty() ? " The divergence report above has the evidence and other causes."
+                                            : " " + evidence.report_file + " has the evidence and other causes.";
+    message += " See docs/guide/running.md#divergence.";
     for (auto & command : checkpoint_replies) run_control::reply(command, "error: " + message);
     for (auto & command : stop_replies) run_control::reply(command, "error: " + message);
     checkpoint_replies.clear();
