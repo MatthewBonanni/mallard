@@ -164,7 +164,7 @@ Result run(const std::string & input) {
         FOR_I_CONSERVATIVE u[i] = static_cast<double>(solver.h_conservatives(c, i));
         r.U.push_back(u);
     }
-    const auto F = solver.calc_force(mesh->get_face_zone("bottom")->faces);
+    const auto F = solver.calc_force(device_zone_faces(*mesh, "bottom"));
     for (size_t i = 0; i < 2 * N_DIM; i++) r.force[i] = static_cast<double>(F[i]);
     for (uint32_t f = 0; f < mesh->n_faces; f++) r.face_cells.emplace_back(mesh->h_cells_of_face(f, 0), mesh->h_cells_of_face(f, 1));
     return r;

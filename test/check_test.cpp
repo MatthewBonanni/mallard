@@ -488,6 +488,44 @@ TEST(MemoryTracker, CountsLiveAllocationsAndThePeak) {
     EXPECT_GE(usage().at_peak[size_t(memory::Category::STATE)], 4000u);
 }
 
+TEST(SetupMemory, NothingOnlyTheSetupReadsSurvivesIt) {
+    const bool device = !Kokkos::SpaceAccessibility<Kokkos::HostSpace,
+                                                    Kokkos::DefaultExecutionSpace::memory_space>::accessible;
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [1.0, 0.5], radius = 0.3}"
+                                        : "{type = \"sphere\", center = [1.0, 0.5, 0.125], radius = 0.3}";
+    const std::string source = "[[sources]]\nrhoE = \"1.0 + x\"\nregion = " + ball + "\n";
+    // Setup scratch of the initial state, the TENO tables and the mesh: what the run would hold from setup
+    const std::vector<std::string> setup = {"init_", "teno_setup_", "teno_batch_", "teno_boxes"};
+    const std::vector<std::string> mesh_device = {"node_coords", "nodes_of_cell", "offsets_nodes_of_cell",
+                                                  "nodes_of_face", "offsets_nodes_of_face", "zone_"};
+    const std::vector<std::string> mesh_host = {"cells_of_cell_mirror", "offsets_cells_of_cell_mirror",
+                                                "cells_of_cell_shift_mirror"};
+    // Host builds share the mesh's device views with the host copies that output reads
+    auto survivors = [&](const std::string & reconstruction, const bool mesh) {
+        memory::Tracker tracker;
+        Solver solver;
+        solver.init(parse_input_string(box("1.0 + 0.1 * x", "n_steps = 1\ncfl = 0.5\n", source + reconstruction)));
+        std::vector<std::string> held;
+        auto find = [&](const bool space, const std::vector<std::string> & prefixes) {
+            for (const auto & [label, bytes] : tracker.live(space)) {
+                for (const std::string & prefix : prefixes) {
+                    if (bytes > 0 && label.rfind(prefix, 0) == 0) held.push_back(label);
+                }
+            }
+        };
+        find(true, setup);
+        find(false, setup);
+        if (mesh && device) {
+            find(true, mesh_device);
+            find(false, mesh_host);
+        }
+        return held;
+    };
+    EXPECT_EQ(survivors("[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\n", false),
+              std::vector<std::string>());
+    EXPECT_EQ(survivors("[numerics.face_reconstruction]\ntype = \"MUSCL\"\n", true), std::vector<std::string>());
+}
+
 TEST(CheckRegions, ListsEveryRegionWithItsDimensionMeasureAndCells) {
     // The box is 2 x 1 (x 0.25): its regions, a probe's ball and the ball's surface
     const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.3"

@@ -12,6 +12,7 @@
 #include <cstring>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
@@ -37,7 +38,7 @@ constexpr Rule RULES[] = {
     {"rhs_faces", false, C::MESH}, {"rhs", true, C::STATE}, {"last_good", true, C::STATE}, {"T_seed", false, C::STATE},
     {"cell_scalars", false, C::STATE}, {"cell_molar_mass", false, C::STATE}, {"p_max", false, C::STATE},
     {"vortex_fields", false, C::STATE}, {"positivity_kappa", false, C::STATE}, {"cell_upwind", false, C::STATE},
-    {"frozen_thermo", false, C::STATE}, {"stage_time", false, C::STATE}, {"step_control", false, C::STATE},
+    {"frozen_thermo", false, C::STATE}, {"stage_time", false, C::STATE}, {"step_", true, C::STATE},
     {"geometric_source", false, C::STATE}, {"cell_mu", false, C::STATE}, {"rhoY", false, C::STATE},
     // Faces, gradients and reconstruction buffers
     {"face_solution", false, C::FACES}, {"face_flux", false, C::FACES}, {"face_thermo", false, C::FACES},
@@ -106,10 +107,17 @@ struct Space {
     Bytes at_phase_peak{};
 };
 
+struct Allocation {
+    int space;
+    uint64_t size;
+    Category category;
+    std::string label;
+};
+
 struct State {
     bool active = false;
     Space spaces[2];  // device, host
-    std::unordered_map<const void *, std::pair<int, std::pair<uint64_t, Category>>> live;
+    std::unordered_map<const void *, Allocation> live;
     std::set<std::string> unclassified;
     Kokkos::Tools::Experimental::EventSet previous{};
 };
@@ -130,7 +138,7 @@ void on_allocate(const Kokkos::Profiling::SpaceHandle handle, const char * label
     const int s = space_index(handle);
     const Category c = category(label);
     if (c == Category::OTHER) state.unclassified.insert(label);
-    state.live[ptr] = {s, {size, c}};
+    state.live[ptr] = {s, size, c, label ? label : ""};
     Space & space = state.spaces[s];
     Usage & u = space.usage;
     u.current += size;
@@ -150,9 +158,9 @@ void on_deallocate(const Kokkos::Profiling::SpaceHandle handle, const char * lab
     if (state.previous.deallocate_data) state.previous.deallocate_data(handle, label, ptr, size);
     const auto it = state.live.find(ptr);
     if (it == state.live.end()) return;
-    Usage & u = state.spaces[it->second.first].usage;
-    u.current -= it->second.second.first;
-    u.by_category[static_cast<size_t>(it->second.second.second)] -= it->second.second.first;
+    Usage & u = state.spaces[it->second.space].usage;
+    u.current -= it->second.size;
+    u.by_category[static_cast<size_t>(it->second.category)] -= it->second.size;
     state.live.erase(it);
 }
 
@@ -222,6 +230,14 @@ void Tracker::reset_peak() {
         space.usage.phases.clear();
         start_phase(space);
     }
+}
+
+std::map<std::string, uint64_t> Tracker::live(const bool device) const {
+    std::map<std::string, uint64_t> bytes;
+    for (const auto & [ptr, a] : state.live) {
+        if ((a.space == 0) == device) bytes[a.label] += a.size;
+    }
+    return bytes;
 }
 
 std::vector<std::string> Tracker::unclassified() const {

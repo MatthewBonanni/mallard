@@ -1258,6 +1258,15 @@ void TENO::init(const Input & input) {
         si_terms = teno_setup::smoothness_terms(degree);
     }
     init_face_quadrature_2d_curved();
+    if constexpr (N_DIM == 2) {
+        offsets_nodes_of_face = mesh->offsets_nodes_of_face;
+        nodes_of_face = mesh->nodes_of_face;
+        node_coords = mesh->node_coords;
+        if (mesh->axisymmetric) {
+            offsets_nodes_of_cell = mesh->offsets_nodes_of_cell;
+            nodes_of_cell = mesh->nodes_of_cell;
+        }
+    }
 
     if (mesh->axisymmetric) {
         // Exact to degree >= the reconstruction's, for the geometric source
@@ -3118,7 +3127,7 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
     Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                    mesh->offsets_nodes_of_face, mesh->nodes_of_face, mesh->node_coords,
+                    offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
@@ -3203,7 +3212,7 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
     Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                    mesh->offsets_nodes_of_face, mesh->nodes_of_face, mesh->node_coords,
+                    offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
@@ -3219,7 +3228,7 @@ void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
     Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                    mesh->offsets_nodes_of_face, mesh->nodes_of_face, mesh->node_coords,
+                    offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
@@ -3239,15 +3248,15 @@ void TENO::launch_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
     Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                    mesh->offsets_nodes_of_face, mesh->nodes_of_face, mesh->node_coords,
+                    offsets_nodes_of_face, nodes_of_face, node_coords,
                     mesh->cell_coords, mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift,
                     quadrature_face.points, face_quad_points, face_quad_weights, boundaries,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
                     solution, {}, {}, {}, cell_gamma, cell_molar_mass, selection, entry_rotations, boundary_faces};
-    functor.offsets_nodes_of_cell = mesh->offsets_nodes_of_cell;
-    functor.nodes_of_cell = mesh->nodes_of_cell;
+    functor.offsets_nodes_of_cell = offsets_nodes_of_cell;
+    functor.nodes_of_cell = nodes_of_cell;
     functor.cell_rule = cell_rule;
     functor.mu = mu;
     functor.source = source;

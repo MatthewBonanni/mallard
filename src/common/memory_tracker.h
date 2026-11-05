@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -83,6 +84,8 @@ class Tracker {
         void reset_peak();
         /** @brief Labels of category OTHER allocated so far, sorted. */
         std::vector<std::string> unclassified() const;
+        /** @brief Bytes held now by each allocation label, in the device's spaces (device) or the host's. */
+        std::map<std::string, uint64_t> live(bool device) const;
 };
 
 } // namespace memory

@@ -310,7 +310,35 @@ pass, whose code is unchanged, runs 1% slower with this build's memory layout. `
 another 3-8% faster (the smooth pass reads half the bytes). Setup: 4.6 s for 1M hexahedra at order 5 (as on
 main), 21 s for 1M tetrahedra (20 s); at order 6, 7.2 s (6.6 s) and 61 s (58 s), from the smaller batches.
 
-### 7. Memory sizing in `mallard check` (#550)
+### 7. Memory held from setup (#551)
+
+Every Kokkos allocation alive at the first step's time-step reduction (the same Kokkos Tools library, by label),
+in steady stepping (20-30 steps, output and restarts included), with host RSS and glibc's heap in use; one A100,
+16 OpenMP threads. The setup's own scratch (initial-state sampling, TENO batches and search, partitioning) was
+already freed with its scope. What the run held and never read again:
+
+- on the device, the mesh's node coordinates and the cells' and faces' node lists (2D TENO keeps the faces' ones,
+  and in axisymmetric runs the cells', for the points of straight faces), and the face zones' lists;
+- on the host, the copies of the vertex-neighbor lists (the stencil and image searches read them); with GPUs
+  these are separate from the device's;
+- the regions' volume fractions (8 bytes per cell per region; `mallard check` keeps them for its region report);
+- host memory the setup freed, which glibc keeps in its arenas: `malloc_trim` hands it back after setup.
+
+| bytes per cell, first step: main / change | cells | device (Kokkos) | device (cudaMemGetInfo) | host RSS |
+|---|---|---|---|---|
+| 2D MUSCL, triangles | 1.84M | 975 / 926 | 1750 / 1698 | 503 / 332 |
+| 2D TENO5, triangles | 461k | 2902 / 2880 | 11830 / 11807 | 896 / 682 |
+| 2D MUSCL, H2/air, mixture-averaged, reacting | 500k | 5097 / 5029 | 7933 / 7866 | 1278 / 1202 |
+| 3D TENO5, hexahedra | 1.00M | 7713 / 7581 | 40830 / 40694 | 2357 / 704 |
+| 3D TENO5, tetrahedra | 998k | 7249 / 7185 | 52295 / 52225 | 1409 / 556 |
+
+In steady stepping the device numbers are the same; host RSS grows again with the output's staging (3D TENO
+hexahedra: 2373 / 1549, tetrahedra 1427 / 1057, 2D MUSCL 562 / 488). The largest items: the host vertex-neighbor
+lists (134 B per hexahedron, 350 B per tetrahedron) and, on the device, the face and cell node lists and node
+coordinates (42 B per triangle of 2D MUSCL, 120 B per hexahedron). Restart files are bitwise those of `main`.
+On CPUs the device views are the host copies, so only the regions' fractions and glibc's arenas change.
+
+### 8. Memory sizing in `mallard check` (#550)
 
 `mallard check` records every Kokkos allocation by label (`memory::Tracker`, Kokkos Tools callbacks chained to
 any tool loaded with `KOKKOS_TOOLS_LIBS`) and gives each label a category (`src/common/memory_tracker.cpp`; the
