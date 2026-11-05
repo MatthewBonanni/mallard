@@ -1897,12 +1897,10 @@
   ]
  },
  "les.combustion.C_u": {
-  "default": "28.0",
   "dims": [
    3
   ],
-  "set_in": [],
-  "type": "number"
+  "set_in": []
  },
  "les.combustion.T_burnt": {
   "dimension": "temperature (K)",
@@ -1981,12 +1979,10 @@
   "type": "number"
  },
  "les.combustion.subgrid_velocity": {
-  "default": "\"colin\"",
   "dims": [
    3
   ],
-  "set_in": [],
-  "type": "string"
+  "set_in": []
  },
  "les.dynamic": {
   "default": "false",

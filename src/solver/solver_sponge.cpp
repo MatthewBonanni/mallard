@@ -15,7 +15,7 @@
 
 #include "characteristic.h"
 #include "input.h"
-#include "region.h"
+#include "region_input.h"
 
 namespace {
 

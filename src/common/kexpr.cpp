@@ -25,8 +25,6 @@
 #include <stdexcept>
 #include <unordered_map>
 
-#include "units.h"
-
 namespace kexpr {
 
 namespace {
@@ -275,8 +273,9 @@ double literal_value(const std::string & text) {
 
 class Parser {
     public:
-        Parser(const std::string & name_, const std::string & text_, const std::vector<std::string> & variables_) :
-            name(name_), text(text_), variables(variables_) {
+        Parser(const std::string & name_, const std::string & text_, const std::vector<std::string> & variables_,
+               const SymbolHint hint_) :
+            name(name_), text(text_), variables(variables_), hint(hint_) {
             tokenize();
         }
 
@@ -297,6 +296,7 @@ class Parser {
         const std::string & name;
         const std::string & text;
         const std::vector<std::string> & variables;
+        const SymbolHint hint;
         std::vector<Token> tokens;
         size_t at = 0;
         std::vector<std::vector<std::pair<std::string, uint16_t>>> scopes{1};
@@ -797,7 +797,7 @@ class Parser {
                 for (const auto & var : variables) {
                     if (!var.empty()) known += (known.empty() ? "" : ", ") + var;
                 }
-                fail("unknown symbol '" + t.text + "' (variables: " + known + ")" + expression_unit_hint(t.text), t.pos);
+                fail("unknown symbol '" + t.text + "' (variables: " + known + ")" + (hint ? hint(t.text) : ""), t.pos);
             }
             if (peek().type != Tok::LPAREN) fail("expected '(' after " + t.text, peek().pos);
             next();
@@ -963,9 +963,10 @@ class Emitter {
 
 } // namespace
 
-Program::Program(const std::string & name, const std::string & text, const std::vector<std::string> & variables) :
+Program::Program(const std::string & name, const std::string & text, const std::vector<std::string> & variables,
+                 const SymbolHint hint) :
     m_name(name), m_text(text), m_uses(variables.size(), false) {
-    Parser parser(name, text, variables);
+    Parser parser(name, text, variables, hint);
     const NodePtr root = parser.parse();
     Emitter emitter(parser.n_locals());
     try {

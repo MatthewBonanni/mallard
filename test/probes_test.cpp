@@ -32,7 +32,7 @@
 #include "input.h"
 #include "mechanism.h"
 #include "probe_geometry.h"
-#include "region.h"
+#include "region_input.h"
 #include "region_mesh.h"
 #include "scratch.h"
 #include "gmsh_fixtures.h"
@@ -1052,7 +1052,7 @@ TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
          pi * 0.7 * std::hypot(1.0, 0.3) + pi * (0.25 + 0.04), false, 2},
     };
     for (const auto & c : cases) {
-        const region::Region r(parse_toml("r = " + c.toml).at("r"), "r");
+        const region::Region r = region::read(parse_toml("r = " + c.toml).at("r"), "r");
         const probe::Geometry g = probe::grid_geometry(region::sample_grid(region::surface_patches(r, "r"), 16, 32));
         EXPECT_EQ(g.dim, 2);
         EXPECT_NEAR(area(g), c.area, 1e-7 * c.area) << c.toml;

@@ -29,7 +29,7 @@
 #include "mesh.h"
 #include "mixture.h"
 #include "quadrature.h"
-#include "region.h"
+#include "region_input.h"
 #include "tabulated.h"
 #include "units.h"
 
@@ -241,7 +241,8 @@ struct Evaluator {
     };
 
     KOKKOS_INLINE_FUNCTION double distance(const uint32_t first_node, const uint32_t count, const double * x) const {
-        return region::distance(nodes.data() + first_node, count, vertices.data(), programs, x);
+        return region::distance(nodes.data() + first_node, count, vertices.data(), region::implicit_programs(programs),
+                                x);
     }
 
     KOKKOS_INLINE_FUNCTION double datum(const uint32_t v, const double * x) const {
@@ -590,7 +591,8 @@ struct Evaluator {
                 continue;
             }
             if (n.kind == region::Kind::IMPLICIT) return false;
-            if (Kokkos::fabs(region::detail::primitive(n, vertices.data(), programs, c)) >= r) continue;
+            const double phi = region::detail::primitive(n, vertices.data(), region::implicit_programs(programs), c);
+            if (Kokkos::fabs(phi) >= r) continue;
             if (n.kind != region::Kind::BOX && n.kind != region::Kind::HALF_SPACE && n.kind != region::Kind::POLYGON) {
                 return false;
             }
@@ -943,14 +945,14 @@ struct InitialState::Impl {
         mesh(m), physics(p), mixture(mix), from_cells(cells) {}
 
     int32_t add_program(const std::string & where, const std::string & text, const std::vector<std::string> & vars) {
-        programs.emplace_back(where, text, vars);
+        programs.emplace_back(where, text, vars, expression_unit_hint);
         return static_cast<int32_t>(programs.size() - 1);
     }
 
     /** @brief Append a region's nodes, polygons and implicit functions; its summary. */
     std::string add_region(const Input & table, const std::string & where, uint32_t & first, uint32_t & count,
                            double & edge, bool & bounded) {
-        const region::Region r(table, where, region_names);
+        const region::Region r = region::read(table, where, region_names);
         region::require_full_dimension(r, table, where);
         const auto & h = r.host();
         const uint32_t vertex_offset = static_cast<uint32_t>(vertices.size() / 2);

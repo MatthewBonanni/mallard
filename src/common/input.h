@@ -34,14 +34,13 @@
 /**
  * @brief How setup reads a key, as the accessors below record it: the type it
  *        asks for, its physical dimension, and the value it uses when the key is
- *        absent, or that it is required. The key catalog (mallard check
- *        --catalog) is made of these.
+ *        absent, or that it is required. The key records (resolve_input) are
+ *        made of these.
  */
 struct KeyUse {
     std::string type;       // bool, integer, number, string, array, or empty if not recorded
-    std::string dimension;  // of a number: "pressure (kg m^-1 s^-2)", or empty
-    std::string unit;       // of a plain number, when not SI (Dimension::plain_unit)
-    std::string fallback;   // the value used when absent, as TOML would write it
+    Dimension dimension{};  // of a number; dim::none if it has none
+    std::string fallback;   // the value used when absent, as TOML writes it
     bool required = false;
 };
 
@@ -50,11 +49,14 @@ struct KeyUse {
  *        or not. Copies share the record, so a key read through a copy counts
  *        as read. Iterating the table counts every key as read. Mallard code
  *        holds the input only as Input: a conversion to toml::value would
- *        iterate it (src/CMakeLists.txt rejects toml::value).
+ *        iterate it (src/CMakeLists.txt rejects toml::value). Keys are sorted, so
+ *        what iterates a table (the species of a composition) does it in one order,
+ *        whatever the file's order and the standard library: results do not
+ *        depend on them, and the resolved input, sorted too, runs bitwise the same.
  */
 template <typename K, typename V>
-class InputTable : public std::unordered_map<K, V> {
-        using Base = std::unordered_map<K, V>;
+class InputTable : public std::map<K, V> {
+        using Base = std::map<K, V>;
 
     public:
         struct Lookups {
@@ -188,12 +190,40 @@ InputError not_accepted(const Input & table, const std::string & key, const std:
 /** @brief Record the values a key accepts, by its path ("numerics.riemann_solver"; indices are dropped). */
 void record_options(const std::string & key, std::vector<std::string> names);
 
+/** @brief A key setup looked up, as the accessors recorded it, and the value the run used. */
+struct KeyRecord {
+    std::string path;                 // "boundaries[0].p"
+    KeyUse use;                       // empty type if only looked up (contains, a table, a value read directly)
+    std::vector<std::string> values;  // accepted values, if a closed set
+    bool set = false;                 // in the input, or written into it by the program (a preset, --restart)
+    bool by_name = true;              // looked up by its name, not only read by iterating its table
+    std::string value;                // as TOML: the input's (in the key's plain units) or the default; empty
+                                      // for a table, an array of tables, or a key with neither
+};
+
 /**
- * @brief The key catalog of an input after setup read it: every key setup looked
- *        up (by path, without array indices), whether the input set it, and its
- *        KeyUse and accepted values where the accessors recorded them, as JSON.
+ * @brief The input as setup used it, from the accessors' records: every key
+ *        looked up, and the input with every key explicit (toml), which runs
+ *        bitwise the same and resolves to the same text. Keys the setup did not
+ *        read are left out; so are tables the input leaves out, whose presence
+ *        can turn a feature on.
  */
-std::string key_catalog(const Input & input);
+struct ResolvedInput {
+    std::vector<KeyRecord> keys;  // in the order of toml
+    std::string toml;
+
+    /** @brief The record of a key path ("numerics.riemann_solver"), or nullptr. */
+    const KeyRecord * find(const std::string & path) const;
+};
+
+/** @brief The records of the keys setup looked up in the input, and the input they resolve to. */
+ResolvedInput resolve_input(const Input & input);
+
+/**
+ * @brief The key catalog of the records: every key path (without array indices),
+ *        whether the input set it, and its KeyUse and accepted values, as JSON.
+ */
+std::string key_catalog(const ResolvedInput & resolved);
 
 /**
  * @brief The entry of options named by value, or an error listing the accepted
@@ -233,19 +263,20 @@ template <typename T> std::string type_name() {
     else return "";
 }
 
+/** @brief The shortest TOML float that reads back as x: as a double, or as a float if single. */
+std::string float_text(double x, bool single = false);
+/** @brief A TOML basic string, quoted and escaped. */
+std::string string_text(const std::string & s);
+
 template <typename T> std::string toml_text(const T & x) {
     if constexpr (std::is_same_v<T, bool>) {
         return x ? "true" : "false";
     } else if constexpr (std::is_integral_v<T>) {
         return std::to_string(x);
     } else if constexpr (std::is_floating_point_v<T>) {
-        std::ostringstream os;
-        os << std::setprecision(15) << x;
-        std::string t = os.str();
-        if (t.find_first_of(".eEn") == std::string::npos) t += ".0";
-        return t;
+        return float_text(static_cast<double>(x), sizeof(T) < sizeof(double));
     } else if constexpr (std::is_convertible_v<T, std::string>) {
-        return "\"" + std::string(x) + "\"";
+        return string_text(std::string(x));
     } else if constexpr (is_vector<T>::value) {
         std::string t;
         for (const auto & item : x) t += (t.empty() ? "" : ", ") + toml_text(item);
@@ -265,10 +296,7 @@ inline const InputTable<std::string, Input> * table_of(const Input & v, const st
 
 /** @brief The KeyUse of a real-valued key of this dimension, with this fallback text or required. */
 inline KeyUse real_use(const std::string & type, const Dimension & dimension, std::string fallback, bool required) {
-    KeyUse use{type, "", "", std::move(fallback), required};
-    if (!dimension.same_as(dim::none)) use.dimension = dimension.describe();
-    if (std::string(dimension.plain_unit) != "SI") use.unit = dimension.plain_unit;
-    return use;
+    return {type, dimension, std::move(fallback), required};
 }
 
 /** @brief What a value of type T is called in messages: "an integer", "an array of strings". */
@@ -344,7 +372,7 @@ T find_value(const Input & v, const Tables &... keys) {
     const std::string path[] = {keys...};
     const auto * table = sizeof...(Tables) == 1 ? input_detail::table_of(v) : input_detail::table_of(v, path[0]);
     const std::string & key = path[sizeof...(Tables) - 1];
-    if (table) table->record_use(key, {input_detail::type_name<T>(), "", "", "", true});
+    if (table) table->record_use(key, {input_detail::type_name<T>(), {}, "", true});
     if constexpr (sizeof...(Tables) == 2) {
         if (!table) throw missing_key(v, path[0] + "." + key);
         if (!table->contains(key)) throw missing_key(v.at(path[0]), path[0] + "." + key);
@@ -359,7 +387,7 @@ template <typename T>
 T find_value_or(const Input & v, const std::string & key, const T & fallback) {
     const auto * table = input_detail::table_of(v);
     if (!table) return fallback;
-    table->record_use(key, {input_detail::type_name<T>(), "", "", input_detail::toml_text(fallback), false});
+    table->record_use(key, {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false});
     return table->contains(key) ? input_detail::get<T>(table->at(key), key) : fallback;
 }
 
@@ -367,7 +395,7 @@ template <typename T>
 T find_value_or(const Input & v, const std::string & table_name, const std::string & key, const T & fallback) {
     const auto * table = input_detail::table_of(v, table_name);
     if (!table) return fallback;
-    table->record_use(key, {input_detail::type_name<T>(), "", "", input_detail::toml_text(fallback), false});
+    table->record_use(key, {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false});
     return table->contains(key) ? input_detail::get<T>(table->at(key), table_name + "." + key) : fallback;
 }
 

@@ -33,7 +33,7 @@
 #include "input.h"
 #include "log.h"
 #include "provenance.h"
-#include "region.h"
+#include "region_input.h"
 #include "viscous_flux.h"
 
 #ifdef Mallard_HAS_HDF5
