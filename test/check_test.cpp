@@ -394,6 +394,85 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     EXPECT_FALSE(mentions(fine.warnings, "TFLES"));
     const CheckReport coarse = check(input(5.0 * delta / 10.0));  // F = 10
     EXPECT_TRUE(mentions(coarse.warnings, "F = 10"));
+    EXPECT_NEAR(fine.cells_per_delta_L_min, 1.25, roundoff(1e-12));
+    EXPECT_NEAR(coarse.cells_per_delta_L_max, 0.5, roundoff(1e-12));
+}
+
+namespace {
+
+/** @brief A periodic box of n^d cells and side 2 pi with viscosity mu, rho = 1; velocity components as expressions. */
+std::string periodic_box(const int n, const double mu, const std::vector<std::string> & u) {
+    std::ostringstream s;
+    s << "[run]\nt_stop = 1.0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 6.283185307179586\nLy = 6.283185307179586\n"
+      << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 6.283185307179586\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"100.0\"\nu = [";
+    for (size_t i = 0; i < N_DIM; i++) s << (i ? ", " : "") << "\"" << u[i] << "\"";
+    s << "]\n[numerics]\nriemann_solver = \"HLLC\"\n[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\n"
+      << "p_ref = 100.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = " << mu << "\nPr = 0.72\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(CheckResolution, TaylorGreenDissipationGivesTheKolmogorovLength) {
+    // epsilon = 2 nu |k|^2 E: |k|^2 = d, E = 1/4 (2D) or 1/8 (3D); u'^2 = 2 E / d
+    const double nu = 0.01;
+    const std::vector<std::string> u = N_DIM == 3
+        ? std::vector<std::string>{"sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"}
+        : std::vector<std::string>{"sin(x) * cos(y)", "-cos(x) * sin(y)"};
+    const double E = N_DIM == 3 ? 0.125 : 0.25, epsilon = 2.0 * nu * N_DIM * E;
+    const int n = N_DIM == 3 ? 48 : 64;
+    const CheckReport r = check(periodic_box(n, nu, u));
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_NEAR(r.epsilon, epsilon, 0.05 * epsilon);
+    EXPECT_NEAR(r.eta, std::pow(nu * nu * nu / r.epsilon, 0.25), roundoff(1e-11) * r.eta);
+    EXPECT_NEAR(r.taylor, std::sqrt(15.0 * nu * (2.0 * E / N_DIM) / r.epsilon), 0.01 * r.taylor);
+    EXPECT_NEAR(r.delta_over_eta, 2.0 * std::numbers::pi / n / r.eta, roundoff(1e-9) * r.delta_over_eta);
+    EXPECT_FALSE(mentions(r.warnings, "DNS"));
+    // A hundredth of the viscosity dissipates a hundredth as much: eta ten times smaller
+    const CheckReport coarse = check(periodic_box(n, nu / 100.0, u));
+    EXPECT_TRUE(mentions(coarse.warnings, "DNS: cells of"));
+}
+
+TEST(CheckResolution, AFlowWithoutGradientsOrForcingHasNoKolmogorovLength) {
+    const CheckReport r = check(periodic_box(8, 0.01, std::vector<std::string>(N_DIM, "1.0")));
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_EQ(r.eta, 0.0);
+    bool said = false;
+    for (const auto & [label, text] : r.resolution) said |= label == "Kolmogorov" && text.rfind("not estimated", 0) == 0;
+    EXPECT_TRUE(said);
+}
+
+TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
+    // Re_b = U_b 2h / nu = 5600, for which Dean's correlation gives Re_tau = u_tau h / nu = 182 (Re_tau 180 cases)
+    const double nu = 1.0 / 2800.0;
+    std::ostringstream s;
+    s << "[run]\nt_stop = 1.0\ncfl = 0.9\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 16\nLx = 4.0\nLy = 2.0\n"
+      << (N_DIM == 3 ? "Nz = 4\nLz = 2.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"17.857142857142858\"\n"
+      << "u = [\"1.5 * (1 - (y - 1) * (y - 1))\", \"0.0\"" << (N_DIM == 3 ? ", \"0.0\"" : "") << "]\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+      << "[source]\nmass_flow = [1.0, 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\n"
+      << "p_ref = 17.857142857142858\nT_ref = 1.0\nrho_ref = 1.0\nmu = " << nu << "\nPr = 0.72\n";
+    const CheckReport r = check(s.str());
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_NEAR(r.u_tau / nu, 180.0, 0.03 * 180.0);
+    const double y1 = 1.0 / 16.0;  // the first cell centers: half of 2 / 16
+    EXPECT_NEAR(r.y_plus_max, y1 * r.u_tau / nu, 1e-5 * r.y_plus_max);
+    EXPECT_NEAR(r.y_plus_mean, r.y_plus_max, 1e-5 * r.y_plus_max);
+    EXPECT_NEAR(r.x_plus_max, 0.5 * r.u_tau / nu, 1e-5 * r.x_plus_max);
+    if (N_DIM == 3) {
+        EXPECT_NEAR(r.z_plus_max, 0.5 * r.u_tau / nu, 1e-5 * r.z_plus_max);
+    }
+    EXPECT_NEAR(r.epsilon, r.u_tau * r.u_tau, 1e-5 * r.epsilon);  // u_tau^2 U_b / h with U_b = h = 1
+    EXPECT_TRUE(mentions(r.warnings, "first cells at y+ up to"));
+    EXPECT_TRUE(mentions(r.warnings, "wall cells up to x+"));
 }
 
 TEST(MeshQualityMetrics, UniformQuadsAreIdealAndElongatedOnesHaveTheirAspectRatio) {
