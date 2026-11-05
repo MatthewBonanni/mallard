@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -567,14 +568,17 @@ TEST(CliTest, DiffMatchesCellsByTheirPlaceAndRemapsAcrossMeshes) {
     EXPECT_TRUE(contains(refused.err, "different meshes; --remap compares B on A's mesh")) << refused.err;
 
     // The fine mesh nests in the coarse one: its averages, remapped conservatively, are the coarse averages
-    const Result remapped =
-        run({"diff", "coarse/restart_000000.restart", "fine/restart_000000.restart", "--remap", "--tol", "1e-12", "--format", "json"}, true);
+    const double rounding = 100.0 * std::numeric_limits<rtype>::epsilon();
+    char tol[32];
+    std::snprintf(tol, sizeof tol, "%.3g", rounding);
+    const Result remapped = run({"diff", "coarse/restart_000000.restart", "fine/restart_000000.restart", "--remap", "--tol",
+                                 tol, "--format", "json"}, true);
     EXPECT_EQ(remapped.status, 0) << remapped.err << remapped.out;
     const json::Value r = json::parse(remapped.out);
     EXPECT_EQ(r["compared"].string, "remap");
     EXPECT_EQ(r["remap"]["source_cells"].number, Mallard_DIM == 3 ? 8 * 6 * 6 : 8 * 6);
     for (const json::Value & f : r["fields"].array) {
-        EXPECT_LT(f["relative"]["linf"].number, 1e-13) << f["name"].string;
+        EXPECT_LT(f["relative"]["linf"].number, rounding) << f["name"].string;
     }
 }
 
