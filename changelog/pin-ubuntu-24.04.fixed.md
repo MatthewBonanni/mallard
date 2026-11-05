@@ -1,0 +1,1 @@
+- GCC 15 builds with `-DMallard_WARNINGS_AS_ERRORS=ON` no longer fail on a possibly dangling reference in the mechanism reader.
