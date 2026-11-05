@@ -247,8 +247,8 @@ class Solver {
         void update_cell_W();
 
         /**
-         * @brief Q = (|Omega|^2 - |S|^2) / 2 and the vorticity of each owned
-         *        cell, into vortex_fields, after update_velocity_gradients.
+         * @brief The vorticity of each owned cell, into vortex_fields, after
+         *        update_velocity_gradients.
          */
         void update_vortex_fields();
 
@@ -525,7 +525,7 @@ class Solver {
         Kokkos::View<rtype *[N_PRIMITIVE]>::host_mirror_type h_primitives;
         Kokkos::View<rtype *> p_max;  // largest pressure of each cell so far, if P_MAX is written
         Kokkos::View<rtype *>::host_mirror_type h_p_max;
-        // Q, then the vorticity (one component in 2D), if any of them is written
+        // The vorticity (one component in 2D), if written
         Kokkos::View<rtype **> vortex_fields;
         Kokkos::View<rtype **>::host_mirror_type h_vortex_fields;
         // MACH, Q_CRITERION, LAMBDA2 and SCHLIEREN, those written, in the columns of derived_selection

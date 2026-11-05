@@ -47,7 +47,6 @@ const Entry NAMED[] = {
     {"T", dim::temperature, "temperature"},
     {"H", dim::velocity_squared, "specific enthalpy"},
     {"CFL", dim::none, "local CFL number"},
-    {"Q", dim::rate.times(dim::rate), "Q-criterion"},
     {"Q_CRITERION", dim::rate.times(dim::rate), "Q-criterion"},
     {"LAMBDA2", dim::rate.times(dim::rate), "lambda2 vortex criterion"},
     {"MACH", dim::none, "Mach number"},

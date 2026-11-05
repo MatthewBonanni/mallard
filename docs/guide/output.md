@@ -59,7 +59,7 @@ variables = ["P", "T"]
 |---|---|
 | Conservative | `RHO`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `RHOU` (vector) |
 | Primitive | `U_X`, `U_Y`, `U_Z`, `U` (vector), `P`, `T`, `H` |
-| Derived | `CFL`, `VORTICITY`, `MACH`, `Q_CRITERION` (or `Q`), `LAMBDA2`, `SCHLIEREN` ([below](#derived-fields)) |
+| Derived | `CFL`, `VORTICITY`, `MACH`, `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN` ([below](#derived-fields)) |
 | TENO | `TENO_SIGMA` (troubled-cell indicator) |
 | Mixtures | `Y_<s>`, `X_<s>`, `RHOY_<s>`; viscous: `MU`, `LAMBDA`, `D_<s>` (and `DT_<s>` with `soret`) |
 | Chemistry, radiation | `HRR`, `OMEGA_<s>`, `CHEM_COST`, `QRAD` |
@@ -84,7 +84,7 @@ variables = ["RHO", "U", "P", "MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN"]
 | Name | Units | Definition |
 |---|---|---|
 | `MACH` | `1` | \|u\| / c, with c = √(γ p / ρ) and, for mixtures, each cell's frozen γ |
-| `Q_CRITERION` | `s-2` | Q = (‖Ω‖² − ‖S‖²) / 2 ([Hunt, Wray & Moin 1988](../references.md#hunt-wray-moin-1988)): positive where rotation dominates strain, i.e. in vortices. `Q` is the same field under its older name |
+| `Q_CRITERION` | `s-2` | Q = (‖Ω‖² − ‖S‖²) / 2 ([Hunt, Wray & Moin 1988](../references.md#hunt-wray-moin-1988)): positive where rotation dominates strain, i.e. in vortices. Before 0.10.0 it was called `Q`, which is now an error that names `Q_CRITERION` |
 | `LAMBDA2` | `s-2` | λ₂, the middle eigenvalue of S² + Ω² ([Jeong & Hussain 1995](../references.md#jeong-hussain-1995)): negative in vortex cores |
 | `SCHLIEREN` | `kg m-4` | \|∇ρ\|, a numerical schlieren image of shocks, contact surfaces and mixing layers |
 
@@ -446,7 +446,7 @@ those of `A` per second.
 | `T`, `T_SEED` | `K` | `HRR`, `QRAD` | `kg m-1 s-3` (W/m³) |
 | `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
-| `Q`, `Q_CRITERION`, `LAMBDA2` | `s-2` | `CFL`, `MACH`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
+| `Q_CRITERION`, `LAMBDA2` | `s-2` | `CFL`, `MACH`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
 | `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
 | `MASS_FLUX`, `SPECIES_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |

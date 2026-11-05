@@ -100,7 +100,7 @@ file = "forces_top.csv"
 [[write_data]]
 prefix = "./solut/flow"
 time_interval = 50.0
-variables = ["U", "P", "Q", "MU_T"]
+variables = ["U", "P", "Q_CRITERION", "MU_T"]
 
 [[write_data]]
 prefix = "./stats/channel"

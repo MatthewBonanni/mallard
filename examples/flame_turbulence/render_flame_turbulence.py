@@ -5,7 +5,7 @@
         [--y-u 0.0285223875] [--width 1600] [--movie DIR_OR_GLOB --fps 8]
 
 FLAME_NPZ are snapshots written by examples/flame_turbulence/flame_turbulence.py extract (T,
-Y_H2, Q, HRR on the cell lattice). Each panel shows the flame surface, the
+Y_H2, Q_CRITERION, HRR on the cell lattice). Each panel shows the flame surface, the
 isosurface c = 1 - Y_H2 / Y_H2,u = 0.5 colored by the heat release rate, and
 the vortices of the fresh gas, isosurfaces Q = q_factor <Q+> (the mean of the
 positive Q where c < 0.05), in gray. Several snapshots are drawn side by side
@@ -36,15 +36,15 @@ def scene(plotter, path, q_factor, y_u, label, clim, args_window=None, crop=None
     grid = pv.ImageData(dimensions=np.array(c.shape) + 1, spacing=(h * 1e3,) * 3)
     grid.cell_data["c"] = c.ravel(order="F")
     grid.cell_data["HRR"] = np.log10(np.maximum(d["HRR"], 1.0)).ravel(order="F")
-    grid.cell_data["Q"] = d["Q"].ravel(order="F")
+    grid.cell_data["Q"] = d["Q_CRITERION"].ravel(order="F")
     pts = grid.cell_data_to_point_data()
     flame = pts.contour([0.5], scalars="c")
     if flame.n_points:
         plotter.add_mesh(flame, scalars="HRR", cmap="inferno", clim=clim, smooth_shading=True,
                          scalar_bar_args={"title": "log10 HRR [W/m^3]"})
-    fresh = (c < 0.05) & (d["Q"] > 0)
+    fresh = (c < 0.05) & (d["Q_CRITERION"] > 0)
     if fresh.any():
-        level = q_factor * float(d["Q"][fresh].mean())
+        level = q_factor * float(d["Q_CRITERION"][fresh].mean())
         vort = pts.contour([level], scalars="Q")
         if vort.n_points:
             cc = vort.point_data["c"] if "c" in vort.point_data else None

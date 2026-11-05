@@ -164,7 +164,7 @@ std::string channel(const std::string & dir) {
           << format << "_reductions.csv\"\n";
     }
     const std::string variables =
-        "variables = [\"RHO\", \"RHOU\", \"RHOE\", \"U\", \"U_X\", \"P\", \"T\", \"H\", \"CFL\", \"Q\", \"VORTICITY\", "
+        "variables = [\"RHO\", \"RHOU\", \"RHOE\", \"U\", \"U_X\", \"P\", \"T\", \"H\", \"CFL\", \"VORTICITY\", "
         "\"MACH\", \"Q_CRITERION\", \"LAMBDA2\", \"SCHLIEREN\", \"MEAN_*\", \"COV_*\"]\n";
     s << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 2\n" << variables
       << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtu\"\nregion = \"bottom\"\ninterval = 2\n"
@@ -213,7 +213,6 @@ TEST(FieldUnitsTest, UnitsFollowFromTheDimensions) {
     EXPECT_EQ(units_of("P"), "kg m-1 s-2");
     EXPECT_EQ(units_of("T"), "K");
     EXPECT_EQ(units_of("H"), "m2 s-2");
-    EXPECT_EQ(units_of("Q"), "s-2");
     EXPECT_EQ(units_of("VORTICITY_Z"), "s-1");
     EXPECT_EQ(units_of("Q_CRITERION"), "s-2");
     EXPECT_EQ(units_of("LAMBDA2"), "s-2");

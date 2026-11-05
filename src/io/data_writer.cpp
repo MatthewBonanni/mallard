@@ -193,6 +193,14 @@ void DataWriter::init(const Input & input,
             }
             if (field.components.size() != N_DIM) field.components.clear();
         }
+        if (field.components.empty() && var == "Q") {
+            throw InputError({.key = "write_data.variables",
+                              .line = line_of(input, "variables"),
+                              .message = "Q was renamed to Q_CRITERION in 0.10.0",
+                              .suggestion = "Q_CRITERION",
+                              .fix = "Write \"Q_CRITERION\" instead of \"Q\"",
+                              .docs = "docs/guide/output.md#derived-fields"});
+        }
         if (field.components.empty()) {
             throw unknown_variable(var, "unknown variable \"" + var + "\"");
         }
