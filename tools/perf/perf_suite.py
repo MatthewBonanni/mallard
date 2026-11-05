@@ -20,6 +20,7 @@ name from nvidia-smi or amd-smi, else the CPU model).
 import argparse
 import csv
 import json
+import lzma
 import platform
 import re
 import shlex
@@ -148,6 +149,9 @@ def cmd_run(args):
             continue
         binary = Path(build).resolve() / "src" / "mallard"
         with tempfile.TemporaryDirectory(prefix=f"perf-{case['name']}-") as tmp:
+            if "mesh" in case:
+                mesh = PERF_DIR / case["mesh"]
+                (Path(tmp) / mesh.stem).write_bytes(lzma.decompress(mesh.read_bytes()))
             for i in range(args.repeats + 1):
                 log = logs / f"{case['name']}-{i}.log" if logs else None
                 result = run_once(case, binary, launcher, Path(tmp), log)

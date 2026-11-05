@@ -36,6 +36,33 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 - **Capacity:** one A100-80GB now holds about 2.1M hexahedra or 1.65M tetrahedra at TENO5 (before: about 1.8M / 1.45M), and 3.4M / 2.75M with `single_precision_tables`. A 125³ Taylor–Green vortex that ran out of memory now runs.
 - **`single_precision_tables`** (opt-in, 3D, single gas) stores the pseudo-inverses in single precision and is another 3–8% faster. It changes results at single-precision round-off: below 10<sup>−7</sup> of each field's range on the Taylor–Green vortex, but up to 6.9 × 10<sup>−3</sup> in shock cells of a blast wave.
 
+## Cell numbering {#cell-numbering}
+
+Each rank (and a serial run) can number its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so that memory locality does not depend on how a mesh file numbers its cells. The default, `[mesh] cell_order = "auto"`, counts the cache lines that blocks of consecutive cells read over the cells the reconstruction reads around each (one vertex layer; two for TENO5), in the input order and along the curve, and takes the curve when it reads a tenth fewer; the Mesh section of the log says which it took and both counts. `hilbert` or `input` force either. Results and output files are bitwise the same with either numbering.
+
+The performance set on one A100, cells per second, best of six runs over two interleaved rounds, before 0.10.0 and with `auto`:
+
+| Case | before | `auto` | order taken | cache lines per cell, input / curve |
+|---|---:|---:|---|---|
+| `sphere_3d`: 180k Gmsh tetrahedra and prisms, MUSCL | 19.1M | 24.4M (+28%) | Hilbert | 5.72 / 0.514 |
+| `teno5_3d`: 96³ hexahedra, TENO5 | 5.56M | 5.97M (+7%) | Hilbert | 0.771 / 0.525 |
+| `probes_3d`: TENO5 with probes | 3.81M | 4.01M (+5%) | Hilbert | 0.771 / 0.525 |
+| `teno5_2d`: 1024² quadrilaterals, TENO5 | 51.7M | 53.5M (+3%) | Hilbert | 0.332 / 0.139 |
+| `muscl_2d`: 1024² quadrilaterals, MUSCL | 271M | 278M (+3%) | Hilbert | 0.199 / 0.139 |
+| `air_3d`: 96 × 48 × 48 hexahedra, MUSCL, LES | 52.3M | 52.5M | input | 0.263 / 0.379 |
+| `flame_3d`: `air_3d` with premixed propane–air | 6.45M | 6.44M | input | 0.263 / 0.379 |
+
+The count and the curve add to setup: 0.7 s for `muscl_2d`, 2-3 s for `teno5_3d` (two layers). Forcing either order, milliseconds per step on one A100 (four in parentheses):
+
+| Case | x-first (generated) | Hilbert | random file numbering, before 0.10.0 |
+|---|---:|---:|---:|
+| 2D TENO5, 1M quadrilaterals | 19.9 (6.39) | 19.3 (6.19) | 52.8 (10.7) |
+| 2D MUSCL, 1M quadrilaterals | 3.61 (1.44) | 3.57 (1.39) | 20.7 (2.90) |
+| 3D TENO5, 96³ hexahedra | 150 (40.9) | 143 (39.6) | 294 (72.2) |
+| 3D MUSCL, 1M tetrahedra | 33.0 (10.4) | 36.8 (11.3) | 198 (32.3) |
+
+On generated boxes, already numbered x first, the curve is within a few percent either way: faster where the reconstruction reads several layers (TENO) or in 2D, and up to 11% slower for one-layer reconstructions in 3D, where `auto` keeps the x-first order of `air_3d` and `flame_3d`. Details: [design notes](../design/performance.md#cell-numbering).
+
 ## Chemistry {#chemistry}
 
 Mallard runs the stiff chemistry of reacting flows on GPUs with one thread per cell for small mechanisms. Larger ones use one warp per cell, or a team of up to 16 warps for the few cells that need many sub-steps, and a sparse LU factorization from 30 species up. The benchmark (`benchmarks/chemistry/` in the repository) advances states sampled along a constant-volume ignition (fresh, igniting and burnt gas, replicated over many cells) by one splitting step, as the solver does in every cell. Cells per second, the best of several calls after a warm-up, in double precision:
