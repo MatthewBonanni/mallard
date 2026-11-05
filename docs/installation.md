@@ -85,7 +85,7 @@ Spack builds its own Kokkos to match. A cluster's MPI, CUDA or compilers can be 
 
 ## From source
 
-Mallard needs a C++20 compiler (GCC 11.4, Clang 14 or newer), CMake 3.22 or newer, and git. It depends on [Kokkos](https://github.com/kokkos/kokkos) (5.x) and [toml11](https://github.com/ToruNiina/toml11), both included in this repository as submodules; CMake fetches yaml-cpp.
+Mallard needs a C++20 compiler (GCC 11.4, Clang 15 or newer), CMake 3.22 or newer, and git. It depends on [Kokkos](https://github.com/kokkos/kokkos) (5.x) and [toml11](https://github.com/ToruNiina/toml11), both included in this repository as submodules; CMake fetches yaml-cpp.
 
 ```sh
 git clone --recursive https://github.com/MatthewBonanni/mallard.git
