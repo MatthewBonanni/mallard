@@ -16,11 +16,14 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "example_inputs.h"
 #include "input.h"
+#include "json_reader.h"
 #include "numerics_preset.h"
+#include "provenance.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -28,10 +31,19 @@ namespace {
 
 using Keys = std::map<std::string, std::string>;
 
-Keys resolved(const numerics_preset::Resolution & r, bool from_preset) {
+/** @brief The keys the preset (or the input) set, with their values in the input. */
+Keys resolved(const numerics_preset::Resolution & r, const Input & input, bool from_preset) {
     Keys keys;
     for (const auto & s : r.settings) {
-        if (s.from_preset == from_preset) keys[s.key] = s.value;
+        if (s.from_preset != from_preset) continue;
+        const Input * v = &input;
+        for (size_t begin = 0, end = 0; end != std::string::npos; begin = end + 1) {
+            end = s.key.find('.', begin);
+            v = &v->as_table().entries().at(s.key.substr(begin, end - begin));
+        }
+        keys[s.key] = v->is_string()   ? v->as_string()
+                      : v->is_integer() ? std::to_string(v->as_integer())
+                                        : input_detail::float_text(v->as_floating());
     }
     return keys;
 }
@@ -59,7 +71,7 @@ TEST(NumericsPreset, EachPresetResolvesToItsDocumentedKeys) {
                       {"numerics.riemann_solver", "HLLC"},
                       {"numerics.convective_flux", "riemann"},
                       {"numerics.time_integrator", "SSPRK3"},
-                      {"run.cfl", "1"}}},
+                      {"run.cfl", "1.0"}}},
         {"les", {{"numerics.face_reconstruction.type", "MUSCL"},
                  {"numerics.face_reconstruction.limiter", "none"},
                  {"numerics.riemann_solver", "HLLC"},
@@ -79,9 +91,9 @@ TEST(NumericsPreset, EachPresetResolvesToItsDocumentedKeys) {
         Input input;
         const auto r = resolve("[run]\nt_stop = 1.0\n[numerics]\npreset = \"" + name + "\"\n", &input);
         EXPECT_EQ(r.name, name);
-        EXPECT_EQ(resolved(r, true), documented.at(name));
-        EXPECT_TRUE(resolved(r, false).empty());
-        EXPECT_EQ(r.summary(), name);
+        EXPECT_EQ(resolved(r, input, true), documented.at(name));
+        EXPECT_TRUE(resolved(r, input, false).empty());
+        EXPECT_EQ(r.summary(resolve_input(input)), name);
         // The keys land in the input the rest of the setup reads
         const Input & recon = input.at("numerics").at("face_reconstruction");
         EXPECT_EQ(recon.at("type").as_string(), documented.at(name).at("numerics.face_reconstruction.type"));
@@ -96,17 +108,17 @@ TEST(NumericsPreset, ExplicitKeysOverrideThePreset) {
     const auto r = resolve("[run]\nt_stop = 1.0\ndt = 1e-3\n"
                          "[numerics]\npreset = \"accurate\"\nriemann_solver = \"RHLL\"\n"
                          "[numerics.face_reconstruction]\norder = 3\n", &input);
-    EXPECT_EQ(resolved(r, false), (Keys{{"numerics.riemann_solver", "RHLL"},
-                                        {"numerics.face_reconstruction.order", "3"},
-                                        {"run.dt", "0.001"}}));
-    EXPECT_EQ(resolved(r, true), (Keys{{"numerics.face_reconstruction.type", "TENO"},
-                                       {"numerics.convective_flux", "riemann"},
-                                       {"numerics.time_integrator", "SSPRK3"}}));
+    EXPECT_EQ(resolved(r, input, false), (Keys{{"numerics.riemann_solver", "RHLL"},
+                                               {"numerics.face_reconstruction.order", "3"},
+                                               {"run.dt", "0.001"}}));
+    EXPECT_EQ(resolved(r, input, true), (Keys{{"numerics.face_reconstruction.type", "TENO"},
+                                              {"numerics.convective_flux", "riemann"},
+                                              {"numerics.time_integrator", "SSPRK3"}}));
     EXPECT_EQ(input.at("numerics").at("riemann_solver").as_string(), "RHLL");
     EXPECT_EQ(input.at("numerics").at("face_reconstruction").at("order").as_integer(), 3);
     EXPECT_FALSE(input.at("run").contains("cfl"));
-    EXPECT_EQ(r.summary(), "accurate (the input sets numerics.face_reconstruction.order = 3, "
-                           "numerics.riemann_solver = RHLL, run.dt = 0.001)");
+    EXPECT_EQ(r.summary(resolve_input(input)), "accurate (the input sets numerics.face_reconstruction.order = 3, "
+                                               "numerics.riemann_solver = \"RHLL\", run.dt = 0.001)");
 }
 
 TEST(NumericsPreset, AnotherReconstructionTypeGetsNoneOfThePresetsReconstructionOptions) {
@@ -114,8 +126,8 @@ TEST(NumericsPreset, AnotherReconstructionTypeGetsNoneOfThePresetsReconstruction
     const auto r = resolve("[run]\nt_stop = 1.0\n[numerics]\npreset = \"accurate\"\n"
                          "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n", &input);
     EXPECT_FALSE(input.at("numerics").at("face_reconstruction").contains("order"));
-    EXPECT_EQ(resolved(r, false), (Keys{{"numerics.face_reconstruction.type", "MUSCL"}}));
-    EXPECT_EQ(resolved(r, true).count("numerics.face_reconstruction.order"), 0u);
+    EXPECT_EQ(resolved(r, input, false), (Keys{{"numerics.face_reconstruction.type", "MUSCL"}}));
+    EXPECT_EQ(resolved(r, input, true).count("numerics.face_reconstruction.order"), 0u);
 }
 
 TEST(NumericsPreset, WithoutAPresetTheInputIsUnchanged) {
@@ -291,3 +303,32 @@ TEST_P(ExampleUnderPreset, RunsAFewSteps) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Examples, ExampleUnderPreset, ::testing::ValuesIn(examples_of_this_build()), param_name);
+
+namespace {
+
+/** @brief The resolved input a run records in its provenance, and the state (and species) after the run. */
+std::pair<std::string, std::vector<double>> resolved_run(const Input & input) {
+    Solver solver;
+    solver.init(input);
+    const std::string resolved = json_reader::parse(provenance::json())["input"]["resolved"].string;
+    solver.run();
+    solver.copy_device_to_host();
+    std::vector<double> state;
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        for (size_t i = 0; i < solver.h_conservatives.extent(1); i++) state.push_back(double(solver.h_conservatives(c, i)));
+        for (size_t k = 0; k < solver.h_species.extent(1); k++) state.push_back(double(solver.h_species(c, k)));
+    }
+    return {resolved, state};
+}
+
+} // namespace
+
+// The resolved input of every example runs bitwise as the example and resolves to
+// itself. Fails if writing out a default changes what setup does (a key whose
+// presence matters), a value is written out inexactly, or a key read is not recorded.
+TEST_P(ExampleUnderPreset, ResolvedInputRunsBitwiseTheSameAndResolvesToItself) {
+    const auto [resolved, state] = resolved_run(example_under_preset(GetParam(), 2, N_DIM == 3 ? 8 : 16));
+    const auto [again, state_again] = resolved_run(parse_toml(resolved));
+    EXPECT_EQ(again, resolved);
+    EXPECT_EQ(state_again, state);
+}

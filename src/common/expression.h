@@ -25,6 +25,7 @@
 
 #include "common_typedef.h"
 #include "kexpr.h"
+#include "units.h"
 
 /**
  * @brief An expression of named variables (by default x, y, z and t), so
@@ -112,7 +113,7 @@ class Expression {
         static kexpr::Program check(const std::string & name, const std::string & text,
                                    const std::vector<std::string> & variables) {
             try {
-                return kexpr::Program(name, text, variables);
+                return kexpr::Program(name, text, variables, expression_unit_hint);
             } catch (const std::invalid_argument & e) {
                 throw std::runtime_error(e.what());
             }

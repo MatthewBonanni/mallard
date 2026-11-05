@@ -2,7 +2,7 @@
 mallard.vtkhdf and mallard.h5, which need h5py) its VTKHDF and HDF5 snapshots:
 every function also takes a snapshot .vtkhdf or .h5 file. provenance() reads the
 provenance block of any output file, units() and long_names() the units and
-descriptions of its fields."""
+descriptions of its fields, resolved_input() the input that made it."""
 import json
 import os
 import re
@@ -282,6 +282,17 @@ def provenance(path):
         return json.loads(m.group(1))
     m = re.search(r"^# provenance (.*)$", head, re.M)
     return json.loads(m.group(1)) if m else None
+
+
+def resolved_input(path):
+    """The input with every key explicit (TOML text) that made a Mallard output
+    file: its provenance's input.resolved. None for a file without provenance, or
+    of Mallard 0.9 (provenance version 1, whose `setup` holds only the terminal
+    output's setup summary)."""
+    block = provenance(path)
+    if block is None or block.get("version", 1) < 2:
+        return None
+    return block["input"].get("resolved")
 
 
 def _string_arrays(text):

@@ -16,7 +16,7 @@
 #include <sstream>
 
 #include "input.h"
-#include "region.h"
+#include "region_input.h"
 #include "region_mesh.h"
 
 #include <algorithm>
@@ -278,7 +278,7 @@ region::Elements plane_elements(const Mesh & mesh, const V3 & p, const V3 & n, c
         }
         table = "{type = \"intersection\", regions = [" + table + sides + "]}";
     }
-    const region::Region r(parse_input_string("r = " + table).at("r"), "cut_plane");
+    const region::Region r = region::read(parse_input_string("r = " + table).at("r"), "cut_plane");
     return region::elements(mesh, r);
 }
 
