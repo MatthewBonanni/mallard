@@ -1,0 +1,1 @@
+- CMake 3.22 or newer is required (`cmake_minimum_required` said 3.16, older than Kokkos 5 needs); CI builds with CMake 3.22.1, GCC 10 and Clang 14 (#647).

@@ -1,6 +1,6 @@
 # Quick start
 
-Build Mallard on a CPU and run your first case in three commands (a C++20 compiler, CMake 3.16 or
+Build Mallard on a CPU and run your first case in three commands (a C++20 compiler, CMake 3.22 or
 newer and git are all it needs):
 
 ```bash
