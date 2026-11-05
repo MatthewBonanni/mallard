@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 
 #include <Kokkos_Core.hpp>
@@ -17,10 +18,16 @@ namespace memory {
 
 namespace {
 
+struct Allocation {
+    int space;
+    uint64_t size;
+    std::string label;
+};
+
 struct State {
     bool active = false;
     Usage spaces[2];  // device, host
-    std::unordered_map<const void *, std::pair<int, uint64_t>> live;
+    std::unordered_map<const void *, Allocation> live;
 };
 
 State state;
@@ -29,9 +36,10 @@ int space_index(const Kokkos::Profiling::SpaceHandle handle) {
     return std::strncmp(handle.name, "Host", 4) == 0 || std::strstr(handle.name, "HostPinned") != nullptr ? 1 : 0;
 }
 
-void on_allocate(const Kokkos::Profiling::SpaceHandle handle, const char *, const void * ptr, const uint64_t size) {
+void on_allocate(const Kokkos::Profiling::SpaceHandle handle, const char * label, const void * ptr,
+                 const uint64_t size) {
     const int s = space_index(handle);
-    state.live[ptr] = {s, size};
+    state.live[ptr] = {s, size, label ? label : ""};
     Usage & u = state.spaces[s];
     u.current += size;
     if (u.current > u.peak) u.peak = u.current;
@@ -40,7 +48,7 @@ void on_allocate(const Kokkos::Profiling::SpaceHandle handle, const char *, cons
 void on_deallocate(const Kokkos::Profiling::SpaceHandle, const char *, const void * ptr, const uint64_t) {
     const auto it = state.live.find(ptr);
     if (it == state.live.end()) return;
-    state.spaces[it->second.first].current -= it->second.second;
+    state.spaces[it->second.space].current -= it->second.size;
     state.live.erase(it);
 }
 
@@ -63,5 +71,13 @@ Tracker::~Tracker() {
 Usage Tracker::device() const { return state.spaces[0]; }
 
 Usage Tracker::host() const { return state.spaces[1]; }
+
+std::map<std::string, uint64_t> Tracker::live(const bool device) const {
+    std::map<std::string, uint64_t> bytes;
+    for (const auto & [ptr, a] : state.live) {
+        if ((a.space == 0) == device) bytes[a.label] += a.size;
+    }
+    return bytes;
+}
 
 } // namespace memory

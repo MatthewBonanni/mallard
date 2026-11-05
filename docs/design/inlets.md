@@ -3,7 +3,7 @@
 Status: implemented (`inlet_stagnation`, `inlet_mass_flow`, numbers as expressions of x, y, z, t).
 
 `inlet_state` imposes velocity, pressure and temperature, which over-specifies a
-subsonic inflow: one characteristic, the acoustic wave travelling upstream,
+subsonic inflow: one characteristic, the acoustic wave traveling upstream,
 leaves the domain through it. Nozzles, ducts and intakes need inlets that
 impose only what the flow upstream sets and take the rest from the interior.
 

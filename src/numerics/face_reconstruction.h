@@ -400,6 +400,11 @@ class TENO : public FaceReconstruction {
         std::vector<uint8_t> gather_depth;
         // Axisymmetric runs: rule on the reference triangle (q, [xi, eta, w]) of the geometric source
         Kokkos::View<rtype *[3]> cell_rule;
+        // 2D: the faces' nodes, from which the kernels place the face points of
+        // straight faces, and (axisymmetric runs) the cells' nodes; the mesh's
+        // own views are released after setup
+        Kokkos::View<uint32_t *> offsets_nodes_of_face, nodes_of_face, offsets_nodes_of_cell, nodes_of_cell;
+        Kokkos::View<rtype *[N_DIM]> node_coords;
         // Device memory of the packed stencils when they were streamed to the device (CUDA)
         std::vector<std::shared_ptr<GrowingBuffer>> table_memory;
 

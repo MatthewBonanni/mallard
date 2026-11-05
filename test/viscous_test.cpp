@@ -202,8 +202,8 @@ TEST(ViscousForces, CouetteWallShearMatchesMuUOverH) {
     c.run = "t_stop = 15.0\ncfl = 0.4\n";
     auto solver = run_viscous(c);
     auto mesh = solver->get_mesh();
-    const auto top = solver->calc_force(mesh->get_face_zone("top")->faces);
-    const auto bottom = solver->calc_force(mesh->get_face_zone("bottom")->faces);
+    const auto top = solver->calc_force(device_zone_faces(*mesh, "top"));
+    const auto bottom = solver->calc_force(device_zone_faces(*mesh, "bottom"));
     EXPECT_NEAR(top[2], -0.02, 2e-4);
     EXPECT_NEAR(bottom[2], 0.02, 2e-4);
     EXPECT_NEAR(top[1], 1.0, 1e-3);
