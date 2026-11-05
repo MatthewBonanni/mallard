@@ -378,6 +378,12 @@ std::string Solver::stop_conditions() const {
     if (t_wall_stop > 0) {
         text += (text.empty() ? "" : ", ") + std::string("t_wall_stop = ") + logging::real(double(t_wall_stop)) + " s";
     }
+    for (size_t i = 0; i < triggers.size(); i++) {
+        const Triggers::Trigger & trigger = triggers[i];
+        const bool stops = std::any_of(trigger.actions.begin(), trigger.actions.end(),
+                                       [](const Triggers::Act & a) { return a.action == Triggers::Action::STOP; });
+        if (stops) text += (text.empty() ? "" : ", ") + std::string("trigger ") + trigger.name + " (" + trigger.when + ")";
+    }
     return text;
 }
 
