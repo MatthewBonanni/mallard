@@ -568,7 +568,7 @@ TEST(CliTest, DiffMatchesCellsByTheirPlaceAndRemapsAcrossMeshes) {
     EXPECT_TRUE(contains(refused.err, "different meshes; --remap compares B on A's mesh")) << refused.err;
 
     // The fine mesh nests in the coarse one: its averages, remapped conservatively, are the coarse averages
-    const double rounding = 100.0 * std::numeric_limits<rtype>::epsilon();
+    const double rounding = 100.0 * static_cast<double>(std::numeric_limits<rtype>::epsilon());
     char tol[32];
     std::snprintf(tol, sizeof tol, "%.3g", rounding);
     const Result remapped = run({"diff", "coarse/restart_000000.restart", "fine/restart_000000.restart", "--remap", "--tol",
