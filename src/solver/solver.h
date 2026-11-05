@@ -531,7 +531,11 @@ class Solver {
         void init_boundaries();
         std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
         void setup_from_input();
-        void check_mesh_quality(CheckReport & report, const CheckOptions & options) const;
+        void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
+        /** @brief The mesh against the case's physical scales; the fields of where it falls short. */
+        CheckFields check_resolution(CheckReport & report);
+        void check_viscous_scales(CheckReport & report, CheckFields & fields, const std::vector<double> & delta,
+                                  double delta_mean, const std::array<double, N_DIM> & coarsest);
         void check_time_step(CheckReport & report);
         void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
         void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);

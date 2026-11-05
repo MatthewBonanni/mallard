@@ -412,7 +412,7 @@ those of `A` per second.
 | `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
 | `Q` | `s-2` | `CFL`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
-| `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` | `1` |
+| `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
 | `MASS_FLUX`, `SPECIES_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
 | `CF`, `CP`, `Y_PLUS` | `1` | `REGION_FRACTION` (regions) | `1` |
