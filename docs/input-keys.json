@@ -3657,6 +3657,15 @@
   ],
   "type": "integer"
  },
+ "output.divergence_report": {
+  "default": "\"divergence_report\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string"
+ },
  "output.health": {
   "default": "true",
   "dims": [
@@ -5837,7 +5846,7 @@
   "set_in": []
  },
  "write_data.format": {
-  "default": "\"vtu\"",
+  "default": "\"vtkhdf\"",
   "dims": [
    2,
    3
