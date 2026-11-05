@@ -300,7 +300,9 @@ TEST(CliTest, CompletionCoversEveryCommandAndOption) {
             for (const cli::Option & o : c.options) {
                 if (o.name.ends_with('*')) continue;
                 EXPECT_TRUE(has(o.name)) << c.name << " " << o.name;
-                if (!o.alias.empty()) EXPECT_TRUE(has(o.alias)) << c.name << " " << o.alias;
+                if (!o.alias.empty()) {
+                    EXPECT_TRUE(has(o.alias)) << c.name << " " << o.alias;
+                }
             }
         }
         for (const cli::Option & o : cli::global_options()) EXPECT_TRUE(has(o.name)) << o.name;
@@ -402,6 +404,8 @@ TEST(CliTest, ZshAndFishCompletionParse) {
         std::ofstream(file) << script.out;
         std::string out;
         const int status = run_shell(shell, "-n", file, out);
-        if (status != -1) EXPECT_EQ(status, 0) << out;
+        if (status != -1) {
+            EXPECT_EQ(status, 0) << out;
+        }
     }
 }
