@@ -38,7 +38,21 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 
 ## Cell numbering {#cell-numbering}
 
-Each rank (and a serial run) numbers the cells of a mesh file along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so memory locality no longer depends on how the file numbers its cells; generated meshes keep their x-first order (`[mesh] cell_order`, default `auto`; `hilbert` or `input` force either). Results and output files are bitwise the same with either numbering. Milliseconds per step on one A100 (four in parentheses):
+Each rank (and a serial run) can number its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so that memory locality does not depend on how a mesh file numbers its cells. The default, `[mesh] cell_order = "auto"`, counts the cache lines that blocks of consecutive cells read over the cells the reconstruction reads around each (one vertex layer; two for TENO5), in the input order and along the curve, and takes the curve when it reads a tenth fewer; the Mesh section of the log says which it took and both counts. `hilbert` or `input` force either. Results and output files are bitwise the same with either numbering.
+
+The performance set on one A100, cells per second, best of six runs over two interleaved rounds, before 0.10.0 and with `auto`:
+
+| Case | before | `auto` | order taken | cache lines per cell, input / curve |
+|---|---:|---:|---|---|
+| `sphere_3d`: 180k Gmsh tetrahedra and prisms, MUSCL | 19.1M | 24.4M (+28%) | Hilbert | 5.72 / 0.514 |
+| `teno5_3d`: 96³ hexahedra, TENO5 | 5.56M | 5.97M (+7%) | Hilbert | 0.771 / 0.525 |
+| `probes_3d`: TENO5 with probes | 3.81M | 4.01M (+5%) | Hilbert | 0.771 / 0.525 |
+| `teno5_2d`: 1024² quadrilaterals, TENO5 | 51.7M | 53.5M (+3%) | Hilbert | 0.332 / 0.139 |
+| `muscl_2d`: 1024² quadrilaterals, MUSCL | 271M | 278M (+3%) | Hilbert | 0.199 / 0.139 |
+| `air_3d`: 96 × 48 × 48 hexahedra, MUSCL, LES | 52.3M | 52.5M | input | 0.263 / 0.379 |
+| `flame_3d`: `air_3d` with premixed propane–air | 6.45M | 6.44M | input | 0.263 / 0.379 |
+
+The count costs a fraction of a second of setup per million cells. Forcing either order, milliseconds per step on one A100 (four in parentheses):
 
 | Case | x-first (generated) | Hilbert | random file numbering, before 0.10.0 |
 |---|---:|---:|---:|
@@ -47,7 +61,7 @@ Each rank (and a serial run) numbers the cells of a mesh file along a Hilbert cu
 | 3D TENO5, 96³ hexahedra | 150 (40.9) | 143 (39.6) | 294 (72.2) |
 | 3D MUSCL, 1M tetrahedra | 33.0 (10.4) | 36.8 (11.3) | 198 (32.3) |
 
-On generated boxes, already numbered x first, the curve is within a few percent either way, and up to 11% slower for MUSCL on structured tetrahedra, which is why `auto` keeps their order. Details: [design notes](../design/performance.md#cell-numbering).
+On generated boxes, already numbered x first, the curve is within a few percent either way: faster where the reconstruction reads several layers (TENO) or in 2D, and up to 11% slower for one-layer reconstructions in 3D, where `auto` keeps the x-first order of `air_3d` and `flame_3d`. Details: [design notes](../design/performance.md#cell-numbering).
 
 ## Chemistry {#chemistry}
 
