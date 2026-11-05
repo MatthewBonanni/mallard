@@ -229,7 +229,11 @@ gradients follow from those of the conservative variables. Troubled cells
 ($\sigma_i \ge \sigma_\mathrm{threshold}$), whose faces may use the sector
 stencils, keep the least-squares gradient. The viscous fluxes keep the
 least-squares gradients. The eddy viscosity enters PaSR's mixing time and the
-thickened flame's efficiency as before, so both follow.
+thickened flame's efficiency as before, so both follow. In decaying isotropic
+turbulence this helps at $32^3$ and hurts from $48^3$ on, where TENO5 plus
+Sigma at its nominal strength over-dissipates above $0.4\,k_c$: a fixed
+model cannot track what the scheme leaves to it
+([design notes](../design/les.md#31-order-aware-models-660)).
 
 ## Global dynamic procedure
 

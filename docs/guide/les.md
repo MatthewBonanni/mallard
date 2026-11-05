@@ -101,7 +101,10 @@ gradients = "reconstruction"
 ```
 
 The reconstruction computes the gradients in its own pass over the stencil,
-for about 7% more time per step with TENO5 in 3D. PaSR's mixing time and the
+for about 7% more time per step with TENO5 in 3D. The key is experimental: it
+improves decaying isotropic turbulence at $32^3$ but makes it worse at $64^3$,
+where the least-squares gradient's lower eddy viscosity is closer to what the
+flow needs. PaSR's mixing time and the
 thickened flame's efficiency take the eddy viscosity, so they follow. With
 MUSCL or first order, the key is an error (their gradient is the least-squares
 one already). What it does to decaying isotropic turbulence, and why:
