@@ -17,7 +17,7 @@ its progress on the terminal and in a machine-readable run record.
 | Probes | `probe_<name>.csv` (or `.h5`, `.vtkhdf`, `.pvd`), `probe_<name>_reductions.csv` | `[[probes]]` | [Probes and monitors](probes.md#probes-probes) |
 | Wall forces | `forces_<zone>.csv` | `[[forces]]` | [Wall forces](probes.md#wall-forces-forces) |
 | Domain integrals | `integrals.csv` | `[integrals]` | [Domain integrals](probes.md#domain-integrals-integrals) |
-| Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files | `[statistics]`, `[statistics.phase]` | [Statistics](statistics.md) |
+| Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files; probe columns `MEAN_<variable>` with `average = true` | `[statistics]`, `[statistics.phase]`, `[[probes]]` | [Statistics](statistics.md), [Probes](probes.md#time-averages) |
 | Spectra and two-point correlations | `spectra.csv` | `[statistics.spectra]` | [Spectra](statistics.md#spectra-and-two-point-correlations-statisticsspectra) |
 
 Every file records its [units](#units), its [provenance](#provenance) and a
@@ -485,7 +485,7 @@ build reads. It is never misread.
 
 | File | Version, where | Versions (written from) | Read by |
 |---|---|---|---|
-| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9) | Mallard: all |
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), and that of time-averaged probes (0.10) | Mallard: all |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
