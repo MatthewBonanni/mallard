@@ -590,6 +590,10 @@ class Solver {
         void write_forces();
         void write_integrals();
         void write_probes();
+        /** @brief Adds the current samples to the averaging probes' time averages. */
+        void sample_probe_averages();
+        /** @brief The named arrays of restart files: averaged spectra and probes (collective). */
+        RestartArrays restart_arrays() const;
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
         ProbeFields probe_fields();
 

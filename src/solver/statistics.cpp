@@ -98,7 +98,11 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
     }
     if (fields.empty()) {
         if (spectra.enabled() || phase.enabled()) return;
-        throw InputError("statistics: list at least one of fields and products (or add spectra or phase).");
+        for (const auto & probe : find_value_or<std::vector<Input>>(input, "probes", {})) {
+            if (find_value_or<bool>(probe, "average", false)) return;
+        }
+        throw InputError("statistics: list at least one of fields and products (or add spectra, phase or a probe with "
+                         "average = true).");
     }
     const uint32_t n_cells = mesh.n_cells;
 

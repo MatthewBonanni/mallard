@@ -138,7 +138,9 @@ std::optional<FieldDescription> find(const std::string & name) {
         return FieldDescription{of->dimension.times(dim::time, -1), "source of " + of->long_name, "", ""};
     }
     if (starts_with(name, "MEAN_")) {
+        // Of a [statistics] field, or the time average of a probe variable
         auto of = find_sampled(name.substr(5));
+        if (!of) of = find_base(name.substr(5));
         if (!of) return std::nullopt;
         return FieldDescription{of->dimension, "time average of " + of->long_name, "", ""};
     }

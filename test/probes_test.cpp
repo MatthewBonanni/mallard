@@ -16,6 +16,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <sstream>
@@ -1057,3 +1058,211 @@ TEST(ProbesTest, SurfacesHaveTheirAreasAndOutwardNormals) {
     }
 }
 #endif
+
+namespace {
+
+/** @brief Rows of a CSV file at a step. */
+std::vector<std::map<std::string, double>> rows_at(const std::string & file, double step) {
+    std::vector<std::map<std::string, double>> rows;
+    for (const auto & row : read_csv(file)) {
+        if (row.at("step") == step) rows.push_back(row);
+    }
+    return rows;
+}
+
+/** @brief Couette flow started impulsively: the fluid at rest between the walls, the top one then moving. */
+std::string started_couette(const std::string & extra, uint32_t n_steps) {
+    std::string s = couette_case(8, extra, "n_steps = " + std::to_string(n_steps) + "\ndt = 2.0e-3\n");
+    const std::string u = "u = " + vector3("0.5 * y", "0", "0");
+    s.replace(s.find(u), u.size(), "u = " + vector3("0", "0", "0"));
+    return s;
+}
+
+/**
+ * @brief Expects each row of the averaging probe's file to be the time-weighted
+ *        mean, over the [statistics] samples so far (every `interval` steps once
+ *        t > t_start, weight t - t_prev), of the rows of the same probe written
+ *        every step, column by column (MEAN_<column>, or <reduction>_MEAN_<variable>
+ *        for <reduction>_<variable>); key names a row's sample.
+ */
+void expect_time_averages(const std::string & every_step, const std::string & averaged,
+                          const std::vector<std::string> & columns, const std::string & key, uint64_t interval,
+                          double t_start) {
+    auto mean_of = [](const std::string & c) {
+        for (const char * r : {"integral_", "mean_", "max_"}) {
+            if (c.starts_with(r)) return r + ("MEAN_" + c.substr(std::string(r).size()));
+        }
+        return "MEAN_" + c;
+    };
+    const auto steps = read_csv(every_step);
+    const auto means = read_csv(averaged);
+    ASSERT_FALSE(means.empty());
+    for (const auto & mean : means) {
+        double weight = 0.0, t_prev = t_start;
+        std::map<std::string, double> sum;
+        for (const auto & row : steps) {
+            if (row.at("step") > mean.at("step")) break;
+            const auto step = static_cast<uint64_t>(row.at("step"));
+            if (step % interval != 0 || !(row.at("t") > t_start)) continue;
+            if (!key.empty() && row.at(key) != mean.at(key)) continue;
+            const double w = row.at("t") - t_prev;
+            t_prev = row.at("t");
+            weight += w;
+            for (const auto & c : columns) sum[c] += w * row.at(c);
+        }
+        ASSERT_GT(weight, 0.0) << "a row before the first sample";
+        for (const auto & c : columns) {
+            const double expected = sum[c] / weight;
+            EXPECT_NEAR(mean.at(mean_of(c)), expected, 1e-12 * (std::fabs(expected) + 1e-3))
+                << c << " at step " << mean.at("step");
+        }
+    }
+}
+
+} // namespace
+
+TEST(ProbesTest, StatisticsAveragesAreProbeVariablesAtTheirSamplesCells) {
+    // Each sample of MEAN_ and COV_ variables is its cell's [statistics] average
+    const std::string dir = fresh_dir("statistics_variables");
+    const std::string ends = N_DIM == 2 ? "start = [0.05, 0.31]\nend = [0.93, 0.77]\n"
+                                        : "start = [0.05, 0.31, 0.2]\nend = [0.93, 0.77, 0.6]\n";
+    const std::string extra =
+        "[statistics]\nfields = [\"P\", \"U_X\", \"U_Y\"" + std::string(N_DIM == 3 ? ", \"U_Z\"" : "") +
+        "]\nproducts = [\"RHO*P\"]\n"
+        "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/line.csv\"\n" + ends +
+        "n_points = 9\nvariables = [\"MEAN_P\", \"MEAN_U\", \"COV_RHO_P\", \"P\"]\ninterval = 5\n"
+        "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/line_reductions.csv\"\n"
+        "[[probes]]\nname = \"first\"\nfile = \"" + dir + "/first.csv\"\n" + ends +
+        "n_points = 5\nvariables = [\"P\", \"MEAN_P\"]\ninterval = 1\nsamples = false\n"
+        "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/first_reductions.csv\"\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"MUSCL\"\n", extra, "n_steps = 5\ndt = 2.0e-3\n")));
+    run(solver);
+    solver.copy_device_to_host();
+    const auto & mesh = *solver.get_mesh();
+    const auto & mean = solver.get_statistics().host_means();
+    const auto & cov = solver.get_statistics().host_covariances();
+    // [statistics] keeps P, U_X, U_Y(, U_Z), then RHO for the product
+    const auto rows = rows_at(dir + "/line.csv", 5);
+    ASSERT_EQ(rows.size(), 9u);
+    for (const auto & row : rows) {
+        uint32_t cell = 0;
+        double best = std::numeric_limits<double>::infinity();
+        for (uint32_t c = 0; c < mesh.n_cells; c++) {
+            double d = 0.0;
+            for (size_t i = 0; i < N_DIM; i++) d += std::pow(double(mesh.h_cell_coords(c, i)) - row.at(std::string(1, "xyz"[i])), 2);
+            if (d < best) best = d, cell = c;
+        }
+        EXPECT_EQ(row.at("MEAN_P"), double(mean(cell, 0)));
+        EXPECT_EQ(row.at("MEAN_U_X"), double(mean(cell, 1)));
+        EXPECT_EQ(row.at("MEAN_U_Y"), double(mean(cell, 2)));
+        EXPECT_EQ(row.at("COV_RHO_P"), double(cov(cell, 0)));
+    }
+    // Reductions take them at their own quadrature points: after the first
+    // sample the mean is the sample itself
+    const auto first = rows_at(dir + "/first_reductions.csv", 1).at(0);
+    EXPECT_EQ(first.at("integral_MEAN_P"), first.at("integral_P"));
+}
+
+TEST(ProbesTest, AveragedProbesAreTimeWeightedMeansOfTheirSamples) {
+    // An impulsively started Couette flow: the wall stress and heat flux
+    // change every step; the averaging probe samples on the [statistics]
+    // schedule and writes the running means of the samples and reductions
+    const std::string dir = fresh_dir("averaged");
+    auto probe = [&](const std::string & name, const std::string & keys) {
+        return "[[probes]]\nname = \"" + name + "\"\nfile = \"" + dir + "/" + name + ".csv\"\nboundary_type = \"wall\"\n"
+               "variables = [\"CF\", \"TAU_W\", \"Q_W\"]\nreference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") +
+               ", p = 1.0}\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + name +
+               "_reductions.csv\"\n" + keys;
+    };
+    const std::string extra = "[statistics]\ninterval = 2\nt_start = 0.005\n" + probe("every", "") +
+                              probe("averaged", "average = true\ninterval = 4\n");
+    Solver solver;
+    solver.init(parse_toml(started_couette(extra, 12)));
+    run(solver);
+    if (comm::is_root()) {
+        expect_time_averages(dir + "/every.csv", dir + "/averaged.csv", {"CF", "TAU_W", "Q_W"}, "face", 2, 0.005);
+        expect_time_averages(dir + "/every_reductions.csv", dir + "/averaged_reductions.csv",
+                             {"integral_CF", "integral_Q_W"}, "", 2, 0.005);
+        // Written once they hold a sample (the first at step 4, t = 0.008): steps 4, 8, 12
+        EXPECT_EQ(read_csv(dir + "/averaged_reductions.csv").size(), 3u);
+        const auto last = rows_at(dir + "/averaged_reductions.csv", 12).at(0);
+        // Reductions of the averaged samples: the extrema of the means
+        double hi = -std::numeric_limits<double>::infinity();
+        for (const auto & row : rows_at(dir + "/averaged.csv", 12)) hi = std::max(hi, row.at("MEAN_TAU_W"));
+        EXPECT_EQ(last.at("max_MEAN_TAU_W"), hi);
+    }
+    comm::barrier();
+}
+
+TEST(ProbesTest, AveragedProbeOfMassFluxesThroughACutIsTheMeanOfItsSamples) {
+    const std::string dir = fresh_dir("averaged_cut");
+    const std::string plane = N_DIM == 2 ? "point = [0.5, 0.47]\nnormal = [0.3, 1.0]\n"
+                                         : "point = [0.5, 0.5, 0.47]\nnormal = [0.0, 0.3, 1.0]\n";
+    auto probe = [&](const std::string & name, const std::string & keys) {
+        return "[[probes]]\nname = \"" + name + "\"\nfile = \"" + dir + "/" + name + ".csv\"\ntype = \"cut_plane\"\n" +
+               plane + "variables = [\"MASS_FLUX\", \"P\"]\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
+               "/" + name + "_reductions.csv\"\n" + keys;
+    };
+    const std::string extra = probe("every", "") + probe("averaged", "average = true\ninterval = 3\n");
+    Solver solver;
+    solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"MUSCL\"\n", extra, "n_steps = 6\ndt = 2.0e-3\n")));
+    run(solver);
+    // Without [statistics]: every step from t = 0
+    if (comm::is_root()) {
+        expect_time_averages(dir + "/every.csv", dir + "/averaged.csv", {"MASS_FLUX", "P"}, "cell", 1, 0.0);
+        expect_time_averages(dir + "/every_reductions.csv", dir + "/averaged_reductions.csv",
+                             {"integral_MASS_FLUX"}, "", 1, 0.0);
+    }
+    comm::barrier();
+}
+
+TEST(ProbesTest, RestartedRunsContinueTheTimeAveragesBitwise) {
+    const std::string dir = fresh_dir("averaged_restart");
+    auto probe = [&](const std::string & file) {
+        return "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/" + file + "\"\nboundary_type = \"wall\"\n"
+               "variables = [\"TAU_W\", \"Q_W\", \"MASS_FLUX\"]\naverage = true\ninterval = 3\n"
+               "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/red_" + file + "\"\n";
+    };
+    const std::string stats = "[statistics]\nt_start = 0.003\n";
+    Solver straight;
+    straight.init(parse_toml(started_couette(stats + probe("walls.csv") + "[[write_data]]\nprefix = \"" + dir +
+                                                 "/r\"\nformat = \"restart\"\ninterval = 5\n",
+                                             12)));
+    run(straight);
+    std::map<std::string, std::vector<std::map<std::string, double>>> straight_rows;
+    for (const char * file : {"walls.csv", "red_walls.csv"}) straight_rows[file] = rows_at(dir + "/" + file, 12);
+    // The restarted run appends to the files, after their rows of steps 6 to 12
+    std::string input = started_couette(stats + probe("walls.csv"), 12);
+    const size_t from = input.find("[initialize]\n"), to = input.find("[[boundaries]]");
+    input.replace(from, to - from, "[initialize]\ntype = \"restart\"\nfile = \"" + dir + "/r_000005.restart\"\n");
+    Solver continued;
+    continued.init(parse_toml(input));
+    run(continued);
+    if (comm::is_root()) {
+        for (const auto & [file, a] : straight_rows) {
+            ASSERT_FALSE(a.empty());
+            const auto both = rows_at(dir + "/" + file, 12);
+            ASSERT_EQ(both.size(), 2 * a.size()) << file;
+            EXPECT_EQ(std::vector(both.begin() + static_cast<long>(a.size()), both.end()), a) << file;
+        }
+    }
+    comm::barrier();
+    // The probe's samples or variables changed: its averages are another's
+    input.replace(input.find("\"TAU_W\", "), 9, "");
+    Solver other;
+    EXPECT_THROW(other.init(parse_toml(input)), InputError);
+}
+
+TEST(ProbesTest, RejectsAveragesOfAverages) {
+    const std::string extra = "[statistics]\nfields = [\"P\"]\n[[probes]]\nname = \"p\"\ntype = \"point\"\npoint = " +
+                              numbers3("0.3", "0.3", "0.3") + "\nvariables = [\"MEAN_P\"]\naverage = true\n";
+    Solver solver;
+    try {
+        solver.init(parse_toml(box_case(8, "1.0", "type = \"MUSCL\"\n", extra)));
+        FAIL() << "averaged MEAN_P accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("averaged already"), std::string::npos) << e.what();
+    }
+}
