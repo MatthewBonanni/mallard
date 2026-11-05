@@ -19,6 +19,7 @@
 #include <numeric>
 #include <optional>
 #include <sstream>
+#include <type_traits>
 
 #include <Kokkos_Core.hpp>
 
@@ -45,8 +46,18 @@ constexpr uint32_t STACK = (N_CHILDREN - 1) * MAX_LEVEL + 1;
 /** @brief Planes a finest-level simplex is cut along, at most, and the pieces pending meanwhile. */
 constexpr uint32_t MAX_PLANES = 3;
 constexpr uint32_t PIECES = 1 + (N_DIM == 2 ? 2 : 5) * MAX_PLANES;
-/** @brief Cells integrated per kernel launch (bounds the scratch memory). */
-constexpr uint32_t CHUNK = 1u << 14;
+/**
+ * @brief Scratch memory of a kernel launch: as many cells as fit, so that a
+ *        GPU gets enough threads (a launch of 16K cells keeps an A100 half idle).
+ */
+constexpr size_t CHUNK_BYTES = size_t{64} << 20;
+/**
+ * @brief Points whose base programs a host thread evaluates at once (kexpr's
+ *        evaluate_lanes): the 3D rule's 14, the 2D rule's 7. A GPU thread
+ *        takes one point at a time.
+ */
+constexpr int LANES =
+    std::is_same_v<Kokkos::DefaultExecutionSpace, Kokkos::DefaultHostExecutionSpace> ? (N_DIM == 2 ? 7 : 14) : 1;
 
 enum Status : uint8_t { OUT = 0, IN = 1, POINT = 2, CUT = 3, BAND = 4, IN_CUT = 5, OUT_CUT = 6 };
 enum ThermoKey : uint8_t { RHO = 1, PRESSURE = 2, TEMPERATURE = 4 };
@@ -204,6 +215,8 @@ struct Evaluator {
     kexpr::ProgramTable<> programs;
     Kokkos::View<const uint8_t *> constant;  // per program: a constant, read without the interpreter
     Kokkos::View<const double *> constant_value;
+    Kokkos::View<const uint32_t *> base_programs;  // the programs the base layer reads, evaluated LANES points at once
+    Scratch lane_values;                           // (row, program * LANES + lane)
     Kokkos::View<const uint32_t *[2]> fractions;
     tabulated::DataView<> data;
     Kokkos::View<const Variable *> variables;
@@ -220,10 +233,10 @@ struct Evaluator {
     Kokkos::View<const double *[N_VERTICES][N_VERTICES]> subs;
     Kokkos::View<const double *[N_VERTICES]> rule_points;
     Kokkos::View<const double *> rule_weights;
-    // Per chunk: the cells' simplices, or their curved rules, and the base cells' conservatives
+    Kokkos::View<const uint32_t *> nodes_of_cell, offsets_nodes_of_cell;
+    Kokkos::View<const rtype *[N_DIM]> node_coords;
+    // Per chunk: the curved cells' rules (empty without curved geometry) and the base cells' conservatives
     uint32_t first_cell = 0;
-    Kokkos::View<const uint32_t *> simplex_offsets;
-    Kokkos::View<const double *[N_VERTICES][3]> simplices;
     Kokkos::View<const uint32_t *> curved_offsets;
     Kokkos::View<const double *[3]> curved_points;
     Kokkos::View<const double *> curved_weights;
@@ -262,13 +275,41 @@ struct Evaluator {
         return constant(p) ? constant_value(p) : programs(p, PointVariables{this, x});
     }
 
+    /** @brief A program's value at x, or at lane l of `lanes` (lane_values(row, l)) when not null. */
+    KOKKOS_INLINE_FUNCTION double value(const int32_t program, const double * x, const double * lanes) const {
+        return lanes ? lanes[static_cast<uint32_t>(program) * LANES] : value(program, x);
+    }
+
+    struct LaneVariables {
+        const Evaluator * e;
+        const double (*x)[3];
+        KOKKOS_INLINE_FUNCTION double operator()(const int l, const uint16_t i) const {
+            return i < 3 ? x[l][i] : e->datum(i - 3u, x[l]);
+        }
+    };
+
+    /** @brief The base programs at the LANES points x into lane_values(row, ...). */
+    KOKKOS_INLINE_FUNCTION void evaluate_base(const uint32_t row, const double (*x)[3]) const {
+        double out[LANES];
+        for (uint32_t b = 0; b < base_programs.extent(0); b++) {
+            const uint32_t p = base_programs(b);
+            if (constant(p)) {
+                for (int l = 0; l < LANES; l++) out[l] = constant_value(p);
+            } else {
+                programs.lanes<LANES>(p, LaneVariables{this, x}, out);
+            }
+            for (int l = 0; l < LANES; l++) lane_values(row, p * LANES + static_cast<uint32_t>(l)) = out[l];
+        }
+    }
+
     /** @brief Mass fractions of layer L at x into Y (normalized; mole fractions converted). */
-    KOKKOS_INLINE_FUNCTION void composition(const Layer & L, const double * x, double * Y) const {
+    KOKKOS_INLINE_FUNCTION void composition(const Layer & L, const double * x, double * Y,
+                                            const double * lanes = nullptr) const {
         for (uint32_t k = 0; k < n_species; k++) Y[k] = 0.0;
         double total = 0.0;
         for (uint32_t i = L.fractions; i < L.fractions + L.n_fractions; i++) {
             const uint32_t k = fractions(i, 0);
-            const double v = value(static_cast<int32_t>(fractions(i, 1)), x);
+            const double v = value(static_cast<int32_t>(fractions(i, 1)), x, lanes);
             Y[k] = v > 0.0 ? v : 0.0;
             if (static_cast<int32_t>(k) != L.balance) total += Y[k];
         }
@@ -312,8 +353,10 @@ struct Evaluator {
     }
 
     /** @brief Conservatives (rounded to rtype) at x into out; touched when a region weighs on it. */
-    KOKKOS_INLINE_FUNCTION void evaluate(const uint32_t row, const double * x, const uint8_t * status,
-                                         const double * w_center, double * out, bool & touched) const {
+    template <bool LAYERED = true>  // false: the base layer alone (one layer), the loop over regions compiled out
+    KOKKOS_FORCEINLINE_FUNCTION void evaluate(const uint32_t row, const double * x, const uint8_t * status,
+                                              const double * w_center, double * out, bool & touched,
+                                              const double * lanes) const {
         double * Y = n_species > 0 ? &Y_below(row, 0) : nullptr;
         double * Y_new = n_species > 0 ? &Y_layer(row, 0) : nullptr;
         PointState s;
@@ -327,22 +370,22 @@ struct Evaluator {
             for (uint32_t k = 0; k < n_species; k++) Y[k] = b[6 + k];
         } else {
             const Layer & L = layers(0);
-            for (int i = 0; i < N_DIM; i++) s.u[i] = value(L.u[i], x);
+            for (int i = 0; i < N_DIM; i++) s.u[i] = value(L.u[i], x, lanes);
             if (L.rho >= 0) {
-                s.rho = value(L.rho, x);
+                s.rho = value(L.rho, x, lanes);
                 s.mask |= RHO;
             }
             if (L.p >= 0) {
-                s.p = value(L.p, x);
+                s.p = value(L.p, x, lanes);
                 s.mask |= PRESSURE;
             }
             if (L.T >= 0) {
-                s.T = value(L.T, x);
+                s.T = value(L.T, x, lanes);
                 s.mask |= TEMPERATURE;
             }
-            if (mixture) composition(L, x, Y);
+            if (mixture) composition(L, x, Y, lanes);
         }
-        for (uint32_t k = 1; k < n_layers; k++) {
+        for (uint32_t k = 1; k < (LAYERED ? n_layers : 1u); k++) {
             const double w = weight(k, status, w_center, x);
             if (w == 0.0) continue;
             touched = true;
@@ -434,10 +477,8 @@ struct Evaluator {
         bool uniform = true, touched = false;
     };
 
-    KOKKOS_INLINE_FUNCTION void accumulate(const uint32_t row, const double * x, const double w, const uint8_t * status,
-                                           const double * w_center, Accumulator & acc) const {
-        double * p = &point(row, 0);
-        evaluate(row, x, status, w_center, p, acc.touched);
+    /** @brief Add the conservatives p at a point of weight w. */
+    KOKKOS_INLINE_FUNCTION void add(const uint32_t row, const double * p, const double w, Accumulator & acc) const {
         double * f = &first(row, 0);
         double * s = &sum(row, 0);
         if (acc.n == 0) {
@@ -455,18 +496,58 @@ struct Evaluator {
         acc.n++;
     }
 
+    KOKKOS_INLINE_FUNCTION void accumulate(const uint32_t row, const double * x, const double w, const uint8_t * status,
+                                           const double * w_center, Accumulator & acc) const {
+        double * p = &point(row, 0);
+        evaluate(row, x, status, w_center, p, acc.touched, nullptr);
+        add(row, p, w, acc);
+    }
+
     KOKKOS_INLINE_FUNCTION void apply_rule(const uint32_t row, const double (&v)[N_VERTICES][3], const uint8_t * status,
                                            const double * w_center, Accumulator & acc) const {
         const double measure = simplex_measure(v);
         if (!(measure > 0.0)) return;
-        for (uint32_t q = 0; q < rule_weights.extent(0); q++) {
-            double x[3] = {0.0, 0.0, 0.0};
+        const uint32_t n_points = static_cast<uint32_t>(rule_weights.extent(0));
+        auto point_of = [&](const uint32_t q, double * x) {
+            for (int d = 0; d < 3; d++) x[d] = 0.0;
             for (uint32_t k = 0; k < N_VERTICES; k++) {
                 for (int d = 0; d < 3; d++) x[d] += rule_points(q, k) * v[k][d];
             }
+        };
+        auto weight_of = [&](const uint32_t q, const double * x) {
             double w = rule_weights(q) * measure;
             if (axisymmetric) w *= x[1];
-            accumulate(row, x, w, status, w_center, acc);
+            return w;
+        };
+        if constexpr (LANES > 1) {
+            if (base_programs.extent(0) > 0) {
+                for (uint32_t q0 = 0; q0 < n_points; q0 += LANES) {
+                    double x[LANES][3];
+                    // Lanes past the last point repeat it
+                    for (uint32_t l = 0; l < static_cast<uint32_t>(LANES); l++) point_of(Kokkos::min(q0 + l, n_points - 1), x[l]);
+                    evaluate_base(row, x);
+                    // The lanes' states, then their sums: the points' conversions overlap
+                    const uint32_t n = Kokkos::min(static_cast<uint32_t>(LANES), n_points - q0);
+                    if (n_layers == 1) {
+                        for (uint32_t l = 0; l < n; l++) {
+                            evaluate<false>(row, x[l], status, w_center, &point(row, l * n_vars), acc.touched,
+                                            &lane_values(row, l));
+                        }
+                    } else {
+                        for (uint32_t l = 0; l < n; l++) {
+                            evaluate(row, x[l], status, w_center, &point(row, l * n_vars), acc.touched,
+                                     &lane_values(row, l));
+                        }
+                    }
+                    for (uint32_t l = 0; l < n; l++) add(row, &point(row, l * n_vars), weight_of(q0 + l, x[l]), acc);
+                }
+                return;
+            }
+        }
+        for (uint32_t q = 0; q < n_points; q++) {
+            double x[3];
+            point_of(q, x);
+            accumulate(row, x, weight_of(q, x), status, w_center, acc);
         }
     }
 
@@ -504,15 +585,18 @@ struct Evaluator {
         status[0] = IN;
         while (top > 0) {
             const Simplex s = stack[--top];
+            // The centroid and radius, for the regions
             double c[3] = {0.0, 0.0, 0.0};
-            for (uint32_t k = 0; k < N_VERTICES; k++) {
-                for (int d = 0; d < 3; d++) c[d] += s.v[k][d] / N_VERTICES;
-            }
             double r = 0.0;
-            for (uint32_t k = 0; k < N_VERTICES; k++) {
-                double d2 = 0.0;
-                for (int d = 0; d < 3; d++) d2 += (s.v[k][d] - c[d]) * (s.v[k][d] - c[d]);
-                r = Kokkos::sqrt(d2) > r ? Kokkos::sqrt(d2) : r;
+            if (n_layers > 1) {
+                for (uint32_t k = 0; k < N_VERTICES; k++) {
+                    for (int d = 0; d < 3; d++) c[d] += s.v[k][d] / N_VERTICES;
+                }
+                for (uint32_t k = 0; k < N_VERTICES; k++) {
+                    double d2 = 0.0;
+                    for (int d = 0; d < 3; d++) d2 += (s.v[k][d] - c[d]) * (s.v[k][d] - c[d]);
+                    r = Kokkos::sqrt(d2) > r ? Kokkos::sqrt(d2) : r;
+                }
             }
             bool refine = false;
             int32_t cut = -1;
@@ -773,6 +857,87 @@ struct Evaluator {
         }
     }
 
+    /** @brief Integrate over one of a cell's simplices, split into the n_subdivisions sub-simplices. */
+    KOKKOS_INLINE_FUNCTION void integrate_simplex(const uint32_t row, const double (&t)[N_VERTICES][3],
+                                                  const double * w_center, Accumulator & acc) const {
+        for (uint32_t j = 0; j < subs.extent(0); j++) {
+            Simplex s;
+            s.level = 0;
+            for (uint32_t k = 0; k < N_VERTICES; k++) {
+                for (int d = 0; d < 3; d++) {
+                    double v = 0.0;
+                    for (uint32_t l = 0; l < N_VERTICES; l++) v += subs(j, k, l) * t[l][d];
+                    s.v[k][d] = v;
+                }
+            }
+            integrate(row, s, w_center, acc);
+        }
+    }
+
+    /**
+     * @brief Integrate over a straight cell: a triangle, or a fan from the vertex
+     *        average, in 2D; in 3D the tetrahedra of cell_tetrahedra, in its order
+     *        and arithmetic.
+     */
+    KOKKOS_INLINE_FUNCTION void integrate_cell(const uint32_t row, const uint32_t cell, const double * w_center,
+                                               Accumulator & acc) const {
+        const uint32_t first_node = offsets_nodes_of_cell(cell);
+        const uint32_t n = Kokkos::min(offsets_nodes_of_cell(cell + 1) - first_node, 8u);
+        double p[8][3];
+        for (uint32_t k = 0; k < n; k++) {
+            const uint32_t node = nodes_of_cell(first_node + k);
+            for (int d = 0; d < 3; d++) p[k][d] = d < N_DIM ? static_cast<double>(node_coords(node, d)) : 0.0;
+        }
+        double t[N_VERTICES][3];
+        auto set = [](double * to, const double * from) {
+            for (int d = 0; d < 3; d++) to[d] = from[d];
+        };
+        // One call site of integrate_simplex: it inlines the whole integration
+        if constexpr (N_DIM == 2) {
+            // A fan from the vertex average, so the rule does not depend on the node numbering
+            double center[3] = {0.0, 0.0, 0.0};
+            for (uint32_t k = 0; k < n && n > 3; k++) {
+                for (int d = 0; d < 2; d++) center[d] += p[k][d] / n;
+            }
+            for (uint32_t k = 0; k < (n == 3 ? 1u : n); k++) {
+                set(t[0], n == 3 ? p[0] : center);
+                set(t[1], n == 3 ? p[1] : p[k]);
+                set(t[2], n == 3 ? p[2] : p[(k + 1) % n]);
+                integrate_simplex(row, t, w_center, acc);
+            }
+        } else {
+            // cell_local_faces
+            const uint8_t tet[4][4] = {{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}};
+            const uint8_t pyramid[5][4] = {{0, 3, 2, 1}, {0, 1, 4}, {1, 2, 4}, {2, 3, 4}, {3, 0, 4}};
+            const uint8_t prism[5][4] = {{0, 2, 1}, {3, 4, 5}, {0, 1, 4, 3}, {1, 2, 5, 4}, {2, 0, 3, 5}};
+            const uint8_t hex[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+            const uint8_t(*faces)[4] = n == 4 ? tet : (n == 5 ? pyramid : (n == 6 ? prism : hex));
+            const uint32_t n_faces = n == 4 ? 4 : (n == 8 ? 6 : 5);
+            double o[3] = {0.0, 0.0, 0.0};
+            for (uint32_t k = 0; k < n; k++) {
+                for (int d = 0; d < 3; d++) o[d] += p[k][d];
+            }
+            for (int d = 0; d < 3; d++) o[d] /= static_cast<double>(n);
+            for (uint32_t f = 0; f < n_faces; f++) {
+                const uint8_t * face = faces[f];
+                const uint32_t m = n == 4 || (n == 5 && f > 0) || (n == 6 && f < 2) ? 3 : 4;
+                double c[3] = {0.0, 0.0, 0.0};
+                for (uint32_t k = 0; k < m && m > 3; k++) {
+                    for (int d = 0; d < 3; d++) c[d] += p[face[k]][d];
+                }
+                for (int d = 0; d < 3; d++) c[d] /= static_cast<double>(m);
+                // A triangle face makes one tetrahedron, a quadrilateral four around its vertex average
+                for (uint32_t k = 0; k < (m == 3 ? 1u : m); k++) {
+                    set(t[0], o);
+                    set(t[1], m == 3 ? p[face[0]] : c);
+                    set(t[2], m == 3 ? p[face[1]] : p[face[k]]);
+                    set(t[3], m == 3 ? p[face[2]] : p[face[(k + 1) % m]]);
+                    integrate_simplex(row, t, w_center, acc);
+                }
+            }
+        }
+    }
+
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t row) const {
         const uint32_t cell = first_cell + row;
         for (uint32_t i = 0; i < n_vars; i++) sum(row, i) = 0.0;
@@ -785,7 +950,7 @@ struct Evaluator {
             w_center[k] = L.center ? region::indicator(distance(L.nodes, L.n_nodes, centroid), L.edge) : 0.0;
         }
         Accumulator acc;
-        if (curved_offsets(row + 1) > curved_offsets(row)) {
+        if (curved_offsets.extent(0) > 0 && curved_offsets(row + 1) > curved_offsets(row)) {
             uint8_t status[MAX_LAYERS];
             for (uint32_t k = 0; k < n_layers; k++) status[k] = POINT;
             for (uint32_t q = curved_offsets(row); q < curved_offsets(row + 1); q++) {
@@ -793,20 +958,7 @@ struct Evaluator {
                 accumulate(row, x, curved_weights(q), status, w_center, acc);
             }
         } else {
-            for (uint32_t i = simplex_offsets(row); i < simplex_offsets(row + 1); i++) {
-                for (uint32_t j = 0; j < subs.extent(0); j++) {
-                    Simplex s;
-                    s.level = 0;
-                    for (uint32_t k = 0; k < N_VERTICES; k++) {
-                        for (int d = 0; d < 3; d++) {
-                            double v = 0.0;
-                            for (uint32_t l = 0; l < N_VERTICES; l++) v += subs(j, k, l) * simplices(i, l, d);
-                            s.v[k][d] = v;
-                        }
-                    }
-                    integrate(row, s, w_center, acc);
-                }
-            }
+            integrate_cell(row, cell, w_center, acc);
         }
         kept(row) = from_cells && !acc.touched ? 1 : 0;
         for (uint32_t i = 0; i < n_vars; i++) result(row, i) = acc.uniform ? first(row, i) : sum(row, i) / acc.measure;
@@ -1473,12 +1625,31 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
     e.error = Kokkos::View<int>("init_error");
 
     const uint32_t n_cells = mesh.n_cells;
-    const uint32_t chunk = std::min(n_cells, CHUNK);
+    const size_t row_bytes = sizeof(double) * (2 * n_species + (3 + LANES) * n_vars +
+                                               (impl->from_cells ? 6 + n_species + n_vars + 1 : 0) +
+                                               (LANES > 1 ? impl->programs.size() * LANES : 0));
+    const uint32_t chunk = static_cast<uint32_t>(std::clamp<size_t>(CHUNK_BYTES / row_bytes, 1, std::max(n_cells, 1u)));
     e.Y_below = Scratch("init_Y_below", chunk, n_species);
     e.Y_layer = Scratch("init_Y_layer", chunk, n_species);
     e.base = Scratch("init_base", chunk, impl->from_cells ? 6 + n_species : 0);
     e.base_cells = Scratch("init_base_cells", chunk, impl->from_cells ? n_vars + 1 : 0);
-    e.point = Scratch("init_point", chunk, n_vars);
+    e.point = Scratch("init_point", chunk, n_vars * (impl->from_cells ? 1 : LANES));
+    if (LANES > 1 && !impl->from_cells) {
+        const Layer & L = impl->layers[0];
+        std::vector<uint32_t> base;
+        auto add = [&](const int32_t p) {
+            if (p >= 0 && std::find(base.begin(), base.end(), static_cast<uint32_t>(p)) == base.end()) {
+                base.push_back(static_cast<uint32_t>(p));
+            }
+        };
+        for (int i = 0; i < N_DIM; i++) add(L.u[i]);
+        add(L.rho);
+        add(L.p);
+        add(L.T);
+        for (uint32_t i = L.fractions; i < L.fractions + L.n_fractions; i++) add(static_cast<int32_t>(impl->fractions[i][1]));
+        e.base_programs = upload(base, "init_base_programs");
+        e.lane_values = Scratch("init_lane_values", chunk, impl->programs.size() * LANES);
+    }
     e.first = Scratch("init_first", chunk, n_vars);
     e.sum = Scratch("init_sum", chunk, n_vars);
     e.result = Scratch("init_result", chunk, n_vars);
@@ -1487,73 +1658,40 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
     auto h_kept = Kokkos::create_mirror_view(e.kept);
     auto h_base_cells = Kokkos::create_mirror_view(e.base_cells);
 
-    std::vector<std::array<std::array<double, 3>, 4>> tets;
+    e.nodes_of_cell = mesh.nodes_of_cell;
+    e.offsets_nodes_of_cell = mesh.offsets_nodes_of_cell;
+    e.node_coords = mesh.node_coords;
     for (uint32_t c0 = 0; c0 < n_cells; c0 += chunk) {
         const uint32_t n = std::min(chunk, n_cells - c0);
-        std::vector<uint32_t> simplex_offsets(1, 0), curved_offsets(1, 0);
-        std::vector<std::array<std::array<double, 3>, N_VERTICES>> simplices;
-        std::vector<std::array<double, 3>> curved_points;
-        std::vector<double> curved_weights;
-        for (uint32_t c = c0; c < c0 + n; c++) {
-            if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(c)) {
-                std::vector<curved::Vec3> x;
-                std::vector<double> w;
-                mesh.curved_geometry->cell_rule(c, N_DIM == 2 ? 10 : 8, x, w);
-                curved_points.insert(curved_points.end(), x.begin(), x.end());
-                curved_weights.insert(curved_weights.end(), w.begin(), w.end());
-            } else if constexpr (N_DIM == 2) {
-                const uint32_t n_nodes = mesh.h_n_nodes_of_cell(c);
-                auto node = [&](const uint32_t k) {
-                    const uint32_t id = mesh.h_node_of_cell(c, k);
-                    return std::array<double, 3>{double(mesh.h_node_coords(id, 0)), double(mesh.h_node_coords(id, 1)), 0.0};
-                };
-                if (n_nodes == 3) {
-                    simplices.push_back({node(0), node(1), node(2)});
-                } else {
-                    // A fan from the vertex average, so the rule does not depend on the node numbering
-                    std::array<double, 3> center = {0.0, 0.0, 0.0};
-                    for (uint32_t k = 0; k < n_nodes; k++) {
-                        for (size_t d = 0; d < 2; d++) center[d] += node(k)[d] / n_nodes;
-                    }
-                    for (uint32_t k = 0; k < n_nodes; k++) simplices.push_back({center, node(k), node((k + 1) % n_nodes)});
-                }
-            } else {
-                mesh.h_cell_tetrahedra(c, tets);
-                for (const auto & t : tets) {
-                    std::array<std::array<double, 3>, N_VERTICES> s;
-                    for (size_t k = 0; k < N_VERTICES; k++) s[k] = t[k];
-                    simplices.push_back(s);
-                }
-            }
-            simplex_offsets.push_back(static_cast<uint32_t>(simplices.size()));
-            curved_offsets.push_back(static_cast<uint32_t>(curved_weights.size()));
-        }
-        // The previous chunk's geometry goes before this one's is allocated
-        e.simplex_offsets = {};
-        e.simplices = {};
-        e.curved_offsets = {};
-        e.curved_points = {};
-        e.curved_weights = {};
-        Kokkos::View<double *[N_VERTICES][3]> sv("init_simplices", simplices.size());
-        auto hs = Kokkos::create_mirror_view(sv);
-        for (size_t i = 0; i < simplices.size(); i++) {
-            for (size_t k = 0; k < N_VERTICES; k++) {
-                for (size_t d = 0; d < 3; d++) hs(i, k, d) = simplices[i][k][d];
-            }
-        }
-        Kokkos::deep_copy(sv, hs);
-        Kokkos::View<double *[3]> cp("init_curved_points", curved_points.size());
-        auto hc = Kokkos::create_mirror_view(cp);
-        for (size_t i = 0; i < curved_points.size(); i++) {
-            for (size_t d = 0; d < 3; d++) hc(i, d) = curved_points[i][d];
-        }
-        Kokkos::deep_copy(cp, hc);
         e.first_cell = c0;
-        e.simplex_offsets = upload(simplex_offsets, "init_simplex_offsets");
-        e.simplices = sv;
-        e.curved_offsets = upload(curved_offsets, "init_curved_offsets");
-        e.curved_points = cp;
-        e.curved_weights = upload(curved_weights, "init_curved_weights");
+        if (mesh.curved_geometry) {
+            std::vector<uint32_t> curved_offsets(1, 0);
+            std::vector<curved::Vec3> curved_points;
+            std::vector<double> curved_weights;
+            for (uint32_t c = c0; c < c0 + n; c++) {
+                if (mesh.curved_geometry->cell_is_curved(c)) {
+                    std::vector<curved::Vec3> x;
+                    std::vector<double> w;
+                    mesh.curved_geometry->cell_rule(c, N_DIM == 2 ? 10 : 8, x, w);
+                    curved_points.insert(curved_points.end(), x.begin(), x.end());
+                    curved_weights.insert(curved_weights.end(), w.begin(), w.end());
+                }
+                curved_offsets.push_back(static_cast<uint32_t>(curved_weights.size()));
+            }
+            // The previous chunk's rules go before this one's are allocated
+            e.curved_offsets = {};
+            e.curved_points = {};
+            e.curved_weights = {};
+            Kokkos::View<double *[3]> cp("init_curved_points", curved_points.size());
+            auto hc = Kokkos::create_mirror_view(cp);
+            for (size_t i = 0; i < curved_points.size(); i++) {
+                for (size_t d = 0; d < 3; d++) hc(i, d) = curved_points[i][d];
+            }
+            Kokkos::deep_copy(cp, hc);
+            e.curved_offsets = upload(curved_offsets, "init_curved_offsets");
+            e.curved_points = cp;
+            e.curved_weights = upload(curved_weights, "init_curved_weights");
+        }
         if (impl->from_cells) {
             for (uint32_t r = 0; r < n; r++) {
                 FOR_I_CONSERVATIVE h_base_cells(r, i) = double(U(c0 + r, i));
