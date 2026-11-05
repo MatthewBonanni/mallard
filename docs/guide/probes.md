@@ -247,6 +247,76 @@ Pitfalls:
 - A region probe has no samples: `type`, `sampling`, `format`, `file` and
   `samples` do not apply to it.
 
+### Probes of existing output
+
+A probe added after the run, or a run that wrote too few, does not need a
+rerun: `mallard post extract` sets the case up again from a restart file or a
+snapshot and evaluates probes on its stored state, with the run's own probe
+code. The case comes from the file's provenance (every output of Mallard 0.10
+and later records its resolved input), or from `-i input.toml`, which may add
+probes the run did not have:
+
+```sh
+mallard post extract solut/restart_*.restart                  # every [[probes]] of the input, at each restart
+mallard post extract solut/flow.vtkhdf.series --probe wake -o wake
+mallard post extract solut/flow.vtkhdf.series --latest --region domain --fields RHO,RHOE
+mallard post extract solut/flow.vtkhdf.series --times 0.1:0.5 --fields MASS_FLUX --reductions integral \
+    --region '{type = "cut_plane", point = [0.5, 0, 0], normal = [1, 0, 0]}'
+```
+
+`--region` takes what a probe's `region` takes: a name of `[regions]` or of
+the mesh (`domain`, a boundary or cell zone), or an inline table, a region or
+a probe type; its files are `probe_extract.csv` and
+`probe_extract_reductions.csv` (`--name` renames them). `--steps`, `--times`,
+`--every` and `--latest` choose the snapshots, and `--snapshot vtkhdf`
+also writes the chosen fields (`--fields`, of `--region` if given) as
+`[[write_data]]` would have. Files go to `extract/` (`-o DIR`) under the names
+the input gives them, every probe at every snapshot chosen whatever its
+`interval`. The report lists what it wrote and the reductions of the last
+snapshot, each with its units:
+
+```
+$ mallard post extract solut/restart_000002.restart solut/restart_000004.restart
+== Extract ================================================================================
+  Files              solut/restart_000002.restart (restart), solut/restart_000004.restart (restart)
+  Case               the resolved input in the provenance of solut/restart_000002.restart
+  Snapshots          2 of 2, t = 0.002 to 0.004 s
+  Output             extract
+
+== Snapshots ================================================================== 2 extracted
+  #  t [s]  step  file
+  0  0.002  2     restart_000002.restart
+  1  0.004  4     restart_000004.restart
+
+== Written ======================================================================== 2 files
+  file                              kind   times  first t [s]  last t [s]  fields  format
+  extract/probe_line.csv            table  2      0.002        0.004       9       CSV
+  extract/probe_box_reductions.csv  table  2      0.002        0.004       15      CSV
+
+== probe_box_reductions.csv ========================================= t = 0.004 s, the last
+  column        value         units
+  area          0.0799609423  m2
+  integral_RHO  0.079960745   kg m-1
+  mean_RHO      0.999997533   kg m-3
+  ...
+```
+
+`--format json` prints the same as one object. Under `mpirun -n N` the probes
+are evaluated on N ranks, with the same values as on one.
+
+Pitfalls:
+
+- The values are those the run's probe gave at that step: bit for bit from
+  restart files and snapshots of the conservative variables (`RHO`, `RHOU`,
+  `RHOE`, `RHOY_*`), to rounding from snapshots of `RHO`, `U` and `P`. Mixture
+  snapshots need `P`, `T`, `U` and every `Y_*`, or the conservative variables.
+- The file must be of the whole mesh (restart files, VTKHDF or XDMF
+  snapshots), and the case's mesh must be the file's: run the command where
+  the run ran, so that a mesh file named by a relative path is found.
+- VTKHDF files record no step: their snapshots are numbered by their
+  position in the files given, and `--steps` does not apply to them.
+- Statistics (`MEAN_*`) and `[[forces]]`, `[integrals]` are not extracted.
+
 ## Wall forces: `[[forces]]`
 
 ```toml

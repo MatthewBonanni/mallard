@@ -88,6 +88,9 @@ struct RegionValue {
     std::string name;                         // given by name; empty when given inline
 };
 
+/** @brief Whether a region table is a probe type (point, points, line, ..., surface), sampled like that probe. */
+bool sampled(const Input & table);
+
 /** @brief The region a key's value gives (collective); where names the key in errors. */
 RegionValue classify_region(const Input & input, region::Regions & regions, const Input & value,
                             const std::string & where);

@@ -25,6 +25,7 @@
 #include "cli.h"
 #include "input.h"
 #include "input_upgrade.h"
+#include "json.h"
 #include "mesh/mesh_block.h"
 #include "mesh/mesh_file.h"
 #include "output_reader.h"
@@ -224,6 +225,10 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
         case cli::Case::file:
             if (first.empty() || !output::is_mesh_file(first)) return free;
             return {mesh_file_dimension(first), first};
+        case cli::Case::output:
+            if (parsed.has("-i")) return {input_dimension(parsed.value_or("-i", "")), parsed.value_or("-i", "")};
+            if (first.empty()) return free;
+            return {output_dimension(first), first};
         default:
             return free;
     }
@@ -278,6 +283,24 @@ Dimension input_dimension(const std::string & input_file) {
             }
         }
         return {2, ""};
+    } catch (const std::exception & e) {
+        return unreadable(e.what());
+    }
+}
+
+Dimension output_dimension(const std::string & path) {
+    try {
+        const output::Contents c = output::open(path);
+        if (c.dim == 2 || c.dim == 3) return {c.dim, ""};
+        if (!c.provenance.empty()) {
+            const json::Value p = json::parse(c.provenance);
+            const json::Value * build = p.find("build");
+            const json::Value * dim = build ? build->find("dim") : nullptr;
+            if (dim && dim->type == json::Value::Type::NUMBER && (dim->number == 2.0 || dim->number == 3.0)) {
+                return {static_cast<int>(dim->number), ""};
+            }
+        }
+        return unknown(path + " records no dimension (no provenance)");
     } catch (const std::exception & e) {
         return unreadable(e.what());
     }

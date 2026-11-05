@@ -148,6 +148,21 @@ class Solver {
         CheckReport check(const Input & input, const CheckOptions & options);
 
         /**
+         * @brief Post-processing of output (`mallard post extract`), set before init(): the
+         *        state comes from reader instead of [initialize], and init() does not fail on unused
+         *        keys. reader gives a state on the mesh's local cells: a restart file's data, or a
+         *        snapshot's fields (vectors by component, U_X, U_Y, ...) with its step and time.
+         */
+        void set_state_reader(std::function<RestartData(const Mesh &)> reader) { state_reader = std::move(reader); }
+
+        /**
+         * @brief Post-processing: with next, takes the next state from the reader; then writes
+         *        every [[write_data]] snapshot and probe of the input at its step and time, as a run
+         *        writes them, and waits for the files.
+         */
+        void write_output_of_state(bool next);
+
+        /**
          * @brief Run until a stop condition is reached.
          * @return Exit status.
          */
@@ -555,6 +570,8 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
+        /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*. */
+        void apply_output_state(RestartData state);
         void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
@@ -716,6 +733,7 @@ class Solver {
 
         Input input;
         bool check_only = false;  // within check()
+        std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
         numerics_preset::Resolution preset;
         std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
