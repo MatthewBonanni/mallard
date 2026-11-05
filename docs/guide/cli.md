@@ -371,8 +371,8 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ### mallard info
 
 ```text
-Usage: mallard info FILE [--json] [--input] [--quality PREFIX]
-       mallard info RUN_DIR [--json] [--input]
+Usage: mallard info FILE [--format text|json] [--input] [--quality PREFIX]
+       mallard info RUN_DIR [--format text|json] [--input]
 
 Reports what a file Mallard writes or reads holds, without an input file: its
 kind, format and format version; the mesh (cells, points, cell types, bounds,
@@ -391,27 +391,29 @@ by the solver of its dimension, which also reports its quality as mallard check
 does.
 
 RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and
-every output file in it and one level down, one line each (the snapshots of a
-series as their index).
+every output file in it and one level down, one table row each (the snapshots of
+a series as their index).
 
 Options:
-  --json            Print the same as one JSON object, for scripts. Default:
-                    text.
-  --input           Print the input file that produced the file, from its
-                    provenance: the resolved input (every key the run read,
-                    defaults filled in) for files of Mallard 0.10 and later, the
-                    input as written for 0.9. For a run directory, its run's.
-  --quality PREFIX  Mesh files: write the mesh-quality fields to
-                    PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without
-                    HDF5), as mallard check --quality does. Default: none.
-  --kokkos-*        Kokkos options, e.g. --kokkos-num-threads=8 (threads per
-                    rank) or --kokkos-device-id=1 (the GPU; by default each rank
-                    gets its own).
-  -h, --help        Show this page.
+  --format text|json  text: sections and tables, with the units of every
+                      quantity; json: the same as one JSON object, for scripts.
+                      Default: text.
+  --input             Print the input file that produced the file, from its
+                      provenance: the resolved input (every key the run read,
+                      defaults filled in) for files of Mallard 0.10 and later,
+                      the input as written for 0.9. For a run directory, its
+                      run's.
+  --quality PREFIX    Mesh files: write the mesh-quality fields to
+                      PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without
+                      HDF5), as mallard check --quality does. Default: none.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
 
 Examples:
   $ mallard info solut/flow.vtkhdf.series
-  $ mallard info solut/restart_001000.restart --json
+  $ mallard info solut/restart_001000.restart --format json
   $ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it
   $ mallard info wing.msh --quality quality
   $ mallard info runs/cylinder

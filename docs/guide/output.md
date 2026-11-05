@@ -510,8 +510,38 @@ build reads. It is never misread.
 
 `mallard info` tells what any of these files holds, without an input file:
 its kind, format version, mesh, times, fields with their units and ranges, and
-provenance; `mallard info solut` does so for each file a run wrote
-([Command line](cli.md#mallard-info)).
+provenance; `mallard info solut` does so for each file a run wrote, one table
+row each ([Command line](cli.md#mallard-info)). Every number comes in a table
+column or a labeled line that names its units (`t [s]`, `min [m]`, a field's
+units, `dimensionless`); a `-` is something the file does not record:
+
+```
+$ mallard info solut/flow.vtkhdf.series
+== solut/flow.vtkhdf.series ===============================================================
+  Kind               snapshot
+  Format             VTKHDF series index (VTKHDF snapshots), version 1
+  Values             2D, double precision
+  Simulated time     3 snapshots, t = 0 to 0.002 s
+
+== Mesh ===================================================================================
+  cells  points
+  12     20
+...
+== Snapshots ================================================================== 3 snapshots
+  #  t [s]  file
+  0  0      flow_000000.vtkhdf
+  1  0.001  flow_000001.vtkhdf
+  2  0.002  flow_000002.vtkhdf
+
+== Fields ================================================= ranges at t = 0.002 s, the last
+  field  units       components  min      max      description
+  P      kg m-1 s-2  1           1        1        pressure
+  RHO    kg m-3      1           1.03804  1.26232  density
+  U      m s-1       3           0.3      0.3      velocity
+  min and max of fields with several components are of their magnitude.
+```
+
+`--format json` prints the same as one JSON object, for scripts.
 
 The Python scripts in `tools/` (numpy, matplotlib; see
 [Tools](https://matthewbonanni.github.io/mallard/docs/tools/)) read Mallard's output directly:

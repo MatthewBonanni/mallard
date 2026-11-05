@@ -73,7 +73,9 @@ constexpr Option UPGRADE_OPTIONS[] = {
 };
 
 constexpr Option INFO_OPTIONS[] = {
-    {"--json", "", "", "Print the same as one JSON object, for scripts. Default: text."},
+    {"--format", "", "text|json",
+     "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
+     "scripts. Default: text."},
     {"--input", "", "",
      "Print the input file that produced the file, from its provenance: the resolved input (every key the "
      "run read, defaults filled in) for files of Mallard 0.10 and later, the input as written for 0.9. For a "
@@ -341,8 +343,8 @@ constexpr Command COMMANDS[] = {
         .name = "info",
         .group = "Inspect",
         .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
-        .synopsis = "mallard info FILE [--json] [--input] [--quality PREFIX]\n"
-                    "mallard info RUN_DIR [--json] [--input]",
+        .synopsis = "mallard info FILE [--format text|json] [--input] [--quality PREFIX]\n"
+                    "mallard info RUN_DIR [--format text|json] [--input]",
         .description =
             "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
             "version; the mesh (cells, points, cell types, bounds, boundary and cell zones); its times and steps; "
@@ -358,11 +360,11 @@ constexpr Command COMMANDS[] = {
             "of its dimension, which also reports its quality as mallard check does.\n"
             "\n"
             "RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and every output file "
-            "in it and one level down, one line each (the snapshots of a series as their index).",
+            "in it and one level down, one table row each (the snapshots of a series as their index).",
         .options = INFO_OPTIONS,
         .arguments = FILE_ARGUMENTS,
         .examples = "$ mallard info solut/flow.vtkhdf.series\n"
-                    "$ mallard info solut/restart_001000.restart --json\n"
+                    "$ mallard info solut/restart_001000.restart --format json\n"
                     "$ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it\n"
                     "$ mallard info wing.msh --quality quality\n"
                     "$ mallard info runs/cylinder",
