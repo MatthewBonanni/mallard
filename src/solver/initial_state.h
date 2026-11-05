@@ -28,8 +28,9 @@ class MixtureModel;
  * @brief The state [initialize] describes over a base: the base state (the
  *        expressions or numbers of an analytical or constant state, or the
  *        cells of a restart or remap), then [[initialize.regions]] layered
- *        over it by priority, each setting some of u, rho, p, T and the
- *        composition inside a region; expressions read x, y, z and the
+ *        over it by priority, each setting some of u, rho, p, T, the
+ *        composition and synthetic turbulence inside a region (the base can
+ *        have turbulence too); expressions read x, y, z and the
  *        fields of [[initialize.data]] (tables and point clouds). Cell
  *        averages are integrated on the device: each cell's simplices are
  *        subdivided n_subdivisions times, then adaptively where a region's
@@ -52,7 +53,7 @@ class InitialState {
         InitialState(const InitialState &) = delete;
         InitialState & operator=(const InitialState &) = delete;
 
-        /** @brief Whether [initialize] has regions or data. */
+        /** @brief Whether [initialize] has regions, data or turbulence. */
         static bool layered(const Input & input);
 
         /**
