@@ -467,12 +467,12 @@ std::pair<double, size_t> largest_difference(const std::string & a, const std::s
     return out;
 }
 
-/** @brief Runs two steps of a periodic case on an N x (3N/4) mesh (x 3N/4 in 3D), writing restart files and VTU snapshots to dir/. */
-Result diff_case(const std::string & dir, uint32_t n, const std::string & rho) {
+/** @brief Runs steps (two) steps of a periodic case on an N x (3N/4) mesh (x 3N/4 in 3D), writing restart files and VTU snapshots to dir/. */
+Result diff_case(const std::string & dir, uint32_t n, const std::string & rho, int steps = 2) {
     const bool three = Mallard_DIM == 3;
     fs::create_directories(dir);
     std::ofstream(dir + "/input.toml")
-        << "[run]\nn_steps = 2\ndt = 1.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << 3 * n / 4
+        << "[run]\nn_steps = " << steps << "\ndt = 1.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << 3 * n / 4
         << "\nLx = 1.0\nLy = 1.0\n" << (three ? "Nz = " + std::to_string(3 * n / 4) + "\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
         << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
         << "[initialize]\ntype = \"analytical\"\nrho = \"" << rho << "\"\n"
@@ -558,6 +558,19 @@ TEST(CliTest, DiffMatchesCellsByTheirPlaceAndRemapsAcrossMeshes) {
     ASSERT_EQ(x.size(), size_t(Mallard_DIM));
     EXPECT_NEAR(x[0].number, 0.875, 1e-6);
     EXPECT_NEAR(x[1].number, 5.0 / 6.0, 1e-6);
+
+    // Series of different lengths are matched by time, not position
+    ASSERT_EQ(diff_case("longer", 4, linear, 4).status, 0);
+    const Result timed = run({"diff", "longer/flow.pvd", "coarse/flow.pvd", "--time", "0.0021", "--format", "json"}, true);
+    EXPECT_EQ(timed.status, 0) << timed.err;
+    const json::Value t = json::parse(timed.out);
+    EXPECT_EQ(t["a"]["snapshot"].number, 1);
+    EXPECT_EQ(t["b"]["snapshot"].number, 1);
+    EXPECT_EQ(run({"diff", "longer/flow.pvd", "coarse/flow.pvd", "--format", "json"}, true).status, 1);
+    const Result no_step = run({"diff", "coarse/restart_000002.restart", "other/restart_000002.restart", "--step", "3"}, true);
+    EXPECT_EQ(no_step.status, 3);
+    EXPECT_TRUE(contains(no_step.err, "has no snapshot of step 3")) << no_step.err;
+    EXPECT_EQ(run({"diff", "longer/flow.pvd", "coarse/flow.pvd", "--step", "2", "--time", "0"}, true).status, 2);
 
     const Result mixed = run({"diff", "coarse/restart_000002.restart", "coarse/flow_000002.vtu"}, true);
     EXPECT_EQ(mixed.status, 3);

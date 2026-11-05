@@ -552,7 +552,8 @@ how far apart and where: for a regression check in CI, two settings of a case,
 a restart that should reproduce a run, or a serial run against an MPI one
 ([Command line](cli.md#mallard-diff)). A and B are snapshot, restart, probe or
 CSV files, of any format each; it compares every field both hold (`--fields`
-picks some), at the last snapshot of each (`--snapshot N`):
+picks some), at the last snapshot of each, or at the one of a step (`--step N`) or
+nearest a time (`--time T`) as the files record them:
 
 ```
 $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.restart

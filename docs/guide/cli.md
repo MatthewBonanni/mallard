@@ -467,7 +467,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ### mallard diff
 
 ```text
-Usage: mallard diff FILE_A FILE_B [--fields LIST] [--tol TOL] [--snapshot N] [--format text|json]
+Usage: mallard diff FILE_A FILE_B [--fields LIST] [--tol TOL] [--step N|--time T] [--format text|json]
        mallard diff FILE_A FILE_B --remap [--mesh-a FILE] [--mesh-b FILE] [options]
 
 Compares two snapshot, restart, probe or CSV files of the same case, of any
@@ -499,8 +499,15 @@ Options:
                       then FIELD=TOL for some (1e-12,P=1e-6). Restart attributes
                       and arrays take it too. Default: 0, so any difference in
                       value fails.
-  --snapshot N|last   The snapshot of each file to compare, counting from 0, for
-                      series and files of several times. Default: last.
+  --step N            Compare the snapshot of each file at this step, as the
+                      files record it, for series and files of several times.
+                      Default: the last snapshot.
+  --time T            Compare the snapshot of each file nearest this simulated
+                      time, in s; the Time table shows the times compared.
+                      Default: the last snapshot.
+  --snapshot N|last   Compare the snapshot of each file at this position,
+                      counting from 0 (in time order); for files that record no
+                      step. Default: last.
   --remap             Compare files on different meshes: B's cell values
                       remapped conservatively onto A's mesh (as [initialize]
                       type = "remap" does, degree 2, limited), then compared
@@ -521,7 +528,7 @@ Options:
 Examples:
   $ mallard diff run1/solut/restart_001000.restart run2/solut/restart_001000.restart
   $ mallard diff serial/flow_000100.vtkhdf mpi/flow_000100.vtkhdf --tol 1e-12
-  $ mallard diff a/flow.vtkhdf.series b/flow.vtkhdf.series --snapshot 3 --fields RHO,P
+  $ mallard diff a/flow.vtkhdf.series b/flow.vtkhdf.series --step 300 --fields RHO,P
   $ mallard diff fine/restart_000500.restart coarse/restart_000500.restart --remap --tol 1e-2
   $ mallard diff a.restart b.restart --format json | jq '.fields[] | {name, status}'
 

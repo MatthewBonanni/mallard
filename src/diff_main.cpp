@@ -547,18 +547,40 @@ RestartResult compare_restart(const Side & a, const Side & b, const Tolerance & 
     return r;
 }
 
-size_t pick_snapshot(const output::Contents & c, const std::string & option, const char * which) {
-    if (c.snapshots.empty()) throw Trouble(c.path + " holds no snapshot");
-    if (option.empty() || option == "last") return c.snapshots.size() - 1;
-    const double n = std::stod(option);
-    if (n >= static_cast<double>(c.snapshots.size())) {
-        throw Trouble(std::string(which) + " (" + c.path + ") has " + count(c.snapshots.size()) + " snapshots, so no snapshot " +
-                      option + " (they count from 0)");
+/** @brief Which snapshot of each file to compare: by --step, --time or --snapshot, else the last. */
+struct Selection {
+    std::string option = "--snapshot", value = "last";
+    double number = 0.0;
+};
+
+size_t pick_snapshot(const output::Contents & c, const Selection & pick, const char * which) {
+    const std::string file = std::string(which) + " (" + c.path + ")";
+    if (c.snapshots.empty()) throw Trouble(file + " holds no snapshot");
+    const size_t n = c.snapshots.size();
+    if (pick.option == "--step") {
+        bool recorded = false;
+        for (size_t i = 0; i < n; i++) {
+            recorded = recorded || c.snapshots[i].step >= 0;
+            if (static_cast<double>(c.snapshots[i].step) == pick.number) return i;
+        }
+        throw Trouble(file + (recorded ? " has no snapshot of step " + pick.value
+                                       : " records no steps; --time or --snapshot selects its snapshot"));
     }
-    return static_cast<size_t>(n);
+    if (pick.option == "--time") {
+        size_t best = 0;
+        for (size_t i = 1; i < n; i++) {
+            if (std::abs(c.snapshots[i].t - pick.number) < std::abs(c.snapshots[best].t - pick.number)) best = i;
+        }
+        return best;
+    }
+    if (pick.value == "last") return n - 1;
+    if (pick.number >= static_cast<double>(n)) {
+        throw Trouble(file + " has " + count(n) + " snapshots, so no snapshot " + pick.value + " (they count from 0)");
+    }
+    return static_cast<size_t>(pick.number);
 }
 
-Side open_side(const std::string & path, const std::string & snapshot, const char * which) {
+Side open_side(const std::string & path, const Selection & snapshot, const char * which) {
     Side s;
     if (output::is_mesh_file(path) || (s.c = output::open(path)).kind == output::Kind::mesh) {
         throw Trouble(path + " is a mesh file, which holds no field values; mallard diff compares snapshots, restart, "
@@ -1060,10 +1082,20 @@ int diff_main(const cli::Args & args) {
         return cli::usage_error(command, "--tol takes non-negative numbers, as 1e-6 or 1e-6,P=1e-3, not " +
                                              args.value_or("--tol", ""));
     }
-    const std::string snapshot = args.value_or("--snapshot", "last");
-    double index = 0.0;
-    if (snapshot != "last" && (!parse_number(snapshot, index) || index != std::floor(index))) {
-        return cli::usage_error(command, "--snapshot takes an index from 0, or last, not " + snapshot);
+    Selection snapshot;
+    for (const char * option : {"--snapshot", "--step", "--time"}) {
+        if (!args.has(option)) continue;
+        if (args.has(snapshot.option) && snapshot.option != option) {
+            return cli::usage_error(command, snapshot.option + " and " + option + " both select the snapshot; give one");
+        }
+        snapshot.option = option;
+        snapshot.value = args.value_or(option, "");
+        const bool whole = snapshot.option != "--time";
+        if (!(snapshot.option == "--snapshot" && snapshot.value == "last") &&
+            (!parse_number(snapshot.value, snapshot.number) || (whole && snapshot.number != std::floor(snapshot.number)))) {
+            return cli::usage_error(command, snapshot.option + (whole ? " takes a whole number" : " takes a time in s") +
+                                                 ", not " + snapshot.value);
+        }
     }
     if (comm::size() > 1) {
         std::cerr << "mallard diff: runs on one rank, not " << comm::size() << "; start it without mpirun.\n";
