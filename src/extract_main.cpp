@@ -221,6 +221,17 @@ std::string probe_extension(const Input::table_type & entry) {
     return format == "hdf5" ? ".h5" : format == "vtkhdf" ? ".vtkhdf" : format == "vtp" ? ".pvd" : ".csv";
 }
 
+/** @brief Whether a probe entry averages in time: average = true, or [statistics] averages as variables. */
+bool time_averaged(const Input & entry) {
+    const auto & t = entry.as_table().entries();
+    if (t.contains("average") && t.at("average").is_boolean() && t.at("average").as_boolean()) return true;
+    if (!t.contains("variables") || !t.at("variables").is_array()) return false;
+    for (const Input & v : t.at("variables").as_array()) {
+        if (v.is_string() && (v.as_string().starts_with("MEAN_") || v.as_string().starts_with("COV_"))) return true;
+    }
+    return false;
+}
+
 /** @brief What the extraction writes, as the case input sets it up. */
 struct Plan {
     std::vector<std::string> probes;  // names
@@ -246,13 +257,22 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
     const bool others = args.has("--region") || args.has("--snapshot");
     std::vector<std::string> wanted = split_list(args.value_or("--probe", ""));
     Input::array_type probes;
-    std::vector<std::string> available, kept;
+    std::vector<std::string> available, kept, averaged;
     if (top.contains("probes") && top.at("probes").is_array()) {
         for (const Input & entry : top.at("probes").as_array()) {
             const auto & t = entry.as_table().entries();
             const std::string name = t.contains("name") && t.at("name").is_string() ? t.at("name").as_string() : "";
             available.push_back(name);
             if (chosen ? std::find(wanted.begin(), wanted.end(), name) == wanted.end() : others) continue;
+            // Averages over the run's steps are not in a snapshot's state
+            if (time_averaged(entry)) {
+                if (chosen) {
+                    throw UsageError("the probe " + name + " averages in time (average = true, or MEAN_/COV_ "
+                                     "variables), over the run's steps, which output does not hold");
+                }
+                averaged.push_back(name);
+                continue;
+            }
             probes.push_back(entry);
             kept.push_back(name);
         }
@@ -279,6 +299,10 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
         probes.emplace_back(entry);
     } else if (args.has("--reductions") || args.has("--sampling")) {
         throw UsageError(std::string(args.has("--reductions") ? "--reductions" : "--sampling") + " applies to --region");
+    }
+    if (!averaged.empty() && comm::is_root()) {
+        logging::warning("not extracted: the probes " + list_text(averaged) + ", which average in time over the "
+                         "run's steps");
     }
     if (!others && probes.empty()) {
         throw UsageError("the input has no [[probes]]: give --region or --snapshot, or an input with [[probes]] (-i)");

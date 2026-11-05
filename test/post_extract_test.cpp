@@ -178,6 +178,29 @@ TEST(PostExtractTest, FileOfAnotherMeshIsAnError) {
     EXPECT_TRUE(!fs::exists(dir + "/out/probe_line.csv") || rows(dir + "/out/probe_line.csv").empty());
 }
 
+TEST(PostExtractTest, TimeAveragedProbesAreSkippedOrRefused) {
+    const std::string run = run_dir();
+    const std::string dir = fresh_dir("averaged");
+    if (comm::is_root()) {
+        fs::create_directories(dir);
+        std::ofstream(dir + "/input.toml") << case_input(run, 16) << "[statistics]\n"
+                                           << "[[probes]]\nname = \"mean\"\ntype = \"line\"\nstart = "
+                                           << (N_DIM == 3 ? "[0.1, 0.3, 0.5]" : "[0.1, 0.3]") << "\nend = "
+                                           << (N_DIM == 3 ? "[0.9, 0.6, 0.5]" : "[0.9, 0.6]")
+                                           << "\nn_points = 3\nvariables = [\"P\"]\naverage = true\n";
+    }
+    comm::barrier();
+    const std::string restart = run + "/restart_000002.restart";
+    ASSERT_EQ(extract({restart, "-i", dir + "/input.toml", "-o", dir + "/all"}), 0);
+    EXPECT_EQ(rows(dir + "/all/probe_line.csv").size(), 7u);
+    EXPECT_FALSE(fs::exists(dir + "/all/probe_mean.csv"));
+    std::string errors;
+    EXPECT_EQ(extract({restart, "-i", dir + "/input.toml", "--probe", "mean", "-o", dir + "/mean"}, &errors), 2);
+    if (comm::is_root()) {
+        EXPECT_NE(errors.find("averages in time"), std::string::npos) << errors;
+    }
+}
+
 TEST(PostExtractTest, OutputOfStatesHoldsNoTimeSteppingBuffers) {
     const std::string run = run_dir();
     const std::string dir = fresh_dir("buffers");
