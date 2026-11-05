@@ -294,10 +294,11 @@ Options:
                             a run's summary over its ranks. Default: no cost.
   --steps N                 Cost at the throughput measured over N steps, after
                             one untimed step. Default: no cost.
-  --quality PREFIX          Write the mesh-quality fields to
-                            PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds
-                            without HDF5), the default snapshot format. Default:
-                            none.
+  --quality PREFIX          Write the mesh-quality fields, and those of the
+                            resolution estimates (Y_PLUS, DELTA_OVER_ETA,
+                            CELLS_PER_DELTA_L), to PREFIX_000000.vtkhdf
+                            (PREFIX_000000.vtu in builds without HDF5), the
+                            default snapshot format. Default: none.
   --catalog KEYS.json       Write every key the setup looked up, with its type,
                             unit, default and accepted values, as JSON. Default:
                             none.

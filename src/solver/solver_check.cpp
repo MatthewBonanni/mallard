@@ -92,14 +92,15 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_memory(r, options, tracker);
     r.boundaries = boundary_summary;
     check_time_step(r);
-    check_mesh_quality(r, options);
+    const CheckFields resolution = check_resolution(r);
+    check_mesh_quality(r, options, resolution);
     check_cost(r, options, tracker);
     check_settings(r);
     check_regions(r, options);
     return r;
 }
 
-void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) const {
+void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, const CheckFields & extra) const {
     const MeshQuality quality = mesh_quality(*mesh);
     r.quality = summarize(*mesh, quality, options.n_worst);
     r.has_quality = true;
@@ -122,6 +123,12 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) c
         for (uint32_t c = 0; c < mesh->n_owned(); c++) fields.back()(c) = static_cast<rtype>(quality.cells[m][c]);
         quality_data.emplace_back(MeshQuality::FIELDS[m], fields.back());
         names.emplace_back(MeshQuality::FIELDS[m]);
+    }
+    for (const auto & [name, values] : extra) {
+        fields.emplace_back(name, mesh->n_cells);
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) fields.back()(c) = static_cast<rtype>(values[c]);
+        quality_data.emplace_back(name, fields.back());
+        names.emplace_back(name);
     }
     Input writer_input(Input::table_type{});
     writer_input.as_table()["prefix"] = options.quality_file;
@@ -502,6 +509,7 @@ void print_check(const CheckReport & r) {
                          point(r.region_hi));
         }
     }
+    for (const auto & [label, text] : r.resolution) item(label, text);
     if (r.bytes > 0) {
         item("Memory", bytes(double(r.bytes)) + (r.device_memory ? " device memory" : "") +
                            " per rank after setup (peak " + bytes(double(r.bytes_peak)) + "), " +

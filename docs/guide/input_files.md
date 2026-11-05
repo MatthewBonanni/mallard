@@ -332,9 +332,58 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --quality quality
 | Boundaries | Zones without a condition are an error, named with their face count |
 | Mesh quality | Largest and mean non-orthogonality, skewness, aspect ratio and volume ratio, and where the worst cells are ([Meshes](meshes.md#mesh-quality)) |
 | Time step | The stable step at the initial state (or `run.dt` and its CFL number), the cell that sets it and the region of the cells within 10% of it |
+| Resolution | Cell sizes, and the physical scales the case sets against them: Kolmogorov and Taylor lengths, wall units, cells across the flame, each with what it is estimated from, or why it is not ([Resolution](#resolution)) |
 | Memory | Kokkos allocations per rank (device memory on GPUs) after setup and at their peak. With `--ranks N` in a serial check, scaled to the owned and halo cells of the largest part the run's partitioner would make. CUDA's own context, a few hundred MB per GPU, is not counted |
 | Cost | With `--throughput R` (cells/s per rank, the `Throughput` of a run's summary divided by its ranks) or `--steps N` (timed over N steps after an untimed one): steps, wall time and GPU-hours (rank-hours on CPUs) per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude) and to `t_stop`, assuming the throughput per rank holds on N ranks |
-| Warnings | A CFL number above the integrator's limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4), TFLES thickening `n_res Delta / delta_L` above 5, poor cells |
+| Warnings | A CFL number above the integrator's limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4), TFLES thickening `n_res Delta / delta_L` above 5, poor cells, a mesh short of the [resolution](#resolution) its regime needs |
+
+### Resolution
+
+The report compares the mesh with the scales the case sets, so that an
+under-resolved DNS or wall-resolved LES shows before the run. These are
+estimates: each line says what it assumes, a scale the case does not set is
+reported as not estimated, and a mesh short of its target is a warning, not an
+error. For `examples/channel_retau180` on 24 × 32 × 16 cells, started from a
+laminar profile:
+
+```text
+  Cell size          V^(1/3) from 0.129 to 0.249, mean 0.218
+  Walls              u_tau 0.065 from Dean's channel correlation at the forcing's Re_b = U_b 2h / nu = 5.6e+03 (h = volume / wall area = 1)
+                     first-cell y+ up to 1.43 at (0.2618, 1.992, 0.1309), mean 1.43; x+ up to 95.2, z+ up to 47.6
+  Kolmogorov         eta 0.0102 from the mean epsilon 0.00422 (the forcing's power, u_tau^2 U_b / h) and nu 0.000357
+                     cells of 21.4 eta on average, up to 24.5 at (8.639, 1.057, 1.44)
+warning: first cells at y+ up to 1.43 (at (0.2618, 1.992, 0.1309); u_tau from Dean's channel correlation): DNS needs y+ <= 1 at the first cell centres: place them at most 0.0055 from the wall, or model the walls (wall_model)
+warning: wall cells up to x+ 95.2 and z+ 47.6 (along the flow and across it): DNS needs x+ <= 15 and z+ <= 8: refine the mesh along the walls
+warning: DNS: cells of 21.4 eta on average (eta 0.0102 from the forcing's power, u_tau^2 U_b / h): resolving the dissipation needs about 2 eta or less: refine to cells of 0.0204, or model the small scales with LES ([les])
+```
+
+| Scale | Estimated from |
+|---|---|
+| Cell size | `V^(1/d)` of every cell |
+| Friction velocity `u_tau` (walls of viscous cases) | A restart's (or remap's) first-cell velocity, by the linear law or the log law; else, with `source.mass_flow`, Dean's channel correlation `C_f = 0.073 Re_b^(-1/4)` at the bulk velocity `U_b` and `h` = volume / wall area (the half-height of a channel); else a flat plate's mean skin friction (laminar, or turbulent above `Re_L = 5e5`) over the walls' length along the mean flow at the largest initial speed |
+| y+, x+, z+ | The first cell centre's distance to the wall, and the wall face's extents along the flow and across it, in wall units `nu / u_tau` |
+| Wall model's exchange point | `exchange_distance`, or `exchange_cells` wall-cell heights, in wall units |
+| Dissipation `epsilon` | With `source.mass_flow`, the forcing's power `u_tau^2 U_b / h`; else the viscous dissipation of the initial (or restart) velocity field, mass-weighted over the domain |
+| Kolmogorov length `eta` | `(nu^3 / epsilon)^(1/4)` with the domain's mean `nu` |
+| Taylor microscale `lambda` | `(15 nu u'^2 / epsilon)^(1/2)`, `u'` the velocity's fluctuation about its mean (from the field, not the forcing) |
+| Flame thickness | `les.combustion.delta_L` (TFLES): cells across it. Otherwise not estimated |
+
+The targets the warnings use, by regime (LES when `[les]` sets a model, DNS
+otherwise; walls with a `wall_model` are wall-modeled):
+
+| Regime | Target |
+|---|---|
+| DNS | Cells of at most about 2 `eta` on average; first cells at `y+ <= 1`, wall cells at `x+ <= 15`, `z+ <= 8` (about Kim, Moin & Moser, 1987) |
+| Wall-resolved LES | First cells at `y+ <= 1`, wall cells at `x+ <= 150`, `z+ <= 40` (the coarse ends of Georgiadis, Rizzetta & Fureby, 2010) |
+| Wall-modeled LES | Exchange points in the log layer, `y+ >= 30` |
+| TFLES | Thickening `F = n_res Delta / delta_L` at most 5 |
+
+`--quality PREFIX` also writes the estimates' fields with the mesh-quality
+ones: `Y_PLUS` on wall cells, `DELTA_OVER_ETA` (cell size over the mean
+Kolmogorov length) and `CELLS_PER_DELTA_L` (TFLES), to see in ParaView where
+the mesh is short. The mean `eta` stands for the whole domain, so
+`DELTA_OVER_ETA` is pessimistic where the flow dissipates less than its mean
+(far from walls, in a free stream).
 
 ### The key catalog
 

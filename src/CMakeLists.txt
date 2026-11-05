@@ -66,6 +66,7 @@ add_library(MallardCore STATIC
     solver/probes.cpp
     solver/solver.cpp
     solver/solver_check.cpp
+    solver/solver_resolution.cpp
     solver/solver_chemistry.cpp
     solver/solver_control.cpp
     solver/solver_graph.cpp

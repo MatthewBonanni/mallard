@@ -12,11 +12,15 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "input.h"
 #include "log.h"
 #include "mesh_quality.h"
+
+/** @brief Fields of the owned cells by name, written with the mesh-quality fields (--quality). */
+using CheckFields = std::vector<std::pair<std::string, std::vector<double>>>;
 
 struct CheckOptions {
     int ranks = 0;              // ranks to estimate memory and cost for (0: this run's)
@@ -72,6 +76,19 @@ struct CheckReport {
     double flow_through_time = 0.0;    // domain length along the mean velocity over its magnitude, 0 if none
     double t_stop = 0.0;
     uint64_t n_steps = 0;
+
+    // Resolution against the physical scales (check_resolution); 0 where not estimated
+    logging::Items resolution;
+    double delta_min = 0.0, delta_max = 0.0;  // cell size V^(1/d)
+    double epsilon = 0.0;                     // dissipation per unit mass
+    double eta = 0.0;                         // Kolmogorov length (nu^3 / epsilon)^(1/4)
+    double delta_over_eta = 0.0;              // volume-weighted mean cell size over eta
+    double taylor = 0.0;                      // Taylor microscale (15 nu u'^2 / epsilon)^(1/2)
+    double u_tau = 0.0;                       // friction velocity, root mean square over the walls
+    double y_plus_max = 0.0, y_plus_mean = 0.0;  // first cell centres, resolved walls (mean: all walls)
+    double x_plus_max = 0.0, z_plus_max = 0.0;   // wall cells along the flow and across it
+    double y_plus_exchange_min = 0.0;            // the wall model's lowest exchange point
+    double cells_per_delta_L_min = 0.0, cells_per_delta_L_max = 0.0;
 
     bool ok() const { return errors.empty() && unused.empty(); }
 };

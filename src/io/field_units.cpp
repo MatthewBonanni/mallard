@@ -77,6 +77,8 @@ const Entry NAMED[] = {
     {"SKEWNESS", dim::none, "largest face skewness"},
     {"ASPECT_RATIO", dim::none, "cell aspect ratio"},
     {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor"},
+    {"DELTA_OVER_ETA", dim::none, "cell size over the estimated Kolmogorov length"},
+    {"CELLS_PER_DELTA_L", dim::none, "cells across the laminar flame thickness"},
 };
 
 // <prefix><species>
