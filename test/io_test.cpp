@@ -32,7 +32,7 @@
 #include "compression.h"
 #include "data_writer.h"
 #include "gmsh_fixtures.h"
-#include "json_reader.h"
+#include "json.h"
 #include "hdf5_output.h"
 #include "mesh_block.h"
 #include "provenance.h"
@@ -55,7 +55,7 @@ TEST(IOTest, ProvenanceHashesTheMeshFile) {
     };
     Solver hashed;
     hashed.init(parse_toml(input("")));
-    const auto p = json_reader::parse(provenance::json());
+    const auto p = json::parse(provenance::json());
     EXPECT_EQ(p["mesh"]["type"].string, "file");
     EXPECT_EQ(p["mesh"]["file"].string, file);
     std::ifstream in(file, std::ios::binary);
@@ -63,7 +63,7 @@ TEST(IOTest, ProvenanceHashesTheMeshFile) {
 
     Solver unhashed;
     unhashed.init(parse_toml(input("hash_mesh = false\n")));
-    const auto q = json_reader::parse(provenance::json());
+    const auto q = json::parse(provenance::json());
     EXPECT_EQ(q["mesh"]["file"].string, file);
     EXPECT_FALSE(q["mesh"].has("sha256"));
 }

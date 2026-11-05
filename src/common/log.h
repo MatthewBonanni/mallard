@@ -67,6 +67,12 @@ void item(std::string_view key, std::string_view value);
 void items(const Items & list);
 
 /**
+ * @brief Columns under a section: a header row, then one row per entry, each column as wide
+ *        as its widest cell.
+ */
+void table(const std::vector<std::string> & header, const std::vector<std::vector<std::string>> & rows);
+
+/**
  * @brief Starts a line naming a setup phase; end_phase() completes it with the elapsed time.
  *        Anything printed in between first ends the open line.
  */

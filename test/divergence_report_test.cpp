@@ -15,7 +15,7 @@
 
 #include "comm.h"
 #include "gmsh_fixtures.h"
-#include "json_reader.h"
+#include "json.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -58,7 +58,7 @@ const char * PULSE = "1.0 + 0.01 * exp(-50 * ((x - 0.5)^2 + (y - 0.5)^2))";
 
 struct Outcome {
     std::string message;
-    json_reader::Value report;  // divergence_report.json
+    json::Value report;  // divergence_report.json
     std::string text;           // divergence_report.txt
 };
 
@@ -80,12 +80,12 @@ Outcome diverge(const std::string & dir, std::string input) {
     text << std::ifstream(dir + "/report.txt").rdbuf();
     o.text = text.str();
     const std::string line((std::istreambuf_iterator<char>(json)), {});
-    if (!line.empty()) o.report = json_reader::parse(line);
+    if (!line.empty()) o.report = json::parse(line);
     return o;
 }
 
 std::string top_cause(const Outcome & o) {
-    if (o.report.type != json_reader::Value::Type::OBJECT || o.report["causes"].array.empty()) return "";
+    if (o.report.type != json::Value::Type::OBJECT || o.report["causes"].array.empty()) return "";
     return o.report["causes"].array[0]["kind"].string;
 }
 
@@ -112,7 +112,7 @@ TEST(DivergenceReportTest, TooLargeACflNumberIsTheTimeStep) {
     if (comm::size() > 1) {
         EXPECT_NE(o.text.find(" on rank "), std::string::npos) << o.text;
     }
-    EXPECT_EQ(o.report["cell"]["rank"].type, json_reader::Value::Type::NUMBER);
+    EXPECT_EQ(o.report["cell"]["rank"].type, json::Value::Type::NUMBER);
 }
 
 TEST(DivergenceReportTest, AnInflowTheFlowCannotTakeIsTheBoundary) {

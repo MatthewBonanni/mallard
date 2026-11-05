@@ -22,6 +22,9 @@ int resolve_main(const cli::Args & args);
 /** @brief `mallard reactor -i input.toml`: a 0D reactor or chemistry benchmark. */
 int reactor_main(const cli::Args & args);
 
+/** @brief `mallard info FILE|RUN_DIR`: what a file or a run directory holds. */
+int info_main(const cli::Args & args);
+
 /** @brief `mallard mesh convert INPUT OUTPUT.h5`. */
 int mesh_convert_main(const cli::Args & args);
 
