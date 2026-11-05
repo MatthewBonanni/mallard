@@ -352,6 +352,39 @@ tutorial, in 2D and 3D, into
 reads; CI checks that it is up to date, and `tools/dev/input_catalog.py docs`
 that the defaults this reference states match it.
 
+## The resolved input
+
+An input sets the keys that matter for its case; the run uses many more, at
+their defaults or as a [numerics preset](numerics.md#presets) fills them.
+`mallard input resolve` writes the input as the run uses it:
+
+```sh
+mallard input resolve input.toml > full.toml
+```
+
+`full.toml` has every key the setup reads, each with the value the run takes:
+
+- defaults and the keys of a preset written out, renamed keys under their new
+  names ([inputs from older releases](#inputs-from-older-releases));
+- quantities with a unit as plain numbers in the key's units (`t_stop = "1 min"`
+  becomes `t_stop = 60.0`), and numbers written so they read back exactly;
+- keys sorted, comments dropped.
+
+Keys the setup does not read are left out, and so are tables the input leaves
+out, since a table's presence can turn a feature on (`[integrals]`,
+`[statistics]`). A key whose
+absence is a choice of its own (one of alternative keys such as `X` and `Y`, a
+`[[write_data]]` `format` the build picks) stays absent too. `mallard -i
+full.toml` runs bitwise the same as `input.toml`, and resolves to `full.toml`
+again, so comparing two resolved inputs (`diff`) shows every setting in which
+two runs differ.
+
+Every output file's [provenance](output.md#provenance) holds the same text,
+`input.resolved`, next to the input file's own text: the results of a run carry
+the input that reproduces them. The resolved input, the key catalog above and
+the preset's keys in the provenance are all made from the same record, the
+setup's accessors, so they cannot disagree.
+
 ## The other commands
 
 Every command's options, examples and exit status: [Command line](cli.md).
@@ -359,6 +392,7 @@ Every command's options, examples and exit status: [Command line](cli.md).
 | Command | Purpose | Guide |
 |---|---|---|
 | `mallard input upgrade old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
+| `mallard input resolve input.toml` | The input as the run uses it, every key explicit | [The resolved input](#the-resolved-input) |
 | `mallard reactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallard-reactor) |
 | `mallard mesh convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
 | `mallard test` | The unit and regression tests: `mallard-test2d` and `mallard-test3d` (`build/test/mallard-test2d`), from a build or an install tree; `--dim 2\|3` runs one | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |

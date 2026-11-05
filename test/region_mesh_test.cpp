@@ -22,7 +22,7 @@
 #include "gmsh_fixtures.h"
 #include "input.h"
 #include "mesh.h"
-#include "region.h"
+#include "region_input.h"
 #include "region_mesh.h"
 #include "test_fixtures.h"
 
@@ -47,7 +47,7 @@ struct Fixture {
     region::MeshRegions automatic{*mesh};
 
     region::Region region(const std::string & table) const {
-        return region::Region(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic);
+        return region::read(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic);
     }
     region::Elements elements(const std::string & table) const { return region::elements(*mesh, region(table)); }
 };
@@ -361,7 +361,7 @@ TEST(RegionMeshTest, ClippedPrimitiveSurfacesConvergeAtHighOrder) {
             mesh->init_cart_3d(n, n, n, 1.0, 1.0, 1.0, MeshType::CARTESIAN_TET);
 #endif
             const region::MeshRegions automatic(*mesh);
-            const region::Region r(parse_toml("r = {type = \"intersection\", regions = [" + shell + ", " + clip + "]}").at("r"),
+            const region::Region r = region::read(parse_toml("r = {type = \"intersection\", regions = [" + shell + ", " + clip + "]}").at("r"),
                                    "r", nullptr, &automatic);
             const region::Elements e = region::elements(*mesh, r);
             double m = 0.0, f = 0.0;

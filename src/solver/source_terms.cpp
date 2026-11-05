@@ -18,7 +18,7 @@
 #include "comm.h"
 #include "exact_sums.h"
 #include "input.h"
-#include "region.h"
+#include "region_input.h"
 
 namespace sources {
 
@@ -238,7 +238,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
 
         std::string kinds;
         for (const auto & [column, text, name] : values) {
-            kexpr::Program p(where + "." + name, text, names);
+            kexpr::Program p(where + "." + name, text, names, expression_unit_hint);
             if (total) {
                 for (uint16_t i = 0; i < n_variables; i++) {
                     if (i != TIME && p.uses(i)) {

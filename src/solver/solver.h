@@ -56,7 +56,7 @@
 #include "numerics_preset.h"
 #include "run_status.h"
 #include "input_upgrade.h"
-#include "region.h"
+#include "region_input.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -482,7 +482,7 @@ class Solver {
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
         /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
         const Input & resolved_input() const { return input; }
-        /** @brief The numerics preset and the value and origin of each of its keys. */
+        /** @brief The numerics preset and the origin of each of its keys. */
         const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
 
         /** @brief Test-only: errors injected into the update, for the conservation ledger's tests. */
@@ -567,7 +567,7 @@ class Solver {
         std::string stop_reason() const;  // Empty while no stop condition holds
         bool state_needed() const;        // Whether output, checks or the end of the run read the state now
         double progress() const;          // Fraction of the run done, by the first stop condition to hit
-        void print_setup() const;
+        void print_setup(const ResolvedInput & resolved) const;
         void print_progress();
         void print_summary(const std::string & stop) const;
         /** @brief The status at this step, throughput since the last progress row; no diagnostics or memory. */
