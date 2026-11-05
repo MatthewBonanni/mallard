@@ -200,7 +200,7 @@ jobs:
   build-and-test:
     needs: matrix
     if: needs.matrix.outputs.any == 'true'
-    runs-on: ${{ matrix.backend.os || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.backend.os || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
@@ -349,7 +349,7 @@ jobs:
   tutorials:
     needs: [changelog, device]
     if: needs.device.outputs.code == 'true' && (!inputs.only || contains(format(',{0},', inputs.only), ',tutorials,'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -442,7 +442,7 @@ jobs:
     if: >-
       (needs.device.outputs.changed == 'true' || github.ref == 'refs/heads/main' || inputs.device)
       && (!inputs.only || contains(format(',{0},', inputs.only), ',device,'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
       fail-fast: false
@@ -507,7 +507,7 @@ jobs:
     if: >-
       (needs.device.outputs.changed == 'true' || inputs.device)
       && (!inputs.only || contains(format(',{0},', inputs.only), ',device,'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: ${{ matrix.toolchain.image }}
     strategy:
       fail-fast: false
