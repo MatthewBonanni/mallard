@@ -202,6 +202,7 @@ std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & qualit
     set_output_files_enabled(true);
     DataWriter writer;
     writer.init(writer_input, quality_data, mesh);
+    writer.omit_snapshot_block();
     writer.write(0, 0.0_r, true);
     writer.finish();
     set_output_files_enabled(false);

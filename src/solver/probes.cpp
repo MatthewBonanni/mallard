@@ -32,7 +32,9 @@
 #include "input.h"
 #include "log.h"
 #include "provenance.h"
+#include "json.h"
 #include "region_input.h"
+#include "snapshot_block.h"
 #include "viscous_flux.h"
 
 #ifdef Mallard_HAS_HDF5
@@ -272,8 +274,8 @@ std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
  *        vertices (points), polyline points (curves) or polygons (3D
  *        surfaces of mesh faces), with one array per variable.
  */
-void write_vtp_file(const std::string & file, double t, const probe::Geometry & g, const std::vector<std::string> & names,
-                    const std::vector<double> & values, size_t n_columns) {
+void write_vtp_file(const std::string & file, const snapshot_block::Block & block, const probe::Geometry & g,
+                    const std::vector<std::string> & names, const std::vector<double> & values, size_t n_columns) {
     struct Array {
         std::string name, type;
         int components;
@@ -322,10 +324,14 @@ void write_vtp_file(const std::string & file, double t, const probe::Geometry & 
         descriptions.push_back(geometry_field(arrays[a].name, g));
     }
     // Field data belongs to the data set, before the piece, for VTK to read it
-    out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
+    out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n"
+        << provenance::xml_comment(snapshot_block::NAME, block.json())
+        << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
            "header_type=\"UInt64\">\n  <PolyData>\n";
     out << "    <FieldData>\n      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
-        << std::setprecision(17) << t << "</DataArray>\n      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
+        << std::setprecision(17) << block.time << "</DataArray>\n"
+        << "      <DataArray type=\"Int64\" Name=\"STEP\" NumberOfTuples=\"1\" format=\"ascii\">" << block.step
+        << "</DataArray>\n      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" "
            "format=\"ascii\">"
         << file_format::PROBE_OUTPUT.version << "</DataArray>\n"
         << field_units::vtk_field_data(sample_names, descriptions, "      ") << "    </FieldData>\n";
@@ -349,13 +355,16 @@ void write_vtp_file(const std::string & file, double t, const probe::Geometry & 
     out << "\n  </AppendedData>\n</VTKFile>\n";
 }
 
-void write_pvd_file(const std::string & file, const std::vector<std::pair<double, std::string>> & series) {
+template <typename Series>
+void write_pvd_file(const std::string & file, const Series & series) {
     make_parent(file);
     std::ofstream out(file, std::ios::trunc);
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n<VTKFile type=\"Collection\" version=\"1.0\">\n  <Collection>\n";
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
-    for (const auto & [t, name] : series) {
-        out << "    <DataSet timestep=\"" << t << "\" file=\"" << name << "\"/>\n";
+    for (const auto & e : series) {
+        out << "    <DataSet timestep=\"" << e.t << "\"";
+        if (e.step >= 0) out << " step=\"" << e.step << "\"";
+        out << " file=\"" << e.file << "\"/>\n";
     }
     out << "  </Collection>\n</VTKFile>\n";
 }
@@ -1459,12 +1468,13 @@ void Probes::resume([[maybe_unused]] uint64_t step, rtype t) {
                 std::stringstream ss;
                 ss << in.rdbuf();
                 const std::string text = ss.str();
-                const std::regex entry_re("timestep=\"([^\"]+)\" file=\"([^\"]+)\"");
+                const std::regex entry_re("timestep=\"([^\"]+)\"(?: step=\"([^\"]+)\")? file=\"([^\"]+)\"");
                 for (auto it = std::sregex_iterator(text.begin(), text.end(), entry_re); it != std::sregex_iterator();
                      ++it) {
                     const double t_entry = std::stod((*it)[1].str());
+                    const int64_t step_entry = (*it)[2].matched ? std::stoll((*it)[2].str()) : -1;
                     if (t_entry <= static_cast<double>(t) * (1.0 + 1e-12)) {
-                        p.series.emplace_back(t_entry, (*it)[2].str());
+                        p.series.push_back({t_entry, step_entry, (*it)[3].str()});
                     }
                 }
             }
@@ -1606,10 +1616,18 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
                 out.flush();
             } else if (p.format == Format::HDF5) {
                 p.write_hdf5(step, t, nodes);
-            } else if (p.format == Format::VTKHDF) {
-                p.write_vtkhdf(t, nodes);
             } else {
-                p.write_vtp(step, t, nodes);
+                const snapshot_block::Block block =
+                    p.snapshot_of(step, t, p.snapshot ? snapshot_block::current_reason(force) : snapshot_block::reason::INTERVAL);
+                if (p.format == Format::VTKHDF) {
+                    p.write_vtkhdf(block, nodes);
+                } else {
+                    p.write_vtp(block, nodes);
+                }
+                if (p.snapshot) {
+                    logging::output(step, double(t), p.format == Format::VTKHDF ? "vtkhdf" : "vtp", p.last_file,
+                                    block.reason, p.file);
+                }
             }
         }
         if (!p.reductions.empty()) p.write_reductions(step, t, nodes, quad);
@@ -1791,8 +1809,20 @@ void Probes::Probe::write_hdf5([[maybe_unused]] uint64_t step, [[maybe_unused]] 
 #endif
 }
 
-void Probes::Probe::write_vtkhdf([[maybe_unused]] rtype t, [[maybe_unused]] const std::vector<double> & values) {
+snapshot_block::Block Probes::Probe::snapshot_of(uint64_t step, rtype t, const std::string & reason) const {
+    std::vector<snapshot_block::Field> list;
+    for (const auto & v : variables) {
+        const FieldDescription d = field_units::describe(v);
+        list.push_back({v, d.units(), d.long_name, "float64", 0.0});
+    }
+    return snapshot_block::make(step, double(t), reason, format == Format::VTKHDF ? "vtkhdf" : "vtp",
+                                file_format::PROBE_OUTPUT.version, std::move(list));
+}
+
+void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & block,
+                                 [[maybe_unused]] const std::vector<double> & values) {
 #ifdef Mallard_HAS_HDF5
+    last_file = file;
     const std::lock_guard<std::mutex> lock(h5::mutex());
     const uint64_t k = vtkhdf_steps, n = geometry.nodes.size();
     const size_t n_cols = n_evaluated();
@@ -1807,7 +1837,7 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] rtype t, [[maybe_unused]] cons
         h5::Handle created(H5Fcreate(file.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + file);
         {
             h5::Handle root(H5Gopen2(created, "/", H5P_DEFAULT), H5Gclose, "opening /");
-            h5::write_strings_attribute(root, "provenance", {provenance});
+            h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
             h5::write_int_attribute(root, "version", static_cast<int>(file_format::PROBE_OUTPUT.version));
         }
         h5::Handle top(H5Gcreate2(created, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "VTKHDF");
@@ -1848,6 +1878,27 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] rtype t, [[maybe_unused]] cons
         }
     }
     h5::Handle h5file(H5Fopen(file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + file);
+    if (k > 0 && !vtkhdf_run_written) {
+        // A file continued by another run carries that run's block; each step's snapshot block names its run
+        h5::Handle root(H5Gopen2(h5file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+        for (const char * attribute : {provenance::ATTRIBUTE, provenance::LEGACY_ATTRIBUTE}) {
+            if (H5Aexists(root, attribute) > 0) h5::check(H5Adelete(root, attribute), "H5Adelete");
+        }
+        h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance::json()});
+    }
+    vtkhdf_run_written = true;
+    {
+        h5::Handle field_data(H5Gopen2(h5file, "VTKHDF/FieldData", H5P_DEFAULT), H5Gclose, "opening FieldData");
+        h5::put_rows(field_data, "TIME", k + 1, 1, k, 1, &block.time, H5P_DEFAULT);
+        h5::put_rows(field_data, "STEP", k + 1, 1, k, 1, &block.step, H5P_DEFAULT);
+        if (k == 0) {
+            h5::annotate(field_data, "TIME", FieldDescription{dim::time, "time", "time", ""});
+            h5::annotate(field_data, "STEP", FieldDescription{dim::none, "time step number", "", ""});
+        }
+        const std::string text = block.json();
+        h5::put_string_row(h5file, snapshot_block::DATASET, k + 1, k, true, text,
+                           snapshot_block::dataset_width(text.size()), H5P_DEFAULT);
+    }
     h5::Handle samples(H5Gopen2(h5file, ("VTKHDF/" + data).c_str(), H5P_DEFAULT), H5Gclose, "opening " + data);
     std::vector<double> column(n);
     for (size_t v = 0; v < variables.size(); v++) {
@@ -1858,8 +1909,13 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] rtype t, [[maybe_unused]] cons
     // The geometry is the same at every snapshot: its offsets all stay 0
     h5::Handle steps(H5Gopen2(h5file, "VTKHDF/Steps", H5P_DEFAULT), H5Gclose, "opening Steps");
     h5::set_attribute<int64_t>(steps, "NSteps", static_cast<int64_t>(k + 1));
-    const double time = static_cast<double>(t);
+    const double time = block.time;
     const int64_t zeros[4] = {0, 0, 0, 0}, one = 1, offset = static_cast<int64_t>(k * n);
+    {
+        h5::Handle field_offsets(H5Gopen2(steps, "FieldDataOffsets", H5P_DEFAULT), H5Gclose, "opening FieldDataOffsets");
+        const int64_t field_offset = static_cast<int64_t>(k);
+        for (const char * entry : {"TIME", "STEP"}) h5::put_rows(field_offsets, entry, k + 1, 1, k, 1, &field_offset, H5P_DEFAULT);
+    }
     h5::put_rows(steps, "Values", k + 1, 1, k, 1, &time, H5P_DEFAULT);
     if (k == 0) h5::annotate(steps, "Values", FieldDescription{dim::time, "time", "time", ""});
     h5::put_rows(steps, "PartOffsets", k + 1, 1, k, 1, zeros, H5P_DEFAULT);
@@ -1875,13 +1931,13 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] rtype t, [[maybe_unused]] cons
 #endif
 }
 
-void Probes::Probe::write_vtp(uint64_t step, rtype t, const std::vector<double> & values) {
+void Probes::Probe::write_vtp(const snapshot_block::Block & block, const std::vector<double> & values) {
     const std::filesystem::path pvd(file);
     std::ostringstream piece;
-    piece << pvd.stem().string() << "_" << std::setw(6) << std::setfill('0') << step << ".vtp";
-    write_vtp_file((pvd.parent_path() / piece.str()).string(), static_cast<double>(t), geometry, variables, values,
-                   n_evaluated());
-    series.emplace_back(static_cast<double>(t), piece.str());
+    piece << pvd.stem().string() << "_" << std::setw(6) << std::setfill('0') << block.step << ".vtp";
+    last_file = (pvd.parent_path() / piece.str()).string();
+    write_vtp_file(last_file, block, geometry, variables, values, n_evaluated());
+    series.push_back({block.time, block.step, piece.str()});
     write_pvd_file(file, series);
 }
 
@@ -1965,7 +2021,7 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
     return items;
 }
 
-void Probes::annotate(const std::string & csv_line) {
+void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t step) {
     if (!comm::is_root() || !output_files_enabled()) return;
     for (auto & p : probes) {
         if (p->out) *p->out << csv_line << std::flush;
@@ -1975,8 +2031,24 @@ void Probes::annotate(const std::string & csv_line) {
             const std::lock_guard<std::mutex> lock(h5::mutex());
             h5::Handle file(H5Fopen(p->file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + p->file);
             h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
-            if (H5Aexists(root, "provenance") > 0) h5::check(H5Adelete(root, "provenance"), "H5Adelete");
-            h5::write_strings_attribute(root, "provenance", {provenance::json()});
+            for (const char * name : {provenance::ATTRIBUTE, provenance::LEGACY_ATTRIBUTE}) {
+                if (H5Aexists(root, name) > 0) h5::check(H5Adelete(root, name), "H5Adelete");
+            }
+            h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance::json()});
+            // Each run that wrote the file, with its first row and step
+            constexpr const char * RUNS = "mallard_runs";
+            std::vector<std::string> runs;
+            if (H5Aexists(root, RUNS) > 0) {
+                runs = h5::read_strings_attribute(root, RUNS);
+                h5::check(H5Adelete(root, RUNS), "H5Adelete");
+            }
+            runs.push_back(json::Object()
+                               .add("run_id", provenance::run_id())
+                               .raw("restart_of", provenance::restart_of())
+                               .add("first_row", h5::n_rows(file, "step"))
+                               .add("first_step", step)
+                               .str());
+            h5::write_strings_attribute(root, RUNS, runs);
         }
 #endif
     }

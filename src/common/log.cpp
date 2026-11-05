@@ -17,6 +17,7 @@
 
 #include "comm.h"
 #include "json.h"
+#include "provenance.h"
 #include "run_log.h"
 
 namespace logging {
@@ -180,6 +181,24 @@ void event(uint64_t step, double t, std::string_view kind, std::string_view text
     line(format("%8llu %10.4e  ", static_cast<unsigned long long>(step), t) + style(padded, Style::CYAN) + " " +
          std::string(text));
     run_log::write(json::Object().add("type", "event").add("step", step).add("t", t).add("kind", kind).add("text", text));
+}
+
+void output(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+            std::string_view writer) {
+    if (!comm::is_root()) return;
+    std::string padded(kind);
+    if (padded.size() < 8) padded.resize(8, ' ');
+    line(format("%8llu %10.4e  ", static_cast<unsigned long long>(step), t) + style(padded, Style::CYAN) + " " +
+         std::string(path));
+    run_log::write(json::Object()
+                       .add("type", "output")
+                       .add("step", step)
+                       .add("t", t)
+                       .add("kind", kind)
+                       .add("path", path)
+                       .add("reason", reason)
+                       .add("writer", writer)
+                       .add("run_id", provenance::run_id()));
 }
 
 void warning(std::string_view message) {

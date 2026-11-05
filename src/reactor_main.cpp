@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,7 @@
 #include "log.h"
 #include "mixture.h"
 #include "parallel/comm.h"
+#include "provenance.h"
 #include "reactor.h"
 #include "thermo.h"
 
@@ -47,6 +49,11 @@ std::string brief(const double x) {
 
 void run(const std::string & input_file) {
     const Input input = parse_input(input_file);
+    provenance::start_run();
+    {
+        std::ifstream text(input_file);
+        provenance::set_input(input_file, std::string(std::istreambuf_iterator<char>(text), {}));
+    }
     const MixtureModel model = MixtureModel::from_input(input);
     if (!input.contains("reactor")) throw InputError("missing [reactor].");
     const Input & table = input.at("reactor");
@@ -89,12 +96,16 @@ void run(const std::string & input_file) {
 
     std::ofstream out(output);
     if (!out) throw InputError("cannot write reactor.output = \"" + output + "\".");
-    out << "t,T,p";
+    out << "step,t,T,p";
     for (const auto & name : mech.species_names()) out << ",Y_" << name;
-    out << "\n";
+    out << "\n# units: 1,s,K,kg m-1 s-2";
+    for (size_t k = 0; k < mech.species_names().size(); k++) out << ",1";
+    out << "\n" << provenance::csv_comment() << "\n";
     double T = T0;
+    uint64_t row = 0;
     auto write_row = [&](const double t) {
-        out << format(t) << "," << format(T) << "," << format(rho * thermo.gas_constant(chemistry::MassFractions{Y.data()}) * T);
+        out << row++ << "," << format(t) << "," << format(T) << ","
+            << format(rho * thermo.gas_constant(chemistry::MassFractions{Y.data()}) * T);
         for (double y : Y) out << "," << format(y);
         out << "\n";
     };

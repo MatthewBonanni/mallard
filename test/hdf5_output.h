@@ -25,6 +25,7 @@
 
 #include "comm.h"
 #include "hdf5_util.h"
+#include "snapshot_block.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -95,7 +96,11 @@ inline void expect_hdf5_output_matches_serial(const std::string & input, const s
     comm::barrier();
 }
 
-/** @brief The bytes, as stored, of every dataset of a file, by path (e.g. "VTKHDF/CellData/RHO"). */
+/**
+ * @brief The bytes, as stored, of every dataset of a file, by path (e.g.
+ *        "VTKHDF/CellData/RHO"), but the snapshot blocks, which name the run
+ *        and when it wrote them.
+ */
 inline std::map<std::string, std::vector<char>> h5_all_datasets(const std::string & filename) {
     using h5::Handle;
     Handle file(H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + filename);
@@ -108,7 +113,7 @@ inline std::map<std::string, std::vector<char>> h5_all_datasets(const std::strin
     std::map<std::string, std::vector<char>> datasets;
     for (const auto & path : paths) {
         Handle object(H5Oopen(file, path.c_str(), H5P_DEFAULT), H5Oclose, path);
-        if (H5Iget_type(object) != H5I_DATASET) continue;
+        if (H5Iget_type(object) != H5I_DATASET || path == snapshot_block::DATASET) continue;
         Handle dset(H5Dopen2(file, path.c_str(), H5P_DEFAULT), H5Dclose, path);
         Handle type(H5Dget_type(dset), H5Tclose, "H5Dget_type");
         Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");

@@ -467,8 +467,8 @@ The gaps between the jobs are their setups, about 11 s each here (mostly the
 TENO stencils and the deeper halo they need): a chain of jobs pays the setup once per job, so make each job
 long against it. The result does not depend on the stops: the solution in
 `restart_001167.restart` is bit for bit that of an uninterrupted run on 2 ranks
-(the files differ only in their provenance trailer, which records when and
-where each was written). A run can also resume on a different number of ranks
+(the files differ only in their run and snapshot block trailers, which record
+when and where each was written, and by which run). A run can also resume on a different number of ranks
 ([Restarts](../guide/parallel.md#restarts)), for instance on whatever GPUs the
 queue has free.
 

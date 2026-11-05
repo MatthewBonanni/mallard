@@ -121,17 +121,39 @@ void describe_from_table(Field & f) {
     f.long_name = d->long_name;
 }
 
+/** @brief A snapshot at (t, step) of file, with its snapshot block if json holds one: the block's step, time and run then hold. */
+Snapshot snapshot_of(double t, int64_t step, const std::string & file, uint64_t index, const std::string & json_text) {
+    Snapshot s{t, step, file, index, false, {}, ""};
+    if (json_text.empty()) return s;
+    try {
+        s.block = snapshot_block::parse(json_text);
+        s.has_block = true;
+        if (s.block.step >= 0) s.step = s.block.step;
+        if (std::isfinite(s.block.time)) s.t = s.block.time;
+        s.run_id = s.block.run_id;
+    } catch (const std::exception &) {
+        // Reported by note_snapshots: a block that does not parse is no block
+    }
+    return s;
+}
+
 void note_provenance(Contents & c) {
-    if (c.provenance.empty()) {
-        c.notes.push_back("no provenance: written before Mallard 0.9, or not by Mallard");
+    if (c.run.empty()) {
+        c.notes.push_back("no run block: written before Mallard 0.9, or not by Mallard");
         return;
     }
     try {
-        const json::Value p = json::parse(c.provenance);
+        const json::Value p = json::parse(c.run);
         const json::Value * v = p.find("version");
+        const json::Value * schema = p.find("schema");
         if (v && v->number > provenance::VERSION) {
-            c.notes.push_back("provenance version " + std::to_string(int(v->number)) + " is newer than this build's (" +
+            c.notes.push_back("run block version " + std::to_string(int(v->number)) + " is newer than this build's (" +
                               std::to_string(provenance::VERSION) + "): shown as recorded");
+        }
+        if (schema && schema->string == provenance::LEGACY_SCHEMA) {
+            c.notes.push_back("run block of version " + std::to_string(v ? int(v->number) : 0) +
+                              ", under its earlier name \"provenance\" (written before Mallard 0.10): it records no "
+                              "run id");
         }
         if (c.dim == 0) {
             const json::Value * build = p.find("build");
@@ -139,7 +161,33 @@ void note_provenance(Contents & c) {
             if (d && d->type == json::Value::Type::NUMBER) c.dim = int(d->number);
         }
     } catch (const std::exception & e) {
-        c.notes.push_back(std::string("the provenance block is not valid JSON (") + e.what() + ")");
+        c.notes.push_back(std::string("the run block is not valid JSON (") + e.what() + ")");
+    }
+}
+
+/** @brief The run id of a run block, or "". */
+std::string run_id_of(const std::string & run) { return provenance::find_string(run, "run", "run_id"); }
+
+/** @brief Notes on snapshots that record less than the snapshot block (older files), and the run of each. */
+void note_snapshots(Contents & c) {
+    if (c.kind == Kind::mesh || c.snapshots.empty()) return;
+    const std::string run = run_id_of(c.run);
+    bool all_blocks = true, any_step = false, all_steps = true;
+    for (Snapshot & s : c.snapshots) {
+        if (s.run_id.empty() && c.kind != Kind::table) s.run_id = run;
+        all_blocks = all_blocks && s.has_block;
+        any_step = any_step || s.step >= 0;
+        all_steps = all_steps && s.step >= 0;
+    }
+    if (c.kind == Kind::table) return;
+    if (!all_steps) {
+        c.notes.push_back(std::string(any_step ? "some snapshots record" : "the file records") +
+                          " no step (written before Mallard 0.10): those snapshots are numbered by their position "
+                          "in the file, from 0, and their step is shown as -");
+    }
+    if (!all_blocks && c.format != "probe HDF5") {
+        c.notes.push_back("no snapshot block (written before Mallard 0.10): step and time are the format's own "
+                          "records; reason, run and stored precision are unknown");
     }
 }
 
@@ -161,7 +209,7 @@ Contents open_restart(const std::string & path) {
     c.dim = std::find(h.names.begin(), h.names.end(), "RHOU_Z") != h.names.end() ? 3 : 2;
     c.mesh.n_cells = h.n_cells;
     c.global_order = true;
-    c.snapshots.push_back({h.t, static_cast<int64_t>(h.step), path, 0});
+    c.snapshots.push_back(snapshot_of(h.t, static_cast<int64_t>(h.step), path, 0, h.snapshot));
     for (const auto & name : h.names) {
         Field f;
         f.name = name;
@@ -169,7 +217,7 @@ Contents open_restart(const std::string & path) {
         describe_from_table(f);
         c.fields.push_back(f);
     }
-    c.provenance = h.provenance;
+    c.run = h.provenance;
     return c;
 }
 
@@ -403,10 +451,20 @@ struct VtkXml {
     }
 };
 
+/** @brief The snapshot of a VTU or VTP piece's header: TIME, STEP and the snapshot block. */
+std::optional<Snapshot> vtk_snapshot(const VtkXml & x, const std::string & path) {
+    const std::string field_data = section(x.header, "FieldData");
+    const auto t = inline_array(field_data, "TIME");
+    if (!t) return std::nullopt;
+    const auto step = inline_array(field_data, "STEP");
+    return snapshot_of(std::stod(*t), step ? std::stoll(*step) : -1, path, 0,
+                       provenance::parse_comment(x.header, snapshot_block::NAME));
+}
+
 /** @brief Fields, time and version from a VTU or VTP piece's header. */
 void read_vtk_metadata(Contents & c, const VtkXml & x, const char * data_section, const file_format::Format & format) {
     const std::string field_data = section(x.header, "FieldData");
-    if (const auto t = inline_array(field_data, "TIME")) c.snapshots.push_back({std::stod(*t), -1, c.path, 0});
+    if (const auto s = vtk_snapshot(x, c.path)) c.snapshots.push_back(*s);
     if (const auto v = inline_array(field_data, "MALLARD_FORMAT_VERSION")) {
         c.version = std::stoll(*v);
         file_format::check_version(format, c.path, c.version);
@@ -432,7 +490,7 @@ void read_vtk_metadata(Contents & c, const VtkXml & x, const char * data_section
         if (c.real_size == 0 && (a.type == "Float64" || a.type == "Float32")) c.real_size = a.type == "Float64" ? 8 : 4;
     }
     c.compressed = x.zlib;
-    c.provenance = provenance::parse_comment(x.header);
+    c.run = provenance::parse_comment(x.header);
 }
 
 void read_vtu_mesh(MeshSummary & m, const VtkXml & x) {
@@ -488,7 +546,7 @@ Contents open_vtu(const std::string & path) {
     } else {
         fail(path, "is a VTK " + x.type + " file, which Mallard does not write");
     }
-    if (c.snapshots.empty()) c.snapshots.push_back({0.0, -1, path, 0});
+    if (c.snapshots.empty()) c.snapshots.push_back(snapshot_of(0.0, -1, path, 0, ""));
     return c;
 }
 
@@ -503,7 +561,7 @@ Contents open_pvtu(const std::string & path) {
     for (const auto & piece : pieces) read_vtu_mesh(c.mesh, VtkXml(piece));
     for (auto & s : c.snapshots) s.file = path;
     const std::string own = provenance::parse_comment(text);
-    if (!own.empty()) c.provenance = own;
+    if (!own.empty()) c.run = own;
     c.notes.push_back(std::to_string(pieces.size()) + " pieces, one per rank of the run");
     return c;
 }
@@ -529,31 +587,67 @@ std::vector<double> read_vtu_field(const std::string & file, const std::string &
 
 struct Entry {
     double t;
+    int64_t step;  // -1 where the index records none
     std::string file;
+    std::string mesh;  // XDMF: the grid's mesh file
 };
 
+/** @brief The text of each element <name ...>...</name> of text. */
+std::vector<std::string> elements(const std::string & text, const std::string & name) {
+    std::vector<std::string> out;
+    const std::string open = "<" + name + " ", close = "</" + name + ">";
+    for (size_t a = text.find(open); a != std::string::npos; a = text.find(open, a + 1)) {
+        const size_t b = text.find(close, a);
+        if (b == std::string::npos) break;
+        out.push_back(text.substr(a, b - a));
+    }
+    return out;
+}
+
+/**
+ * @brief The snapshots an index lists: time, step where it records one, and
+ *        file. XDMF grids name their file in their data items, read from there.
+ */
 std::vector<Entry> series_entries(const std::string & path, std::string & own_provenance) {
     std::vector<Entry> out;
     const std::string text = read_bytes(path);
     if (ends_with(path, ".vtkhdf.series")) {
         const json::Value index = json::parse(text);
-        for (const auto & e : index["files"].array) out.push_back({e["time"].number, sibling(path, e["name"].string)});
+        for (const auto & e : index["files"].array) {
+            const json::Value * step = e.find("step");
+            out.push_back({e["time"].number, step ? static_cast<int64_t>(step->number) : -1,
+                           sibling(path, e["name"].string), ""});
+        }
         return out;
     }
     own_provenance = provenance::parse_comment(text);
     if (ends_with(path, ".pvd")) {
         for (const auto & t : tags(text, "DataSet")) {
-            if (t.count("file")) out.push_back({std::stod(t.count("timestep") ? t.at("timestep") : "0"), sibling(path, t.at("file"))});
+            if (!t.count("file")) continue;
+            out.push_back({std::stod(t.count("timestep") ? t.at("timestep") : "0"),
+                           t.count("step") ? std::stoll(t.at("step")) : -1, sibling(path, t.at("file")), ""});
         }
         return out;
     }
-    // XDMF: the uniform grids of the temporal collection (or the one grid), each a snapshot file stem
-    static const std::regex grid(R"re(<Grid Name="([^"]+)" GridType="Uniform">\s*<Time Value="([^"]+)"/>)re");
-    for (auto it = std::sregex_iterator(text.begin(), text.end(), grid); it != std::sregex_iterator(); ++it) {
-        out.push_back({std::stod((*it)[2].str()), sibling(path, (*it)[1].str() + ".h5")});
+    // XDMF: the uniform grids of the temporal collection (or the one grid)
+    static const std::regex time(R"re(<Time Value="([^"]+)"/>)re");
+    static const std::regex step(R"re(<Information Name="step" Value="([^"]+)"/>)re");
+    static const std::regex fields(R"re(>([^<>:]+):/fields/)re");
+    static const std::regex mesh(R"re(>([^<>:]+):/nodes/coordinates)re");
+    for (const std::string & grid : elements(text, "Grid")) {
+        if (grid.substr(0, grid.find('>')).find("GridType=\"Uniform\"") == std::string::npos) continue;
+        std::smatch t, s, f, m;
+        if (!std::regex_search(grid, f, fields)) continue;
+        const bool has_time = std::regex_search(grid, t, time);
+        const bool has_step = std::regex_search(grid, s, step);
+        std::regex_search(grid, m, mesh);
+        out.push_back({has_time ? std::stod(t[1].str()) : 0.0, has_step ? std::stoll(s[1].str()) : -1,
+                       sibling(path, f[1].str()), m.empty() ? "" : sibling(path, m[1].str())});
     }
     return out;
 }
+
+std::vector<Snapshot> member_snapshots(const std::string & path);
 
 Contents open_series(const std::string & path, const std::string & format) {
     std::string own;
@@ -564,20 +658,31 @@ Contents open_series(const std::string & path, const std::string & format) {
     Contents c = open(last);
     c.notes.erase(std::remove_if(c.notes.begin(), c.notes.end(),
                                  [](const std::string & n) {
-                                     return n.starts_with("no provenance") || n.starts_with("provenance version");
+                                     return n.starts_with("no run block") || n.starts_with("run block") ||
+                                            n.starts_with("no snapshot block") || n.starts_with("the file records no step") ||
+                                            n.starts_with("some snapshots record");
                                  }),
                   c.notes.end());
     const std::string member_format = c.format;
     c.path = path;
     c.format = format + " (" + member_format + " snapshots)";
-    const Snapshot newest = c.snapshots.empty() ? Snapshot{} : c.snapshots.back();
     c.snapshots.clear();
-    for (size_t i = 0; i < entries.size(); i++) {
-        Snapshot s{entries[i].t, -1, entries[i].file, 0};
-        if (i + 1 == entries.size()) s.step = newest.step;
+    for (const Entry & e : entries) {
+        // The index's time and step, and the member's own block
+        Snapshot s = snapshot_of(e.t, e.step, e.file, 0, "");
+        if (fs::exists(e.file)) {
+            const std::vector<Snapshot> own_snapshots = member_snapshots(e.file);
+            if (!own_snapshots.empty()) {
+                const Snapshot & m = own_snapshots.front();
+                s.has_block = m.has_block;
+                s.block = m.block;
+                s.run_id = m.run_id;
+                if (s.step < 0) s.step = m.step;
+            }
+        }
         c.snapshots.push_back(s);
     }
-    if (!own.empty()) c.provenance = own;
+    if (!own.empty()) c.run = own;
     return c;
 }
 
@@ -587,7 +692,10 @@ Contents open_series(const std::string & path, const std::string & format) {
 struct Table {
     std::vector<std::string> header, units;
     std::vector<std::vector<double>> rows;
-    std::string provenance;
+    std::string provenance;                                // the last run block
+    std::vector<std::pair<size_t, std::string>> runs;      // each run block, with the row it precedes
+    std::string snapshot;                                  // a file of one snapshot (spectra): its block
+    std::string legacy_snapshot;                           // spectra before 0.10: "# step = ..., t = ..."
 };
 
 std::vector<std::string> split(const std::string & line, char sep) {
@@ -604,15 +712,23 @@ Table read_table(const std::string & path) {
     if (!in.good()) throw cannot_read("the CSV file", path);
     Table t;
     std::string line;
+    const std::string snapshot_open = "# " + std::string(snapshot_block::NAME) + " ";
     while (std::getline(in, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (t.header.empty()) {
-            t.header = split(line, ',');
-        } else if (line.starts_with("# units: ")) {
+        if (line.starts_with("# units: ")) {
             t.units = split(line.substr(9), ',');
+        } else if (line.starts_with(snapshot_open)) {
+            t.snapshot = line.substr(snapshot_open.size());
+        } else if (line.starts_with("# step = ")) {
+            t.legacy_snapshot = line;
         } else if (line.starts_with("#")) {
             const std::string p = provenance::parse_comment(line);
-            if (!p.empty()) t.provenance = p;
+            if (!p.empty()) {
+                t.provenance = p;
+                t.runs.emplace_back(t.rows.size(), p);
+            }
+        } else if (t.header.empty()) {
+            t.header = split(line, ',');
         } else if (!line.empty()) {
             std::vector<double> row;
             for (const auto & cell : split(line, ',')) {
@@ -634,7 +750,7 @@ Contents open_csv(const std::string & path) {
     c.path = path;
     c.kind = Kind::table;
     c.format = "CSV";
-    c.provenance = t.provenance;
+    c.run = t.provenance;
     if (t.units.empty()) c.notes.push_back("no units line: written before Mallard 0.9, or not by Mallard");
     size_t time_column = t.header.size(), step_column = t.header.size();
     for (size_t i = 0; i < t.header.size(); i++) {
@@ -646,14 +762,37 @@ Contents open_csv(const std::string & path) {
         if (t.header[i] == "t") time_column = i;
         if (t.header[i] == "step") step_column = i;
     }
-    // A snapshot per run of rows of one time (probes write one row per sample)
+    // A snapshot per run of rows of one time (probes write one row per sample), of the run whose block precedes it
+    size_t segment = 0;
     for (size_t r = 0; r < t.rows.size(); r++) {
+        while (segment + 1 < t.runs.size() && t.runs[segment + 1].first <= r) segment++;
         const double time = time_column < t.header.size() ? t.rows[r][time_column] : 0.0;
         if (r > 0 && time == c.snapshots.back().t && time_column < t.header.size()) continue;
         const double step = step_column < t.header.size() ? t.rows[r][step_column] : -1.0;
-        c.snapshots.push_back({time, std::isfinite(step) ? static_cast<int64_t>(step) : -1, path, r});
+        Snapshot s = snapshot_of(time, std::isfinite(step) ? static_cast<int64_t>(step) : -1, path, r, "");
+        if (!t.runs.empty()) s.run_id = run_id_of(t.runs[segment].second);
+        c.snapshots.push_back(s);
     }
     c.mesh.n_points = c.snapshots.size() > 1 ? c.snapshots[1].index : t.rows.size();
+    if (t.runs.size() > 1) {
+        c.notes.push_back("rows of " + std::to_string(t.runs.size()) +
+                          " runs: each run's block precedes the rows it appended");
+    }
+    if (!t.snapshot.empty() || !t.legacy_snapshot.empty()) {
+        // One snapshot of the whole table (spectra)
+        Snapshot s = snapshot_of(0.0, -1, path, 0, t.snapshot);
+        if (!s.has_block) {
+            static const std::regex legacy(R"re(# step = (\d+), t = ([^,]+),)re");
+            std::smatch m;
+            if (std::regex_search(t.legacy_snapshot, m, legacy)) {
+                s.step = std::stoll(m[1].str());
+                s.t = std::stod(m[2].str());
+            }
+            c.notes.push_back("no snapshot block (written before Mallard 0.10): step and time from its \"# step = ...\" "
+                              "comment");
+        }
+        c.snapshots = {s};
+    }
     return c;
 }
 
@@ -677,7 +816,7 @@ Contents mesh_block_contents(const std::string & path, const std::string & forma
     c.path = path;
     c.kind = Kind::mesh;
     c.format = format;
-    c.notes.push_back("mesh files carry no provenance");
+    c.notes.push_back("mesh files carry no run block");
     c.dim = N_DIM;
     c.global_order = true;
     MeshSummary & m = c.mesh;
@@ -811,9 +950,18 @@ Handle open_file(const std::string & path) {
 
 std::string root_provenance(hid_t file) {
     Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
-    if (H5Aexists(root, "provenance") <= 0) return "";
-    const auto values = h5::read_strings_attribute(root, "provenance");
-    return values.empty() ? "" : values[0];
+    for (const char * name : {provenance::ATTRIBUTE, provenance::LEGACY_ATTRIBUTE}) {
+        if (H5Aexists(root, name) <= 0) continue;
+        const auto values = h5::read_strings_attribute(root, name);
+        return values.empty() ? "" : values[0];
+    }
+    return "";
+}
+
+/** @brief The snapshot blocks of an HDF5 file (snapshot_block::DATASET), one per snapshot; none in older files. */
+std::vector<std::string> root_blocks(hid_t file) {
+    if (H5Lexists(file, snapshot_block::DATASET, H5P_DEFAULT) <= 0) return {};
+    return h5::read_string_rows(file, snapshot_block::DATASET);
 }
 
 int64_t root_int(hid_t file, const char * name, int64_t fallback) {
@@ -848,7 +996,7 @@ Contents open_vtkhdf(const std::string & path) {
     const std::string type = string_attribute(top, "Type");
     Contents c;
     c.path = path;
-    c.provenance = root_provenance(file);
+    c.run = root_provenance(file);
     c.version = root_int(file, "version", -1);
     MeshSummary & m = c.mesh;
     m.n_points = first_count(top, "NumberOfPoints");
@@ -880,14 +1028,20 @@ Contents open_vtkhdf(const std::string & path) {
     const bool series = exists(top, "Steps");
     // A series stores every snapshot's rows one after the other: a field's columns are its shape's second dimension
     group_fields(c, group, data == "CellData" ? "cell" : "point");
+    Handle field_data(H5Gopen2(top, "FieldData", H5P_DEFAULT), H5Gclose, "opening FieldData");
+    const std::vector<int64_t> recorded_steps =
+        exists(field_data, "STEP") ? all<int64_t>(field_data, "STEP") : std::vector<int64_t>{};
+    const std::vector<std::string> blocks = root_blocks(file);
+    std::vector<double> times;
     if (series) {
         Handle steps(H5Gopen2(top, "Steps", H5P_DEFAULT), H5Gclose, "opening Steps");
-        const std::vector<double> times = all<double>(steps, "Values");
-        for (size_t k = 0; k < times.size(); k++) c.snapshots.push_back({times[k], -1, path, k});
+        times = all<double>(steps, "Values");
     } else {
-        Handle field_data(H5Gopen2(top, "FieldData", H5P_DEFAULT), H5Gclose, "opening FieldData");
-        const double t = exists(field_data, "TIME") ? all<double>(field_data, "TIME").at(0) : 0.0;
-        c.snapshots.push_back({t, -1, path, 0});
+        times = {exists(field_data, "TIME") ? all<double>(field_data, "TIME").at(0) : 0.0};
+    }
+    for (size_t k = 0; k < times.size(); k++) {
+        c.snapshots.push_back(snapshot_of(times[k], k < recorded_steps.size() ? recorded_steps[k] : -1, path, k,
+                                          k < blocks.size() ? blocks[k] : ""));
     }
     c.global_order = c.kind == Kind::snapshot && !c.field("REGION_FRACTION");
     if (c.field("REGION_FRACTION")) c.notes.push_back("the cells of a region, in their own order");
@@ -952,7 +1106,7 @@ Contents open_h5(const std::string & path) {
     const std::string kind = format.empty() ? "" : format[0];
     Contents c;
     c.path = path;
-    c.provenance = root_provenance(file);
+    c.run = root_provenance(file);
     c.version = root_int(file, "version", -1);
     c.dim = static_cast<int>(root_int(file, "dimension", 0));
     if (kind == "mallard-mesh") {
@@ -981,8 +1135,10 @@ Contents open_h5(const std::string & path) {
         c.global_order = true;
         const auto mesh = root_strings(file, "mesh");
         if (!mesh.empty()) c.mesh_file = sibling(path, mesh[0]);
-        c.snapshots.push_back({root_scalar<double>(file, "time", 0.0),
-                               static_cast<int64_t>(root_scalar<uint64_t>(file, "step", 0)), path, 0});
+        const std::vector<std::string> blocks = root_blocks(file);
+        c.snapshots.push_back(snapshot_of(root_scalar<double>(file, "time", 0.0),
+                                          static_cast<int64_t>(root_scalar<uint64_t>(file, "step", 0)), path, 0,
+                                          blocks.empty() ? "" : blocks[0]));
         Handle fields(H5Gopen2(file, "fields", H5P_DEFAULT), H5Gclose, "opening fields");
         group_fields(c, fields, "cell");
         if (!c.mesh_file.empty() && fs::exists(c.mesh_file)) {
@@ -1003,8 +1159,27 @@ Contents open_h5(const std::string & path) {
         bound(c.mesh, all<double>(file, "coordinates"), static_cast<size_t>(c.dim));
         const std::vector<double> times = all<double>(file, "time");
         const std::vector<uint64_t> steps = exists(file, "step") ? all<uint64_t>(file, "step") : std::vector<uint64_t>{};
+        // Each run that wrote the file, from its first row
+        std::vector<std::pair<uint64_t, std::string>> runs;
+        for (const std::string & r : root_strings(file, "mallard_runs")) {
+            try {
+                const json::Value v = json::parse(r);
+                runs.emplace_back(static_cast<uint64_t>(v["first_row"].number), v["run_id"].string);
+            } catch (const std::exception &) {
+                c.notes.push_back("an entry of mallard_runs is not valid JSON");
+            }
+        }
+        if (runs.size() > 1) c.notes.push_back("samples of " + std::to_string(runs.size()) + " runs (mallard_runs)");
+        if (runs.empty()) {
+            c.notes.push_back("no mallard_runs (written before Mallard 0.10): the run of each sample is that of the run "
+                              "block, the last run that wrote the file");
+        }
         for (size_t k = 0; k < times.size(); k++) {
-            c.snapshots.push_back({times[k], k < steps.size() ? static_cast<int64_t>(steps[k]) : -1, path, k});
+            Snapshot s = snapshot_of(times[k], k < steps.size() ? static_cast<int64_t>(steps[k]) : -1, path, k, "");
+            for (const auto & [first, id] : runs) {
+                if (first <= k) s.run_id = id;
+            }
+            c.snapshots.push_back(s);
         }
         Handle fields(H5Gopen2(file, "fields", H5P_DEFAULT), H5Gclose, "opening fields");
         group_fields(c, fields, "point", true);
@@ -1031,11 +1206,58 @@ std::vector<double> read_h5_field(const Contents & c, const std::string & field,
 
 Contents open_h5(const std::string & path) { no_hdf5(path); }
 
+
 Contents open_vtkhdf(const std::string & path) { no_hdf5(path); }
 
 std::vector<double> read_h5_field(const Contents &, const std::string &, const Snapshot & s) { no_hdf5(s.file); }
 
 #endif
+
+#ifdef Mallard_HAS_HDF5
+/** @brief The snapshots of a series member that is an HDF5 file: time, step and block, without the mesh. */
+std::vector<Snapshot> h5_member_snapshots(const std::string & path) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    Handle file = open_file(path);
+    const std::vector<std::string> blocks = root_blocks(file);
+    std::vector<Snapshot> out;
+    if (exists(file, "VTKHDF")) {
+        Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+        Handle field_data(H5Gopen2(top, "FieldData", H5P_DEFAULT), H5Gclose, "opening FieldData");
+        const double t = exists(field_data, "TIME") ? all<double>(field_data, "TIME").at(0) : 0.0;
+        const int64_t step = exists(field_data, "STEP") ? all<int64_t>(field_data, "STEP").at(0) : -1;
+        out.push_back(snapshot_of(t, step, path, 0, blocks.empty() ? "" : blocks[0]));
+    } else {
+        const bool has_step = [&] {
+            Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+            return H5Aexists(root, "step") > 0;
+        }();
+        out.push_back(snapshot_of(root_scalar<double>(file, "time", 0.0),
+                                  has_step ? static_cast<int64_t>(root_scalar<uint64_t>(file, "step", 0)) : -1, path,
+                                  0, blocks.empty() ? "" : blocks[0]));
+    }
+    return out;
+}
+#endif
+
+/** @brief The snapshots of a series member, without reading its mesh. */
+std::vector<Snapshot> member_snapshots(const std::string & path) {
+    const std::string ext = extension(path);
+    if (ext == ".vtu" || ext == ".vtp") {
+        const auto s = vtk_snapshot(VtkXml(path), path);
+        return s ? std::vector<Snapshot>{*s} : std::vector<Snapshot>{};
+    }
+    if (ext == ".pvtu") {
+        const std::vector<std::string> pieces = pvtu_pieces(path, read_bytes(path));
+        if (pieces.empty()) return {};
+        auto s = vtk_snapshot(VtkXml(pieces.front()), path);
+        return s ? std::vector<Snapshot>{*s} : std::vector<Snapshot>{};
+    }
+#ifdef Mallard_HAS_HDF5
+    return h5_member_snapshots(path);
+#else
+    return {};
+#endif
+}
 
 bool has_restart_magic(const std::string & path) {
     std::ifstream in(path, std::ios::binary);
@@ -1157,6 +1379,7 @@ Contents open(const std::string & path) {
                    "tables, or meshes (.msh, .cas, .cgns, .h5, an OpenFOAM case)");
     }
     if (c.format != "Mallard HDF5 mesh") note_provenance(c);
+    note_snapshots(c);
     return c;
 }
 
@@ -1213,17 +1436,23 @@ std::vector<std::string> run_files(const std::string & dir) {
         if (it->is_regular_file(error)) files.push_back(it->path().string());
     }
     std::sort(files.begin(), files.end());
-    // Members of an index (and the pieces of a PVTU) are reported through it
-    std::set<std::string> members;
+    // Members of an index (and the pieces of a PVTU), and the mesh files XDMF grids name, are reported through it
+    const auto normal = [](const std::string & p) { return fs::path(p).lexically_normal().string(); };
+    std::set<std::string> members, collection_members;
+    std::vector<std::pair<std::string, std::vector<std::string>>> single_grids;  // XDMF files of one grid: their data
     for (const auto & f : files) {
         try {
             const std::string ext = extension(f);
             std::string own;
             if (ends_with(f, ".vtkhdf.series") || ext == ".pvd" || ext == ".xmf") {
                 const auto entries = series_entries(f, own);
+                const bool single = ext == ".xmf" && read_bytes(f).find("GridType=\"Collection\"") == std::string::npos;
+                if (single) single_grids.push_back({normal(f), {}});
                 for (const auto & e : entries) {
-                    members.insert(fs::path(e.file).lexically_normal().string());
-                    if (ext == ".xmf") members.insert(fs::path(e.file).replace_extension(".xmf").lexically_normal().string());
+                    members.insert(normal(e.file));
+                    if (!e.mesh.empty()) members.insert(normal(e.mesh));
+                    if (single) single_grids.back().second.push_back(normal(e.file));
+                    if (ext == ".xmf" && !single) collection_members.insert(normal(e.file));
                     if (ext == ".pvd" && ends_with(e.file, ".pvtu")) {
                         for (const auto & p : pvtu_pieces(e.file, read_bytes(e.file))) members.insert(fs::path(p).lexically_normal().string());
                     }
@@ -1235,13 +1464,19 @@ std::vector<std::string> run_files(const std::string & dir) {
             // An unreadable index lists nothing; info reports its error
         }
     }
+    // An XDMF file of one grid that a collection also lists is reported through the collection
+    for (const auto & [file, data] : single_grids) {
+        if (!data.empty() &&
+            std::all_of(data.begin(), data.end(), [&](const std::string & d) { return collection_members.count(d) > 0; })) {
+            members.insert(file);
+        }
+    }
     std::vector<std::string> out;
     static const std::set<std::string> OUTPUT = {".vtkhdf", ".series", ".pvd", ".xmf", ".vtu", ".pvtu", ".vtp",
                                                  ".h5", ".restart", ".csv"};
     for (const auto & f : files) {
         if (!OUTPUT.count(extension(f)) || members.count(fs::path(f).lexically_normal().string())) continue;
         if (ends_with(f, ".series") && !ends_with(f, ".vtkhdf.series")) continue;
-        if (ends_with(f, "_mesh.h5")) continue;
         out.push_back(f);
     }
     return out;

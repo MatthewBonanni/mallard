@@ -75,7 +75,7 @@ class Spectra {
         RestartArrays arrays() const;
 
         /** @brief Rank 0 writes the current averages to the output file. */
-        void write(uint64_t step, rtype t) const;
+        void write(uint64_t step, rtype t, const std::string & reason) const;
 
         std::string summary() const;
         uint64_t samples() const { return n_samples; }
@@ -114,7 +114,7 @@ class Spectra {
     private:
         void accumulate(double w);
         std::vector<std::complex<double>> fluctuation(uint32_t pos, uint32_t p, uint32_t h) const;
-        void write_file(const std::string & file, uint64_t step, rtype t) const;
+        void write_file(const std::string & file, uint64_t step, rtype t, const std::string & reason) const;
         bool homogeneous(size_t axis) const;
 
         std::vector<std::string> fields;

@@ -4,7 +4,7 @@ Probes sample the solution where you choose: at points, along curves, on cut
 planes and surfaces, over boundary zones and over regions. Monitors reduce the solution to a
 few numbers per output: the force on a wall and integrals over the domain. Each
 writes its own files ([What a run writes](output.md#what-a-run-writes)), with
-[units](output.md#units) and [provenance](output.md#provenance).
+[units](output.md#units), [run block](output.md#run-block) and [snapshot metadata](output.md#snapshot-metadata).
 
 ## Probes: `[[probes]]`
 

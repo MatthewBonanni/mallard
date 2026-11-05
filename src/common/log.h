@@ -88,6 +88,14 @@ void end_phase(double seconds);
 void event(uint64_t step, double t, std::string_view kind, std::string_view text);
 
 /**
+ * @brief A file written at (step, t): its event line, and an output record of
+ *        the run log, which indexes every file the run writes (path, kind, step,
+ *        time, reason, run id, and the writer: a [[write_data]] prefix or a probe's file).
+ */
+void output(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+            std::string_view writer);
+
+/**
  * @brief Warning on stderr from rank 0, for conditions every rank sees alike; also a
  *        record of the run log.
  */

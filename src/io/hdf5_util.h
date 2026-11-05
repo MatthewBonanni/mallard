@@ -250,6 +250,64 @@ void put_rows(hid_t parent, const char * name, uint64_t n_rows, int cols, uint64
     check(H5Dwrite(dset, memory_type<T>(), memory, space, dxpl, n ? data : &dummy), std::string("writing ") + name);
 }
 
+/**
+ * @brief Resize a one-dimensional dataset of fixed-length strings to n_rows,
+ *        creating it extendable with strings of width bytes if missing, and
+ *        write row (from this rank only if mine; collective where the file is).
+ * @throws std::runtime_error if the value does not fit the dataset's width
+ */
+inline void put_string_row(hid_t parent, const char * name, uint64_t n_rows, uint64_t row, bool mine,
+                           const std::string & value, size_t width, hid_t dxpl) {
+    if (H5Lexists(parent, name, H5P_DEFAULT) <= 0) {
+        const hsize_t dims = n_rows, max = H5S_UNLIMITED, chunk = 16;
+        Handle type(H5Tcopy(H5T_C_S1), H5Tclose, "H5Tcopy");
+        check(H5Tset_size(type, width), "H5Tset_size");
+        check(H5Tset_strpad(type, H5T_STR_NULLPAD), "H5Tset_strpad");
+        Handle space(H5Screate_simple(1, &dims, &max), H5Sclose, "H5Screate_simple");
+        Handle dcpl(H5Pcreate(H5P_DATASET_CREATE), H5Pclose, "H5Pcreate");
+        check(H5Pset_chunk(dcpl, 1, &chunk), "H5Pset_chunk");
+        Handle dset(H5Dcreate2(parent, name, type, space, H5P_DEFAULT, dcpl, H5P_DEFAULT), H5Dclose,
+                    std::string("creating ") + name);
+    }
+    Handle dset(H5Dopen2(parent, name, H5P_DEFAULT), H5Dclose, std::string("opening ") + name);
+    Handle type(H5Dget_type(dset), H5Tclose, "H5Dget_type");
+    const size_t stored = H5Tget_size(type);
+    if (value.size() > stored) {
+        throw std::runtime_error(std::string(name) + ": " + std::to_string(value.size()) +
+                                 " bytes do not fit its strings of " + std::to_string(stored));
+    }
+    const hsize_t dims = n_rows;
+    check(H5Dset_extent(dset, &dims), std::string("resizing ") + name);
+    Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
+    const hsize_t one = 1;
+    Handle memory(H5Screate_simple(1, &one, nullptr), H5Sclose, "H5Screate_simple");
+    select_rows(space, row, mine ? 1 : 0);
+    select_rows(memory, 0, mine ? 1 : 0);
+    std::vector<char> padded(stored, '\0');
+    std::copy(value.begin(), value.end(), padded.begin());
+    check(H5Dwrite(dset, type, memory, space, dxpl, padded.data()), std::string("writing ") + name);
+}
+
+/** @brief The strings of a dataset of fixed-length strings (put_string_row). */
+inline std::vector<std::string> read_string_rows(hid_t parent, const char * name) {
+    Handle dset(H5Dopen2(parent, name, H5P_DEFAULT), H5Dclose, std::string("opening ") + name);
+    Handle type(H5Dget_type(dset), H5Tclose, "H5Dget_type");
+    Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");
+    const size_t width = H5Tget_size(type);
+    const hssize_t n = H5Sget_simple_extent_npoints(space);
+    Handle memory_type(H5Tcopy(H5T_C_S1), H5Tclose, "H5Tcopy");
+    check(H5Tset_size(memory_type, width), "H5Tset_size");
+    check(H5Tset_strpad(memory_type, H5T_STR_NULLPAD), "H5Tset_strpad");
+    std::vector<char> buffer(static_cast<size_t>(std::max<hssize_t>(n, 1)) * width, '\0');
+    if (n > 0) check(H5Dread(dset, memory_type, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data()), name);
+    std::vector<std::string> out;
+    for (hssize_t i = 0; i < n; i++) {
+        const char * s = &buffer[static_cast<size_t>(i) * width];
+        out.emplace_back(s, std::find(s, s + width, '\0'));
+    }
+    return out;
+}
+
 /** @brief Number of rows of a dataset. */
 inline uint64_t n_rows(hid_t parent, const char * name) {
     Handle dset(H5Dopen2(parent, name, H5P_DEFAULT), H5Dclose, std::string("opening ") + name);

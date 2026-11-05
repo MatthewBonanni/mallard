@@ -11,6 +11,7 @@
 #include <cmath>
 
 #include "log.h"
+#include "provenance.h"
 
 namespace divergence {
 
@@ -391,7 +392,7 @@ std::vector<Cause> rank_causes(const Evidence & e) {
 }
 
 std::string text(const Evidence & e, const std::vector<Cause> & causes) {
-    std::string s = "Divergence report\n\n";
+    std::string s = "Divergence report (run " + provenance::run_id() + ")\n\n";
     s += "What and where\n";
     s += "  Step " + std::to_string(e.step) + ", t = " + real(e.t) + ": " + logging::count(e.n_invalid) +
          (e.n_invalid == 1 ? " cell is" : " cells are") + " invalid (non-finite, or a non-positive density or pressure)";
@@ -475,7 +476,7 @@ std::string text(const Evidence & e, const std::vector<Cause> & causes) {
 
 json::Object record(const Evidence & e, const std::vector<Cause> & causes) {
     json::Object r;
-    r.add("type", std::string("divergence")).add("step", e.step).add("t", e.t);
+    r.add("type", std::string("divergence")).add("run_id", provenance::run_id()).add("step", e.step).add("t", e.t);
     r.add("invalid_cells", e.n_invalid);
     std::vector<std::pair<std::string, double>> failed;
     for (size_t q = 0; q < N_QUANTITIES; q++) failed.emplace_back(QUANTITY_KEYS[q], double(e.failed[q]));

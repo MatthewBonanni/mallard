@@ -200,7 +200,7 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsAreWrittenAsTheir
         for (const char * step : {"_000000.vtp", "_000002.vtp", "_000004.vtp"}) {
             const std::string snapshot = read_all(dir + "/s/s_" + name + step);
             EXPECT_GT(snapshot.size(), 500u) << name << step;
-            EXPECT_EQ(without_provenance(snapshot), without_provenance(read_all(dir + "/p/" + name + step))) << name << step;
+            EXPECT_EQ(without_run_metadata(snapshot), without_run_metadata(read_all(dir + "/p/" + name + step))) << name << step;
         }
         EXPECT_TRUE(std::filesystem::exists(dir + "/s/s_" + name + ".pvd")) << name;
 #ifdef Mallard_HAS_HDF5
@@ -209,8 +209,8 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsAreWrittenAsTheir
         EXPECT_EQ(snapshot, h5_all_datasets(dir + "/pk/" + name + ".vtkhdf")) << name;
 #endif
     }
-    EXPECT_EQ(without_provenance(read_all(dir + "/p/named_slice_000002.vtp")),
-              without_provenance(read_all(dir + "/p/slice_000002.vtp")))
+    EXPECT_EQ(without_run_metadata(read_all(dir + "/p/named_slice_000002.vtp")),
+              without_run_metadata(read_all(dir + "/p/slice_000002.vtp")))
         << "a probe of a named region of lower dimension samples it as its type keys do";
 }
 
@@ -254,7 +254,7 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsDoNotDependOnTheR
     for (const auto & f : files) {
         const std::string serial = read_all(dir + "/s/" + f);
         EXPECT_GT(serial.size(), 500u) << f;
-        EXPECT_EQ(without_provenance(read_all(dir + "/d/" + f)), without_provenance(serial)) << f << " on " << comm::size()
+        EXPECT_EQ(without_run_metadata(read_all(dir + "/d/" + f)), without_run_metadata(serial)) << f << " on " << comm::size()
                                                                                              << " ranks";
     }
 #ifdef Mallard_HAS_HDF5

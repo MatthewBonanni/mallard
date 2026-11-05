@@ -21,6 +21,7 @@
 #include "data_writer.h"
 #include "json.h"
 #include "mesh_block.h"
+#include "output_reader.h"
 #include "provenance.h"
 #include "run_log.h"
 #include "scratch.h"
@@ -147,10 +148,12 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
     for (const auto & line : lines(dir + "/run.jsonl")) records.push_back(json::parse(line));
     ASSERT_GE(records.size(), 4u);
 
-    // The first record names the format and holds the provenance
+    // The first record names the format, the run and what it restarted from, and holds the run block
     const Value & start = records.front();
-    EXPECT_EQ(key_set(start),
-              (std::set<std::string>{"type", "schema", "version", "provenance", "placement", "setup_phases"}));
+    EXPECT_EQ(key_set(start), (std::set<std::string>{"type", "schema", "version", "run_id", "restart_of", "provenance",
+                                                     "placement", "setup_phases"}));
+    EXPECT_EQ(start["run_id"].string, provenance::run_id());
+    EXPECT_TRUE(start["restart_of"].is_null());
     EXPECT_EQ(start["placement"].array.size(), static_cast<size_t>(comm::size()));
     EXPECT_EQ(start["placement"].array[0]["rank"].number, 0.0);
     EXPECT_TRUE(start["setup_phases"].has("mesh"));
@@ -167,7 +170,7 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
         "health"};
     std::vector<double> steps;
     double last_progress = 0.0;
-    std::set<std::string> events;
+    std::set<std::pair<std::string, double>> outputs;
     for (const auto & r : records) {
         const std::string type = r["type"].string;
         if (type == "progress") {
@@ -188,13 +191,20 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
             EXPECT_EQ(r["wall_per_step"].type == Value::Type::NUMBER, timed);
             EXPECT_EQ(r["cells_per_second"].type == Value::Type::NUMBER, timed);
             EXPECT_EQ(r["eta"].type == Value::Type::NUMBER, timed);
-        } else if (type == "event") {
-            EXPECT_EQ(key_set(r), (std::set<std::string>{"type", "step", "t", "kind", "text"}));
-            events.insert(r["kind"].string);
+        } else if (type == "output") {
+            // The output index: every file written, by step, time, writer and reason
+            EXPECT_EQ(key_set(r), (std::set<std::string>{"type", "step", "t", "kind", "path", "reason", "writer",
+                                                         "run_id"}));
+            EXPECT_EQ(r["run_id"].string, provenance::run_id());
+            EXPECT_EQ(r["reason"].string, r["step"].number == 0 ? "start" : "interval") << r["path"].string;
+            EXPECT_TRUE(std::filesystem::exists(r["path"].string)) << r["path"].string;
+            outputs.insert({r["kind"].string, r["step"].number});
         }
     }
     EXPECT_EQ(steps, (std::vector<double>{0, 2, 4}));
-    EXPECT_TRUE(events.count("vtu") && events.count("restart")) << "file writes are events";
+    for (const char * kind : {"vtu", "restart"}) {
+        EXPECT_TRUE(outputs.count({kind, 0.0}) && outputs.count({kind, 4.0})) << kind;
+    }
     EXPECT_EQ(last_progress, 1.0);
 
     const Value & end = records.back();
@@ -222,7 +232,7 @@ TEST(ProvenanceTest, Hdf5ProbeFilesCarryTheRunsProvenance) {
     if (!comm::is_root()) return;
     h5::Handle file(H5Fopen((dir + "/probe.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "probe.h5");
     h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-    EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), provenance::json());
+    EXPECT_EQ(h5::read_strings_attribute(root, provenance::ATTRIBUTE).at(0), provenance::json());
 }
 #endif
 
@@ -274,7 +284,7 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
         if (!writes_hdf5()) break;
         h5::Handle file(H5Fopen((dir + h5).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, h5);
         h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-        EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), expected) << h5;
+        EXPECT_EQ(h5::read_strings_attribute(root, provenance::ATTRIBUTE).at(0), expected) << h5;
     }
     if (writes_hdf5()) {
         EXPECT_EQ(provenance::parse_comment(read_file(dir + "/h.xmf")), expected);
@@ -288,20 +298,54 @@ TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
     if (comm::is_root()) std::filesystem::remove_all(dir);
     run_box(dir, 4, UNIFORM);
     const std::string first = provenance::json();
-    run_box(dir, 8, "type = \"restart\"\nfile = \"" + dir + "/r_000004.restart\"\n");
+    const std::string first_id = provenance::run_id();
+    const std::string restart = dir + "/r_000004.restart";
+    run_box(dir, 8, "type = \"restart\"\nfile = \"" + restart + "\"\n");
     const std::string second = provenance::json();
+    const std::string second_id = provenance::run_id();
     if (!comm::is_root()) return;
     EXPECT_NE(first, second);
+    EXPECT_NE(first_id, second_id);
+    // The second run names the run and the snapshot it continued, in its run block and in each snapshot's
+    const Value restart_of = json::parse(second)["run"]["restart_of"];
+    EXPECT_EQ(restart_of["run_id"].string, first_id);
+    EXPECT_EQ(restart_of["file"].string, restart);
+    EXPECT_EQ(restart_of["step"].number, 4);
+    EXPECT_TRUE(json::parse(first)["run"]["restart_of"].is_null());
+    std::vector<std::string> files = {dir + "/f.pvd", dir + "/line.pvd", dir + "/integrals.csv", dir + "/probe.csv"};
+    if (writes_hdf5()) files.push_back(dir + "/h.xmf");
+    for (const std::string & name : files) {
+        const output::Contents c = output::open(name);
+        ASSERT_FALSE(c.snapshots.empty()) << name;
+        for (const output::Snapshot & s : c.snapshots) {
+            EXPECT_EQ(s.run_id, s.step <= 4 ? first_id : second_id) << name << " step " << s.step;
+            if (!s.has_block) continue;
+            EXPECT_EQ(s.block.restarted, s.step > 4) << name << " step " << s.step;
+            if (s.step > 4) {
+                EXPECT_EQ(s.block.restart_of_run_id, first_id) << name;
+                EXPECT_EQ(s.block.restart_of_step, 4) << name;
+            }
+        }
+        EXPECT_EQ(c.snapshots.back().step, 8) << name;
+    }
+    const output::Contents last = output::open(dir + "/r_000008.restart");
+    ASSERT_TRUE(last.snapshots.at(0).has_block);
+    EXPECT_EQ(last.snapshots[0].block.run_id, second_id);
+    EXPECT_EQ(last.snapshots[0].block.restart_of_file, restart);
     // Each part of a monitor file follows the provenance of the run that wrote it
     std::vector<std::string> blocks;
     for (const auto & row : lines(dir + "/integrals.csv")) {
-        if (row.rfind("# provenance ", 0) == 0) blocks.push_back(provenance::parse_comment(row));
+        if (row.rfind("# mallard-run ", 0) == 0) blocks.push_back(provenance::parse_comment(row));
     }
     EXPECT_EQ(blocks, (std::vector<std::string>{first, second}));
     std::vector<std::string> starts;
     for (const auto & line : lines(dir + "/run.jsonl")) {
         const Value r = json::parse(line);
-        if (r["type"].string == "start") starts.push_back(r["provenance"]["input"]["file"].string);
+        if (r["type"].string == "start") {
+            starts.push_back(r["provenance"]["input"]["file"].string);
+            EXPECT_EQ(r["run_id"].string, starts.size() == 1 ? first_id : second_id);
+            EXPECT_EQ(r["restart_of"].is_null(), starts.size() == 1);
+        }
     }
     EXPECT_EQ(starts, (std::vector<std::string>{dir + "/input_4.toml", dir + "/input_8.toml"}));
     EXPECT_EQ(read_restart(dir + "/r_000008.restart").provenance, second);
@@ -438,7 +482,7 @@ TEST(ProvenanceTest, LargeProvenanceFitsInHdf5Attributes) {
     if (!comm::is_root()) return;
     h5::Handle file(H5Fopen((dir + "/h_000004.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "h5");
     h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-    EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), provenance::json());
+    EXPECT_EQ(h5::read_strings_attribute(root, provenance::ATTRIBUTE).at(0), provenance::json());
     EXPECT_GT(provenance::json().size(), 100000u);
     std::filesystem::remove_all(dir);
 #endif

@@ -1543,10 +1543,10 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | Key | Description |
 |---|---|
 | `check_interval` | Print a progress row every this many steps (default 1) |
-| `run_log` | The machine-readable run record, one JSON record per line: a start record with the provenance, a progress record per progress row, file writes, warnings and errors, and an end record ([format](guide/output.md#run-record-mallardjsonl)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
+| `run_log` | The machine-readable run record, one JSON record per line: a start record with the run block, a progress record per progress row, an output record per file written, warnings and errors, and an end record ([format](guide/output.md#run-record-mallardjsonl)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
 | `divergence_report` | Prefix of the [divergence report](guide/running.md#the-divergence-report) a run that diverges writes: `PREFIX.txt`, `PREFIX.json` and the snapshot of the failure's neighborhood `PREFIX_neighborhood_<step>.vtkhdf` (`.vtu` without HDF5); the report is printed and in the run record either way. `""` writes no files. Default `"divergence_report"` |
 | `health` | Run health diagnostics at each progress row: admissibility margins, numerics and chemistry activity, output timings, the audit of numerical repairs and the conservation ledger, in the run record's progress records and a summary at the end of the terminal output ([details](guide/output.md#run-health)). Default `true` |
-| `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the provenance; `false` skips reading it again for very large meshes. Default `true` |
+| `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the run block; `false` skips reading it again for very large meshes. Default `true` |
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
 
@@ -1596,8 +1596,9 @@ With
 snapshot's time (`Steps/Values`) and where its cell values start
 (`Steps/CellDataOffsets/<name>`). Nothing else is added to the VTKHDF layout:
 the units and descriptions are HDF5 attributes of each dataset (`units`,
-`long_name`), and the root group carries the `provenance` and the format
-`version` as HDF5 attributes, which VTK ignores.
+`long_name`), and the root group carries the run block (`mallard_run`) and the format
+`version` as HDF5 attributes and the snapshot blocks as the dataset `mallard_snapshot`, which VTK ignores;
+the field data holds `TIME` and `STEP` ([snapshot metadata](guide/output.md#snapshot-metadata)).
 `tools/mallard/vtkhdf.py` reads the files.
 
 `format = "xdmf"` (`"hdf5"` before 0.10.0; builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
