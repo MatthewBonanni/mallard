@@ -52,7 +52,7 @@ The performance set on one A100, cells per second, best of six runs over two int
 | `air_3d`: 96 × 48 × 48 hexahedra, MUSCL, LES | 52.3M | 52.5M | input | 0.263 / 0.379 |
 | `flame_3d`: `air_3d` with premixed propane–air | 6.45M | 6.44M | input | 0.263 / 0.379 |
 
-The count costs a fraction of a second of setup per million cells. Forcing either order, milliseconds per step on one A100 (four in parentheses):
+The count and the curve add to setup: 0.7 s for `muscl_2d`, 2-3 s for `teno5_3d` (two layers). Forcing either order, milliseconds per step on one A100 (four in parentheses):
 
 | Case | x-first (generated) | Hilbert | random file numbering, before 0.10.0 |
 |---|---:|---:|---:|

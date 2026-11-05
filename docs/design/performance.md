@@ -466,8 +466,9 @@ so ranks can differ, and the log says how many took the curve. The decision is t
 | `muscl_2d` | 1 | 0.199 | 0.139 | Hilbert |
 | `air_3d`, `flame_3d` | 1 | 0.263 | 0.379 | input |
 
-The count is a host loop over the node-to-cell map at setup, a fraction of a second per million cells; it reads
-no timings, so a mesh and its inputs always get the same numbering.
+The count is a host loop over the node-to-cell map at setup (with the curve: +0.2 s for `air_3d`, +0.7 s for
+`muscl_2d`, +2-3 s for `teno5_3d`); it reads no timings, so a mesh and its inputs always get the same
+numbering.
 
 ### Against the numbering before
 
