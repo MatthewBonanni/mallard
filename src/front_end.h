@@ -41,6 +41,9 @@ Dimension mesh_file_dimension(const std::string & path);
  */
 Dimension input_dimension(const std::string & input_file);
 
+/** @brief The dimension of the case an output file is of: its own, else its provenance's build. */
+Dimension output_dimension(const std::string & path);
+
 /**
  * @brief Whether this process was started as the front end, `mallard`.
  */

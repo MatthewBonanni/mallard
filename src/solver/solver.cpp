@@ -183,7 +183,7 @@ int Solver::init(const Input & input_in) {
         if (misspelled.empty() || check_only) throw;
         throw InputError(std::string(e.what()) + "\npossibly misspelled:" + misspelled);
     }
-    if (!check_only) {
+    if (!check_only && !state_reader) {
         const std::vector<Diagnostic> unused = unused_keys(input);
         if (!unused.empty()) {
             std::string list;
@@ -2612,6 +2612,13 @@ void Solver::write_data(bool force) {
         ProbeFluxes fluxes;
         probes.write(step, t, probe_fields(fluxes), true, force);
     }
+}
+
+void Solver::write_output_of_state(bool next) {
+    if (next) apply_output_state(state_reader(*mesh));
+    write_data(true);
+    write_probes();
+    for (auto & writer : data_writers) writer->finish();
 }
 
 void Solver::write_probes() {

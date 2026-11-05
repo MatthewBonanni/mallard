@@ -1,0 +1,175 @@
+/**
+ * @file post_extract_test.cpp
+ * @brief mallard post extract: probes of existing output are the run's own probes at those steps.
+ *
+ * @copyright Copyright (c) 2026 Matthew Bonanni
+ */
+
+#include <gtest/gtest.h>
+
+#include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "cli.h"
+#include "comm.h"
+#include "commands.h"
+#include "mesh_block.h"
+#include "scratch.h"
+#include "solver.h"
+#include "test_fixtures.h"
+
+namespace {
+
+namespace fs = std::filesystem;
+
+std::string fresh_dir(const std::string & name) {
+    const std::string dir = (scratch_dir() / ("extract_" + name)).string();
+    comm::barrier();
+    if (comm::is_root()) fs::remove_all(dir);
+    comm::barrier();
+    return dir;
+}
+
+bool vtkhdf() { return have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()); }
+
+const std::string BOX = N_DIM == 3 ? "{type = \"box\", center = [0.5, 0.5, 0.5], size = [0.4, 0.2, 0.6]}"
+                                   : "{type = \"rectangle\", center = [0.5, 0.5], size = [0.4, 0.2]}";
+
+/** @brief A periodic box with a curve probe of point values, a region probe and restart files and snapshots every 2 steps. */
+std::string case_input(const std::string & dir, uint32_t n) {
+    std::ostringstream s;
+    s << "[run]\nn_steps = 4\ndt = 1.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 1.0\nLy = 1.0\n";
+    if (N_DIM == 3) s << "Nz = 4\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * sin(2 * pi * x) * sin(2 * pi * y)\"\n"
+      << "u = " << (N_DIM == 3 ? "[\"0.3\", \"-0.1\", \"0.2\"]" : "[\"0.3\", \"-0.1\"]") << "\np = \"1.0\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\nrun_log = \"\"\n"
+      << "[[probes]]\nname = \"line\"\ntype = \"line\"\nstart = " << (N_DIM == 3 ? "[0.1, 0.3, 0.5]" : "[0.1, 0.3]")
+      << "\nend = " << (N_DIM == 3 ? "[0.9, 0.6, 0.5]" : "[0.9, 0.6]")
+      << "\nn_points = 7\nvariables = [\"RHO\", \"U\", \"P\"]\nsampling = \"point\"\ninterval = 2\n"
+      << "file = \"" << dir << "/probe_line.csv\"\n"
+      << "[[probes]]\nname = \"box\"\nregion = " << BOX << "\nvariables = [\"RHO\", \"T\", \"P\"]\n"
+      << "time_interval = 0.002\nreductions_file = \"" << dir << "/probe_box_reductions.csv\"\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
+    if (vtkhdf()) {
+        s << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtkhdf\"\nvariables = [\"RHO\", \"U\", \"P\"]\n"
+          << "interval = 2\n";
+    }
+    return s.str();
+}
+
+/** @brief Runs the case; afterwards every rank can read its files. */
+std::string run_dir() {
+    const std::string dir = fresh_dir("run");
+    Solver solver;
+    solver.init(parse_toml(case_input(dir, 16)));
+    solver.run();
+    comm::barrier();
+    return dir;
+}
+
+/** @brief The data rows of a CSV file, as text. */
+std::vector<std::string> rows(const std::string & file) {
+    std::ifstream in(file);
+    std::vector<std::string> out;
+    std::string line;
+    std::getline(in, line);
+    while (std::getline(in, line)) {
+        if (!line.empty() && line[0] != '#') out.push_back(line);
+    }
+    return out;
+}
+
+/** @brief The rows of the run's probe file from step 2 on: those of the snapshots after the first. */
+std::vector<std::string> after_step_0(const std::string & file) {
+    std::vector<std::string> out;
+    for (const std::string & r : rows(file)) {
+        if (!r.starts_with("0,")) out.push_back(r);
+    }
+    return out;
+}
+
+/** @brief Runs mallard post extract; errors, if any, of rank 0 in errors. */
+int extract(const std::vector<std::string> & words, std::string * errors = nullptr) {
+    cli::Args args;
+    std::string error;
+    EXPECT_TRUE(cli::parse(*cli::command("post extract"), words, args, error)) << error;
+    std::ostringstream report, messages;
+    std::streambuf * out = std::cout.rdbuf(report.rdbuf());
+    std::streambuf * err = std::cerr.rdbuf(messages.rdbuf());
+    const int status = post_extract(args);
+    std::cout.rdbuf(out);
+    std::cerr.rdbuf(err);
+    if (errors) *errors = messages.str();
+    comm::barrier();
+    return status;
+}
+
+std::vector<double> numbers(const std::string & row) {
+    std::vector<double> out;
+    std::stringstream s(row);
+    std::string cell;
+    while (std::getline(s, cell, ',')) out.push_back(std::stod(cell));
+    return out;
+}
+
+} // namespace
+
+TEST(PostExtractTest, RestartFilesGiveTheRunsProbesBitForBit) {
+    const std::string run = run_dir();
+    const std::string out = fresh_dir("restart");
+    ASSERT_EQ(extract({run + "/restart_000000.restart", run + "/restart_000002.restart", run + "/restart_000004.restart",
+                       "--steps", "2,4", "-o", out}),
+              0);
+    EXPECT_EQ(rows(out + "/probe_line.csv"), after_step_0(run + "/probe_line.csv"));
+    EXPECT_EQ(rows(out + "/probe_box_reductions.csv"), after_step_0(run + "/probe_box_reductions.csv"));
+    EXPECT_FALSE(fs::exists(out + "/restart_000002.restart"));
+
+    // The input's region, given on the command line, is the same probe
+    const std::string region = fresh_dir("region");
+    ASSERT_EQ(extract({run + "/restart_000004.restart", "--region", BOX, "--fields", "RHO,T,P", "--name", "b", "-o",
+                       region}),
+              0);
+    EXPECT_EQ(rows(region + "/probe_b_reductions.csv"), std::vector<std::string>{rows(run + "/probe_box_reductions.csv").back()});
+}
+
+TEST(PostExtractTest, SnapshotsOfPrimitivesGiveTheRunsProbesToRounding) {
+    if (!vtkhdf()) GTEST_SKIP() << "VTKHDF snapshots need HDF5, parallel HDF5 on several ranks";
+    const std::string run = run_dir();
+    const std::string out = fresh_dir("snapshots");
+    ASSERT_EQ(extract({run + "/flow.vtkhdf.series", "--times", "0.001:0.005", "--probe", "line", "-o", out}), 0);
+    const std::vector<std::string> expected = after_step_0(run + "/probe_line.csv");
+    const std::vector<std::string> got = rows(out + "/probe_line.csv");
+    ASSERT_EQ(got.size(), expected.size());
+    EXPECT_FALSE(fs::exists(out + "/probe_box_reductions.csv"));
+    for (size_t i = 0; i < got.size(); i++) {
+        const std::vector<double> a = numbers(got[i]), b = numbers(expected[i]);
+        ASSERT_EQ(a.size(), b.size());
+        // VTKHDF files record no step: their snapshots are numbered by position in the series
+        EXPECT_EQ(a[0], double(1 + i / 7));
+        for (size_t c = 1; c < a.size(); c++) EXPECT_NEAR(a[c], b[c], 1e-12 * (1.0 + std::abs(b[c]))) << got[i];
+    }
+}
+
+TEST(PostExtractTest, FileOfAnotherMeshIsAnError) {
+    const std::string run = run_dir();
+    const std::string dir = fresh_dir("coarse");
+    if (comm::is_root()) {
+        fs::create_directories(dir);
+        std::ofstream(dir + "/input.toml") << case_input(dir, 8);
+    }
+    comm::barrier();
+    std::string errors;
+    EXPECT_EQ(extract({run + "/restart_000002.restart", "-i", dir + "/input.toml", "-o", dir + "/out"}, &errors), 1);
+    if (comm::is_root()) EXPECT_NE(errors.find(" cells, but the case's mesh has "), std::string::npos) << errors;
+    EXPECT_TRUE(!fs::exists(dir + "/out/probe_line.csv") || rows(dir + "/out/probe_line.csv").empty());
+}

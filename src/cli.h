@@ -41,6 +41,7 @@ enum class Case {
     mesh,           ///< the mesh file, or input file, named by the first argument
     file,           ///< the first argument's: a mesh file's dimension; any solver for output files
     output,         ///< the first argument's: an output file's dimension, where it records one and that solver is there
+    output_case,    ///< the input of -i, else the first argument's output file (its run block's build)
     front_end,      ///< runs in the front end itself
 };
 
