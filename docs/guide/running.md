@@ -36,19 +36,82 @@ Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`), 1 
 
 ## Divergence
 
-Every step's time-step reduction also tells whether any owned cell holds a non-finite value. The run then stops with the number of such cells and the first ones by global cell id (variable, value, cell, centroid and rank):
+Every step's time-step reduction also tells whether any owned cell holds a non-finite value. The run then stops with the number of such cells and the first ones by global cell id (variable, value, cell, centroid and rank), and the most likely cause with what to try:
 
 ```text
-error: Solution diverged at step 611, t = 1.90583: 1 cell has a non-finite value: RHOE = nan in cell 19 at
-(0.025, 0.975). The last valid state (step 610, t = 1.90328) is in restart_000610.restart. Common causes: ...
+error: Solution diverged at step 9, t = 0.707496: 48 cells have a non-finite value: RHO = nan in cell 38 at
+(0.15625, 0.40625); ... The last valid state (step 8, t = 0.632983) is in restart_000008.restart. Most likely
+cause: time step too large (the failing step ran at CFL 3 (run.cfl = 3), above 1.2, the largest stable value of
+SSPRK3 for smooth flow); try: lower run.cfl to 1. divergence_report.txt has the evidence and other causes.
 ```
 
-The message ends with the usual causes: a time step too large for the scheme
-(lower `run.cfl`), initial or boundary values far from the flow (check units
-and signs), or poor cells near the first one listed (`mallard check` reports
-mesh quality); a more dissipative scheme (`numerics.preset = "robust"`) helps.
-
 It writes the state at the start of the step before, the last valid one (all `[[write_data]]` outputs and a restart; see [`keep_last_good`](../input.md#run)), and exits with status 1. The invalid state is found one step after it appears, or right after its step with `[numerics] check_nan`; without `check_nan`, the outputs and `[statistics]` samples of that step may hold it (resume from the last valid state with `[statistics] reset = true` if its averages are not finite).
+
+### The divergence report
+
+Before it stops, the run diagnoses the failure from the failing state and the last valid one, and prints the
+report; it also writes it as `divergence_report.txt` and `divergence_report.json` (`[output] divergence_report`
+sets the prefix, `""` none), as a `divergence` record of the [run record](output.md#run-record-mallardjsonl),
+and a snapshot of the failure's neighborhood for ParaView. It is gathered only once the run has failed, from
+what the run already keeps: a healthy run does nothing more per step, and its results do not change.
+
+- **What and where:** the step, the cells that became invalid (non-finite, or a non-positive density or
+  pressure) by global id, with their rank on several ranks, what failed first in them (density, pressure,
+  temperature, a mass fraction, velocity), their extent, and the cell that was closest to failing in the last
+  valid state.
+- **Likely causes, most likely first**, each with a weight from 0 to 1, the evidence behind it and what to try:
+
+  | Cause | Evidence |
+  |---|---|
+  | Time step | The failing step's CFL number against the integrator's largest stable one for smooth flow (1.2 for SSPRK3, 1.35 for RK4, 2.2 for SSPRK54, CK45 and RDPK3Sp35, 1 for FE; [table](../numerics/overview.md#time-step)), and how many cells exceeded it: many is the time step, a few is the cells (next row) |
+  | Mesh | The [quality](meshes.md#mesh-quality) of the invalid cells and their neighbors, against the questionable values and the mesh's worst; stronger when the CFL excess or the failure is confined to those cells |
+  | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
+  | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
+  | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
+  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "robust"`) |
+
+- **Evidence:** the state of the cell closest to failing and of its face neighbors in the last valid state
+  (density, speed, pressure, temperature, local CFL number), their quality metrics, the nearest boundary zone,
+  repairs, TENO and limiter activity and chemistry sub-steps; the domain means; the last progress rows before the
+  failure (`dt`, CFL number, minimum density and pressure, and temperature for mixtures).
+- **Reproduce:** the restart of the last valid state to resume from (`mallard -i input.toml --restart FILE`,
+  with `[numerics] check_nan = true` and `[output] check_interval = 1` to follow it step by step), and
+  `divergence_report_neighborhood_<step>.vtkhdf` (`.vtu` in builds without HDF5): the invalid cells and three
+  layers of cells around them, with the last valid state's density, velocity, pressure, temperature, local CFL
+  number and mass fractions, `DIVERGED` (1 in the invalid cells) and the four mesh-quality fields.
+
+An inflow that the flow next to it cannot take, for example:
+
+```text
+Likely causes, most likely first
+  1. boundary condition of left (inlet_mass_flow) (0.90)
+     - its exterior state is far from the flow next to it: p 11.2049 and rho 11.2049 outside, against p 1 and
+       rho 1 in the cell next to it (ratio 11.2, velocity jump 7.29 sound speeds)
+     - 12 of the 12 invalid cells are within two cells of left
+     Try: check the values of left (units and signs), or start from a state closer to them
+  2. initial state (0.35)
+     - the run failed 1 step after its start, before the flow could develop
+     Try: check [initialize]: units, signs and the regions of its expressions (density, pressure and
+     temperature must be positive everywhere)
+```
+
+and a cell squeezed to a sliver, at a fixed `dt` that suits the rest of the mesh:
+
+```text
+  1. poor cells (0.98)
+     - cell 135 at (0.439063, 0.53125), which became invalid, has volume ratio 39 (questionable above 10; the
+       mesh's worst is 39)
+     - only 6 cells exceeded the stable CFL number: the time step suits the rest of the mesh
+     Try: improve cells 119, 134, 135, 136, 151 (mallard check input.toml --quality quality writes the metrics
+     for ParaView), or lower the time step to suit them
+  2. time step too large (0.55)
+     - the failing step ran at CFL 3.08, above 1.2, the largest stable value of SSPRK3 for smooth flow
+     - 6 of 256 cells (2%) were above it: the excess is local, so look at those cells first
+```
+
+The weights rank the causes of one failure; they are not probabilities. A pressure that becomes negative
+without becoming non-finite does not stop a run (the [run health](output.md#run-health) warns of it); the
+report covers the cells that do.
 
 ## Kubernetes
 

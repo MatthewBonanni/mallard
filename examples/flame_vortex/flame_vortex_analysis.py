@@ -235,7 +235,7 @@ def plot(results, out):
         axs[2].plot(t, res["rows"][:, 3], color=cmap(i % 20), label=lab)
     axs[1].axhspan(0.95, 1.05, color="#ddd", zorder=0)
     axs[1].set_xlabel("t S_L / delta_L")
-    axs[1].set_ylabel("heat release / planar flame's (grey: cut-off, 5%)")
+    axs[1].set_ylabel("heat release / planar flame's (gray: cut-off, 5%)")
     axs[2].set_xlabel("t S_L / delta_L")
     axs[2].set_ylabel("weakest burning along the front, q_min")
     axs[2].axhline(0.1, color="#888", ls=":")

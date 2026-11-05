@@ -758,6 +758,18 @@ void Mesh::copy_host_to_device() {
     }
 }
 
+void Mesh::release_setup_data() {
+    node_coords = {};
+    nodes_of_cell = {};
+    offsets_nodes_of_cell = {};
+    nodes_of_face = {};
+    offsets_nodes_of_face = {};
+    h_cells_of_cell = {};
+    h_offsets_cells_of_cell = {};
+    h_cells_of_cell_shift = {};
+    for (auto & zone : m_face_zones) zone.faces = {};
+}
+
 void Mesh::copy_device_to_host() {
     Kokkos::deep_copy(h_node_coords, node_coords);
     Kokkos::deep_copy(h_cell_coords, cell_coords);

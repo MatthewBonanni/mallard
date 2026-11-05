@@ -27,7 +27,7 @@ def scene(plotter, path, q_factor, y_u, label, clim, args_window=None, crop=None
     d = read_npz(path)
     h = float(d["h"])
     if crop:
-        # The last crop metres along x (the DNS box at the fresh-gas end of an extended LES box)
+        # The last crop meters along x (the DNS box at the fresh-gas end of an extended LES box)
         keep = int(round(crop / h))
         for k, v in d.items():
             if np.ndim(v) == 3:
@@ -87,7 +87,7 @@ def main():
     ap.add_argument("--hrr-max", type=float, default=10.8)
     ap.add_argument("--movie", help="glob of the snapshots of one run, one frame each")
     ap.add_argument("--fps", type=int, default=8)
-    ap.add_argument("--crop", type=float, help="draw only the last CROP metres along x")
+    ap.add_argument("--crop", type=float, help="draw only the last CROP meters along x")
     args = ap.parse_args()
     if args.snapshots:
         labels = args.labels.split(",") if args.labels else [os.path.basename(s) for s in args.snapshots]

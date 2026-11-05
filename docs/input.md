@@ -46,7 +46,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dynamic viscosity (Pa s) | `physics.mu` |
 | Heat flux (W/m^2) | `boundaries.q` |
 | Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
-| Mass flow (kg/s; per metre of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
+| Mass flow (kg/s; per meter of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
 | Sources (per unit volume) | `source.rho` (kg/(m^3 s)), `rhou` (N/m^3), `rhoE` (W/m^3), and the same of `[[sources]]` with `rhoY` (kg/(m^3 s)); with `total = true` integrated rates (kg/s, N, W) |
 | Concentration (plain numbers in kmol/m^3) | `chemistry.C_reg` |
 
@@ -1485,6 +1485,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 |---|---|
 | `check_interval` | Print a progress row every this many steps (default 1) |
 | `run_log` | The machine-readable run record, one JSON record per line: a start record with the provenance, a progress record per progress row, file writes, warnings and errors, and an end record ([format](guide/output.md#run-record-mallardjsonl)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
+| `divergence_report` | Prefix of the [divergence report](guide/running.md#the-divergence-report) a run that diverges writes: `PREFIX.txt`, `PREFIX.json` and the snapshot of the failure's neighborhood `PREFIX_neighborhood_<step>.vtkhdf` (`.vtu` without HDF5); the report is printed and in the run record either way. `""` writes no files. Default `"divergence_report"` |
 | `health` | Run health diagnostics at each progress row: admissibility margins, numerics and chemistry activity, output timings, the audit of numerical repairs and the conservation ledger, in the run record's progress records and a summary at the end of the terminal output ([details](guide/output.md#run-health)). Default `true` |
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the provenance; `false` skips reading it again for very large meshes. Default `true` |
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |

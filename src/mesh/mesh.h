@@ -337,6 +337,15 @@ class Mesh {
         void copy_device_to_host();
 
         /**
+         * @brief Drop what only the setup reads: the node coordinates and the
+         *        cells' and faces' node lists on the device, the zones' device
+         *        lists, and the host vertex-neighbor lists. Kernels that read
+         *        the nodes later keep their own views (2D TENO); output keeps
+         *        the host nodes and connectivity.
+         */
+        void release_setup_data();
+
+        /**
          * @brief Initialize the mesh as a cartesian grid.
          * 
          * @param nx Number of cells in the x-direction.

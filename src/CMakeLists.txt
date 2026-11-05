@@ -70,6 +70,8 @@ add_library(MallardCore STATIC
     solver/solver_check.cpp
     solver/solver_chemistry.cpp
     solver/solver_control.cpp
+    solver/solver_divergence.cpp
+    solver/divergence_report.cpp
     solver/solver_graph.cpp
     solver/solver_health.cpp
     solver/solver_step_control.cpp
