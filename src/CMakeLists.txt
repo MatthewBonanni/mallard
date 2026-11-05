@@ -220,7 +220,7 @@ if(Mallard_ENABLE_CGNS)
 endif()
 
 # The commands of the mallard executable (cli.h), which the test suite also runs
-add_library(MallardCommands STATIC cli.cpp commands.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp)
+add_library(MallardCommands STATIC cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp)
 target_link_libraries(MallardCommands PUBLIC MallardCore)
 mallard_target_warnings(MallardCommands)
 

@@ -16,7 +16,8 @@ COPY . /src
 ARG CUDA_ARCHS="80 86 89 90"
 ARG JOBS
 # Kokkos builds for one architecture (the lowest, which sets its compile-time
-# tuning); nvcc adds machine code for the others through NVCC_APPEND_FLAGS
+# tuning); nvcc adds machine code for the others through NVCC_APPEND_FLAGS. The
+# driver's stub lets the install run mallard (for its shell completion) without a GPU
 RUN set -eu; \
     first=${CUDA_ARCHS%% *}; \
     case $first in \
@@ -29,6 +30,8 @@ RUN set -eu; \
         NVCC_APPEND_FLAGS="$NVCC_APPEND_FLAGS -gencode=arch=compute_$cc,code=sm_$cc"; \
     done; \
     export NVCC_APPEND_FLAGS; \
+    mkdir -p /tmp/cuda-stub && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /tmp/cuda-stub/libcuda.so.1; \
+    LD_LIBRARY_PATH=/tmp/cuda-stub${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} \
     JOBS=${JOBS} /src/docker/build.sh /src /opt/mallard \
         -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_$arch=ON -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_NCCL=ON \
         -DCMAKE_CXX_COMPILER=/src/src/external/kokkos/bin/nvcc_wrapper; \
@@ -53,6 +56,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # Mallard's executables only, not the bundled Kokkos's tools
 COPY --from=build /opt/mallard/bin/mallard* /opt/mallard/bin/
 COPY --from=build /opt/mallard/share /opt/mallard/share
+# Tab completion of mallard in interactive shells
+RUN echo '[ -r /opt/mallard/share/bash-completion/completions/mallard ] && . /opt/mallard/share/bash-completion/completions/mallard' \
+        >> /etc/bash.bashrc
 ENV PATH=/opt/mallard/bin:$PATH \
     MALLARD_SHARE=/opt/mallard/share/mallard \
     OMP_PROC_BIND=spread \

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include <Kokkos_Core.hpp>
 
@@ -86,7 +87,9 @@ CUmemAllocationProp properties(const int device) {
 
 bool GrowingBuffer::supported() { return true; }
 
-GrowingBuffer::GrowingBuffer(const size_t max_bytes) {
+Kokkos::Tools::SpaceHandle device_space() { return Kokkos::Tools::make_space_handle(Kokkos::CudaSpace::name()); }
+
+GrowingBuffer::GrowingBuffer(const size_t max_bytes, std::string label_) : label(std::move(label_)) {
     if (cudaGetDevice(&device) != cudaSuccess) throw std::runtime_error("GrowingBuffer: cudaGetDevice failed");
     const CUmemAllocationProp prop = properties(device);
     check(driver().granularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), "cuMemGetAllocationGranularity");
@@ -99,6 +102,10 @@ GrowingBuffer::GrowingBuffer(const size_t max_bytes) {
 GrowingBuffer::~GrowingBuffer() {
     // Freed while the device is idle, as cudaFree would
     Kokkos::fence("GrowingBuffer");
+    report_rounding(false);
+    for (const auto & [offset, size] : filled) {
+        Kokkos::Tools::deallocateData(device_space(), label, reinterpret_cast<void *>(base + offset), size);
+    }
     size_t offset = 0;
     for (size_t k = 0; k < handles.size(); k++) {
         driver().unmap(base + offset, sizes[k]);
@@ -108,9 +115,28 @@ GrowingBuffer::~GrowingBuffer() {
     if (base != 0) driver().address_free(base, reserved);
 }
 
+void GrowingBuffer::report_rounding(const bool allocate) const {
+    if (mapped == used) return;
+    void * p = reinterpret_cast<void *>(base + used);
+    if (allocate) {
+        Kokkos::Tools::allocateData(device_space(), label + "_pages", p, mapped - used);
+    } else {
+        Kokkos::Tools::deallocateData(device_space(), label + "_pages", p, mapped - used);
+    }
+}
+
 void GrowingBuffer::ensure(const size_t bytes) {
-    if (bytes <= mapped) return;
+    if (bytes <= used) return;
     if (bytes > reserved) throw std::length_error("GrowingBuffer: more than the reserved size");
+    report_rounding(false);
+    if (bytes > mapped) map(bytes);
+    Kokkos::Tools::allocateData(device_space(), label, reinterpret_cast<void *>(base + used), bytes - used);
+    filled.emplace_back(used, bytes - used);
+    used = bytes;
+    report_rounding(true);
+}
+
+void GrowingBuffer::map(const size_t bytes) {
     const size_t size = std::min((bytes - mapped + granularity - 1) / granularity * granularity, reserved - mapped);
     const CUmemAllocationProp prop = properties(device);
     CUmemGenericAllocationHandle handle;
@@ -129,7 +155,7 @@ void GrowingBuffer::ensure(const size_t bytes) {
 
 bool GrowingBuffer::supported() { return false; }
 
-GrowingBuffer::GrowingBuffer(size_t) { throw std::logic_error("GrowingBuffer: CUDA builds only"); }
+GrowingBuffer::GrowingBuffer(size_t, std::string) { throw std::logic_error("GrowingBuffer: CUDA builds only"); }
 
 GrowingBuffer::~GrowingBuffer() {}
 

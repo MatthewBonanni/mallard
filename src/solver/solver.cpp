@@ -146,6 +146,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
     Kokkos::Timer phase_timer;
     f();
     Kokkos::fence();
+    memory::end_phase();
     const double seconds = phase_timer.seconds();
     run_health.setup_phases.emplace_back(name, seconds);
     t_wall_setup += seconds;

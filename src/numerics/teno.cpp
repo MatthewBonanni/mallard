@@ -550,11 +550,11 @@ class PackedRows {
          * @brief Upload each chunk as it is added, for n_cells cells of at
          *        most max_slots_per_cell stencil entries each.
          */
-        void stream(const uint32_t n_cells, const size_t max_slots_per_cell) {
+        void stream(const uint32_t n_cells, const size_t max_slots_per_cell, const std::string & label) {
             const size_t max_slots = ((size_t(n_cells) >> shift) + 1) * max_slots_per_cell << shift;
-            memory = {std::make_shared<GrowingBuffer>(max_slots * sizeof(int32_t)),
-                      std::make_shared<GrowingBuffer>(max_slots * sizeof(int32_t)),
-                      std::make_shared<GrowingBuffer>(max_slots * width * sizeof(rtype))};
+            memory = {std::make_shared<GrowingBuffer>(max_slots * sizeof(int32_t), label),
+                      std::make_shared<GrowingBuffer>(max_slots * sizeof(int32_t), label + "_face"),
+                      std::make_shared<GrowingBuffer>(max_slots * width * sizeof(rtype), label + "_pinv")};
         }
 
         /** @brief The device memory that the stencils of finish() live in, if streamed. */
@@ -1035,8 +1035,8 @@ class TableBuilder {
             if (GrowingBuffer::supported()) {
                 // The searches cap central stencils at 3.5 nk + 64 entries and sectors
                 // at twice small_stencil_size; the reservation is address space only
-                large.stream(n_cells, 4 * size_t(nk) + 64);
-                small.stream(n_cells, teno::MAX_FACES * 2 * size_t(scheme.n_stencil_small));
+                large.stream(n_cells, 4 * size_t(nk) + 64, "teno_stencil_large");
+                small.stream(n_cells, teno::MAX_FACES * 2 * size_t(scheme.n_stencil_small), "teno_stencil_small");
             }
         }
 
