@@ -238,7 +238,9 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
     auto & top = input.as_table().entries();
     for (const char * key : {"write_data", "forces", "integrals", "statistics", "initialize"}) top.erase(key);
     if (!top.contains("output") || !top.at("output").is_table()) top["output"] = Input(Input::table_type{});
-    top.at("output").as_table().entries()["run_log"] = Input("");
+    auto & output = top.at("output").as_table().entries();
+    output["run_log"] = Input("");
+    output["health"] = Input(false);  // Its ledger and repair audit follow time steps
 
     const bool chosen = args.has("--probe");
     const bool others = args.has("--region") || args.has("--snapshot");

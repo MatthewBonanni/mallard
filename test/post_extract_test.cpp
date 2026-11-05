@@ -18,6 +18,8 @@
 #include "cli.h"
 #include "comm.h"
 #include "commands.h"
+#include "data_writer.h"
+#include "memory_tracker.h"
 #include "mesh_block.h"
 #include "scratch.h"
 #include "solver.h"
@@ -170,6 +172,38 @@ TEST(PostExtractTest, FileOfAnotherMeshIsAnError) {
     comm::barrier();
     std::string errors;
     EXPECT_EQ(extract({run + "/restart_000002.restart", "-i", dir + "/input.toml", "-o", dir + "/out"}, &errors), 1);
-    if (comm::is_root()) EXPECT_NE(errors.find(" cells, but the case's mesh has "), std::string::npos) << errors;
+    if (comm::is_root()) {
+        EXPECT_NE(errors.find(" cells, but the case's mesh has "), std::string::npos) << errors;
+    }
     EXPECT_TRUE(!fs::exists(dir + "/out/probe_line.csv") || rows(dir + "/out/probe_line.csv").empty());
+}
+
+TEST(PostExtractTest, OutputOfStatesHoldsNoTimeSteppingBuffers) {
+    const std::string run = run_dir();
+    const std::string dir = fresh_dir("buffers");
+    const std::vector<std::string> prefixes = {"face_solution", "face_flux", "solution", "rhs", "last_good"};
+    auto held = [&](const bool from_file) {
+        memory::Tracker tracker;
+        Solver solver;
+        if (from_file) {
+            solver.set_state_reader([&](const Mesh & mesh) {
+                return read_restart(run + "/restart_000002.restart",
+                                    mesh.h_global_cell_id.empty() ? nullptr : &mesh.h_global_cell_id);
+            });
+        }
+        solver.init(parse_toml(case_input(dir, 16)));
+        std::vector<std::string> labels;
+        for (const bool device : {true, false}) {
+            for (const auto & [label, bytes] : tracker.live(device)) {
+                for (const std::string & prefix : prefixes) {
+                    if (bytes > 0 && label.starts_with(prefix) && memory::category(label) != memory::Category::MESH) {
+                        labels.push_back(label);
+                    }
+                }
+            }
+        }
+        return labels;
+    };
+    EXPECT_FALSE(held(false).empty());
+    EXPECT_EQ(held(true), std::vector<std::string>{});
 }

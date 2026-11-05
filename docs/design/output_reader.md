@@ -108,6 +108,12 @@ the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
   `write_output_of_state` then loads the next snapshot and writes, so the
   mesh, regions, probe geometry and sample locations are set up once for a
   whole series.
+- **Memory.** With a state reader the setup allocates no time stepping:
+  `allocate_time_stepping()` (face states and fluxes, the integrator's stages
+  and right-hand sides, the last good state) is the one call it skips, and the
+  rewrite turns off `[output] health`, whose ledger follows steps. The
+  reconstruction stays the run's, because point samples, gradients and
+  `Q`/`VORTICITY` read its polynomials.
 - **Steps.** Restart and XDMF files record their steps; VTKHDF files do not,
   and their snapshots are numbered by position.
 - **Same values.** A probe's samples are evaluated and gathered as in the run,

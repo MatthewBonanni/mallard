@@ -692,9 +692,38 @@ class Builder {
         void extract(const Piece & p) {
             // Planes are cut exactly without subdividing
             const int levels = affine(p) ? 0 : m_region.resolution();
+            // A plane's levels at the nodes. A cell with none negative has no negative simplex vertex either (and
+            // the cells on the negative side take a face in the plane); one with all clearly negative has no zero
+            std::vector<std::vector<double>> phi;
+            if (levels == 0) {
+                for (const uint32_t i : p.carriers) {
+                    std::vector<double> & at = phi.emplace_back(m_mesh.n_nodes);
+                    for (uint32_t n = 0; n < m_mesh.n_nodes; n++) at[n] = m_views[i].distance(node(n).data());
+                }
+            }
             for (uint32_t c = 0; c < m_mesh.n_owned(); c++) {
+                if (levels == 0 && off_planes(phi, c)) continue;
                 for (const auto & s : simplices(c)) extract(p, c, s, 0, levels);
             }
+        }
+
+        bool off_planes(const std::vector<std::vector<double>> & phi, const uint32_t c) const {
+            const uint32_t n = m_mesh.h_n_nodes_of_cell(c);
+            Vec lo = node(m_mesh.h_node_of_cell(c, 0)), hi = lo;
+            for (uint32_t k = 1; k < n; k++) {
+                const Vec x = node(m_mesh.h_node_of_cell(c, k));
+                for (size_t d = 0; d < 3; d++) lo[d] = std::min(lo[d], x[d]), hi[d] = std::max(hi[d], x[d]);
+            }
+            const double margin = 1e-9 * norm(sub(hi, lo));
+            for (const std::vector<double> & at : phi) {
+                double phi_min = std::numeric_limits<double>::max(), phi_max = -phi_min;
+                for (uint32_t k = 0; k < n; k++) {
+                    phi_min = std::min(phi_min, at[m_mesh.h_node_of_cell(c, k)]);
+                    phi_max = std::max(phi_max, at[m_mesh.h_node_of_cell(c, k)]);
+                }
+                if (phi_min >= 0.0 || phi_max < -margin) return true;
+            }
+            return false;
         }
 
         void extract(const Piece & p, const uint32_t c, const std::vector<Vec> & s, const int level, const int levels) {
