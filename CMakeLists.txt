@@ -46,6 +46,12 @@ endfunction()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     add_compile_options(-fp-model=precise)
 endif()
+# GCC fuses multiplies and adds across statements where the CPU has FMA (arm64, or x86-64
+# with -march), so equal expressions round differently by where they are inlined, and
+# results differ from other CPUs'; Clang fuses only within an expression
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT Kokkos_ENABLE_CUDA)
+    add_compile_options(-ffp-contract=off)
+endif()
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
     set(MALLARD_THIRD_PARTY SYSTEM)
