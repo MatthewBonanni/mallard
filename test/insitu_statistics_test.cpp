@@ -65,10 +65,11 @@ std::string box(const std::string & periodic, double beta_y, uint32_t n_steps, c
 /** @brief Cell values of a variable (host copies; serial run, so local = global ids). */
 std::vector<double> values(const Solver & solver, const std::string & name) {
     const int32_t code = CellSampler::code(name, {}, "test");
-    std::vector<double> v(solver.get_mesh()->n_cells);
+    std::vector<double> v(solver.get_mesh()->n_cells);  // by global id
     for (uint32_t c = 0; c < v.size(); c++) {
-        v[c] = code == CellSampler::RHO ? double(solver.h_conservatives(c, 0))
-                                        : double(solver.h_primitives(c, size_t(code - CellSampler::FIRST_PRIMITIVE)));
+        v[solver.get_mesh()->h_global_cell(c)] =
+            code == CellSampler::RHO ? double(solver.h_conservatives(c, 0))
+                                     : double(solver.h_primitives(c, size_t(code - CellSampler::FIRST_PRIMITIVE)));
     }
     return v;
 }
@@ -410,7 +411,7 @@ std::vector<double> gather_phase(Solver & solver) {
     const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
     std::vector<double> values(n_global * width, 0.0);
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-        const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
+        const uint64_t g = mesh->h_global_cell(c);
         for (size_t i = 0; i < width; i++) values[g * width + i] = double(mean(c, i));
     }
     if (mesh->n_global_cells > 0) comm::allreduce(std::span<double>(values), comm::Op::SUM);

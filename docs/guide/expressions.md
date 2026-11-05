@@ -91,6 +91,8 @@ T = """\
 ```
 
 Not supported, with an error that says so: strings (`'abc'`), vectors
-(`var v[3]`), `return`, and functions or variables defined in other
-expressions.
+(`var v[3]`), `return`, exprtk's vector, string and bitwise functions
+(`dot`, `like`, `shl`, ...), and functions or variables defined in other
+expressions. An input written for exprtk's case-insensitive names (`X` for
+`x`) fails with the name to use.
 

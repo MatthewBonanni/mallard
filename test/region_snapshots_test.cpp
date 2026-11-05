@@ -153,9 +153,9 @@ std::pair<std::vector<uint32_t>, std::vector<double>> region_cells(const Solver 
     const Input value = parse_toml("r = " + table + "\n").at("r");
     const region::Region region = region::read(value, "test");
     const std::vector<double> fractions = region::cell_fractions(*solver.get_mesh(), region);
-    std::vector<uint32_t> cells;
-    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
-        if (fractions[c] > 0.0) cells.push_back(c);
+    std::vector<uint32_t> cells;  // in global order, as files hold them
+    for (uint32_t c : solver.get_mesh()->cells_by_global_id()) {
+        if (c < solver.get_mesh()->n_owned() && fractions[c] > 0.0) cells.push_back(c);
     }
     return {cells, fractions};
 }
@@ -267,7 +267,7 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsDoNotDependOnTheR
 }
 
 TEST(RegionSnapshotsTest, AVolumeIsTheFullSnapshotRestrictedToTheCellsItCovers) {
-    // Serial, where the files hold the cells in the mesh's order (MPITest compares ranks)
+    // Serial, where the files hold every cell at its global id (MPITest compares ranks)
     if (comm::size() > 1) GTEST_SKIP() << "serial";
     const std::string dir = fresh_dir("volume");
     const std::string ball = std::string("{type = \"sphere\", center = ") + point(0.45, 0.5, 0.5) +
@@ -298,12 +298,13 @@ TEST(RegionSnapshotsTest, AVolumeIsTheFullSnapshotRestrictedToTheCellsItCovers) 
         ASSERT_EQ(near_cells.size(), cells.size()) << what;
         ASSERT_EQ(fraction.size(), cells.size()) << what;
         for (size_t k = 0; k < cells.size(); k++) {
-            EXPECT_EQ(near_cells[k], full_cells[cells[k]]) << what << " " << k;
+            const uint64_t g = solver.get_mesh()->h_global_cell(cells[k]);
+            EXPECT_EQ(near_cells[k], full_cells[g]) << what << " " << k;
             EXPECT_EQ(double(fraction[k]), double(static_cast<rtype>(fractions[cells[k]]))) << what << " " << k;
             for (const auto & [name, values] : full) {
                 const size_t width = values.size() / full_cells.size();
                 for (size_t i = 0; i < width; i++) {
-                    EXPECT_EQ(near.at(name)[width * k + i], values[width * cells[k] + i]) << what << " " << name << " " << k;
+                    EXPECT_EQ(near.at(name)[width * k + i], values[width * g + i]) << what << " " << name << " " << k;
                 }
             }
         }

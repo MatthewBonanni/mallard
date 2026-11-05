@@ -318,7 +318,7 @@ namespace {
 logging::Items describe_mesh(const Mesh & mesh) {
     using logging::count;
     using logging::format;
-    const bool distributed = !mesh.h_global_cell_id.empty();
+    const bool distributed = mesh.n_global_cells > 0;
     const uint32_t n_owned = mesh.n_owned();
     auto owned = [&](int32_t c) { return c >= 0 && static_cast<uint32_t>(c) < n_owned; };
 
@@ -435,7 +435,7 @@ void Solver::init_mesh() {
                               : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
                                                              : partition_hilbert(*setup, comm::size()));
         }
-        mesh = setup->build_local_mesh(halo_layers, distribution);
+        mesh = setup->build_local_mesh(halo_layers, distribution, cell_numbering_of_input(input));
         if (exchange == "nccl" && !comm::nccl_available()) {
             throw InputError({.key = "parallel.halo_exchange",
                               .line = line_of(input.at("parallel"), "halo_exchange"),
@@ -487,6 +487,25 @@ void Solver::init_mesh() {
                                                   logging::count(min_owned).c_str(),
                                                   logging::count(max_owned).c_str(), static_cast<double>(max_owned) / mean,
                                                   logging::count(max_halo).c_str()));
+    }
+    {
+        const CellOrderChoice & choice = mesh->cell_order_choice;
+        const bool hilbert = choice.order == CellOrder::HILBERT;
+        std::string text = hilbert ? "Hilbert curve" : "input order";
+        if (is_distributed()) {
+            const int n_hilbert = comm::allreduce(int(hilbert), comm::Op::SUM);
+            if (n_hilbert > 0 && n_hilbert < comm::size()) {
+                text = logging::format("Hilbert curve on %d of %d ranks, input order on the others", n_hilbert, comm::size());
+            } else {
+                text = n_hilbert > 0 ? "Hilbert curve" : "input order";
+            }
+        } else if (choice.input_lines > 0.0) {
+            text += logging::format(" (auto: %.3g cache lines per cell, %.3g %s)",
+                                    hilbert ? choice.hilbert_lines : choice.input_lines,
+                                    hilbert ? choice.input_lines : choice.hilbert_lines,
+                                    hilbert ? "in the input order" : "along the Hilbert curve");
+        }
+        mesh_summary.emplace_back("Cell order", text);
     }
     if (mesh->curved_geometry) {
         // Curved boundary faces of owned cells, and curved faces in all
@@ -818,7 +837,7 @@ void Solver::init_boundaries() {
         boundary_fields[i_bc] = fields;
         const bool composition = is_mixture() && bcs.back().prescribes_composition() &&
                                  MixtureModel::composition_varies(bound);
-        // The target of an average-pressure outlet is one number, of t at most: update_average_pressure_outlets
+        // The target of an average-pressure outlet is one number, of t at most: one entry of timed_fields
         const bool average = bcs.back().has(BoundaryCondition::AVERAGE);
         const bool profiled = composition || (!average && (fields->varies() || fields->per_face()));
         rtype direction[N_DIM];
@@ -1016,6 +1035,11 @@ void Solver::init_boundaries() {
         }
         timed_fields.add(i_bc, x, n_in, boundary_fields[base], composition);
     }
+    for (const auto & outlet : average_pressure_outlets) {
+        if (outlet.fields->depends_on_time()) {
+            timed_fields.add(static_cast<uint32_t>(outlet.i_bc), Point{}, Point{}, outlet.fields, nullptr, false);
+        }
+    }
     if (!timed_fields.empty()) timed_fields.finish();
     dirichlet_states = DirichletStates();
     const auto h_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
@@ -1210,7 +1234,7 @@ double Solver::get_mass_flow_force() const {
     return force;
 }
 
-void Solver::update_average_pressure_outlets(StateView solution, const rtype t_eval) {
+void Solver::update_average_pressure_outlets(StateView solution) {
     const Euler phys = physics;
     for (const auto & outlet : average_pressure_outlets) {
         Kokkos::View<uint32_t *> faces = outlet.faces;
@@ -1234,15 +1258,12 @@ void Solver::update_average_pressure_outlets(StateView solution, const rtype t_e
             pA += all[2 * k];
             A += all[2 * k + 1];
         }
-        auto bc = Kokkos::subview(boundary_data.bcs, outlet.i_bc);
-        auto h_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bc);
-        if (outlet.fields->depends_on_time()) {
-            BoundaryCondition target = h_bc();
-            outlet.fields->apply(target, Point{}, double(t_eval), double(physics.R), Point{});
-            h_bc().data[N_DIM + 1] = target.data[N_DIM + 1];
-        }
-        h_bc().data[0] = h_bc().data[N_DIM + 1] - pA / A;
-        Kokkos::deep_copy(bc, h_bc);
+        const Kokkos::View<BoundaryCondition *> bcs = boundary_data.bcs;
+        const int32_t i_bc = outlet.i_bc;
+        const rtype mean = pA / A;
+        Kokkos::parallel_for("outlet_average_offset", 1, KOKKOS_LAMBDA(const int) {
+            bcs(i_bc).data[0] = bcs(i_bc).data[N_DIM + 1] - mean;
+        });
     }
 }
 

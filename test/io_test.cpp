@@ -632,7 +632,7 @@ std::string vtkhdf_type(const std::string & file) {
 
 TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
     // Triangles and quadrilaterals of a Gmsh file: each cell's nodes, type
-    // and values round trip, in serial cell order
+    // and values round trip, at their global ids (the file's order)
     if (comm::size() > 1) GTEST_SKIP() << "a writer of one rank's whole mesh";
     const std::string dir = (scratch_dir() / "mallard_vtkhdf_cells").string();
     const std::string file = write_temp("vtkhdf_mixed.msh", jittered_mixed_mesh(6));
@@ -667,18 +667,19 @@ TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
     const std::vector<double> u = h5_values<double>(out, "VTKHDF/CellData/U");
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
         const uint32_t n = mesh->h_n_nodes_of_cell(i);
-        ASSERT_EQ(grid.size(i), n);
-        EXPECT_EQ(grid.types[i], vtk_cell_type(2, n));
+        const uint32_t j = uint32_t(mesh->h_global_cell(i));
+        ASSERT_EQ(grid.size(j), n);
+        EXPECT_EQ(grid.types[j], vtk_cell_type(2, n));
         for (uint32_t k = 0; k < n; k++) {
-            const auto x = grid.point(i, k);
+            const auto x = grid.point(j, k);
             EXPECT_EQ(x[0], double(mesh->h_node_coords(mesh->h_node_of_cell(i, k), 0)));
             EXPECT_EQ(x[1], double(mesh->h_node_coords(mesh->h_node_of_cell(i, k), 1)));
             EXPECT_EQ(x[2], 0.0);
         }
-        EXPECT_EQ(rho[i], double(values(i, 0)));
-        EXPECT_EQ(u[3 * i], double(values(i, 1)));
-        EXPECT_EQ(u[3 * i + 1], double(values(i, 2)));
-        EXPECT_EQ(u[3 * i + 2], 0.0);
+        EXPECT_EQ(rho[j], double(values(i, 0)));
+        EXPECT_EQ(u[3 * j], double(values(i, 1)));
+        EXPECT_EQ(u[3 * j + 1], double(values(i, 2)));
+        EXPECT_EQ(u[3 * j + 2], 0.0);
     }
     std::ifstream index(dir + "/f.vtkhdf.series");
     std::stringstream text;
