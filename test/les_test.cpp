@@ -590,7 +590,7 @@ TEST(LESEffectiveWidth, TroubledCellsKeepTheCellWidthAndSmoothOnesRelaxToTheRati
     auto h_delta = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), troubled->get_les_delta());
     for (uint32_t c = 0; c < troubled->get_mesh()->n_owned(); c++) {
         EXPECT_EQ(troubled->get_les_width_ratio()(c), 1.0_r) << "cell " << c;
-        EXPECT_NEAR(double(h_delta(c)), delta_V(*troubled, c), 1e-12 * delta_V(*troubled, c));
+        EXPECT_NEAR(double(h_delta(c)), delta_V(*troubled, c), precision_tol<double>(1e-12, 1e-6) * delta_V(*troubled, c));
         FOR_I_CONSERVATIVE EXPECT_EQ(troubled->h_conservatives(c, i), reference->h_conservatives(c, i));
     }
     // Every cell smooth: from 1 toward LES::width_ratio by 1 / WIDTH_RELAXATION_STEPS of the gap per step
