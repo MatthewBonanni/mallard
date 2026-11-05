@@ -25,6 +25,11 @@ When a job runs:
 | Serial, 2D | x86-64 CPU | Run | Full suite | main | `ci.yml/serial` |
 | Serial, 3D, HDF5 | x86-64 CPU | Run | Full suite | main | `ci.yml/serial-3d` |
 | Serial, single precision, 2D, HDF5, Clang | | Compile | | every PR | `ci.yml/clang` |
+| Threads, 2D, AppleClang | arm64 CPU (macOS) | Run | Full suite (2 threads) | every PR | `ci.yml/macos` |
+| Threads, 3D, AppleClang | arm64 CPU (macOS) | Run | Full suite (2 threads) | every PR | `ci.yml/macos-3d` |
+| OpenMP, 2D, HDF5, zlib | arm64 CPU (Ubuntu 24.04) | Run | Full suite (2 threads) | every PR | `ci.yml/arm64` |
+| Serial, 2D, GCC 10, CMake 3.22 | x86-64 CPU (Ubuntu 22.04) | Run | Full suite | every PR | `ci.yml/gcc-10` |
+| Serial, 3D, Clang 14, CMake 3.22 | x86-64 CPU (Ubuntu 22.04) | Run | Full suite | every PR | `ci.yml/clang-14` |
 | CUDA 12.9 (sm_80), OpenMP host, MPI, GPU-aware MPI, 2D and 3D | NVIDIA A100 | Run | Full suite on one GPU (with CUDA graphs, the default); MPI tests on 2 ranks, one GPU each, GPU-aware; [performance suite](../../benchmarks/README.md) against its baselines | device PRs (GPU CI) | |
 | CUDA 12.9 (sm_80), OpenMP host, MPI, GPU-aware MPI, 2D and 3D | | Compile | | main, device PRs | `ci.yml/cuda` |
 | CUDA 13.2 (sm_80), same options | | Compile | | device PRs (GPU CI) | |
