@@ -608,12 +608,12 @@ BoundaryData make_boundary_data(const Mesh & mesh,
     auto h_bcs = Kokkos::create_mirror_view(data.bcs);
     for (size_t i = 0; i < h_bcs_vec.size(); i++) h_bcs(i) = h_bcs_vec[i];
 
-    // Cells sharing a node with each cell, for the image search of transmissive faces
+    // Cells sharing a node with each cell, by global id, for the image search of transmissive faces
     const bool any_image = std::any_of(h_face_bc_vec.begin(), h_face_bc_vec.end(), [&](const int32_t bc) {
         return bc >= 0 && h_bcs_vec[static_cast<size_t>(bc)].is_transmissive();
     });
     std::vector<std::vector<uint32_t>> cells_of_node(any_image ? mesh.n_nodes : 0);
-    for (uint32_t c = 0; any_image && c < mesh.n_cells; c++) {
+    for (uint32_t c : any_image ? mesh.cells_by_global_id() : std::vector<uint32_t>{}) {
         for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
             cells_of_node[mesh.h_node_of_cell(c, k)].push_back(c);
         }
@@ -788,6 +788,17 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             char_of_node[node_key(mesh.h_node_of_face(char_faces[k], j))].push_back(
                 static_cast<uint32_t>(k));
         }
+    }
+    // Each node's faces by global key (cell 0 and its face slot), so the fit's sums do not depend on the face numbering
+    std::vector<uint64_t> char_key(char_faces.size());
+    for (size_t k = 0; k < char_faces.size(); k++) {
+        const uint32_t c = static_cast<uint32_t>(mesh.h_cells_of_face(char_faces[k], 0));
+        uint32_t slot = 0;
+        while (mesh.h_face_of_cell(c, slot) != char_faces[k]) slot++;
+        char_key[k] = mesh.h_global_cell(c) * 8 + slot;  // No cell has 8 faces
+    }
+    for (auto & [node, list] : char_of_node) {
+        std::sort(list.begin(), list.end(), [&](uint32_t a, uint32_t b) { return char_key[a] < char_key[b]; });
     }
     std::vector<uint32_t> offsets(char_faces.size() + 1, 0), neighbors;
     std::vector<std::array<rtype, N_DIM>> neighbor_dx;

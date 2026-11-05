@@ -2477,6 +2477,20 @@
   "type": "number",
   "unit": "deg"
  },
+ "mesh.cell_order": {
+  "default": "\"auto\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string",
+  "values": [
+   "auto",
+   "hilbert",
+   "input"
+  ]
+ },
  "mesh.curved": {
   "dims": [
    2,
@@ -2798,6 +2812,8 @@
    "examples/detonation_1d/input.toml",
    "examples/detonation_2d/input.toml",
    "examples/detonation_3d/input.toml",
+   "examples/detonation_3d/input_2d.toml",
+   "examples/double_mach/input.toml",
    "examples/explosion_3d/input.toml",
    "examples/flame_2d/input.toml",
    "examples/flame_2d/unity/input.toml",
@@ -2840,6 +2856,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ]
  },
@@ -2957,6 +2974,7 @@
    3
   ],
   "set_in": [
+   "examples/double_mach/input.toml",
    "examples/explosion_3d/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -2974,7 +2992,8 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
-   "examples/viscous_shock_tube/input.toml"
+   "examples/viscous_shock_tube/input.toml",
+   "tutorials/cluster/input.toml"
   ],
   "type": "integer"
  },
@@ -3060,6 +3079,8 @@
    "examples/detonation_1d/input.toml",
    "examples/detonation_2d/input.toml",
    "examples/detonation_3d/input.toml",
+   "examples/detonation_3d/input_2d.toml",
+   "examples/double_mach/input.toml",
    "examples/explosion_3d/input.toml",
    "examples/flame_2d/input.toml",
    "examples/flame_2d/unity/input.toml",
@@ -3102,6 +3123,7 @@
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
+   "tutorials/cluster/input.toml",
    "tutorials/wedge/input.toml"
   ],
   "type": "string",

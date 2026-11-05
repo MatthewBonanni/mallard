@@ -398,7 +398,7 @@ class Builder {
         }
 
         Builder(const Mesh & mesh, const Region & region) : m_mesh(mesh), m_region(region) {
-            const bool distributed = !mesh.h_global_cell_id.empty();
+            const bool distributed = mesh.n_global_cells > 0;
             double volume = 0.0;
             for (uint32_t c = 0; c < mesh.n_owned(); c++) volume += double(mesh.h_cell_volume(c));
             for (size_t i = 0; i < 3; i++) {
@@ -646,7 +646,7 @@ class Builder {
                     keys.push_back(std::max(key(u), key(v)));
                 });
             }
-            if (!m_mesh.h_global_cell_id.empty()) keys = comm::allgatherv(keys);
+            if (m_mesh.n_global_cells > 0) keys = comm::allgatherv(keys);
             std::map<std::pair<uint64_t, uint64_t>, int> count;
             for (size_t i = 0; i < keys.size(); i += 2) count[{keys[i], keys[i + 1]}]++;
             for (const auto & face : list) {
@@ -1177,7 +1177,7 @@ class Builder {
             for (size_t k = 0; k < points.size(); k++) {
                 keep[k] = located[k] >= 0 && contained[k] && kept(rest, quad[k].x, located[k]) ? 1 : 0;
             }
-            if (!m_mesh.h_global_cell_id.empty()) comm::allreduce(std::span<uint32_t>(keep), comm::Op::MAX);
+            if (m_mesh.n_global_cells > 0) comm::allreduce(std::span<uint32_t>(keep), comm::Op::MAX);
             for (size_t c = 0; c < cells.size(); c++) {
                 const size_t center = first[c + 1] - 1;
                 std::vector<Quadrature> kept_points;
