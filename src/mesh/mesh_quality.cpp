@@ -199,7 +199,8 @@ void print_quality(const std::array<QualitySummary, MeshQuality::N_METRICS> & su
     }
 }
 
-std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & quality, const std::string & prefix) {
+std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & quality, const std::string & prefix,
+                          const std::vector<std::pair<std::string, std::vector<double>>> & extra) {
     std::vector<Kokkos::View<rtype *>::host_mirror_type> fields;
     std::vector<Data> quality_data;
     std::vector<std::string> names;
@@ -208,6 +209,12 @@ std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & qualit
         for (uint32_t c = 0; c < mesh->n_owned(); c++) fields.back()(c) = static_cast<rtype>(quality.cells[m][c]);
         quality_data.emplace_back(MeshQuality::FIELDS[m], fields.back());
         names.emplace_back(MeshQuality::FIELDS[m]);
+    }
+    for (const auto & [name, values] : extra) {
+        fields.emplace_back(name, mesh->n_cells);
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) fields.back()(c) = static_cast<rtype>(values[c]);
+        quality_data.emplace_back(name, fields.back());
+        names.emplace_back(name);
     }
     Input writer_input(Input::table_type{});
     writer_input.as_table()["prefix"] = prefix;

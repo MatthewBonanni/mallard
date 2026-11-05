@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "mesh.h"
@@ -72,10 +73,11 @@ std::string quality_point(const std::array<double, N_DIM> & x);
 void print_quality(const std::array<QualitySummary, MeshQuality::N_METRICS> & summary);
 
 /**
- * @brief Writes the quality fields as a snapshot PREFIX_000000 in the default
- *        format (collective).
+ * @brief Writes the quality fields, then the extra (name, per-owned-cell values)
+ *        fields, as a snapshot PREFIX_000000 in the default format (collective).
  * @return The file written.
  */
-std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & quality, const std::string & prefix);
+std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & quality, const std::string & prefix,
+                          const std::vector<std::pair<std::string, std::vector<double>>> & extra = {});
 
 #endif // MESH_QUALITY_H
