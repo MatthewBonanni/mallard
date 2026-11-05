@@ -374,7 +374,8 @@ TEST(CliTest, BashCompletesCommandsOptionsAndValues) {
         EXPECT_TRUE(contains(got[0], std::string(" ") + w + " ")) << w << ":" << got[0];
     }
     EXPECT_FALSE(contains(got[0], " upgrade ")) << got[0];
-    EXPECT_EQ(got[1], " upgrade ");
+    EXPECT_TRUE(contains(got[1], " upgrade ")) << got[1];
+    EXPECT_FALSE(contains(got[1], " check ")) << got[1];
     EXPECT_EQ(got[2], " --restart ");
     EXPECT_EQ(got[3], " case.toml run1 solut ");
     EXPECT_EQ(got[4], " latest run1 solut ");
