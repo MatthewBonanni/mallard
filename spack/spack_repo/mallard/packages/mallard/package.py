@@ -110,9 +110,13 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
 
     @run_after("install")
     def check_install(self):
-        """mallard and the solvers start and report their version."""
+        """mallard and the solvers start and report their version; shell completion is installed."""
         for name in ["mallard"] + [f"mallard{dim}d" for dim in self.spec.variants["dims"].value]:
             Executable(join_path(self.prefix.bin, name))("--version", output=str, error=str)
+        for script in ["bash-completion/completions/mallard", "zsh/site-functions/_mallard",
+                       "fish/vendor_completions.d/mallard.fish"]:
+            if not os.path.exists(join_path(self.prefix.share, script)):
+                raise InstallError(f"no shell completion {script}: see the warning of cmake --install")
 
     def _run_example(self, example, *command):
         share = join_path(self.prefix.share, "mallard")
