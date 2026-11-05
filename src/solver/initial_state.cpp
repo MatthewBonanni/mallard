@@ -30,6 +30,7 @@
 #include "mixture.h"
 #include "quadrature.h"
 #include "region_input.h"
+#include "synthetic_turbulence.h"
 #include "tabulated.h"
 #include "units.h"
 
@@ -62,6 +63,7 @@ struct Layer {
     uint32_t fractions = 0, n_fractions = 0;  // composition: (species, program) pairs; none: unset
     int32_t balance = -1;
     uint8_t mole = 0;
+    uint32_t modes = 0, n_modes = 0;  // synthetic turbulence added to the velocity
 };
 
 /** @brief How a data set is read at a point: its coordinates as programs of x, y, z, or a region's signed distance. */
@@ -209,6 +211,7 @@ struct Evaluator {
     Kokkos::View<const Variable *> variables;
     Kokkos::View<const Mapping *> mappings;
     Kokkos::View<const double *> molecular_weight;
+    Kokkos::View<const synthetic_turbulence::Mode *> modes;
     Euler physics;
     Mixture gas;
     bool mixture = false;
@@ -260,6 +263,14 @@ struct Evaluator {
     KOKKOS_INLINE_FUNCTION double value(const int32_t program, const double * x) const {
         const uint32_t p = static_cast<uint32_t>(program);
         return constant(p) ? constant_value(p) : programs(p, PointVariables{this, x});
+    }
+
+    KOKKOS_INLINE_FUNCTION void add_turbulence(const Layer & L, const double * x, double * u) const {
+        for (uint32_t m = L.modes; m < L.modes + L.n_modes; m++) {
+            const synthetic_turbulence::Mode & M = modes(m);
+            const double c = Kokkos::cos(M.k[0] * x[0] + M.k[1] * x[1] + M.k[2] * x[2] + M.phase);
+            for (int i = 0; i < N_DIM; i++) u[i] += M.a[i] * c;
+        }
     }
 
     /** @brief Mass fractions of layer L at x into Y (normalized; mole fractions converted). */
@@ -342,6 +353,10 @@ struct Evaluator {
             }
             if (mixture) composition(L, x, Y);
         }
+        if (layers(0).n_modes > 0) {
+            add_turbulence(layers(0), x, s.u);
+            touched = true;
+        }
         for (uint32_t k = 1; k < n_layers; k++) {
             const double w = weight(k, status, w_center, x);
             if (w == 0.0) continue;
@@ -351,6 +366,7 @@ struct Evaluator {
             for (int i = 0; i < N_DIM; i++) {
                 if (L.u[i] >= 0) l.u[i] = value(L.u[i], x);
             }
+            add_turbulence(L, x, l.u);
             const int32_t given[3] = {L.rho, L.p, L.T};
             const uint8_t keys[3] = {RHO, PRESSURE, TEMPERATURE};
             uint8_t set = 0;
@@ -938,6 +954,7 @@ struct InitialState::Impl {
     tabulated::Data data;
     std::vector<Variable> variables;
     std::vector<Mapping> mappings;
+    std::vector<synthetic_turbulence::Mode> modes;
     std::vector<std::string> names = {"x", "y", "z"};
     const Input * region_names = nullptr;  // [regions]
 
@@ -970,6 +987,15 @@ struct InitialState::Impl {
         edge = r.edge();
         bounded = r.bounded();
         return r.summary();
+    }
+
+    /** @brief The modes of a layer's turbulence table; its summary. */
+    std::string add_turbulence(const Input & t, const std::string & where, Layer & L) {
+        const synthetic_turbulence::Field field = synthetic_turbulence::read(t, where, mesh);
+        L.modes = static_cast<uint32_t>(modes.size());
+        L.n_modes = static_cast<uint32_t>(field.modes.size());
+        modes.insert(modes.end(), field.modes.begin(), field.modes.end());
+        return field.summary;
     }
 
     std::string add_data(const Input & e, const std::string & where) {
@@ -1267,7 +1293,7 @@ struct InitialState::Impl {
 bool InitialState::layered(const Input & input) {
     if (!input.contains("initialize")) return false;
     const Input & init = input.at("initialize");
-    return init.contains("regions") || init.contains("data");
+    return init.contains("regions") || init.contains("data") || init.contains("turbulence");
 }
 
 InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler & physics,
@@ -1299,6 +1325,10 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
 
     Layer base;
     if (!base_from_cells) impl->add_state(init, "initialize", base, type);
+    if (init.contains("turbulence")) {
+        summary << (summary.tellp() > 0 ? "; " : "") << "turbulence ("
+                << impl->add_turbulence(init.at("turbulence"), "initialize.turbulence", base) << ")";
+    }
     impl->layers.push_back(base);
 
     struct Entry {
@@ -1342,8 +1372,12 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
             for (const char * key : {"u", "rho", "p", "T", "X", "Y"}) {
                 if (e.contains(key)) fields += (fields.empty() ? "" : ", ") + std::string(key);
             }
+            if (e.contains("turbulence")) {
+                fields += (fields.empty() ? "" : ", ") + std::string("turbulence (") +
+                          impl->add_turbulence(e.at("turbulence"), where + ".turbulence", L) + ")";
+            }
             if (fields.empty()) {
-                throw InputError({.key = where, .line = line_of(e), .message = "sets none of u, rho, p, T, X, Y",
+                throw InputError({.key = where, .line = line_of(e), .message = "sets none of u, rho, p, T, X, Y, turbulence",
                                   .fix = "Give the values inside the region, e.g. T = 2000", .docs = REGIONS_DOCS});
             }
             entry.text = name + ": " + fields + " in " + described + (L.center ? ", whole cells by their centers" : "");
@@ -1422,6 +1456,7 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
     e.data = impl->data.device();
     e.variables = upload(impl->variables, "init_variables");
     e.mappings = upload(impl->mappings, "init_mappings");
+    e.modes = upload(impl->modes, "init_turbulence_modes");
     e.physics = impl->physics;
     e.mixture = impl->mixture != nullptr;
     if (impl->mixture) {
