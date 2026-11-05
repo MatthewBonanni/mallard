@@ -172,9 +172,11 @@ class TimedBoundaryFields {
         /**
          * @brief Condition i_bc of the face at x, of inward normal n_in, takes
          *        `fields`, and for mixtures `composition` (null: fixed).
+         *        Without a face (`at_face` false), x and n_in are 0 and errors
+         *        give no position.
          */
         void add(uint32_t i_bc, const Point & x, const Point & n_in, const std::shared_ptr<const BoundaryFields> & fields,
-                 const std::shared_ptr<const CompositionPrograms> & composition);
+                 const std::shared_ptr<const CompositionPrograms> & composition, bool at_face = true);
 
         /** @brief Copy what add() gathered to the device; call once, after the last add(). */
         void finish();
@@ -205,6 +207,7 @@ class TimedBoundaryFields {
             uint32_t set;
             Point x;
             Point n_in;
+            bool at_face;
         };
         std::vector<std::shared_ptr<const BoundaryFields>> sets;
         std::vector<std::shared_ptr<const CompositionPrograms>> compositions;  // per set

@@ -97,6 +97,24 @@ expressions of the tests and the source below compile to the same
 instructions as before and evaluate 10–25% faster (the source: 40.5 → 36.4 ns
 per evaluation), from the interpreter's reordered dispatch.
 
+### No expression on the host during a step (#449)
+
+Every expression read during a step runs in a kernel at the stage time held
+in a device scalar: sources, boundary values of `t` (`TimedBoundaryFields`,
+`DirichletStates`, `TimedInletTargets`) and the target of an average-pressure
+outlet. The outlet's target was the last one evaluated on the host: each stage
+copied its condition to the host, evaluated `p(t)` there and copied it back.
+It is now one entry of `TimedBoundaryFields` without a face, and the outlet's
+offset is written by a one-thread kernel; the outlet still copies its faces'
+`p A` and `A` to the host once per stage, to sum them in an order every rank
+count agrees on (a 3D outlet case with `p(t)`, 40 steps, is bitwise the same as
+before). The setup sites evaluate once: on the device at mesh points, and on
+the host (with the same `kexpr::evaluate`) only for parametric probe curves
+and synthetic-inflow profiles. `ForcedInletTest.ConditionsOfTKeepTheStepGraph`
+shows the step path needs the host for none of them: on CUDA it replays the
+whole step, conditions of `t` included, as one captured graph, with the same
+solution as stepping kernel by kernel.
+
 ### Geometry, expressions and inputs apart (#449)
 
 Three layers, each unaware of the one above:
@@ -197,10 +215,8 @@ every stage; cells outside a region skip it.
 
 ## Reuse
 
-Boundary expressions (#316), sponges and `[initialize]` still evaluate exprtk
-on the host where they are evaluated once (checked by `kexpr::Program`);
-adopting it for evaluation is a matter of binding their variables (#449). Sponges
-and probes take regions too (#499), and initialization is to (#324).
+Boundary expressions (#316), sponges and `[initialize]` (#324) evaluate kexpr
+on the device like sources (#449). Sponges and probes take regions too (#499).
 
 `region::Regions` holds the regions of one setup: inline ones, and each name of
 `[regions]` once, with its volume fractions computed the first time a key asks

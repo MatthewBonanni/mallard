@@ -20,6 +20,7 @@
 
 #include "boundary_fields.h"
 #include "comm.h"
+#include "common_math.h"
 #include "input.h"
 #include "log.h"
 #include "mesh.h"
@@ -107,14 +108,6 @@ std::vector<double> gaussian_kernel(double n, int32_t N) {
 
 /** @brief Variance of (1 - f) a + f b for unit-variance a, b of correlation rho. */
 double interpolated_variance(double f, double rho) { return (1.0 - f) * (1.0 - f) + f * f + 2.0 * f * (1.0 - f) * rho; }
-
-KOKKOS_INLINE_FUNCTION
-uint64_t mix64(uint64_t z) {
-    z += 0x9e3779b97f4a7c15ULL;
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-    return z ^ (z >> 31);
-}
 
 /**
  * @brief Uniform random number of zero mean and unit variance, a hash of its

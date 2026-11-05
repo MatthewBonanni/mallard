@@ -252,7 +252,7 @@ std::vector<double> inside_fractions(const Mesh & mesh, const std::vector<std::s
             }
         }
     }
-    if (!mesh.h_global_cell_id.empty()) elements = comm::allgatherv(elements);
+    if (mesh.n_global_cells > 0) elements = comm::allgatherv(elements);
     std::vector<uint32_t> part(mesh.n_cells);
     for (uint32_t c = 0; c < mesh.n_cells; c++) part[c] = c;
     auto find = [&](uint32_t c) {
