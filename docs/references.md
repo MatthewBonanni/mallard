@@ -314,6 +314,13 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="franzelli-2012"></a>B. Franzelli, E. Riber, L. Y. M. Gicquel and T. Poinsot, Large Eddy Simulation of combustion instabilities in a lean partially premixed swirled flame, *Combust. Flame* 159, 621–637 (2012). [doi:10.1016/j.combustflame.2011.08.004](https://doi.org/10.1016/j.combustflame.2011.08.004)
   Used in: `mechanisms/ch4_bfer.yaml`, the two-step mechanism 2S-CH4-BFER (lean branch) of `examples/flame_vortex_quenching`.
 
+## Derived output fields
+
+- <a id="hunt-wray-moin-1988"></a>J. C. R. Hunt, A. A. Wray and P. Moin, Eddies, streams, and convergence zones in turbulent flows, Center for Turbulence Research, Proceedings of the Summer Program 1988, 193–208 (1988).
+  Used in: the `Q_CRITERION` (and `Q`) output field (`src/solver/derived_fields.h`).
+- <a id="jeong-hussain-1995"></a>J. Jeong and F. Hussain, On the identification of a vortex, *J. Fluid Mech.* 285, 69–94 (1995). [doi:10.1017/S0022112095000462](https://doi.org/10.1017/S0022112095000462)
+  Used in: the `LAMBDA2` output field, the middle eigenvalue of S² + Ω² by Jacobi rotations (`src/solver/derived_fields.h`).
+
 ## Validation cases and reference data
 
 - <a id="comte-bellot-corrsin-1971"></a>G. Comte-Bellot and S. Corrsin, Simple Eulerian time correlation of full- and narrow-band velocity signals in grid-generated, 'isotropic' turbulence, *J. Fluid Mech.* 48, 273–337 (1971). [doi:10.1017/S0022112071001599](https://doi.org/10.1017/S0022112071001599)

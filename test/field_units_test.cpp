@@ -166,7 +166,7 @@ std::string channel(const std::string & dir) {
     }
     const std::string variables =
         "variables = [\"RHO\", \"RHOU\", \"RHOE\", \"U\", \"U_X\", \"P\", \"T\", \"H\", \"CFL\", \"Q\", \"VORTICITY\", "
-        "\"MEAN_*\", \"COV_*\"]\n";
+        "\"MACH\", \"Q_CRITERION\", \"LAMBDA2\", \"SCHLIEREN\", \"MEAN_*\", \"COV_*\"]\n";
     s << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 2\n" << variables
       << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtu\"\nregion = \"bottom\"\ninterval = 2\n"
       << "variables = [\"P\", \"U\"]\n"
@@ -216,6 +216,10 @@ TEST(FieldUnitsTest, UnitsFollowFromTheDimensions) {
     EXPECT_EQ(units_of("H"), "m2 s-2");
     EXPECT_EQ(units_of("Q"), "s-2");
     EXPECT_EQ(units_of("VORTICITY_Z"), "s-1");
+    EXPECT_EQ(units_of("Q_CRITERION"), "s-2");
+    EXPECT_EQ(units_of("LAMBDA2"), "s-2");
+    EXPECT_EQ(units_of("MACH"), "1");
+    EXPECT_EQ(units_of("SCHLIEREN"), "kg m-4");
     EXPECT_EQ(units_of("CFL"), "1");
     EXPECT_EQ(units_of("LAMBDA"), "kg m s-3 K-1");
     EXPECT_EQ(units_of("DT_H2O"), "kg m-1 s-1");
