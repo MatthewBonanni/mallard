@@ -57,7 +57,9 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
         }
         if (InletProfile::turbulent(bound)) {
             inflows.push_back(std::make_unique<SyntheticInflow>(bound, where, i_bc, *mesh, faces, chars));
-            boundary_summary.emplace_back(name + " turbulence", inflows.back()->summary());
+            for (CheckBoundary & b : boundary_summary) {
+                if (b.zone == name) b.turbulence = inflows.back()->summary();
+            }
         }
     }
     if (profiled) {

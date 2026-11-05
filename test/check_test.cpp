@@ -19,6 +19,7 @@
 #include <string>
 
 #include "hdf5_output.h"
+#include "json.h"
 #include "mesh_block.h"
 #include "data_paths.h"
 #include "test_fixtures.h"
@@ -60,6 +61,12 @@ std::string box(const std::string & u_x = "1.0", const std::string & run = "t_st
 CheckReport check(const std::string & input, const CheckOptions & options = {}) {
     Solver solver;
     return solver.check(parse_input_string(input), options);
+}
+
+/** @brief The first error's message, or empty. */
+std::string first_error(const CheckReport & r) {
+    const std::vector<std::string> errors = r.errors();
+    return errors.empty() ? "" : errors.front();
 }
 
 bool mentions(const std::vector<std::string> & messages, const std::string & text) {
@@ -126,8 +133,8 @@ TEST(CheckKeys, RemovedKeysNameWhatReplacedThem) {
     input.replace(input.find("rho_ref = 1.0\n"), 14, "rho_ref = 1.0\np_min = 0.0\n");
     const CheckReport r = check(input);
     EXPECT_FALSE(r.ok());
-    EXPECT_TRUE(mentions(r.errors, "physics.p_min was removed in 0.2.0")) << r.errors.front();
-    EXPECT_TRUE(mentions(r.errors, "mallard input upgrade"));
+    EXPECT_TRUE(mentions(r.errors(), "physics.p_min was removed in 0.2.0")) << first_error(r);
+    EXPECT_TRUE(mentions(r.errors(), "mallard input upgrade"));
 }
 
 TEST(CheckKeys, KeyInTheWrongTableSuggestsWhereItIsRead) {
@@ -191,8 +198,8 @@ TEST(CheckBoundaries, ZonesWithoutAConditionAreNamed) {
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "", zones));
     EXPECT_FALSE(r.setup_done);
     const uint32_t n_top = N_DIM == 3 ? 16 * 2 : 16;
-    EXPECT_TRUE(mentions(r.errors, "no condition for zone top (" + std::to_string(n_top) + " faces)"))
-        << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_TRUE(mentions(r.errors(), "no condition for zone top (" + std::to_string(n_top) + " faces)"))
+        << (first_error(r));
     EXPECT_FALSE(r.ok());
 }
 
@@ -201,7 +208,7 @@ TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
     // flow is 3 times faster for x > 1.5, so that is where dt is set
     const double a = std::sqrt(1.4), h = 2.0 / 16;
     const CheckReport r = check(box("1.0 + 2.0 * (x > 1.5)"));
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     if (N_DIM == 2) {
         EXPECT_NEAR(r.dt, 0.8 * h / (3.0 + 2.0 * a), roundoff(1e-12));
     }
@@ -216,9 +223,9 @@ TEST(CheckTimeStep, FixedTimeStepReportsItsCflAndWarnsAboveTheIntegratorsLimit) 
     const CheckReport ok = check(box("1.0", "t_stop = 0.5\ndt = 1e-3\n"));
     EXPECT_NEAR(ok.dt, 1e-3, roundoff(1e-18));
     EXPECT_NEAR(ok.cfl, 1e-3 / ok.dt_cfl1, roundoff(1e-12));
-    EXPECT_FALSE(mentions(ok.warnings, "stability limit"));
+    EXPECT_FALSE(mentions(ok.warnings(), "stability limit"));
     const CheckReport fast = check(box("1.0", "t_stop = 0.5\ncfl = 1.5\n"));
-    EXPECT_TRUE(mentions(fast.warnings, "stability limit of SSPRK3"));
+    EXPECT_TRUE(mentions(fast.warnings(), "stability limit of SSPRK3"));
     EXPECT_TRUE(fast.ok());  // a warning, not an error
 }
 
@@ -248,7 +255,7 @@ TEST(CheckMemory, MeasuresAllocationsAndScalesThemToTheTargetRanks) {
     CheckOptions options;
     options.ranks = 4;
     const CheckReport r = check(box(), options);
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     // Conservatives alone are N_CONSERVATIVE reals per cell
     EXPECT_GT(r.bytes, r.n_cells * N_CONSERVATIVE * sizeof(rtype));
     EXPECT_GE(r.bytes_peak, r.bytes);
@@ -278,7 +285,7 @@ uint64_t sum(const memory::Bytes & b) { return std::accumulate(b.begin(), b.end(
 TEST(CheckMemory, CategoriesSumToTheTotalsAndNameEveryAllocation) {
     if (comm::size() > 1) GTEST_SKIP() << "one rank's allocations";
     const CheckReport r = check(sized_box(16, 8));
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     EXPECT_EQ(sum(r.setup_bytes), r.bytes_peak);
     EXPECT_EQ(sum(r.steady_bytes), r.bytes);
     EXPECT_EQ(r.setup_bytes[size_t(memory::Category::OTHER)], 0u);
@@ -347,7 +354,7 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
                                         "zone = \"bottom\"\nfile = \"" + (dir / "forces.csv").string() +
                                         "\"\n[integrals]\nfile = \"" + (dir / "integrals.csv").string() + "\"\n"),
                                 options);
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     EXPECT_FALSE(std::filesystem::exists(dir / "out"));
     EXPECT_FALSE(std::filesystem::exists(dir / "forces.csv"));
     EXPECT_FALSE(std::filesystem::exists(dir / "integrals.csv"));
@@ -390,10 +397,10 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     };
     const double delta = 0.01;
     const CheckReport fine = check(input(5.0 * delta / 4.0));    // F = 4
-    ASSERT_TRUE(fine.ok()) << (fine.errors.empty() ? describe(fine.unused[0]) : fine.errors[0]);
-    EXPECT_FALSE(mentions(fine.warnings, "TFLES"));
+    ASSERT_TRUE(fine.ok()) << (first_error(fine));
+    EXPECT_FALSE(mentions(fine.warnings(), "TFLES"));
     const CheckReport coarse = check(input(5.0 * delta / 10.0));  // F = 10
-    EXPECT_TRUE(mentions(coarse.warnings, "F = 10"));
+    EXPECT_TRUE(mentions(coarse.warnings(), "F = 10"));
     EXPECT_NEAR(fine.cells_per_delta_L_min, 1.25, roundoff(1e-12));
     EXPECT_NEAR(coarse.cells_per_delta_L_max, 0.5, roundoff(1e-12));
 }
@@ -426,23 +433,25 @@ TEST(CheckResolution, TaylorGreenDissipationGivesTheKolmogorovLength) {
     const double E = N_DIM == 3 ? 0.125 : 0.25, epsilon = 2.0 * nu * N_DIM * E;
     const int n = N_DIM == 3 ? 48 : 64;
     const CheckReport r = check(periodic_box(n, nu, u));
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     EXPECT_NEAR(r.epsilon, epsilon, 0.05 * epsilon);
     EXPECT_NEAR(r.eta, std::pow(nu * nu * nu / r.epsilon, 0.25), roundoff(1e-11) * r.eta);
     EXPECT_NEAR(r.taylor, std::sqrt(15.0 * nu * (2.0 * E / N_DIM) / r.epsilon), 0.01 * r.taylor);
     EXPECT_NEAR(r.delta_over_eta, 2.0 * std::numbers::pi / n / r.eta, roundoff(1e-9) * r.delta_over_eta);
-    EXPECT_FALSE(mentions(r.warnings, "DNS"));
+    EXPECT_FALSE(mentions(r.warnings(), "DNS"));
     // A hundredth of the viscosity dissipates a hundredth as much: eta ten times smaller
     const CheckReport coarse = check(periodic_box(n, nu / 100.0, u));
-    EXPECT_TRUE(mentions(coarse.warnings, "DNS: cells of"));
+    EXPECT_TRUE(mentions(coarse.warnings(), "DNS: cells of"));
 }
 
 TEST(CheckResolution, AFlowWithoutGradientsOrForcingHasNoKolmogorovLength) {
     const CheckReport r = check(periodic_box(8, 0.01, std::vector<std::string>(N_DIM, "1.0")));
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     EXPECT_EQ(r.eta, 0.0);
     bool said = false;
-    for (const auto & [label, text] : r.resolution) said |= label == "Kolmogorov" && text.rfind("not estimated", 0) == 0;
+    for (const CheckEstimate & e : r.resolution) {
+        said |= e.id == "eta" && std::isnan(e.value) && e.basis.rfind("not estimated", 0) == 0;
+    }
     EXPECT_TRUE(said);
 }
 
@@ -461,7 +470,7 @@ TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
       << "[numerics]\nriemann_solver = \"HLLC\"\n[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\n"
       << "p_ref = 17.857142857142858\nT_ref = 1.0\nrho_ref = 1.0\nmu = " << nu << "\nPr = 0.72\n";
     const CheckReport r = check(s.str());
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     EXPECT_NEAR(r.u_tau / nu, 180.0, 0.03 * 180.0);
     const double y1 = 1.0 / 16.0;  // the first cell centers: half of 2 / 16
     EXPECT_NEAR(r.y_plus_max, y1 * r.u_tau / nu, 1e-5 * r.y_plus_max);
@@ -471,8 +480,8 @@ TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
         EXPECT_NEAR(r.z_plus_max, 0.5 * r.u_tau / nu, 1e-5 * r.z_plus_max);
     }
     EXPECT_NEAR(r.epsilon, r.u_tau * r.u_tau, 1e-5 * r.epsilon);  // u_tau^2 U_b / h with U_b = h = 1
-    EXPECT_TRUE(mentions(r.warnings, "first cells at y+ up to"));
-    EXPECT_TRUE(mentions(r.warnings, "wall cells up to x+"));
+    EXPECT_TRUE(mentions(r.warnings(), "first cells at y+ up to"));
+    EXPECT_TRUE(mentions(r.warnings(), "wall cells up to x+"));
 }
 
 TEST(MeshQualityMetrics, UniformQuadsAreIdealAndElongatedOnesHaveTheirAspectRatio) {
@@ -618,21 +627,33 @@ TEST(CheckRegions, ListsEveryRegionWithItsDimensionMeasureAndCells) {
         return solver.check(parse_input_string(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", extra)), CheckOptions{});
     };
     const CheckReport r = report(true);
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
-    std::map<std::string, std::string> regions(r.regions.begin(), r.regions.end());
-    EXPECT_EQ(regions.at("domain"), std::string(N_DIM == 2 ? "area 2" : "volume 0.5") + ", " +
-                                        (N_DIM == 2 ? "128" : "256") + " cells (of the mesh)");
-    EXPECT_EQ(regions.at("left"), std::string(N_DIM == 2 ? "curve, length 1, 8" : "surface, area 0.25, 16") +
-                                      " cells (of the mesh)");
-    EXPECT_NE(regions.at("ball").find(N_DIM == 2 ? "area " : "volume "), std::string::npos);
-    const std::string on = regions.at("probes[name = \"on\"].region");
-    EXPECT_NE(on.find(std::string(N_DIM == 2 ? "curve, length " : "surface, area ") +
-                      logging::real(N_DIM == 2 ? 2.0 * std::numbers::pi * 0.3 : 4.0 * std::numbers::pi * 0.01)),
-              std::string::npos)
-        << on;
-    EXPECT_NE(on.find(", exact"), std::string::npos) << on;
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    std::map<std::string, CheckRegion> regions;
+    for (const CheckRegion & g : r.regions) regions[g.name] = g;
+    const CheckRegion & domain = regions.at("domain");
+    EXPECT_TRUE(domain.of_mesh);
+    EXPECT_EQ(domain.dimension, N_DIM);
+    EXPECT_DOUBLE_EQ(domain.measure, N_DIM == 2 ? 2.0 : 0.5);
+    EXPECT_EQ(domain.cells, N_DIM == 2 ? 128u : 256u);
+    const CheckRegion & left = regions.at("left");
+    EXPECT_EQ(left.dimension, N_DIM - 1);
+    EXPECT_DOUBLE_EQ(left.measure, N_DIM == 2 ? 1.0 : 0.25);
+    EXPECT_EQ(left.cells, N_DIM == 2 ? 8u : 16u);
+    EXPECT_EQ(regions.at("ball").dimension, N_DIM);
+    EXPECT_FALSE(regions.at("ball").of_mesh);
+    const CheckRegion & on = regions.at("probes[name = \"on\"].region");
+    EXPECT_EQ(on.dimension, N_DIM - 1);
+    const double sphere = N_DIM == 2 ? 2.0 * std::numbers::pi * 0.3 : 4.0 * std::numbers::pi * 0.01;
+    EXPECT_NEAR(on.measure, sphere, 1e-6 * sphere);
+    EXPECT_TRUE(on.exact);
     // The same on one rank as on several
-    EXPECT_EQ(report(false).regions, r.regions);
+    const CheckReport serial = report(false);
+    ASSERT_EQ(serial.regions.size(), r.regions.size());
+    for (size_t i = 0; i < r.regions.size(); i++) {
+        EXPECT_EQ(serial.regions[i].name, r.regions[i].name);
+        EXPECT_EQ(serial.regions[i].cells, r.regions[i].cells);
+        EXPECT_DOUBLE_EQ(serial.regions[i].measure, r.regions[i].measure);
+    }
 }
 
 TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
@@ -641,8 +662,8 @@ TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
                                     "[[sponges]]\nstrength = 1.0\nregion = " + far + "\nu = " + U_ZERO +
                                         "\np = 1.0\nT = 1.0\n"));
-    EXPECT_TRUE(mentions(r.errors, "region sponges[0].region lies outside the domain: it spans (4.5, 4"))
-        << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_TRUE(mentions(r.errors(), "region sponges[0].region lies outside the domain: it spans (4.5, 4"))
+        << (first_error(r));
 }
 
 #ifdef Mallard_HAS_HDF5
@@ -657,7 +678,7 @@ TEST(CheckRegions, TheCaseViewHoldsEveryRegionAndZone) {
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
                                     "[[probes]]\nname = \"s\"\nvariables = [\"P\"]\nregion = " + surface + "\n"),
                                 options);
-    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
     EXPECT_EQ(r.view_file, (dir / "case.vtkhdf").string());
     comm::barrier();
     if (!comm::is_root()) return;
@@ -668,3 +689,133 @@ TEST(CheckRegions, TheCaseViewHoldsEveryRegionAndZone) {
     }
 }
 #endif
+
+namespace {
+
+/**
+ * @brief The check of a 2D box with an unused key, a CFL above SSPRK3's limit, a sponge outside the domain and
+ *        a probe on a circle, with the numbers that depend on the build or the machine (memory) set by hand.
+ */
+CheckReport report_case() {
+    const std::string far = N_DIM == 2 ? "{type = \"rectangle\", center = [5, 5], size = [1, 2]}"
+                                       : "{type = \"box\", center = [5, 5, 5], size = [1, 2, 1]}";
+    const std::string ring = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
+                                        : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
+    const std::string extra = "[[sponges]]\nstrength = 1.0\nregion = " + far + "\nu = " + U_ZERO +
+                              "\np = 1.0\nT = 1.0\n[[probes]]\nname = \"ring\"\nvariables = [\"P\"]\nregion = " + ring +
+                              "\n";
+    std::string input = box("1.0", "t_stop = 0.5\ncfl = 1.5\n", extra);
+    input.replace(input.find("riemann_solver"), 14, "riemann_solvr");
+    CheckOptions options;
+    options.input_file = "input.toml";
+    options.throughput = 1e6;
+    CheckReport r = check(input, options);
+    r.device_memory = false;
+    r.device_capacity = 0;
+    r.outside_kokkos = 0;
+    r.sizing_name.clear();
+    r.setup_bytes.fill(0);
+    r.steady_bytes.fill(0);
+    r.setup_bytes[size_t(memory::Category::STATE)] = r.steady_bytes[size_t(memory::Category::STATE)] = 27'100;
+    r.setup_bytes[size_t(memory::Category::MESH)] = r.steady_bytes[size_t(memory::Category::MESH)] = 42'900;
+    r.setup_bytes[size_t(memory::Category::SETUP)] = 58'100;
+    r.bytes = r.target_bytes = 70'000;
+    r.bytes_peak = r.target_bytes_peak = 128'100;
+    return r;
+}
+
+} // namespace
+
+// Guards every section, column, unit and status of the text report. After a deliberate change of the report,
+// MALLARD_UPDATE_GOLDEN=1 rewrites the expected text (then review its diff).
+TEST(CheckReportText, MatchesTheGoldenReport) {
+    if (N_DIM != 2 || sizeof(rtype) != 8 || comm::size() > 1) {
+        GTEST_SKIP() << "the golden report is of a serial 2D double-precision check";
+    }
+    const std::string text = check_text(report_case(), false);
+    const std::filesystem::path golden =
+        std::filesystem::path(source_dir()) / "test" / "data" / "check" / "report_2d.txt";
+    if (const char * update = std::getenv("MALLARD_UPDATE_GOLDEN"); update && std::string(update) == "1") {
+        std::ofstream(golden) << text;
+    }
+    std::ifstream file(golden);
+    ASSERT_TRUE(file) << golden;
+    const std::string expected((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(text, expected) << "the report differs from " << golden << "; MALLARD_UPDATE_GOLDEN=1 updates it";
+}
+
+TEST(CheckReportText, ColorChangesOnlyTheStyles) {
+    const CheckReport r = report_case();
+    std::string colored = check_text(r, true);
+    EXPECT_NE(colored.find("\033["), std::string::npos);
+    for (size_t at = colored.find("\033["); at != std::string::npos; at = colored.find("\033[")) {
+        colored.erase(at, colored.find('m', at) + 1 - at);
+    }
+    EXPECT_EQ(colored, check_text(r, false));
+}
+
+TEST(CheckReportJson, ReadsBackTheReportsNumbersAndDiagnostics) {
+    const CheckReport r = report_case();
+    const json::Value v = json::parse(check_json(r));
+    EXPECT_EQ(v["version"].number, 1.0);
+    EXPECT_EQ(v["status"].string, "error");
+    EXPECT_EQ(v["errors"].number, double(r.errors().size()));
+    EXPECT_EQ(v["warnings"].number, double(r.warnings().size()));
+    ASSERT_EQ(v["diagnostics"].array.size(), r.diagnostics.size());
+    for (size_t i = 0; i < r.diagnostics.size(); i++) {
+        const json::Value & d = v["diagnostics"].array[i];
+        EXPECT_EQ(d["code"].string, r.diagnostics[i].code);
+        EXPECT_EQ(d["message"].string, r.diagnostics[i].message);
+        EXPECT_EQ(d["severity"].string, report::status_name(r.diagnostics[i].severity));
+        EXPECT_EQ(d["docs"].string, r.diagnostics[i].docs());
+    }
+    ASSERT_EQ(v["unused_keys"].array.size(), 1u);
+    EXPECT_EQ(v["unused_keys"].array[0]["suggestion"].string, "numerics.riemann_solver");
+    EXPECT_EQ(v["time_step"]["dt"].number, r.dt);
+    EXPECT_EQ(v["time_step"]["cfl"].number, r.cfl);
+    EXPECT_EQ(v["time_step"]["cfl_limit"].number, 1.2);
+    EXPECT_EQ(v["time_step"]["limiting_cell"].number, double(r.limiting_cell));
+    ASSERT_EQ(v["regions"].array.size(), r.regions.size());
+    for (size_t i = 0; i < r.regions.size(); i++) {
+        EXPECT_EQ(v["regions"].array[i]["name"].string, r.regions[i].name);
+        EXPECT_EQ(v["regions"].array[i]["measure"].number, r.regions[i].measure);
+        EXPECT_EQ(v["regions"].array[i]["cells"].number, double(r.regions[i].cells));
+    }
+    ASSERT_FALSE(r.resolution.empty());
+    for (const CheckEstimate & e : r.resolution) {
+        const json::Value & j = v["resolution"][e.id];
+        if (std::isnan(e.value)) {
+            EXPECT_TRUE(j["value"].is_null()) << e.id;
+        } else {
+            EXPECT_EQ(j["value"].number, e.value) << e.id;
+        }
+        EXPECT_EQ(j["units"].string, e.units) << e.id;
+    }
+    EXPECT_EQ(v["memory"]["bytes_peak"].number, double(r.bytes_peak));
+    EXPECT_EQ(v["memory"]["at_setup_peak"]["setup"].number, 58'100.0);
+    EXPECT_EQ(v["cost"]["wall_per_time"].number, r.wall_per_time);
+    EXPECT_EQ(v["mesh_quality"]["ASPECT_RATIO"]["max"].number, r.quality[2].max);
+}
+
+TEST(CheckReportJson, ASetupThatStopsStillGivesEveryTopLevelKey) {
+    std::string input = box();
+    input.replace(input.find("Nx = 16"), 7, "Nx = 16.0");
+    const json::Value v = json::parse(check_json(check(input)));
+    EXPECT_EQ(v["status"].string, "error");
+    EXPECT_EQ(v["diagnostics"].array.at(0)["code"].string, check_code::INPUT);
+    for (const char * key : {"time_step", "memory", "sizing", "cost", "mesh_quality"}) {
+        EXPECT_TRUE(v[key].is_null()) << key;
+    }
+}
+
+TEST(CheckDiagnostics, EveryCodeIsExplainedInTheDocs) {
+    const std::filesystem::path page = std::filesystem::path(source_dir()) / "docs" / "guide" / "input_files.md";
+    if (!std::filesystem::exists(page)) GTEST_SKIP() << "no docs in an install tree";
+    std::ifstream file(page);
+    const std::string docs((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    for (const char * code : check_code::ALL) {
+        const std::string link = CheckDiagnostic{report::Status::ERROR, code, ""}.docs();
+        const std::string anchor = link.substr(link.find('#') + 1);
+        EXPECT_NE(docs.find("<a id=\"" + anchor + "\"></a>`" + code + "`"), std::string::npos) << code;
+    }
+}
