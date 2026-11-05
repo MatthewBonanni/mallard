@@ -867,22 +867,35 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     });
 }
 
-std::vector<double> Probes::Samples::gather(const CellColumns & columns) const {
-    const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
+void Probes::Samples::gather(std::vector<double> & out, const CellColumns & columns) const {
+    using Space = Kokkos::View<rtype **, Kokkos::LayoutRight>::memory_space;
+    if (Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space>::accessible ||
+        host_values.extent(0) != values.extent(0) || host_values.extent(1) != values.extent(1)) {
+        host_values = Kokkos::create_mirror_view(values);
+    }
+    Kokkos::deep_copy(host_values, values);
+    const auto & h = host_values;
     for (const auto & [column, data] : columns) {
         for (size_t i = 0; i < host_cells.size(); i++) h(i, column) = (*data)[host_cells[i]];
     }
     const size_t n_vars = values.extent(1);
-    std::vector<double> local(h.size());
-    for (size_t i = 0; i < local.size(); i++) local[i] = static_cast<double>(h.data()[i]);
-    const std::vector<double> all = distributed ? comm::gatherv(local) : local;
-    if (!comm::is_root() && distributed) return {};
-    std::vector<double> ordered(all.size());
-    for (uint64_t p = 0; p < n_global; p++) {
-        std::copy_n(all.begin() + static_cast<long>(gathered_row[p] * n_vars), n_vars,
-                    ordered.begin() + static_cast<long>(p * n_vars));
+    std::vector<double> all;
+    if (distributed) {
+        std::vector<double> local(h.size());
+        for (size_t i = 0; i < local.size(); i++) local[i] = static_cast<double>(h.data()[i]);
+        all = comm::gatherv(local);
+        if (!comm::is_root()) {
+            out.clear();
+            return;
+        }
     }
-    return ordered;
+    out.resize(distributed ? all.size() : h.size());
+    for (uint64_t p = 0; p < n_global; p++) {
+        const size_t row = gathered_row[p] * n_vars;
+        for (size_t v = 0; v < n_vars; v++) {
+            out[p * n_vars + v] = distributed ? all[row + v] : static_cast<double>(h.data()[row + v]);
+        }
+    }
 }
 
 namespace probe {
@@ -1561,19 +1574,22 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         const bool extrema = std::any_of(p.reductions.begin(), p.reductions.end(),
                                          [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
-        std::vector<double> nodes, quad;
+        std::vector<double> & nodes = p.gathered_nodes;
+        std::vector<double> & quad = p.gathered_quad;
+        nodes.clear();
+        quad.clear();
         // Collective on every rank (the geometry lives on rank 0 for some shapes)
         const bool own_quadrature = p.quadrature.n_global == 0;
         if ((!p.from_region || p.resampled) && (p.write_samples || extrema || own_quadrature)) {
             p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
-            nodes = p.nodes.gather(p.cell_columns);
+            p.nodes.gather(nodes, p.cell_columns);
         }
         if (!p.reductions.empty() && !own_quadrature) {
             p.quadrature.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
-            quad = p.quadrature.gather();
+            p.quadrature.gather(quad);
         }
         if (comm::is_root() || !distributed) {
-            p.last = p.reduce(nodes, quad);
+            p.reduce(nodes, quad);
             if (p.point_value) {
                 for (size_t v = 0; v < p.variables.size(); v++) p.last.push_back(nodes[v]);
             }
@@ -1770,71 +1786,67 @@ void Probes::Probe::write_vtp(uint64_t step, rtype t, const std::vector<double> 
     write_pvd_file(file, series);
 }
 
-std::vector<double> Probes::Probe::reduce(const std::vector<double> & node_values,
-                                          const std::vector<double> & quad) const {
+void Probes::Probe::reduce(const std::vector<double> & node_values, const std::vector<double> & quad) {
     // Point sets and boundaries reduce their samples; curves their quadrature points
     const bool points = quadrature.n_global == 0;
-    const std::vector<double> & q = points ? node_values : quad;
+    const double * q = points ? node_values.data() : quad.data();
     const size_t n_cols = n_evaluated();
     const size_t n_q = points ? geometry.nodes.size() : geometry.quad_weights.size();
-    auto weight = [&](size_t i) {
-        return points ? (geometry.node_weights.empty() ? 1.0 : geometry.node_weights[i]) : geometry.quad_weights[i];
+    const double * weights = points ? (geometry.node_weights.empty() ? nullptr : geometry.node_weights.data())
+                                    : geometry.quad_weights.data();
+    // One loop per reduction, without branches: these run over every sample at every write
+    // add(sum, w, i) adds sample i of weight w in one expression, as a single rounding (or FMA)
+    auto weighted_sum = [&](auto add) {
+        double sum = 0.0;
+        if (weights) {
+            for (size_t i = 0; i < n_q; i++) add(sum, weights[i], i);
+        } else {
+            for (size_t i = 0; i < n_q; i++) add(sum, 1.0, i);
+        }
+        return sum;
     };
-    const double measure = this->measure();
-    std::vector<double> results;
+    measure = weighted_sum([](double & sum, double w, size_t) { sum += w; });
+    last.clear();
     for (const Reduction r : reductions) {
         for (size_t v = 0; v < variables.size(); v++) {
-            double sum = 0.0, sum_rho = 0.0;
-            double lo = std::numeric_limits<double>::infinity(), hi = -lo;
-            for (size_t i = 0; i < n_q; i++) {
-                const double w = weight(i);
-                const double value = q[i * n_cols + v];
-                switch (r) {
-                    case Reduction::INTEGRAL:
-                    case Reduction::MEAN: sum += w * value; break;
-                    case Reduction::FAVRE:
-                        sum += w * q[i * n_cols + rho_column] * value;
-                        sum_rho += w * q[i * n_cols + rho_column];
-                        break;
-                    case Reduction::RMS: sum += w * value * value; break;
-                    case Reduction::MIN: lo = std::min(lo, value); break;
-                    case Reduction::MAX: hi = std::max(hi, value); break;
-                }
-            }
-            if (r == Reduction::MIN || r == Reduction::MAX) {
-                for (size_t i = 0; i < geometry.nodes.size(); i++) {
-                    lo = std::min(lo, node_values[i * n_cols + v]);
-                    hi = std::max(hi, node_values[i * n_cols + v]);
-                }
-            }
+            auto value = [&](size_t i) { return q[i * n_cols + v]; };
+            auto integrand = [&](double & sum, double w, size_t i) { sum += w * value(i); };
             double result = 0.0;
             switch (r) {
-                case Reduction::INTEGRAL: result = sum; break;
-                case Reduction::MEAN: result = sum / measure; break;
-                case Reduction::FAVRE: result = sum / sum_rho; break;
-                case Reduction::RMS: result = std::sqrt(sum / measure); break;
-                case Reduction::MIN: result = lo; break;
-                case Reduction::MAX: result = hi; break;
+                case Reduction::INTEGRAL: result = weighted_sum(integrand); break;
+                case Reduction::MEAN: result = weighted_sum(integrand) / measure; break;
+                case Reduction::FAVRE: {
+                    auto rho = [&](size_t i) { return q[i * n_cols + rho_column]; };
+                    result = weighted_sum([&](double & sum, double w, size_t i) { sum += w * rho(i) * value(i); }) /
+                             weighted_sum([&](double & sum, double w, size_t i) { sum += w * rho(i); });
+                    break;
+                }
+                case Reduction::RMS:
+                    result = std::sqrt(weighted_sum([&](double & sum, double w, size_t i) { sum += w * value(i) * value(i); }) / measure);
+                    break;
+                case Reduction::MIN:
+                case Reduction::MAX: {
+                    double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+                    for (size_t i = 0; i < n_q; i++) {
+                        lo = std::min(lo, value(i));
+                        hi = std::max(hi, value(i));
+                    }
+                    for (size_t i = 0; i < geometry.nodes.size(); i++) {
+                        lo = std::min(lo, node_values[i * n_cols + v]);
+                        hi = std::max(hi, node_values[i * n_cols + v]);
+                    }
+                    result = r == Reduction::MIN ? lo : hi;
+                    break;
+                }
             }
-            results.push_back(result);
+            last.push_back(result);
         }
     }
-    return results;
-}
-
-double Probes::Probe::measure() const {
-    const bool points = quadrature.n_global == 0;
-    const size_t n_q = points ? geometry.nodes.size() : geometry.quad_weights.size();
-    double sum = 0.0;
-    for (size_t i = 0; i < n_q; i++) {
-        sum += points ? (geometry.node_weights.empty() ? 1.0 : geometry.node_weights[i]) : geometry.quad_weights[i];
-    }
-    return sum;
 }
 
 void Probes::Probe::write_reductions(uint64_t step, rtype t) const {
     std::ostream & row = *out_reductions;
-    row << step << "," << std::setprecision(std::numeric_limits<double>::max_digits10) << double(t) << "," << measure();
+    row << step << "," << std::setprecision(std::numeric_limits<double>::max_digits10) << double(t) << "," << measure;
     for (size_t i = 0; i < reductions.size() * variables.size(); i++) row << "," << last[i];
     row << "\n";
     row.flush();
