@@ -468,7 +468,7 @@ json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
 ```
 
 or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
-`mallard info FILE` summarises the block, and `mallard info --input FILE`
+`mallard info FILE` summarizes the block, and `mallard info --input FILE`
 prints the input that produced the file, ready to run again
 ([Command line](cli.md#mallard-info)).
 

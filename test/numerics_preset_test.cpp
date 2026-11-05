@@ -21,7 +21,7 @@
 
 #include "example_inputs.h"
 #include "input.h"
-#include "json_reader.h"
+#include "json.h"
 #include "numerics_preset.h"
 #include "provenance.h"
 #include "solver.h"
@@ -310,7 +310,7 @@ namespace {
 std::pair<std::string, std::vector<double>> resolved_run(const Input & input) {
     Solver solver;
     solver.init(input);
-    const std::string resolved = json_reader::parse(provenance::json())["input"]["resolved"].string;
+    const std::string resolved = json::parse(provenance::json())["input"]["resolved"].string;
     solver.run();
     solver.copy_device_to_host();
     std::vector<double> state;

@@ -384,14 +384,14 @@ TEST(ProvenanceTest, HoldsTheResolvedInput) {
     input.replace(input.find("cfl = 0.25\n"), 11, "cfl = 0.25\nt_stop = \"1 min\"\n");
     Solver solver;
     solver.init(parse_toml(input));
-    const std::string resolved = json_reader::parse(provenance::json())["input"]["resolved"].string;
+    const std::string resolved = json::parse(provenance::json())["input"]["resolved"].string;
     EXPECT_NE(resolved.find("\nt_stop = 60.0\n"), std::string::npos) << resolved;
     EXPECT_NE(resolved.find("\nconvective_flux = \"riemann\"\n"), std::string::npos) << "a default";
     Solver checked;
     EXPECT_EQ(checked.check(parse_toml(input), CheckOptions{}).resolved, resolved);
     Solver again;
     again.init(parse_toml(resolved));
-    EXPECT_EQ(json_reader::parse(provenance::json())["input"]["resolved"].string, resolved);
+    EXPECT_EQ(json::parse(provenance::json())["input"]["resolved"].string, resolved);
     if (comm::is_root()) std::filesystem::remove_all(dir);
 }
 

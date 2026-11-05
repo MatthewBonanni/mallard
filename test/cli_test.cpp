@@ -327,10 +327,12 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
     SKIP_UNDER_MPI();
     const Result ran = small_run();
     ASSERT_EQ(ran.status, 0) << ran.err;
+    const Result resolved = run({"input", "resolve", "small.toml"}, true);
+    ASSERT_EQ(resolved.status, 0) << resolved.err;
     const Result input = run({"info", "--input", "case/flow_000002.vtu"}, true);
     EXPECT_EQ(input.status, 0) << input.err;
-    EXPECT_EQ(input.out, read_file("small.toml"));
-    EXPECT_EQ(run({"info", "--input", "case/restart_000002.restart"}, true).out, read_file("small.toml"));
+    EXPECT_EQ(input.out, resolved.out);
+    EXPECT_EQ(run({"info", "--input", "case/restart_000002.restart"}, true).out, resolved.out);
 
     const Result described = run({"info", "--json", "case/flow_000002.vtu"}, true);
     ASSERT_EQ(described.status, 0) << described.err;
@@ -360,7 +362,7 @@ TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {
         EXPECT_TRUE(contains(r.out, part)) << part << "\n" << r.out;
     }
     EXPECT_FALSE(contains(r.out, "flow_000002.vtu")) << r.out;
-    EXPECT_EQ(run({"info", "--input", "."}, true).out, read_file("small.toml"));
+    EXPECT_EQ(run({"info", "--input", "."}, true).out, run({"input", "resolve", "small.toml"}, true).out);
 }
 
 TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
