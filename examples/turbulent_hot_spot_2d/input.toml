@@ -1,0 +1,85 @@
+# A hot spot in decaying 2D turbulence, set up without a script: synthetic
+# turbulence of prescribed spectra in the base state and, stronger and finer,
+# inside the hot spot.
+#
+# - The base state is uniform air at rest (c = 1) with a Passot-Pouquet
+#   spectrum of u' = 0.1 and integral length scale 0.5 on the periodic box
+#   [0, 2 pi]^2: [initialize.turbulence].
+# - The hot spot is a disk three times hotter at the same pressure, with a
+#   smooth edge; inside it a von Karman-Pao spectrum of u' = 0.2 and length
+#   scale 0.2 adds to the base turbulence, fading out over the edge.
+#
+# The run log's Initial state lists both fields: their modes, shells and the
+# share of each spectrum's energy they hold (the von Karman-Pao tail beyond
+# k_max is cut). The turbulence stirs the hot gas into filaments while both
+# fields decay; integrals.csv holds the kinetic energy.
+#
+# Run:
+#   ../../build/src/mallard -i input.toml --kokkos-num-threads=8
+#   python ../../tools/post/animate.py solut hot_spot
+
+[run]
+t_stop = 10.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 256
+Ny = 256
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+# The fields are smooth over a cell: no subdivision (the 2D default, 4,
+# integrates sharp expressions and edges, and costs 16 times as much here)
+n_subdivisions = 1
+
+[initialize.turbulence]
+spectrum = "passot_pouquet"
+intensity = 0.1
+length_scale = 0.5
+
+[[initialize.regions]]
+name = "hot spot"
+region = {type = "disk", center = [3.141592653589793, 3.141592653589793], radius = 1.0, edge = 0.3}
+T = 2.142857142857143
+turbulence = {spectrum = "von_karman_pao", intensity = 0.2, length_scale = 0.2, seed = 2}
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 5.0e-4
+Pr = 0.7
+
+[output]
+check_interval = 100
+
+[integrals]
+interval = 10
+file = "integrals.csv"
+
+[[write_data]]
+prefix = "solut/hot_spot"
+time_interval = 0.25
+variables = ["RHO", "U", "T", "VORTICITY"]

@@ -286,8 +286,8 @@ class DataWriter {
         /** @brief A snapshot's cell values: per field, its cells' components interleaved. */
         using Values = std::vector<std::vector<rtype>>;
 
-        /** @brief The values of the first n_cells cells, or of the subset's cells. */
-        Values capture(uint32_t n_cells, bool in_subset = false) const;
+        /** @brief The values of the first n_cells cells (by_id: of the owned cells by global id), or of the subset's cells. */
+        Values capture(uint32_t n_cells, bool in_subset = false, bool by_id = false) const;
         void run(std::function<void()> job, bool allow_async = true);
         /**
          * @brief Rename the restart file written under a temporary name once
@@ -362,7 +362,9 @@ class DataWriter {
         void write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const;
         /** @brief The VTU field data: TIME, MALLARD_FORMAT_VERSION and the fields' units record. */
         std::string vtu_field_data(rtype t) const;
-        // A region's cells (subset), their places among the region's cells of every rank, and its fractions
+        // Owned cells by global id, the order of restart and VTU files
+        std::vector<uint32_t> owned_by_id;
+        // A region's cells (subset, by global id), their places among the region's cells of every rank, and its fractions
         bool subset = false;
         std::string region_name;
         std::vector<uint32_t> subset_cells;

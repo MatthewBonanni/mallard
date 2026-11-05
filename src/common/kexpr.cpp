@@ -57,6 +57,17 @@ bool is_keyword(const std::string & name) {
     return std::find(words.begin(), words.end(), lower(name)) != words.end();
 }
 
+/** @brief Functions and operators of exprtk that kexpr leaves out: its vector, string and bitwise ones. */
+bool is_exprtk_only(const std::string & name) {
+    static const std::vector<std::string> words = {
+        "all_false", "all_true", "any_false", "any_true", "assert", "axpby", "axpbsy", "axpbsyz", "axpbyz", "axpbz",
+        "axpy", "axpyz", "count", "deg2grad", "diff", "dot", "dotk", "equal", "grad2deg", "iclamp", "ilike", "in",
+        "iota", "like", "mand", "mor", "nequal", "not_equal", "nth_element", "null", "reverse", "rotate_left",
+        "rotate_right", "shift_left", "shift_right", "shl", "shr", "size", "sort", "sumk", "swap",
+        "threshold_above", "threshold_below"};
+    return std::find(words.begin(), words.end(), lower(name)) != words.end();
+}
+
 bool is_constant_name(const std::string & name) {
     static const std::vector<std::string> words = {"pi", "epsilon", "inf", "true", "false"};
     return std::find(words.begin(), words.end(), lower(name)) != words.end();
@@ -793,9 +804,18 @@ class Parser {
             if (l == "false") return constant(0.0);
             const auto f = functions().find(l);
             if (f == functions().end()) {
-                std::string known;
+                if (is_exprtk_only(t.text)) {
+                    fail("'" + t.text + "' is exprtk's, not kexpr's: kexpr has no vector, string or bitwise "
+                         "functions (see docs/guide/expressions.md)", t.pos);
+                }
+                std::string known, other_case;
                 for (const auto & var : variables) {
                     if (!var.empty()) known += (known.empty() ? "" : ", ") + var;
+                    if (other_case.empty() && !var.empty() && lower(var) == l) other_case = var;
+                }
+                if (!other_case.empty()) {
+                    fail("unknown symbol '" + t.text + "': names are case sensitive (unlike exprtk's); did you mean '" +
+                             other_case + "'?", t.pos);
                 }
                 fail("unknown symbol '" + t.text + "' (variables: " + known + ")" + (hint ? hint(t.text) : ""), t.pos);
             }

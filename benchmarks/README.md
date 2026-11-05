@@ -46,6 +46,7 @@ A fixed set for tracking performance across commits, defined in
 | `probes_3d` | 3D | `teno5_3d` with probes every step: an exact cut plane and a sphere's surface with mass fluxes (point values), a wall zone with its shear, and region probes over a ball and a sphere's surface; reductions only. Its gap to `teno5_3d` is the cost of sampling |
 | `flame_3d` | 3D | reacting LES in the Volvo combustor's configuration without the bluff body: premixed propane-air (two-step mechanism, mixture-averaged transport, TFLES, Sigma), 96 x 48 x 48 hexes, MUSCL, hybrid flux, Strang-split chemistry, 100 steps |
 | `air_3d` | 3D | the same flow of air (single gas): the reference of the mixture's cost per cell and step |
+| `sphere_3d` | 3D | `examples/sphere_re300` on a mesh file in Gmsh's numbering: 4,000 prisms and 176,243 tetrahedra (`make_sphere_re300_mesh.py --scale 0.5 --threads 1`, Gmsh 4.13.1, nodes rounded to nine digits, `sphere_3d.msh.xz`, which `perf_suite.py` decompresses), MUSCL, Navier-Stokes, 100 steps |
 | `h2o2@dt=...`, `gri30@dt=...` | 2D | `chemistry/h2o2.toml` and `chemistry/gri30.toml` at each `dt` |
 
 The solver cases report the throughput over the time stepping (the run's

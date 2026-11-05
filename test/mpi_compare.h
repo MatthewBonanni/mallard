@@ -41,10 +41,11 @@ inline std::string with_halo_exchange(const std::string & input, const std::stri
 }
 
 /**
- * @brief Run the input distributed and serially; every rank compares the
- *        gathered distributed solution with its serial one. NCCL builds
- *        exchange halos with NCCL by default, and also run the input with
- *        MPI's exchanges, so both match the serial run bit for bit.
+ * @brief Run the input distributed and serially, the serial run in the
+ *        global numbering; every rank compares the gathered distributed
+ *        solution with its serial one. NCCL builds exchange halos with NCCL
+ *        by default, and also run the input with MPI's exchanges, so both
+ *        match the serial run bit for bit.
  */
 inline void expect_matches_serial(const std::string & input,
                                   const std::function<void(const Solver &)> & check_distributed = {}) {
@@ -53,17 +54,22 @@ inline void expect_matches_serial(const std::string & input,
         inputs.push_back(with_halo_exchange(input, "mpi"));
     }
     std::vector<std::unique_ptr<Solver>> runs;
-    for (const std::string & distributed_input : inputs) {
+    for (const std::string & text : inputs) {
+        Input distributed_input = parse_toml(text);
+        if (!distributed_input["mesh"].contains("cell_order")) distributed_input["mesh"]["cell_order"] = "hilbert";
         auto & distributed = *runs.emplace_back(std::make_unique<Solver>());
-        distributed.init(parse_toml(distributed_input));
+        distributed.init(distributed_input);
         distributed.run();
         distributed.copy_device_to_host();
         if (check_distributed) check_distributed(distributed);
     }
 
+    // The reference keeps the global numbering; the distributed run numbers its cells along the curve
+    Input serial_input = parse_toml(input);
+    serial_input["mesh"]["cell_order"] = "input";
     Solver serial;
     serial.set_distributed(false);
-    serial.init(parse_toml(input));
+    serial.init(serial_input);
     serial.run();
     serial.copy_device_to_host();
 
@@ -74,13 +80,16 @@ inline void expect_matches_serial(const std::string & input,
     auto value = [&](const Solver & s, uint32_t c, uint32_t i) {
         return static_cast<double>(i < N_CONSERVATIVE ? s.h_conservatives(c, i) : s.h_species(c, i - N_CONSERVATIVE));
     };
+    std::vector<uint32_t> serial_cell(n_global);
+    for (uint32_t c = 0; c < n_global; c++) serial_cell[serial.get_mesh()->h_global_cell(c)] = c;
+
     for (std::size_t r = 0; r < runs.size(); r++) {
         const Solver & distributed = *runs[r];
         const auto & dist = distributed.get_distribution();
         std::vector<double> gathered(n_global * n_vars, 0.0);
         std::vector<double> count(n_global, 0.0);
         for (uint32_t c = 0; c < distributed.get_mesh()->n_owned(); c++) {
-            const uint64_t g = distributed.is_distributed() ? dist.global_cell[c] : c;
+            const uint64_t g = distributed.is_distributed() ? dist.global_cell[c] : distributed.get_mesh()->h_global_cell(c);
             for (uint32_t i = 0; i < n_vars; i++) gathered[g * n_vars + i] = value(distributed, c, i);
             count[g] += 1.0;
         }
@@ -94,7 +103,7 @@ inline void expect_matches_serial(const std::string & input,
         for (uint32_t g = 0; g < n_global; g++) {
             ASSERT_EQ(count[g], 1.0) << "cell " << g << " owned " << count[g] << " times" << run;
             for (uint32_t i = 0; i < n_vars; i++) {
-                const double ref = value(serial, g, i);
+                const double ref = value(serial, serial_cell[g], i);
                 max_rel = std::max(max_rel, std::abs(gathered[g * n_vars + i] - ref) / (std::abs(ref) + 1e-3));
             }
         }

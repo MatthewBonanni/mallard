@@ -480,6 +480,18 @@ TEST(MPITest, InitialRegionsAndDataMatchSerial) {
                           "region = {type = \"disk\", center = [0.7, 0.15], radius = 0.1, edge = 0.02}\n");
 }
 
+TEST(MPITest, SyntheticTurbulenceMatchesSerial) {
+    // The default period is the mesh's bounding box, reduced over the ranks;
+    // the modes come from the seed alone
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",
+                                        "type = \"symmetry\"\n"),
+                                    2) +
+                          "[initialize.turbulence]\nspectrum = \"passot_pouquet\"\nintensity = 0.1\nlength_scale = 0.15\n"
+                          "[[initialize.regions]]\nregion = {type = \"disk\", center = [0.4, 0.4], radius = 0.25, edge = 0.05}\n"
+                          "turbulence = {intensity = 0.05, length_scale = 0.1, kolmogorov_scale = 0.01, seed = 2}\n");
+}
+
 TEST(MPITest, AxisymmetricRunsMatchSerial) {
     // Revolved geometry, r-weighted stencils, the high-order geometric source
     // and the axis-corrected viscous gradients of halo cells
@@ -524,7 +536,7 @@ std::vector<double> gather(Solver & solver) {
     const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
     std::vector<double> U(n_global * N_CONSERVATIVE, 0.0);
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-        const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
+        const uint64_t g = mesh->h_global_cell(c);
         FOR_I_CONSERVATIVE U[g * N_CONSERVATIVE + i] = double(solver.h_conservatives(c, i));
     }
     // A serial run holds every cell on every rank already
@@ -701,7 +713,7 @@ std::vector<double> gather_statistics(Solver & solver) {
     const uint64_t n_global = mesh->n_global_cells ? mesh->n_global_cells : mesh->n_cells;
     std::vector<double> values(n_global * n_vars, 0.0);
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-        const uint64_t g = mesh->n_global_cells ? mesh->h_global_cell_id[c] : c;
+        const uint64_t g = mesh->h_global_cell(c);
         for (uint32_t i = 0; i < mean.extent(1); i++) values[g * n_vars + i] = double(mean(c, i));
         for (uint32_t p = 0; p < cov.extent(1); p++) values[g * n_vars + mean.extent(1) + p] = double(cov(c, p));
     }
@@ -713,14 +725,22 @@ std::vector<double> gather_statistics(Solver & solver) {
 
 TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     // Averages are per cell; probe points on faces between ranks take the same
-    // cell on every rank count; averages written by all ranks continue on one
+    // cell on every rank count; averages written by all ranks continue on one,
+    // and so do the time averages of probes (rank 0 sums them in sample order)
     const std::string dir = io_dir() + "_statistics";
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     const std::string stats = "[statistics]\ninterval = 2\nfields = [\"P\"]\nproducts = [\"U_X*U_Y\", \"RHO*RHO\"]\n";
     auto probe = [&](const std::string & file) {
-        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nvariables = [\"RHO\", \"P\"]\n"
-               "start = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\n";
+        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nvariables = [\"RHO\", \"P\", "
+               "\"MEAN_P\", \"COV_U_X_U_Y\"]\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\n"
+               "[[probes]]\nname = \"mean_line\"\nfile = \"" + dir + "/mean_" + file + "\"\nvariables = [\"RHO\", "
+               "\"P\", \"MASS_FLUX\"]\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\naverage = true\n"
+               "interval = 5\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/mean_red_" + file + "\"\n"
+               "[[probes]]\nname = \"outflow\"\nfile = \"" + dir + "/out_" + file + "\"\n"
+               "boundary_type = \"outlet_extrapolation\"\nvariables = [\"MASS_FLUX\", \"ENTHALPY_FLUX\"]\n"
+               "average = true\ninterval = 5\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
+               "/out_red_" + file + "\"\n";
     };
     Solver reference;
     reference.set_distributed(false);
@@ -735,7 +755,7 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     EXPECT_EQ(max_rel_diff(gather_statistics(distributed), ref), 0.0);
     comm::barrier();
 
-    std::string input = restart_case(20, stats);
+    std::string input = restart_case(20, stats + probe("continued.csv"));
     const std::string init = BLAST;
     input.replace(input.find("[initialize]\n") + 13, init.size(),
                   "type = \"restart\"\nfile = \"" + dir + "/r_000010.restart\"\n");
@@ -752,9 +772,18 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
             ss << in.rdbuf();
             return ss.str();
         };
-        const std::string a = without_comment_lines(read(dir + "/reference.csv"));
-        EXPECT_FALSE(a.empty());
-        EXPECT_EQ(without_comment_lines(read(dir + "/distributed.csv")), a);
+        for (const char * prefix : {"", "mean_", "mean_red_", "out_", "out_red_"}) {
+            const std::string a = without_comment_lines(read(dir + "/" + prefix + "reference.csv"));
+            EXPECT_FALSE(a.empty()) << prefix;
+            EXPECT_EQ(without_comment_lines(read(dir + "/" + prefix + "distributed.csv")), a) << prefix;
+            // The run continued from step 10 writes the same last row
+            const auto last_line = [](const std::string & text) {
+                const size_t end = text.find_last_not_of('\n');
+                return text.substr(text.rfind('\n', end) + 1, end - text.rfind('\n', end));
+            };
+            const std::string c = without_comment_lines(read(dir + "/" + prefix + "continued.csv"));
+            EXPECT_EQ(last_line(c), last_line(a)) << prefix;
+        }
     }
     comm::barrier();
 }

@@ -33,16 +33,17 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
 | Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`; `boundaries.p0`; `physics.p_ref` |
 | Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries and `probes.reference` |
-| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
 | Acceleration (m/s^2) | `source.gravity` |
 | Rate (1/s) | `sponges.strength` |
+| Wavenumber (1/m) | `initialize.turbulence.k_max` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
 | Heat flux (W/m^2) | `boundaries.q` |
 | Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
@@ -87,6 +88,7 @@ At least one stop condition is required.
 | `filename` | (`file`) Mallard HDF5 mesh (`.h5` or `.hdf5`, see below), ASCII Gmsh mesh (format 2.2 or 4.1), CGNS file (`.cgns`), ANSYS Fluent mesh or case file (`.msh`, `.cas`; ASCII or binary), or OpenFOAM polyMesh (a directory: the case, its `constant/polyMesh`, or anything between), of triangles and/or quadrilaterals (2D), or tetrahedra, pyramids, prisms and/or hexahedra (3D); see mesh files below |
 | `Nx`, `Ny` | Number of quads in x and y (default 100) |
 | `Lx`, `Ly` | Domain size; the domain is `[0, Lx] x [0, Ly]` (default 1) |
+| `cell_order` | How each rank numbers its cells in memory: `auto` (default), which counts the cache lines that blocks of cells read, over the vertex layers the reconstruction reads around each cell (one; TENO of order p: (p - 1) / 2), in both orders and takes `hilbert` when it needs a tenth fewer, else `input`; `hilbert` (along a Hilbert curve, owned cells and each halo layer separately) or `input` (the mesh's order); see [cell numbering](guide/performance.md#cell-numbering). Results, restart and output files do not depend on it |
 
 Generated meshes have boundary zones named `left`, `right`, `bottom` and `top`.
 
@@ -485,7 +487,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
-| `n_subdivisions` | (`analytical`, and any state with regions) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
+| `n_subdivisions` | (`analytical`, and any state with regions or turbulence) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages or the snapshot counts of `time_interval` writers, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#formats-and-compatibility)) |
 
 Expressions, e.g. `"x < 0.5 ? 1.0 : 0.125"`: [Expressions](guide/expressions.md).
@@ -504,6 +506,7 @@ priority: see [Initialization: regions](guide/initialization.md#regions).
 | `X` or `Y`, `balance` | (mixtures) The composition inside, as in `[initialize]`; unset keeps the composition below |
 | `priority` | Integer: higher priorities go on top, equal ones in the order listed (default 0) |
 | `cells` | `volume_fraction` (default): cell averages, cut cells mixing by volume; `center`: cells whose centroid is inside take the region's state whole |
+| `turbulence` | Synthetic turbulence added to the velocity inside, a table as [`[initialize.turbulence]`](#initializeturbulence): on the region's `u` if given, else on the velocity below |
 | `name` | Name in the terminal output; without it, the entry's place, e.g. `initialize.regions[0]` |
 
 Cut cells are subdivided and their finest pieces cut along the surface:
@@ -527,6 +530,25 @@ Tables and point clouds from CSV files, read by the expressions of
 | `interpolation` | (tables) `linear` (default) or `cubic` (4-point Lagrange per axis) |
 | `neighbors` | (points) Nearest points weighted by inverse distance squared, 1 to 16 (default 1: the nearest) |
 | `units` | Units of columns, e.g. `{x = "mm"}` (default SI) |
+
+### `[initialize.turbulence]`
+
+A divergence-free random velocity of a prescribed energy spectrum E(k),
+added to the base state of any `type`; the same table, as `turbulence = {...}`
+in a `[[initialize.regions]]` entry, adds it inside a region: see
+[Initialization: synthetic turbulence](guide/initialization.md#synthetic-turbulence).
+
+| Key | Description |
+|---|---|
+| `spectrum` | `von_karman_pao` (default), `passot_pouquet`, or `table` (a CSV `file`) |
+| `intensity` | u', the rms of one velocity component: the field's kinetic energy is (d / 2) u'^2 in d dimensions (required for the models; for `table`, default 0: the table's own values) |
+| `length_scale` | (models) The integral length scale L = C ∫E/k dk / ∫E dk, C = 3π/4 in 3D and 2 in 2D (required) |
+| `kolmogorov_scale` | (`von_karman_pao`) η of the dissipation range exp(-2 (k η)^2) (default 0: none) |
+| `file` | (`table`) CSV file of columns `k` (1/m) and `E` (m^3/s^2), k increasing; E is linear between rows and zero outside |
+| `seed` | Integer seed of the modes' wavevectors, directions and phases (default 1) |
+| `modes_per_shell` | Fourier modes per wavenumber shell, at most (default 32) |
+| `k_max` | Largest wavenumber (default π / Δ, Δ the mean cell size: (bounding-box volume / cells)^(1/d)) |
+| `period` | Size of the periodic box the modes fit, per direction (default: the mesh's bounding box) |
 
 ### `type = "remap"`
 
@@ -924,8 +946,11 @@ only some of them is an error unless `reset = true`. With
 `tools/post/plane_average.py` averages them further over homogeneous directions
 (e.g. over x and z of a channel, as a function of y). `fields` and
 `products` may be left out when `[statistics.spectra]` or
-`[statistics.phase]` is given; both take `interval` and `t_start` from
+`[statistics.phase]` is given, or a probe with `average = true`; both take `interval` and `t_start` from
 `[statistics]` unless they set their own, and `reset` applies to them too.
+Probes may list the averages as variables (`MEAN_P`, ...), and probes with
+`average = true` sample on the schedule of `interval` and `t_start`
+([time averages](#probes)).
 
 ### `[statistics.spectra]`
 
@@ -1011,7 +1036,7 @@ ranks. A probe that is not due costs nothing.
 | Key | Description |
 |---|---|
 | `name` | Probe name |
-| `variables` | Any of the `[statistics]` fields, `U` and `RHOU` for all components, `Y_*` and `RHOY_*` for every species |
+| `variables` | Any of the `[statistics]` fields, `U` and `RHOU` for all components, `Y_*` and `RHOY_*` for every species; and the averages `[statistics]` keeps (`MEAN_<A>`, `MEAN_U`, `COV_<A>_<B>`, `PHASE_<bin>_<A>`), each sample's the value of its cell in both `sampling` modes |
 | `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `surface` (below); without it, `point` or `start`/`end` select a point or a line |
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples (below). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
@@ -1023,6 +1048,7 @@ ranks. A probe that is not due costs nothing.
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
 | `file` | Output file, default `probe_<name>.csv`, `.h5`, `.vtkhdf` or `.pvd` |
 | `samples` | `false` writes only the reductions (default `true`) |
+| `average` | `true`: write the running time averages of the samples instead (columns `MEAN_<variable>`), sampled on the `[statistics]` schedule (below); default `false` |
 | `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below); default none, and `["integral", "mean", "min", "max"]` with `region` |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
 | `scale`, `rotate`, `pivot`, `translate` | Transform of the geometry, as for [regions](#regions): scaled (a factor, or one per axis), then rotated (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`), both about `pivot` (default the origin), then translated |
@@ -1080,6 +1106,39 @@ and cut planes no `reductions`. CSV rows of cut planes are
 `step, t, cell, x, y(, z), nx, ny(, nz), area, <variables>`; VTP and VTKHDF files are
 their polygons (segments in 2D) with cell data, and grids of resampled
 surfaces with point data.
+
+**Time averages.** A probe with `average = true` samples its variables on the
+schedule of `[statistics]` (every `interval` steps once `t > t_start`; without
+`[statistics]`, every step from the start) and keeps the running mean of each
+sample, weighted by the time since the previous sample as the `[statistics]`
+means are: rank 0 updates them in double precision in the samples' global
+order, so they are the same bit for bit on any number of ranks. Every
+`interval` (or `time_interval`) of the probe, it writes the means so far, as
+`MEAN_<variable>` (the first row once a sample is taken), and its reductions
+are those of the averaged samples (`integral_MEAN_<variable>`, ...): the time
+average of an `integral` or `mean`, while `min`, `max` and `rms` are those of
+the averaged samples, not time averages of the extrema. This averages what
+`[statistics]` cannot keep per cell: point values, fluxes and wall
+quantities (`CF`, `Q_W`, `MASS_FLUX`, ...). Restart files carry the means
+(format version 6), so a restarted run continues them bit for bit; a restart
+file without them starts them afresh, as does `statistics.reset = true`, and
+one holding means of other samples or variables is an error. The variables
+of an averaging probe are instantaneous ones (not `MEAN_*`, `COV_*`).
+
+```toml
+# The time-averaged skin friction and heat flux along a wall, from t = 0.2
+[statistics]
+t_start = 0.2
+
+[[probes]]
+name = "wall_mean"
+boundary = "wall"
+variables = ["CF", "Q_W"]
+reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}
+average = true
+interval = 1000
+reductions = ["integral"]
+```
 
 ```toml
 # Mass flow through a tilted section of a duct, and its pressure for ParaView
