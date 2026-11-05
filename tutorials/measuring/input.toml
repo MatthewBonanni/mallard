@@ -124,7 +124,8 @@ samples = false
 reductions = ["integral"]
 interval = 20
 
-# A point in the wake, for the spectrum of the cross-stream velocity
+# A point in the wake, and the spectrum of its cross-stream velocity over
+# the last 140 time units, written at the end with the peak's Strouhal number
 [[probes]]
 name = "wake"
 type = "point"
@@ -132,6 +133,12 @@ point = [3.0, 0.5]
 variables = ["U_Y", "P"]
 sampling = "point"
 time_interval = 0.5
+
+[probes.spectra]
+variables = ["U_Y"]
+t_start = 60.0
+length = 140.0
+strouhal = {length = 1.0, velocity = 0.2}
 
 # Time averages from t = 60, and phase averages in 8 bins of the shedding
 # cycle, from the upward zero crossings of U_Y on the wake axis

@@ -70,7 +70,8 @@ products = ["U_X*U_Y"]           # cross spectra and correlations
 On a generated `cartesian` mesh, spectra and two-point correlations along the
 homogeneous (periodic, unstretched) directions, at each position of the
 others: per y of a channel, or shell spectra of a periodic box. Computed by
-FFTs on the device, bitwise the same on any number of ranks.
+FFTs on the device, bitwise the same on any number of ranks. Spectra in time
+of a probe's signal, on any mesh, are [time spectra](probes.md#time-spectra) of probes.
 
 | Key | Default | Meaning |
 |---|---|---|
