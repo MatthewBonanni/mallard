@@ -8,6 +8,8 @@ Three ways to install Mallard, quickest first:
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development; options the others lack | CMake |
 
+[Supported platforms](guide/support.md) lists what CI builds and runs: hardware, backends, compilers and MPI.
+
 Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](guide/cli.md)).
 
 ## Container
@@ -83,7 +85,7 @@ Spack builds its own Kokkos to match. A cluster's MPI, CUDA or compilers can be 
 
 ## From source
 
-Mallard needs a C++20 compiler (GCC 10.4, Clang 14 or newer), CMake 3.22 or newer, and git. It depends on [Kokkos](https://github.com/kokkos/kokkos) (5.x), [toml11](https://github.com/ToruNiina/toml11) and [exprtk](https://github.com/ArashPartow/exprtk), all included in this repository (Kokkos and toml11 are submodules); CMake fetches yaml-cpp.
+Mallard needs a C++20 compiler (GCC 10.4, Clang 14 or newer), CMake 3.22 or newer, and git. It depends on [Kokkos](https://github.com/kokkos/kokkos) (5.x) and [toml11](https://github.com/ToruNiina/toml11), both included in this repository as submodules; CMake fetches yaml-cpp.
 
 ```sh
 git clone --recursive https://github.com/MatthewBonanni/mallard.git

@@ -84,6 +84,7 @@ struct RestartData {
     RestartArrays arrays;
     RestartFaces faces;                      // every face of the file, in increasing key
     std::string provenance;                  // the writing run's provenance block, or empty
+    bool complete = true;                    // false if cut short in the provenance trailer
 
     /** @brief Values of the named variable, or nullptr if the file has none. */
     const std::vector<rtype> * find(const std::string & name) const;
@@ -140,6 +141,22 @@ RestartHeader read_restart_header(std::ifstream & in, const std::string & filena
  * build's dimension. Any version may end with the provenance trailer.
  */
 RestartData read_restart(const std::string & filename, const std::vector<uint64_t> * cells = nullptr);
+
+/** @brief A restart file found by newest_restart; file is empty if there is none. */
+struct FoundRestart {
+    std::string file;
+    uint64_t step = 0;
+    double t = 0.0;
+};
+
+/**
+ * @brief The newest complete restart file <prefix>_<step>.restart of any of
+ *        the prefixes: of the run that started last (by the start time in its
+ *        provenance), then of the highest step, then of the earliest prefix.
+ *        Files that do not read completely are skipped, each added to skipped
+ *        with the reason.
+ */
+FoundRestart newest_restart(const std::vector<std::string> & prefixes, std::vector<std::string> & skipped);
 
 /** @brief Whether the HDF5 library has the shuffle and deflate filters (compressed HDF5 output). */
 bool have_hdf5_deflate();

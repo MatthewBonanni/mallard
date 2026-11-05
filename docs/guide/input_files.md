@@ -103,7 +103,7 @@ top-level table is at level 2); deeper input is an error, not a crash.
   and probe curves can be strings of `x`, `y`, `z` (0 in 2D) and, where noted,
   the time `t`: `"x < 0.5 ? 1.0 : 0.125"`, `"exp(-((x - 1)^2 + y^2) / 0.01)"`.
   One language, with local variables, conditionals and loops, serves every
-  section: see [Expressions](#expressions).
+  section: see [Expressions](expressions.md).
 - **Units.** Plain numbers are in SI units (Pa, K, m, s, kg), and any
   dimensional number can instead be written with its unit, as a string:
   `p = "1 atm"`. See [Units](#units).
@@ -203,90 +203,9 @@ thermochemistry and are always dimensional.
 
 ## Expressions
 
-```toml
-[initialize]
-type = "analytical"
-u = ["0.0", "0.0"]
-p = "1.0"
-# A density bump: a local variable, then the value
-rho = "var r2 := (x - 0.5)^2 + (y - 0.5)^2; 1 + 0.2 * exp(-r2 / 0.01)"
-```
-
-Wherever a key takes an expression, Mallard compiles it once when it reads
-the input, with the syntax of [exprtk](https://www.partow.net/programming/exprtk/).
-Every section accepts the same language and reports the same errors, with the
-expression and the position of the problem, and `mallard check` reports them
-before a run. The values are exprtk's to the last bit on CPUs, and the same
-on GPUs up to the last bits of library functions such as `sin` and `exp`.
-
-**Variables.** `x`, `y`, `z` in meters (`z` is 0 in 2D) and, where the key
-says so, the time `t` in seconds; sources also read the local and
-domain-averaged state ([Sources](sources.md)), initial states the columns of
-tabulated data ([Initialization](initialization.md#tabulated-data-and-point-clouds))
-and probe curves their parameter `s`. Names are case sensitive: `T` is not `t`.
-
-**Operators and functions.**
-
-| What | Syntax |
-|---|---|
-| Arithmetic | `+ - * / % ^`; `^` binds from the right and above unary minus (`-x^2` is `-(x^2)`); `2x`, `2(x + 1)` and `(x)(y)` multiply |
-| Comparisons | `< <= > >= == !=` (also `=` and `<>`), giving 1 or 0 |
-| Logic | `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `&`, `\|`, `not(x)`; any value other than 0 is true |
-| Conditionals | `c ? a : b`, `if (c, a, b)`, and the statements below |
-| Functions | `abs`, `sgn`, `floor`, `ceil`, `round`, `roundn(x, n)`, `trunc`, `frac`, `min`, `max`, `sum`, `mul`, `avg` (any number of arguments), `clamp(lo, x, hi)`, `inrange(lo, x, hi)`, `sqrt`, `root(x, n)`, `pow(x, y)`, `exp`, `expm1`, `log`, `log10`, `log2`, `log1p`, `logn(x, n)`, `sin`, `cos`, `tan`, `cot`, `sec`, `csc`, `asin`, `acos`, `atan`, `atan2(y, x)`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `sinc`, `hypot(x, y)`, `erf`, `erfc`, `ncdf`, `deg2rad`, `rad2deg` |
-| Constants | `pi`, `epsilon` (1e-10), `inf`, `true`, `false` |
-
-**Statements.** Statements are separated by `;`; the value of an expression
-is that of its last statement. Long expressions fit on several lines with
-TOML's `"""` and a trailing `\` on each line.
-
-| Statement | Meaning |
-|---|---|
-| `var r := sqrt(x^2 + y^2);` | A local variable (0 without `:=`), until the end of its `{ }` block. `x`, `y`, `z`, `t` themselves cannot be assigned |
-| `r := 2 r;` `r += 1;` (`-=`, `*=`, `/=`, `%=`) | Assignment; its value is the new value |
-| `if (c) a; else b;` | `a` if `c` is true, else `b`; without `else`, NaN when `c` is false. `{ ... }` holds several statements; `else if (d) ...` chains |
-| `switch { case c1 : a; case c2 : b; default : d; }` | The value of the first true case, else `d` (NaN without `default`) |
-| `while (c) { ... }` | Runs the body while `c` is true |
-| `for (var i := 0; i < n; i += 1) { ... }` | Initializer, condition, step (which may be empty), body |
-| `repeat ...; until (c)` | Runs the statements, then again until `c` is true |
-| `break;` `break[v];` `continue;` | Leave the loop (giving it the value `v`, or NaN), or go on with its next iteration |
-| `~{a; b; c}` | Several statements where one value is expected |
-
-A loop's value is that of its body's last complete run (0 if it never ran).
-An evaluation stops with an error after 100000 loop iterations in all, so a
-loop that never ends cannot hang a run, on the CPU or in a GPU kernel.
-
-```toml
-# Piecewise, with if-else
-rho = """\
-    if (x < 0.4) 1.0; \
-    else if (x < 0.6) 1.0 - 4.375 * (x - 0.4); \
-    else 0.125;"""
-
-# A square wave from 20 terms of its Fourier series
-p = """\
-    var s := 0; \
-    for (var k := 1; k <= 39; k += 2) { s += sin(2 * pi * k * x) / k }; \
-    1 + 0.1 * 4 / pi * s"""
-
-# Layers by height
-T = "switch { case y < 0.1 : 300; case y < 0.2 : 600; default : 900; }"
-```
-
-```toml
-# The root of s^3 + s = x by Newton's method
-T = """\
-    var s := x; var ds := 1; \
-    repeat \
-        ds := (s^3 + s - x) / (3 * s^2 + 1); \
-        s -= ds; \
-    until (abs(ds) < 1e-12); \
-    300 + 10 * s"""
-```
-
-Not supported, with an error that says so: strings (`'abc'`), vectors
-(`var v[3]`), `return`, and functions or variables defined in other
-expressions.
+One language, kexpr, serves every key that takes an expression: its
+variables, operators, functions, statements and loops are on the
+[Expressions](expressions.md) page.
 
 ## Inputs from older releases
 
@@ -433,6 +352,39 @@ tutorial, in 2D and 3D, into
 reads; CI checks that it is up to date, and `tools/dev/input_catalog.py docs`
 that the defaults this reference states match it.
 
+## The resolved input
+
+An input sets the keys that matter for its case; the run uses many more, at
+their defaults or as a [numerics preset](numerics.md#presets) fills them.
+`mallard input resolve` writes the input as the run uses it:
+
+```sh
+mallard input resolve input.toml > full.toml
+```
+
+`full.toml` has every key the setup reads, each with the value the run takes:
+
+- defaults and the keys of a preset written out, renamed keys under their new
+  names ([inputs from older releases](#inputs-from-older-releases));
+- quantities with a unit as plain numbers in the key's units (`t_stop = "1 min"`
+  becomes `t_stop = 60.0`), and numbers written so they read back exactly;
+- keys sorted, comments dropped.
+
+Keys the setup does not read are left out, and so are tables the input leaves
+out, since a table's presence can turn a feature on (`[integrals]`,
+`[statistics]`). A key whose
+absence is a choice of its own (one of alternative keys such as `X` and `Y`, a
+`[[write_data]]` `format` the build picks) stays absent too. `mallard -i
+full.toml` runs bitwise the same as `input.toml`, and resolves to `full.toml`
+again, so comparing two resolved inputs (`diff`) shows every setting in which
+two runs differ.
+
+Every output file's [provenance](output.md#provenance) holds the same text,
+`input.resolved`, next to the input file's own text: the results of a run carry
+the input that reproduces them. The resolved input, the key catalog above and
+the preset's keys in the provenance are all made from the same record, the
+setup's accessors, so they cannot disagree.
+
 ## The other commands
 
 Every command's options, examples and exit status: [Command line](cli.md).
@@ -440,6 +392,7 @@ Every command's options, examples and exit status: [Command line](cli.md).
 | Command | Purpose | Guide |
 |---|---|---|
 | `mallard input upgrade old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
+| `mallard input resolve input.toml` | The input as the run uses it, every key explicit | [The resolved input](#the-resolved-input) |
 | `mallard reactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallard-reactor) |
 | `mallard mesh convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
 | `mallard test` | The unit and regression tests: `mallard-test2d` and `mallard-test3d` (`build/test/mallard-test2d`), from a build or an install tree; `--dim 2\|3` runs one | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |

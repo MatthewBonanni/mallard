@@ -12,6 +12,7 @@ mallard new cylinder && cd cylinder     # a ready-to-run case
 mallard check input.toml                # set it up without running: keys, mesh, time step, cost
 mallard -i input.toml                   # run it
 mallard ctl . status                    # from another terminal: how far it is
+mallard -i input.toml --restart latest  # after a stop: resume from the newest restart file
 ```
 
 A few things hold for every command:
@@ -35,7 +36,7 @@ How the commands are laid out, and which are planned:
 ### mallard
 
 ```text
-Usage: mallard -i input.toml [--restart FILE] [Kokkos options]
+Usage: mallard -i input.toml [--restart FILE|latest] [Kokkos options]
        mallard <command> [options]
 
 Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations
@@ -52,6 +53,11 @@ mpirun -n 4 mallard -i input.toml. Kokkos options set the threads and devices of
 each rank; on OpenMP builds, so do OMP_NUM_THREADS, OMP_PROC_BIND and
 OMP_PLACES.
 
+--restart latest resumes a run from where it stopped, whatever stopped it: a job
+script runs the same command for the first job and every continuation. It skips,
+with a warning, a restart file that does not read completely, and fails if no
+restart file does.
+
 Commands:
   Run
     mallard -i input.toml  Run a case
@@ -61,6 +67,8 @@ Commands:
   Set up
     mallard new            Create a ready-to-run case from a template
     mallard input upgrade  Bring an input file from an older release up to date
+    mallard input resolve  Write the input as a run uses it: every key explicit,
+                           defaults and preset included
   Inspect
     mallard check          Set up a case without running it and report on it:
                            keys, mesh, time step, memory, cost
@@ -74,14 +82,17 @@ Commands:
     mallard --version      Print the version
 
 Options:
-  -i FILE         The input file (TOML). Required.
-  --restart FILE  Start from this restart file: replaces the input's
-                  [initialize] with type = "restart". Default: as [initialize]
-                  says.
-  --kokkos-*      Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank)
-                  or --kokkos-device-id=1 (the GPU; by default each rank gets
-                  its own).
-  -h, --help      Show this page.
+  -i FILE                The input file (TOML). Required.
+  --restart FILE|latest  Start from this restart file: replaces the input's
+                         [initialize] with type = "restart". latest: the newest
+                         complete restart file of the input's restart writers
+                         (of the run that started last, then of the highest
+                         step), or [initialize] if there is none. Default: as
+                         [initialize] says.
+  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                         per rank) or --kokkos-device-id=1 (the GPU; by default
+                         each rank gets its own).
+  -h, --help             Show this page.
 
 Options of mallard before any command:
   --dim 2|3  --dim 2 runs mallard2d, --dim 3 mallard3d, for any command.
@@ -92,6 +103,7 @@ Examples:
   $ mallard -i input.toml --kokkos-num-threads=8
   $ mpirun -n 4 mallard -i input.toml
   $ mallard -i input.toml --restart solut/restart_010000.restart
+  $ mpirun -n 4 mallard -i input.toml --restart latest
 
 Exit status:
   0  the run reached a stop condition (n_steps, t_stop, t_wall_stop)
@@ -209,6 +221,8 @@ Commands on input files.
 
 Commands:
   mallard input upgrade    Bring an input file from an older release up to date
+  mallard input resolve    Write the input as a run uses it: every key explicit,
+                           defaults and preset included
 
 mallard input <command> --help shows the page of a command.
 
@@ -257,6 +271,42 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-input-upgrade
 ```
 
+### mallard input resolve
+
+```text
+Usage: mallard input resolve input.toml > full.toml
+
+Sets up the case as mallard check does and writes to standard output the input
+the run uses: every key the setup reads, with the value it takes, whether the
+input sets it, a numerics preset fills it or it is the default. Renamed keys are
+under their new names, quantities with units are plain numbers in the units the
+key documents, keys are sorted and comments dropped. Keys the setup does not
+read are left out, and so are tables the input leaves out, whose presence can
+turn a feature on.
+
+The result runs bitwise the same as the input and resolves to itself. Every
+output file's provenance holds the same text (input.resolved), so a run's
+results carry the full input that made them.
+
+Options:
+  --restart FILE  The input of the run as started from this restart file.
+  --kokkos-*      Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank)
+                  or --kokkos-device-id=1 (the GPU; by default each rank gets
+                  its own).
+  -h, --help      Show this page.
+
+Examples:
+  $ mallard input resolve input.toml > full.toml
+  $ diff <(mallard input resolve a.toml) <(mallard input resolve b.toml)
+
+Exit status:
+  0  the resolved input was written
+  1  errors in the input or the setup, as mallard check reports them
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-input-resolve
+```
+
 ### mallard check
 
 ```text
@@ -274,7 +324,8 @@ ranks.
 
 Options:
   -i FILE                   The input file, instead of the argument.
-  --restart FILE            Check the run as started from this restart file.
+  --restart FILE|latest     Check the run as started from this restart file, or
+                            as --restart latest would.
   --ranks N                 Memory and cost per rank for a run on N ranks; from
                             a serial check, memory is scaled to the largest part
                             the run's partitioner would make. Default: the ranks

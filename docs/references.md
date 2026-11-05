@@ -245,7 +245,7 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: all of Mallard's kernels and data ([Kokkos](https://github.com/kokkos/kokkos)).
 - <a id="geuzaine-remacle-2009"></a>C. Geuzaine and J.-F. Remacle, Gmsh: A 3-D finite element mesh generator with built-in pre- and post-processing facilities, *Int. J. Numer. Methods Eng.* 79, 1309–1331 (2009). [doi:10.1002/nme.2579](https://doi.org/10.1002/nme.2579)
   Used in: the Gmsh 2.2 and 4.1 mesh reader, and the meshes of `tools/mesh/make_cylinder_mesh.py`, `examples/mallard/make_mallard_mesh.py` and `examples/sphere_re300/make_sphere_re300_mesh.py`.
-- [toml11](https://github.com/ToruNiina/toml11) reads the input file; [exprtk](https://www.partow.net/programming/exprtk/) evaluates its expressions.
+- [toml11](https://github.com/ToruNiina/toml11) reads the input file. [exprtk](https://www.partow.net/programming/exprtk/) (A. Partow, MIT License): kexpr, Mallard's expression language, follows its syntax, operator semantics and numerics (literal conversion, integer powers), so that its values match exprtk's bitwise.
 
 ## Chemistry and multicomponent flow
 

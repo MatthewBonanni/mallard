@@ -23,7 +23,7 @@
 
 #include <Kokkos_Core.hpp>
 #include "common_typedef.h"
-#include "compiled_expression.h"
+#include "kexpr.h"
 #include "input.h"
 
 class Mesh;
@@ -143,7 +143,7 @@ KOKKOS_INLINE_FUNCTION double primitive(const Node & n, const double * vertices,
             phi = polygon(vertices + 2 * n.first, n.count, q[0], q[1]);
             break;
         case Kind::IMPLICIT:
-            phi = programs(n.first, expr::ArrayVariables{q});
+            phi = programs(n.first, kexpr::ArrayVariables{q});
             break;
         default:
             break;
@@ -202,7 +202,7 @@ template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 struct RegionView {
     Kokkos::View<const Node *, MemorySpace> nodes;
     Kokkos::View<const double *, MemorySpace> vertices;  // polygons: x0, y0, x1, y1, ...
-    expr::ProgramTable<MemorySpace> programs;
+    kexpr::ProgramTable<MemorySpace> programs;
     double edge = 0.0;
 
     /** @brief Signed distance at x (z = 0 in 2D). */
@@ -338,12 +338,12 @@ class Region {
         const std::string & summary() const { return m_summary; }
 
         /** @brief The compiled functions of implicit regions, by index. */
-        const std::vector<expr::Program> & programs() const { return m_programs; }
+        const std::vector<kexpr::Program> & programs() const { return m_programs; }
 
     private:
         std::vector<Node> m_nodes;
         std::vector<double> m_vertices;
-        std::vector<expr::Program> m_programs;
+        std::vector<kexpr::Program> m_programs;
         std::vector<Filled> m_filled;
         std::vector<Piece> m_pieces;
         uint32_t m_root = 0;

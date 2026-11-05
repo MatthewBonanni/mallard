@@ -1,9 +1,11 @@
 /**
- * @file compiled_expression.cpp
+ * @file kexpr.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Parser of compiled expressions: exprtk's grammar and precedences
+ * @brief Parser of kexpr expressions: exprtk's grammar and precedences
  *        (precedence climbing) and its statements, constants folded, emitted
- *        as a stack program with jumps.
+ *        as a stack program with jumps. The grammar, operator semantics and
+ *        numerics (literal conversion, integer powers) follow exprtk
+ *        (Arash Partow, MIT License; see licenses/exprtk-MIT.txt).
  * @version 0.1
  * @date 2026-10-15
  *
@@ -11,22 +13,21 @@
  *
  */
 
-#include "compiled_expression.h"
+#include "kexpr.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
 
-#include <exprtk.hpp>
-
 #include "units.h"
 
-namespace expr {
+namespace kexpr {
 
 namespace {
 
@@ -211,11 +212,65 @@ NodePtr sequence(std::vector<NodePtr> statements) {
     return node(Kind::SEQUENCE, std::move(kept));
 }
 
-/** @brief exprtk's value of a numeric literal (its own conversion, not strtod). */
+/** @brief d * 10^exponent rounded as exprtk's compute_pow10 rounds it (exponent nonzero, in [-308, 308]). */
+double scale_pow10(const double d, const int exponent) {
+    static const std::vector<double> pow10 = [] {
+        std::vector<double> p(309, 0.0);
+        for (int k = 1; k <= 308; k++) p[static_cast<size_t>(k)] = std::strtod(("1e" + std::to_string(k)).c_str(), nullptr);
+        return p;
+    }();
+    constexpr int min_exponent = std::numeric_limits<double>::min_exponent10;
+    if (exponent < min_exponent) {
+        return d / pow10[static_cast<size_t>(-min_exponent)] / pow10[static_cast<size_t>(min_exponent - exponent)];
+    }
+    const size_t e = static_cast<size_t>(std::abs(exponent));
+    return exponent > 0 ? d * pow10[e] : d / pow10[e];
+}
+
+/**
+ * @brief The value of a numeric literal (digits, '.', an exponent) as exprtk
+ *        converts it, not as strtod: the integer and the fraction digits
+ *        accumulated on their own, the fraction scaled by its number of
+ *        digits, then the exponent applied. Exponents of more than 4 digits
+ *        or outside [-308, 308] are invalid.
+ */
 double literal_value(const std::string & text) {
-    double v = 0.0;
-    if (!exprtk::details::string_to_real(text, v)) throw std::invalid_argument("invalid number " + text);
-    return v;
+    const auto invalid = [&] { return std::invalid_argument("invalid number " + text); };
+    const auto digit = [&](const size_t i) { return static_cast<double>(static_cast<unsigned>(text[i] - '0')); };
+    const auto is_digit = [&](const size_t i) { return i < text.size() && text[i] >= '0' && text[i] <= '9'; };
+    const size_t n = text.size();
+    size_t i = 0;
+    double d = 0.0;
+    bool digits = false;
+    if (i < n && text[i] != '.') {
+        const size_t start = i;
+        while (i < n && text[i] == '0') i++;
+        for (; is_digit(i); i++) d = d * 10.0 + digit(i);
+        digits = i != start;
+    }
+    if (i < n && text[i] == '.') {
+        const size_t start = ++i;
+        double fraction = 0.0;
+        for (; is_digit(i); i++) fraction = fraction * 10.0 + digit(i);
+        if (i != start) {
+            digits = true;
+            const int fraction_exponent = -static_cast<int>(i - start);
+            if (fraction_exponent < -308) throw invalid();
+            d += scale_pow10(fraction, fraction_exponent);
+        }
+    }
+    int exponent = 0;
+    if (i < n && (text[i] == 'e' || text[i] == 'E')) {
+        i++;
+        const bool negative = i < n && text[i] == '-';
+        if (i < n && (text[i] == '-' || text[i] == '+')) i++;
+        while (i < n && text[i] == '0') i++;
+        if (n - i > 4) throw invalid();
+        for (; is_digit(i); i++) exponent = exponent * 10 + (text[i] - '0');
+        if (negative) exponent = -exponent;
+    }
+    if (i != n || !digits || exponent < -308 || exponent > 308) throw invalid();
+    return exponent ? scale_pow10(d, exponent) : d;
 }
 
 class Parser {
@@ -942,4 +997,4 @@ double Program::operator()(const double * vars) const {
     return v;
 }
 
-} // namespace expr
+} // namespace kexpr

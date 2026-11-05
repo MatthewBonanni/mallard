@@ -101,7 +101,40 @@ int Solver::init(const std::string & input_file_name, const std::string & restar
 }
 
 void Solver::start_from_restart(Input & input, const std::string & restart_file) {
-    input.as_table()["initialize"] = Input(Input::table_type{{"type", "restart"}, {"file", restart_file}});
+    std::string file = restart_file;
+    if (restart_file == "latest") {
+        // The files the run's restart writers write: those of the whole mesh, or the on-request default
+        std::vector<std::string> prefixes;
+        if (input.contains("write_data")) {
+            for (const Input & output : find_value<std::vector<Input>>(input, "write_data")) {
+                if (find_value_or<std::string>(output, "format", "") == "restart" && output.contains("prefix") &&
+                    !output.contains("region") && !output.contains("regions")) {
+                    prefixes.push_back(find_value<std::string>(output, "prefix"));
+                }
+            }
+        }
+        if (prefixes.empty()) prefixes.emplace_back("restart");
+        std::string list;
+        for (const std::string & prefix : prefixes) list += (list.empty() ? "" : ", ") + prefix + "_<step>.restart";
+        std::string error;
+        if (comm::is_root()) {
+            std::vector<std::string> skipped;
+            const FoundRestart found = newest_restart(prefixes, skipped);
+            for (const std::string & reason : skipped) logging::warning(reason + " Skipped by --restart latest.");
+            file = found.file;
+            if (file.empty() && !skipped.empty()) {
+                error = "--restart latest: no restart file " + list + " reads completely. Name one with --restart "
+                        "FILE, or delete them to start from [initialize].";
+            } else if (file.empty()) {
+                logging::line("--restart latest: no restart file " + list + "; starting from [initialize]");
+            }
+        }
+        error = comm::broadcast(error);
+        if (!error.empty()) throw std::runtime_error(error);
+        file = comm::broadcast(file);
+        if (file.empty()) return;
+    }
+    input.as_table()["initialize"] = Input(Input::table_type{{"type", "restart"}, {"file", file}});
 }
 
 template <typename F>
@@ -128,9 +161,6 @@ int Solver::init(const Input & input_in) {
         for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
     }
     preset = numerics_preset::apply(input);
-    std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
-    for (const auto & s : preset.settings) preset_settings.emplace_back(s.key, s.value, s.from_preset);
-    provenance::set_preset(preset.name, preset_settings);
     try {
         setup_from_input();
     } catch (const std::exception & e) {
@@ -150,9 +180,15 @@ int Solver::init(const Input & input_in) {
                              list);
         }
     }
-    logging::begin_record();
-    print_setup();
-    provenance::set_setup(logging::end_record());
+    const ResolvedInput resolved = resolve_input(input);
+    provenance::set_resolved(resolved.toml);
+    std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
+    for (const auto & s : preset.settings) {
+        const KeyRecord * record = resolved.find(s.key);
+        preset_settings.emplace_back(s.key, record ? record->value : "", s.from_preset);
+    }
+    provenance::set_preset(preset.name, preset_settings);
+    print_setup(resolved);
     provenance::set_placement();
     provenance::share();
     write_provenance();
@@ -753,7 +789,7 @@ void Solver::init_boundaries() {
             }
             const auto & u = bound.at("u").as_array();
             auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
-                dirichlet.W.push_back(std::make_shared<const expr::Program>(
+                dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
                     key, quantity_or_expression(v, key, dimension), BoundaryValue::variables()));
             };
             add_state(bound.at("rho"), name + ".rho", dim::density);
@@ -775,11 +811,15 @@ void Solver::init_boundaries() {
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
         std::string twice, outward;
+        std::vector<double> selected;
+        if (where && zone) {
+            std::vector<uint32_t> zone_faces(zone->n_faces());
+            for (uint32_t i = 0; i < zone->n_faces(); i++) zone_faces[i] = zone->h_faces(i);
+            selected = evaluate_at({where.get()}, mesh->face_coords, zone_faces);
+        }
         for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
             const uint32_t i_face = zone->h_faces(i);
-            if (where && where->at(Kokkos::subview(mesh->h_face_coords, i_face, Kokkos::ALL()), N_DIM) == 0.0) {
-                continue;
-            }
+            if (where && selected[i] == 0.0) continue;
             if (face_bc[i_face] != -1 && twice.empty()) {
                 const auto & first = input_boundaries[static_cast<size_t>(face_bc[i_face])];
                 std::string at;
@@ -2226,7 +2266,7 @@ RunStatus Solver::run_status() const {
     return s;
 }
 
-void Solver::print_setup() const {
+void Solver::print_setup(const ResolvedInput & resolved) const {
     using logging::real;
     logging::section("Mesh");
     logging::items(mesh_summary);
@@ -2237,7 +2277,7 @@ void Solver::print_setup() const {
     logging::item("Initial state", initial_state);
 
     logging::section("Numerics");
-    if (!preset.name.empty()) logging::item("Preset", preset.summary());
+    if (!preset.name.empty()) logging::item("Preset", preset.summary(resolved));
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {

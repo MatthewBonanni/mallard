@@ -27,15 +27,16 @@ constexpr Option KOKKOS = {"--kokkos-*", "", "",
 
 constexpr Option RUN_OPTIONS[] = {
     {"-i", "", "FILE", "The input file (TOML). Required."},
-    {"--restart", "", "FILE",
-     "Start from this restart file: replaces the input's [initialize] with type = \"restart\". "
-     "Default: as [initialize] says."},
+    {"--restart", "", "FILE|latest",
+     "Start from this restart file: replaces the input's [initialize] with type = \"restart\". latest: the "
+     "newest complete restart file of the input's restart writers (of the run that started last, then of the "
+     "highest step), or [initialize] if there is none. Default: as [initialize] says."},
     KOKKOS,
 };
 
 constexpr Option CHECK_OPTIONS[] = {
     {"-i", "", "FILE", "The input file, instead of the argument."},
-    {"--restart", "", "FILE", "Check the run as started from this restart file."},
+    {"--restart", "", "FILE|latest", "Check the run as started from this restart file, or as --restart latest would."},
     {"--ranks", "", "N",
      "Memory and cost per rank for a run on N ranks; from a serial check, memory is scaled to the "
      "largest part the run's partitioner would make. Default: the ranks of this check."},
@@ -80,6 +81,11 @@ constexpr Option INFO_OPTIONS[] = {
     {"--quality", "", "PREFIX",
      "Mesh files: write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without "
      "HDF5), as mallard check --quality does. Default: none."},
+    KOKKOS,
+};
+
+constexpr Option RESOLVE_OPTIONS[] = {
+    {"--restart", "", "FILE", "The input of the run as started from this restart file."},
     KOKKOS,
 };
 
@@ -151,7 +157,7 @@ constexpr Command COMMANDS[] = {
         .name = "",
         .group = "Run",
         .summary = "Run a case",
-        .synopsis = "mallard -i input.toml [--restart FILE] [Kokkos options]\n"
+        .synopsis = "mallard -i input.toml [--restart FILE|latest] [Kokkos options]\n"
                     "mallard <command> [options]",
         .description =
             "Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations on unstructured "
@@ -163,13 +169,18 @@ constexpr Command COMMANDS[] = {
             "\n"
             "Parallel runs start under MPI, with one rank per GPU or per group of cores: mpirun -n 4 mallard -i "
             "input.toml. Kokkos options set the threads and devices of each rank; on OpenMP builds, so do "
-            "OMP_NUM_THREADS, OMP_PROC_BIND and OMP_PLACES.",
+            "OMP_NUM_THREADS, OMP_PROC_BIND and OMP_PLACES.\n"
+            "\n"
+            "--restart latest resumes a run from where it stopped, whatever stopped it: a job script runs the "
+            "same command for the first job and every continuation. It skips, with a warning, a restart file "
+            "that does not read completely, and fails if no restart file does.",
         .options = RUN_OPTIONS,
         .arguments = {},
         .examples = "$ mallard -i input.toml\n"
                     "$ mallard -i input.toml --kokkos-num-threads=8\n"
                     "$ mpirun -n 4 mallard -i input.toml\n"
-                    "$ mallard -i input.toml --restart solut/restart_010000.restart",
+                    "$ mallard -i input.toml --restart solut/restart_010000.restart\n"
+                    "$ mpirun -n 4 mallard -i input.toml --restart latest",
         .exit_status = "0  the run reached a stop condition (n_steps, t_stop, t_wall_stop)\n"
                        "1  an error, divergence included\n"
                        "2  usage error: an unknown option or command, no -i\n"
@@ -274,6 +285,32 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::front_end,
         .run = upgrade_main,
+    },
+    {
+        .name = "input resolve",
+        .group = "Set up",
+        .summary = "Write the input as a run uses it: every key explicit, defaults and preset included",
+        .synopsis = "mallard input resolve input.toml > full.toml",
+        .description =
+            "Sets up the case as mallard check does and writes to standard output the input the run uses: every "
+            "key the setup reads, with the value it takes, whether the input sets it, a numerics preset fills it "
+            "or it is the default. Renamed keys are under their new names, quantities with units are plain "
+            "numbers in the units the key documents, keys are sorted and comments dropped. Keys the setup does "
+            "not read are left out, and so are tables the input leaves out, whose presence can turn a feature "
+            "on.\n"
+            "\n"
+            "The result runs bitwise the same as the input and resolves to itself. Every output file's "
+            "provenance holds the same text (input.resolved), so a run's results carry the full input that "
+            "made them.",
+        .options = RESOLVE_OPTIONS,
+        .arguments = FILE_ARGUMENTS,
+        .examples = "$ mallard input resolve input.toml > full.toml\n"
+                    "$ diff <(mallard input resolve a.toml) <(mallard input resolve b.toml)",
+        .exit_status = "0  the resolved input was written\n"
+                       "1  errors in the input or the setup, as mallard check reports them\n"
+                       "2  usage error",
+        .dim = Case::input,
+        .run = resolve_main,
     },
     {
         .name = "check",

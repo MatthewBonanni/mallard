@@ -57,11 +57,16 @@ void Solver::init_sponges(region::Regions & regions) {
             fractions = &regions.fractions(sponge.at("region"), where + ".region");
         }
 
+        std::vector<uint32_t> candidates;
+        for (uint32_t c = 0; c < n_owned; c++) {
+            if (!fractions || (*fractions)[c] != 0.0) candidates.push_back(c);
+        }
+        const std::vector<double> sigma_candidates = evaluate_at({&sigma}, mesh->cell_coords, candidates);
         std::vector<uint32_t> cells;
         std::vector<double> sigma_cells;
-        for (uint32_t c = 0; c < n_owned; c++) {
-            if (fractions && (*fractions)[c] == 0.0) continue;
-            double s = sigma.at(Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL()), N_DIM);
+        for (size_t k = 0; k < candidates.size(); k++) {
+            const uint32_t c = candidates[k];
+            double s = sigma_candidates[k];
             if (!(s >= 0.0)) throw InputError(where + ".strength must be non-negative.");
             if (fractions) s *= (*fractions)[c];
             if (s == 0.0) continue;
@@ -70,13 +75,16 @@ void Solver::init_sponges(region::Regions & regions) {
         }
         const std::vector<std::vector<double>> Y =
             is_mixture() ? composition_at_cells(sponge, where, cells) : std::vector<std::vector<double>>();
+        std::vector<const Expression *> state = {&p, &T};
+        FOR_I_DIM state.push_back(&u[i]);
+        const std::vector<double> state_cells = evaluate_at(state, mesh->cell_coords, cells);
         std::vector<rtype> U(n_vars);
         for (size_t j = 0; j < cells.size(); j++) {
             const uint32_t c = cells[j];
-            const auto x = Kokkos::subview(mesh->h_cell_coords, c, Kokkos::ALL());
+            const double * s = state_cells.data() + j * state.size();
             rtype u_c[N_DIM];
-            FOR_I_DIM u_c[i] = static_cast<rtype>(u[i].at(x, N_DIM));
-            const double p_c = p.at(x, N_DIM), T_c = T.at(x, N_DIM);
+            FOR_I_DIM u_c[i] = static_cast<rtype>(s[2 + i]);
+            const double p_c = s[0], T_c = s[1];
             if (is_mixture()) {
                 mixture_model->conservatives(p_c, T_c, u_c, Y[j], U.data(), U.data() + N_CONSERVATIVE);
             } else {

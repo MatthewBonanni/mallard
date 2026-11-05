@@ -473,3 +473,95 @@ TEST(RestartTest, CharacteristicFacesOfOlderFilesStartAfresh) {
     from_partial.init(input("/d", from("partial.restart"), 40));
     EXPECT_EQ(max_abs_diff(run_to_end(from_partial), U_v2), 0.0);
 }
+
+namespace {
+
+/** @brief The bytes of a file. */
+std::string file_bytes(const std::string & path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+/** @brief A restart file's bytes with another step in the header. */
+std::string with_step(std::string bytes, uint64_t step) {
+    std::memcpy(bytes.data() + 16 + 4 + 4 + 8 + 8, &step, sizeof(step));
+    return bytes;
+}
+
+} // namespace
+
+TEST(RestartTest, LatestIsTheNewestRunsHighestCompleteStep) {
+    const std::string dir = (scratch_dir() / "mallard_restart_latest").string();
+    Solver first;
+    first.init(parse_toml(restart_input(dir, BLAST, 40)));
+    first.run();
+    const std::string bytes = file_bytes(dir + "/restart_000040.restart");
+    const std::string run_start = "\"run\":{\"start_time\":\"";
+    const size_t started = bytes.find(run_start);
+    ASSERT_NE(started, std::string::npos);
+    if (comm::is_root()) {
+        // Higher steps, written later, that are not complete restart files
+        std::ofstream(dir + "/restart_000060.restart", std::ios::binary) << with_step(bytes, 60).substr(0, bytes.size() / 2);
+        std::ofstream(dir + "/restart_000070.restart", std::ios::binary) << with_step(bytes, 70).substr(0, bytes.size() - 1);
+        std::ofstream(dir + "/restart_000080.restart.partial", std::ios::binary) << with_step(bytes, 80);
+        std::ofstream(dir + "/restart_x00090.restart", std::ios::binary) << with_step(bytes, 90);
+        // The same step under a later prefix
+        std::ofstream(dir + "/z_000040.restart", std::ios::binary) << bytes;
+    }
+    comm::barrier();
+    std::vector<std::string> skipped;
+    FoundRestart found = newest_restart({dir + "/restart", dir + "/z"}, skipped);
+    EXPECT_EQ(found.file, dir + "/restart_000040.restart");
+    EXPECT_EQ(found.step, 40u);
+    EXPECT_EQ(found.t, double(first.get_time()));
+    ASSERT_EQ(skipped.size(), 2u);
+    EXPECT_NE(skipped[0].find("restart_000060.restart"), std::string::npos);
+    EXPECT_NE(skipped[1].find("restart_000070.restart"), std::string::npos);
+
+    // A run started later (a rewind to step 20, say) wins over higher steps
+    comm::barrier();
+    if (comm::is_root()) {
+        std::string rewound = with_step(bytes, 30);
+        rewound.replace(started + run_start.size(), 20, "2999-01-01T00:00:00Z");
+        std::ofstream(dir + "/z_000030.restart", std::ios::binary) << rewound;
+    }
+    comm::barrier();
+    skipped.clear();
+    found = newest_restart({dir + "/restart", dir + "/z"}, skipped);
+    EXPECT_EQ(found.file, dir + "/z_000030.restart");
+    EXPECT_EQ(found.step, 30u);
+}
+
+TEST(RestartTest, LatestResumesAsTheNamedFileDoesOrStartsFresh) {
+    const std::string dir = (scratch_dir() / "mallard_restart_latest_resume").string();
+    const std::string from_file = "type = \"restart\"\nfile = \"" + dir + "/b/restart_000040.restart\"\n";
+    Input fresh = parse_toml(restart_input(dir + "/b", BLAST, 40));
+    Solver::start_from_restart(fresh, "latest");
+    Solver first;
+    first.init(fresh);
+    EXPECT_EQ(first.get_step(), 0u);
+    first.run();
+
+    Solver named;
+    named.init(parse_toml(restart_input(dir + "/a", from_file, 60)));
+    const std::vector<rtype> U_named = run_to_end(named);
+    Input latest = parse_toml(restart_input(dir + "/b", BLAST, 60));
+    Solver::start_from_restart(latest, "latest");
+    Solver resumed;
+    resumed.init(latest);
+    EXPECT_EQ(resumed.get_step(), 40u);
+    const std::vector<rtype> U_latest = run_to_end(resumed);
+    ASSERT_EQ(U_latest.size(), U_named.size());
+    EXPECT_EQ(std::memcmp(U_latest.data(), U_named.data(), U_named.size() * sizeof(rtype)), 0);
+
+    // Restart files, none of them complete: an error, not a fresh start
+    comm::barrier();
+    if (comm::is_root()) {
+        const std::string bytes = file_bytes(dir + "/b/restart_000060.restart");
+        std::filesystem::create_directories(dir + "/c");
+        std::ofstream(dir + "/c/restart_000060.restart", std::ios::binary) << bytes.substr(0, bytes.size() / 2);
+    }
+    comm::barrier();
+    Input truncated = parse_toml(restart_input(dir + "/c", BLAST, 60));
+    EXPECT_THROW(Solver::start_from_restart(truncated, "latest"), std::runtime_error);
+}

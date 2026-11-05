@@ -38,19 +38,11 @@ spec:
               set -eu
               [ -d /data/examples ] || cp -r "$MALLARD_SHARE/examples" "$MALLARD_SHARE/mechanisms" /data
               cd "$CASE"
-              [ -e .started ] || touch .started
-              input=input.toml
-              restart=$(find . -name '*.restart' -newer .started -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d ' ' -f 2-)
-              if [ -n "$restart" ]; then
-                  echo "Resuming from $restart"
-                  awk '/^\[+initialize[].]/ {skip = 1; next} /^\[/ {skip = 0} !skip' input.toml > resume.toml
-                  printf '\n[initialize]\ntype = "restart"\nfile = "%s"\n' "$restart" >> resume.toml
-                  input=resume.toml
-              fi
+              # The newest complete restart file, or the input's [initialize] in the first pod
               if [ "$RANKS" -gt 1 ]; then
-                  exec mpirun -n "$RANKS" --bind-to none mallard -i "$input"
+                  exec mpirun -n "$RANKS" --bind-to none mallard -i input.toml --restart latest
               fi
-              exec mallard -i "$input"
+              exec mallard -i input.toml --restart latest
           lifecycle:
             # mpirun ends its ranks on SIGTERM without a restart file; ask the run to stop first
             preStop:

@@ -1,7 +1,7 @@
 /**
  * @file provenance.h
  * @brief Provenance of a run: the code and build, the input, the mesh, the
- *        resolved setup and where and when it ran, as one JSON object that
+ *        resolved input and where and when it ran, as one JSON object that
  *        every output file carries.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
@@ -15,13 +15,12 @@
 #include <tuple>
 #include <vector>
 
-#include "log.h"
 
 namespace provenance {
 
 /** @brief Name and version of the block's format. */
 inline constexpr const char * SCHEMA = "mallard-provenance";
-constexpr int VERSION = 1;
+constexpr int VERSION = 2;
 
 /** @brief SHA-256 of data, in hexadecimal. */
 std::string sha256(std::string_view data);
@@ -47,11 +46,11 @@ void set_input(const std::string & file, const std::string & text);
 /** @brief The mesh: its type (e.g. "file", "cartesian"), file and file hash (empty if none). */
 void set_mesh(const std::string & type, const std::string & file, const std::string & hash);
 
+/** @brief The input with every key explicit, as setup used it (ResolvedInput::toml). */
+void set_resolved(const std::string & toml);
+
 /** @brief The numerics preset (empty name: none) and each key it covers: value, and whether the preset set it. */
 void set_preset(const std::string & name, const std::vector<std::tuple<std::string, std::string, bool>> & settings);
-
-/** @brief The resolved setup, as printed to the human log. */
-void set_setup(const logging::Record & setup);
 
 /** @brief Every rank takes rank 0's block (collective). */
 void share();
@@ -70,6 +69,12 @@ std::string xml_comment();
  *        comment line, or "" if text holds neither.
  */
 std::string parse_comment(std::string_view text);
+
+/**
+ * @brief The string value of key in a top-level object of a block (e.g.
+ *        "mesh", "sha256"), as written (escapes kept), or "" if there is none.
+ */
+std::string find_string(std::string_view block, std::string_view object, std::string_view key);
 
 } // namespace provenance
 

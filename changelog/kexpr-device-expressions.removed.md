@@ -1,0 +1,1 @@
+- exprtk is no longer bundled or built: Mallard's expression language, which follows its syntax and numerics, has its own literal conversion and derivative. The input syntax is unchanged; exprtk's MIT notice stays in `licenses/exprtk-MIT.txt` and NOTICE.
