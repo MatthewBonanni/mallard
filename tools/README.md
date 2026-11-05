@@ -417,7 +417,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | Script | Purpose |
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
-| `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard` that every snapshot and monitor format carries the same units for each field; the `openmp` job of `ci.yml` runs it |
+| `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard` that every snapshot and monitor format carries the same units for each field, and that `mallard info --format json` finds them too; the `openmp` job of `ci.yml` runs it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
 | `dev/check_support_matrix.py` | Fails if a test or build job of the GitHub workflows is missing from the [support matrix](../docs/guide/support.md), or the matrix names a job no workflow has; the first job of `ci.yml` runs it |
 | `dev/check_spelling.py` | Fails on British spellings in tracked text files (Mallard uses American spelling everywhere), except names fixed by other formats or published titles; the first job of `ci.yml` runs it |

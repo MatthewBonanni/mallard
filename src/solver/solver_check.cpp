@@ -46,11 +46,7 @@ std::string bytes(const double b) { return logging::si(b) + "B"; }
 constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'000;
 constexpr double HALO_FRACTION = 0.1;
 
-std::string point(const std::array<double, N_DIM> & x) {
-    std::string text = "(";
-    for (size_t i = 0; i < N_DIM; i++) text += (i ? ", " : "") + logging::format("%.4g", x[i]);
-    return text + ")";
-}
+std::string point(const std::array<double, N_DIM> & x) { return quality_point(x); }
 
 /** @brief Largest CFL number of each integrator for smooth flow (docs/numerics/overview.md#time-step). */
 double cfl_limit(const TimeIntegratorType type) {
@@ -123,32 +119,7 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, c
                              "); such cells limit the time step and accuracy and can make a run diverge: improve "
                              "the mesh there (--quality shows where). See docs/guide/meshes.md#mesh-quality");
     }
-    if (options.quality_file.empty()) return;
-
-    std::vector<Kokkos::View<rtype *>::host_mirror_type> fields;
-    std::vector<Data> quality_data;
-    std::vector<std::string> names;
-    for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
-        fields.emplace_back(MeshQuality::FIELDS[m], mesh->n_cells);
-        for (uint32_t c = 0; c < mesh->n_owned(); c++) fields.back()(c) = static_cast<rtype>(quality.cells[m][c]);
-        quality_data.emplace_back(MeshQuality::FIELDS[m], fields.back());
-        names.emplace_back(MeshQuality::FIELDS[m]);
-    }
-    for (const auto & [name, values] : extra) {
-        fields.emplace_back(name, mesh->n_cells);
-        for (uint32_t c = 0; c < mesh->n_owned(); c++) fields.back()(c) = static_cast<rtype>(values[c]);
-        quality_data.emplace_back(name, fields.back());
-        names.emplace_back(name);
-    }
-    Input writer_input(Input::table_type{});
-    writer_input.as_table()["prefix"] = options.quality_file;
-    writer_input.as_table()["interval"] = 1;
-    writer_input.as_table()["variables"] = names;
-    set_output_files_enabled(true);
-    DataWriter writer;
-    writer.init(writer_input, quality_data, mesh);
-    writer.write(0, 0.0_r, true);
-    set_output_files_enabled(false);
+    if (!options.quality_file.empty()) write_quality(mesh, quality, options.quality_file, extra);
 }
 
 void Solver::check_time_step(CheckReport & r) {
@@ -746,26 +717,7 @@ void print_check(const CheckReport & r) {
     }
     for (size_t i = 0; i < r.regions.size(); i++) item(i ? "" : "Regions", r.regions[i].first + ": " + r.regions[i].second);
     if (!r.view_file.empty()) item("Case view", r.view_file);
-    if (r.has_quality) {
-        for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
-            const QualitySummary & s = r.quality[m];
-            std::string text = format("max %.3g, mean %.3g", s.max, s.mean);
-            if (s.n_over_limit > 0) {
-                text += logging::style(", " + count(s.n_over_limit) + " cells above " +
-                                           logging::real(MeshQuality::LIMITS[m]),
-                                       logging::Style::YELLOW);
-            }
-            item(MeshQuality::NAMES[m], text);
-            if (s.max < MeshQuality::NOTABLE[m]) continue;
-            std::string worst;
-            for (const QualityCell & c : s.worst) {
-                const std::string entry = format("%.3g at ", c.value) + point(c.x);
-                if (!worst.empty() && worst.size() + entry.size() > 64) break;
-                worst += (worst.empty() ? "" : ", ") + entry;
-            }
-            item("", "worst " + worst);
-        }
-    }
+    if (r.has_quality) print_quality(r.quality);
     if (r.dt > 0.0) {
         const std::string source = r.dt_limit == "CFL"      ? "from run.cfl"
                                    : r.dt_limit == "sponge" ? "limited by the sponge strength"
