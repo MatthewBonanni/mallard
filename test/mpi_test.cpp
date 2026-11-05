@@ -31,7 +31,7 @@
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
-#include "json_reader.h"
+#include "json.h"
 #include "provenance.h"
 #include "renumbered_mesh.h"
 #include "test_fixtures.h"
@@ -784,7 +784,7 @@ TEST(MPITest, EveryRankWritesRankZerosProvenance) {
     comm::barrier();
     const std::string expected = provenance::json();
     EXPECT_EQ(comm::broadcast(expected), expected);
-    EXPECT_EQ(json_reader::parse(expected)["run"]["ranks"].number, comm::size());
+    EXPECT_EQ(json::parse(expected)["run"]["ranks"].number, comm::size());
     std::ostringstream piece;
     piece << dir << "/f_000002";
     if (comm::size() > 1) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();

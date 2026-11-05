@@ -338,6 +338,52 @@ lists (134 B per hexahedron, 350 B per tetrahedron) and, on the device, the face
 coordinates (42 B per triangle of 2D MUSCL, 120 B per hexahedron). Restart files are bitwise those of `main`.
 On CPUs the device views are the host copies, so only the regions' fractions and glibc's arenas change.
 
+### 8. Memory sizing in `mallard check` (#550)
+
+`mallard check` records every Kokkos allocation by label (`memory::Tracker`, Kokkos Tools callbacks chained to
+any tool loaded with `KOKKOS_TOOLS_LIBS`) and gives each label a category (`src/common/memory_tracker.cpp`; the
+examples' test fails on a label no rule names). It keeps the peak of each setup phase and of the steady state,
+each as bytes proportional to the cells plus bytes that are not (the setup's chunks and batches, the chemistry's
+work memory, Kokkos' scratch), and sizes a rank by the largest of these at its cell count. TENO's packed stencils
+live in CUDA virtual memory outside Kokkos; the bytes they fill are reported to the tools as allocations, and the
+rest of the last 2 MB page as bytes that are not proportional to the cells (9 of the 53 MB of 2D TENO3 tables at 16k cells).
+
+Measured: each case run on one A100-80GB (5 steps) with a Kokkos Tools library that records the peak of the
+Kokkos allocations and the largest `cudaMemGetInfo` use over the run. Predicted: `mallard check --memory a100-80`
+on a CPU (2 threads) of the same case with 4 to 16 times fewer cells, extrapolated, plus the typical memory outside
+Kokkos; the rows checked at the measured size are the check's own prediction for its mesh.
+
+| case | cells | checked at | Kokkos, predicted / measured | error | total, predicted / measured | error |
+|---|---|---|---|---|---|---|
+| MUSCL 2D | 65,536 | 65,536 | 0.08 / 0.08 GB | +1.4% | 1.68 / 1.55 GB | +8.6% |
+| MUSCL 2D | 1,048,576 | 65,536 | 1.08 / 1.08 GB | -0.2% | 2.68 / 2.60 GB | +3.3% |
+| TENO5 2D | 262,144 | 262,144 | 2.25 / 2.26 GB | -0.2% | 3.85 / 3.78 GB | +1.9% |
+| TENO5 2D | 1,048,576 | 262,144 | 8.98 / 8.97 GB | +0.1% | 10.58 / 10.51 GB | +0.7% |
+| TENO5 3D | 110,592 | 110,592 | 4.37 / 4.38 GB | -0.2% | 6.57 / 6.45 GB | +1.8% |
+| TENO5 3D | 884,736 | 110,592 | 34.41 / 34.40 GB | +0.0% | 36.61 / 36.50 GB | +0.3% |
+| TENO3 3D | 262,144 | 262,144 | 3.97 / 3.99 GB | -0.5% | 6.17 / 6.10 GB | +1.1% |
+| TENO3 3D | 2,097,152 | 262,144 | 31.12 / 31.21 GB | -0.3% | 33.32 / 33.33 GB | -0.1% |
+| TENO6 3D | 32,768 | 32,768 | 3.28 / 3.24 GB | +1.2% | 5.48 / 4.59 GB | +19.3% |
+| TENO6 3D | 262,144 | 32,768 | 19.08 / 19.39 GB | -1.6% | 21.28 / 21.51 GB | -1.0% |
+| propane flame 3D (`flame_3d`) | 221,184 | 221,184 | 2.22 / 1.57 GB | +41.1% | 4.42 / 3.61 GB | +22.3% |
+| propane flame 3D | 1,769,472 | 221,184 | 9.65 / 9.64 GB | +0.1% | 11.85 / 11.71 GB | +1.2% |
+
+The 2D Riemann problem (quadrilaterals) and the 3D Taylor-Green vortex (hexahedra) of the performance set, HLLC, SSPRK3. From a check of 4 to
+16 times fewer cells the total is within -1.0% to +3.3% of the measured peak, inside the 5% that sizing keeps
+free. Small meshes are overestimated, on the safe side:
+
+- The memory outside Kokkos, measured after the steps: 1.48-1.54 GB in 2D and 2.05-2.13 GB in 3D, of which CUDA's
+  context is 0.45-0.50 GB at the first allocation and the rest the local memory CUDA reserves for kernels with
+  large stacks at their first launch. The setup's peak comes before those launches (TENO6 at 32^3), but sizing
+  counts all of it at every peak. A check on a CPU counts 1.6 GB (2D) or 2.2 GB (3D); a check on the GPU with
+  `--steps` measures it.
+- The chemistry's work memory has a row per cell in flight, `max(4096, 4 x concurrency)` rows of 1 GiB at most: 8 MB
+  on 2 CPU threads, 423 MB for the 221k cells of `flame_3d` and 1.07 GB from about 550k cells on an A100. A check
+  on a CPU counts the 1 GiB bound for a GPU.
+- Before the stencil pages were reported, a check missed 30 KB per cell of TENO5 in 3D (29.6 GB at 96^3).
+- TENO6's tables take 2-4% more per cell on the GPU than in a check on a CPU, the largest underestimate above
+  (-1.6% of the Kokkos peak).
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step

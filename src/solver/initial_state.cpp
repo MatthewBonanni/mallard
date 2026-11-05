@@ -1563,6 +1563,12 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
             simplex_offsets.push_back(static_cast<uint32_t>(simplices.size()));
             curved_offsets.push_back(static_cast<uint32_t>(curved_weights.size()));
         }
+        // The previous chunk's geometry goes before this one's is allocated
+        e.simplex_offsets = {};
+        e.simplices = {};
+        e.curved_offsets = {};
+        e.curved_points = {};
+        e.curved_weights = {};
         Kokkos::View<double *[N_VERTICES][3]> sv("init_simplices", simplices.size());
         auto hs = Kokkos::create_mirror_view(sv);
         for (size_t i = 0; i < simplices.size(); i++) {

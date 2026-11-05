@@ -127,6 +127,26 @@ void items(const Items & list) {
     for (const auto & [key, value] : list) item(key, value);
 }
 
+void table(const std::vector<std::string> & header, const std::vector<std::vector<std::string>> & rows) {
+    std::vector<size_t> width(header.size());
+    for (size_t c = 0; c < header.size(); c++) width[c] = header[c].size();
+    for (const auto & row : rows) {
+        for (size_t c = 0; c < row.size() && c < width.size(); c++) width[c] = std::max(width[c], row[c].size());
+    }
+    const auto text = [&](const std::vector<std::string> & row) {
+        std::string out = " ";
+        for (size_t c = 0; c < row.size() && c < width.size(); c++) {
+            std::string cell = row[c];
+            if (c + 1 < row.size()) cell.resize(width[c], ' ');
+            out += " " + cell + (c + 1 < row.size() ? " " : "");
+        }
+        while (!out.empty() && out.back() == ' ') out.pop_back();
+        return out;
+    };
+    line(style(text(header), Style::DIM));
+    for (const auto & row : rows) line(text(row));
+}
+
 void begin_phase(std::string_view name) {
     if (!comm::is_root()) return;
     close_phase();

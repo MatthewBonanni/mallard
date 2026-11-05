@@ -44,7 +44,13 @@ constexpr Option CHECK_OPTIONS[] = {
      "Cost (wall time and GPU-hours per unit simulated time, per flow-through and to t_stop) at this "
      "many cell updates per second per rank: the Throughput of a run's summary over its ranks. "
      "Default: no cost."},
-    {"--steps", "", "N", "Cost at the throughput measured over N steps, after one untimed step. Default: no cost."},
+    {"--steps", "", "N",
+     "Cost at the throughput measured over N steps, after one untimed step; the memory then includes the "
+     "steps' peak. Default: no cost."},
+    {"--memory", "", "SIZE|GPU",
+     "Size the run for this memory per rank: a size (40GB, 512MiB; host memory per rank in CPU builds) or a GPU "
+     "(a100-40, a100-80, h100-80, h200, mi250x, mi300x): the most cells per rank, the fewest ranks the mesh fits "
+     "on and up to how many the halo stays below 10%. Default: the GPU's memory in GPU builds, else none."},
     {"--quality", "", "PREFIX",
      "Write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without HDF5), "
      "the default snapshot format. Default: none."},
@@ -70,6 +76,20 @@ constexpr Option UPGRADE_OPTIONS[] = {
     {"--check", "", "", "Write nothing: list the changes, with exit status 1 if there are any."},
     {"--dim", "", "2|3",
      "The case's dimension, for renames that depend on it. Default: from the input's mesh, as a run finds it."},
+};
+
+constexpr Option INFO_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
+     "scripts. Default: text."},
+    {"--input", "", "",
+     "Print the input file that produced the file, from its provenance: the resolved input (every key the "
+     "run read, defaults filled in) for files of Mallard 0.10 and later, the input as written for 0.9. For a "
+     "run directory, its run's."},
+    {"--quality", "", "PREFIX",
+     "Mesh files: write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without "
+     "HDF5), as mallard check --quality does. Default: none."},
+    KOKKOS,
 };
 
 constexpr Option RESOLVE_OPTIONS[] = {
@@ -334,6 +354,41 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::input,
         .run = check_main,
+    },
+    {
+        .name = "info",
+        .group = "Inspect",
+        .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
+        .synopsis = "mallard info FILE [--format text|json] [--input] [--quality PREFIX]\n"
+                    "mallard info RUN_DIR [--format text|json] [--input]",
+        .description =
+            "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
+            "version; the mesh (cells, points, cell types, bounds, boundary and cell zones); its times and steps; "
+            "its fields with their units, descriptions and ranges (of the last snapshot); the species; and its "
+            "provenance (Mallard version and commit, build, when, where and on how many ranks it ran, the input "
+            "file and mesh with their SHA-256). Files without provenance (before Mallard 0.9) or from a newer "
+            "Mallard are reported with a note.\n"
+            "\n"
+            "FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5) or a series index (.vtkhdf.series, .pvd, .xmf), "
+            "a restart file (compressed too), a probe file (.csv, .h5, .vtkhdf, .vtp, .pvd), a CSV file of forces "
+            "or integrals, or a mesh file (Gmsh or Fluent .msh, .cas, .cgns, an OpenFOAM case, a Mallard HDF5 "
+            "mesh). Output files are read by any build, of any dimension and precision; a mesh file by the solver "
+            "of its dimension, which also reports its quality as mallard check does.\n"
+            "\n"
+            "RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and every output file "
+            "in it and one level down, one table row each (the snapshots of a series as their index).",
+        .options = INFO_OPTIONS,
+        .arguments = FILE_ARGUMENTS,
+        .examples = "$ mallard info solut/flow.vtkhdf.series\n"
+                    "$ mallard info solut/restart_001000.restart --format json\n"
+                    "$ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it\n"
+                    "$ mallard info wing.msh --quality quality\n"
+                    "$ mallard info runs/cylinder",
+        .exit_status = "0  the file was read\n"
+                       "1  a file cannot be read (missing, not Mallard's, newer), or --input finds no provenance\n"
+                       "2  usage error",
+        .dim = Case::file,
+        .run = info_main,
     },
     {
         .name = "mesh convert",

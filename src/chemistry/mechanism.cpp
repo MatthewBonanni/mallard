@@ -12,6 +12,7 @@
 #include "mechanism.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <cctype>
 #include <cmath>
@@ -20,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 
 #include <yaml-cpp/yaml.h>
 
@@ -261,7 +263,8 @@ bool Reader::parse_reaction(const YAML::Node & node, const Source & source, cons
     if (lhs.third_body != rhs.third_body || lhs.falloff != rhs.falloff) {
         throw std::runtime_error(where + ": the third body differs between the sides.");
     }
-    for (const auto & [side, terms] : {std::make_pair(&lhs, &r.reactants), std::make_pair(&rhs, &r.products)}) {
+    const std::array sides = {std::pair{&lhs, &r.reactants}, std::pair{&rhs, &r.products}};
+    for (const auto & [side, terms] : sides) {
         for (const auto & [name, nu] : side->species) {
             const int32_t k = mech.species_index(name);
             if (k < 0) {

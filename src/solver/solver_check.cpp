@@ -9,6 +9,7 @@
 #include "solver.h"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <cmath>
 #include <limits>
@@ -39,11 +40,13 @@ std::string error_text(const std::exception & e) {
 
 std::string bytes(const double b) { return logging::si(b) + "B"; }
 
-std::string point(const std::array<double, N_DIM> & x) {
-    std::string text = "(";
-    for (size_t i = 0; i < N_DIM; i++) text += (i ? ", " : "") + logging::format("%.4g", x[i]);
-    return text + ")";
-}
+// Sizing: the device memory outside Kokkos when not measured, CUDA's context and the local memory of
+// kernels with large stacks (A100, CUDA 12.9: 1.5 GB in 2D, 2.1 GB in 3D; see docs/design/performance.md),
+// and the halo the recommended ranks stay below
+constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'000;
+constexpr double HALO_FRACTION = 0.1;
+
+std::string point(const std::array<double, N_DIM> & x) { return quality_point(x); }
 
 /** @brief Largest CFL number of each integrator for smooth flow (docs/numerics/overview.md#time-step). */
 double cfl_limit(const TimeIntegratorType type) {
@@ -96,6 +99,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_time_step(r);
     check_mesh_quality(r, options);
     check_cost(r, options, tracker);
+    check_sizing(r, options);
     check_settings(r);
     check_regions(r, options);
     return r;
@@ -114,26 +118,7 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) c
                              "); such cells limit the time step and accuracy and can make a run diverge: improve "
                              "the mesh there (--quality shows where). See docs/guide/meshes.md#mesh-quality");
     }
-    if (options.quality_file.empty()) return;
-
-    std::vector<Kokkos::View<rtype *>::host_mirror_type> fields;
-    std::vector<Data> quality_data;
-    std::vector<std::string> names;
-    for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
-        fields.emplace_back(MeshQuality::FIELDS[m], mesh->n_cells);
-        for (uint32_t c = 0; c < mesh->n_owned(); c++) fields.back()(c) = static_cast<rtype>(quality.cells[m][c]);
-        quality_data.emplace_back(MeshQuality::FIELDS[m], fields.back());
-        names.emplace_back(MeshQuality::FIELDS[m]);
-    }
-    Input writer_input(Input::table_type{});
-    writer_input.as_table()["prefix"] = options.quality_file;
-    writer_input.as_table()["interval"] = 1;
-    writer_input.as_table()["variables"] = names;
-    set_output_files_enabled(true);
-    DataWriter writer;
-    writer.init(writer_input, quality_data, mesh);
-    writer.write(0, 0.0_r, true);
-    set_output_files_enabled(false);
+    if (!options.quality_file.empty()) write_quality(mesh, quality, options.quality_file);
 }
 
 void Solver::check_time_step(CheckReport & r) {
@@ -190,13 +175,85 @@ void Solver::check_time_step(CheckReport & r) {
     }
 }
 
+namespace {
+
+/** @brief The bytes by category of the rank whose key is largest (the lowest such rank). */
+memory::Bytes of_largest_rank(const memory::Bytes & local, const uint64_t key) {
+    if (comm::size() == 1) return local;
+    const uint64_t largest = comm::allreduce(key, comm::Op::MAX);
+    const int chosen = comm::allreduce(key == largest ? comm::rank() : comm::size(), comm::Op::MIN);
+    memory::Bytes mine{};
+    if (comm::rank() == chosen) mine = local;
+    return comm::allreduce(mine, comm::Op::SUM);
+}
+
+/** @brief Device memory in use beyond Kokkos' own allocations: CUDA's context, libraries and kernels' local memory. */
+uint64_t outside_kokkos([[maybe_unused]] const uint64_t kokkos_bytes) {
+    size_t free_bytes = 0, total_bytes = 0;
+#if defined(KOKKOS_ENABLE_CUDA)
+    if (cudaMemGetInfo(&free_bytes, &total_bytes) != cudaSuccess) return 0;
+#elif defined(KOKKOS_ENABLE_HIP)
+    if (hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess) return 0;
+#endif
+    const uint64_t used = total_bytes - free_bytes;
+    return used > kokkos_bytes ? used - kokkos_bytes : 0;
+}
+
+/** @brief A snapshot's bytes: proportional to the rank's cells, except those sized by the device. */
+struct Model {
+    double per_cell = 0.0;
+    double fixed = 0.0;
+    double at(const double n) const { return per_cell * n + fixed; }
+};
+
+Model model(const CheckReport & r, const memory::Bytes & b) {
+    const double cells = static_cast<double>(std::max<uint64_t>(r.local_cells, 1));
+    Model m;
+    for (size_t c = 0; c < memory::N_CATEGORIES; c++) {
+        // A GPU keeps the output staging in host memory, and sizes its work memory for its many threads
+        const bool host_for_gpu = r.sizing_gpu && !r.device_memory;
+        if (host_for_gpu && memory::Category(c) == memory::Category::OUTPUT) continue;
+        if (host_for_gpu && memory::Category(c) == memory::Category::WORK && b[c] > 0) {
+            m.fixed += static_cast<double>(std::max(b[c], memory::MAX_WORK_BYTES));
+        } else if (memory::scales_with_cells(memory::Category(c))) {
+            m.per_cell += static_cast<double>(b[c]) / cells;
+        } else {
+            m.fixed += static_cast<double>(b[c]);
+        }
+    }
+    return m;
+}
+
+} // namespace
+
+double predicted_peak(const CheckReport & r, const double local_cells) {
+    double peak = model(r, r.steady_bytes).at(local_cells);
+    for (const memory::Bytes & phase : r.setup_phases) peak = std::max(peak, model(r, phase).at(local_cells));
+    return peak;
+}
+
+PartSize Solver::check_part(const DistributedMesh & whole, const int n_ranks) const {
+    const std::string method = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
+    const std::vector<int> owner = method == "graph" && have_graph_partitioner() ? partition_graph(whole, n_ranks)
+                                   : method == "hilbert" ? partition_hilbert(whole, n_ranks)
+                                                         : partition_multijagged(whole, n_ranks);
+    int layers = base_halo_layers();
+    if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
+        for (const uint8_t depth : teno->gather_depth) layers = std::max(layers, depth + 1);
+    }
+    return largest_part(whole.mesh_block(), owner, n_ranks, layers);
+}
+
 void Solver::check_memory(CheckReport & r, const CheckOptions & options, const memory::Tracker & tracker) const {
     r.device_memory = !Kokkos::SpaceAccessibility<Kokkos::HostSpace,
                                                   Kokkos::DefaultExecutionSpace::memory_space>::accessible;
     const memory::Usage usage = r.device_memory ? tracker.device() : tracker.host();
     r.bytes = comm::allreduce(usage.current, comm::Op::MAX);
     r.bytes_peak = comm::allreduce(usage.peak, comm::Op::MAX);
-    r.local_cells = comm::allreduce(uint64_t(mesh->n_cells), comm::Op::MAX);
+    r.setup_bytes = of_largest_rank(usage.at_peak, usage.peak);
+    r.steady_bytes = of_largest_rank(usage.by_category, usage.peak);
+    for (const memory::Bytes & phase : usage.phases) r.setup_phases.push_back(of_largest_rank(phase, usage.peak));
+    r.local_cells = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_cells) : 0, comm::Op::MAX);
     r.ranks = comm::size();
     r.target_ranks = options.ranks > 0 ? options.ranks : r.ranks;
     r.n_cells = n_cells_global;
@@ -205,6 +262,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
 #elif defined(KOKKOS_ENABLE_HIP)
     r.device_capacity = Kokkos::HIP::hip_device_prop().totalGlobalMem;
 #endif
+    if (r.device_memory) r.outside_kokkos = comm::allreduce(outside_kokkos(usage.current), comm::Op::MAX);
 
     if (r.target_ranks == r.ranks) {
         r.target_owned = comm::allreduce(uint64_t(mesh->n_owned()), comm::Op::MAX);
@@ -213,16 +271,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
         r.target_bytes_peak = r.bytes_peak;
     } else if (r.ranks == 1) {
         const DistributedMesh whole(read_mesh_block(input), Mesh::periodic_pairs(input));
-        const std::string method = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
-        const std::vector<int> owner = method == "graph" && have_graph_partitioner()
-                                           ? partition_graph(whole, r.target_ranks)
-                                       : method == "hilbert" ? partition_hilbert(whole, r.target_ranks)
-                                                             : partition_multijagged(whole, r.target_ranks);
-        int layers = base_halo_layers();
-        if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
-            for (const uint8_t depth : teno->gather_depth) layers = std::max(layers, depth + 1);
-        }
-        const PartSize part = largest_part(whole.mesh_block(), owner, r.target_ranks, layers);
+        const PartSize part = check_part(whole, r.target_ranks);
         r.target_owned = part.owned;
         r.target_halo = part.halo;
         const double scale = static_cast<double>(part.owned + part.halo) / static_cast<double>(mesh->n_cells);
@@ -241,13 +290,84 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
     }
 }
 
-void Solver::check_cost(CheckReport & r, const CheckOptions & options, const memory::Tracker & tracker) {
+void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
+    if (options.memory > 0) {
+        r.sizing_name = options.memory_name;
+        r.sizing_memory = options.memory;
+        r.sizing_gpu = options.memory_gpu;
+    } else if (r.device_capacity > 0) {
+        r.sizing_name = "this GPU";
+        r.sizing_memory = r.device_capacity;
+        r.sizing_gpu = true;
+    } else {
+        return;
+    }
+    if (r.sizing_gpu) {
+        // Before any step, the step kernels' local memory is not reserved yet
+        r.overhead_measured = r.outside_kokkos > 0 && (r.steps_timed > 0 || r.outside_kokkos >= CUDA_CONTEXT_BYTES);
+        r.sizing_overhead = r.overhead_measured ? r.outside_kokkos : CUDA_CONTEXT_BYTES;
+    }
+    const double overhead = static_cast<double>(r.sizing_overhead);
+    auto peak = [&](const double n) { return predicted_peak(r, n) + overhead; };
+    const double usable = (1.0 - SIZING_MARGIN) * static_cast<double>(r.sizing_memory);
+    double n_max = std::numeric_limits<double>::infinity();
+    std::vector<memory::Bytes> snapshots = r.setup_phases;
+    snapshots.push_back(r.steady_bytes);
+    for (size_t k = 0; k < snapshots.size(); k++) {
+        const Model m = model(r, snapshots[k]);
+        const double n_fit = (usable - overhead - m.fixed) / m.per_cell;
+        if (m.per_cell <= 0.0 || n_fit >= n_max) continue;
+        n_max = n_fit;
+        r.bytes_per_cell = m.per_cell;
+        r.fixed_bytes = static_cast<uint64_t>(m.fixed);
+        r.sizing_setup = k + 1 < snapshots.size();
+    }
+    if (!(n_max >= 1.0)) return;
+    r.max_local_cells = static_cast<uint64_t>(n_max);
+
+    auto fits = [&](const PartSize & p) { return peak(double(p.owned + p.halo)) <= usable; };
+    auto record = [&](const int n, const PartSize & p) {
+        r.min_ranks = n;
+        r.min_owned = p.owned;
+        r.min_halo = p.halo;
+        r.min_peak = static_cast<uint64_t>(peak(double(p.owned + p.halo)));
+    };
+    const double halo_ratio = double(comm::allreduce(uint64_t(mesh->n_cells - mesh->n_owned()), comm::Op::SUM)) /
+                              double(n_cells_global);
+    int n = std::max(1, static_cast<int>(std::ceil(double(n_cells_global) * (1.0 + halo_ratio) / n_max)));
+    if (comm::size() > 1) {
+        // Without the whole mesh at hand: parts keep this run's halo as a fraction of their cells
+        const uint64_t owned = (n_cells_global + uint64_t(n) - 1) / uint64_t(n);
+        record(n, {owned, static_cast<uint64_t>(halo_ratio * double(owned))});
+        return;
+    }
+    r.min_partitioned = true;
+    const uint64_t max_ranks = std::max<uint64_t>(1, n_cells_global / 64);
+    const DistributedMesh whole(read_mesh_block(input), Mesh::periodic_pairs(input));
+    PartSize part = n == 1 ? PartSize{n_cells_global, 0} : check_part(whole, n);
+    for (int tries = 0; !fits(part); tries++) {
+        if (tries == 16 || uint64_t(n) >= max_ranks) return;
+        const double over = double(part.owned + part.halo) / n_max;
+        n = std::max(n + 1, static_cast<int>(std::ceil(n * std::min(over, 2.0))));
+        part = check_part(whole, n);
+    }
+    record(n, part);
+    // Halo below 10% of the owned cells: doubling the ranks while it holds
+    for (int m = n; uint64_t(m) <= max_ranks; m *= 2) {
+        const PartSize p = m == n ? part : check_part(whole, m);
+        if (double(p.halo) >= HALO_FRACTION * double(p.owned)) break;
+        r.halo_ranks = m;
+    }
+}
+
+void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::Tracker & tracker) {
     r.t_stop = static_cast<double>(t_stop);
     r.n_steps = n_steps;
     if (options.throughput > 0.0) {
         r.throughput = options.throughput;
     } else if (options.steps > 0) {
         calc_dt();
+        tracker.reset_peak();
         take_step();  // first-use allocations
         Kokkos::fence();
         Kokkos::Timer timer_steps;
@@ -262,6 +382,12 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, const mem
         r.steps_timed = options.steps;
         const memory::Usage usage = r.device_memory ? tracker.device() : tracker.host();
         const uint64_t peak = comm::allreduce(usage.peak, comm::Op::MAX);
+        r.steady_bytes = of_largest_rank(usage.at_peak, usage.peak);
+        // The time stepping's kernels add their local memory to CUDA's reservation
+        if (r.device_memory) {
+            r.outside_kokkos =
+                std::max(r.outside_kokkos, comm::allreduce(outside_kokkos(usage.current), comm::Op::MAX));
+        }
         if (peak > r.bytes_peak) {
             r.target_bytes_peak = static_cast<uint64_t>(static_cast<double>(r.target_bytes_peak) *
                                                         static_cast<double>(peak) / static_cast<double>(r.bytes_peak));
@@ -456,6 +582,123 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     }
 }
 
+namespace {
+
+void print_breakdown(const CheckReport & r) {
+    using logging::format;
+    using logging::item;
+    const double cells = static_cast<double>(std::max<uint64_t>(r.local_cells, 1));
+    item("By category", std::string("at the setup's peak / ") +
+                            (r.steps_timed > 0 ? "at the steps' peak" : "after setup") + ", largest rank");
+    for (size_t c = 0; c < memory::N_CATEGORIES; c++) {
+        const double a = double(r.setup_bytes[c]), b = double(r.steady_bytes[c]);
+        if (a < 0.0005 * double(r.bytes_peak) && b < 0.0005 * double(r.bytes_peak)) continue;
+        const bool per_cell = memory::scales_with_cells(memory::Category(c));
+        item("", format("%-22s %7s / %-7s", memory::category_name(memory::Category(c)), bytes(a).c_str(),
+                        bytes(b).c_str()) +
+                     (per_cell ? format("  %s / %s per cell", bytes(a / cells).c_str(), bytes(b / cells).c_str())
+                               : std::string("  not proportional to the cells")));
+    }
+    if (r.outside_kokkos > 0) {
+        item("", format("%-22s %7s", "outside Kokkos", bytes(double(r.outside_kokkos)).c_str()) +
+                     "  CUDA's context and kernels' local memory, the most measured");
+    }
+}
+
+void print_sizing(const CheckReport & r) {
+    using logging::count;
+    using logging::format;
+    using logging::item;
+    if (r.sizing_name.empty()) return;
+    const std::string unit = r.sizing_gpu ? "GPU" : "rank";
+    auto units = [&](const int n) { return std::to_string(n) + " " + unit + (n == 1 ? "" : "s"); };
+    std::string what = r.sizing_name + ": " + bytes(double(r.sizing_memory)) + " per " + unit + ", " +
+                       format("%.0f%%", 100.0 * SIZING_MARGIN) + " kept free";
+    if (r.sizing_gpu) {
+        what += ", " + bytes(double(r.sizing_overhead)) + " outside Kokkos" +
+                (r.overhead_measured ? " (measured)" : " (typical)");
+    }
+    item(r.sizing_gpu ? "GPU sizing" : "Rank sizing", what);
+    if (r.max_local_cells == 0) {
+        item("", logging::style("this case's fixed memory alone does not fit", logging::Style::RED));
+        return;
+    }
+    item("", "at most " + count(r.max_local_cells) + " cells per " + unit + ", halo included (" +
+                 bytes(r.bytes_per_cell) + " per cell" +
+                 (r.fixed_bytes > 0 ? " + " + bytes(double(r.fixed_bytes)) : "") +
+                 (r.sizing_setup ? " at the setup's peak)" : " in the steady state)"));
+    if (r.min_ranks == 0) {
+        item("", logging::style("no partition into a few thousand parts fits", logging::Style::RED));
+        return;
+    }
+    item("", (r.min_ranks == 1 ? std::string("fits on 1 ") + unit : "fits on " + units(r.min_ranks)) +
+                 ": largest part " + count(r.min_owned) + " + " + count(r.min_halo) + " halo cells, " +
+                 bytes(double(r.min_peak)) + " peak" + (r.min_partitioned ? "" : " (halo estimated)"));
+    if (r.halo_ranks > r.min_ranks) {
+        item("", format("halo below %.0f%% of the owned cells up to %s", 100.0 * HALO_FRACTION,
+                        units(r.halo_ranks).c_str()));
+    } else if (r.min_partitioned && r.min_ranks > 1) {
+        item("", format("halo above %.0f%% of the owned cells already on %s: a coarser mesh or larger %ss "
+                        "keep more of the work local",
+                        100.0 * HALO_FRACTION, units(r.min_ranks).c_str(), unit.c_str()));
+    }
+    if (r.throughput > 0.0 && r.dt > 0.0) {
+        const int n = std::max(r.min_ranks, r.halo_ranks);
+        item("", format("on %s at %s cells/s each: %s wall per unit simulated time", units(n).c_str(),
+                        logging::si(r.throughput).c_str(),
+                        logging::duration(double(r.n_cells) / (n * r.throughput * r.dt)).c_str()));
+    }
+}
+
+} // namespace
+
+std::string set_memory_target(const std::string & text, CheckOptions & options) {
+    // Memory as the driver reports it (cudaGetDeviceProperties, hipGetDeviceProperties; measured on the A100-80GB)
+    struct Gpu {
+        const char * key;
+        const char * name;
+        uint64_t bytes;
+    };
+    static constexpr Gpu GPUS[] = {
+        {"a100-40", "A100-40GB", 42'298'834'944},  {"a100-80", "A100-80GB", 85'093'171'200},
+        {"h100-80", "H100-80GB", 85'093'171'200},  {"h200", "H200", 150'754'820'096},
+        {"mi250x", "MI250X (one GCD)", 68'702'699'520}, {"mi300x", "MI300X", 206'141'652'992},
+    };
+    std::string lower = text;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch) { return std::tolower(ch); });
+    for (const Gpu & gpu : GPUS) {
+        if (lower != gpu.key) continue;
+        options.memory = gpu.bytes;
+        options.memory_name = gpu.name;
+        options.memory_gpu = true;
+        return "";
+    }
+    std::string list;
+    for (const Gpu & gpu : GPUS) list += std::string(list.empty() ? "" : ", ") + gpu.key;
+    const std::string error = "--memory takes a size with its unit (40GB, 512MiB) or a GPU (" + list + "), not " + text;
+    size_t used = 0;
+    double value = 0.0;
+    try {
+        value = std::stod(text, &used);
+    } catch (const std::exception &) {
+        return error;
+    }
+    static const std::pair<const char *, double> UNITS[] = {
+        {"b", 1.0},     {"kb", 1e3},           {"mb", 1e6},           {"gb", 1e9},           {"tb", 1e12},
+        {"kib", 1024.0}, {"mib", 1048576.0},   {"gib", 1073741824.0}, {"tib", 1099511627776.0},
+    };
+    const std::string unit = lower.substr(used);
+    for (const auto & [name, scale] : UNITS) {
+        if (unit != name || !(value > 0.0)) continue;
+        options.memory = static_cast<uint64_t>(value * scale);
+        options.memory_name = text;
+        options.memory_gpu = !Kokkos::SpaceAccessibility<Kokkos::HostSpace,
+                                                         Kokkos::DefaultExecutionSpace::memory_space>::accessible;
+        return "";
+    }
+    return error;
+}
+
 void print_check(const CheckReport & r) {
     using logging::count;
     using logging::format;
@@ -473,26 +716,7 @@ void print_check(const CheckReport & r) {
     }
     for (size_t i = 0; i < r.regions.size(); i++) item(i ? "" : "Regions", r.regions[i].first + ": " + r.regions[i].second);
     if (!r.view_file.empty()) item("Case view", r.view_file);
-    if (r.has_quality) {
-        for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
-            const QualitySummary & s = r.quality[m];
-            std::string text = format("max %.3g, mean %.3g", s.max, s.mean);
-            if (s.n_over_limit > 0) {
-                text += logging::style(", " + count(s.n_over_limit) + " cells above " +
-                                           logging::real(MeshQuality::LIMITS[m]),
-                                       logging::Style::YELLOW);
-            }
-            item(MeshQuality::NAMES[m], text);
-            if (s.max < MeshQuality::NOTABLE[m]) continue;
-            std::string worst;
-            for (const QualityCell & c : s.worst) {
-                const std::string entry = format("%.3g at ", c.value) + point(c.x);
-                if (!worst.empty() && worst.size() + entry.size() > 64) break;
-                worst += (worst.empty() ? "" : ", ") + entry;
-            }
-            item("", "worst " + worst);
-        }
-    }
+    if (r.has_quality) print_quality(r.quality);
     if (r.dt > 0.0) {
         const std::string source = r.dt_limit == "CFL"      ? "from run.cfl"
                                    : r.dt_limit == "sponge" ? "limited by the sponge strength"
@@ -520,7 +744,9 @@ void print_check(const CheckReport & r) {
                                                                    double(r.device_capacity),
                             bytes(double(r.device_capacity)).c_str()));
         }
+        print_breakdown(r);
     }
+    print_sizing(r);
     if (r.wall_per_time > 0.0) {
         const std::string units = r.device_memory ? "GPU-hours" : "rank-hours";
         const double hours = r.wall_per_time * r.target_ranks / 3600.0;
