@@ -77,6 +77,8 @@ const Entry NAMED[] = {
     {"SKEWNESS", dim::none, "largest face skewness"},
     {"ASPECT_RATIO", dim::none, "cell aspect ratio"},
     {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor"},
+    {"DELTA_OVER_ETA", dim::none, "cell size over the estimated Kolmogorov length"},
+    {"CELLS_PER_DELTA_L", dim::none, "cells across the laminar flame thickness"},
     // The divergence report's snapshot
     {"DIVERGED", dim::none, "1 in the cells that became invalid"},
 };
@@ -140,7 +142,9 @@ std::optional<FieldDescription> find(const std::string & name) {
         return FieldDescription{of->dimension.times(dim::time, -1), "source of " + of->long_name, "", ""};
     }
     if (starts_with(name, "MEAN_")) {
+        // Of a [statistics] field, or the time average of a probe variable
         auto of = find_sampled(name.substr(5));
+        if (!of) of = find_base(name.substr(5));
         if (!of) return std::nullopt;
         return FieldDescription{of->dimension, "time average of " + of->long_name, "", ""};
     }

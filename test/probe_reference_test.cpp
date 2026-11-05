@@ -39,7 +39,7 @@ std::string numbers3(const char * x, const char * y, const char * z) {
     return std::string("[") + x + ", " + y + (N_DIM == 3 ? std::string(", ") + z : "") + "]";
 }
 
-const std::vector<std::string> PROBES = {"points", "line", "circle", "cut", "walls", "open"
+const std::vector<std::string> PROBES = {"points", "line", "circle", "cut", "walls", "open", "means", "averaged"
 #if N_DIM == 3
                                          , "sphere"
 #endif
@@ -50,7 +50,8 @@ constexpr const char * EVERY_REDUCTION = "reductions = [\"integral\", \"mean\", 
 /**
  * @brief A smooth viscous flow on simplices between an isothermal and an
  *        adiabatic wall, with a fixed step, every probe kind with point values
- *        and every reduction, and a region with a smooth edge.
+ *        and every reduction, a region with a smooth edge, and [statistics]
+ *        averages and time-averaged wall quantities.
  */
 std::string reference_case(const std::string & dir) {
     std::ostringstream s;
@@ -67,7 +68,8 @@ std::string reference_case(const std::string & dir) {
       << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
       << "[physics]\ntype = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\n"
-      << "rho_ref = 1.0\n[output]\ncheck_interval = 1000000\n";
+      << "rho_ref = 1.0\n[output]\ncheck_interval = 1000000\n"
+      << "[statistics]\nfields = [\"P\"]\nproducts = [\"U_X*U_X\"]\n";
     const std::map<std::string, std::string> geometry = {
         {"points", "type = \"points\"\npoints = [" + numbers3("0.21", "0.33", "0.17") + ", " +
                        numbers3("0.67", "0.52", "0.41") + ", " + numbers3("0.45", "0.71", "0.29") +
@@ -83,6 +85,10 @@ std::string reference_case(const std::string & dir) {
                   "\"Y_PLUS\"]\nreference = {rho = 1.0, u = " + numbers3("0.3", "0.0", "0.0") + ", p = 1.0}\n"},
         {"open", "boundary = [\"left\", \"right\"]\nvariables = [\"P\", \"MASS_FLUX\", \"MOMENTUM_FLUX\", "
                  "\"ENTHALPY_FLUX\"]\n"},
+        {"means", "start = " + numbers3("0.13", "0.07", "0.21") + "\nend = " + numbers3("0.88", "0.71", "0.39") +
+                      "\nn_points = 11\nvariables = [\"MEAN_P\", \"COV_U_X_U_X\"]\n"},
+        {"averaged", "boundary_type = \"wall\"\naverage = true\nvariables = [\"P\", \"CF\", \"TAU_W\", \"Q_W\"]\n"
+                     "reference = {rho = 1.0, u = " + numbers3("0.3", "0.0", "0.0") + ", p = 1.0}\n"},
         {"sphere", "region = {type = \"sphere\", center = [0.5, 0.4, 0.3], radius = 0.2, filled = false}\n"
                    "n_points = [6, 12]\n"
                    "variables = [\"RHO\", \"P\", \"MASS_FLUX\"]\n"},
