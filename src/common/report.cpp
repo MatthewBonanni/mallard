@@ -8,6 +8,8 @@
 #include "report.h"
 
 #include <algorithm>
+#include <cctype>
+#include <stdexcept>
 
 #include "log.h"
 
@@ -48,7 +50,62 @@ std::string rtrim(std::string s) {
     return s;
 }
 
+bool digit(const char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }
+
+/** @brief Throws unless every VALUE cell is bare, with its row's units when it is a number. */
+void validate(const std::vector<Column> & header, const std::vector<Row> & rows) {
+    size_t units = header.size();
+    bool values = false;
+    for (size_t c = 0; c < header.size(); c++) {
+        if (header[c].kind == Column::Kind::UNITS) units = c;
+        values = values || header[c].kind == Column::Kind::VALUE;
+        if (header[c].kind == Column::Kind::TEXT && header[c].name == "units") {
+            throw std::logic_error("report: a units column is Column::Kind::UNITS");
+        }
+    }
+    if (values != (units < header.size())) {
+        throw std::logic_error("report: a table has VALUE columns exactly when it has a UNITS column");
+    }
+    for (const Row & row : rows) {
+        bool number = false;
+        for (size_t c = 0; c < header.size() && c < row.cells.size(); c++) {
+            if (header[c].kind != Column::Kind::VALUE) continue;
+            const std::string & cell = row.cells[c];
+            if (!bare(cell)) {
+                throw std::logic_error("report: \"" + cell + "\" in column " + header[c].name +
+                                       " is not a bare value: its unit belongs in the units column");
+            }
+            number = number || (cell != "-" && cell != "none");
+        }
+        if (number && (units >= row.cells.size() || row.cells[units].empty())) {
+            throw std::logic_error("report: row \"" + (row.cells.empty() ? std::string() : row.cells[0]) +
+                                   "\" has a value but no units (\"dimensionless\" when it has none)");
+        }
+    }
+}
+
 } // namespace
+
+bool bare(std::string_view s) {
+    if (s == "-" || s == "none") return true;
+    size_t i = 0;
+    if (i < s.size() && (s[i] == '-' || s[i] == '+')) i++;
+    if (s.substr(i) == "inf" || s.substr(i) == "nan") return true;
+    size_t digits = 0;
+    for (; i < s.size() && (digit(s[i]) || (s[i] == ',' && digits > 0)); i++) digits += digit(s[i]);
+    if (i < s.size() && s[i] == '.') {
+        for (i++; i < s.size() && digit(s[i]); i++) digits++;
+    }
+    if (digits == 0) return false;
+    if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
+        i++;
+        if (i < s.size() && (s[i] == '+' || s[i] == '-')) i++;
+        size_t exponent = 0;
+        for (; i < s.size() && digit(s[i]); i++) exponent++;
+        if (exponent == 0) return false;
+    }
+    return i == s.size();
+}
 
 Status worse(const Status a, const Status b) { return a > b ? a : b; }
 
@@ -107,7 +164,10 @@ void Text::note(std::string_view line_text) {
 
 void Text::blank() { add(""); }
 
-void Text::table(const std::vector<std::string> & header, const std::vector<Row> & rows, const bool status_column) {
+void Text::table(const std::vector<Column> & columns, const std::vector<Row> & rows, const bool status_column) {
+    validate(columns, rows);
+    std::vector<std::string> header;
+    for (const Column & c : columns) header.push_back(c.name);
     std::vector<size_t> width(header.size());
     for (size_t c = 0; c < header.size(); c++) width[c] = header[c].size();
     size_t status_width = std::string_view("status").size();
@@ -145,6 +205,29 @@ void Text::table(const std::vector<std::string> & header, const std::vector<Row>
     };
     render(Status::NONE, header, true);
     for (const Row & row : rows) render(row.status, row.cells, false);
+}
+
+void Text::quantities(const std::vector<Row> & rows) {
+    using Kind = Column::Kind;
+    const std::vector<Column> header = {"quantity", {"value", Kind::VALUE}, {"units", Kind::UNITS}, "target", "basis"};
+    std::vector<bool> used(header.size(), false);
+    for (const Row & row : rows) {
+        for (size_t c = 0; c < row.cells.size() && c < used.size(); c++) used[c] = used[c] || !row.cells[c].empty();
+    }
+    used[2] = used[1];
+    std::vector<Column> kept_header;
+    for (size_t c = 0; c < header.size(); c++) {
+        if (used[c]) kept_header.push_back(header[c]);
+    }
+    std::vector<Row> kept;
+    for (const Row & row : rows) {
+        Row k{row.status, {}};
+        for (size_t c = 0; c < row.cells.size() && c < used.size(); c++) {
+            if (used[c]) k.cells.push_back(row.cells[c]);
+        }
+        kept.push_back(std::move(k));
+    }
+    table(kept_header, kept);
 }
 
 void Text::print() const {

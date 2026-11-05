@@ -123,10 +123,10 @@ mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --throughput 5e
   The largest rank's predicted peak (the larger of the setup's and the steady state's, plus
   the memory outside Kokkos) against the memory per GPU, for --memory or this build's GPU.
   status  quantity                            value      units                 basis
-          memory per GPU                      85.1 GB                          A100-80GB
-          kept free                           5%         of the memory         fragmentation and allocations during the
+          memory per GPU                      85.1       GB                    A100-80GB
+          kept free                           5          % of the memory       fragmentation and allocations during the
                                                                                run
-          outside Kokkos per GPU              1.60 GB                          typical: CUDA's context and kernels'
+          outside Kokkos per GPU              1.60       GB                    typical: CUDA's context and kernels'
                                                                                local memory on an A100
   ok      most cells per GPU                  9,226,381  owned and halo cells  8.59 kB per cell + 3.43 MB, at the
                                                                                setup's peak
@@ -134,7 +134,7 @@ mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --throughput 5e
                                                                                cells, predicted peak 5.56 GB (from the
                                                                                partitioner)
           most GPUs with halo < 10% of owned  4          GPUs                  doubling from the fewest
-          wall time per unit simulated time   21.0 s                           on 4 GPUs at 50.0M cells/s each
+          wall time per unit simulated time   21.0       s                     on 4 GPUs at 50.0M cells/s each
 
 == Cost ====================================================================================
   On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:

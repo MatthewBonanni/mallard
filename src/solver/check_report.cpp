@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cmath>
 #include <iostream>
+#include <utility>
 
 #include "check.h"
 #include "comm.h"
@@ -18,6 +19,7 @@
 
 using report::Row;
 using report::Status;
+using Kind = report::Column::Kind;
 
 void CheckReport::error(const std::string & code, const std::string & message) {
     diagnostics.push_back({Status::ERROR, code, message});
@@ -74,6 +76,16 @@ std::string bytes(const double b) {
 }
 
 /** @brief A number of steps: whole above 1000 ("10,339"), else 4 significant digits. */
+/** @brief A duration as a bare value of three digits ("21.0") and its units: us, ms, s, min or h. */
+std::pair<std::string, std::string> time_parts(const double s) {
+    auto digits3 = [](const double v) { return format(v < 9.995 ? "%.2f" : (v < 99.95 ? "%.1f" : "%.0f"), v); };
+    if (s < 0.9995e-3) return {digits3(s * 1.0e6), "us"};
+    if (s < 0.9995) return {digits3(s * 1.0e3), "ms"};
+    if (s < 59.95) return {digits3(s), "s"};
+    if (s < 3597.0) return {digits3(s / 60.0), "min"};
+    return {format("%.3g", s / 3600.0), "h"};
+}
+
 std::string steps(const double n) { return n >= 1000.0 ? count(static_cast<uint64_t>(std::llround(n))) : g4(n); }
 
 std::string plural(const uint64_t n, const std::string & noun) {
@@ -98,27 +110,6 @@ size_t n_of(const CheckReport & r, const std::string & code) {
                                              [&](const CheckDiagnostic & d) { return d.code == code; }));
 }
 
-/** @brief A table of quantities: status, quantity, value, units, target, basis; columns empty in every row left out. */
-void quantities(report::Text & text, const std::vector<Row> & rows) {
-    const std::vector<std::string> header = {"quantity", "value", "units", "target", "basis"};
-    std::vector<bool> used(header.size(), false);
-    for (const Row & row : rows) {
-        for (size_t c = 0; c < row.cells.size(); c++) used[c] = used[c] || !row.cells[c].empty();
-    }
-    std::vector<std::string> kept_header;
-    for (size_t c = 0; c < header.size(); c++) {
-        if (used[c]) kept_header.push_back(header[c]);
-    }
-    std::vector<Row> kept;
-    for (const Row & row : rows) {
-        Row k{row.status, {}};
-        for (size_t c = 0; c < row.cells.size(); c++) {
-            if (used[c]) k.cells.push_back(row.cells[c]);
-        }
-        kept.push_back(std::move(k));
-    }
-    text.table(kept_header, kept);
-}
 
 void overview(report::Text & text, const CheckReport & r) {
     text.section("Check", r.status());
@@ -166,16 +157,15 @@ void boundaries_section(report::Text & text, const CheckReport & r) {
     text.table({"zone", "condition", "faces", "details"}, rows);
 }
 
-std::string measure_text(const CheckRegion & g) {
-    const std::string value = logging::real(g.measure);
+std::string measure_units(const CheckRegion & g) {
     switch (g.dimension) {
-        case 0: return value + " points";
-        case 1: return value + " m";
+        case 0: return "points";
+        case 1: return "m";
         default: break;
     }
-    if (g.dimension < N_DIM) return value + " m^2";
-    if (N_DIM == 2) return value + (g.per_radian ? " m^3 per radian" : " m^2");
-    return value + " m^3";
+    if (g.dimension < N_DIM) return "m^2";
+    if (N_DIM == 2) return g.per_radian ? "m^3 per radian" : "m^2";
+    return "m^3";
 }
 
 void regions_section(report::Text & text, const CheckReport & r) {
@@ -191,12 +181,12 @@ void regions_section(report::Text & text, const CheckReport & r) {
                                                            : "extracted, resolution " + std::to_string(g.resolution);
         const Status row = g.cells > 0 ? Status::OK : Status::ERROR;
         s = report::worse(s, row);
-        rows.push_back({row, {g.name, kind, measure_text(g), count(g.cells), made}});
+        rows.push_back({row, {g.name, kind, logging::real(g.measure), measure_units(g), count(g.cells), made}});
     }
     text.section("Regions", s);
     text.note("The mesh's own (the domain, its boundary and cell zones) and every region the case uses; cells: the "
               "cells each touches. A region of the case that touches no cell is an error.");
-    text.table({"region", "kind", "measure", "cells", "made from"}, rows);
+    text.table({"region", "kind", {"measure", Kind::VALUE}, {"units", Kind::UNITS}, "cells", "made from"}, rows);
     if (!r.view_file.empty()) text.line("Case view (every region and zone, for ParaView): " + r.view_file);
 }
 
@@ -214,19 +204,23 @@ void quality_section(report::Text & text, const CheckReport & r) {
                               logging::real(MeshQuality::LIMITS[m]), count(q.n_over_limit)}});
         if (q.max < MeshQuality::NOTABLE[m]) continue;
         for (const QualityCell & c : q.worst) {
-            std::vector<std::string> cells = {MeshQuality::NAMES[m], format("%.3g", c.value), count(c.cell)};
+            std::vector<std::string> cells = {MeshQuality::NAMES[m], format("%.3g", c.value), UNITS[m],
+                                              count(c.cell)};
             for (size_t i = 0; i < N_DIM; i++) cells.push_back(g4(c.x[i]));
             worst.push_back({Status::NONE, cells});
         }
     }
     text.section("Mesh quality", s);
     text.note("Over every cell; a cell above the limit is questionable.");
-    text.table({"metric", "units", "max", "mean", "limit", "cells over limit"}, rows);
+    text.table({"metric", {"units", Kind::UNITS}, {"max", Kind::VALUE}, {"mean", Kind::VALUE}, {"limit", Kind::VALUE},
+                "cells over limit"},
+               rows);
     if (!worst.empty()) {
         text.blank();
         text.note("Worst cells of the metrics at or above their notable value (non-orthogonality 10 deg, skewness "
                   "0.05, aspect ratio 10, volume ratio 2), worst first:");
-        std::vector<std::string> header = {"metric", "value", "cell (global id)"};
+        std::vector<report::Column> header = {"metric", {"value", Kind::VALUE}, {"units", Kind::UNITS},
+                                              "cell (global id)"};
         for (size_t i = 0; i < N_DIM; i++) header.push_back(std::string(1, "xyz"[i]) + " [m]");
         text.table(header, worst, false);
     }
@@ -252,7 +246,7 @@ void time_step_section(report::Text & text, const CheckReport & r) {
     };
     text.section("Time step", cfl == Status::NONE ? Status::OK : cfl);
     text.note("At the initial state, t = " + g4(r.t) + " s.");
-    quantities(text, rows);
+    text.quantities(rows);
 }
 
 void resolution_section(report::Text & text, const CheckReport & r) {
@@ -270,7 +264,7 @@ void resolution_section(report::Text & text, const CheckReport & r) {
     text.note("Estimates from the initial state, against the targets of the case's regime (DNS, or LES with "
               "[les]); value -: not estimated, for the reason its basis gives. See "
               "docs/guide/input_files.md#resolution.");
-    quantities(text, rows);
+    text.quantities(rows);
 }
 
 void memory_section(report::Text & text, const CheckReport & r) {
@@ -334,15 +328,19 @@ void sizing_section(report::Text & text, const CheckReport & r) {
     const std::string units = unit + "s";
     std::vector<Row> rows;
     const Status fixed = n_of(r, check_code::SIZING_FIXED) ? Status::WARNING : Status::OK;
-    rows.push_back({Status::NONE, {"memory per " + unit, bytes(double(r.sizing_memory)), "", "", r.sizing_name}});
+    auto memory_row = [&](const std::string & quantity, const double b, const std::string & basis) {
+        const std::string text_bytes = bytes(b);
+        const size_t space = text_bytes.find(' ');
+        rows.push_back({Status::NONE, {quantity, text_bytes.substr(0, space), text_bytes.substr(space + 1), "", basis}});
+    };
+    memory_row("memory per " + unit, double(r.sizing_memory), r.sizing_name);
     rows.push_back({Status::NONE,
-                    {"kept free", format("%.0f%%", 100.0 * SIZING_MARGIN), "of the memory", "",
+                    {"kept free", format("%.0f", 100.0 * SIZING_MARGIN), "% of the memory", "",
                      "fragmentation and allocations during the run"}});
     if (r.sizing_gpu) {
-        rows.push_back({Status::NONE,
-                        {"outside Kokkos per GPU", bytes(double(r.sizing_overhead)), "", "",
+        memory_row("outside Kokkos per GPU", double(r.sizing_overhead),
                          r.overhead_measured ? "measured on this GPU"
-                                             : "typical: CUDA's context and kernels' local memory on an A100"}});
+                                             : "typical: CUDA's context and kernels' local memory on an A100");
     }
     if (r.max_local_cells == 0) {
         rows.push_back(
@@ -377,9 +375,9 @@ void sizing_section(report::Text & text, const CheckReport & r) {
             }
             if (r.throughput > 0.0 && r.dt > 0.0) {
                 const int n = std::max(r.min_ranks, r.halo_ranks);
+                const auto [wall, wall_units] = time_parts(double(r.n_cells) / (n * r.throughput * r.dt));
                 rows.push_back({Status::NONE,
-                                {"wall time per unit simulated time",
-                                 logging::duration(double(r.n_cells) / (n * r.throughput * r.dt)), "", "",
+                                {"wall time per unit simulated time", wall, wall_units, "",
                                  "on " + plural(uint64_t(n), unit) + " at " + logging::si(r.throughput) +
                                      " cells/s each"}});
             }
@@ -390,7 +388,7 @@ void sizing_section(report::Text & text, const CheckReport & r) {
     text.section(r.sizing_gpu ? "GPU sizing" : "Rank sizing", s);
     text.note("The largest rank's predicted peak (the larger of the setup's and the steady state's, plus the memory "
               "outside Kokkos) against the memory per " + unit + ", for --memory or this build's GPU.");
-    quantities(text, rows);
+    text.quantities(rows);
 }
 
 void cost_section(report::Text & text, const CheckReport & r) {

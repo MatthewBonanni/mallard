@@ -21,14 +21,14 @@
 == Regions =========================================================================== ERROR
   The mesh's own (the domain, its boundary and cell zones) and every region the case uses;
   cells: the cells each touches. A region of the case that touches no cell is an error.
-  status  region                        kind    measure   cells  made from
-  ok      domain                        filled  2 m^2     128    the mesh's
-  ok      bottom                        curve   2 m       16     the mesh's
-  ok      left                          curve   1 m       8      the mesh's
-  ok      right                         curve   1 m       8      the mesh's
-  ok      top                           curve   2 m       16     the mesh's
-  ERROR   sponges[0].region             filled  0 m^2     0      cell fractions
-  ok      probes[name = "ring"].region  curve   1.5708 m  13     exact
+  status  region                        kind    measure  units  cells  made from
+  ok      domain                        filled  2        m^2    128    the mesh's
+  ok      bottom                        curve   2        m      16     the mesh's
+  ok      left                          curve   1        m      8      the mesh's
+  ok      right                         curve   1        m      8      the mesh's
+  ok      top                           curve   2        m      16     the mesh's
+  ERROR   sponges[0].region             filled  0        m^2    0      cell fractions
+  ok      probes[name = "ring"].region  curve   1.5708   m      13     exact
 
 == Mesh quality ========================================================================= ok
   Over every cell; a cell above the limit is questionable.
@@ -71,6 +71,22 @@
   mesh and geometry    42.9 kB              335 B     42.9 kB      335 B     yes
   setup                58.1 kB              -         0 B          -         no
   total                128 kB               -         70.0 kB      -
+
+== GPU sizing =========================================================================== ok
+  The largest rank's predicted peak (the larger of the setup's and the steady state's, plus
+  the memory outside Kokkos) against the memory per GPU, for --memory or this build's GPU.
+  status  quantity                           value        units                 basis
+          memory per GPU                     80.0         GB                    A100-80GB
+          kept free                          5            % of the memory       fragmentation and allocations during the
+                                                                                run
+          outside Kokkos per GPU             1.60         GB                    typical: CUDA's context and kernels'
+                                                                                local memory on an A100
+  ok      most cells per GPU                 128,683,729  owned and halo cells  547 B per cell + 58.1 kB, at the setup's
+                                                                                peak
+  ok      fewest GPUs                        1            GPUs                  largest part 128 owned + 0 halo cells,
+                                                                                predicted peak 1.60 GB (from the
+                                                                                partitioner)
+          wall time per unit simulated time  2.30         ms                    on 1 GPU at 1.00M cells/s each
 
 == Cost ====================================================================================
   On 1 rank at 1.00M cells/s per rank (--throughput), at the initial time step; rank-hours:

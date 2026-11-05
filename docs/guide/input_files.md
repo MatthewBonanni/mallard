@@ -325,12 +325,12 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality
 == Regions ============================================================================== ok
   The mesh's own (the domain, its boundary and cell zones) and every region the case uses;
   cells: the cells each touches. A region of the case that touches no cell is an error.
-  status  region  kind    measure  cells    made from
-  ok      domain  filled  4 m^2    460,800  the mesh's
-  ok      bottom  curve   4 m      960      the mesh's
-  ok      left    curve   1 m      240      the mesh's
-  ok      right   curve   1 m      240      the mesh's
-  ok      top     curve   4 m      960      the mesh's
+  status  region  kind    measure  units  cells    made from
+  ok      domain  filled  4        m^2    460,800  the mesh's
+  ok      bottom  curve   4        m      960      the mesh's
+  ok      left    curve   1        m      240      the mesh's
+  ok      right   curve   1        m      240      the mesh's
+  ok      top     curve   4        m      960      the mesh's
   Case view (every region and zone, for ParaView): view/case.vtm
 
 == Mesh quality ========================================================================= ok
@@ -343,12 +343,12 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality
 
   Worst cells of the metrics at or above their notable value (non-orthogonality 10 deg,
   skewness 0.05, aspect ratio 10, volume ratio 2), worst first:
-  metric             value  cell (global id)  x [m]   y [m]
-  non-orthogonality  26.6   59,999            0.5181  0.9986
-  non-orthogonality  26.6   67,199            0.5806  0.9986
-  non-orthogonality  26.6   74,399            0.6431  0.9986
-  non-orthogonality  26.6   81,599            0.7056  0.9986
-  non-orthogonality  26.6   88,799            0.7681  0.9986
+  metric             value  units  cell (global id)  x [m]   y [m]
+  non-orthogonality  26.6   deg    59,999            0.5181  0.9986
+  non-orthogonality  26.6   deg    67,199            0.5806  0.9986
+  non-orthogonality  26.6   deg    74,399            0.6431  0.9986
+  non-orthogonality  26.6   deg    81,599            0.7056  0.9986
+  non-orthogonality  26.6   deg    88,799            0.7681  0.9986
   Quality fields: quality_000000.vtu
 
 == Time step ============================================================================ ok
@@ -394,10 +394,10 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality
   The largest rank's predicted peak (the larger of the setup's and the steady state's, plus
   the memory outside Kokkos) against the memory per GPU, for --memory or this build's GPU.
   status  quantity                            value      units                 basis
-          memory per GPU                      85.1 GB                          A100-80GB
-          kept free                           5%         of the memory         fragmentation and allocations during the
+          memory per GPU                      85.1       GB                    A100-80GB
+          kept free                           5          % of the memory       fragmentation and allocations during the
                                                                                run
-          outside Kokkos per GPU              1.60 GB                          typical: CUDA's context and kernels'
+          outside Kokkos per GPU              1.60       GB                    typical: CUDA's context and kernels'
                                                                                local memory on an A100
   ok      most cells per GPU                  9,226,381  owned and halo cells  8.59 kB per cell + 3.43 MB, at the
                                                                                setup's peak
@@ -405,7 +405,7 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality
                                                                                cells, predicted peak 5.56 GB (from the
                                                                                partitioner)
           most GPUs with halo < 10% of owned  4          GPUs                  doubling from the fewest
-          wall time per unit simulated time   21.0 s                           on 4 GPUs at 50.0M cells/s each
+          wall time per unit simulated time   21.0       s                     on 4 GPUs at 50.0M cells/s each
 
 == Cost ====================================================================================
   On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:
@@ -423,7 +423,7 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality
 
 (`examples/double_mach`: 460,800 quadrilaterals with TENO5, checked on a CPU in a build without HDF5 (hence `.vtm` and `.vtu`) and sized for an A100-80GB. The setup's own sections come before the report and are left out here.)
 
-The report opens and closes with the result, and the exit status is 1 if there is an error. Each section's heading ends with its status, the worst of its rows. Each row of a table starts with its status: `ok` (checked and fine), `WARN`, `ERROR`, or blank (information, nothing to check). The status column and the headings alone show every problem. Every number states its units: in its column's header (`x [m]`), in its own `units` column, or in the value (`3.96 GB`, `21.0 s`). Dimensionless numbers say `dimensionless`, or `wall units` when they are relative to `nu / u_tau`. Numbers are SI, and bytes use decimal prefixes (1 GB = 10<sup>9</sup> B). Each section says what its numbers are of: which rank, which state, against which limit.
+The report opens and closes with the result, and the exit status is 1 if there is an error. Each section's heading ends with its status, the worst of its rows. Each row of a table starts with its status: `ok` (checked and fine), `WARN`, `ERROR`, or blank (information, nothing to check). The status column and the headings alone show every problem. Every number states its units: in its column's header (`x [m]`), in the `units` column of a table that has one (where every value is bare: `21.0` with `s` beside it), or else in the value itself (`3.96 GB`, `21.0 s`), never two of these. Dimensionless numbers say `dimensionless`, or `wall units` when they are relative to `nu / u_tau`. Numbers are SI, and bytes use decimal prefixes (1 GB = 10<sup>9</sup> B). Each section says what its numbers are of: which rank, which state, against which limit.
 
 | Section | What it is |
 |---|---|

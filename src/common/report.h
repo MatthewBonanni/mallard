@@ -12,6 +12,7 @@
 
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace report {
@@ -33,6 +34,23 @@ struct Row {
     Status status = Status::NONE;
     std::vector<std::string> cells;
 };
+
+/**
+ * @brief A column of a table. A table with a UNITS column keeps every value bare: its VALUE cells hold a number
+ *        ("21.0", "1,024", "-1.5e-06") or "-" or "none", and a row with a number has its units; Text::table
+ *        throws std::logic_error otherwise. A value with its unit ("21.0 s") belongs in a TEXT column of a table
+ *        without a UNITS column.
+ */
+struct Column {
+    enum class Kind { TEXT, VALUE, UNITS };
+    Column(const char * name_in, Kind kind_in = Kind::TEXT) : name(name_in), kind(kind_in) {}
+    Column(std::string name_in, Kind kind_in = Kind::TEXT) : name(std::move(name_in)), kind(kind_in) {}
+    std::string name;
+    Kind kind;
+};
+
+/** @brief Whether a cell is a bare value: a number, "-" or "none". */
+bool bare(std::string_view cell);
 
 /**
  * @brief Text built section by section: headings, indented lines and tables, each line at most
@@ -60,7 +78,13 @@ class Text {
          *        cell; the last column wraps at the width, and a cell's "\n" starts a continuation line.
          * @param status_column A "status" column first, holding each row's status.
          */
-        void table(const std::vector<std::string> & header, const std::vector<Row> & rows, bool status_column = true);
+        void table(const std::vector<Column> & header, const std::vector<Row> & rows, bool status_column = true);
+
+        /**
+         * @brief A table of quantities: status, then quantity, value, units, target and basis cells, the columns
+         *        empty in every row left out (units only with value).
+         */
+        void quantities(const std::vector<Row> & rows);
 
         /** @brief The text, a "\n" after every line. */
         const std::string & str() const { return text; }

@@ -16,6 +16,7 @@
 #include <numeric>
 #include <numbers>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #include "hdf5_output.h"
@@ -30,6 +31,7 @@
 #include "mesh_block.h"
 #include "mesh_quality.h"
 #include "partition.h"
+#include "report.h"
 #include "scratch.h"
 #include "solver.h"
 
@@ -713,7 +715,21 @@ CheckReport report_case() {
     r.device_memory = false;
     r.device_capacity = 0;
     r.outside_kokkos = 0;
-    r.sizing_name.clear();
+    r.sizing_name = "A100-80GB";
+    r.sizing_gpu = true;
+    r.sizing_memory = 80'000'000'000;
+    r.sizing_overhead = 1'600'000'000;
+    r.overhead_measured = false;
+    r.bytes_per_cell = 547.0;
+    r.fixed_bytes = 58'100;
+    r.sizing_setup = true;
+    r.max_local_cells = 128'683'729;
+    r.min_ranks = 1;
+    r.min_owned = 128;
+    r.min_halo = 0;
+    r.min_peak = 1'600'128'100;
+    r.min_partitioned = true;
+    r.halo_ranks = 0;
     r.setup_bytes.fill(0);
     r.steady_bytes.fill(0);
     r.setup_bytes[size_t(memory::Category::STATE)] = r.steady_bytes[size_t(memory::Category::STATE)] = 27'100;
@@ -742,6 +758,25 @@ TEST(CheckReportText, MatchesTheGoldenReport) {
     ASSERT_TRUE(file) << golden;
     const std::string expected((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     EXPECT_EQ(text, expected) << "the report differs from " << golden << "; MALLARD_UPDATE_GOLDEN=1 updates it";
+}
+
+TEST(ReportTable, KeepsEveryValueOfAUnitsColumnTableBare) {
+    using Kind = report::Column::Kind;
+    const std::vector<report::Column> header = {"quantity", {"value", Kind::VALUE}, {"units", Kind::UNITS}, "basis"};
+    auto table = [&](const std::string & value, const std::string & units) {
+        report::Text text(false);
+        text.table(header, {{report::Status::NONE, {"wall time", value, units, "on 4 GPUs"}}});
+    };
+    for (const char * value : {"21.0", "1,024", "-1.5e-06", "-", "none"}) EXPECT_NO_THROW(table(value, "s")) << value;
+    for (const char * value : {"21.0 s", "5%", "1.60 GB", "2h 05m", "(1, 2) m"}) {
+        EXPECT_THROW(table(value, "s"), std::logic_error) << value;
+    }
+    EXPECT_THROW(table("21.0", ""), std::logic_error);
+    EXPECT_NO_THROW(table("-", ""));
+    report::Text text(false);
+    EXPECT_THROW(text.table({"quantity", "value", "units"}, {}), std::logic_error);
+    EXPECT_THROW(text.quantities({{report::Status::NONE, {"memory per GPU", "80.0 GB", "", "", "A100-80GB"}}}),
+                 std::logic_error);
 }
 
 TEST(CheckReportText, ColorChangesOnlyTheStyles) {
