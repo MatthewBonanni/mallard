@@ -151,7 +151,7 @@ constexpr int32_t SPECIES_TOTAL_FLUX = FIRST + (2 << 16);        // + species
 
 constexpr bool on_faces(int32_t k) { return (k >= TRACTION_PRESSURE && k < SPECIES_FLUX) || k >= SPECIES_DIFFUSIVE_FLUX; }
 constexpr bool normals(int32_t k) { return k >= FIRST; }
-constexpr bool diffusive(int32_t k) {
+KOKKOS_INLINE_FUNCTION constexpr bool diffusive(int32_t k) {
     return k == ENERGY_DIFFUSIVE_FLUX || k == ENERGY_TOTAL_FLUX || k >= SPECIES_DIFFUSIVE_FLUX;
 }
 constexpr bool gradients(int32_t k) {
