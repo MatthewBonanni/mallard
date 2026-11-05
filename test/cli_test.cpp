@@ -454,11 +454,28 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
     SKIP_UNDER_MPI();
     const Result catalog = run({"list", "fields"}, true);
     EXPECT_EQ(catalog.status, 0) << catalog.err;
-    for (const char * part : {"== Fields: conservative", "MEAN_<A>", "MU_T", "needs [les]", "kg m-3"}) {
-        EXPECT_TRUE(contains(catalog.out, part)) << part << "\n" << catalog.out;
-    }
+    EXPECT_TRUE(contains(catalog.out, "== Fields: conservative")) << catalog.out;
+    const std::vector<std::vector<std::string>> catalog_rows = {
+        {"field", "units", "description", "needs"},
+        {"RHO", "kg m-3", "density", "every case"},
+        {"CFL", "dimensionless", "local CFL number", "every case"},
+        {"MU_T", "kg m-1 s-1", "eddy viscosity", "[les]"},
+    };
+    for (const auto & row : catalog_rows) EXPECT_TRUE(has_row(catalog.out, row)) << row[0] << "\n" << catalog.out;
+    EXPECT_TRUE(contains(catalog.out, "MEAN_<A>")) << catalog.out;
     ASSERT_EQ(small_run().status, 0);
-    const Result listed = run({"list", "fields", "small.toml", "--json"}, true);
+    const Result text = run({"list", "fields", "small.toml"}, true);
+    ASSERT_EQ(text.status, 0) << text.err;
+    const std::vector<std::vector<std::string>> case_rows = {
+        {"field", "units", "description"},
+        {"RHO", "kg m-3", "density"},
+        {"U_X", "m s-1", "x component of velocity"},
+        {"field", "units", "needs"},
+        {"MU_T", "kg m-1 s-1", "[les]"},
+    };
+    for (const auto & row : case_rows) EXPECT_TRUE(has_row(text.out, row)) << row[0] << "\n" << text.out;
+    EXPECT_EQ(run({"list", "fields", "--format", "yaml"}, true).status, 2);
+    const Result listed = run({"list", "fields", "small.toml", "--format", "json"}, true);
     ASSERT_EQ(listed.status, 0) << listed.err;
     const json::Value v = json::parse(listed.out);
     EXPECT_EQ(v["dim"].number, Mallard_DIM);
@@ -484,7 +501,17 @@ TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
     std::ofstream("mixture.toml") << mixture;
     const Result r = run({"list", "species", "mixture.toml"}, true);
     EXPECT_EQ(r.status, 0) << r.err;
-    EXPECT_EQ(r.out, "H2\nH\nO\nO2\nOH\nH2O\nHO2\nH2O2\nAR\nN2\n");
+    EXPECT_TRUE(has_row(r.out, {"#", "species"})) << r.out;
+    const std::vector<std::string> species = {"H2", "H", "O", "O2", "OH", "H2O", "HO2", "H2O2", "AR", "N2"};
+    for (size_t i = 0; i < species.size(); i++) {
+        EXPECT_TRUE(has_row(r.out, {std::to_string(i), species[i]})) << species[i] << "\n" << r.out;
+    }
+    const Result listed = run({"list", "species", "mixture.toml", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    std::vector<std::string> names;
+    const json::Value v = json::parse(listed.out);
+    for (const auto & s : v["species"].array) names.push_back(s.string);
+    EXPECT_EQ(names, species);
     ASSERT_EQ(small_run().status, 0);
     const Result gas = run({"list", "species", "small.toml"}, true);
     EXPECT_EQ(gas.status, 0) << gas.err;

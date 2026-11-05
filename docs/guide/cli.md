@@ -451,7 +451,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ### mallard list fields
 
 ```text
-Usage: mallard list fields [INPUT] [--json]
+Usage: mallard list fields [INPUT] [--format text|json]
 
 Without an input file, lists every field the [[write_data]] variables,
 [[probes]] and [statistics] take, by group, with its units, its description and
@@ -464,15 +464,18 @@ for it: its species, its physics, chemistry, LES and statistics, and its
 dimension; then the common fields it does not have, with what they need.
 
 Options:
-  --json      Print the list as one JSON object, for scripts. Default: text.
-  --kokkos-*  Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank) or
-              --kokkos-device-id=1 (the GPU; by default each rank gets its own).
-  -h, --help  Show this page.
+  --format text|json  text: one table per group, with the units of every field;
+                      json: the same as one JSON object, for scripts. Default:
+                      text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
 
 Examples:
   $ mallard list fields
   $ mallard list fields input.toml
-  $ mallard list fields input.toml --json
+  $ mallard list fields input.toml --format json
 
 Exit status:
   0  listed
@@ -485,21 +488,24 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ### mallard list species
 
 ```text
-Usage: mallard list species INPUT [--json]
+Usage: mallard list species INPUT [--format text|json]
 
-Sets the case up as mallard check does and lists its species, one per line, in
-the order of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s> fields. A
-single gas has none.
+Sets the case up as mallard check does and lists its species, one table row
+each, in the order of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s>
+fields. A single gas has none.
 
 Options:
-  --json      Print the list as one JSON object, for scripts. Default: text.
-  --kokkos-*  Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank) or
-              --kokkos-device-id=1 (the GPU; by default each rank gets its own).
-  -h, --help  Show this page.
+  --format text|json  text: one table per group, with the units of every field;
+                      json: the same as one JSON object, for scripts. Default:
+                      text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
 
 Examples:
   $ mallard list species flame.toml
-  $ mallard list species flame.toml --json
+  $ mallard list species flame.toml --format json
 
 Exit status:
   0  listed

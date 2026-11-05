@@ -59,7 +59,9 @@ constexpr Option CHECK_OPTIONS[] = {
 };
 
 constexpr Option LIST_OPTIONS[] = {
-    {"--json", "", "", "Print the list as one JSON object, for scripts. Default: text."},
+    {"--format", "", "text|json",
+     "text: one table per group, with the units of every field; json: the same as one JSON object, for "
+     "scripts. Default: text."},
     KOKKOS,
 };
 
@@ -386,7 +388,7 @@ constexpr Command COMMANDS[] = {
         .name = "list fields",
         .group = "Inspect",
         .summary = "The output fields there are, or exactly those of one case",
-        .synopsis = "mallard list fields [INPUT] [--json]",
+        .synopsis = "mallard list fields [INPUT] [--format text|json]",
         .description =
             "Without an input file, lists every field the [[write_data]] variables, [[probes]] and [statistics] "
             "take, by group, with its units, its description and what a case needs to have it, and the patterns "
@@ -399,7 +401,7 @@ constexpr Command COMMANDS[] = {
         .arguments = OPTIONAL_INPUT,
         .examples = "$ mallard list fields\n"
                     "$ mallard list fields input.toml\n"
-                    "$ mallard list fields input.toml --json",
+                    "$ mallard list fields input.toml --format json",
         .exit_status = "0  listed\n"
                        "1  the case cannot be set up (the errors are printed)\n"
                        "2  usage error",
@@ -410,14 +412,14 @@ constexpr Command COMMANDS[] = {
         .name = "list species",
         .group = "Inspect",
         .summary = "The species of a case",
-        .synopsis = "mallard list species INPUT [--json]",
+        .synopsis = "mallard list species INPUT [--format text|json]",
         .description =
-            "Sets the case up as mallard check does and lists its species, one per line, in the order of its "
-            "mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s> fields. A single gas has none.",
+            "Sets the case up as mallard check does and lists its species, one table row each, in the order "
+            "of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s> fields. A single gas has none.",
         .options = LIST_OPTIONS,
         .arguments = INPUT_ARGUMENT,
         .examples = "$ mallard list species flame.toml\n"
-                    "$ mallard list species flame.toml --json",
+                    "$ mallard list species flame.toml --format json",
         .exit_status = "0  listed\n"
                        "1  the case cannot be set up (the errors are printed)\n"
                        "2  usage error",

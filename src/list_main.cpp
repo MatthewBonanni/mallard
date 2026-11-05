@@ -70,7 +70,8 @@ std::string pattern_prefix(const std::string & name) { return name.substr(0, nam
 std::vector<CatalogField> missing(const std::vector<std::string> & fields) {
     std::vector<CatalogField> out;
     for (const CatalogField & f : field_units::catalog()) {
-        if (f.needs.empty() || f.group == "surface probes" || f.group == "mesh quality" || f.name == "REGION_FRACTION") {
+        if (f.needs.empty() || f.group == "surface probes" || f.group == "mesh quality" || f.name == "REGION_FRACTION" ||
+            f.name == "DIVERGED") {
             continue;
         }
         const std::string prefix = pattern_prefix(f.name);
@@ -83,10 +84,18 @@ std::vector<CatalogField> missing(const std::vector<std::string> & fields) {
     return out;
 }
 
-std::string padded(std::string text, size_t width) {
-    if (text.size() < width) text.resize(width, ' ');
-    return text;
+std::string units_text(const std::string & units) { return units == "1" ? "dimensionless" : units; }
+
+bool json_format(const cli::Args & args) { return args.value_or("--format", "text") == "json"; }
+
+/** @brief A usage error for a --format other than text or json, else 0. */
+int format_error(const cli::Args & args, const char * command) {
+    const std::string f = args.value_or("--format", "text");
+    if (f == "text" || f == "json") return 0;
+    return cli::usage_error(*cli::command(command), "--format takes text or json, not " + f);
 }
+
+std::string count_text(size_t n) { return std::to_string(n) + (n == 1 ? " field" : " fields"); }
 
 std::string field_json(const std::string & name, const std::string & units, const std::string & long_name,
                        const std::string & group, const std::string & needs) {
@@ -105,7 +114,7 @@ std::string json_array(const std::vector<T> & items, F && entry) {
 
 int list_catalog(const cli::Args & args) {
     const std::vector<CatalogField> catalog = field_units::catalog();
-    if (args.has("--json")) {
+    if (json_format(args)) {
         std::cout << json::Object()
                          .raw("input", "null")
                          .raw("fields", json_array(catalog, [](const CatalogField & f) {
@@ -115,12 +124,15 @@ int list_catalog(const cli::Args & args) {
                   << "\n";
         return 0;
     }
-    std::string group;
-    for (const CatalogField & f : catalog) {
-        if (f.group != group) logging::section("Fields: " + (group = f.group));
-        std::string text = padded(f.units, 16) + f.long_name;
-        if (!f.needs.empty()) text += "; needs " + f.needs;
-        logging::item(f.name, text);
+    std::vector<std::vector<std::string>> rows;
+    for (size_t i = 0; i < catalog.size(); i++) {
+        const CatalogField & f = catalog[i];
+        rows.push_back({f.name, units_text(f.units), f.long_name, f.needs.empty() ? "every case" : f.needs});
+        if (i + 1 == catalog.size() || catalog[i + 1].group != f.group) {
+            logging::section("Fields: " + f.group, count_text(rows.size()));
+            logging::table({"field", "units", "description", "needs"}, rows);
+            rows.clear();
+        }
     }
     std::cout << "\nmallard list fields input.toml lists the fields of one case.\n";
     return 0;
@@ -132,12 +144,13 @@ int list_fields_main(const cli::Args & args) {
     int argc = args.argc;
     char ** argv = args.argv;
     comm::Session session(argc, argv);
+    if (const int e = format_error(args, "list fields")) return e;
     if (args.positional.empty()) return list_catalog(args);
     const std::string & input_file = args.positional[0];
     const CaseFields c = set_up(input_file, args);
     if (!c.errors.empty() && c.fields.empty()) return report_errors(c);
     const std::vector<CatalogField> absent = missing(c.fields);
-    if (args.has("--json")) {
+    if (json_format(args)) {
         std::cout << json::Object()
                          .add("input", input_file)
                          .add("dim", N_DIM)
@@ -156,15 +169,22 @@ int list_fields_main(const cli::Args & args) {
     std::stable_sort(fields.begin(), fields.end(), [](const std::string & a, const std::string & b) {
         return field_units::group_rank(field_units::group(a)) < field_units::group_rank(field_units::group(b));
     });
-    std::string group = "-";
-    for (const std::string & name : fields) {
-        const FieldDescription d = field_units::describe(name);
-        const std::string g = field_units::group(name);
-        if (g != group) logging::section(input_file + ": " + (group = g));
-        logging::item(name, padded(d.units(), 16) + d.long_name);
+    std::vector<std::vector<std::string>> rows;
+    for (size_t i = 0; i < fields.size(); i++) {
+        const FieldDescription d = field_units::describe(fields[i]);
+        const std::string g = field_units::group(fields[i]);
+        rows.push_back({fields[i], units_text(d.units()), d.long_name});
+        if (i + 1 == fields.size() || field_units::group(fields[i + 1]) != g) {
+            logging::section(input_file + ": " + g, count_text(rows.size()));
+            logging::table({"field", "units", "description"}, rows);
+            rows.clear();
+        }
     }
-    if (!absent.empty()) logging::section("Not in this case");
-    for (const CatalogField & f : absent) logging::item(f.name, "needs " + f.needs);
+    if (!absent.empty()) {
+        logging::section("Not in this case", count_text(absent.size()));
+        for (const CatalogField & f : absent) rows.push_back({f.name, units_text(f.units), f.needs});
+        logging::table({"field", "units", "needs"}, rows);
+    }
     std::cout << "\nVectors also go by their name without _X, _Y, _Z (U); a trailing * selects every field it starts "
                  "(Y_*).\n";
     return 0;
@@ -174,10 +194,11 @@ int list_species_main(const cli::Args & args) {
     int argc = args.argc;
     char ** argv = args.argv;
     comm::Session session(argc, argv);
+    if (const int e = format_error(args, "list species")) return e;
     const std::string & input_file = args.positional[0];
     const CaseFields c = set_up(input_file, args);
     if (!c.errors.empty() && c.fields.empty()) return report_errors(c);
-    if (args.has("--json")) {
+    if (json_format(args)) {
         std::cout << json::Object()
                          .add("input", input_file)
                          .raw("species", json_array(c.species, [](const std::string & s) { return json::quote(s); }))
@@ -189,7 +210,10 @@ int list_species_main(const cli::Args & args) {
         std::cout << input_file << ": a single gas, no species (a mixture has [physics] gas = \"mixture\").\n";
         return 0;
     }
-    for (const std::string & s : c.species) std::cout << s << "\n";
+    logging::section(input_file + ": species", std::to_string(c.species.size()) + " species");
+    std::vector<std::vector<std::string>> rows;
+    for (size_t i = 0; i < c.species.size(); i++) rows.push_back({std::to_string(i), c.species[i]});
+    logging::table({"#", "species"}, rows);
     return 0;
 }
 
