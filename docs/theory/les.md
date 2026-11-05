@@ -18,7 +18,7 @@ filter $\widetilde{\phi} = \overline{\rho\phi}/\overline{\rho}$, Mallard
 solves eq. (2) of [chapter 1](governing_equations.md#conservation-laws) for $\overline{\rho}$, $\overline{\rho}\widetilde{\mathbf{u}}$,
 $\overline{\rho}\widetilde{E}$ and $\overline{\rho}\widetilde{Y}_k$, with the
 molecular fluxes evaluated at the filtered state and the unclosed SGS fluxes
-modelled by gradient-diffusion closures:
+modeled by gradient-diffusion closures:
 
 $$
 \begin{equation}

@@ -2,7 +2,7 @@
 # (wall_heat_flux) with a heat flux that varies along it,
 # q = 2e4 (1 + 0.5 cos(2 pi x / 0.1)) W/m^2, the other walls adiabatic. No
 # mass or work crosses the walls, so the energy in the box grows by exactly
-# the heat that entered: the integral of q over the floor, 2000 W per metre of
+# the heat that entered: the integral of q over the floor, 2000 W per meter of
 # depth, times t.
 #
 # Run (seconds on one CPU thread):

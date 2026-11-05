@@ -105,7 +105,7 @@ Examples:
 
 Exit status:
   0  the run reached a stop condition (n_steps, t_stop, t_wall_stop)
-  1  an error, divergence included
+  1  an error, divergence included (the divergence report says why)
   2  usage error: an unknown option or command, no -i
   3  stopped on request (signal, mallard ctl stop, STOP file), restart written
 

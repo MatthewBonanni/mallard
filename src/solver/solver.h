@@ -13,6 +13,7 @@
 #define SOLVER_H
 
 #include <array>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -42,6 +43,7 @@
 #include "statistics.h"
 #include "triggers.h"
 #include "health_state.h"
+#include "divergence_report.h"
 #include "synthetic_inflow.h"
 #include "source_terms.h"
 #include "wall_exchange.h"
@@ -310,6 +312,14 @@ class Solver {
         void restore_last_good();
         std::string describe_invalid_cells();
         [[noreturn]] void diverged();
+        /**
+         * @brief The divergence report's evidence (collective): what failed in each local cell of the failing
+         *        state, then, with the last valid state in place (if has_valid), its neighborhood.
+         */
+        divergence::Evidence diagnose_divergence(bool has_valid, std::vector<int> & failed, MeshQuality & quality);
+        /** @brief Ranks the causes, prints the report and writes its files and the snapshot of the neighborhood. */
+        std::vector<divergence::Cause> write_divergence_report(divergence::Evidence & e, const std::vector<int> & failed,
+                                                               const MeshQuality & quality);
         void act_on_requests();
         void apply_commands();
         std::string write_restarts();
@@ -650,6 +660,8 @@ class Solver {
         rtype last_good_t = 0.0;
         double last_good_pending = 0.0;
         bool stepped_past_divergence = false;    // a step graph went on from the invalid state
+        std::string divergence_prefix = "divergence_report";  // [output] divergence_report
+        std::deque<divergence::Sample> progress_history;       // the last progress rows, for the report
 
         bool distribute = true;
         int halo_layers = 0;
@@ -743,7 +755,7 @@ class Solver {
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
-        std::unique_ptr<region::Regions> used_regions;  // every region the setup used
+        std::unique_ptr<region::Regions> used_regions;  // every region the setup used; checks keep it
         Euler physics;
         std::vector<std::string> species_names;
         std::shared_ptr<MixtureModel> mixture_model;  // null for a single gas

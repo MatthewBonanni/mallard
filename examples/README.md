@@ -80,7 +80,7 @@ hardware they were measured on.
 `isotropic_turbulence` on $64^3$, $128^3$ and $256^3$, filtered to $64^3$ as the
 references: top, sixth-order differences against Johnsen et al. (2010,
 circles); bottom, spectral derivatives against Subramaniam et al. (2019,
-grey). $64^3$ is under-resolved ($k_\mathrm{max}\eta \approx 0.7$) and misses 15% of the
+gray). $64^3$ is under-resolved ($k_\mathrm{max}\eta \approx 0.7$) and misses 15% of the
 enstrophy; $128^3$ and $256^3$ agree within 2%. The remaining differences from
 the references (kinetic energy +2%, temperature variance -5%) are of the size
 of the spread between random initial fields, whose realizations the
