@@ -207,6 +207,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"sphere_axisymmetric/input.toml", "accurate", 2, "",
      {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "axis"}, {"cylinder", "cylinder"}}, ""},
     {"triple_flame/input.toml", "reacting", 2, "", {}, ""},
+    {"turbulent_hot_spot_2d/input.toml", "accurate", 2, "", {}, ""},
     {"triple_flame/thick/input.toml", "reacting", 2, "", {}, ""},
     {"viscous_shock_tube/input.toml", "robust", 2, "", {}, ""},
     {"wedge/input.toml", "robust", 2, "", {}, ""},

@@ -49,6 +49,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 
 **Input and output** ([guide](docs/guide/input_files.md))
 - TOML input with units (`p = "1 atm"`); every error names the key, line and fix
+- Initial states from expressions, layered regions, tables and divergence-free synthetic turbulence of a prescribed spectrum
 - `mallard check` before a run, `mallard new` case templates, `mallard ctl` to steer a running job
 - VTKHDF output for ParaView
 - Probes on points, curves, surfaces, boundaries and regions; statistics, spectra and phase averages
