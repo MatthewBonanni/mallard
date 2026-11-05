@@ -97,8 +97,15 @@ bool widespread_cfl(const Evidence & e) {
     return e.n_over_limit > 4 && double(e.n_over_limit) > 0.1 * double(e.n_cells);
 }
 
+Cause cause(std::string kind, std::string title) {
+    Cause c;
+    c.kind = std::move(kind);
+    c.title = std::move(title);
+    return c;
+}
+
 Cause time_step(const Evidence & e) {
-    Cause c{.kind = "time_step", .title = "time step too large"};
+    Cause c = cause("time_step", "time step too large");
     if (!(e.dt > 0.0) || !(e.dt_cfl1 > 0.0)) return c;
     const double cfl = e.dt / e.dt_cfl1;
     const double fraction = e.n_cells ? double(e.n_over_limit) / double(e.n_cells) : 0.0;
@@ -142,7 +149,7 @@ Cause time_step(const Evidence & e) {
 }
 
 Cause mesh(const Evidence & e) {
-    Cause c{.kind = "mesh", .title = "poor cells"};
+    Cause c = cause("mesh", "poor cells");
     std::vector<const Cell *> cells = {&e.focus};
     for (const Cell & n : e.neighbors) cells.push_back(&n);
     for (const Cell & n : e.others) cells.push_back(&n);
@@ -183,7 +190,7 @@ Cause mesh(const Evidence & e) {
 }
 
 Cause boundary(const Evidence & e, const Zone * zone) {
-    Cause c{.kind = "boundary", .title = "boundary condition"};
+    Cause c = cause("boundary", "boundary condition");
     if (zone->near == 0 || e.n_invalid == 0) return c;
     const double fraction = double(zone->near) / double(e.n_invalid);
     c.title = "boundary condition of " + zone->name + " (" + zone->type + ")";
@@ -217,7 +224,7 @@ Cause boundary(const Evidence & e, const Zone * zone) {
 
 /** @brief The zone whose condition is the likeliest cause. */
 Cause boundary(const Evidence & e) {
-    Cause best{.kind = "boundary", .title = "boundary condition"};
+    Cause best = cause("boundary", "boundary condition");
     for (const Zone & z : e.zones) {
         Cause c = boundary(e, &z);
         if (c.score > best.score) best = std::move(c);
@@ -226,7 +233,7 @@ Cause boundary(const Evidence & e) {
 }
 
 Cause initial_state(const Evidence & e) {
-    Cause c{.kind = "initial_state", .title = e.from_restart ? "the state the run restarted from" : "initial state"};
+    Cause c = cause("initial_state", e.from_restart ? "the state the run restarted from" : "initial state");
     const uint64_t steps = e.step - e.step_start;
     const std::string start = e.from_restart ? "the restart file's state" : "the initial state";
     const bool at_start = !e.has_valid || e.step_valid == e.step_start;
@@ -244,7 +251,7 @@ Cause initial_state(const Evidence & e) {
     }
     double ratio = 1.0;
     for (const Cell & n : e.neighbors) {
-        for (const auto [a, b] : {std::make_pair(n.p, e.focus.p), std::make_pair(n.rho, e.focus.rho)}) {
+        for (const auto & [a, b] : {std::make_pair(n.p, e.focus.p), std::make_pair(n.rho, e.focus.rho)}) {
             if (a > 0.0 && b > 0.0) ratio = std::max(ratio, std::max(a / b, b / a));
         }
     }
@@ -260,7 +267,7 @@ Cause initial_state(const Evidence & e) {
 }
 
 Cause chemistry(const Evidence & e) {
-    Cause c{.kind = "chemistry", .title = "chemistry stiffness"};
+    Cause c = cause("chemistry", "chemistry stiffness");
     if (!e.reacting) return c;
     const bool thermo = e.focus.failed == TEMPERATURE || e.focus.failed == MASS_FRACTION ||
                         e.failed[TEMPERATURE] + e.failed[MASS_FRACTION] > e.n_invalid / 2;
@@ -285,7 +292,7 @@ Cause chemistry(const Evidence & e) {
 }
 
 Cause numerics(const Evidence & e) {
-    Cause c{.kind = "numerics", .title = "the scheme's robustness"};
+    Cause c = cause("numerics", "the scheme's robustness");
     c.score = 0.15;
     if (!e.repairs.empty() && e.n_repaired > 0) {
         c.score += 0.3;

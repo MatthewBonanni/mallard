@@ -109,7 +109,9 @@ TEST(DivergenceReportTest, TooLargeACflNumberIsTheTimeStep) {
     EXPECT_TRUE(fs::exists(o.report["snapshot"].string)) << o.report["snapshot"].string;
     EXPECT_NE(o.text.find("--restart " + valid["file"].string), std::string::npos) << o.text;
     // On several ranks, every cell named with its rank
-    if (comm::size() > 1) EXPECT_NE(o.text.find(" on rank "), std::string::npos) << o.text;
+    if (comm::size() > 1) {
+        EXPECT_NE(o.text.find(" on rank "), std::string::npos) << o.text;
+    }
     EXPECT_EQ(o.report["cell"]["rank"].type, json_reader::Value::Type::NUMBER);
 }
 
@@ -129,7 +131,9 @@ TEST(DivergenceReportTest, AnInflowTheFlowCannotTakeIsTheBoundary) {
     EXPECT_NE(o.message.find("Most likely cause: boundary condition of left (inlet_mass_flow)"), std::string::npos)
         << o.message;
     for (const auto & zone : o.report["zones"].array) {
-        if (zone["name"].string == "left") EXPECT_GT(zone["ratio"].number, 10.0);
+        if (zone["name"].string == "left") {
+            EXPECT_GT(zone["ratio"].number, 10.0);
+        }
     }
 }
 
