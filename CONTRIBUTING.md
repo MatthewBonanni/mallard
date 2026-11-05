@@ -66,6 +66,7 @@ cmake --build build -j
 
 - **Style:** the [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html),
   in C++20. Match the surrounding code where the two differ.
+- **Spelling:** American, everywhere: code, comments, messages and docs (`color`, `center`, `modeling`, `initialize`). `tools/dev/check_spelling.py` enforces it in CI.
 - **Comments:** Doxygen (`/** ... */`, `@brief`, `@param`, `@return`) on every public
   interface: classes, functions and members declared in headers. Elsewhere, keep
   comments minimal: say *why* when it is not obvious, never restate *what* the code

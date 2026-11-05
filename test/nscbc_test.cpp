@@ -290,7 +290,7 @@ double rms_pressure_difference(const Result & a, const Result & ref) {
 } // namespace
 
 TEST(NSCBCTest, VortexLeavesWithoutReflection) {
-    // At M = 0.25, cancelling the transverse terms in the incoming wave
+    // At M = 0.25, canceling the transverse terms in the incoming wave
     // (beta = M, the default) keeps the outlet from pushing the vortex's low
     // pressure back to the target; Poinsot & Lele's original condition
     // (beta = 1) sets off a pressure wave and a transverse slosh between the walls

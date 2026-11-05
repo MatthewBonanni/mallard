@@ -77,6 +77,8 @@ const Entry NAMED[] = {
     {"SKEWNESS", dim::none, "largest face skewness"},
     {"ASPECT_RATIO", dim::none, "cell aspect ratio"},
     {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor"},
+    // The divergence report's snapshot
+    {"DIVERGED", dim::none, "1 in the cells that became invalid"},
 };
 
 // <prefix><species>
