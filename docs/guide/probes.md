@@ -447,7 +447,10 @@ Pitfalls:
   the run ran, so that a mesh file named by a relative path is found.
 - VTKHDF files record no step: their snapshots are numbered by their
   position in the files given, and `--steps` does not apply to them.
-- Statistics (`MEAN_*`) and `[[forces]]`, `[integrals]` are not extracted.
+- Statistics (`MEAN_*`) and `[[forces]]`, `[integrals]` are not extracted,
+  nor are [time-averaged probes](#time-averages) (`average = true`, or
+  `MEAN_`/`COV_` variables): their averages are over the run's steps, which
+  output does not hold. Without `--probe` they are skipped with a warning.
 
 ## Wall forces: `[[forces]]`
 
