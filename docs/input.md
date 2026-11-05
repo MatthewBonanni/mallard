@@ -924,8 +924,11 @@ only some of them is an error unless `reset = true`. With
 `tools/post/plane_average.py` averages them further over homogeneous directions
 (e.g. over x and z of a channel, as a function of y). `fields` and
 `products` may be left out when `[statistics.spectra]` or
-`[statistics.phase]` is given; both take `interval` and `t_start` from
+`[statistics.phase]` is given, or a probe with `average = true`; both take `interval` and `t_start` from
 `[statistics]` unless they set their own, and `reset` applies to them too.
+Probes may list the averages as variables (`MEAN_P`, ...), and probes with
+`average = true` sample on the schedule of `interval` and `t_start`
+([time averages](#probes)).
 
 ### `[statistics.spectra]`
 
@@ -1011,7 +1014,7 @@ ranks. A probe that is not due costs nothing.
 | Key | Description |
 |---|---|
 | `name` | Probe name |
-| `variables` | Any of the `[statistics]` fields, `U` and `RHOU` for all components, `Y_*` and `RHOY_*` for every species |
+| `variables` | Any of the `[statistics]` fields, `U` and `RHOU` for all components, `Y_*` and `RHOY_*` for every species; and the averages `[statistics]` keeps (`MEAN_<A>`, `MEAN_U`, `COV_<A>_<B>`, `PHASE_<bin>_<A>`), each sample's the value of its cell in both `sampling` modes |
 | `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `surface` (below); without it, `point` or `start`/`end` select a point or a line |
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples (below). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
@@ -1023,6 +1026,7 @@ ranks. A probe that is not due costs nothing.
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
 | `file` | Output file, default `probe_<name>.csv`, `.h5`, `.vtkhdf` or `.pvd` |
 | `samples` | `false` writes only the reductions (default `true`) |
+| `average` | `true`: write the running time averages of the samples instead (columns `MEAN_<variable>`), sampled on the `[statistics]` schedule (below); default `false` |
 | `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below); default none, and `["integral", "mean", "min", "max"]` with `region` |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
 | `scale`, `rotate`, `pivot`, `translate` | Transform of the geometry, as for [regions](#regions): scaled (a factor, or one per axis), then rotated (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`), both about `pivot` (default the origin), then translated |
@@ -1080,6 +1084,39 @@ and cut planes no `reductions`. CSV rows of cut planes are
 `step, t, cell, x, y(, z), nx, ny(, nz), area, <variables>`; VTP and VTKHDF files are
 their polygons (segments in 2D) with cell data, and grids of resampled
 surfaces with point data.
+
+**Time averages.** A probe with `average = true` samples its variables on the
+schedule of `[statistics]` (every `interval` steps once `t > t_start`; without
+`[statistics]`, every step from the start) and keeps the running mean of each
+sample, weighted by the time since the previous sample as the `[statistics]`
+means are: rank 0 updates them in double precision in the samples' global
+order, so they are the same bit for bit on any number of ranks. Every
+`interval` (or `time_interval`) of the probe, it writes the means so far, as
+`MEAN_<variable>` (the first row once a sample is taken), and its reductions
+are those of the averaged samples (`integral_MEAN_<variable>`, ...): the time
+average of an `integral` or `mean`, while `min`, `max` and `rms` are those of
+the averaged samples, not time averages of the extrema. This averages what
+`[statistics]` cannot keep per cell: point values, fluxes and wall
+quantities (`CF`, `Q_W`, `MASS_FLUX`, ...). Restart files carry the means
+(format version 6), so a restarted run continues them bit for bit; a restart
+file without them starts them afresh, as does `statistics.reset = true`, and
+one holding means of other samples or variables is an error. The variables
+of an averaging probe are instantaneous ones (not `MEAN_*`, `COV_*`).
+
+```toml
+# The time-averaged skin friction and heat flux along a wall, from t = 0.2
+[statistics]
+t_start = 0.2
+
+[[probes]]
+name = "wall_mean"
+boundary = "wall"
+variables = ["CF", "Q_W"]
+reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}
+average = true
+interval = 1000
+reductions = ["integral"]
+```
 
 ```toml
 # Mass flow through a tilted section of a duct, and its pressure for ParaView

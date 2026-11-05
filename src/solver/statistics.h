@@ -152,6 +152,10 @@ class Statistics {
 
         bool enabled() const { return means_enabled() || spectra.enabled() || phase.enabled(); }
         bool means_enabled() const { return !fields.empty(); }
+        /** @brief Sampling of the means, also that of time-averaged probes: every interval steps once t > t_start. */
+        uint64_t sampling_interval() const { return interval; }
+        rtype sampling_start() const { return t_start; }
+        bool resets() const { return reset; }
         bool due(uint64_t step, rtype t) const {
             return (means_enabled() && step % interval == 0 && t > t_start) || spectra.due(step, t) || phase.due(step, t);
         }

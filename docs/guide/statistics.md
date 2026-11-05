@@ -31,7 +31,8 @@ carried across restarts.
 | `interval` | 1 | Sample every this many steps (weighted by the time since the last sample) |
 | `reset` | `false` | Start afresh on a restart |
 
-Write them with `variables = ["MEAN_*", "COV_*"]`, and average further over
+Write them with `variables = ["MEAN_*", "COV_*"]`, sample them with
+[probes](probes.md#time-averages) (`variables = ["MEAN_P"]`), and average further over
 homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of a
 channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)).

@@ -71,7 +71,10 @@ void Solver::init_solution() {
         initial_state += "; " + state.summary();
     }
     copy_host_to_device();
-    if (!from_file) statistics.start(t);
+    if (!from_file) {
+        statistics.start(t);
+        probes.start_averages(t);
+    }
     if (is_mixture() && (!from_file || layered)) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();
@@ -175,6 +178,7 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
         if (const auto started = triggers.statistics_started()) statistics.set_start(static_cast<rtype>(*started));
     }
     statistics.restore(restart, file, t);
+    probes.restore_averages(restart, file, t, statistics.resets());
     if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
     if (!resume_output) return;

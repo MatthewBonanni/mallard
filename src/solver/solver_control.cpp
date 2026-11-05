@@ -332,7 +332,7 @@ std::string Solver::write_restarts() {
     copy_device_to_host();
     const RestartAttributes attributes = restart_attributes();
     const RestartFaces faces = characteristic_restart_faces();
-    const RestartArrays arrays = statistics.arrays();
+    const RestartArrays arrays = restart_arrays();
     std::string file;
     for (auto & writer : data_writers) {
         if (writer->get_format() != DataFormat::RESTART) continue;

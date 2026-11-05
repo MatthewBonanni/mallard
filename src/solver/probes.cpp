@@ -171,7 +171,8 @@ int32_t variable_code(const std::string & name, const std::vector<std::string> &
     try {
         return CellSampler::code(name, species_names, key);
     } catch (const InputError &) {
-        throw InputError(key + ": unknown variable \"" + name + "\" (the [statistics] fields, or on boundaries " +
+        throw InputError(key + ": unknown variable \"" + name + "\" (the [statistics] fields and " +
+                         "the averages it keeps, MEAN_<field> and COV_<a>_<b>, or on boundaries " +
                          "MASS_FLUX, MOMENTUM_FLUX, ENTHALPY_FLUX, SPECIES_FLUX_<species>, TRACTION_PRESSURE, " +
                          "TRACTION_VISCOUS, TAU_W, TAU_W_<axis>, CF, CP, Q_W, U_TAU, Y_PLUS).");
     }
@@ -590,6 +591,7 @@ void Probes::Samples::select(const Mesh & mesh, const std::vector<uint32_t> & ow
         ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
     }
     cells = to_device(owned_cells, "probe_cells");
+    host_cells = owned_cells;
     W = Kokkos::View<rtype *[N_CONSERVATIVE]>("probe_W", owned_cells.size());
     values = Kokkos::View<rtype **, Kokkos::LayoutRight>("probe_values", owned_cells.size(), n_variables);
     order(mesh);
@@ -943,12 +945,16 @@ RegionValue classify_region(const Input & input, region::Regions & regions, cons
 } // namespace probe
 
 void Probes::init(const Input & input, const Mesh & mesh, region::Regions & regions,
-                  const std::vector<std::string> & species_names, bool resume, bool viscous) {
+                  const std::vector<std::string> & species_names, bool resume, bool viscous,
+                  const std::vector<Data> & cell_data, const Statistics & statistics) {
     resumed = resume;
     distributed = mesh.n_global_cells > 0;
+    statistics_variables = statistics.variables();
+    average_interval = statistics.sampling_interval();
+    average_start = statistics.sampling_start();
     if (!input.contains("probes")) return;
     for (const auto & entry : find_value<std::vector<Input>>(input, "probes")) {
-        add(input, mesh, regions, species_names, resume, viscous, entry, nullptr, nullptr);
+        add(input, mesh, regions, species_names, resume, viscous, entry, nullptr, &cell_data);
     }
 }
 
@@ -1073,9 +1079,13 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     }
 
     if (!entry.contains("variables")) throw InputError(key + ": variables not specified.");
-    // Snapshots also write cell fields, as the value of each sample's cell
+    // Snapshots also write cell fields, and probes the [statistics] outputs, as the value of each sample's cell
     auto cell_field = [&](const std::string & name) -> const Data * {
-        if (!snapshot || !cell_data) return nullptr;
+        if (!cell_data) return nullptr;
+        if (!snapshot &&
+            std::find(statistics_variables.begin(), statistics_variables.end(), name) == statistics_variables.end()) {
+            return nullptr;
+        }
         for (const Data & d : *cell_data) {
             if (d.name() == name) return &d;
         }
@@ -1117,6 +1127,15 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         h_codes.push_back(CellSampler::RHO);
     }
     p.codes = to_device(h_codes, "probe_codes");
+    p.average = !snapshot && find_value_or<bool>(entry, "average", false);
+    if (p.average && !p.cell_columns.empty()) {
+        throw InputError(Diagnostic{.key = key + ".variables",
+                                    .line = line_of(entry, "variables"),
+                                    .message = "with average = true lists [statistics] averages, which are averaged "
+                                               "already",
+                                    .fix = "List the instantaneous variables (P, not MEAN_P), or drop average",
+                                    .docs = "docs/guide/probes.md#time-averages"});
+    }
 
     const bool boundary = !region_zones.empty() || (where == &entry && !p.from_region &&
                                                      (entry.contains("boundary") || entry.contains("boundary_type")));
@@ -1295,6 +1314,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         }
     }
 
+    if (p.average) {
+        for (auto & v : p.variables) v = "MEAN_" + v;
+    }
     on_root(distributed, [&] {
         if (p.write_samples && p.format == Format::CSV) {
             std::vector<std::pair<std::string, Dimension>> columns = {
@@ -1572,24 +1594,18 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
                 p.n_written++;
             }
         }
-        const bool extrema = std::any_of(p.reductions.begin(), p.reductions.end(),
-                                         [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
-        std::vector<double> & nodes = p.gathered_nodes;
-        std::vector<double> & quad = p.gathered_quad;
-        nodes.clear();
-        quad.clear();
-        // Collective on every rank (the geometry lives on rank 0 for some shapes)
-        const bool own_quadrature = p.quadrature.n_global == 0;
-        if ((!p.from_region || p.resampled) && (p.write_samples || extrema || own_quadrature)) {
-            p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
-            p.nodes.gather(nodes, p.cell_columns);
-        }
-        if (!p.reductions.empty() && !own_quadrature) {
-            p.quadrature.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
-            p.quadrature.gather(quad);
-        }
+        // Averages are written once they hold a sample
+        if (p.average && p.average_samples == 0) continue;
+        std::vector<double> & sampled_nodes = p.gathered_nodes;
+        std::vector<double> & sampled_quad = p.gathered_quad;
+        sampled_nodes.clear();
+        sampled_quad.clear();
+        if (!p.average) p.sample(fields, sampled_nodes, sampled_quad);
+        const std::vector<double> & nodes = p.average ? p.mean_nodes : sampled_nodes;
+        const std::vector<double> & quad = p.average ? p.mean_quadrature : sampled_quad;
         if (comm::is_root() || !distributed) {
-            p.reduce(nodes, quad);
+            p.last.clear();
+            if (!p.reductions.empty()) p.reduce(nodes, quad);
             if (p.point_value) {
                 for (size_t v = 0; v < p.variables.size(); v++) p.last.push_back(nodes[v]);
             }
@@ -1655,6 +1671,146 @@ std::vector<double> Probes::values() const {
         }
     }
     return values;
+}
+
+bool Probes::Probe::samples_nodes() const {
+    const bool extrema = std::any_of(reductions.begin(), reductions.end(),
+                                     [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
+    return (!from_region || resampled) && (write_samples || extrema || quadrature.n_global == 0);
+}
+
+bool Probes::Probe::samples_quadrature() const { return !reductions.empty() && quadrature.n_global > 0; }
+
+void Probes::Probe::sample(const ProbeFields & fields, std::vector<double> & node_values,
+                           std::vector<double> & quad_values) {
+    // Collective on every rank (the geometry lives on rank 0 for some shapes)
+    if (samples_nodes()) {
+        nodes.evaluate(sampling, codes, fields, reference, gradients);
+        nodes.gather(node_values, cell_columns);
+    }
+    if (samples_quadrature()) {
+        quadrature.evaluate(sampling, codes, fields, reference, gradients);
+        quadrature.gather(quad_values, cell_columns);
+    }
+}
+
+namespace {
+
+const std::string AVERAGE_PREFIX = "PROBE_AVERAGE_";
+
+/** @brief West's running mean: mean += a (x - mean), from zero at the first sample. */
+void accumulate(std::vector<double> & mean, const std::vector<double> & x, double a) {
+    if (mean.empty()) mean.assign(x.size(), 0.0);
+    for (size_t i = 0; i < x.size(); i++) mean[i] += a * (x[i] - mean[i]);
+}
+
+} // namespace
+
+bool Probes::averages_due(uint64_t step, rtype t) const {
+    return step % average_interval == 0 && t > average_start &&
+           std::any_of(probes.begin(), probes.end(), [](const auto & p) { return p->average; });
+}
+
+std::pair<bool, bool> Probes::average_needs() const {
+    bool cell_W = false, transport = false;
+    for (const auto & p : probes) {
+        if (!p->average) continue;
+        cell_W = cell_W || p->sampling == Sampling::POINT || p->gradients;
+        transport = transport || p->transport;
+    }
+    return {cell_W, transport};
+}
+
+void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields) {
+    if (!averages_due(step, t)) return;
+    for (auto & pp : probes) {
+        Probe & p = *pp;
+        if (!p.average) continue;
+        const double w = static_cast<double>(t) - p.average_t_last;
+        if (!(w > 0.0)) continue;
+        std::vector<double> nodes, quad;
+        p.sample(fields, nodes, quad);
+        p.average_weight += w;
+        p.average_t_last = static_cast<double>(t);
+        p.average_samples++;
+        if (distributed && !comm::is_root()) continue;
+        accumulate(p.mean_nodes, nodes, w / p.average_weight);
+        accumulate(p.mean_quadrature, quad, w / p.average_weight);
+    }
+}
+
+void Probes::start_averages(rtype t) {
+    for (auto & p : probes) {
+        if (!p->average) continue;
+        p->average_weight = 0.0;
+        p->average_t_last = static_cast<double>(std::max(t, average_start));
+        p->average_samples = 0;
+        p->mean_nodes.clear();
+        p->mean_quadrature.clear();
+    }
+}
+
+void Probes::restore_averages(const RestartData & restart, const std::string & file, rtype t, bool reset) {
+    start_averages(t);
+    if (reset) return;
+    for (auto & pp : probes) {
+        Probe & p = *pp;
+        if (!p.average) continue;
+        const std::string name = AVERAGE_PREFIX + p.name;
+        const double * w = restart.attribute(name + "_WEIGHT");
+        const double * t_last = restart.attribute(name + "_T_LAST");
+        const double * n = restart.attribute(name + "_SAMPLES");
+        if (!w || !t_last || !n || !(*w > 0.0)) continue;
+        // Every rank reads them (arrays of no values are not written)
+        const std::vector<double> * nodes = restart.array(name + "_NODES");
+        const std::vector<double> * quad = restart.array(name + "_QUADRATURE");
+        const uint64_t n_nodes = p.samples_nodes() ? p.nodes.n_global * p.n_evaluated() : 0;
+        const uint64_t n_quad = p.samples_quadrature() ? p.quadrature.n_global * p.n_evaluated() : 0;
+        if ((nodes ? nodes->size() : 0) != n_nodes || (quad ? quad->size() : 0) != n_quad) {
+            throw InputError("probes[name = \"" + p.name + "\"]: restart file " + file +
+                             " holds the averages of other samples or variables; set statistics.reset = true "
+                             "to start them afresh.");
+        }
+        if (nodes) p.mean_nodes = *nodes;
+        if (quad) p.mean_quadrature = *quad;
+        p.average_weight = *w;
+        p.average_t_last = *t_last;
+        p.average_samples = static_cast<uint64_t>(*n);
+    }
+}
+
+RestartAttributes Probes::attributes() const {
+    RestartAttributes all;
+    for (const auto & p : probes) {
+        if (!p->average) continue;
+        const std::string name = AVERAGE_PREFIX + p->name;
+        all.emplace_back(name + "_WEIGHT", p->average_weight);
+        all.emplace_back(name + "_T_LAST", p->average_t_last);
+        all.emplace_back(name + "_SAMPLES", static_cast<double>(p->average_samples));
+    }
+    return all;
+}
+
+RestartArrays Probes::arrays() const {
+    RestartArrays all;
+    // Every rank's restart header holds them
+    auto add = [&](const std::string & name, const std::vector<double> & values) {
+        std::vector<double> all_values = distributed ? comm::allgatherv(comm::is_root() ? values : std::vector<double>{})
+                                                     : values;
+        if (!all_values.empty()) all.emplace_back(name, std::move(all_values));
+    };
+    for (const auto & p : probes) {
+        if (!p->average) continue;
+        add(AVERAGE_PREFIX + p->name + "_NODES", p->mean_nodes);
+        add(AVERAGE_PREFIX + p->name + "_QUADRATURE", p->mean_quadrature);
+    }
+    return all;
+}
+
+bool Probes::statistics_due(uint64_t step, rtype t) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return !p->snapshot && !p->average && !p->cell_columns.empty() && p->due(step, t);
+    });
 }
 
 void Probes::Probe::write_hdf5([[maybe_unused]] uint64_t step, [[maybe_unused]] rtype t,
@@ -1865,6 +2021,7 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
                            logging::count(n) + unit +
                            (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
                                            : " every t = " + logging::real(double(p.time_interval))) +
+                           (p.average ? ", time averages" : "") +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;
         if (!p.reductions.empty()) {
             std::string reds;
