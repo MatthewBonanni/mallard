@@ -1,9 +1,11 @@
 """Runs a small case with every snapshot and monitor format and checks, with
 h5py and the tools/mallard readers, that each file carries the same units for
-the same field (docs/guide/output.md#units).
+the same field (docs/guide/output.md#units), and that mallard info, the C++
+reader, finds the same units as the Python readers.
 
     python3 tools/dev/check_output_units.py build/src/mallard
 """
+import json
 import os
 import subprocess
 import sys
@@ -71,7 +73,8 @@ variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 prefix = "flow"
 format = "xdmf"
 interval = 2
-variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"][[write_data]]
+variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
+[[write_data]]
 prefix = "flow"
 interval = 2
 variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
@@ -121,7 +124,20 @@ def main():
         assert read_csv(path("forces_bottom.csv"))[1]["Fx_pressure"] == "kg s-2"
         assert read_csv(path("integrals.csv"))[1]["kinetic_energy"] == "kg m s-2"
         assert len(read_csv(path("integrals.csv"))[0]["t"]) == 3
-    print("output units: consistent across VTKHDF, VTU, HDF5, XDMF and CSV")
+
+        def info(name):
+            out = subprocess.run([mallard, "info", "--format", "json", name], cwd=work, check=True, capture_output=True,
+                                 text=True).stdout
+            return {f["name"]: f["units"] for f in json.loads(out)["fields"]}
+
+        for name in ["flow_000002.vtu", "flow_000002.h5", "flow_000002.xmf", "flow_000002.vtkhdf", "flow.pvd",
+                     "flow.vtkhdf.series"]:
+            assert info(name) == vtu, (name, info(name), vtu)
+        assert info("probe_h5.h5") == {k: probe[k] for k in ("RHO", "T")}, (info("probe_h5.h5"), probe)
+        assert info("probe_vtkhdf.vtkhdf") == units(path("probe_vtkhdf.vtkhdf"))
+        for name in ["probe_line.csv", "probe_line_reductions.csv", "forces_bottom.csv", "integrals.csv"]:
+            assert info(name) == read_csv(path(name))[1], name
+    print("output units: consistent across VTKHDF, VTU, HDF5, XDMF and CSV, and with mallard info")
 
 
 if __name__ == "__main__":
