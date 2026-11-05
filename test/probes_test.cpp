@@ -666,7 +666,9 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
             error_energy = std::max(error_energy, std::fabs(row.at("ENERGY_DIFFUSIVE_FLUX") - e) / std::fabs(e));
             // No flow through the walls: the total is the diffusive flux
             EXPECT_EQ(row.at("ENERGY_TOTAL_FLUX"), row.at("ENERGY_DIFFUSIVE_FLUX"));
-            if (!top) EXPECT_NEAR(row.at("ENERGY_DIFFUSIVE_FLUX"), -row.at("Q_W"), tol * std::fabs(q));
+            if (!top) {
+                EXPECT_NEAR(row.at("ENERGY_DIFFUSIVE_FLUX"), -row.at("Q_W"), tol * std::fabs(q));
+            }
         }
         EXPECT_EQ(n_faces, (N_DIM == 2 ? 2u * 4u : 2u * 12u));
         e_tau.push_back(error_tau);
@@ -1136,27 +1138,29 @@ TEST(ProbesTest, ModeledWallsTakeTheWallModelsStressHeatFluxAndExchangeState) {
                        COUETTE_MU * COUETTE_U * COUETTE_U / (2.0 * COUETTE_KAPPA) * h * (1.0 - h);
     const auto start = rows_at(dir + "/bottom.csv_serial", 0.0);
     ASSERT_EQ(start.size(), N_DIM == 2 ? 4u : 12u);
+    const double tol = precision_tol<double>(1e-12, 1e-6);
     for (const auto & row : start) {
-        EXPECT_NEAR(row.at("WALL_MODEL_H"), h, 1e-12);
+        EXPECT_NEAR(row.at("WALL_MODEL_H"), h, tol);
         EXPECT_NEAR(row.at("WALL_MODEL_U"), COUETTE_U * h, 1e-3 * COUETTE_U * h);
         EXPECT_NEAR(row.at("WALL_MODEL_T"), T_h, 1e-3);
         EXPECT_NEAR(row.at("TAU_W"), tau, 0.02 * tau);
         // The fluid drags the wall at rest along +x
-        EXPECT_NEAR(row.at("TRACTION_VISCOUS_X"), row.at("TAU_W"), 1e-14);
+        EXPECT_NEAR(row.at("TRACTION_VISCOUS_X"), row.at("TAU_W"), tol * tau);
         EXPECT_NEAR(row.at("U_TAU"), std::sqrt(row.at("TAU_W") * COUETTE_T0), 1e-3 * std::sqrt(tau));
     }
     const auto forces = read_csv(dir + "/forces.csv_serial");
     std::map<double, std::map<std::string, double>> reduced;
     for (const auto & row : read_csv(dir + "/bottom_red.csv_serial")) reduced[row.at("step")] = row;
     ASSERT_EQ(forces.size(), 3u);
+    const double tol_sum = precision_tol<double>(1e-11, 1e-5);
     for (const auto & f : forces) {
         const auto & r = reduced.at(f.at("step"));
         // [[forces]] writes 12 significant digits
         for (size_t d = 0; d < N_DIM; d++) {
             const double F = f.at(std::string("F") + "xyz"[d] + "_viscous");
-            EXPECT_NEAR(r.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), F, 1e-11 * tau) << d;
+            EXPECT_NEAR(r.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), F, tol_sum * tau) << d;
         }
-        EXPECT_NEAR(r.at("integral_Q_W"), f.at("Q"), 1e-11 * std::fabs(f.at("Q")) + 1e-15);
+        EXPECT_NEAR(r.at("integral_Q_W"), f.at("Q"), tol_sum * std::fabs(f.at("Q")) + 1e-15);
     }
 }
 
