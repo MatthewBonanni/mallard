@@ -97,6 +97,31 @@ expressions of the tests and the source below compile to the same
 instructions as before and evaluate 10–25% faster (the source: 40.5 → 36.4 ns
 per evaluation), from the interpreter's reordered dispatch.
 
+### Geometry, expressions and inputs apart (#449)
+
+Three layers, each unaware of the one above:
+
+- `geometry.h`: primitives, transforms and booleans (`region::Node`,
+  `distance`, `indicator`), for kernels and the host. An implicit shape is
+  whatever callable the caller passes, `implicit(i, q)` at the local point
+  `q`, so the geometry knows neither kexpr nor inputs.
+- `kexpr.{h,cpp}`: the expression engine. Where an input-facing caller wants
+  more in the error for an unknown symbol (the hint that expressions take no
+  unit symbols, from `units.h`), it passes a `SymbolHint`.
+- `region.{h,cpp}` joins them: `ImplicitPrograms` evaluates implicit shape
+  `i` as program `i` of a `kexpr::ProgramTable`, and a `Region` is built
+  from a `region::Definition`, plain data. `region_input.{h,cpp}` parses
+  input tables into definitions (`region::parse`, `region::read`) and holds
+  what refers to the input: named regions, regions of the mesh and
+  `region::Regions`.
+
+`src/CMakeLists.txt` checks that `geometry.h` and `kexpr.{h,cpp}` include no
+other Mallard header. The code that evaluates is unchanged, and so is every
+result: a 2D case (48² triangles, 4 steps) and a 3D one (20³, 3 steps) whose
+initial regions, sources, sponges and region probes use every kind of node
+(each primitive and boolean), smooth edges and boundaries of implicit shapes
+write the same solution and probe files, byte for byte, before and after.
+
 ## Stage times in captured steps
 
 A graph-captured step replays kernels whose time and time step live on the
@@ -182,7 +207,7 @@ and probes take regions too (#499), and initialization is to (#324).
 and shared by every key that names it (a source, the sponge and the probe of
 the same region read one array). It reads `[regions]` lazily, entry by entry,
 so a name no key uses stays an unused key, reported like any other. Each
-primitive type has one fixed dimension (`PRIMITIVES` in `region.cpp`; all of
+primitive type has one fixed dimension (`types()` in `region_input.cpp`; all of
 them fill space so far), a boolean requires its parts to share it, and
 consumers check it (`require_full_dimension` for sources, sponges and region
 probes), so that

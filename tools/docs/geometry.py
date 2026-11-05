@@ -4,7 +4,7 @@
 
 The schematics (3D primitives, booleans, transforms, the signed distance)
 evaluate a NumPy port of the signed distances and transforms of
-src/common/region.h. The figures on meshes run Mallard and read back what it
+src/common/geometry.h. The figures on meshes run Mallard and read back what it
 computed: volume fractions as SOURCE_RHOE of a source of 1 per unit volume over
 the region, probe samples from the probe CSV files. They need --mallard (2D)
 and, for the 3D probes, --mallard3d.
@@ -35,7 +35,7 @@ PHYSICS = '[physics]\ntype = "euler"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho
 MONO = dict(family="monospace")
 
 
-# ------------------------------------------------------- signed distances (port of region.h, z = 0)
+# ------------------------------------------------------- signed distances (port of geometry.h, z = 0)
 
 def to_local(x, y, center=(0.0, 0.0), rotate=0.0, pivot=(0.0, 0.0), scale=(1.0, 1.0), translate=(0.0, 0.0)):
     """Local coordinates of world points: world = pivot + R S (local - pivot) + translate."""
