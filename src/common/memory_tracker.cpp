@@ -37,7 +37,8 @@ constexpr Rule RULES[] = {
     {"W_cells", false, C::STATE}, {"cfl_local", false, C::STATE}, {"solution", true, C::STATE},
     {"rhs_faces", false, C::MESH}, {"rhs", true, C::STATE}, {"last_good", true, C::STATE}, {"T_seed", false, C::STATE},
     {"cell_scalars", false, C::STATE}, {"cell_molar_mass", false, C::STATE}, {"p_max", false, C::STATE},
-    {"vortex_fields", false, C::STATE}, {"positivity_kappa", false, C::STATE}, {"cell_upwind", false, C::STATE},
+    {"vortex_fields", false, C::STATE}, {"derived_fields", false, C::STATE},
+    {"positivity_kappa", false, C::STATE}, {"cell_upwind", false, C::STATE},
     {"frozen_thermo", false, C::STATE}, {"stage_time", false, C::STATE}, {"step_", true, C::STATE},
     {"geometric_source", false, C::STATE}, {"cell_mu", false, C::STATE}, {"rhoY", false, C::STATE},
     // Faces, gradients and reconstruction buffers
