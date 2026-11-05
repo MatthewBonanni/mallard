@@ -737,7 +737,7 @@ class Solver {
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;
-        std::unique_ptr<region::Regions> used_regions;  // every region the setup used
+        std::unique_ptr<region::Regions> used_regions;  // every region the setup used; checks keep it
         Euler physics;
         std::vector<std::string> species_names;
         std::shared_ptr<MixtureModel> mixture_model;  // null for a single gas
