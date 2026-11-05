@@ -53,7 +53,7 @@ closure for the filtered reaction rates.
 | 1 | Favre-filtered equations closed by an eddy viscosity mu_t, with `lambda_t = cp mu_t / Pr_t` and `rho D_t = mu_t / Sc_t`; mu_t added to the molecular coefficients | Mixed or scale-similarity models; separate SGS flux kernels | Shares the viscous fluxes, boundary treatment, time step and transport infrastructure; the standard closure of compressible LES (Vreman et al. 1995; Garnier et al. 2009) |
 | 2 | **Sigma model** (Nicoud et al. 2011) as the primary eddy viscosity; WALE, Vreman and Smagorinsky also available | WALE, Vreman, dynamic Smagorinsky as primary | Local, no test filter, positive; vanishes in pure shear, solid rotation, two-component and axisymmetric/isotropic expansion; cubic near walls; insensitive to the one-dimensional dilatation of flames |
 | 3 | Dynamic Smagorinsky deferred | Germano-Lilly with local averaging | Needs a test filter and averaging on unstructured mixed meshes (section 2.5); Sigma gets near-wall and laminar behavior without it |
-| 4 | Filter width `Delta = V^(1/d)` (d = 2 or 3) of each cell, independent of the reconstruction order; in 3D times Scotti's anisotropy factor since stage 7 (section 3) | Largest cell extent; Scotti's anisotropy correction; `h / (p + 1)` | A finite volume has one degree of freedom per cell at any order; Sigma and WALE vanish where the cells are most anisotropic (walls) |
+| 4 | Filter width `Delta = V^(1/d)` (d = 2 or 3) of each cell, independent of the reconstruction order; in 3D times Scotti's anisotropy factor since stage 7 (section 3); a width scaled by the reconstruction's effective resolution is opt-in (`effective_width`, section 3.1) | Largest cell extent; Scotti's anisotropy correction; `h / (p + 1)` | A finite volume has one degree of freedom per cell at any order; Sigma and WALE vanish where the cells are most anisotropic (walls) |
 | 5 | Eddy viscosity per cell from the viscous cell gradients, averaged to faces; zero on wall faces | Per face from face gradients | One evaluation per cell; enters the time step and output; consistent across ranks |
 | 6 | A **kinetic-energy budget diagnostic** that measures the numerical dissipation of resolved kinetic energy against the SGS and molecular dissipation at run time | Inferring numerical dissipation from -dK/dt after the fact | Proves at every output which term dissipates the energy; needs no reference |
 | 7 | A **low-dissipation convective flux**: a kinetic-energy-preserving (KEEP) central flux blended with the Riemann solver by a compression-only Ducros sensor | Lower TENO cutoff; Riemann solvers with scaled dissipation only; artificial viscosity | Upwind Riemann fluxes dissipate resolved energy at the grid scale at a rate comparable to the SGS model; the KEEP flux adds none, and shocks keep the Riemann solver |
@@ -299,6 +299,136 @@ axisymmetric runs), for every cell type and reconstruction order.
   cube root (a regular tetrahedron of edge h has `V^(1/3) = 0.49 h`, a cube
   `h`): tetrahedral regions get a smaller $\Delta$ at the same edge length,
   which is consistent with their higher number of cells per volume.
+
+### 3.1 Effective resolution of the reconstructions
+
+Issue #660 asked whether `V^(1/d)` should depend on the reconstruction: a
+fifth-order scheme resolves scales that a second-order one damps, so with the
+same width the model might damp scales the scheme already resolves, and PaSR
+and the thickened flame inherit the same width. Phase 1 measured the
+effective resolution of each reconstruction, added an opt-in width that uses
+it (`[les] effective_width`), and ran decaying isotropic turbulence with and
+without it. **Decision 4 stands: the default stays `V^(1/d)`.**
+
+**Measurement.** `tools/docs/effective_resolution.py` drives the real code:
+one forward-Euler step of a density wave at uniform velocity and pressure
+with HLLC (the exact upwind flux of the reconstructed density) gives the
+semi-discrete advection operator, whose projection onto the wave is the
+modified wavenumber $\tilde k$ ([theory](../theory/les.md#effective-filter-width)).
+Linear schemes on uniform meshes take one run with all 63 (2D) or 31 (3D)
+resolved wavenumbers superposed; nonlinear ones (TENO with every cell
+troubled, MUSCL's limiter) and the irregular triangles one run per
+wavenumber (Pirozzoli 2006). $k_\mathrm{eff}$ is where
+$-\mathrm{Im}\,\tilde k\,\Delta_V$ reaches 0.01 (after Moura et al.'s 1%
+rule, with the dissipation per cell as their dissipation per degree of
+freedom), and $r = \pi/(k_\mathrm{eff}\Delta_V)$:
+
+| Scheme | Quadrilaterals | Hexahedra | Irregular triangles |
+|---|---|---|---|
+| First order | 22.4 | | |
+| MUSCL, no limiter | 5.84 | 5.91 | 4.34 |
+| MUSCL, Venkatakrishnan (amplitude 1%) | 6.13 | | |
+| TENO3, central polynomial | 6.77 | 5.27 | 5.45 |
+| TENO4, central polynomial | 3.68 | 3.69 | |
+| TENO5, central polynomial | 4.32 | 3.31 | 3.83 |
+| TENO6, central polynomial | 2.90 | 2.88 | |
+| TENO5, every cell troubled | 4.36 | 3.34 | 3.83 |
+| TENO5, sector stencils only | 6.78 | 4.63 | |
+
+Findings:
+
+- **The gain from order is modest and not monotone.** The TENO central
+  polynomials are least-squares fits over about twice as many cells as
+  coefficients, which smooths: TENO5 resolves 1.35 (2D) to 1.8 (3D) times the
+  wavenumber of MUSCL. Even orders beat the next odd one: with an upwind
+  flux their leading error is dispersive, so the dissipation starts an
+  order later. TENO3 resolves
+  less than MUSCL in 2D. Chow & Moin's filter-to-grid ratio of about 4 for a
+  second-order scheme matches MUSCL's $r$ of 5.8 in order of magnitude.
+- **The troubled-cell flag is a poor proxy for resolution.** On a smooth
+  wave, TENO with every cell troubled picks the central polynomial on every
+  face and resolves as the linear scheme does; only when the cutoff rejects
+  it (sector stencils, the fallback at discontinuities) does $r$ drop to
+  MUSCL's level or below (6.78 in 2D, 4.63 in 3D). So the width should
+  follow the stencil chosen per face, not the cell's flag, if this is pursued.
+- **Cell type matters as much as order.** In units of $V^{1/2}$, MUSCL on
+  irregular triangles resolves like TENO5 on quadrilaterals ($r$ 4.3), since
+  a triangle mesh has two cells per square of the same edge.
+
+**Opt-in width.** `effective_width = true` multiplies every width of the
+models by $\rho = \min(1, r_\mathrm{TENO}/r_\mathrm{MUSCL})$ of the order
+(uniform-mesh values; 2D: 1, 0.631, 0.740, 0.497; 3D: 0.893, 0.624, 0.560,
+0.488 for orders 3-6) in cells whose last reconstruction found them smooth,
+and 1 in troubled cells. MUSCL is the reference since the constants (Lilly,
+Nicoud et al.) and $n_\mathrm{res} = 5$ were set with second-order codes. A
+ratio rises at once when a cell turns troubled (no step with a too-small
+width next to a shock) and relaxes down by a tenth of the gap per step,
+about the time the flow takes to cross the central stencil at CFL 0.3-1;
+the ratio is a state of the run, so restart files carry it
+(`LES_WIDTH_RATIO`). Since the eddy viscosity, PaSR and TFLES all read
+`les_delta` and `les_width`, applying the ratio there makes the use
+consistent: $\nu_t \propto \Delta^2$, $\tau_\mathrm{mix} \propto \Delta^2$,
+$F_\mathrm{max} = n_\mathrm{res}\Delta/\delta_L$ and the efficiency at
+$F\delta_L$ (and Colin's $u'_\Delta \propto \Delta^3$). The solver change is
+one call at the end of a step, behind `if (les.effective_width)`.
+
+**Validation: Comte-Bellot & Corrsin** (`examples/cbc_les` set-up, Sigma,
+CFL 0.8, two rescaled pre-runs; columns as in section 8.1: log10 RMS of
+$E/E_\mathrm{CBC}$ for $k \le 2k_c/3$ and resolved over measured energy up to
+$k_c$ at stations 2 / 3, budget shares averaged to station 3). TENO is run
+with the HLLC flux, since with the hybrid flux its stencil selection feeds
+energy in (section 8.1); MUSCL with both. On every run TENO flagged 0% of the
+cells troubled, so the width ratio was 0.56 everywhere.
+
+| Mesh | Reconstruction | Flux | Model | Spectral error | Energy | Numerical | SGS | Molecular |
+|---|---|---|---|---|---|---|---|---|
+| 32³ | MUSCL | hybrid | Sigma | 0.153 / 0.151 | 1.54 / 1.50 | -0.044 | 0.856 | 0.188 |
+| 32³ | MUSCL | hybrid | none | 0.224 / 0.329 | 2.07 / 2.93 | -0.365 | 0.000 | 1.365 |
+| 32³ | MUSCL | HLLC | Sigma | 0.083 / 0.077 | 1.14 / 1.09 | 0.592 | 0.338 | 0.071 |
+| 32³ | MUSCL | HLLC | dynamic Sigma | 0.096 / 0.090 | 1.18 / 1.15 | 0.639 | 0.285 | 0.076 |
+| 32³ | MUSCL | HLLC | none | 0.149 / 0.150 | 1.36 / 1.35 | 0.899 | 0.000 | 0.101 |
+| 32³ | TENO5 | HLLC | Sigma | 0.112 / 0.113 | 1.18 / 1.16 | 0.584 | 0.345 | 0.071 |
+| 32³ | TENO5 | HLLC | dynamic Sigma | 0.130 / 0.136 | 1.24 / 1.24 | 0.643 | 0.280 | 0.077 |
+| 32³ | TENO5 | HLLC | Sigma, `effective_width` | **0.158 / 0.172** | 1.34 / 1.36 | 0.756 | 0.155 | 0.089 |
+| 32³ | TENO5 | HLLC | none | 0.184 / 0.204 | 1.43 / 1.48 | 0.897 | 0.000 | 0.103 |
+| 48³ | MUSCL | hybrid | Sigma | 0.144 / 0.135 | 1.39 / 1.19 | -0.025 | 0.775 | 0.250 |
+| 48³ | MUSCL | HLLC | Sigma | 0.087 / 0.111 | 1.08 / 1.03 | 0.560 | 0.338 | 0.102 |
+| 48³ | MUSCL | HLLC | none | 0.149 / 0.131 | 1.27 / 1.20 | 0.854 | 0.000 | 0.146 |
+| 48³ | TENO5 | HLLC | Sigma | 0.107 / 0.115 | 1.11 / 1.05 | 0.554 | 0.344 | 0.102 |
+| 48³ | TENO5 | HLLC | dynamic Sigma | 0.127 / 0.123 | 1.17 / 1.11 | 0.621 | 0.266 | 0.113 |
+| 48³ | TENO5 | HLLC | Sigma, `effective_width` | **0.156 / 0.147** | 1.24 / 1.18 | 0.723 | 0.149 | 0.128 |
+| 48³ | TENO5 | HLLC | none | 0.187 / 0.178 | 1.33 / 1.26 | 0.853 | 0.000 | 0.147 |
+
+![Spectra with and without the effective width](../images/cbc_effective_width.png)
+
+Findings:
+
+- **With an upwind flux the scheme dominates the dissipation** (55-60% with
+  Sigma at its constant, 85-90% without a model), at both resolutions and
+  for both reconstructions: Garnier et al.'s warning holds, and these runs
+  are mostly implicit LES with a model on top.
+- **Every TENO5 + HLLC run under-dissipates** at these resolutions
+  (energy above the measurement, a positive spectral bias), and less
+  model makes it worse: `effective_width` cuts the SGS share from 0.34 to
+  0.15 and raises the spectral error from 0.112 / 0.113 to 0.158 / 0.172 at
+  32³ and from 0.107 / 0.115 to 0.156 / 0.147 at 48³.
+  The dynamic constant also lowers C and the accuracy. The opposite of the
+  hypothesis: the model is not over-dissipative on top of TENO5 here, it is
+  needed to make up for TENO's lower numerical dissipation near $k_c$.
+- **MUSCL + HLLC with Sigma at 1.35 is the most accurate** of these runs at
+  32³ and 48³, at a ninth of TENO5's cost.
+- The rows for MUSCL with the hybrid flux reproduce section 8.1 (0.153 / 0.151
+  at 32³).
+
+**Recommendation.** Keep `V^(1/d)` (Scotti's in 3D) as the default for every
+reconstruction, and keep `effective_width` opt-in and experimental. Before any
+default changes: (1) base the ratio on the per-face stencil choice rather
+than the troubled flag; (2) validate where the model, not the scheme, does
+the work (TENO with a low-dissipation flux that does not feed energy in, or
+64³-128³ CBC where $k_c$ is in the inertial range), and on the channel and a
+turbulent flame, which need GPU-scale runs; (3) revisit $n_\mathrm{res}$ for
+TFLES separately, from flame-resolution tests rather than from the
+eddy-viscosity argument.
 
 ## 4. Keeping the model's dissipation dominant
 
