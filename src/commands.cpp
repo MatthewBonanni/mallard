@@ -180,7 +180,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard -i input.toml --restart solut/restart_010000.restart\n"
                     "$ mpirun -n 4 mallard -i input.toml --restart latest",
         .exit_status = "0  the run reached a stop condition (n_steps, t_stop, t_wall_stop)\n"
-                       "1  an error, divergence included\n"
+                       "1  an error, divergence included (the divergence report says why)\n"
                        "2  usage error: an unknown option or command, no -i\n"
                        "3  stopped on request (signal, mallard ctl stop, STOP file), restart written",
         .dim = Case::input,
