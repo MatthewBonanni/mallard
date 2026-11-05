@@ -20,11 +20,10 @@
 
 namespace numerics_preset {
 
-/** @brief One key a preset sets, as resolved for a run. */
+/** @brief One key a preset covers, and who set it; its value is the key's record (resolve_input). */
 struct Setting {
-    std::string key;    ///< Full key, e.g. "numerics.face_reconstruction.type" or "run.cfl"
-    std::string value;  ///< Resolved value, e.g. "TENO", "5", "0.8"
-    bool from_preset;   ///< false: the input sets the key, overriding the preset
+    std::string key;   ///< Full key, e.g. "numerics.face_reconstruction.type" or "run.cfl"
+    bool from_preset;  ///< false: the input sets the key, overriding the preset
 };
 
 /** @brief The preset of a run and what became of each of its keys. */
@@ -32,8 +31,8 @@ struct Resolution {
     std::string name;               ///< Empty without a preset
     std::vector<Setting> settings;  ///< Every key the preset covers, in the preset's order
 
-    /** @brief "accurate", plus the keys the input overrides, for the log. */
-    std::string summary() const;
+    /** @brief "accurate", plus the keys the input overrides with their resolved values, for the log. */
+    std::string summary(const ResolvedInput & resolved) const;
 };
 
 /** @brief The preset names, in the order the documentation lists them. */

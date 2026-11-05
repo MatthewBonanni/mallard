@@ -21,10 +21,10 @@
 namespace {
 
 /** @brief A constant program holding v exactly. */
-std::shared_ptr<expr::Program> constant(const double v, const std::string & name) {
+std::shared_ptr<kexpr::Program> constant(const double v, const std::string & name) {
     std::ostringstream text;
     text << std::setprecision(17) << v;
-    return std::make_shared<expr::Program>(name, text.str(), BoundaryValue::variables());
+    return std::make_shared<kexpr::Program>(name, text.str(), BoundaryValue::variables());
 }
 
 std::string real(const double v) {
@@ -42,7 +42,7 @@ const std::vector<std::string> & BoundaryValue::variables() {
 
 BoundaryValue::BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension) {
     if (is_expression(v)) {
-        program = std::make_shared<expr::Program>(name, v.as_string(), variables());
+        program = std::make_shared<kexpr::Program>(name, v.as_string(), variables(), expression_unit_hint);
     } else {
         program = constant(as_double(v, name, dimension), name);
     }
@@ -298,7 +298,7 @@ void TimedBoundaryFields::finish() {
         const bool normal = fields.get_type() == BoundaryType::INLET_MASS_FLOW || !fields.is_directed();
         FOR_I_DIM h_direction(k, i) = normal ? faces_host[k].n_in[i] : fields.get_direction()[i];
     }
-    std::vector<const expr::Program *> all;
+    std::vector<const kexpr::Program *> all;
     set_type = Kokkos::View<uint8_t *[2]>("timed_set_type", n_sets);
     set_slot = Kokkos::View<int32_t *[BoundaryFields::N_SLOTS]>("timed_set_slot", n_sets);
     set_composition = Kokkos::View<int32_t *[4]>("timed_set_composition", n_sets);
@@ -342,7 +342,7 @@ void TimedBoundaryFields::finish() {
     Kokkos::deep_copy(set_composition, h_comp);
     Kokkos::deep_copy(composition_species, h_species);
     Kokkos::deep_copy(composition_program, h_program);
-    programs = expr::ProgramTable<>(all);
+    programs = kexpr::ProgramTable<>(all);
     program_list = all;
     error_face = Kokkos::View<int32_t>("timed_error_face");
     error = Kokkos::View<double[3]>("timed_error");
@@ -360,7 +360,7 @@ struct TimedFieldsFunctor {
     Kokkos::View<int32_t *[4]> set_composition;
     Kokkos::View<uint32_t *> composition_species;
     Kokkos::View<uint32_t *> composition_program;
-    expr::ProgramTable<> programs;
+    kexpr::ProgramTable<> programs;
     Kokkos::View<rtype> time;
     Kokkos::View<BoundaryCondition *> bcs;
     TimedBoundaryFields::Gas gas;
@@ -380,7 +380,7 @@ struct TimedFieldsFunctor {
         const uint32_t i_bc = face_bc(k), s = face_set(k);
         const double t = static_cast<double>(time());
         const double vars[4] = {face_x(k, 0), face_x(k, 1), face_x(k, 2), t};
-        const expr::ArrayVariables variables{vars};
+        const kexpr::ArrayVariables variables{vars};
         double value[BoundaryFields::N_SLOTS] = {};
         bool has[BoundaryFields::N_SLOTS] = {};
         for (int j = 0; j < BoundaryFields::N_SLOTS; j++) {
@@ -496,14 +496,14 @@ struct InletTargetsFunctor {
     Kokkos::View<double *[3]> x;
     Kokkos::View<uint32_t *[N_DIM]> slots;
     Kokkos::View<double *[N_DIM]> scale;
-    expr::ProgramTable<> programs;
+    kexpr::ProgramTable<> programs;
     Kokkos::View<rtype *[N_DIM]> target;
     double t;
 
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k) const {
         const double vars[4] = {x(k, 0), x(k, 1), x(k, 2), t};
         for (uint8_t d = 0; d < N_DIM; d++) {
-            target(chars(k), d) = static_cast<rtype>(programs(slots(k, d), expr::ArrayVariables{vars}) * scale(k, d));
+            target(chars(k), d) = static_cast<rtype>(programs(slots(k, d), kexpr::ArrayVariables{vars}) * scale(k, d));
         }
     }
 };
@@ -545,7 +545,7 @@ void TimedBoundaryFields::check() const {
                      (slot == BoundaryFields::SLOT_FLUX ? "non-negative" : "positive") + " (" + real(h_error(1)) + at + ").");
 }
 
-void DirichletStates::add(const std::vector<std::shared_ptr<const expr::Program>> & W,
+void DirichletStates::add(const std::vector<std::shared_ptr<const kexpr::Program>> & W,
                           const std::vector<int32_t> & states, const std::vector<Point> & x) {
     const uint32_t set = static_cast<uint32_t>(set_timed.size());
     const bool timed = std::any_of(W.begin(), W.end(), [](const auto & w) { return w->uses(3); });
@@ -561,7 +561,7 @@ struct DirichletStatesFunctor {
     Kokkos::View<int32_t *> face_state_index;
     Kokkos::View<uint32_t *> face_set;
     Kokkos::View<double *[3]> face_x;
-    expr::ProgramTable<> programs;
+    kexpr::ProgramTable<> programs;
     Kokkos::View<rtype> time;
     Kokkos::View<rtype *[N_DIM + 2]> face_state;
 
@@ -570,7 +570,7 @@ struct DirichletStatesFunctor {
         const double vars[4] = {face_x(k, 0), face_x(k, 1), face_x(k, 2), static_cast<double>(time())};
         for (uint32_t i = 0; i < N_W; i++) {
             face_state(face_state_index(k), i) =
-                static_cast<rtype>(programs(face_set(k) * N_W + i, expr::ArrayVariables{vars}));
+                static_cast<rtype>(programs(face_set(k) * N_W + i, kexpr::ArrayVariables{vars}));
         }
     }
 };
@@ -594,9 +594,9 @@ void DirichletStates::finish(const Kokkos::View<rtype *[N_DIM + 2]> & face_state
     Kokkos::deep_copy(face_state_index, h_index);
     Kokkos::deep_copy(face_set, h_set);
     Kokkos::deep_copy(face_x, h_x);
-    std::vector<const expr::Program *> all;
+    std::vector<const kexpr::Program *> all;
     for (const auto & p : host_programs) all.push_back(p.get());
-    programs = expr::ProgramTable<>(all);
+    programs = kexpr::ProgramTable<>(all);
     if (n == n_timed) return;
     Kokkos::parallel_for("dirichlet_states", Kokkos::RangePolicy<>(n_timed, n),
                          DirichletStatesFunctor{face_state_index, face_set, face_x, programs,
@@ -621,7 +621,7 @@ bool TimedInletTargets::depends_on_time(const Input & entry, const std::string &
     for (size_t d = 0; d < u.items.size(); d++) {
         const Input & v = u.items[d];
         if (!BoundaryValue::is_expression(v)) continue;
-        const expr::Program p(where + ".u[" + std::to_string(d) + "]", v.as_string(), BoundaryValue::variables());
+        const kexpr::Program p(where + ".u[" + std::to_string(d) + "]", v.as_string(), BoundaryValue::variables(), expression_unit_hint);
         if (p.uses(3)) return true;
     }
     return false;
@@ -672,9 +672,9 @@ void TimedInletTargets::finish() {
     Kokkos::deep_copy(x, h_x);
     Kokkos::deep_copy(slots, h_slots);
     Kokkos::deep_copy(scale, h_scale);
-    std::vector<const expr::Program *> all;
+    std::vector<const kexpr::Program *> all;
     for (const auto & p : host_programs) all.push_back(p.get());
-    programs = expr::ProgramTable<>(all);
+    programs = kexpr::ProgramTable<>(all);
 }
 
 void TimedInletTargets::check() const {

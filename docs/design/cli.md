@@ -18,9 +18,8 @@ Maintain  mallard test | completion | --version
 | Command | Group | Status |
 |---|---|---|
 | `mallard -i input.toml`, `ctl`, `reactor` | Run | available |
-| `--restart latest` | Run | planned ([#510](https://github.com/MatthewBonanni/mallard/issues/510)) |
-| `new`, `input upgrade` | Set up | available |
-| `input resolve` | Set up | planned ([#509](https://github.com/MatthewBonanni/mallard/issues/509)) |
+| `--restart latest` | Run | available |
+| `new`, `input upgrade`, `input resolve` | Set up | available |
 | `check input.toml` | Inspect | available |
 | `check --view DIR` (the case view) | Inspect | regions and boundary zones available; the rest planned ([#546](https://github.com/MatthewBonanni/mallard/issues/546)) |
 | `check` with no input | Inspect | planned ([#508](https://github.com/MatthewBonanni/mallard/issues/508)) |

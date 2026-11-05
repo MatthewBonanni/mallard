@@ -11,16 +11,17 @@ cannot call it. Until 0.8 a time-dependent `[source]` was evaluated on the
 host at every Runge–Kutta stage, cell by cell, and copied to the device: the
 step left the CUDA graph and spent most of its time on the host.
 
-`src/common/compiled_expression.{h,cpp}` parses the same syntax once on the
-host into a postfix program of 16-byte instructions (`expr::Program`), which
-`expr::evaluate` runs with a small stack. It is one `KOKKOS_INLINE_FUNCTION`,
+`src/common/kexpr.{h,cpp}` parses the same syntax once on the
+host into a postfix program of 16-byte instructions (`kexpr::Program`), which
+`kexpr::evaluate` runs with a small stack. It is one `KOKKOS_INLINE_FUNCTION`,
 so the host and the kernels execute the same code; variables come from a
 callable index → value, so a cell, a face or a point binds its own values
-without copying them into an array. `expr::ProgramTable` packs many programs
+without copying them into an array. `kexpr::ProgramTable` packs many programs
 into one device array.
 
-The values are exprtk's to the last bit on the host (tested on 22 expressions ×
-203 points), which needs exprtk's own semantics, not just its grammar:
+The values are exprtk's to the last bit on the host (tested against exprtk on
+45 expressions × 203 points until exprtk was removed), which needs exprtk's own
+semantics, not just its grammar:
 
 - precedence climbing with exprtk's levels: `^` right-associative, unary
   minus binding below `^` (`-x^2 = -(x^2)`), comparisons left-associative,
@@ -58,20 +59,68 @@ Locals live in the bottom slots of the evaluation stack (`LOCALS n` moves the
 stack above them; block scopes reuse slots), so a thread's storage is still the
 one `double[32]` array, and a loop's value sits in a stack slot that `break`
 and `continue` cut the stack back to (`KEEP`, `DROP`). The only new
-per-thread state is an iteration counter: after `expr::MAX_ITERATIONS`
+per-thread state is an iteration counter: after `kexpr::MAX_ITERATIONS`
 (100000) loop iterations in all, an evaluation returns NaN and records which
 program stopped in a device flag of its `ProgramTable`. The flag is read only
 where the host already waits (setup, output, a diverged step), and only for
 tables that have loops, so a runaway loop becomes an input error instead of a
-hung kernel without a synchronization per stage. Host sites that still
-evaluate exprtk (`Expression`) first compile the text with `expr::Program`,
-so every section accepts the same language with the same messages, and give
-exprtk a loop check with the same cap.
+hung kernel without a synchronization per stage.
+
+### One evaluation path, without exprtk (#449)
+
+Since 0.10 exprtk is no longer part of Mallard. The remaining host sites
+(`Expression`: sponges, boundary `where`, mass-flow profiles, compositions,
+synthetic-inflow profiles, parametric probes) evaluate the same `kexpr::Program`;
+those that evaluate at many mesh points (sponges and their compositions,
+`where`, mass-flow profiles, boundary compositions) do so in one kernel
+(`evaluate_at`), and parametric probes and synthetic-inflow profiles, which
+evaluate at a few points on the host, call the same `kexpr::evaluate`. The
+literal conversion is a port of exprtk's `string_to_real` and `derivative`
+(probe curves) of exprtk's fourth-order difference, so no value changed
+where exprtk ran with strength reduction off. exprtk ran these sites with it
+on, which rewrites a few patterns of division (`(a / b) / c → a / (b * c)`,
+`a / (b / c) → (a * c) / b`, ...); expressions of those forms now round as
+written. Of the 77 expressions in the examples and tutorials, only one would
+round differently (by up to 34 ulp, through `cos` of a rewritten argument),
+and it is a boundary value, compiled since 0.9. Where the host compiler
+contracts multiply-adds (Apple silicon by default), exprtk's fused nodes such
+as `a * b + c` also rounded once; the engine never contracts. In a 2D test
+case with a sponge, `where` filters and a mass-flow profile free of such
+divisions, 20 steps of the
+solution are bitwise the same as before without contraction, and differ in
+the last bits (relative 1e-15) with it. The tests check the engine
+against hand-written references of each expression and the device against
+the host.
 
 Measured on the host (Apple M4 Pro, 2 threads, 2M points, best of 7), the
 expressions of the tests and the source below compile to the same
 instructions as before and evaluate 10–25% faster (the source: 40.5 → 36.4 ns
 per evaluation), from the interpreter's reordered dispatch.
+
+### Geometry, expressions and inputs apart (#449)
+
+Three layers, each unaware of the one above:
+
+- `geometry.h`: primitives, transforms and booleans (`region::Node`,
+  `distance`, `indicator`), for kernels and the host. An implicit shape is
+  whatever callable the caller passes, `implicit(i, q)` at the local point
+  `q`, so the geometry knows neither kexpr nor inputs.
+- `kexpr.{h,cpp}`: the expression engine. Where an input-facing caller wants
+  more in the error for an unknown symbol (the hint that expressions take no
+  unit symbols, from `units.h`), it passes a `SymbolHint`.
+- `region.{h,cpp}` joins them: `ImplicitPrograms` evaluates implicit shape
+  `i` as program `i` of a `kexpr::ProgramTable`, and a `Region` is built
+  from a `region::Definition`, plain data. `region_input.{h,cpp}` parses
+  input tables into definitions (`region::parse`, `region::read`) and holds
+  what refers to the input: named regions, regions of the mesh and
+  `region::Regions`.
+
+`src/CMakeLists.txt` checks that `geometry.h` and `kexpr.{h,cpp}` include no
+other Mallard header. The code that evaluates is unchanged, and so is every
+result: a 2D case (48² triangles, 4 steps) and a 3D one (20³, 3 steps) whose
+initial regions, sources, sponges and region probes use every kind of node
+(each primitive and boolean), smooth edges and boundaries of implicit shapes
+write the same solution and probe files, byte for byte, before and after.
 
 ## Stage times in captured steps
 
@@ -149,7 +198,7 @@ every stage; cells outside a region skip it.
 ## Reuse
 
 Boundary expressions (#316), sponges and `[initialize]` still evaluate exprtk
-on the host where they are evaluated once (checked by `expr::Program`);
+on the host where they are evaluated once (checked by `kexpr::Program`);
 adopting it for evaluation is a matter of binding their variables (#449). Sponges
 and probes take regions too (#499), and initialization is to (#324).
 
@@ -158,7 +207,7 @@ and probes take regions too (#499), and initialization is to (#324).
 and shared by every key that names it (a source, the sponge and the probe of
 the same region read one array). It reads `[regions]` lazily, entry by entry,
 so a name no key uses stays an unused key, reported like any other. Each
-primitive type has one fixed dimension (`PRIMITIVES` in `region.cpp`; all of
+primitive type has one fixed dimension (`types()` in `region_input.cpp`; all of
 them fill space so far), a boolean requires its parts to share it, and
 consumers check it (`require_full_dimension` for sources, sponges and region
 probes), so that

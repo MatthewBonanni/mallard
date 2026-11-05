@@ -56,7 +56,7 @@
 #include "numerics_preset.h"
 #include "run_status.h"
 #include "input_upgrade.h"
-#include "region.h"
+#include "region_input.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -95,7 +95,7 @@ struct KineticEnergyBudget {
  */
 struct DirichletBoundary {
     std::vector<uint32_t> faces;
-    std::vector<std::shared_ptr<const expr::Program>> W;
+    std::vector<std::shared_ptr<const kexpr::Program>> W;
 };
 
 /** @brief Thrown inside the time loop when the state stops being valid; run() handles it. */
@@ -123,7 +123,11 @@ class Solver {
          */
         int init(const std::string & input_file_name, const std::string & restart_file = {});
 
-        /** @brief Replaces the input's [initialize] by a start from restart_file (`--restart`). */
+        /**
+         * @brief Replaces the input's [initialize] by a start from restart_file (`--restart`).
+         *        "latest" is the newest complete restart file the input's restart writers
+         *        wrote (newest_restart), or, if there is none, the input's [initialize].
+         */
         static void start_from_restart(Input & input, const std::string & restart_file);
 
         /**
@@ -478,7 +482,7 @@ class Solver {
         std::shared_ptr<Mesh> get_mesh() const { return mesh; }
         /** @brief The input after its numerics preset, if any, filled the keys it leaves unset. */
         const Input & resolved_input() const { return input; }
-        /** @brief The numerics preset and the value and origin of each of its keys. */
+        /** @brief The numerics preset and the origin of each of its keys. */
         const numerics_preset::Resolution & get_numerics_preset() const { return preset; }
 
         /** @brief Test-only: errors injected into the update, for the conservation ledger's tests. */
@@ -569,7 +573,7 @@ class Solver {
         std::string stop_reason() const;  // Empty while no stop condition holds
         bool state_needed() const;        // Whether output, checks or the end of the run read the state now
         double progress() const;          // Fraction of the run done, by the first stop condition to hit
-        void print_setup() const;
+        void print_setup(const ResolvedInput & resolved) const;
         void print_progress();
         void print_summary(const std::string & stop) const;
         /** @brief The status at this step, throughput since the last progress row; no diagnostics or memory. */

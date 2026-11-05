@@ -248,10 +248,8 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
     EXPECT_EQ(p["mesh"]["type"].string, "cartesian");
     EXPECT_FALSE(p["mesh"].has("sha256")) << "a generated mesh is given by the input";
     EXPECT_EQ(p["preset"].type, Value::Type::NUL);
-    // The setup resolves what the input leaves to defaults, e.g. the time integrator
-    bool integrator = false;
-    for (const auto & item : p["setup"]["Numerics"].array) integrator |= item.array.at(0).string == "Time integrator";
-    EXPECT_TRUE(integrator);
+    EXPECT_NE(p["input"]["resolved"].string.find("\ntime_integrator = \"SSPRK3\"\n"), std::string::npos)
+        << "the resolved input holds what the input leaves to defaults";
 
     EXPECT_EQ(read_restart(dir + "/r_000004.restart").provenance, expected);
     for (const std::string & vtu : comm::size() > 1 ? std::vector<std::string>{"f_000004.pvtu", "f_000004_p0000.vtu"}
@@ -356,21 +354,44 @@ TEST(ProvenanceTest, RecordsTheResolvedNumericsPreset) {
     solver.init(parse_toml(input));
     const Value p = json::parse(provenance::json());
     const auto & resolved = solver.get_numerics_preset();
+    const ResolvedInput records = resolve_input(solver.resolved_input());
     EXPECT_EQ(p["preset"]["name"].string, "robust");
     ASSERT_EQ(p["preset"]["settings"].array.size(), resolved.settings.size());
     bool overridden = false;
     for (size_t i = 0; i < resolved.settings.size(); i++) {
         const Value & s = p["preset"]["settings"].array[i];
         EXPECT_EQ(s["key"].string, resolved.settings[i].key);
-        EXPECT_EQ(s["value"].string, resolved.settings[i].value);
+        ASSERT_NE(records.find(s["key"].string), nullptr) << s["key"].string;
+        EXPECT_EQ(s["value"].string, records.find(s["key"].string)->value) << "a view of the key's record";
         EXPECT_EQ(s["from_preset"].boolean, resolved.settings[i].from_preset);
         if (s["key"].string == "numerics.riemann_solver") {
             overridden = true;
-            EXPECT_EQ(s["value"].string, "HLLC");
+            EXPECT_EQ(s["value"].string, "\"HLLC\"");
             EXPECT_FALSE(s["from_preset"].boolean) << "the input sets it";
         }
     }
     EXPECT_TRUE(overridden);
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+}
+
+// The provenance holds the input as setup used it, the text mallard input resolve
+// writes: a quantity with a unit in the key's units, a default written out, and
+// the same text again when run. Fails if check and a run read different keys, or a
+// key written out changes what setup reads.
+TEST(ProvenanceTest, HoldsTheResolvedInput) {
+    const std::string dir = (scratch_dir() / "mallard_provenance_resolved").string();
+    std::string input = box(dir, 2, UNIFORM, false);
+    input.replace(input.find("cfl = 0.25\n"), 11, "cfl = 0.25\nt_stop = \"1 min\"\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    const std::string resolved = json::parse(provenance::json())["input"]["resolved"].string;
+    EXPECT_NE(resolved.find("\nt_stop = 60.0\n"), std::string::npos) << resolved;
+    EXPECT_NE(resolved.find("\nconvective_flux = \"riemann\"\n"), std::string::npos) << "a default";
+    Solver checked;
+    EXPECT_EQ(checked.check(parse_toml(input), CheckOptions{}).resolved, resolved);
+    Solver again;
+    again.init(parse_toml(resolved));
+    EXPECT_EQ(json::parse(provenance::json())["input"]["resolved"].string, resolved);
     if (comm::is_root()) std::filesystem::remove_all(dir);
 }
 

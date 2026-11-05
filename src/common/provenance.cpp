@@ -38,6 +38,7 @@
 #include "common_typedef.h"
 #include "git_version.h"
 #include "json.h"
+#include "log.h"
 #include "version.h"
 
 namespace provenance {
@@ -253,10 +254,10 @@ std::string code_block() {
 
 struct State {
     std::string run;    // JSON object, or empty
-    std::string input;  // JSON object, or empty
+    bool has_input = false;
+    std::string input_file, input_text, resolved;
     std::string mesh;   // JSON object, or empty
     std::string preset; // JSON object or null, or empty
-    std::string setup;  // JSON object, or empty
     std::string text;   // the block
     std::string placement = "[]";  // JSON array, one object per rank
     int n_hosts = 1;
@@ -276,10 +277,19 @@ void rebuild() {
     p.add("schema", SCHEMA).add("version", VERSION).raw("mallard", code).raw("build", build)
         .raw("dependencies", dependencies);
     if (!s.run.empty()) p.raw("run", s.run);
-    if (!s.input.empty()) p.raw("input", s.input);
+    if (s.has_input) {
+        json::Object i;
+        if (s.input_file.empty()) {
+            i.raw("file", "null");
+        } else {
+            i.add("file", s.input_file);
+        }
+        i.add("sha256", sha256(s.input_text)).add("text", s.input_text);
+        if (!s.resolved.empty()) i.add("resolved", s.resolved);
+        p.raw("input", i.str());
+    }
     if (!s.mesh.empty()) p.raw("mesh", s.mesh);
     if (!s.preset.empty()) p.raw("preset", s.preset);
-    if (!s.setup.empty()) p.raw("setup", s.setup);
     s.text = p.str();
 }
 
@@ -372,13 +382,15 @@ void set_placement() {
 const std::string & placement() { return state().placement; }
 
 void set_input(const std::string & file, const std::string & text) {
-    json::Object i;
-    if (file.empty()) {
-        i.raw("file", "null");
-    } else {
-        i.add("file", file);
-    }
-    state().input = i.add("sha256", sha256(text)).add("text", text).str();
+    State & s = state();
+    s.has_input = true;
+    s.input_file = file;
+    s.input_text = text;
+    rebuild();
+}
+
+void set_resolved(const std::string & toml) {
+    state().resolved = toml;
     rebuild();
 }
 
@@ -402,20 +414,6 @@ void set_preset(const std::string & name, const std::vector<std::tuple<std::stri
         }
         state().preset = json::Object().add("name", name).raw("settings", list + "]").str();
     }
-    rebuild();
-}
-
-void set_setup(const logging::Record & setup) {
-    json::Object s;
-    for (const auto & [title, items] : setup) {
-        std::string list = "[";
-        for (const auto & [key, value] : items) {
-            if (list.size() > 1) list += ',';
-            list += "[" + json::quote(key) + "," + json::quote(value) + "]";
-        }
-        s.raw(title, list + "]");
-    }
-    state().setup = s.str();
     rebuild();
 }
 
@@ -464,6 +462,30 @@ std::string parse_comment(std::string_view text) {
     a += CSV_OPEN.size();
     const size_t b = text.find('\n', a);
     return std::string(text.substr(a, b == std::string_view::npos ? std::string_view::npos : b - a));
+}
+
+std::string find_string(std::string_view block, std::string_view object, std::string_view key) {
+    // Outside strings, "<object>":{ can only be the object's key: inside one, its quotes are escaped
+    const std::string open = json::quote(object) + ":{";
+    const std::string name = json::quote(key) + ":\"";
+    size_t i = block.find(open);
+    if (i == std::string_view::npos) return "";
+    int depth = 0;
+    for (i += open.size(); i < block.size(); i++) {
+        if (block[i] == '{') {
+            depth++;
+        } else if (block[i] == '}') {
+            if (depth-- == 0) return "";
+        } else if (block[i] == '"') {
+            const bool found = depth == 0 && block.substr(i, name.size()) == name;
+            const size_t first = found ? i + name.size() : i + 1;
+            for (i = first; i < block.size() && block[i] != '"'; i++) {
+                if (block[i] == '\\') i++;
+            }
+            if (found) return i < block.size() ? std::string(block.substr(first, i - first)) : "";
+        }
+    }
+    return "";
 }
 
 } // namespace provenance

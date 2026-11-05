@@ -1,9 +1,10 @@
 /**
- * @file compiled_expression.h
+ * @file kexpr.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Expressions compiled once on the host into a stack program with
+ * @brief kexpr (Kokkos expressions): expressions compiled once on the host into a stack program with
  *        jumps that kernels evaluate on the device (and the host) with the
- *        same code.
+ *        same code. The language follows exprtk (Arash Partow, MIT License;
+ *        see licenses/exprtk-MIT.txt and NOTICE).
  * @version 0.1
  * @date 2026-10-15
  *
@@ -11,8 +12,8 @@
  *
  */
 
-#ifndef COMPILED_EXPRESSION_H
-#define COMPILED_EXPRESSION_H
+#ifndef KEXPR_H
+#define KEXPR_H
 
 #include <cstdint>
 #include <string>
@@ -20,7 +21,7 @@
 
 #include <Kokkos_Core.hpp>
 
-namespace expr {
+namespace kexpr {
 
 /** @brief Slots for a program's local variables and its deepest evaluation stack. */
 constexpr int MAX_STACK = 32;
@@ -294,16 +295,21 @@ struct ArrayVariables {
  *        with strength reduction off: the same operations in the same order,
  *        integer powers by exprtk's multiplications, constants folded.
  *        Unlike exprtk, names are case sensitive (T is not t). See
- *        docs/guide/input_files.md#expressions.
+ *        docs/guide/expressions.md.
  */
+/** @brief Text added to the error for an unknown symbol, from the symbol (e.g. a hint about units), or empty. */
+using SymbolHint = std::string (*)(const std::string & symbol);
+
 class Program {
     public:
         /**
          * @param name Name for error messages.
          * @param text The expression.
          * @param variables Names of the variables it may read, by index.
+         * @param hint Adds to the error for an unknown symbol, or null.
          */
-        Program(const std::string & name, const std::string & text, const std::vector<std::string> & variables);
+        Program(const std::string & name, const std::string & text, const std::vector<std::string> & variables,
+                SymbolHint hint = nullptr);
 
         const std::vector<Instr> & code() const { return m_code; }
 
@@ -381,6 +387,6 @@ struct ProgramTable {
     }
 };
 
-} // namespace expr
+} // namespace kexpr
 
-#endif // COMPILED_EXPRESSION_H
+#endif // KEXPR_H

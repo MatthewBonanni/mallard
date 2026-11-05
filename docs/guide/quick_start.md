@@ -28,5 +28,5 @@ The [tutorials](../tutorials/index.md) are an ordered path, each building on the
 8. [Measuring a flow](../tutorials/measuring.md): named regions, probes, fluxes, a control-volume balance, phase averages and spectra
 
 The [examples](https://matthewbonanni.github.io/mallard/docs/examples/) are 40 ready-to-run cases to
-browse, and the user guide covers each topic: [input files](input_files.md), [meshes](meshes.md),
+browse, and the user guide covers each topic: [input files](input_files.md), [expressions](expressions.md), [meshes](meshes.md),
 [boundary conditions](boundary_conditions.md), [numerics](numerics.md), [output](output.md).

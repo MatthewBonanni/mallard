@@ -26,7 +26,6 @@ cd "$PBS_O_WORKDIR" || exit 1
 MALLARD=mallard                    # <mallard, or the path to it>
 INPUT=input.toml
 SCRIPT=pbs.sh                      # <this file's name, to submit the continuation>
-RESTARTS='restart_*.restart'       # <the restart files the run writes; the newest is resumed from>
 STOP_BEFORE=300                    # seconds before the walltime to stop (longer than a step plus a restart write)
 MAX_JOBS=20                        # resubmit at most this many times
 
@@ -38,9 +37,8 @@ threads=16                         # <cores per node / ranks per node>
 export OMP_NUM_THREADS=$threads OMP_PROC_BIND=spread OMP_PLACES=threads
 
 rm -f .at_limit
-args=(-i "$INPUT")
-latest=$(ls -1t $RESTARTS 2>/dev/null | head -n 1)
-[ -n "$latest" ] && args+=(--restart "$latest")
+# The newest complete restart file, or the input's [initialize] on the first job
+args=(-i "$INPUT" --restart latest)
 
 # Open MPI. Cray PALS: mpiexec -n N --ppn $ranks_per_node --depth $threads --cpu-bind depth.
 # MPICH (Hydra): mpiexec -n N -ppn $ranks_per_node -bind-to core:$threads

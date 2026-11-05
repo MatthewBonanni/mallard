@@ -16,6 +16,9 @@ int run_main(const cli::Args & args);
 /** @brief `mallard check input.toml`: sets up a case and reports on it. */
 int check_main(const cli::Args & args);
 
+/** @brief `mallard input resolve input.toml`: writes the input as setup uses it. */
+int resolve_main(const cli::Args & args);
+
 /** @brief `mallard reactor -i input.toml`: a 0D reactor or chemistry benchmark. */
 int reactor_main(const cli::Args & args);
 

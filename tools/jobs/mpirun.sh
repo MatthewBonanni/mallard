@@ -14,7 +14,6 @@ set -u
 
 MALLARD=${MALLARD:-mallard}        # <mallard, or the path to it>
 INPUT=${INPUT:-input.toml}
-RESTARTS='restart_*.restart'       # <the restart files the run writes; the newest is resumed from>
 
 # Physical cores (not hardware threads), which mpirun binds ranks to
 cores=$(lscpu -p=core,socket 2>/dev/null | grep -v '^#' | sort -u | wc -l)
@@ -29,9 +28,8 @@ fi
 threads=${THREADS:-$(( cores / NRANKS > 0 ? cores / NRANKS : 1 ))}
 export OMP_NUM_THREADS=$threads OMP_PROC_BIND=spread OMP_PLACES=threads
 
-args=(-i "$INPUT")
-latest=$(ls -1t $RESTARTS 2>/dev/null | head -n 1)
-[ -n "$latest" ] && args+=(--restart "$latest")
+# The newest complete restart file, or the input's [initialize] on the first run
+args=(-i "$INPUT" --restart latest)
 
 # Open MPI: each rank on $threads consecutive cores. MPICH: replace the
 # options by "-bind-to core:$threads". macOS cannot bind processes to cores.
