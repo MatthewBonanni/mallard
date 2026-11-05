@@ -362,7 +362,7 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
         const double x_max = les_on ? LES_X_PLUS : DNS_X_PLUS, z_max = les_on ? LES_Z_PLUS : DNS_Z_PLUS;
         if (resolved && r.y_plus_max > WALL_Y_PLUS) {
             r.warnings.push_back(format("first cells at y+ up to %.3g (at %s; u_tau from %s): %s needs y+ <= %.0f at "
-                                        "the first cell centres: place them at most %s from the wall, or model the "
+                                        "the first cell centers: place them at most %s from the wall, or model the "
                                         "walls (wall_model)",
                                         r.y_plus_max, point(y_plus.x).c_str(), u_tau_basis.c_str(), regime.c_str(),
                                         WALL_Y_PLUS, g3(y1_fix).c_str()));

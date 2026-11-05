@@ -386,7 +386,7 @@ TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
     const CheckReport r = check(s.str());
     ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
     EXPECT_NEAR(r.u_tau / nu, 180.0, 0.03 * 180.0);
-    const double y1 = 1.0 / 16.0;  // the first cell centres: half of 2 / 16
+    const double y1 = 1.0 / 16.0;  // the first cell centers: half of 2 / 16
     EXPECT_NEAR(r.y_plus_max, y1 * r.u_tau / nu, 1e-5 * r.y_plus_max);
     EXPECT_NEAR(r.y_plus_mean, r.y_plus_max, 1e-5 * r.y_plus_max);
     EXPECT_NEAR(r.x_plus_max, 0.5 * r.u_tau / nu, 1e-5 * r.x_plus_max);

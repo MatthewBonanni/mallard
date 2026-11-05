@@ -352,7 +352,7 @@ laminar profile:
                      first-cell y+ up to 1.43 at (0.2618, 1.992, 0.1309), mean 1.43; x+ up to 95.2, z+ up to 47.6
   Kolmogorov         eta 0.0102 from the mean epsilon 0.00422 (the forcing's power, u_tau^2 U_b / h) and nu 0.000357
                      cells of 21.4 eta on average, up to 24.5 at (8.639, 1.057, 1.44)
-warning: first cells at y+ up to 1.43 (at (0.2618, 1.992, 0.1309); u_tau from Dean's channel correlation): DNS needs y+ <= 1 at the first cell centres: place them at most 0.0055 from the wall, or model the walls (wall_model)
+warning: first cells at y+ up to 1.43 (at (0.2618, 1.992, 0.1309); u_tau from Dean's channel correlation): DNS needs y+ <= 1 at the first cell centers: place them at most 0.0055 from the wall, or model the walls (wall_model)
 warning: wall cells up to x+ 95.2 and z+ 47.6 (along the flow and across it): DNS needs x+ <= 15 and z+ <= 8: refine the mesh along the walls
 warning: DNS: cells of 21.4 eta on average (eta 0.0102 from the forcing's power, u_tau^2 U_b / h): resolving the dissipation needs about 2 eta or less: refine to cells of 0.0204, or model the small scales with LES ([les])
 ```
@@ -361,7 +361,7 @@ warning: DNS: cells of 21.4 eta on average (eta 0.0102 from the forcing's power,
 |---|---|
 | Cell size | `V^(1/d)` of every cell |
 | Friction velocity `u_tau` (walls of viscous cases) | A restart's (or remap's) first-cell velocity, by the linear law or the log law; else, with `source.mass_flow`, Dean's channel correlation `C_f = 0.073 Re_b^(-1/4)` at the bulk velocity `U_b` and `h` = volume / wall area (the half-height of a channel); else a flat plate's mean skin friction (laminar, or turbulent above `Re_L = 5e5`) over the walls' length along the mean flow at the largest initial speed |
-| y+, x+, z+ | The first cell centre's distance to the wall, and the wall face's extents along the flow and across it, in wall units `nu / u_tau` |
+| y+, x+, z+ | The first cell center's distance to the wall, and the wall face's extents along the flow and across it, in wall units `nu / u_tau` |
 | Wall model's exchange point | `exchange_distance`, or `exchange_cells` wall-cell heights, in wall units |
 | Dissipation `epsilon` | With `source.mass_flow`, the forcing's power `u_tau^2 U_b / h`; else the viscous dissipation of the initial (or restart) velocity field, mass-weighted over the domain |
 | Kolmogorov length `eta` | `(nu^3 / epsilon)^(1/4)` with the domain's mean `nu` |

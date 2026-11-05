@@ -86,7 +86,7 @@ struct CheckReport {
     double delta_over_eta = 0.0;              // volume-weighted mean cell size over eta
     double taylor = 0.0;                      // Taylor microscale (15 nu u'^2 / epsilon)^(1/2)
     double u_tau = 0.0;                       // friction velocity, root mean square over the walls
-    double y_plus_max = 0.0, y_plus_mean = 0.0;  // first cell centres, resolved walls (mean: all walls)
+    double y_plus_max = 0.0, y_plus_mean = 0.0;  // first cell centers, resolved walls (mean: all walls)
     double x_plus_max = 0.0, z_plus_max = 0.0;   // wall cells along the flow and across it
     double y_plus_exchange_min = 0.0;            // the wall model's lowest exchange point
     double cells_per_delta_L_min = 0.0, cells_per_delta_L_max = 0.0;
