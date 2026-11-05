@@ -195,9 +195,9 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
     const auto normals = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->face_normals);
     const auto area = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->face_area);
     const auto face_x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->face_coords);
-    const auto nodes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->nodes_of_face);
-    const auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->offsets_nodes_of_face);
-    const auto node_x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->node_coords);
+    const auto nodes = mesh->h_nodes_of_face;
+    const auto offsets = mesh->h_offsets_nodes_of_face;
+    const auto node_x = mesh->h_node_coords;  // the device copies are freed after setup
     std::vector<WallFace> walls;
     double wall_area = 0.0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {

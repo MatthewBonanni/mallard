@@ -101,14 +101,18 @@ inline void expect_shifts_join_cells(const Mesh & mesh) {
         EXPECT_TRUE(found) << "face " << f;
     }
     EXPECT_GT(n_shifted, 0u);
+    // From the device: a solver's mesh drops the host copies after setup
+    const auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh.offsets_cells_of_cell);
+    const auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh.cells_of_cell);
+    const auto neighbor_shifts = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh.cells_of_cell_shift);
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
-        for (uint32_t k = mesh.h_offsets_cells_of_cell(c); k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
-            const uint32_t nb = mesh.h_cells_of_cell(k);
+        for (uint32_t k = offsets(c); k < offsets(c + 1); k++) {
+            const uint32_t nb = neighbors(k);
             bool touch = false;
             for (uint32_t a = 0; a < mesh.h_n_nodes_of_cell(c); a++) {
                 for (uint32_t b = 0; b < mesh.h_n_nodes_of_cell(nb); b++) {
                     auto q = node_point(mesh, mesh.h_node_of_cell(nb, b));
-                    FOR_I_DIM q[i] += double(mesh.h_shifts(mesh.h_cells_of_cell_shift(k), i));
+                    FOR_I_DIM q[i] += double(mesh.h_shifts(neighbor_shifts(k), i));
                     touch = touch || close(node_point(mesh, mesh.h_node_of_cell(c, a)), q);
                 }
             }
