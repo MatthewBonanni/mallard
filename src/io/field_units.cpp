@@ -79,6 +79,8 @@ const Entry NAMED[] = {
     {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor"},
     {"DELTA_OVER_ETA", dim::none, "cell size over the estimated Kolmogorov length"},
     {"CELLS_PER_DELTA_L", dim::none, "cells across the laminar flame thickness"},
+    // The divergence report's snapshot
+    {"DIVERGED", dim::none, "1 in the cells that became invalid"},
 };
 
 // <prefix><species>
