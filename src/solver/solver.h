@@ -629,6 +629,7 @@ class Solver {
         std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const;
         void allocate_memory();
+        void allocate_time_stepping();  // Stages and face buffers of the right-hand side
         void register_data();
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
         std::string stop_reason() const;  // Empty while no stop condition holds

@@ -632,9 +632,12 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         h_bcs(i).set_dispatch();
     }
 
-    // Cells sharing a node with each cell, for the image search, by global id
-    std::vector<std::vector<uint32_t>> cells_of_node(mesh.n_nodes);
-    for (uint32_t c : mesh.cells_by_global_id()) {
+    // Cells sharing a node with each cell, by global id, for the image search of transmissive faces
+    const bool any_image = std::any_of(h_face_bc_vec.begin(), h_face_bc_vec.end(), [&](const int32_t bc) {
+        return bc >= 0 && h_bcs_vec[static_cast<size_t>(bc)].is_transmissive();
+    });
+    std::vector<std::vector<uint32_t>> cells_of_node(any_image ? mesh.n_nodes : 0);
+    for (uint32_t c : any_image ? mesh.cells_by_global_id() : std::vector<uint32_t>{}) {
         for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
             cells_of_node[mesh.h_node_of_cell(c, k)].push_back(c);
         }
