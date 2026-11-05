@@ -124,6 +124,13 @@ void print_help(std::ostream & out, const Command & command);
 void print_help(std::ostream & out, const Family & family);
 
 /**
+ * @brief The completion script of every command and option for a shell.
+ * @param shell "bash", "zsh" or "fish".
+ * @return empty for another shell.
+ */
+std::string completion_script(std::string_view shell);
+
+/**
  * @brief Prints "<title>: <message> (see <title> --help)" to stderr.
  * @return 2, the exit status of a usage error.
  */

@@ -26,6 +26,33 @@ A few things hold for every command:
   (`--kokkos-num-threads=8`, `--kokkos-device-id=1`) go after the command
   ([Running in parallel](parallel.md)).
 
+## Shell completion
+
+Tab completes `mallard`'s commands, their options and the values those take: input
+files after `-i`, `latest` and `*.restart` files after `--restart`, template names
+after `mallard new`, run directories and requests after `mallard ctl`, `2` or `3`
+after `--dim`. An install puts the scripts where bash (with the bash-completion
+package), zsh and fish look under its prefix:
+
+| Shell | Installed as | Found without setup when |
+|---|---|---|
+| bash | `share/bash-completion/completions/mallard` | the prefix is `/usr` or `/usr/local`, or in `XDG_DATA_DIRS` |
+| zsh | `share/zsh/site-functions/_mallard` | that directory is in `fpath` (it is for `/usr/local` on most systems) |
+| fish | `share/fish/vendor_completions.d/mallard.fish` | the prefix is `/usr` or `/usr/local`, or in `XDG_DATA_DIRS` |
+
+Otherwise, for a build tree, a Spack install or a prefix such as `~/mallard`,
+load it from the shell's startup file; `mallard completion` prints it:
+
+```sh
+source <(mallard completion bash)     # ~/.bashrc
+source <(mallard completion zsh)      # ~/.zshrc, after compinit
+mallard completion fish | source      # ~/.config/fish/config.fish
+```
+
+The containers load the bash completion in every interactive shell. The script is
+made from the same table as the help pages, so it completes exactly the commands of
+the `mallard` that printed it; reload it after updating Mallard.
+
 How the commands are laid out, and which are planned:
 [design notes](../design/cli.md).
 
@@ -77,6 +104,8 @@ Commands:
                            Mallard HDF5 mesh
   Maintain
     mallard test           Run the unit and regression tests
+    mallard completion     Print the shell completion script for bash, zsh or
+                           fish
     mallard --version      Print the version
 
 Options:
@@ -446,6 +475,40 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-test
+```
+
+### mallard completion
+
+```text
+Usage: mallard completion bash|zsh|fish
+
+Prints a script that makes the shell complete mallard's commands, their options
+and the values those take: input files for -i, latest and restart files for
+--restart, template names for mallard new, run directories for mallard ctl and
+its requests. It is made from the same table as the help pages, so it knows
+every command of this build; templates come from mallard new when completing.
+
+An install (cmake --install, Spack, the containers) puts the scripts where the
+shells look: share/bash-completion/completions/mallard,
+share/zsh/site-functions/_mallard and
+share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree,
+or a prefix the shell does not search, load it from the shell's startup file, as
+the examples show.
+
+Options:
+  -h, --help  Show this page.
+
+Examples:
+  $ source <(mallard completion bash)                  # in ~/.bashrc
+  $ source <(mallard completion zsh)                   # in ~/.zshrc, after compinit
+  $ mallard completion fish | source                   # in ~/.config/fish/config.fish
+  $ mallard completion zsh > ~/.zfunc/_mallard         # or once, into a directory of fpath
+
+Exit status:
+  0  the script was printed
+  2  usage error, or a shell other than bash, zsh and fish
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-completion
 ```
 
 ### mallard --version
