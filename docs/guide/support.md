@@ -28,7 +28,7 @@ When a job runs:
 | Threads, 2D, AppleClang | arm64 CPU (macOS) | Run | Full suite (2 threads) | every PR | `ci.yml/macos` |
 | Threads, 3D, AppleClang | arm64 CPU (macOS) | Run | Full suite (2 threads) | every PR | `ci.yml/macos-3d` |
 | OpenMP, 2D, HDF5, zlib | arm64 CPU (Ubuntu 24.04) | Run | Full suite (2 threads) | every PR | `ci.yml/arm64` |
-| Serial, 2D, GCC 10, CMake 3.22 | x86-64 CPU (Ubuntu 22.04) | Run | Full suite | every PR | `ci.yml/gcc-10` |
+| Serial, 2D, GCC 11, CMake 3.22 | x86-64 CPU (Ubuntu 22.04) | Run | Full suite | every PR | `ci.yml/gcc-11` |
 | Serial, 3D, Clang 14, CMake 3.22 | x86-64 CPU (Ubuntu 22.04) | Run | Full suite | every PR | `ci.yml/clang-14` |
 | CUDA 12.9 (sm_80), OpenMP host, MPI, GPU-aware MPI, NCCL, parallel HDF5, CGNS, 2D and 3D | NVIDIA A100 | Run | Full suite on one GPU (with CUDA graphs, the default); MPI tests on 2 ranks, one GPU each, GPU-aware, with NCCL's and MPI's halo exchanges, each compared bit for bit with a serial run; [performance suite](../../benchmarks/README.md) against its baselines | device PRs (GPU CI) | |
 | CUDA 12.9 (sm_80), single precision, same options, 2D | NVIDIA A100 | Run | Full suite on one GPU | device PRs (GPU CI) | |
@@ -54,8 +54,8 @@ When a job runs:
 | | Tested with |
 |---|---|
 | Kokkos | 5.2.2, the submodule; Spack builds use the Kokkos 5 of Spack's package repository |
-| C++ compilers | GCC 13 (the other CPU jobs, the containers, Spack, and the host compiler of nvcc); GCC 10.5, the oldest supported (`gcc-10`); Clang 18 (`clang`, fuzzing); Clang 14, the oldest supported (`clang-14`); the macOS runner's AppleClang (`macos`, `macos-3d`) |
-| CMake | 3.22.1, the oldest supported (`gcc-10`, `clang-14`); the runners' and images' newer ones elsewhere |
+| C++ compilers | GCC 13 (the other CPU jobs, the containers, Spack, and the host compiler of nvcc); GCC 11.4, the oldest supported (`gcc-11`; GCC 10 lacks `std::to_chars` for floating point); Clang 18 (`clang`, fuzzing); Clang 14, the oldest supported (`clang-14`); the macOS runner's AppleClang (`macos`, `macos-3d`) |
+| CMake | 3.22.1, the oldest supported (`gcc-11`, `clang-14`); the runners' and images' newer ones elsewhere |
 | Device compilers | nvcc 12.9 and 13.2 through Kokkos' `nvcc_wrapper`; ROCm 7.2 `hipcc`; oneAPI 2025.3 `icpx` |
 | MPI | Open MPI 4.1 (Ubuntu 24.04's): CPU jobs, containers, Spack; HPC-X's Open MPI 4.1 (NVIDIA HPC SDK 25.7), CUDA-aware: GPU CI |
 | HDF5, CGNS | Ubuntu 24.04's HDF5 1.10 (serial and parallel) and CGNS 4.4; CGNS 4.5.0 built by Mallard (`USE_SYSTEM_CGNS=OFF`) in the containers and GPU CI, there with a parallel HDF5 1.14.6 built with HPC-X's Open MPI |

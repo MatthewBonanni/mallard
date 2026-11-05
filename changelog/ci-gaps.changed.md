@@ -1,1 +1,2 @@
-- CMake 3.22 or newer is required (`cmake_minimum_required` said 3.16, older than Kokkos 5 needs); CI builds with CMake 3.22.1, GCC 10 and Clang 14 (#647).
+- CMake 3.22 or newer is required (`cmake_minimum_required` said 3.16, older than Kokkos 5 needs), and GCC 11.4 or newer (GCC 10 has no `std::to_chars` for floating point); CI builds with CMake 3.22.1, GCC 11.4 and Clang 14 (#647).
+- GCC builds without a device backend no longer fuse multiplies and adds across statements (`-ffp-contract=off`), so arm64 gives the same results as x86-64.

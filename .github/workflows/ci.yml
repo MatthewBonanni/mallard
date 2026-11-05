@@ -184,7 +184,7 @@ jobs:
             {"name": "macos", "flags": "-DKokkos_ENABLE_THREADS=ON", "os": "macos-latest"},
             {"name": "macos-3d", "flags": "-DKokkos_ENABLE_THREADS=ON -DMallard_DIM=3", "os": "macos-latest"},
             {"name": "arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "hdf5": true, "os": "ubuntu-24.04-arm"},
-            {"name": "gcc-10", "flags": "-DKokkos_ENABLE_SERIAL=ON -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10", "os": "ubuntu-22.04", "packages": "g++-10", "cmake": "3.22.1"},
+            {"name": "gcc-11", "flags": "-DKokkos_ENABLE_SERIAL=ON -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11", "os": "ubuntu-22.04", "packages": "g++-11", "cmake": "3.22.1"},
             {"name": "clang-14", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-14 -DCMAKE_CXX_COMPILER=clang++-14", "os": "ubuntu-22.04", "packages": "clang-14", "cmake": "3.22.1"}
           ]'
           if [ "$ALL" != true ]; then backends=$(jq -c 'map(select(.main_only | not))' <<< "$backends"); fi
