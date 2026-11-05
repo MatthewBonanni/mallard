@@ -290,8 +290,8 @@ TEST(InitialStateTest, TableInterpolationHasItsDesignOrder) {
         const auto h = data.host();
         double e = 0.0;
         for (int i = 0; i <= 997; i++) {
-            const double q = i / 997.0;
-            e = std::max(e, std::abs(h(0, 0, &q) - f(q)));
+            const double q[tabulated::MAX_DIMS] = {i / 997.0, 0.0, 0.0};
+            e = std::max(e, std::abs(h(0, 0, q) - f(q[0])));
         }
         return e;
     };
