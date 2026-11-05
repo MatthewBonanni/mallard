@@ -92,4 +92,4 @@ interval = 2000
 [[write_data]]
 prefix = "./solut/tgv"
 time_interval = 0.2
-variables = ["U"]
+variables = ["U", "Q_CRITERION", "LAMBDA2"]
