@@ -144,13 +144,17 @@ void end_phase(double seconds) {
     phase_open = false;
 }
 
-void event(uint64_t step, double t, std::string_view kind, std::string_view text) {
+void event(uint64_t step, double t, std::string_view kind, std::string_view text,
+           const std::vector<std::pair<std::string, std::string>> & fields) {
     if (!comm::is_root()) return;
     std::string padded(kind);
     if (padded.size() < 8) padded.resize(8, ' ');
     line(format("%8llu %10.4e  ", static_cast<unsigned long long>(step), t) + style(padded, Style::CYAN) + " " +
          std::string(text));
-    run_log::write(json::Object().add("type", "event").add("step", step).add("t", t).add("kind", kind).add("text", text));
+    json::Object record;
+    record.add("type", "event").add("step", step).add("t", t).add("kind", kind).add("text", text);
+    for (const auto & [key, value] : fields) record.raw(key, value);
+    run_log::write(record);
 }
 
 void warning(std::string_view message) {

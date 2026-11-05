@@ -908,7 +908,7 @@ changing it.
 |---|---|
 | `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE` and, for mixtures, `Y_<species>` and `RHOY_<species>` |
 | `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`) whose covariance to keep; their means are kept too |
-| `t_start` | Start time, default 0 |
+| `t_start` | Start time, default 0; a [trigger](#triggers) with `"start statistics"` starts them instead |
 | `interval` | Every this many steps, default 1 |
 | `reset` | `true` starts the averages afresh on a restart instead of continuing those of the restart file (default `false`) |
 
@@ -1216,6 +1216,26 @@ n_points = 121
 time_interval = 1.0e-4
 format = "vtp"
 reductions = ["mean", "rms"]
+```
+
+## `[[triggers]]`
+
+A condition on the run and what to do once it holds, evaluated after every
+step ([Triggers](guide/running.md#triggers)).
+
+| Key | Description |
+|---|---|
+| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>` and, for probes of one point, `<probe>_<variable>`; true when not 0. Required |
+| `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set). Required |
+| `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
+| `for` | Simulated time the condition must hold before it fires, default 0 |
+| `repeat` | `true` fires again each time the condition turns true after being false; default `false` (once) |
+
+```toml
+[[triggers]]
+name = "hot"
+when = "combustor_max_T > 2500"
+do = ["checkpoint", "stop"]
 ```
 
 ## `[source]`

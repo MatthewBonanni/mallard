@@ -151,6 +151,11 @@ class Probes {
         /** @brief Changes the time interval of the probe of that name, the next output due after t. */
         std::string set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot = false);
 
+        /** @brief Names of the monitored values: <probe>_<reduction>_<variable>, and <probe>_<variable> of one-point probes. */
+        std::vector<std::string> value_names() const;
+        /** @brief The latest monitored values, as value_names(); NaN before a probe's first write. Rank 0 when distributed. */
+        std::vector<double> values() const;
+
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
         /**
@@ -237,14 +242,19 @@ class Probes {
             std::shared_ptr<std::ofstream> out, out_reductions;
             std::vector<std::pair<double, std::string>> series;  // vtp: (t, file) of the .pvd
             uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
+            bool point_value = false;   // one sample, evaluated at every write: its values are monitored
+            std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
 
             bool due(uint64_t step, rtype t) const;
             uint64_t n_evaluated() const { return codes.extent(0); }
             void write_hdf5(uint64_t step, rtype t, const std::vector<double> & values) const;
             void write_vtp(uint64_t step, rtype t, const std::vector<double> & values);
             void write_vtkhdf(rtype t, const std::vector<double> & values);
-            void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
-                                  const std::vector<double> & quad) const;
+            /** @brief The reductions of the samples, by reduction then variable. */
+            std::vector<double> reduce(const std::vector<double> & nodes, const std::vector<double> & quad) const;
+            double measure() const;
+            /** @brief Writes a row of the reductions in last. */
+            void write_reductions(uint64_t step, rtype t) const;
         };
         void add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,

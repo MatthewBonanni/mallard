@@ -62,6 +62,7 @@ class Spectra {
 
         bool enabled() const { return !pairs.empty(); }
         bool due(uint64_t step, rtype t) const { return enabled() && step % interval == 0 && t > t_start; }
+        void set_start(rtype t) { t_start = t; }
         bool averaged() const { return average; }
 
         /** @brief Take the sample of time t (collective); unaveraged spectra are written at once. */

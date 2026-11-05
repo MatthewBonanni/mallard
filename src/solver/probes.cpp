@@ -1392,6 +1392,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         }
 #endif
     });
+    const bool extrema = std::any_of(p.reductions.begin(), p.reductions.end(),
+                                     [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
+    p.point_value = !p.snapshot && (!p.from_region || p.resampled) && p.nodes.n_global == 1 &&
+                    (p.write_samples || extrema || p.quadrature.n_global == 0);
     probes.push_back(std::move(probe_ptr));
 }
 
@@ -1568,6 +1572,12 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
             p.quadrature.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
             quad = p.quadrature.gather();
         }
+        if (comm::is_root() || !distributed) {
+            p.last = p.reduce(nodes, quad);
+            if (p.point_value) {
+                for (size_t v = 0; v < p.variables.size(); v++) p.last.push_back(nodes[v]);
+            }
+        }
         if (!comm::is_root()) continue;
         if (p.write_samples) {
             if (p.format == Format::CSV) {
@@ -1597,8 +1607,38 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
                 p.write_vtp(step, t, nodes);
             }
         }
-        if (!p.reductions.empty()) p.write_reductions(step, t, nodes, quad);
+        if (!p.reductions.empty()) p.write_reductions(step, t);
     }
+}
+
+std::vector<std::string> Probes::value_names() const {
+    std::vector<std::string> names;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        for (const Reduction r : p.reductions) {
+            for (const auto & v : p.variables) names.push_back(p.name + "_" + reduction_name(r) + "_" + v);
+        }
+        if (p.point_value) {
+            for (const auto & v : p.variables) names.push_back(p.name + "_" + v);
+        }
+    }
+    return names;
+}
+
+std::vector<double> Probes::values() const {
+    std::vector<double> values;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        const size_t n = p.variables.size() * (p.reductions.size() + (p.point_value ? 1 : 0));
+        if (p.last.size() == n) {
+            values.insert(values.end(), p.last.begin(), p.last.end());
+        } else {
+            values.insert(values.end(), n, std::numeric_limits<double>::quiet_NaN());
+        }
+    }
+    return values;
 }
 
 void Probes::Probe::write_hdf5([[maybe_unused]] uint64_t step, [[maybe_unused]] rtype t,
@@ -1730,8 +1770,8 @@ void Probes::Probe::write_vtp(uint64_t step, rtype t, const std::vector<double> 
     write_pvd_file(file, series);
 }
 
-void Probes::Probe::write_reductions(uint64_t step, rtype t, const std::vector<double> & node_values,
-                                     const std::vector<double> & quad) const {
+std::vector<double> Probes::Probe::reduce(const std::vector<double> & node_values,
+                                          const std::vector<double> & quad) const {
     // Point sets and boundaries reduce their samples; curves their quadrature points
     const bool points = quadrature.n_global == 0;
     const std::vector<double> & q = points ? node_values : quad;
@@ -1740,10 +1780,8 @@ void Probes::Probe::write_reductions(uint64_t step, rtype t, const std::vector<d
     auto weight = [&](size_t i) {
         return points ? (geometry.node_weights.empty() ? 1.0 : geometry.node_weights[i]) : geometry.quad_weights[i];
     };
-    double measure = 0.0;
-    for (size_t i = 0; i < n_q; i++) measure += weight(i);
-    std::ostream & row = *out_reductions;
-    row << step << "," << std::setprecision(std::numeric_limits<double>::max_digits10) << double(t) << "," << measure;
+    const double measure = this->measure();
+    std::vector<double> results;
     for (const Reduction r : reductions) {
         for (size_t v = 0; v < variables.size(); v++) {
             double sum = 0.0, sum_rho = 0.0;
@@ -1778,9 +1816,26 @@ void Probes::Probe::write_reductions(uint64_t step, rtype t, const std::vector<d
                 case Reduction::MIN: result = lo; break;
                 case Reduction::MAX: result = hi; break;
             }
-            row << "," << result;
+            results.push_back(result);
         }
     }
+    return results;
+}
+
+double Probes::Probe::measure() const {
+    const bool points = quadrature.n_global == 0;
+    const size_t n_q = points ? geometry.nodes.size() : geometry.quad_weights.size();
+    double sum = 0.0;
+    for (size_t i = 0; i < n_q; i++) {
+        sum += points ? (geometry.node_weights.empty() ? 1.0 : geometry.node_weights[i]) : geometry.quad_weights[i];
+    }
+    return sum;
+}
+
+void Probes::Probe::write_reductions(uint64_t step, rtype t) const {
+    std::ostream & row = *out_reductions;
+    row << step << "," << std::setprecision(std::numeric_limits<double>::max_digits10) << double(t) << "," << measure();
+    for (size_t i = 0; i < reductions.size() * variables.size(); i++) row << "," << last[i];
     row << "\n";
     row.flush();
 }

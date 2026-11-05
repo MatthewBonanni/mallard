@@ -75,9 +75,11 @@ void end_phase(double seconds);
 
 /**
  * @brief One-line event during the run (e.g. a file written), led by the step and time
- *        so it lines up with the progress table; also an event record of the run log.
+ *        so it lines up with the progress table; also an event record of the run log,
+ *        with the fields given as (key, JSON text) after its own.
  */
-void event(uint64_t step, double t, std::string_view kind, std::string_view text);
+void event(uint64_t step, double t, std::string_view kind, std::string_view text,
+           const std::vector<std::pair<std::string, std::string>> & fields = {});
 
 /**
  * @brief Warning on stderr from rank 0, for conditions every rank sees alike; also a
