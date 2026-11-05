@@ -4,6 +4,7 @@ add_library(MallardCore STATIC
     common/kexpr.cpp
     common/expression.cpp
     common/region.cpp
+    common/region_input.cpp
     common/region_mesh.cpp
     io/case_view.cpp
     common/tabulated.cpp
@@ -136,6 +137,18 @@ foreach(source ${mallard_sources})
                             "Input::table_type, find_value<T> with find_value<T> and find_value_or<T> with "
                             "find_value_or<T>.")
     endif()
+endforeach()
+# The expression and geometry engines know nothing of inputs or of each other:
+# what they need from them (unit hints, implicit shapes) is passed in
+foreach(engine "kexpr.h;" "kexpr.cpp;kexpr.h" "geometry.h;common_typedef.h")
+    list(POP_FRONT engine file)
+    file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/common/${file} includes REGEX "^#include \"")
+    foreach(include ${includes})
+        string(REGEX REPLACE "^#include \"([^\"]*)\".*" "\\1" header "${include}")
+        if(NOT header IN_LIST engine)
+            message(FATAL_ERROR "src/common/${file} includes ${header}; the engine includes only: ${engine}")
+        endif()
+    endforeach()
 endforeach()
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and contracting multiplies and adds into FMAs would
