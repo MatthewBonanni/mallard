@@ -87,12 +87,12 @@ CUmemAllocationProp properties(const int device) {
 bool GrowingBuffer::supported() { return true; }
 
 GrowingBuffer::GrowingBuffer(const size_t max_bytes) {
-    if (cudaGetDevice(&device) != cudaSuccess) throw std::runtime_error("GrowingBuffer: cudaGetDevice failed");
-    const CUmemAllocationProp prop = properties(device);
-    check(driver().granularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), "cuMemGetAllocationGranularity");
-    reserved = (max_bytes + granularity - 1) / granularity * granularity;
+    if (cudaGetDevice(&vm.device) != cudaSuccess) throw std::runtime_error("GrowingBuffer: cudaGetDevice failed");
+    const CUmemAllocationProp prop = properties(vm.device);
+    check(driver().granularity(&vm.granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), "cuMemGetAllocationGranularity");
+    vm.reserved = (max_bytes + vm.granularity - 1) / vm.granularity * vm.granularity;
     CUdeviceptr ptr = 0;
-    check(driver().address_reserve(&ptr, reserved, 0, 0, 0), "cuMemAddressReserve");
+    check(driver().address_reserve(&ptr, vm.reserved, 0, 0, 0), "cuMemAddressReserve");
     base = ptr;
 }
 
@@ -105,24 +105,24 @@ GrowingBuffer::~GrowingBuffer() {
         driver().release(handles[k]);
         offset += sizes[k];
     }
-    if (base != 0) driver().address_free(base, reserved);
+    if (base != 0) driver().address_free(base, vm.reserved);
 }
 
 void GrowingBuffer::ensure(const size_t bytes) {
-    if (bytes <= mapped) return;
-    if (bytes > reserved) throw std::length_error("GrowingBuffer: more than the reserved size");
-    const size_t size = std::min((bytes - mapped + granularity - 1) / granularity * granularity, reserved - mapped);
-    const CUmemAllocationProp prop = properties(device);
+    if (bytes <= vm.mapped) return;
+    if (bytes > vm.reserved) throw std::length_error("GrowingBuffer: more than the reserved size");
+    const size_t size = std::min((bytes - vm.mapped + vm.granularity - 1) / vm.granularity * vm.granularity, vm.reserved - vm.mapped);
+    const CUmemAllocationProp prop = properties(vm.device);
     CUmemGenericAllocationHandle handle;
     check(driver().create(&handle, size, &prop, 0), "cuMemCreate");
     handles.push_back(handle);
     sizes.push_back(size);
-    check(driver().map(base + mapped, size, 0, handle, 0), "cuMemMap");
+    check(driver().map(base + vm.mapped, size, 0, handle, 0), "cuMemMap");
     CUmemAccessDesc access = {};
     access.location = prop.location;
     access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    check(driver().set_access(base + mapped, size, &access, 1), "cuMemSetAccess");
-    mapped += size;
+    check(driver().set_access(base + vm.mapped, size, &access, 1), "cuMemSetAccess");
+    vm.mapped += size;
 }
 
 #else
