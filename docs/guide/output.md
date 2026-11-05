@@ -445,15 +445,19 @@ the run record's `start` record.
 
 | Field | Contents |
 |---|---|
-| `schema`, `version` | `"mallard-provenance"`, 1 |
+| `schema`, `version` | `"mallard-provenance"`, 2 |
 | `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
 | `dependencies` | Versions of `compiler`, `kokkos`, `mpi` (the library's own string and the standard), `hdf5`, `cgns`, `zlib`, `nccl`, `gpu_runtime` and `gpu_driver` (CUDA or HIP); `null` for those not built in |
 | `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
 | `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run record's `placement`) |
-| `input` | `file`, `sha256` of its bytes, and its `text` |
+| `input` | `file`, `sha256` of its bytes, its `text`, and `resolved`: the input with every key explicit, as the run used it ([the resolved input](input_files.md#the-resolved-input), what `mallard input resolve` writes) |
 | `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
-| `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, resolved `value` and `from_preset` (`false` where the input overrides it) |
-| `setup` | The resolved setup, defaults included: each section of the terminal output's setup summary (`Mesh`, `Physics`, `Numerics`, `Boundaries`, `Output`) as `[key, value]` pairs |
+| `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, its `value` in the resolved input (as TOML: `"\"HLLC\""`, `0.5`) and `from_preset` (`false` where the input overrides it) |
+
+Version 1 (0.9) had no `input.resolved`, its preset values were plain text
+(`"HLLC"`), and a `setup` object held the terminal output's setup summary as
+`[key, value]` pairs per section; `resolved_input()` of `tools/mallard/vtu.py`
+returns `None` for such files.
 
 Check that a file belongs to a given input with `sha256sum input.toml`; read
 the block in Python:
@@ -482,7 +486,7 @@ build reads. It is never misread.
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard/vtu.py` |
 | Run record (`mallard.jsonl`, `[output] run_log`) | `version` of each `start` record | 1 (0.9) | Your scripts (records only gain fields within a version) |
-| Provenance block (every output file) | its `version` | 1 (0.9) | `tools/mallard/vtu.py` (`provenance()`); in restart files a trailer that every restart reader skips, so it changes no restart version |
+| Provenance block (every output file) | its `version` | 2 (0.10; 1 in 0.9) | `tools/mallard/vtu.py` (`provenance()`, `resolved_input()`, both versions); in restart files a trailer that every restart reader skips, so it changes no restart version |
 | Probe output (`[[probes]]` `format = "hdf5"`, `"vtkhdf"`, `"vtp"`) | root attribute `version` (HDF5, VTKHDF), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
 

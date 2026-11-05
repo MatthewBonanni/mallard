@@ -41,6 +41,7 @@ struct CheckReport {
     std::vector<std::string> warnings;
     std::vector<Diagnostic> unused;
     bool setup_done = false;
+    std::string resolved;  // the input with every key explicit (resolve_input), once setup is done
 
     logging::Items boundaries;  // zone, condition and faces
     logging::Items regions;     // name, then dimension, measure, cells and how it is made

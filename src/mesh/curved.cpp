@@ -21,7 +21,7 @@
 #include "input.h"
 #include "mesh.h"
 #include "mesh_block.h"
-#include "region.h"
+#include "region_input.h"
 #include "zone.h"
 
 namespace curved {
@@ -377,7 +377,7 @@ Shape shape_of(const Input & entry, const std::string & where, const Input * nam
                                      : "type = \"sphere\" with center, radius and filled = false") + ".");
     }
     if (entry.contains("edge")) throw InputError(where + ".edge: curved zones lie on sharp surfaces; remove edge.");
-    auto region = std::make_shared<const region::Region>(entry, where, names);
+    auto region = std::make_shared<const region::Region>(region::parse(entry, where, names));
     if (region->dimension() == N_DIM) {
         throw InputError(where + " is " + (N_DIM == 2 ? "an area" : "a volume") + ", and a curved zone lies on " +
                          surface + ": add filled = false for its boundary.");

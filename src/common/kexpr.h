@@ -297,14 +297,19 @@ struct ArrayVariables {
  *        Unlike exprtk, names are case sensitive (T is not t). See
  *        docs/guide/expressions.md.
  */
+/** @brief Text added to the error for an unknown symbol, from the symbol (e.g. a hint about units), or empty. */
+using SymbolHint = std::string (*)(const std::string & symbol);
+
 class Program {
     public:
         /**
          * @param name Name for error messages.
          * @param text The expression.
          * @param variables Names of the variables it may read, by index.
+         * @param hint Adds to the error for an unknown symbol, or null.
          */
-        Program(const std::string & name, const std::string & text, const std::vector<std::string> & variables);
+        Program(const std::string & name, const std::string & text, const std::vector<std::string> & variables,
+                SymbolHint hint = nullptr);
 
         const std::vector<Instr> & code() const { return m_code; }
 

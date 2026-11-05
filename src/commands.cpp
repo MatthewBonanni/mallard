@@ -78,6 +78,11 @@ constexpr Option UPGRADE_OPTIONS[] = {
      "The case's dimension, for renames that depend on it. Default: from the input's mesh, as a run finds it."},
 };
 
+constexpr Option RESOLVE_OPTIONS[] = {
+    {"--restart", "", "FILE", "The input of the run as started from this restart file."},
+    KOKKOS,
+};
+
 constexpr Option REACTOR_OPTIONS[] = {
     {"-i", "", "FILE", "The input file, with a [reactor] table, or a [benchmark] table too. Required."},
     KOKKOS,
@@ -274,6 +279,32 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::front_end,
         .run = upgrade_main,
+    },
+    {
+        .name = "input resolve",
+        .group = "Set up",
+        .summary = "Write the input as a run uses it: every key explicit, defaults and preset included",
+        .synopsis = "mallard input resolve input.toml > full.toml",
+        .description =
+            "Sets up the case as mallard check does and writes to standard output the input the run uses: every "
+            "key the setup reads, with the value it takes, whether the input sets it, a numerics preset fills it "
+            "or it is the default. Renamed keys are under their new names, quantities with units are plain "
+            "numbers in the units the key documents, keys are sorted and comments dropped. Keys the setup does "
+            "not read are left out, and so are tables the input leaves out, whose presence can turn a feature "
+            "on.\n"
+            "\n"
+            "The result runs bitwise the same as the input and resolves to itself. Every output file's "
+            "provenance holds the same text (input.resolved), so a run's results carry the full input that "
+            "made them.",
+        .options = RESOLVE_OPTIONS,
+        .arguments = FILE_ARGUMENTS,
+        .examples = "$ mallard input resolve input.toml > full.toml\n"
+                    "$ diff <(mallard input resolve a.toml) <(mallard input resolve b.toml)",
+        .exit_status = "0  the resolved input was written\n"
+                       "1  errors in the input or the setup, as mallard check reports them\n"
+                       "2  usage error",
+        .dim = Case::input,
+        .run = resolve_main,
     },
     {
         .name = "check",

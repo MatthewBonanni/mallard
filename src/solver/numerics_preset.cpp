@@ -15,7 +15,6 @@
 #include <unordered_map>
 
 #include "input.h"
-#include "log.h"
 
 namespace numerics_preset {
 
@@ -83,12 +82,6 @@ std::string join(const std::vector<std::string> & path) {
     return key;
 }
 
-std::string text(const Input & v) {
-    if (v.is_string()) return v.as_string();
-    if (v.is_floating()) return logging::real(v.as_floating());
-    return toml::format(v);
-}
-
 const Input * lookup(const Input & input, const std::vector<std::string> & path) {
     const Input * v = &input;
     for (const auto & part : path) {
@@ -116,10 +109,12 @@ std::vector<std::string> names() {
     return list;
 }
 
-std::string Resolution::summary() const {
+std::string Resolution::summary(const ResolvedInput & resolved) const {
     std::string overrides;
     for (const auto & s : settings) {
-        if (!s.from_preset) overrides += (overrides.empty() ? "" : ", ") + s.key + " = " + s.value;
+        if (s.from_preset) continue;
+        const KeyRecord * record = resolved.find(s.key);
+        overrides += (overrides.empty() ? "" : ", ") + s.key + " = " + (record ? record->value : "");
     }
     return overrides.empty() ? name : name + " (the input sets " + overrides + ")";
 }
@@ -146,20 +141,13 @@ Resolution apply(Input & input) {
         const std::vector<std::string> parent(entry.path.begin(), entry.path.end() - 1);
         const bool reconstruction_option = parent == RECONSTRUCTION && entry.path.back() != "type";
         if (reconstruction_option && !own_reconstruction) continue;
-        const Input * set = lookup(input, entry.path);
-        if (key == "run.cfl" && !set) {
-            const std::vector<std::string> dt_path = {"run", "dt"};
-            if (const Input * dt = lookup(input, dt_path)) {
-                resolution.settings.push_back({join(dt_path), text(*dt), false});
-                continue;
-            }
+        const bool set = lookup(input, entry.path);
+        if (key == "run.cfl" && !set && lookup(input, {"run", "dt"})) {
+            resolution.settings.push_back({"run.dt", false});
+            continue;
         }
-        if (set) {
-            resolution.settings.push_back({key, text(*set), false});
-        } else {
-            table_at(input, parent).as_table().emplace(entry.path.back(), entry.value);
-            resolution.settings.push_back({key, text(entry.value), true});
-        }
+        if (!set) table_at(input, parent).as_table().emplace(entry.path.back(), entry.value);
+        resolution.settings.push_back({key, !set});
     }
     return resolution;
 }
