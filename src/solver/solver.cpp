@@ -28,6 +28,9 @@
 #include <sstream>
 #include <tuple>
 #include <type_traits>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 #include <Kokkos_Core.hpp>
 
@@ -202,6 +205,12 @@ void Solver::setup_from_input() {
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
+    mesh->release_setup_data();
+    if (!check_only) used_regions.reset();
+    // glibc keeps what the setup freed in its arenas; hand it back to the system
+#ifdef __GLIBC__
+    malloc_trim(0);
+#endif
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
 }

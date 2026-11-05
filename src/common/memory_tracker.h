@@ -9,6 +9,8 @@
 #define MEMORY_TRACKER_H
 
 #include <cstdint>
+#include <map>
+#include <string>
 
 namespace memory {
 
@@ -32,6 +34,8 @@ class Tracker {
         Usage device() const;
         /** @brief Host memory, pinned included. */
         Usage host() const;
+        /** @brief Bytes held now by each allocation label, in the device's spaces (device) or the host's. */
+        std::map<std::string, uint64_t> live(bool device) const;
 };
 
 } // namespace memory
