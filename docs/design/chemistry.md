@@ -262,7 +262,7 @@ remaining error from the conservative update is of the order of the jump in
 reaction zones, but percent-level at sharp fuel/oxidizer or hot/cold contacts
 (e.g. hydrogen injected into air), which is what double flux addresses
 ([Houim & Kuo 2011](https://doi.org/10.1016/j.jcp.2011.07.031) is the closest
-analogue to Mallard: WENO with double flux for thermally perfect reacting
+analog to Mallard: WENO with double flux for thermally perfect reacting
 flow).
 
 The design:

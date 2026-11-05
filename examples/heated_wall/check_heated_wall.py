@@ -23,7 +23,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
 from mallard import vtu  # noqa: E402
 
-Q_TOTAL = 2.0e4 * 0.1   # W per metre of depth: the integral of q over the 0.1 m floor (the cosine integrates to 0)
+Q_TOTAL = 2.0e4 * 0.1   # W per meter of depth: the integral of q over the 0.1 m floor (the cosine integrates to 0)
 LX, CP = 0.1, 1.4 * 287.0 / 0.4
 BINS = 8
 
