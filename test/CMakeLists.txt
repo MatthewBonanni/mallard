@@ -4,7 +4,7 @@ set(MALLARD_TEST_SOURCES
     test_main.cpp
     scratch.cpp
     common_math_test.cpp
-    compiled_expression_test.cpp
+    kexpr_test.cpp
     region_test.cpp
     region_mesh_test.cpp
     initial_state_test.cpp
@@ -94,9 +94,9 @@ set_target_properties(mallard-test PROPERTIES OUTPUT_NAME mallard-test${Mallard_
 
 # The compiled expressions round every operation on its own, and so must their hand-written references
 if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
-    set_source_files_properties(compiled_expression_test.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
+    set_source_files_properties(kexpr_test.cpp PROPERTIES COMPILE_OPTIONS "--fmad=false;-ffp-contract=off")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(compiled_expression_test.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    set_source_files_properties(kexpr_test.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
 target_include_directories(mallard-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mallard-test PRIVATE MALLARD_EXECUTABLE="$<TARGET_FILE:mallard>")

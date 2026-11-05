@@ -1,7 +1,7 @@
 # CMakeLists.txt for Mallard
 add_library(MallardCore STATIC
     common/common_math.cpp
-    common/compiled_expression.cpp
+    common/kexpr.cpp
     common/expression.cpp
     common/region.cpp
     common/region_mesh.cpp

@@ -63,7 +63,7 @@ double ordered_sum(const Mesh & mesh, const std::vector<double> & values) {
     return sum;
 }
 
-bool reads_solution(const expr::Program & p, const uint16_t n_variables) {
+bool reads_solution(const kexpr::Program & p, const uint16_t n_variables) {
     for (uint16_t i = RHO; i < n_variables; i++) {
         if (i >= MEAN_RHO && i < N_FIXED) continue;
         if (p.uses(i)) return true;
@@ -71,7 +71,7 @@ bool reads_solution(const expr::Program & p, const uint16_t n_variables) {
     return false;
 }
 
-bool reads_means(const expr::Program & p) {
+bool reads_means(const kexpr::Program & p) {
     for (uint16_t i = MEAN_RHO; i < N_FIXED; i++) {
         if (p.uses(i)) return true;
     }
@@ -87,7 +87,7 @@ template <typename Sink>
 struct TermKernel {
     Kokkos::View<rtype **, Kokkos::LayoutRight> field;
     Kokkos::View<Term *> terms;
-    expr::ProgramTable<> programs;
+    kexpr::ProgramTable<> programs;
     Kokkos::View<double **, Kokkos::LayoutRight> weights;
     CellFields fields;
     Kokkos::View<double *> means;
@@ -238,7 +238,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
 
         std::string kinds;
         for (const auto & [column, text, name] : values) {
-            expr::Program p(where + "." + name, text, names);
+            kexpr::Program p(where + "." + name, text, names);
             if (total) {
                 for (uint16_t i = 0; i < n_variables; i++) {
                     if (i != TIME && p.uses(i)) {
@@ -267,9 +267,9 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         m_summary.emplace_back("Source " + label, text + "; " + region_text);
     }
 
-    std::vector<const expr::Program *> pointers;
+    std::vector<const kexpr::Program *> pointers;
     for (const auto & p : programs) pointers.push_back(&p);
-    table = expr::ProgramTable<>(pointers);
+    table = kexpr::ProgramTable<>(pointers);
     const size_t n_rows = weight_rows.size();
     weights = Kokkos::View<double **, Kokkos::LayoutRight>("source_weights", n_rows, mesh->n_cells);
     auto h_weights = Kokkos::create_mirror_view(weights);

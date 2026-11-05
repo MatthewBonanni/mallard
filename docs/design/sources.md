@@ -11,12 +11,12 @@ cannot call it. Until 0.8 a time-dependent `[source]` was evaluated on the
 host at every Runge–Kutta stage, cell by cell, and copied to the device: the
 step left the CUDA graph and spent most of its time on the host.
 
-`src/common/compiled_expression.{h,cpp}` parses the same syntax once on the
-host into a postfix program of 16-byte instructions (`expr::Program`), which
-`expr::evaluate` runs with a small stack. It is one `KOKKOS_INLINE_FUNCTION`,
+`src/common/kexpr.{h,cpp}` parses the same syntax once on the
+host into a postfix program of 16-byte instructions (`kexpr::Program`), which
+`kexpr::evaluate` runs with a small stack. It is one `KOKKOS_INLINE_FUNCTION`,
 so the host and the kernels execute the same code; variables come from a
 callable index → value, so a cell, a face or a point binds its own values
-without copying them into an array. `expr::ProgramTable` packs many programs
+without copying them into an array. `kexpr::ProgramTable` packs many programs
 into one device array.
 
 The values are exprtk's to the last bit on the host (tested against exprtk on
@@ -59,7 +59,7 @@ Locals live in the bottom slots of the evaluation stack (`LOCALS n` moves the
 stack above them; block scopes reuse slots), so a thread's storage is still the
 one `double[32]` array, and a loop's value sits in a stack slot that `break`
 and `continue` cut the stack back to (`KEEP`, `DROP`). The only new
-per-thread state is an iteration counter: after `expr::MAX_ITERATIONS`
+per-thread state is an iteration counter: after `kexpr::MAX_ITERATIONS`
 (100000) loop iterations in all, an evaluation returns NaN and records which
 program stopped in a device flag of its `ProgramTable`. The flag is read only
 where the host already waits (setup, output, a diverged step), and only for
@@ -70,11 +70,11 @@ hung kernel without a synchronization per stage.
 
 Since 0.10 exprtk is no longer part of Mallard. The remaining host sites
 (`Expression`: sponges, boundary `where`, mass-flow profiles, compositions,
-synthetic-inflow profiles, parametric probes) evaluate the same `expr::Program`;
+synthetic-inflow profiles, parametric probes) evaluate the same `kexpr::Program`;
 those that evaluate at many mesh points (sponges and their compositions,
 `where`, mass-flow profiles, boundary compositions) do so in one kernel
 (`evaluate_at`), and parametric probes and synthetic-inflow profiles, which
-evaluate at a few points on the host, call the same `expr::evaluate`. The
+evaluate at a few points on the host, call the same `kexpr::evaluate`. The
 literal conversion is a port of exprtk's `string_to_real` and `derivative`
 (probe curves) of exprtk's fourth-order difference, so no value changed
 where exprtk ran with strength reduction off. exprtk ran these sites with it
@@ -173,7 +173,7 @@ every stage; cells outside a region skip it.
 ## Reuse
 
 Boundary expressions (#316), sponges and `[initialize]` still evaluate exprtk
-on the host where they are evaluated once (checked by `expr::Program`);
+on the host where they are evaluated once (checked by `kexpr::Program`);
 adopting it for evaluation is a matter of binding their variables (#449). Sponges
 and probes take regions too (#499), and initialization is to (#324).
 
