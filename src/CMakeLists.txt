@@ -23,6 +23,7 @@ add_library(MallardCore STATIC
     common/run_log.cpp
     common/run_status.cpp
     common/input_upgrade.cpp
+    mesh/cell_order.cpp
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp

@@ -499,9 +499,13 @@ TEST(RestartTest, LatestIsTheNewestRunsHighestCompleteStep) {
     const std::string run_start = "\"run\":{\"start_time\":\"";
     const size_t started = bytes.find(run_start);
     ASSERT_NE(started, std::string::npos);
+    // Cut within the data: a cut where the provenance trailer starts leaves a complete file without one
+    uint64_t provenance_size = 0;
+    std::memcpy(&provenance_size, bytes.data() + bytes.size() - 24, sizeof(provenance_size));
+    const size_t data_size = bytes.size() - 24 - provenance_size;
     if (comm::is_root()) {
         // Higher steps, written later, that are not complete restart files
-        std::ofstream(dir + "/restart_000060.restart", std::ios::binary) << with_step(bytes, 60).substr(0, bytes.size() / 2);
+        std::ofstream(dir + "/restart_000060.restart", std::ios::binary) << with_step(bytes, 60).substr(0, data_size / 2);
         std::ofstream(dir + "/restart_000070.restart", std::ios::binary) << with_step(bytes, 70).substr(0, bytes.size() - 1);
         std::ofstream(dir + "/restart_000080.restart.partial", std::ios::binary) << with_step(bytes, 80);
         std::ofstream(dir + "/restart_x00090.restart", std::ios::binary) << with_step(bytes, 90);
