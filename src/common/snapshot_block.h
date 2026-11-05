@@ -13,6 +13,7 @@
 #ifndef SNAPSHOT_BLOCK_H
 #define SNAPSHOT_BLOCK_H
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>

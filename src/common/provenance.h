@@ -12,6 +12,7 @@
 #ifndef PROVENANCE_H
 #define PROVENANCE_H
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -46,7 +47,7 @@ const std::string & run_id();
  *        file records none: written before Mallard 0.10), the restart file
  *        and the step it continues from.
  */
-void set_restart_of(const std::string & run_id, const std::string & file, uint64_t step);
+void set_restart_of(const std::string & run_id, const std::string & file, std::uint64_t step);
 
 /** @brief The block's restart_of: an object, or "null" for a run that did not restart. */
 const std::string & restart_of();
