@@ -472,7 +472,7 @@ struct OnMesh {
 OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name) {
     OnMesh m;
     m.block.name = name;
-    const bool distributed = !mesh.h_global_cell_id.empty();
+    const bool distributed = mesh.n_global_cells > 0;
     const double inf = std::numeric_limits<double>::infinity();
     Box box = {std::array<double, 3>{inf, inf, inf}, std::array<double, 3>{-inf, -inf, -inf}};
     auto extend = [&](const std::array<double, 3> & x) {

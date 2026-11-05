@@ -451,11 +451,10 @@ Notes:
 - Multi-jagged parts of a box are its cuboid blocks: the same as Hilbert parts at power-of-two rank counts
   on cubes, and 30-45% fewer layer-1 cells otherwise (12 and 24 ranks, the weak-scaling boxes from 12 ranks
   up). On a graded O-mesh around a cylinder (2D) and on tetrahedra they also cut fewer faces than the curve.
-- At equal surface the orientation still matters, because a rank numbers its cells like the global mesh
-  (x first): 4 GPUs, $96^3$ split 2 x 2 x 1 take 41.2 ms, 1 x 2 x 2 43.9 ms, 1 x 1 x 4 48.4 ms (TENO +12%,
+- At equal surface the orientation still mattered while a rank numbered its cells like the global mesh
+  (x first): 4 GPUs, $96^3$ split 2 x 2 x 1 took 41.2 ms, 1 x 2 x 2 43.9 ms, 1 x 1 x 4 48.4 ms (TENO +12%,
   gradients +34% per launch). Multi-jagged breaks ties toward more pieces along x. At 16 GPUs 4 x 4 x 1 (20%
-  more surface) is fastest (12.8 ms): numbering a rank's cells for locality, as section 6 of `mpi.md` plans,
-  should matter more than the partition from here.
+  more surface) is fastest (12.8 ms). Ranks now number their cells along a Hilbert curve ("Cell numbering").
 - Multi-jagged numbers its blocks along a Hilbert curve, so that the ranks of a node hold a compact group:
   16 GPUs, $96^3$: 13.0 ms instead of 13.9 ms with the blocks numbered x-major.
 - Exchanging reconstructed face states instead of reconstructing layer 1 (`mpi.md`, section 7) is not worth
@@ -464,6 +463,105 @@ Notes:
   reconstructed cells, so it could save at most 1.3 ms (9%), less three exchanges' latency; at 12 GPUs
   weak (6% layer 1) at most 3 ms (5%). Most of the strong-scaling loss (73% at 16 GPUs, 55k cells per GPU)
   is the TENO kernel itself running less efficiently on fewer cells.
+
+## Cell numbering
+
+Each rank numbers its owned cells and each halo layer along the Hilbert curve of their vertex averages, and
+its faces in the order those cells reach them (`mpi.md`, section 6; `[mesh] cell_order`), when the default,
+`auto`, finds that this reads fewer cache lines (below). Before, a rank kept the global order, so a mesh file's
+numbering set the memory locality of every kernel.
+
+A100-80GB, ms per step (1 GPU / 4 GPUs of one node), the cases of the performance set at 1M cells and their
+variants on triangles and tetrahedra. *Main* is the global (generated, x-first) order. *Random* and *z first*
+number the same cells randomly and z first (y first in 2D), standing in for mesh files numbered without regard
+for locality and for a numbering against the partition; Hilbert gives the same order whatever the input order.
+
+| case | cells | main | Hilbert | random | z first |
+|---|---|---|---|---|---|
+| 2D TENO5, quadrilaterals | 1.05M | 19.9 / 6.39 | 19.3 / 6.19 | 52.8 / 10.7 | 20.0 / 6.36 |
+| 2D TENO5, triangles | 1.05M | 19.0 / 6.05 | 19.1 / 6.10 | 49.6 / 9.60 | 19.0 / 6.05 |
+| 2D MUSCL, quadrilaterals | 1.05M | 3.61 / 1.44 | 3.57 / 1.39 | 20.7 / 2.90 | 3.66 / 1.39 |
+| 2D MUSCL, triangles | 2.10M | 5.87 / 2.00 | 5.89 / 1.94 | 34.9 / 6.03 | 5.94 / 1.98 |
+| 3D TENO5, hexahedra | 885k | 150 / 40.9 | 143 / 39.6 | 294 / 72.2 | 151 / 40.7 |
+| 3D TENO5, tetrahedra | 664k | 118 / 35.6 | 117 / 35.9 | 258 / 64.0 | 128 / 37.1 |
+| 3D MUSCL, hexahedra | 885k | 13.1 / 4.27 | 13.4 / 4.36 | 75.9 / 10.7 | 13.1 / 4.20 |
+| 3D MUSCL, tetrahedra | 1.05M | 33.0 / 10.4 | 36.8 / 11.3 | 198 / 32.3 | 31.2 / 10.3 |
+
+- A numbering without locality costs 2-6x on one GPU (MUSCL on tetrahedra: 198 ms instead of 33-37 ms), less
+  on four, where each rank's cells are fewer. The Hilbert numbering removes that dependence on the mesh file.
+- Against the x-first numbering of a generated box, the curve is 1-5% faster for TENO on hexahedra and
+  quadrilaterals and up to 11% slower for MUSCL on tetrahedra: along x, consecutive cells' neighbors are
+  consecutive too, so a warp's loads coalesce, which a curve gives up at its turns.
+- Tried and not kept: reverse Cuthill-McKee on the vertex-neighbor graph (2-10% slower than the curve, e.g. 155 /
+  43.8 ms for 3D TENO5 on hexahedra and 39.1 / 11.9 ms for MUSCL on tetrahedra), and the curve over tiles of 512
+  or 4096 cells with the input order within each (MUSCL on tetrahedra 36.3 and 34.2 ms, others as the curve).
+- Restart files are bitwise identical (MD5) across the numberings and between 1 and 4 GPUs for every case.
+
+### Which kernels gain and lose
+
+Kernel time, x-first against Hilbert, one A100, nsys over the cases of the performance set (ms in all; the
+kernels of more than 2% of the total):
+
+| case | kernel | x-first | Hilbert | ratio |
+|---|---|---|---|---|
+| `air_3d` (MUSCL, LES) | all | 546 | 581 | 1.064 |
+| | vertex least-squares gradient | 131 | 143 | 1.10 |
+| | MUSCL cell reconstruction | 80.6 | 91.9 | 1.14 |
+| | viscous flux | 82.5 | 86.9 | 1.05 |
+| | convective flux | 41.1 | 45.8 | 1.11 |
+| `teno5_3d` | all | 20,236 | 19,137 | 0.946 |
+| | TENO reconstruction | 13,948 | 12,875 | 0.923 |
+| | vertex least-squares gradient | 342 | 357 | 1.04 |
+| `teno5_2d` | all | 6,770 | 6,613 | 0.977 |
+| | TENO reconstruction | 5,060 | 4,887 | 0.966 |
+| `muscl_2d` | all | 1,812 | 1,758 | 0.970 |
+| | MUSCL cell reconstruction | 490 | 463 | 0.946 |
+| | face flux sum | 89.0 | 83.5 | 0.938 |
+
+Kernels that gather one layer of neighbors (gradients, MUSCL, fluxes) favor the x-first rows of a 3D box, whose
+consecutive cells have consecutive neighbors; TENO's stencils of two or more layers favor the curve's compact
+tiles, and so does every kernel in 2D, where x-first rows put a cell's y neighbors 1024 cells away. `flame_3d`
+is `air_3d` plus order-independent chemistry. Neither order wins everywhere, so `auto` measures the stencil.
+
+### The `auto` count
+
+For blocks of 256 consecutive owned cells (every eighth block), `auto` counts the distinct 128-byte lines of a
+cell field (16 cells in double precision) that the block reads when each cell reads the cells within L vertex
+layers of it: L = 1 for first order and MUSCL, (p - 1) / 2 for TENO of order p. It counts the input order and
+the Hilbert order and takes Hilbert when it needs fewer than 0.9 times the lines; a rank counts its own cells,
+so ranks can differ, and the log says how many took the curve. The decision is the same for blocks of 64 to
+1024 cells. Lines per owned cell, input / Hilbert:
+
+| case | layers | input | Hilbert | taken |
+|---|---|---|---|---|
+| `sphere_3d` (Gmsh numbering) | 1 | 5.72 | 0.514 | Hilbert |
+| `teno5_3d`, `probes_3d` | 2 | 0.771 | 0.525 | Hilbert |
+| `teno5_2d` | 2 | 0.332 | 0.139 | Hilbert |
+| `muscl_2d` | 1 | 0.199 | 0.139 | Hilbert |
+| `air_3d`, `flame_3d` | 1 | 0.263 | 0.379 | input |
+
+The count is a host loop over the node-to-cell map at setup (with the curve: +0.2 s for `air_3d`, +0.7 s for
+`muscl_2d`, +2-3 s for `teno5_3d`); it reads no timings, so a mesh and its inputs always get the same
+numbering.
+
+### Against the numbering before
+
+Performance set on one A100, cells per second, best of six runs in two interleaved rounds (before, after,
+after, before), `perf_suite.py`:
+
+| case | before | `auto` | change |
+|---|---|---|---|
+| `sphere_3d` | 19.1M | 24.4M | +28% |
+| `teno5_3d` | 5.56M | 5.97M | +7.4% |
+| `probes_3d` | 3.81M | 4.01M | +5.2% |
+| `teno5_2d` | 51.7M | 53.5M | +3.5% |
+| `muscl_2d` | 271M | 278M | +2.6% |
+| `air_3d` | 52.3M | 52.5M | within noise (spread 4%) |
+| `flame_3d` | 6.45M | 6.44M | within noise |
+| chemistry (`h2o2`, `gri30`) | | | within 0.2% |
+
+Restart files of `sphere_3d`, `teno5_3d`, `teno5_2d`, `muscl_2d`, `air_3d` and `flame_3d` are bitwise
+identical before and after.
 
 ## Verification
 
