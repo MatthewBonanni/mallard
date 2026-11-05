@@ -67,6 +67,8 @@ Commands:
   Set up
     mallard new            Create a ready-to-run case from a template
     mallard input upgrade  Bring an input file from an older release up to date
+    mallard input resolve  Write the input as a run uses it: every key explicit,
+                           defaults and preset included
   Inspect
     mallard check          Set up a case without running it and report on it:
                            keys, mesh, time step, memory, cost
@@ -217,6 +219,8 @@ Commands on input files.
 
 Commands:
   mallard input upgrade    Bring an input file from an older release up to date
+  mallard input resolve    Write the input as a run uses it: every key explicit,
+                           defaults and preset included
 
 mallard input <command> --help shows the page of a command.
 
@@ -263,6 +267,42 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-input-upgrade
+```
+
+### mallard input resolve
+
+```text
+Usage: mallard input resolve input.toml > full.toml
+
+Sets up the case as mallard check does and writes to standard output the input
+the run uses: every key the setup reads, with the value it takes, whether the
+input sets it, a numerics preset fills it or it is the default. Renamed keys are
+under their new names, quantities with units are plain numbers in the units the
+key documents, keys are sorted and comments dropped. Keys the setup does not
+read are left out, and so are tables the input leaves out, whose presence can
+turn a feature on.
+
+The result runs bitwise the same as the input and resolves to itself. Every
+output file's provenance holds the same text (input.resolved), so a run's
+results carry the full input that made them.
+
+Options:
+  --restart FILE  The input of the run as started from this restart file.
+  --kokkos-*      Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank)
+                  or --kokkos-device-id=1 (the GPU; by default each rank gets
+                  its own).
+  -h, --help      Show this page.
+
+Examples:
+  $ mallard input resolve input.toml > full.toml
+  $ diff <(mallard input resolve a.toml) <(mallard input resolve b.toml)
+
+Exit status:
+  0  the resolved input was written
+  1  errors in the input or the setup, as mallard check reports them
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-input-resolve
 ```
 
 ### mallard check

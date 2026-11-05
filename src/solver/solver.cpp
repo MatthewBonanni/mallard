@@ -161,9 +161,6 @@ int Solver::init(const Input & input_in) {
         for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
     }
     preset = numerics_preset::apply(input);
-    std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
-    for (const auto & s : preset.settings) preset_settings.emplace_back(s.key, s.value, s.from_preset);
-    provenance::set_preset(preset.name, preset_settings);
     try {
         setup_from_input();
     } catch (const std::exception & e) {
@@ -183,9 +180,15 @@ int Solver::init(const Input & input_in) {
                              list);
         }
     }
-    logging::begin_record();
-    print_setup();
-    provenance::set_setup(logging::end_record());
+    const ResolvedInput resolved = resolve_input(input);
+    provenance::set_resolved(resolved.toml);
+    std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
+    for (const auto & s : preset.settings) {
+        const KeyRecord * record = resolved.find(s.key);
+        preset_settings.emplace_back(s.key, record ? record->value : "", s.from_preset);
+    }
+    provenance::set_preset(preset.name, preset_settings);
+    print_setup(resolved);
     provenance::set_placement();
     provenance::share();
     write_provenance();
@@ -2263,7 +2266,7 @@ RunStatus Solver::run_status() const {
     return s;
 }
 
-void Solver::print_setup() const {
+void Solver::print_setup(const ResolvedInput & resolved) const {
     using logging::real;
     logging::section("Mesh");
     logging::items(mesh_summary);
@@ -2274,7 +2277,7 @@ void Solver::print_setup() const {
     logging::item("Initial state", initial_state);
 
     logging::section("Numerics");
-    if (!preset.name.empty()) logging::item("Preset", preset.summary());
+    if (!preset.name.empty()) logging::item("Preset", preset.summary(resolved));
     logging::items(face_reconstruction->summary());
     logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
