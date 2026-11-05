@@ -44,7 +44,13 @@ constexpr Option CHECK_OPTIONS[] = {
      "Cost (wall time and GPU-hours per unit simulated time, per flow-through and to t_stop) at this "
      "many cell updates per second per rank: the Throughput of a run's summary over its ranks. "
      "Default: no cost."},
-    {"--steps", "", "N", "Cost at the throughput measured over N steps, after one untimed step. Default: no cost."},
+    {"--steps", "", "N",
+     "Cost at the throughput measured over N steps, after one untimed step; the memory then includes the "
+     "steps' peak. Default: no cost."},
+    {"--memory", "", "SIZE|GPU",
+     "Size the run for this memory per rank: a size (40GB, 512MiB; host memory per rank in CPU builds) or a GPU "
+     "(a100-40, a100-80, h100-80, h200, mi250x, mi300x): the most cells per rank, the fewest ranks the mesh fits "
+     "on and up to how many the halo stays below 10%. Default: the GPU's memory in GPU builds, else none."},
     {"--quality", "", "PREFIX",
      "Write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without HDF5), "
      "the default snapshot format. Default: none."},
