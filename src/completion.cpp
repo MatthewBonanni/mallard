@@ -338,7 +338,7 @@ _mallard() {
         _mallard_options "$cmd"
         COMPREPLY=($(compgen -W "$REPLY" -- "$cur"))
         if ((${#COMPREPLY[@]} == 1)) && [[ ${COMPREPLY[0]} == *= ]]; then
-            type compopt &>/dev/null && compopt -o nospace
+            compopt -o nospace 2>/dev/null
         fi
         return 0
     fi
