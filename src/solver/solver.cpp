@@ -810,7 +810,7 @@ void Solver::init_boundaries() {
         boundary_fields[i_bc] = fields;
         const bool composition = is_mixture() && bcs.back().prescribes_composition() &&
                                  MixtureModel::composition_varies(bound);
-        // The target of an average-pressure outlet is one number, of t at most: update_average_pressure_outlets
+        // The target of an average-pressure outlet is one number, of t at most: one entry of timed_fields
         const bool average = bcs.back().has(BoundaryCondition::AVERAGE);
         const bool profiled = composition || (!average && (fields->varies() || fields->per_face()));
         rtype direction[N_DIM];
@@ -1008,6 +1008,11 @@ void Solver::init_boundaries() {
         }
         timed_fields.add(i_bc, x, n_in, boundary_fields[base], composition);
     }
+    for (const auto & outlet : average_pressure_outlets) {
+        if (outlet.fields->depends_on_time()) {
+            timed_fields.add(static_cast<uint32_t>(outlet.i_bc), Point{}, Point{}, outlet.fields, nullptr, false);
+        }
+    }
     if (!timed_fields.empty()) timed_fields.finish();
     dirichlet_states = DirichletStates();
     const auto h_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_state_index);
@@ -1202,7 +1207,7 @@ double Solver::get_mass_flow_force() const {
     return force;
 }
 
-void Solver::update_average_pressure_outlets(StateView solution, const rtype t_eval) {
+void Solver::update_average_pressure_outlets(StateView solution) {
     const Euler phys = physics;
     for (const auto & outlet : average_pressure_outlets) {
         Kokkos::View<uint32_t *> faces = outlet.faces;
@@ -1226,15 +1231,12 @@ void Solver::update_average_pressure_outlets(StateView solution, const rtype t_e
             pA += all[2 * k];
             A += all[2 * k + 1];
         }
-        auto bc = Kokkos::subview(boundary_data.bcs, outlet.i_bc);
-        auto h_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bc);
-        if (outlet.fields->depends_on_time()) {
-            BoundaryCondition target = h_bc();
-            outlet.fields->apply(target, Point{}, double(t_eval), double(physics.R), Point{});
-            h_bc().data[N_DIM + 1] = target.data[N_DIM + 1];
-        }
-        h_bc().data[0] = h_bc().data[N_DIM + 1] - pA / A;
-        Kokkos::deep_copy(bc, h_bc);
+        const Kokkos::View<BoundaryCondition *> bcs = boundary_data.bcs;
+        const int32_t i_bc = outlet.i_bc;
+        const rtype mean = pA / A;
+        Kokkos::parallel_for("outlet_average_offset", 1, KOKKOS_LAMBDA(const int) {
+            bcs(i_bc).data[0] = bcs(i_bc).data[N_DIM + 1] - mean;
+        });
     }
 }
 
