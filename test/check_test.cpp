@@ -317,8 +317,8 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     EXPECT_FALSE(mentions(fine.warnings, "TFLES"));
     const CheckReport coarse = check(input(5.0 * delta / 10.0));  // F = 10
     EXPECT_TRUE(mentions(coarse.warnings, "F = 10"));
-    EXPECT_NEAR(fine.cells_per_delta_L_min, 1.25, 1e-12);
-    EXPECT_NEAR(coarse.cells_per_delta_L_max, 0.5, 1e-12);
+    EXPECT_NEAR(fine.cells_per_delta_L_min, 1.25, roundoff(1e-12));
+    EXPECT_NEAR(coarse.cells_per_delta_L_max, 0.5, roundoff(1e-12));
 }
 
 namespace {
@@ -351,9 +351,9 @@ TEST(CheckResolution, TaylorGreenDissipationGivesTheKolmogorovLength) {
     const CheckReport r = check(periodic_box(n, nu, u));
     ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
     EXPECT_NEAR(r.epsilon, epsilon, 0.05 * epsilon);
-    EXPECT_NEAR(r.eta, std::pow(nu * nu * nu / r.epsilon, 0.25), 1e-12);
+    EXPECT_NEAR(r.eta, std::pow(nu * nu * nu / r.epsilon, 0.25), roundoff(1e-12) * r.eta);
     EXPECT_NEAR(r.taylor, std::sqrt(15.0 * nu * (2.0 * E / N_DIM) / r.epsilon), 0.01 * r.taylor);
-    EXPECT_NEAR(r.delta_over_eta, 2.0 * std::numbers::pi / n / r.eta, 1e-9);
+    EXPECT_NEAR(r.delta_over_eta, 2.0 * std::numbers::pi / n / r.eta, roundoff(1e-9) * r.delta_over_eta);
     EXPECT_FALSE(mentions(r.warnings, "DNS"));
     // A hundredth of the viscosity dissipates a hundredth as much: eta ten times smaller
     const CheckReport coarse = check(periodic_box(n, nu / 100.0, u));
