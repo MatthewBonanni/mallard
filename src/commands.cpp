@@ -102,9 +102,10 @@ constexpr Option GLOBAL_OPTIONS[] = {
 
 constexpr std::string_view CHECK_ARGUMENTS[] = {"[INPUT]"};
 constexpr std::string_view NEW_ARGUMENTS[] = {"[TEMPLATE]", "[DIRECTORY]"};
-constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "COMMAND", "[KEY=VALUE...]"};
+constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "status|checkpoint|stop|set", "[KEY=VALUE...]"};
 constexpr std::string_view FILE_ARGUMENTS[] = {"FILE"};
 constexpr std::string_view CONVERT_ARGUMENTS[] = {"INPUT", "OUTPUT.h5"};
+constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
     return case_template::new_case(args.positional, args.has("--list"), args.has("--quick"), args.has("--force"));
@@ -133,6 +134,15 @@ int upgrade_main(const Args & args) {
     if (!dim.empty()) return input_upgrade::upgrade_file(file, args.has("--check"), dim[0] - '0');
     const front_end::Dimension found = front_end::input_dimension(file);
     return input_upgrade::upgrade_file(file, args.has("--check"), found.dim, found.why);
+}
+
+int completion_main(const Args & args) {
+    const std::string script = completion_script(args.positional[0]);
+    if (script.empty()) {
+        return usage_error(*command("completion"), "no completion for " + args.positional[0] + " (bash, zsh, fish)");
+    }
+    std::cout << script;
+    return 0;
 }
 
 int version_main(const Args &) {
@@ -170,7 +180,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard -i input.toml --restart solut/restart_010000.restart\n"
                     "$ mpirun -n 4 mallard -i input.toml --restart latest",
         .exit_status = "0  the run reached a stop condition (n_steps, t_stop, t_wall_stop)\n"
-                       "1  an error, divergence included\n"
+                       "1  an error, divergence included (the divergence report says why)\n"
                        "2  usage error: an unknown option or command, no -i\n"
                        "3  stopped on request (signal, mallard ctl stop, STOP file), restart written",
         .dim = Case::input,
@@ -365,6 +375,32 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::front_end,
         .run = front_end::test_main,
+    },
+    {
+        .name = "completion",
+        .group = "Maintain",
+        .summary = "Print the shell completion script for bash, zsh or fish",
+        .synopsis = "mallard completion bash|zsh|fish",
+        .description =
+            "Prints a script that makes the shell complete mallard's commands, their options and the values those "
+            "take: input files for -i, latest and restart files for --restart, template names for mallard new, "
+            "run directories for mallard ctl and its requests. It is made from the same table as the help pages, "
+            "so it knows every command of this build; templates come from mallard new when completing.\n"
+            "\n"
+            "An install (cmake --install, Spack, the containers) puts the scripts where the shells look: "
+            "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "
+            "share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree, or a prefix the "
+            "shell does not search, load it from the shell's startup file, as the examples show.",
+        .options = {},
+        .arguments = COMPLETION_ARGUMENTS,
+        .examples = "$ source <(mallard completion bash)                  # in ~/.bashrc\n"
+                    "$ source <(mallard completion zsh)                   # in ~/.zshrc, after compinit\n"
+                    "$ mallard completion fish | source                   # in ~/.config/fish/config.fish\n"
+                    "$ mallard completion zsh > ~/.zfunc/_mallard         # or once, into a directory of fpath",
+        .exit_status = "0  the script was printed\n"
+                       "2  usage error, or a shell other than bash, zsh and fish",
+        .dim = Case::front_end,
+        .run = completion_main,
     },
     {
         .name = "--version",
