@@ -4179,6 +4179,15 @@
   ],
   "type": "array"
  },
+ "probes.average": {
+  "default": "false",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "bool"
+ },
  "probes.boundary": {
   "dims": [
    2,

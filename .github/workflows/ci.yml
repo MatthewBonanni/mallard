@@ -193,7 +193,7 @@ jobs:
   build-and-test:
     needs: matrix
     if: needs.matrix.outputs.any == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -326,7 +326,7 @@ jobs:
   tutorials:
     needs: [changelog, device]
     if: needs.device.outputs.code == 'true' && (!inputs.only || contains(format(',{0},', inputs.only), ',tutorials,'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -341,7 +341,7 @@ jobs:
         timeout-minutes: 15
         run: >
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=3 install -y -qq
-          libopenmpi-dev openmpi-bin libhdf5-openmpi-dev ccache libglu1-mesa libxcursor1 libxft2 libxinerama1
+          libopenmpi-dev openmpi-bin libhdf5-openmpi-dev ccache libglu1-mesa libxcursor1 libxft2 libxinerama1 zsh fish
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -375,6 +375,26 @@ jobs:
       # Both dimensions in one install, run through the mallard front end
       - name: Install (2D and 3D)
         run: for dim in 2 3; do cmake --install build-$dim --prefix ${{ runner.temp }}/mallard > /dev/null; done
+      # The scripts the install wrote: bash and fish complete through them, zsh parses its own
+      - name: Shell completion of the install
+        run: |
+          export PATH=${{ runner.temp }}/mallard/bin:$PATH
+          share=${{ runner.temp }}/mallard/share
+          zsh -n $share/zsh/site-functions/_mallard
+          fish -n $share/fish/vendor_completions.d/mallard.fish
+          expect() {
+            fish --no-config -c "source $share/fish/vendor_completions.d/mallard.fish; complete -C '$1'" | cut -f1 > "$RUNNER_TEMP/fish.txt"
+            grep -qxE -- "$2" "$RUNNER_TEMP/fish.txt" || { echo "fish: '$1' offers no $2:"; cat "$RUNNER_TEMP/fish.txt"; exit 1; }
+          }
+          expect 'mallard ' check
+          expect 'mallard input ' upgrade
+          expect 'mallard --restart ' latest
+          expect 'mallard new ' cylinder
+          expect 'mallard ctl . ' status
+          expect 'mallard check -' --ranks
+          expect 'mallard test --gtest_fi' '--gtest_filter=?'
+          bash -c ". $share/bash-completion/completions/mallard; COMP_WORDS=(mallard new ''); COMP_CWORD=2; _mallard
+                   printf '%s\n' \"\${COMPREPLY[@]}\"" | grep -qx cylinder
       - name: Run the tutorials
         run: tutorials/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/tutorials
       # docs/input-keys.json is what setup reads from the examples and tutorials
@@ -399,7 +419,7 @@ jobs:
     if: >-
       (needs.device.outputs.changed == 'true' || github.ref == 'refs/heads/main' || inputs.device)
       && (!inputs.only || contains(format(',{0},', inputs.only), ',device,'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: nvidia/cuda:12.9.1-devel-ubuntu24.04
     strategy:
       fail-fast: false
@@ -464,7 +484,7 @@ jobs:
     if: >-
       (needs.device.outputs.changed == 'true' || inputs.device)
       && (!inputs.only || contains(format(',{0},', inputs.only), ',device,'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: ${{ matrix.toolchain.image }}
     strategy:
       fail-fast: false

@@ -39,6 +39,7 @@ enum class Case {
     input,          ///< the input file: -i FILE, else the first argument
     template_name,  ///< the case template named by the first argument
     mesh,           ///< the mesh file, or input file, named by the first argument
+    file,           ///< the first argument's: a mesh file's dimension; any solver for output files
     front_end,      ///< runs in the front end itself
 };
 
@@ -122,6 +123,13 @@ void print_help(std::ostream & out, const Command & command);
 
 /** @brief Prints the page of a command family. */
 void print_help(std::ostream & out, const Family & family);
+
+/**
+ * @brief The completion script of every command and option for a shell.
+ * @param shell "bash", "zsh" or "fish".
+ * @return empty for another shell.
+ */
+std::string completion_script(std::string_view shell);
 
 /**
  * @brief Prints "<title>: <message> (see <title> --help)" to stderr.

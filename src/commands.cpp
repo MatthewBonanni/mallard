@@ -44,9 +44,15 @@ constexpr Option CHECK_OPTIONS[] = {
      "Cost (wall time and GPU-hours per unit simulated time, per flow-through and to t_stop) at this "
      "many cell updates per second per rank: the Throughput of a run's summary over its ranks. "
      "Default: no cost."},
-    {"--steps", "", "N", "Cost at the throughput measured over N steps, after one untimed step. Default: no cost."},
+    {"--steps", "", "N",
+     "Cost at the throughput measured over N steps, after one untimed step; the memory then includes the "
+     "steps' peak. Default: no cost."},
+    {"--memory", "", "SIZE|GPU",
+     "Size the run for this memory per rank: a size (40GB, 512MiB; host memory per rank in CPU builds) or a GPU "
+     "(a100-40, a100-80, h100-80, h200, mi250x, mi300x): the most cells per rank, the fewest ranks the mesh fits "
+     "on and up to how many the halo stays below 10%. Default: the GPU's memory in GPU builds, else none."},
     {"--quality", "", "PREFIX",
-     "Write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without HDF5), "
+     "Write the mesh-quality fields, and those of the resolution estimates (Y_PLUS, DELTA_OVER_ETA, CELLS_PER_DELTA_L), to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without HDF5), "
      "the default snapshot format. Default: none."},
     {"--catalog", "", "KEYS.json",
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
@@ -70,6 +76,20 @@ constexpr Option UPGRADE_OPTIONS[] = {
     {"--check", "", "", "Write nothing: list the changes, with exit status 1 if there are any."},
     {"--dim", "", "2|3",
      "The case's dimension, for renames that depend on it. Default: from the input's mesh, as a run finds it."},
+};
+
+constexpr Option INFO_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
+     "scripts. Default: text."},
+    {"--input", "", "",
+     "Print the input file that produced the file, from its provenance: the resolved input (every key the "
+     "run read, defaults filled in) for files of Mallard 0.10 and later, the input as written for 0.9. For a "
+     "run directory, its run's."},
+    {"--quality", "", "PREFIX",
+     "Mesh files: write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without "
+     "HDF5), as mallard check --quality does. Default: none."},
+    KOKKOS,
 };
 
 constexpr Option RESOLVE_OPTIONS[] = {
@@ -102,9 +122,10 @@ constexpr Option GLOBAL_OPTIONS[] = {
 
 constexpr std::string_view CHECK_ARGUMENTS[] = {"[INPUT]"};
 constexpr std::string_view NEW_ARGUMENTS[] = {"[TEMPLATE]", "[DIRECTORY]"};
-constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "COMMAND", "[KEY=VALUE...]"};
+constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "status|checkpoint|stop|set", "[KEY=VALUE...]"};
 constexpr std::string_view FILE_ARGUMENTS[] = {"FILE"};
 constexpr std::string_view CONVERT_ARGUMENTS[] = {"INPUT", "OUTPUT.h5"};
+constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
     return case_template::new_case(args.positional, args.has("--list"), args.has("--quick"), args.has("--force"));
@@ -133,6 +154,15 @@ int upgrade_main(const Args & args) {
     if (!dim.empty()) return input_upgrade::upgrade_file(file, args.has("--check"), dim[0] - '0');
     const front_end::Dimension found = front_end::input_dimension(file);
     return input_upgrade::upgrade_file(file, args.has("--check"), found.dim, found.why);
+}
+
+int completion_main(const Args & args) {
+    const std::string script = completion_script(args.positional[0]);
+    if (script.empty()) {
+        return usage_error(*command("completion"), "no completion for " + args.positional[0] + " (bash, zsh, fish)");
+    }
+    std::cout << script;
+    return 0;
 }
 
 int version_main(const Args &) {
@@ -326,6 +356,41 @@ constexpr Command COMMANDS[] = {
         .run = check_main,
     },
     {
+        .name = "info",
+        .group = "Inspect",
+        .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
+        .synopsis = "mallard info FILE [--format text|json] [--input] [--quality PREFIX]\n"
+                    "mallard info RUN_DIR [--format text|json] [--input]",
+        .description =
+            "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
+            "version; the mesh (cells, points, cell types, bounds, boundary and cell zones); its times and steps; "
+            "its fields with their units, descriptions and ranges (of the last snapshot); the species; and its "
+            "provenance (Mallard version and commit, build, when, where and on how many ranks it ran, the input "
+            "file and mesh with their SHA-256). Files without provenance (before Mallard 0.9) or from a newer "
+            "Mallard are reported with a note.\n"
+            "\n"
+            "FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5) or a series index (.vtkhdf.series, .pvd, .xmf), "
+            "a restart file (compressed too), a probe file (.csv, .h5, .vtkhdf, .vtp, .pvd), a CSV file of forces "
+            "or integrals, or a mesh file (Gmsh or Fluent .msh, .cas, .cgns, an OpenFOAM case, a Mallard HDF5 "
+            "mesh). Output files are read by any build, of any dimension and precision; a mesh file by the solver "
+            "of its dimension, which also reports its quality as mallard check does.\n"
+            "\n"
+            "RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and every output file "
+            "in it and one level down, one table row each (the snapshots of a series as their index).",
+        .options = INFO_OPTIONS,
+        .arguments = FILE_ARGUMENTS,
+        .examples = "$ mallard info solut/flow.vtkhdf.series\n"
+                    "$ mallard info solut/restart_001000.restart --format json\n"
+                    "$ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it\n"
+                    "$ mallard info wing.msh --quality quality\n"
+                    "$ mallard info runs/cylinder",
+        .exit_status = "0  the file was read\n"
+                       "1  a file cannot be read (missing, not Mallard's, newer), or --input finds no provenance\n"
+                       "2  usage error",
+        .dim = Case::file,
+        .run = info_main,
+    },
+    {
         .name = "mesh convert",
         .group = "Mesh",
         .summary = "Write a mesh file, or the mesh of an input file, as a Mallard HDF5 mesh",
@@ -365,6 +430,32 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::front_end,
         .run = front_end::test_main,
+    },
+    {
+        .name = "completion",
+        .group = "Maintain",
+        .summary = "Print the shell completion script for bash, zsh or fish",
+        .synopsis = "mallard completion bash|zsh|fish",
+        .description =
+            "Prints a script that makes the shell complete mallard's commands, their options and the values those "
+            "take: input files for -i, latest and restart files for --restart, template names for mallard new, "
+            "run directories for mallard ctl and its requests. It is made from the same table as the help pages, "
+            "so it knows every command of this build; templates come from mallard new when completing.\n"
+            "\n"
+            "An install (cmake --install, Spack, the containers) puts the scripts where the shells look: "
+            "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "
+            "share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree, or a prefix the "
+            "shell does not search, load it from the shell's startup file, as the examples show.",
+        .options = {},
+        .arguments = COMPLETION_ARGUMENTS,
+        .examples = "$ source <(mallard completion bash)                  # in ~/.bashrc\n"
+                    "$ source <(mallard completion zsh)                   # in ~/.zshrc, after compinit\n"
+                    "$ mallard completion fish | source                   # in ~/.config/fish/config.fish\n"
+                    "$ mallard completion zsh > ~/.zfunc/_mallard         # or once, into a directory of fpath",
+        .exit_status = "0  the script was printed\n"
+                       "2  usage error, or a shell other than bash, zsh and fish",
+        .dim = Case::front_end,
+        .run = completion_main,
     },
     {
         .name = "--version",

@@ -19,6 +19,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -107,13 +108,19 @@ RegionValue classify_region(const Input & input, region::Regions & regions, cons
  *        the samples in the owned cells of each rank; a write evaluates them
  *        on the device of the owning ranks and gathers them on rank 0, which
  *        writes the samples and the reductions in a fixed sample order, so the
- *        files do not depend on the number of ranks.
+ *        files do not depend on the number of ranks. A probe with `average`
+ *        samples on the [statistics] schedule instead and writes the running
+ *        time averages of its samples, accumulated on rank 0 in that order.
  */
 class Probes {
     public:
-        /** @brief Read [[probes]] and locate the samples; resume appends to existing files. */
+        /**
+         * @brief Read [[probes]] and locate the samples; resume appends to existing files. The [statistics]
+         *        outputs among cell_data are variables too, and its schedule is that of averaging probes.
+         */
         void init(const Input & input, const Mesh & mesh, region::Regions & regions,
-                  const std::vector<std::string> & species_names, bool resume, bool viscous);
+                  const std::vector<std::string> & species_names, bool resume, bool viscous,
+                  const std::vector<Data> & cell_data, const Statistics & statistics);
 
         enum class Format { CSV, HDF5, VTP, VTKHDF };
         /** @brief A [[write_data]] snapshot of a region of lower dimension: point values on it. */
@@ -134,6 +141,25 @@ class Probes {
                           const Input & entry, const Snapshot & snapshot, const std::vector<Data> & cell_data);
         /** @brief A restarted run at (step, t): next output times, and series cut back to t. */
         void resume(uint64_t step, rtype t);
+
+        /** @brief Whether an averaging probe samples now. */
+        bool averages_due(uint64_t step, rtype t) const;
+        /**
+         * @brief Whether the averaging probes need point values or gradients (ProbeFields::W current),
+         *        transport, and, as all_gradients_due, the gradients of every cell and the wall model.
+         */
+        std::tuple<bool, bool, bool> average_needs(bool wall_model) const;
+        /** @brief Adds the samples at (step, t) to the time averages of the averaging probes (collective). */
+        void sample_averages(uint64_t step, rtype t, const ProbeFields & fields);
+        /** @brief Start the time averages afresh at time t (the first sample weighted from max(t, t_start)). */
+        void start_averages(rtype t);
+        /** @brief Continue the time averages of a restart file, or start them afresh if it holds none (or with reset). */
+        void restore_averages(const RestartData & restart, const std::string & file, rtype t, bool reset);
+        RestartAttributes attributes() const;
+        /** @brief The running time averages, from rank 0 (collective). */
+        RestartArrays arrays() const;
+        /** @brief Whether a probe due now reads [statistics] outputs, which must then be on the host. */
+        bool statistics_due(uint64_t step, rtype t) const;
 
         /** @brief Whether a probe or a snapshot is due now. */
         bool due(uint64_t step, rtype t) const;
@@ -244,6 +270,12 @@ class Probes {
             std::array<double, 3> moment_center = {0.0, 0.0, 0.0};
             // moment: the vectors whose every component is a variable, and those components' columns
             std::vector<std::pair<std::string, std::array<uint32_t, N_DIM>>> moment_vectors;
+            bool average = false;                // writes the time averages of its samples
+            // Averages: total weight, time of the last sample, samples, and (rank 0) the means of the
+            // gathered node and quadrature values
+            double average_weight = 0.0, average_t_last = 0.0;
+            uint64_t average_samples = 0;
+            std::vector<double> mean_nodes, mean_quadrature;
             ProbeReference reference;
             probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
             bool from_region = false;
@@ -261,6 +293,10 @@ class Probes {
                 return due(step, t) || (force && snapshot && step != step_last);
             }
             uint64_t n_evaluated() const { return codes.extent(0); }
+            bool samples_nodes() const;
+            bool samples_quadrature() const;
+            /** @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values. */
+            void sample(const ProbeFields & fields, std::vector<double> & nodes, std::vector<double> & quad);
             void write_hdf5(uint64_t step, rtype t, const std::vector<double> & values) const;
             void write_vtp(uint64_t step, rtype t, const std::vector<double> & values);
             void write_vtkhdf(rtype t, const std::vector<double> & values);
@@ -282,6 +318,9 @@ class Probes {
                                     bool per_cell);
 
         std::vector<std::unique_ptr<Probe>> probes;
+        std::vector<std::string> statistics_variables;
+        uint64_t average_interval = 1;
+        rtype average_start = 0.0;
         bool resumed = false;
         bool distributed = false;  // samples split over the ranks, which set up and write together
 };

@@ -17,7 +17,7 @@ its progress on the terminal and in a machine-readable run record.
 | Probes | `probe_<name>.csv` (or `.h5`, `.vtkhdf`, `.pvd`), `probe_<name>_reductions.csv` | `[[probes]]` | [Probes and monitors](probes.md#probes-probes) |
 | Wall forces | `forces_<zone>.csv` | `[[forces]]` | [Wall forces](probes.md#wall-forces-forces) |
 | Domain integrals | `integrals.csv` | `[integrals]` | [Domain integrals](probes.md#domain-integrals-integrals) |
-| Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files | `[statistics]`, `[statistics.phase]` | [Statistics](statistics.md) |
+| Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files; probe columns `MEAN_<variable>` with `average = true` | `[statistics]`, `[statistics.phase]`, `[[probes]]` | [Statistics](statistics.md), [Probes](probes.md#time-averages) |
 | Spectra and two-point correlations | `spectra.csv` | `[statistics.spectra]` | [Spectra](statistics.md#spectra-and-two-point-correlations-statisticsspectra) |
 
 Every file records its [units](#units), its [provenance](#provenance) and a
@@ -411,7 +411,7 @@ those of `A` per second.
 | `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
 | `Q` | `s-2` | `CFL`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
-| `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` | `1` |
+| `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
 | `MASS_FLUX`, `SPECIES_FLUX_<s>`, `SPECIES_DIFFUSIVE_FLUX_<s>`, `SPECIES_TOTAL_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `ENERGY_DIFFUSIVE_FLUX`, `ENERGY_TOTAL_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
 | `CF`, `CP`, `Y_PLUS` | `1` | `REGION_FRACTION` (regions) | `1` |
@@ -472,6 +472,9 @@ json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
 ```
 
 or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
+`mallard info FILE` summarizes the block, and `mallard info --input FILE`
+prints the input that produced the file, ready to run again
+([Command line](cli.md#mallard-info)).
 
 ### Formats and compatibility
 
@@ -484,7 +487,7 @@ build reads. It is never misread.
 
 | File | Version, where | Versions (written from) | Read by |
 |---|---|---|---|
-| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9) | Mallard: all |
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), and that of time-averaged probes (0.10) | Mallard: all |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
@@ -508,6 +511,41 @@ build reads. It is never misread.
   [README](../../test/data/formats/README.md)).
 
 ## Post-processing
+
+`mallard info` tells what any of these files holds, without an input file:
+its kind, format version, mesh, times, fields with their units and ranges, and
+provenance; `mallard info solut` does so for each file a run wrote, one table
+row each ([Command line](cli.md#mallard-info)). Every number comes in a table
+column or a labeled line that names its units (`t [s]`, `min [m]`, a field's
+units, `dimensionless`); a `-` is something the file does not record:
+
+```
+$ mallard info solut/flow.vtkhdf.series
+== solut/flow.vtkhdf.series ===============================================================
+  Kind               snapshot
+  Format             VTKHDF series index (VTKHDF snapshots), version 1
+  Values             2D, double precision
+  Simulated time     3 snapshots, t = 0 to 0.002 s
+
+== Mesh ===================================================================================
+  cells  points
+  12     20
+...
+== Snapshots ================================================================== 3 snapshots
+  #  t [s]  file
+  0  0      flow_000000.vtkhdf
+  1  0.001  flow_000001.vtkhdf
+  2  0.002  flow_000002.vtkhdf
+
+== Fields ================================================= ranges at t = 0.002 s, the last
+  field  units       components  min      max      description
+  P      kg m-1 s-2  1           1        1        pressure
+  RHO    kg m-3      1           1.03804  1.26232  density
+  U      m s-1       3           0.3      0.3      velocity
+  min and max of fields with several components are of their magnitude.
+```
+
+`--format json` prints the same as one JSON object, for scripts.
 
 The Python scripts in `tools/` (numpy, matplotlib; see
 [Tools](https://matthewbonanni.github.io/mallard/docs/tools/)) read Mallard's output directly:

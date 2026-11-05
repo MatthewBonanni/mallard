@@ -49,7 +49,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 
 **Input and output** ([guide](docs/guide/input_files.md))
 - TOML input with units (`p = "1 atm"`); every error names the key, line and fix
-- `mallard check` before a run, `mallard new` case templates, `mallard ctl` to steer a running job
+- `mallard check` before a run, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file; tab completion for bash, zsh and fish
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView
 - Probes on points, curves, surfaces, boundaries and regions; statistics, spectra and phase averages
@@ -87,7 +87,7 @@ mallard -i input.toml --kokkos-num-threads=8                   # installed (cont
 ../../build/src/mallard -i input.toml --kokkos-num-threads=8   # source build
 ```
 
-`mallard new --list` shows ready-to-run templates (`mallard new cylinder` creates a case with its mesh, run and plot scripts), `mallard check input.toml` checks a case before a long run, and `mallard ctl <run-dir> status|stop` steers it while it runs. Start with the [tutorials](docs/tutorials/index.md); see [`examples/`](examples) for complete cases, the [user guide](docs/guide/input_files.md) for each topic, [`docs/input.md`](docs/input.md) for every input key, [Running on clusters](docs/guide/parallel.md#running-on-clusters) for MPI and job scripts, and [`tools/`](tools) for plotting and animation.
+`mallard new --list` shows ready-to-run templates (`mallard new cylinder` creates a case with its mesh, run and plot scripts), `mallard check input.toml` checks a case before a long run, and `mallard ctl <run-dir> status|stop` steers it while it runs; `mallard info solut` tells what a run wrote. Start with the [tutorials](docs/tutorials/index.md); see [`examples/`](examples) for complete cases, the [user guide](docs/guide/input_files.md) for each topic, [`docs/input.md`](docs/input.md) for every input key, [Running on clusters](docs/guide/parallel.md#running-on-clusters) for MPI and job scripts, and [`tools/`](tools) for plotting and animation.
 
 `mallard test` runs the test suites of an install (`./build/src/mallard test` in a build tree).
 

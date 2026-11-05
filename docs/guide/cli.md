@@ -26,6 +26,33 @@ A few things hold for every command:
   (`--kokkos-num-threads=8`, `--kokkos-device-id=1`) go after the command
   ([Running in parallel](parallel.md)).
 
+## Shell completion
+
+Tab completes `mallard`'s commands, their options and the values those take: input
+files after `-i`, `latest` and `*.restart` files after `--restart`, template names
+after `mallard new`, run directories and requests after `mallard ctl`, `2` or `3`
+after `--dim`. An install puts the scripts where bash (with the bash-completion
+package), zsh and fish look under its prefix:
+
+| Shell | Installed as | Found without setup when |
+|---|---|---|
+| bash | `share/bash-completion/completions/mallard` | the prefix is `/usr` or `/usr/local`, or in `XDG_DATA_DIRS` |
+| zsh | `share/zsh/site-functions/_mallard` | that directory is in `fpath` (it is for `/usr/local` on most systems) |
+| fish | `share/fish/vendor_completions.d/mallard.fish` | the prefix is `/usr` or `/usr/local`, or in `XDG_DATA_DIRS` |
+
+Otherwise, for a build tree, a Spack install or a prefix such as `~/mallard`,
+load it from the shell's startup file; `mallard completion` prints it:
+
+```sh
+source <(mallard completion bash)     # ~/.bashrc
+source <(mallard completion zsh)      # ~/.zshrc, after compinit
+mallard completion fish | source      # ~/.config/fish/config.fish
+```
+
+The containers load the bash completion in every interactive shell. The script is
+made from the same table as the help pages, so it completes exactly the commands of
+the `mallard` that printed it; reload it after updating Mallard.
+
 How the commands are laid out, and which are planned:
 [design notes](../design/cli.md).
 
@@ -72,11 +99,15 @@ Commands:
   Inspect
     mallard check          Set up a case without running it and report on it:
                            keys, mesh, time step, memory, cost
+    mallard info           What a mesh, snapshot, restart, probe or CSV file, or
+                           a run directory, holds
   Mesh
     mallard mesh convert   Write a mesh file, or the mesh of an input file, as a
                            Mallard HDF5 mesh
   Maintain
     mallard test           Run the unit and regression tests
+    mallard completion     Print the shell completion script for bash, zsh or
+                           fish
     mallard --version      Print the version
 
 Options:
@@ -333,11 +364,19 @@ Options:
                             cell updates per second per rank: the Throughput of
                             a run's summary over its ranks. Default: no cost.
   --steps N                 Cost at the throughput measured over N steps, after
-                            one untimed step. Default: no cost.
-  --quality PREFIX          Write the mesh-quality fields to
-                            PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds
-                            without HDF5), the default snapshot format. Default:
-                            none.
+                            one untimed step; the memory then includes the
+                            steps' peak. Default: no cost.
+  --memory SIZE|GPU         Size the run for this memory per rank: a size (40GB,
+                            512MiB; host memory per rank in CPU builds) or a GPU
+                            (a100-40, a100-80, h100-80, h200, mi250x, mi300x):
+                            the most cells per rank, the fewest ranks the mesh
+                            fits on and up to how many the halo stays below 10%.
+                            Default: the GPU's memory in GPU builds, else none.
+  --quality PREFIX          Write the mesh-quality fields, and those of the
+                            resolution estimates (Y_PLUS, DELTA_OVER_ETA,
+                            CELLS_PER_DELTA_L), to PREFIX_000000.vtkhdf
+                            (PREFIX_000000.vtu in builds without HDF5), the
+                            default snapshot format. Default: none.
   --catalog KEYS.json       Write every key the setup looked up, with its type,
                             unit, default and accepted values, as JSON. Default:
                             none.
@@ -364,6 +403,64 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-check
+```
+
+### mallard info
+
+```text
+Usage: mallard info FILE [--format text|json] [--input] [--quality PREFIX]
+       mallard info RUN_DIR [--format text|json] [--input]
+
+Reports what a file Mallard writes or reads holds, without an input file: its
+kind, format and format version; the mesh (cells, points, cell types, bounds,
+boundary and cell zones); its times and steps; its fields with their units,
+descriptions and ranges (of the last snapshot); the species; and its provenance
+(Mallard version and commit, build, when, where and on how many ranks it ran,
+the input file and mesh with their SHA-256). Files without provenance (before
+Mallard 0.9) or from a newer Mallard are reported with a note.
+
+FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5) or a series index
+(.vtkhdf.series, .pvd, .xmf), a restart file (compressed too), a probe file
+(.csv, .h5, .vtkhdf, .vtp, .pvd), a CSV file of forces or integrals, or a mesh
+file (Gmsh or Fluent .msh, .cas, .cgns, an OpenFOAM case, a Mallard HDF5 mesh).
+Output files are read by any build, of any dimension and precision; a mesh file
+by the solver of its dimension, which also reports its quality as mallard check
+does.
+
+RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and
+every output file in it and one level down, one table row each (the snapshots of
+a series as their index).
+
+Options:
+  --format text|json  text: sections and tables, with the units of every
+                      quantity; json: the same as one JSON object, for scripts.
+                      Default: text.
+  --input             Print the input file that produced the file, from its
+                      provenance: the resolved input (every key the run read,
+                      defaults filled in) for files of Mallard 0.10 and later,
+                      the input as written for 0.9. For a run directory, its
+                      run's.
+  --quality PREFIX    Mesh files: write the mesh-quality fields to
+                      PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without
+                      HDF5), as mallard check --quality does. Default: none.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard info solut/flow.vtkhdf.series
+  $ mallard info solut/restart_001000.restart --format json
+  $ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it
+  $ mallard info wing.msh --quality quality
+  $ mallard info runs/cylinder
+
+Exit status:
+  0  the file was read
+  1  a file cannot be read (missing, not Mallard's, newer), or --input finds no provenance
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-info
 ```
 
 ### mallard mesh
@@ -445,6 +542,40 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-test
+```
+
+### mallard completion
+
+```text
+Usage: mallard completion bash|zsh|fish
+
+Prints a script that makes the shell complete mallard's commands, their options
+and the values those take: input files for -i, latest and restart files for
+--restart, template names for mallard new, run directories for mallard ctl and
+its requests. It is made from the same table as the help pages, so it knows
+every command of this build; templates come from mallard new when completing.
+
+An install (cmake --install, Spack, the containers) puts the scripts where the
+shells look: share/bash-completion/completions/mallard,
+share/zsh/site-functions/_mallard and
+share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree,
+or a prefix the shell does not search, load it from the shell's startup file, as
+the examples show.
+
+Options:
+  -h, --help  Show this page.
+
+Examples:
+  $ source <(mallard completion bash)                  # in ~/.bashrc
+  $ source <(mallard completion zsh)                   # in ~/.zshrc, after compinit
+  $ mallard completion fish | source                   # in ~/.config/fish/config.fish
+  $ mallard completion zsh > ~/.zfunc/_mallard         # or once, into a directory of fpath
+
+Exit status:
+  0  the script was printed
+  2  usage error, or a shell other than bash, zsh and fish
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-completion
 ```
 
 ### mallard --version

@@ -23,7 +23,8 @@ Maintain  mallard test | completion | --version
 | `check input.toml` | Inspect | available |
 | `check --view DIR` (the case view) | Inspect | regions and boundary zones available; the rest planned ([#546](https://github.com/MatthewBonanni/mallard/issues/546)) |
 | `check` with no input | Inspect | planned ([#508](https://github.com/MatthewBonanni/mallard/issues/508)) |
-| `info <file>`, `info <run-dir> [--html]` (the run report) | Inspect | planned ([#504](https://github.com/MatthewBonanni/mallard/issues/504), [#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
+| `info <file>`, `info <run-dir>` | Inspect | available; on the [output reader](output_reader.md) |
+| `info <run-dir> --html` (the run report) | Inspect | planned ([#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
 | `list fields\|species\|templates\|keys` | Inspect | planned ([#502](https://github.com/MatthewBonanni/mallard/issues/502)) |
 | `diff` | Inspect | planned ([#506](https://github.com/MatthewBonanni/mallard/issues/506)) |
 | `mesh convert` | Mesh | available |
@@ -35,8 +36,7 @@ Maintain  mallard test | completion | --version
 | `post convergence` | Post | planned ([#514](https://github.com/MatthewBonanni/mallard/issues/514)) |
 | `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
 | `pack` | Share | planned |
-| `test`, `--version` | Maintain | available |
-| `completion` | Maintain | planned ([#507](https://github.com/MatthewBonanni/mallard/issues/507)) |
+| `test`, `completion`, `--version` | Maintain | available |
 
 ## Rules
 
@@ -56,8 +56,8 @@ Maintain  mallard test | completion | --version
   synopsis, description, options, arguments, examples, exit status, how the
   front end finds its dimension, and the function that runs it. The parser,
   the dispatcher, every help page, the top-level page (grouped as above), the
-  user docs and, later, shell completion are made from it, so a command or
-  option cannot exist without its help.
+  user docs and shell completion are made from it, so a command or option
+  cannot exist without its help.
 - **Help pages.** Each has a synopsis, a description, every option with its
   argument and default, examples, the exit status and a link to its section of
   the [Command line](../guide/cli.md) page. `-h` or `--help` anywhere in a
@@ -66,18 +66,30 @@ Maintain  mallard test | completion | --version
 - **Usage errors** (an unknown option or command, a missing argument) print
   one line, `mallard <cmd>: <what> (see mallard <cmd> --help)`, with exit
   status 2. Other failures exit with 1; a run stopped on request with 3.
+- **Placeholders say what completes them.** `mallard completion` reads an
+  option's value and a command's arguments by their spelling: lowercase
+  alternatives (`2|3`, `FILE|latest`, `status|checkpoint|stop|set`) are words
+  to offer; `FILE` and `INPUT` are files (`*.toml` for `-i`, `*.restart` for
+  `--restart`), `NAME.ext` files of that extension, `DIR`, `RUN_DIR` and
+  `DIRECTORY` directories, and `TEMPLATE` the templates `mallard new` lists;
+  anything else (`N`, `KEY=VALUE`) completes nothing. A pass-through row offers
+  the options its help names (`--kokkos-num-threads=8`). So a command added to
+  the table completes with no change to the scripts.
 - **Pass-through options** are rows whose name ends in `*`: `--kokkos-*` for
   every command that starts Kokkos, `--gtest_*` for `mallard test`.
 - **Tests** (`test/cli_test.cpp`) run every command's `--help` and fail if a
   command lacks a summary, a group or a page, or if its page misses an option
-  the parser accepts; and check that `docs/guide/cli.md` shows every page as
+  the parser accepts; check that `docs/guide/cli.md` shows every page as
   it is (`python tools/docs/cli.py --mallard build/src/mallard` regenerates
-  it).
+  it); and check that each shell's completion has every command and option,
+  that bash completes them and their values, and that the zsh and fish
+  scripts parse (where those shells are installed).
 
 ## Adding a command
 
 1. A row in `src/commands.cpp` with every field, in its group of the layout
-   above; a `Family` row for a new noun.
+   above; a `Family` row for a new noun. Spell its placeholders so they
+   complete (see the rules above).
 2. Its run function takes the parsed `cli::Args`; it reports misuse the parser
    cannot see with `cli::usage_error`.
 3. `python tools/docs/cli.py --mallard build/src/mallard` adds its page to

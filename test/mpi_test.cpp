@@ -31,7 +31,7 @@
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
-#include "json_reader.h"
+#include "json.h"
 #include "provenance.h"
 #include "renumbered_mesh.h"
 #include "test_fixtures.h"
@@ -713,14 +713,22 @@ std::vector<double> gather_statistics(Solver & solver) {
 
 TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     // Averages are per cell; probe points on faces between ranks take the same
-    // cell on every rank count; averages written by all ranks continue on one
+    // cell on every rank count; averages written by all ranks continue on one,
+    // and so do the time averages of probes (rank 0 sums them in sample order)
     const std::string dir = io_dir() + "_statistics";
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     const std::string stats = "[statistics]\ninterval = 2\nfields = [\"P\"]\nproducts = [\"U_X*U_Y\", \"RHO*RHO\"]\n";
     auto probe = [&](const std::string & file) {
-        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nvariables = [\"RHO\", \"P\"]\n"
-               "start = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\n";
+        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nvariables = [\"RHO\", \"P\", "
+               "\"MEAN_P\", \"COV_U_X_U_Y\"]\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\n"
+               "[[probes]]\nname = \"mean_line\"\nfile = \"" + dir + "/mean_" + file + "\"\nvariables = [\"RHO\", "
+               "\"P\", \"MASS_FLUX\"]\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\naverage = true\n"
+               "interval = 5\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/mean_red_" + file + "\"\n"
+               "[[probes]]\nname = \"outflow\"\nfile = \"" + dir + "/out_" + file + "\"\n"
+               "boundary_type = \"outlet_extrapolation\"\nvariables = [\"MASS_FLUX\", \"ENTHALPY_FLUX\"]\n"
+               "average = true\ninterval = 5\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
+               "/out_red_" + file + "\"\n";
     };
     Solver reference;
     reference.set_distributed(false);
@@ -735,7 +743,7 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     EXPECT_EQ(max_rel_diff(gather_statistics(distributed), ref), 0.0);
     comm::barrier();
 
-    std::string input = restart_case(20, stats);
+    std::string input = restart_case(20, stats + probe("continued.csv"));
     const std::string init = BLAST;
     input.replace(input.find("[initialize]\n") + 13, init.size(),
                   "type = \"restart\"\nfile = \"" + dir + "/r_000010.restart\"\n");
@@ -752,9 +760,18 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
             ss << in.rdbuf();
             return ss.str();
         };
-        const std::string a = without_comment_lines(read(dir + "/reference.csv"));
-        EXPECT_FALSE(a.empty());
-        EXPECT_EQ(without_comment_lines(read(dir + "/distributed.csv")), a);
+        for (const char * prefix : {"", "mean_", "mean_red_", "out_", "out_red_"}) {
+            const std::string a = without_comment_lines(read(dir + "/" + prefix + "reference.csv"));
+            EXPECT_FALSE(a.empty()) << prefix;
+            EXPECT_EQ(without_comment_lines(read(dir + "/" + prefix + "distributed.csv")), a) << prefix;
+            // The run continued from step 10 writes the same last row
+            const auto last_line = [](const std::string & text) {
+                const size_t end = text.find_last_not_of('\n');
+                return text.substr(text.rfind('\n', end) + 1, end - text.rfind('\n', end));
+            };
+            const std::string c = without_comment_lines(read(dir + "/" + prefix + "continued.csv"));
+            EXPECT_EQ(last_line(c), last_line(a)) << prefix;
+        }
     }
     comm::barrier();
 }
@@ -772,7 +789,7 @@ TEST(MPITest, EveryRankWritesRankZerosProvenance) {
     comm::barrier();
     const std::string expected = provenance::json();
     EXPECT_EQ(comm::broadcast(expected), expected);
-    EXPECT_EQ(json_reader::parse(expected)["run"]["ranks"].number, comm::size());
+    EXPECT_EQ(json::parse(expected)["run"]["ranks"].number, comm::size());
     std::ostringstream piece;
     piece << dir << "/f_000002";
     if (comm::size() > 1) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();

@@ -299,32 +299,49 @@ without writing any file, then reports on it; the exit status is 1 if there
 is an error. Run it under `mpirun -n N` to check a run on N ranks.
 
 ```text
-$ mallard check input.toml --ranks 4 --throughput 5e7 --quality quality
+$ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality quality
 ...
 == Check ==================================================================================
   Input keys         all used
   Boundaries         every boundary face has a condition (5 conditions)
-  non-orthogonality  max 27.7, mean 4.87
-                     worst 27.7 at (1.222, 0.3962), 27.7 at (1.209, 0.389)
-  skewness           max 0.363, mean 0.0545
-                     worst 0.363 at (0.8478, 0.4729), 0.363 at (0.8561, 0.4827)
-  aspect ratio       max 1.95, mean 1.13
-  volume ratio       max 2.26, mean 1.18
-                     worst 2.26 at (0.8694, 0.488), 2.26 at (0.8561, 0.4827)
-  Time step          0.0001416 (from run.cfl), CFL 0.25 at the initial state
-  CFL-limiting       cell 9,273 at (0.468, 0.05182)
-                     2 cells within 10% of it, in (0.4556, 0.05182) to (0.468, 0.05629)
-  Memory             72.2MB per rank after setup (peak 72.2MB), 9,385 cells, 1 rank
-                     on 4 ranks: about 26.7MB per rank (peak 26.7MB), largest part 2,347 + 1,119 halo cells
+  Regions            domain: area 4, 460,800 cells (of the mesh)
+                     bottom: curve, length 4, 960 cells (of the mesh)
+                     left: curve, length 1, 240 cells (of the mesh)
+                     right: curve, length 1, 240 cells (of the mesh)
+                     top: curve, length 4, 960 cells (of the mesh)
+  non-orthogonality  max 26.6, mean 26.6
+                     worst 26.6 at (0.5181, 0.9986), 26.6 at (0.5806, 0.9986)
+  skewness           max 1.43e-13, mean 2.85e-14
+  aspect ratio       max 1.58, mean 1.58
+  volume ratio       max 1, mean 1
+  Time step          0.0001098 (from run.cfl), CFL 1 at the initial state
+  CFL-limiting       cell 57,397 at (0.4972, 0.5778)
+                     52,499 cells within 10% of it, in (0.001389, 0.001389) to (0.7431, 0.9986)
+  Cell size          V^(1/2) from 0.00295 to 0.00295, mean 0.00295
+  Scales             inviscid: no Kolmogorov length or wall units
+  Memory             3.96GB per rank after setup (peak 3.96GB), 460,800 cells, 1 rank
+                     on 4 ranks: about 1.06GB per rank (peak 1.06GB), largest part 115,200 + 7,680 halo cells
+  By category        at the setup's peak / after setup, largest rank
+                     solution and stages     95.8MB / 95.8MB   208B / 208B per cell
+                     faces and gradients      658MB / 658MB    1.43kB / 1.43kB per cell
+                     reconstruction tables   3.07GB / 3.07GB   6.66kB / 6.66kB per cell
+                     mesh and geometry        127MB / 127MB    275B / 275B per cell
+                     boundaries and models   5.62MB / 5.62MB   12B / 12B per cell
+                     setup                   3.43MB / 0B       not proportional to the cells
+  GPU sizing         A100-80GB: 85.1GB per GPU, 5% kept free, 1.60GB outside Kokkos (typical)
+                     at most 9,226,381 cells per GPU, halo included (8.59kB per cell + 3.43MB at the setup's peak)
+                     fits on 1 GPU: largest part 460,800 + 0 halo cells, 5.56GB peak
+                     halo below 10% of the owned cells up to 4 GPUs
+                     on 4 GPUs at 50.0M cells/s each: 21.0 s wall per unit simulated time
   Throughput         50.0M cells/s per rank
-  Cost               7060 steps per unit simulated time
-                     per unit time: 331 ms wall on 4 ranks, 0.000368 rank-hours
-                     per flow-through (0.4375): 145 ms wall on 4 ranks, 0.000161 rank-hours
-                     to t_stop = 0.75: 248 ms wall on 4 ranks, 0.000276 rank-hours
+  Cost               9109 steps per unit simulated time
+                     per unit time: 21.0 s wall on 4 ranks, 0.0233 rank-hours
+                     per flow-through (1.135): 23.8 s wall on 4 ranks, 0.0265 rank-hours
+                     to t_stop = 0.2: 4.20 s wall on 4 ranks, 0.00466 rank-hours
   Result             ok
 ```
 
-(`examples/mallard` on a coarse mesh of 9k triangles, on a CPU.) The report covers:
+(`examples/double_mach`, 460,800 quadrilaterals with TENO5, checked on a CPU and sized for an A100-80GB.) The report covers:
 
 | Line | What it is |
 |---|---|
@@ -332,9 +349,60 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --quality quality
 | Boundaries | Zones without a condition are an error, named with their face count |
 | Mesh quality | Largest and mean non-orthogonality, skewness, aspect ratio and volume ratio, and where the worst cells are ([Meshes](meshes.md#mesh-quality)) |
 | Time step | The stable step at the initial state (or `run.dt` and its CFL number), the cell that sets it and the region of the cells within 10% of it |
-| Memory | Kokkos allocations per rank (device memory on GPUs) after setup, once the data only the setup reads is freed (what the time steps hold), and at their peak. With `--ranks N` in a serial check, scaled to the owned and halo cells of the largest part the run's partitioner would make. CUDA's own context, a few hundred MB per GPU, is not counted |
+| Resolution | Cell sizes, and the physical scales the case sets against them: Kolmogorov and Taylor lengths, wall units, cells across the flame, each with what it is estimated from, or why it is not ([Resolution](#resolution)) |
+| Memory | Kokkos allocations per rank (device memory on GPUs) after setup, once the data only the setup reads is freed (what the time steps hold), and at their peak. With `--ranks N` in a serial check, scaled to the owned and halo cells of the largest part the run's partitioner would make |
+| By category | The same at the setup's peak and after setup (at the steps' peak with `--steps`), by what it holds, in total and per cell; the setup's workspace, freed before the run, and work memory sized by the device are not proportional to the cells. On GPUs, also the device memory outside Kokkos: CUDA's context and the local memory of kernels with large stacks, 1.5 GB (2D) to 2.1 GB (3D) on an A100 |
+| GPU sizing | With `--memory SIZE` or `--memory GPU` (by default the GPU's own memory in GPU builds; `Rank sizing` in CPU builds): the most cells per GPU, halo included, the fewest GPUs the mesh fits on (from the parts the run's partitioner makes, in a serial check) with the largest part's peak, and up to how many GPUs the halo stays below 10% of the owned cells. The peak is the larger of the setup's and the steady state's, 5% of the memory is kept free, and the memory outside Kokkos is measured on the GPU with `--steps` (the step kernels reserve their local memory at their first launch), else the typical 1.6 GB (2D) or 2.2 GB (3D); on an A100, −1.0% to +3.3% from the measured peak extrapolating CPU checks of 4 to 16 times fewer cells ([performance](../design/performance.md#8-memory-sizing-in-mallard-check-550)) |
 | Cost | With `--throughput R` (cells/s per rank, the `Throughput` of a run's summary divided by its ranks) or `--steps N` (timed over N steps after an untimed one): steps, wall time and GPU-hours (rank-hours on CPUs) per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude) and to `t_stop`, assuming the throughput per rank holds on N ranks |
-| Warnings | A CFL number above the integrator's limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4), TFLES thickening `n_res Delta / delta_L` above 5, poor cells |
+| Warnings | A CFL number above the integrator's limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4), TFLES thickening `n_res Delta / delta_L` above 5, poor cells, a mesh short of the [resolution](#resolution) its regime needs |
+
+### Resolution
+
+The report compares the mesh with the scales the case sets, so that an
+under-resolved DNS or wall-resolved LES shows before the run. These are
+estimates: each line says what it assumes, a scale the case does not set is
+reported as not estimated, and a mesh short of its target is a warning, not an
+error. For `examples/channel_retau180` on 24 × 32 × 16 cells, started from a
+laminar profile:
+
+```text
+  Cell size          V^(1/3) from 0.129 to 0.249, mean 0.218
+  Walls              u_tau 0.065 from Dean's channel correlation at the forcing's Re_b = U_b 2h / nu = 5.6e+03 (h = volume / wall area = 1)
+                     first-cell y+ up to 1.43 at (0.2618, 1.992, 0.1309), mean 1.43; x+ up to 95.2, z+ up to 47.6
+  Kolmogorov         eta 0.0102 from the mean epsilon 0.00422 (the forcing's power, u_tau^2 U_b / h) and nu 0.000357
+                     cells of 21.4 eta on average, up to 24.5 at (8.639, 1.057, 1.44)
+warning: first cells at y+ up to 1.43 (at (0.2618, 1.992, 0.1309); u_tau from Dean's channel correlation): DNS needs y+ <= 1 at the first cell centers: place them at most 0.0055 from the wall, or model the walls (wall_model)
+warning: wall cells up to x+ 95.2 and z+ 47.6 (along the flow and across it): DNS needs x+ <= 15 and z+ <= 8: refine the mesh along the walls
+warning: DNS: cells of 21.4 eta on average (eta 0.0102 from the forcing's power, u_tau^2 U_b / h): resolving the dissipation needs about 2 eta or less: refine to cells of 0.0204, or model the small scales with LES ([les])
+```
+
+| Scale | Estimated from |
+|---|---|
+| Cell size | `V^(1/d)` of every cell |
+| Friction velocity `u_tau` (walls of viscous cases) | A restart's (or remap's) first-cell velocity, by the linear law or the log law; else, with `source.mass_flow`, Dean's channel correlation `C_f = 0.073 Re_b^(-1/4)` at the bulk velocity `U_b` and `h` = volume / wall area (the half-height of a channel); else a flat plate's mean skin friction (laminar, or turbulent above `Re_L = 5e5`) over the walls' length along the mean flow at the largest initial speed |
+| y+, x+, z+ | The first cell center's distance to the wall, and the wall face's extents along the flow and across it, in wall units `nu / u_tau` |
+| Wall model's exchange point | `exchange_distance`, or `exchange_cells` wall-cell heights, in wall units |
+| Dissipation `epsilon` | With `source.mass_flow`, the forcing's power `u_tau^2 U_b / h`; else the viscous dissipation of the initial (or restart) velocity field, mass-weighted over the domain |
+| Kolmogorov length `eta` | `(nu^3 / epsilon)^(1/4)` with the domain's mean `nu` |
+| Taylor microscale `lambda` | `(15 nu u'^2 / epsilon)^(1/2)`, `u'` the velocity's fluctuation about its mean (from the field, not the forcing) |
+| Flame thickness | `les.combustion.delta_L` (TFLES): cells across it. Otherwise not estimated |
+
+The targets the warnings use, by regime (LES when `[les]` sets a model, DNS
+otherwise; walls with a `wall_model` are wall-modeled):
+
+| Regime | Target |
+|---|---|
+| DNS | Cells of at most about 2 `eta` on average; first cells at `y+ <= 1`, wall cells at `x+ <= 15`, `z+ <= 8` (about Kim, Moin & Moser, 1987) |
+| Wall-resolved LES | First cells at `y+ <= 1`, wall cells at `x+ <= 150`, `z+ <= 40` (the coarse ends of Georgiadis, Rizzetta & Fureby, 2010) |
+| Wall-modeled LES | Exchange points in the log layer, `y+ >= 30` |
+| TFLES | Thickening `F = n_res Delta / delta_L` at most 5 |
+
+`--quality PREFIX` also writes the estimates' fields with the mesh-quality
+ones: `Y_PLUS` on wall cells, `DELTA_OVER_ETA` (cell size over the mean
+Kolmogorov length) and `CELLS_PER_DELTA_L` (TFLES), to see in ParaView where
+the mesh is short. The mean `eta` stands for the whole domain, so
+`DELTA_OVER_ETA` is pessimistic where the flow dissipates less than its mean
+(far from walls, in a free stream).
 
 ### The key catalog
 

@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <numeric>
 #include <numbers>
 #include <sstream>
 #include <string>
@@ -258,6 +259,82 @@ TEST(CheckMemory, MeasuresAllocationsAndScalesThemToTheTargetRanks) {
     EXPECT_NEAR(double(r.target_bytes), per_cell * double(r.target_owned + r.target_halo), 1.0);
 }
 
+namespace {
+
+/** @brief The box at Nx x Ny cells (x 2 in 3D), with TENO3 or first order. */
+std::string sized_box(const int nx, const int ny, const bool teno = true) {
+    std::string input =
+        box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
+            teno ? "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n" : "");
+    const std::string mesh = "Nx = 16\nNy = 8\n";
+    input.replace(input.find(mesh), mesh.size(), "Nx = " + std::to_string(nx) + "\nNy = " + std::to_string(ny) + "\n");
+    return input;
+}
+
+uint64_t sum(const memory::Bytes & b) { return std::accumulate(b.begin(), b.end(), uint64_t(0)); }
+
+} // namespace
+
+TEST(CheckMemory, CategoriesSumToTheTotalsAndNameEveryAllocation) {
+    if (comm::size() > 1) GTEST_SKIP() << "one rank's allocations";
+    const CheckReport r = check(sized_box(16, 8));
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_EQ(sum(r.setup_bytes), r.bytes_peak);
+    EXPECT_EQ(sum(r.steady_bytes), r.bytes);
+    EXPECT_EQ(r.setup_bytes[size_t(memory::Category::OTHER)], 0u);
+    EXPECT_GT(r.steady_bytes[size_t(memory::Category::TABLES)], 0u);
+    // The setup's workspace is freed by the time stepping
+    EXPECT_GT(r.setup_bytes[size_t(memory::Category::SETUP)], 0u);
+    EXPECT_EQ(r.steady_bytes[size_t(memory::Category::SETUP)], 0u);
+}
+
+TEST(CheckMemory, PeakPredictedFromACoarseMeshMatchesTheMeasuredOne) {
+    if (comm::size() > 1) GTEST_SKIP() << "one rank's allocations";
+    // From 16,384 cells, the size of the initial solution's chunks, to four times as many along x (the same
+    // share of cells near the walls across y and z, whose TENO stencils are smaller)
+    const int ny = N_DIM == 2 ? 128 : 64;
+    const CheckReport coarse = check(sized_box(128, ny)), fine = check(sized_box(512, ny));
+    ASSERT_TRUE(coarse.ok() && fine.ok());
+    const double predicted = predicted_peak(coarse, double(fine.local_cells));
+    EXPECT_NEAR(predicted, double(fine.bytes_peak), 0.05 * double(fine.bytes_peak));
+}
+
+TEST(CheckSizing, FewestRanksTheMeshFitsOn) {
+    if (comm::size() > 1) GTEST_SKIP() << "partitions the whole mesh";
+    const std::string input = sized_box(256, 64, false);
+    CheckOptions options;
+    options.memory = 1ull << 40;
+    options.memory_name = "1TiB";
+    const CheckReport whole = check(input, options);
+    ASSERT_TRUE(whole.ok());
+    EXPECT_EQ(whole.min_ranks, 1);
+    EXPECT_GT(whole.max_local_cells, whole.n_cells);
+    // Room for a third of the cells: three parts with their halos do not fit, four do
+    const double third = predicted_peak(whole, double(whole.n_cells) / 3.0);
+    options.memory = static_cast<uint64_t>(third / (1.0 - SIZING_MARGIN));
+    const CheckReport r = check(input, options);
+    ASSERT_TRUE(r.ok());
+    EXPECT_EQ(r.min_ranks, 4);
+    EXPECT_GT(r.min_halo, 0u);
+    EXPECT_LE(double(r.min_peak), third);
+    EXPECT_NEAR(double(r.min_peak), predicted_peak(r, double(r.min_owned + r.min_halo)), 1.0);
+    EXPECT_NEAR(double(r.max_local_cells), double(whole.n_cells) / 3.0, 1.0);
+}
+
+TEST(CheckSizing, MemoryIsASizeWithItsUnitOrAGpu) {
+    CheckOptions options;
+    EXPECT_EQ(set_memory_target("40GB", options), "");
+    EXPECT_EQ(options.memory, 40'000'000'000u);
+    EXPECT_EQ(set_memory_target("512MiB", options), "");
+    EXPECT_EQ(options.memory, 512u << 20);
+    EXPECT_EQ(set_memory_target("A100-80", options), "");
+    EXPECT_EQ(options.memory_name, "A100-80GB");
+    EXPECT_TRUE(options.memory_gpu);
+    EXPECT_NE(set_memory_target("40", options).find("a100-40"), std::string::npos);
+    EXPECT_NE(set_memory_target("-3GB", options), "");
+    EXPECT_NE(set_memory_target("a100", options), "");
+}
+
 TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     const std::filesystem::path dir = scratch_dir() / "mallard_check_files";
     if (comm::is_root()) std::filesystem::remove_all(dir);
@@ -317,6 +394,85 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     EXPECT_FALSE(mentions(fine.warnings, "TFLES"));
     const CheckReport coarse = check(input(5.0 * delta / 10.0));  // F = 10
     EXPECT_TRUE(mentions(coarse.warnings, "F = 10"));
+    EXPECT_NEAR(fine.cells_per_delta_L_min, 1.25, roundoff(1e-12));
+    EXPECT_NEAR(coarse.cells_per_delta_L_max, 0.5, roundoff(1e-12));
+}
+
+namespace {
+
+/** @brief A periodic box of n^d cells and side 2 pi with viscosity mu, rho = 1; velocity components as expressions. */
+std::string periodic_box(const int n, const double mu, const std::vector<std::string> & u) {
+    std::ostringstream s;
+    s << "[run]\nt_stop = 1.0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 6.283185307179586\nLy = 6.283185307179586\n"
+      << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 6.283185307179586\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"100.0\"\nu = [";
+    for (size_t i = 0; i < N_DIM; i++) s << (i ? ", " : "") << "\"" << u[i] << "\"";
+    s << "]\n[numerics]\nriemann_solver = \"HLLC\"\n[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\n"
+      << "p_ref = 100.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = " << mu << "\nPr = 0.72\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(CheckResolution, TaylorGreenDissipationGivesTheKolmogorovLength) {
+    // epsilon = 2 nu |k|^2 E: |k|^2 = d, E = 1/4 (2D) or 1/8 (3D); u'^2 = 2 E / d
+    const double nu = 0.01;
+    const std::vector<std::string> u = N_DIM == 3
+        ? std::vector<std::string>{"sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"}
+        : std::vector<std::string>{"sin(x) * cos(y)", "-cos(x) * sin(y)"};
+    const double E = N_DIM == 3 ? 0.125 : 0.25, epsilon = 2.0 * nu * N_DIM * E;
+    const int n = N_DIM == 3 ? 48 : 64;
+    const CheckReport r = check(periodic_box(n, nu, u));
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_NEAR(r.epsilon, epsilon, 0.05 * epsilon);
+    EXPECT_NEAR(r.eta, std::pow(nu * nu * nu / r.epsilon, 0.25), roundoff(1e-11) * r.eta);
+    EXPECT_NEAR(r.taylor, std::sqrt(15.0 * nu * (2.0 * E / N_DIM) / r.epsilon), 0.01 * r.taylor);
+    EXPECT_NEAR(r.delta_over_eta, 2.0 * std::numbers::pi / n / r.eta, roundoff(1e-9) * r.delta_over_eta);
+    EXPECT_FALSE(mentions(r.warnings, "DNS"));
+    // A hundredth of the viscosity dissipates a hundredth as much: eta ten times smaller
+    const CheckReport coarse = check(periodic_box(n, nu / 100.0, u));
+    EXPECT_TRUE(mentions(coarse.warnings, "DNS: cells of"));
+}
+
+TEST(CheckResolution, AFlowWithoutGradientsOrForcingHasNoKolmogorovLength) {
+    const CheckReport r = check(periodic_box(8, 0.01, std::vector<std::string>(N_DIM, "1.0")));
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_EQ(r.eta, 0.0);
+    bool said = false;
+    for (const auto & [label, text] : r.resolution) said |= label == "Kolmogorov" && text.rfind("not estimated", 0) == 0;
+    EXPECT_TRUE(said);
+}
+
+TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
+    // Re_b = U_b 2h / nu = 5600, for which Dean's correlation gives Re_tau = u_tau h / nu = 182 (Re_tau 180 cases)
+    const double nu = 1.0 / 2800.0;
+    std::ostringstream s;
+    s << "[run]\nt_stop = 1.0\ncfl = 0.9\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 16\nLx = 4.0\nLy = 2.0\n"
+      << (N_DIM == 3 ? "Nz = 4\nLz = 2.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"17.857142857142858\"\n"
+      << "u = [\"1.5 * (1 - (y - 1) * (y - 1))\", \"0.0\"" << (N_DIM == 3 ? ", \"0.0\"" : "") << "]\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+      << "[source]\nmass_flow = [1.0, 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\n"
+      << "p_ref = 17.857142857142858\nT_ref = 1.0\nrho_ref = 1.0\nmu = " << nu << "\nPr = 0.72\n";
+    const CheckReport r = check(s.str());
+    ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
+    EXPECT_NEAR(r.u_tau / nu, 180.0, 0.03 * 180.0);
+    const double y1 = 1.0 / 16.0;  // the first cell centers: half of 2 / 16
+    EXPECT_NEAR(r.y_plus_max, y1 * r.u_tau / nu, 1e-5 * r.y_plus_max);
+    EXPECT_NEAR(r.y_plus_mean, r.y_plus_max, 1e-5 * r.y_plus_max);
+    EXPECT_NEAR(r.x_plus_max, 0.5 * r.u_tau / nu, 1e-5 * r.x_plus_max);
+    if (N_DIM == 3) {
+        EXPECT_NEAR(r.z_plus_max, 0.5 * r.u_tau / nu, 1e-5 * r.z_plus_max);
+    }
+    EXPECT_NEAR(r.epsilon, r.u_tau * r.u_tau, 1e-5 * r.epsilon);  // u_tau^2 U_b / h with U_b = h = 1
+    EXPECT_TRUE(mentions(r.warnings, "first cells at y+ up to"));
+    EXPECT_TRUE(mentions(r.warnings, "wall cells up to x+"));
 }
 
 TEST(MeshQualityMetrics, UniformQuadsAreIdealAndElongatedOnesHaveTheirAspectRatio) {
@@ -404,6 +560,11 @@ TEST(MemoryTracker, CountsLiveAllocationsAndThePeak) {
     }
     EXPECT_EQ(usage().current, 0u);
     EXPECT_GE(usage().peak, 32000u);
+    EXPECT_EQ(tracker.unclassified(), (std::vector<std::string>{"a", "b"}));
+    Kokkos::View<double *> c("conservatives", 500);
+    tracker.reset_peak();
+    EXPECT_EQ(usage().peak, usage().current);
+    EXPECT_GE(usage().at_peak[size_t(memory::Category::STATE)], 4000u);
 }
 
 TEST(SetupMemory, NothingOnlyTheSetupReadsSurvivesIt) {

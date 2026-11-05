@@ -12,11 +12,19 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "input.h"
 #include "log.h"
+#include "memory_tracker.h"
 #include "mesh_quality.h"
+
+/** @brief The share of the memory per rank that sizing keeps free (fragmentation, allocations in the run). */
+constexpr double SIZING_MARGIN = 0.05;
+
+/** @brief Fields of the owned cells by name, written with the mesh-quality fields (--quality). */
+using CheckFields = std::vector<std::pair<std::string, std::vector<double>>>;
 
 struct CheckOptions {
     int ranks = 0;              // ranks to estimate memory and cost for (0: this run's)
@@ -27,6 +35,9 @@ struct CheckOptions {
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
     std::string input_file;     // named before input errors, as a run names it, or empty
+    uint64_t memory = 0;        // memory per rank to size the run for (bytes); 0: the device's, if any
+    std::string memory_name;    // what it is ("A100-80GB", "40GB")
+    bool memory_gpu = false;    // a GPU's memory: CUDA's context comes on top of Kokkos' allocations
 };
 
 struct CheckReport {
@@ -63,6 +74,25 @@ struct CheckReport {
     uint64_t target_owned = 0, target_halo = 0;  // largest part at target_ranks
     uint64_t target_bytes = 0, target_bytes_peak = 0;
     uint64_t device_capacity = 0;  // bytes, 0 if unknown
+    memory::Bytes setup_bytes{};   // largest rank by category: at the setup's peak
+    memory::Bytes steady_bytes{};  // after setup, or at the peak of the timed steps
+    std::vector<memory::Bytes> setup_phases;  // at the peak of each phase of the setup
+    uint64_t outside_kokkos = 0;   // device memory beyond Kokkos' allocations (CUDA context, libraries), measured
+
+    // Sizing for options.memory (or the device): the largest rank's peak against the memory per rank
+    std::string sizing_name;       // empty: no sizing
+    bool sizing_gpu = false;
+    uint64_t sizing_memory = 0;    // bytes per rank
+    uint64_t sizing_overhead = 0;  // outside Kokkos per rank (CUDA context), measured or nominal
+    bool overhead_measured = false;
+    double bytes_per_cell = 0.0;   // of the peak that limits the cells per rank, cell-proportional categories
+    uint64_t fixed_bytes = 0;      // the rest (memory::scales_with_cells)
+    bool sizing_setup = false;     // the setup's peak limits the cells per rank, else the steady state
+    uint64_t max_local_cells = 0;  // owned and halo cells per rank that fit
+    int min_ranks = 0;             // fewest ranks the mesh fits on, 0 if not found
+    uint64_t min_owned = 0, min_halo = 0, min_peak = 0;  // largest part there and its predicted peak
+    bool min_partitioned = false;  // the part comes from the partitioner (serial checks), else from this halo ratio
+    int halo_ranks = 0;            // most ranks (doubling from min_ranks) with halo below 10% of owned, 0 if none
 
     // Cost at target_ranks
     uint64_t n_cells = 0;
@@ -74,8 +104,34 @@ struct CheckReport {
     double t_stop = 0.0;
     uint64_t n_steps = 0;
 
+    // Resolution against the physical scales (check_resolution); 0 where not estimated
+    logging::Items resolution;
+    double delta_min = 0.0, delta_max = 0.0;  // cell size V^(1/d)
+    double epsilon = 0.0;                     // dissipation per unit mass
+    double eta = 0.0;                         // Kolmogorov length (nu^3 / epsilon)^(1/4)
+    double delta_over_eta = 0.0;              // volume-weighted mean cell size over eta
+    double taylor = 0.0;                      // Taylor microscale (15 nu u'^2 / epsilon)^(1/2)
+    double u_tau = 0.0;                       // friction velocity, root mean square over the walls
+    double y_plus_max = 0.0, y_plus_mean = 0.0;  // first cell centers, resolved walls (mean: all walls)
+    double x_plus_max = 0.0, z_plus_max = 0.0;   // wall cells along the flow and across it
+    double y_plus_exchange_min = 0.0;            // the wall model's lowest exchange point
+    double cells_per_delta_L_min = 0.0, cells_per_delta_L_max = 0.0;
+
     bool ok() const { return errors.empty() && unused.empty(); }
 };
+
+/**
+ * @brief Set options.memory from --memory: a size with its unit (40GB, 512MiB) or a GPU of the table
+ *        (a100-40, a100-80, h100-80, h200, mi250x, mi300x). Returns an error, or empty.
+ */
+std::string set_memory_target(const std::string & text, CheckOptions & options);
+
+/**
+ * @brief The peak of Kokkos allocations predicted for a rank of local_cells owned and halo cells: the largest
+ *        of the peaks of the setup's phases and the steady state, each proportional to the cells but for the categories
+ *        that are not (memory::scales_with_cells); for a GPU from a host check, without the output staging.
+ */
+double predicted_peak(const CheckReport & report, double local_cells);
 
 /** @brief Print a report on rank 0. */
 void print_check(const CheckReport & report);

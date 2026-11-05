@@ -147,6 +147,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
     Kokkos::Timer phase_timer;
     f();
     Kokkos::fence();
+    memory::end_phase();
     const double seconds = phase_timer.seconds();
     run_health.setup_phases.emplace_back(name, seconds);
     t_wall_setup += seconds;
@@ -1599,7 +1600,8 @@ void Solver::init_output(region::Regions & regions) {
         }
     }
     probes.init(input, *mesh, regions, species_names,
-                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous());
+                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
+                statistics);
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
@@ -2093,6 +2095,7 @@ int Solver::run() {
                 update_primitives();
                 statistics.sample(step, t, cell_sampler(), mesh->n_owned());
             }
+            if (probes.averages_due(step, t)) sample_probe_averages();
             t_wall_stepping += step_timer.seconds();
             Kokkos::Timer output_timer;
             write_forces();
@@ -2160,7 +2163,7 @@ bool Solver::state_needed() const {
         if (step % monitor.interval == 0) return true;
     }
     return (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || statistics.due(step, t) ||
-           probes.due(step, t);
+           probes.due(step, t) || probes.averages_due(step, t);
 }
 
 double Solver::progress() const {
@@ -2465,6 +2468,7 @@ void Solver::check_fields() {
 
 RestartAttributes Solver::restart_attributes() const {
     RestartAttributes attributes = statistics.attributes();
+    for (const auto & a : probes.attributes()) attributes.push_back(a);
     if (step_controller.enabled()) {
         for (const auto & a : step_controller.attributes()) attributes.push_back(a);
     }
@@ -2493,7 +2497,7 @@ void Solver::write_data(bool force) {
     }
     const RestartAttributes attributes = restart_attributes();
     const RestartFaces faces = characteristic_restart_faces();
-    const RestartArrays arrays = statistics.arrays();
+    const RestartArrays arrays = restart_arrays();
     for (auto & writer : data_writers) {
         if (writer->get_format() == DataFormat::RESTART) writer->write(step, t, force, attributes, faces, arrays);
     }
@@ -2517,8 +2521,28 @@ void Solver::write_probes() {
     } else {
         update_primitives();
     }
+    if (probes.statistics_due(step, t)) statistics.copy_device_to_host();
     ProbeFluxes fluxes;
     probes.write(step, t, probe_fields(fluxes));
+}
+
+void Solver::sample_probe_averages() {
+    const auto [cell_W, transport, all_gradients] = probes.average_needs(wall_model_on);
+    if (cell_W) {
+        update_cell_W();
+        if (is_mixture() && transport) update_transport();
+        if (all_gradients) update_probe_gradients();
+    } else {
+        update_primitives();
+    }
+    ProbeFluxes fluxes;
+    probes.sample_averages(step, t, probe_fields(fluxes));
+}
+
+RestartArrays Solver::restart_arrays() const {
+    RestartArrays arrays = statistics.arrays();
+    for (auto && a : probes.arrays()) arrays.push_back(std::move(a));
+    return arrays;
 }
 
 void Solver::update_probe_gradients() {

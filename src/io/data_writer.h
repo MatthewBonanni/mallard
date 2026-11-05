@@ -14,6 +14,7 @@
 
 #include <functional>
 #include <future>
+#include <iosfwd>
 #include <limits>
 #include <memory>
 #include <string>
@@ -97,6 +98,35 @@ struct RestartData {
     /** @brief The RestartFaces::WIDTH values of the face with this key, or nullptr if the file has none. */
     const rtype * face(uint64_t key) const;
 };
+
+/**
+ * @brief The header of a restart file of any version, dimension and
+ *        precision: what read_restart reads, and what mallard info reports.
+ */
+struct RestartHeader {
+    uint32_t version = 0;
+    uint32_t real_size = 0;          // bytes per value: 8 (double) or 4 (single)
+    uint64_t n_cells = 0;
+    uint64_t step = 0;
+    double t = 0.0;
+    std::vector<std::string> names;  // [variable]; version 1: the flow block of its dimension
+    RestartAttributes attributes;
+    RestartArrays arrays;
+    uint64_t n_faces = 0;
+    uint64_t chunk_cells = 0;        // cells per compressed chunk; 0: uncompressed
+    std::vector<uint64_t> chunk_at;  // compressed: offset of each chunk, variable by variable, then of the faces
+    uint64_t data_offset = 0;        // where the values (or the chunk table) start
+    uint64_t faces_offset = 0;       // where the face records start
+    std::string provenance;          // the provenance trailer, or empty
+};
+
+/**
+ * @brief Reads a restart file's header and provenance trailer, and leaves in
+ *        at data_offset.
+ * @throws std::runtime_error for a file that is not a restart file, of a newer
+ *         version, or corrupt
+ */
+RestartHeader read_restart_header(std::ifstream & in, const std::string & filename);
 
 /**
  * @brief Read a restart file written by a DataWriter with format = "restart":

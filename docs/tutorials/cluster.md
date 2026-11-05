@@ -89,12 +89,18 @@ at about 5 × 10<sup>7</sup> cells/s ([Multi-GPU scaling](../guide/parallel.md#s
 so the full-size example on 4 GPUs:
 
 ```bash
-mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --throughput 5e7
+mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --throughput 5e7 --memory a100-80
 ```
 
 ```text
   Memory             3.96GB per rank after setup (peak 3.96GB), 460,800 cells, 1 rank
                      on 4 ranks: about 1.06GB per rank (peak 1.06GB), largest part 115,200 + 7,680 halo cells
+  ...
+  GPU sizing         A100-80GB: 85.1GB per GPU, 5% kept free, 1.60GB outside Kokkos (typical)
+                     at most 9,226,236 cells per GPU, halo included (8.59kB per cell + 4.67MB at the setup's peak)
+                     fits on 1 GPU: largest part 460,800 + 0 halo cells, 5.56GB peak
+                     halo below 10% of the owned cells up to 4 GPUs
+                     on 4 GPUs at 50.0M cells/s each: 21.0 s wall per unit simulated time
   Throughput         50.0M cells/s per rank
   Cost               9109 steps per unit simulated time
                      per unit time: 21.0 s wall on 4 ranks, 0.0233 rank-hours
@@ -111,8 +117,10 @@ would not use 4 GPUs well. Rules of thumb for choosing the ranks:
   1M-cell mesh on 16 GPUs (62,500 cells each) runs at 39% efficiency
   ([Multi-GPU scaling](../guide/parallel.md#multi-gpu-scaling)). Below a few
   hundred thousand cells per GPU, use fewer GPUs.
-- **Memory:** the `Memory` line per rank must fit the GPU (or the node's
-  memory over its ranks), with a few hundred MB per GPU for CUDA itself.
+- **Memory:** `--memory` (a GPU such as `a100-80`, or a size per rank) gives
+  the fewest GPUs the mesh fits on and the most cells per GPU, from the peak
+  per rank (setup or steady state) and the memory CUDA itself takes, 1.5 to
+  2.1 GB on an A100.
 - **CPUs:** ranks × threads at most the cores of the node, typically one rank
   per socket or NUMA node, or per 8 cores, with `OMP_NUM_THREADS` threads each.
 - **Time:** the job's time limit from the `to t_stop` line with a margin; a
