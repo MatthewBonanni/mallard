@@ -480,6 +480,18 @@ TEST(MPITest, InitialRegionsAndDataMatchSerial) {
                           "region = {type = \"disk\", center = [0.7, 0.15], radius = 0.1, edge = 0.02}\n");
 }
 
+TEST(MPITest, SyntheticTurbulenceMatchesSerial) {
+    // The default period is the mesh's bounding box, reduced over the ranks;
+    // the modes come from the seed alone
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",
+                                        "type = \"symmetry\"\n"),
+                                    2) +
+                          "[initialize.turbulence]\nspectrum = \"passot_pouquet\"\nintensity = 0.1\nlength_scale = 0.15\n"
+                          "[[initialize.regions]]\nregion = {type = \"disk\", center = [0.4, 0.4], radius = 0.25, edge = 0.05}\n"
+                          "turbulence = {intensity = 0.05, length_scale = 0.1, kolmogorov_scale = 0.01, seed = 2}\n");
+}
+
 TEST(MPITest, AxisymmetricRunsMatchSerial) {
     // Revolved geometry, r-weighted stencils, the high-order geometric source
     // and the axis-corrected viscous gradients of halo cells
