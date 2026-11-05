@@ -50,6 +50,7 @@
 #include "comm.h"
 #include "distributed_mesh.h"
 #include "distribution.h"
+#include "partition.h"
 #include "halo_exchange.h"
 #include "log.h"
 #include "run_control.h"
@@ -533,7 +534,10 @@ class Solver {
         void check_mesh_quality(CheckReport & report, const CheckOptions & options) const;
         void check_time_step(CheckReport & report);
         void check_memory(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker) const;
-        void check_cost(CheckReport & report, const CheckOptions & options, const memory::Tracker & tracker);
+        void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);
+        void check_sizing(CheckReport & report, const CheckOptions & options) const;
+        /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
+        PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         void init_run_parameters();

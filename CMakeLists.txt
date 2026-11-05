@@ -264,6 +264,32 @@ install(CODE "
         file(REMOVE \"\${bin}/mallard\")
         execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink mallard${Mallard_DIM}d \"\${bin}/mallard\")
     endif()")
+option(${PROJECT_NAME}_INSTALL_COMPLETION "Install bash, zsh and fish completion, from mallard completion" ON)
+if(${PROJECT_NAME}_INSTALL_COMPLETION AND NOT CMAKE_CROSSCOMPILING)
+    # From the built executable, so completion knows exactly its commands; skipped, with a warning, where it cannot run
+    install(CODE "
+        get_filename_component(share \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}\" ABSOLUTE)
+        foreach(script bash:bash-completion/completions/mallard zsh:zsh/site-functions/_mallard
+                       fish:fish/vendor_completions.d/mallard.fish)
+            string(REGEX MATCH \"^[a-z]+\" shell \"\${script}\")
+            string(REGEX REPLACE \"^[a-z]+:\" \"\" path \"\${script}\")
+            if(NOT EXISTS \"$<TARGET_FILE:mallard>\")
+                break()
+            endif()
+            get_filename_component(dir \"\${share}/\${path}\" DIRECTORY)
+            file(MAKE_DIRECTORY \"\${dir}\")
+            message(STATUS \"Installing: \${share}/\${path}\")
+            execute_process(COMMAND \"$<TARGET_FILE:mallard>\" completion \${shell}
+                OUTPUT_FILE \"\${share}/\${path}\" RESULT_VARIABLE status ERROR_VARIABLE error)
+            if(NOT status EQUAL 0)
+                file(REMOVE \"\${share}/\${path}\")
+                message(WARNING \"No \${shell} completion: $<TARGET_FILE_NAME:mallard> completion \${shell} failed \"
+                                \"(\${status}): \${error}\")
+            else()
+                list(APPEND CMAKE_INSTALL_MANIFEST_FILES \"\${share}/\${path}\")
+            endif()
+        endforeach()")
+endif()
 if(${PROJECT_NAME}_ENABLE_TESTS AND ${PROJECT_NAME}_INSTALL_TESTS)
     install(TARGETS mallard-test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
     install(DIRECTORY test/data DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/test)

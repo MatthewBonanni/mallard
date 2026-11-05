@@ -12,8 +12,10 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -448,4 +450,134 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
         run({"info", "--quality", "quality", source_dir() + "/test/data/formats/gas.toml"}, true);
     EXPECT_EQ(not_a_mesh.status, 2);
     EXPECT_TRUE(contains(not_a_mesh.err, "--quality takes a mesh file")) << not_a_mesh.err;
+}
+
+TEST(CliTest, CompletionCoversEveryCommandAndOption) {
+    for (const std::string shell : {"bash", "zsh", "fish"}) {
+        SCOPED_TRACE(shell);
+        const std::string script = cli::completion_script(shell);
+        ASSERT_FALSE(script.empty());
+        auto has = [&](std::string_view name) {
+            std::string spelled(name);
+            if (shell == "fish" && name.starts_with("--")) {
+                spelled = "-l " + spelled.substr(2);
+            } else if (shell == "fish" && name.starts_with('-')) {
+                spelled = "-s " + spelled.substr(1);
+            }
+            return std::regex_search(script, std::regex("(^|[ '(])" + spelled + "([ ':=)]|$)"));
+        };
+        for (const cli::Command & c : cli::commands()) {
+            for (const std::string & w : words(c.name)) EXPECT_TRUE(has(w)) << c.name;
+            for (const cli::Option & o : c.options) {
+                if (o.name.ends_with('*')) continue;
+                EXPECT_TRUE(has(o.name)) << c.name << " " << o.name;
+                if (!o.alias.empty()) {
+                    EXPECT_TRUE(has(o.alias)) << c.name << " " << o.alias;
+                }
+            }
+        }
+        for (const cli::Option & o : cli::global_options()) EXPECT_TRUE(has(o.name)) << o.name;
+    }
+    EXPECT_TRUE(cli::completion_script("tcsh").empty());
+}
+
+namespace {
+
+/** @brief Runs a script with a shell, if installed (else -1): its exit status, out its output. */
+int run_shell(const std::string & shell, const std::string & flags, const fs::path & script, std::string & out) {
+    if (std::system(("command -v " + shell + " > /dev/null 2>&1").c_str()) != 0) return -1;
+    const int status = std::system((shell + " " + flags + " " + script.string() + " > shell_out.txt 2>&1").c_str());
+    out = read_file("shell_out.txt");
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -2;
+}
+
+} // namespace
+
+TEST(CliTest, BashCompletesCommandsOptionsAndValues) {
+    SKIP_UNDER_MPI();
+    const fs::path dir = fs::absolute("completion_case");
+    fs::remove_all(dir);
+    fs::create_directories(dir / "solut");
+    fs::create_directories(dir / "run1");
+    for (const char * f : {"case.toml", "notes.txt", "mesh.h5", "solut/restart_000010.restart"}) std::ofstream(dir / f);
+    const Result script = run({"completion", "bash"});
+    ASSERT_EQ(script.status, 0) << script.err;
+    std::ofstream(dir / "mallard.bash") << script.out;
+    // The words after mallard; the last is the one completed
+    const std::vector<std::vector<std::string>> lines = {
+        {""},
+        {"input", ""},
+        {"--res"},
+        {"-i", ""},
+        {"-i", "case.toml", "--restart", ""},
+        {"--restart", "solut/"},
+        {"--restart", "=", ""},
+        {"ctl", ""},
+        {"ctl", "run1", ""},
+        {"ctl", "run1", "set", ""},
+        {"new", ""},
+        {"test", "--gtest_f"},
+        {"check", "case.toml", "--kokkos-n"},
+        {"--dim", ""},
+        {"--dim", "3", "check", "--ranks", ""},
+        {"completion", ""},
+        {"mesh", "convert", "case.toml", ""},
+        {"input", "upgrade", "--dim", ""},
+    };
+    std::ofstream driver(dir / "driver.sh");
+    driver << "export LC_ALL=C\ncd '" << dir.string() << "' && source mallard.bash || exit 1\n";
+    for (const auto & line : lines) {
+        driver << "COMP_WORDS=('" << mallard() << "'";
+        for (const std::string & w : line) driver << " '" << w << "'";
+        driver << "); COMP_CWORD=" << line.size() << "; COMPREPLY=(); _mallard\n"
+               << "printf '%s\\n' \"${COMPREPLY[@]}\" | sort | tr '\\n' ' '; echo\n";
+    }
+    driver.close();
+    std::string out;
+    const int status = run_shell("bash", "--norc --noprofile", dir / "driver.sh", out);
+    if (status == -1) GTEST_SKIP() << "no bash";
+    ASSERT_EQ(status, 0) << out;
+    std::vector<std::string> got;
+    std::istringstream in(out);
+    for (std::string l; std::getline(in, l);) got.push_back(" " + l);
+    ASSERT_EQ(got.size(), lines.size()) << out;
+    for (const char * w : {"ctl", "check", "new", "input", "mesh", "test", "completion"}) {
+        EXPECT_TRUE(contains(got[0], std::string(" ") + w + " ")) << w << ":" << got[0];
+    }
+    EXPECT_FALSE(contains(got[0], " upgrade ")) << got[0];
+    EXPECT_TRUE(contains(got[1], " upgrade ")) << got[1];
+    EXPECT_FALSE(contains(got[1], " check ")) << got[1];
+    EXPECT_EQ(got[2], " --restart ");
+    EXPECT_EQ(got[3], " case.toml run1 solut ");
+    EXPECT_EQ(got[4], " latest run1 solut ");
+    EXPECT_EQ(got[5], " solut/restart_000010.restart ");
+    EXPECT_EQ(got[6], " latest run1 solut ");
+    EXPECT_EQ(got[7], " run1 solut ");
+    EXPECT_EQ(got[8], " checkpoint set status stop ");
+    EXPECT_EQ(got[9], "  ");
+    EXPECT_TRUE(contains(got[10], " cylinder ")) << got[10];
+    EXPECT_TRUE(contains(got[10], " sod ")) << got[10];
+    EXPECT_EQ(got[11], " --gtest_fail_fast --gtest_filter= ");
+    EXPECT_EQ(got[12], " --kokkos-num-threads= ");
+    EXPECT_EQ(got[13], " 2 3 ");
+    EXPECT_EQ(got[14], "  ");
+    EXPECT_EQ(got[15], " bash fish zsh ");
+    EXPECT_EQ(got[16], " mesh.h5 run1 solut ");
+    EXPECT_EQ(got[17], " 2 3 ");
+}
+
+TEST(CliTest, ZshAndFishCompletionParse) {
+    SKIP_UNDER_MPI();
+    for (const std::string shell : {"zsh", "fish"}) {
+        SCOPED_TRACE(shell);
+        const Result script = run({"completion", shell});
+        ASSERT_EQ(script.status, 0) << script.err;
+        const std::string file = "completion." + shell;
+        std::ofstream(file) << script.out;
+        std::string out;
+        const int status = run_shell(shell, "-n", file, out);
+        if (status != -1) {
+            EXPECT_EQ(status, 0) << out;
+        }
+    }
 }

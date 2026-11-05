@@ -49,7 +49,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 
 **Input and output** ([guide](docs/guide/input_files.md))
 - TOML input with units (`p = "1 atm"`); every error names the key, line and fix
-- `mallard check` before a run, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file
+- `mallard check` before a run, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file; tab completion for bash, zsh and fish
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView
 - Probes on points, curves, surfaces, boundaries and regions; statistics, spectra and phase averages

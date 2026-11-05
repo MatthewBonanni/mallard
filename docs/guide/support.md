@@ -21,7 +21,7 @@ When a job runs:
 | OpenMP, single precision, 3D, HDF5, CGNS | x86-64 CPU | Run | Full suite | every PR | `ci.yml/float-3d` |
 | Serial, MPI, 2D, dKaMinPar, HDF5, zlib | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3 | every PR | `ci.yml/mpi` |
 | Serial, MPI, 3D, HDF5 | x86-64 CPU | Run | Full suite on 1 and 3 ranks; MPI tests on 2 and 4 ranks | every PR | `ci.yml/mpi-3d` |
-| Serial, MPI, HDF5, 2D and 3D, installed | x86-64 CPU | Run | Every [tutorial](../tutorials/index.md) at reduced size on 2 ranks, with its Gmsh mesh and scripts; every case template | every PR | `ci.yml/tutorials` |
+| Serial, MPI, HDF5, 2D and 3D, installed | x86-64 CPU | Run | Every [tutorial](../tutorials/index.md) at reduced size on 2 ranks, with its Gmsh mesh and scripts; every case template; the installed bash, zsh and fish completion | every PR | `ci.yml/tutorials` |
 | Serial, 2D | x86-64 CPU | Run | Full suite | main | `ci.yml/serial` |
 | Serial, 3D, HDF5 | x86-64 CPU | Run | Full suite | main | `ci.yml/serial-3d` |
 | Serial, single precision, 2D, HDF5, Clang | | Compile | | every PR | `ci.yml/clang` |
