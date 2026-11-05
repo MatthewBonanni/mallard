@@ -413,17 +413,17 @@ def mesh_read(args, name, transform=""):
 
 def draw_import(ax, P, mesh, labels=True):
     x, cells, zones = mesh
-    colours = {"inlet": P["blue"], "outlet": P["red"], "walls": P["green"], "cylinder": P["flame"]}
+    colors = {"inlet": P["blue"], "outlet": P["red"], "walls": P["green"], "cylinder": P["flame"]}
     ax.add_collection(PolyCollection(cells, facecolors=P["panel"], edgecolors=P["mesh"], linewidths=0.6))
     for name, segs in zones.items():
-        ax.add_collection(LineCollection(segs, colors=colours.get(name, P["plum"]), linewidths=3.0,
+        ax.add_collection(LineCollection(segs, colors=colors.get(name, P["plum"]), linewidths=3.0,
                                          capstyle="round"))
         if not labels or not segs:
             continue
         if name == "walls":
             segs = [s for s in segs if s[:, 1].mean() > np.median(x[:, 1])] or segs
         mid = np.concatenate(segs).mean(axis=0)
-        label(ax, *mid, name, P, color=colours.get(name, P["plum"]), size=11, box=True, fontweight="bold")
+        label(ax, *mid, name, P, color=colors.get(name, P["plum"]), size=11, box=True, fontweight="bold")
     ax.autoscale_view()
 
 

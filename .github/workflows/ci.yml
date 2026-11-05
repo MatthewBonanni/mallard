@@ -66,6 +66,8 @@ jobs:
           python3 tools/dev/check_workflow_triggers.py
       - name: Check that the support matrix names every CI job
         run: python3 tools/dev/check_support_matrix.py
+      - name: Check for British spellings
+        run: python3 tools/dev/check_spelling.py
       - name: Check the documented input defaults against the key catalog
         run: python3 tools/dev/input_catalog.py docs
       - name: Check that the TOML snippets of the docs parse

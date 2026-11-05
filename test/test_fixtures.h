@@ -42,6 +42,16 @@ inline Input parse_toml(const std::string & str) {
     return parse_input_string(str);
 }
 
+/** @brief A zone's faces on the device (empty if there is no such zone), from its host list. */
+inline Kokkos::View<uint32_t *> device_zone_faces(const Mesh & mesh, const std::string & name) {
+    for (const FaceZone & zone : mesh.h_face_zones()) {
+        if (zone.get_name() == name) {
+            return Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace::memory_space(), zone.h_faces);
+        }
+    }
+    return Kokkos::View<uint32_t *>("no faces", 0);
+}
+
 inline std::shared_ptr<Mesh> make_mesh(const std::string & type, uint32_t nx, uint32_t ny,
                                        rtype Lx = 1.0, rtype Ly = 1.0) {
     Input input = parse_toml("[mesh]\ntype = \"" + type + "\"\n" +
