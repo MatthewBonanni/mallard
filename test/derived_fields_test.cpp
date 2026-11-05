@@ -196,14 +196,22 @@ TEST(DerivedFields, DeviceKernelMatchesHost) {
 
 TEST(DerivedFields, SolidBodyRotation) {
     // u = w (-(y - 1/2), x - 1/2): Q = w^2 and lambda2 = -w^2, exact for least
-    // squares; Q_CRITERION is Q bit for bit
+    // squares
     const double w = 3.0;
     auto solver = init_flow("1.0", velocity("-3.0 * (y - 0.5)", "3.0 * (x - 0.5)", "0.0"), "2.0",
-                            "\"Q\", \"Q_CRITERION\", \"LAMBDA2\"");
+                            "\"Q_CRITERION\", \"LAMBDA2\"");
     expect_everywhere(*solver, derived::Q_CRITERION, w * w, roundoff(1e-11));
     expect_everywhere(*solver, derived::LAMBDA2, -w * w, roundoff(1e-11));
-    for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
-        EXPECT_EQ(field(*solver, derived::Q_CRITERION, c), double(solver->h_vortex_fields(c, 0))) << "cell " << c;
+}
+
+TEST(DerivedFields, QIsRenamedQCriterion) {
+    try {
+        init_flow("1.0", velocity("0.0", "0.0", "0.0"), "1.0", "\"P\", \"Q\"");
+        FAIL() << "Q was accepted";
+    } catch (const InputError & e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("Q was renamed to Q_CRITERION"), std::string::npos) << what;
+        EXPECT_EQ(what.find("unknown variable"), std::string::npos) << what;
     }
 }
 

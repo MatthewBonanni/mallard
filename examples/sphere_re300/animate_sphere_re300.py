@@ -7,7 +7,7 @@
     animate_sphere_re300.py --extract SOLUT_DIR SURFACE_DIR [--q 0.02] [--u 0.2]
 
 SOLUT_DIR holds the volume series (VTKHDF, or VTU) of examples/sphere_re300 with
-U and Q, the Q-criterion from the solver's velocity gradients. Each snapshot
+U and Q_CRITERION, the Q-criterion from the solver's velocity gradients. Each snapshot
 is resampled near the wake onto a uniform grid of the given spacing (in D),
 smoothed by a Gaussian of sigma grid spacings, and Q is contoured there at
 --q (in units of (U / D)^2, U the free-stream speed), colored by the
@@ -67,15 +67,15 @@ def q_surface(path, q_level, spacing, sigma):
     mesh = pv.read(path)
     if path.endswith(".vtp"):
         return mesh
-    if "Q" not in mesh.cell_data:
-        raise SystemExit(f"{path} has no Q: add \"Q\" to the variables of [[write_data]]")
+    if "Q_CRITERION" not in mesh.cell_data:
+        raise SystemExit(f"{path} has no Q_CRITERION: add \"Q_CRITERION\" to the variables of [[write_data]]")
     lo, hi = np.array(BOUNDS[0::2]), np.array(BOUNDS[1::2])
     margin = 4 * (sigma + 1) * spacing
     c = mesh.cell_centers().points
     near = np.all((c >= lo - margin) & (c <= hi + margin), axis=1)
     mesh = mesh.extract_cells(np.flatnonzero(near))
     for name in list(mesh.cell_data.keys()):
-        if name not in ("Q", "U"):
+        if name not in ("Q_CRITERION", "U"):
             del mesh.cell_data[name]
     # The pieces of a parallel output repeat the points they share
     mesh = mesh.clean().cell_data_to_point_data(pass_cell_data=False)
@@ -84,7 +84,7 @@ def q_surface(path, q_level, spacing, sigma):
     grid = grid.sample(mesh)
     shape = tuple(n[::-1])  # ImageData points run fastest in x
     valid = np.asarray(grid.point_data["vtkValidPointMask"]).reshape(shape) > 0
-    q = np.where(valid, np.asarray(grid.point_data["Q"]).reshape(shape), 0.0)
+    q = np.where(valid, np.asarray(grid.point_data["Q_CRITERION"]).reshape(shape), 0.0)
     ux = np.where(valid, np.asarray(grid.point_data["U"])[:, 0].reshape(shape), 0.0)
     # The boundary layer carries Q ~ 0 of either sign: leave it out so that it
     # does not wrap the sphere in a sheath

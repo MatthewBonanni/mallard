@@ -73,4 +73,4 @@ interval = 10
 [[write_data]]
 prefix = "solut/forced"
 time_interval = 1.0
-variables = ["RHO", "U", "P", "Q", "SOURCE_RHOE"]
+variables = ["RHO", "U", "P", "Q_CRITERION", "SOURCE_RHOE"]

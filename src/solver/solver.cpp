@@ -1791,11 +1791,11 @@ void Solver::allocate_memory() {
         h_p_max = Kokkos::create_mirror_view(p_max);
     }
     bool vortex_output = false;
-    for (const char * name : {"Q", "VORTICITY", "VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z"}) {
+    for (const char * name : {"VORTICITY", "VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z"}) {
         vortex_output = vortex_output || writes_variable(input, name);
     }
     if (vortex_output) {
-        vortex_fields = Kokkos::View<rtype **>("vortex_fields", mesh->n_cells, N_DIM == 2 ? 2 : 4);
+        vortex_fields = Kokkos::View<rtype **>("vortex_fields", mesh->n_cells, N_DIM == 2 ? 1 : 3);
         h_vortex_fields = Kokkos::create_mirror_view(vortex_fields);
     }
     derived_selection = {};
@@ -2014,13 +2014,12 @@ void Solver::register_data() {
     statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (vortex_fields.is_allocated()) {
-        data.push_back(Data("Q", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
         if constexpr (N_DIM == 2) {
-            data.push_back(Data("VORTICITY", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 1)));
+            data.push_back(Data("VORTICITY", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
         } else {
             FOR_I_DIM {
                 data.push_back(Data(std::string("VORTICITY_") + "XYZ"[i],
-                                    Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 1 + i)));
+                                    Kokkos::subview(h_vortex_fields, Kokkos::ALL(), i)));
             }
         }
     }
@@ -3128,16 +3127,13 @@ std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
 void Solver::update_vortex_fields() {
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> g = viscous_gradients;
     Kokkos::View<rtype **> out = vortex_fields;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::View<rtype *[N_DIM]> radius_coords = axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>();
     Kokkos::parallel_for("vortex_fields", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
-        out(c, 0) = derived::q_criterion(derived::velocity_gradient(g, W, radius_coords, c));
         if constexpr (N_DIM == 2) {
-            out(c, 1) = g(c, 2, 0) - g(c, 1, 1);
+            out(c, 0) = g(c, 2, 0) - g(c, 1, 1);
         } else {
             for (uint8_t k = 0; k < 3; k++) {
                 const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
-                out(c, 1 + k) = g(c, 1 + b, a) - g(c, 1 + a, b);
+                out(c, k) = g(c, 1 + b, a) - g(c, 1 + a, b);
             }
         }
     });

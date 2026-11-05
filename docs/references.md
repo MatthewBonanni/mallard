@@ -317,7 +317,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 ## Derived output fields
 
 - <a id="hunt-wray-moin-1988"></a>J. C. R. Hunt, A. A. Wray and P. Moin, Eddies, streams, and convergence zones in turbulent flows, Center for Turbulence Research, Proceedings of the Summer Program 1988, 193–208 (1988).
-  Used in: the `Q_CRITERION` (and `Q`) output field (`src/solver/derived_fields.h`).
+  Used in: the `Q_CRITERION` output field (`src/solver/derived_fields.h`).
 - <a id="jeong-hussain-1995"></a>J. Jeong and F. Hussain, On the identification of a vortex, *J. Fluid Mech.* 285, 69–94 (1995). [doi:10.1017/S0022112095000462](https://doi.org/10.1017/S0022112095000462)
   Used in: the `LAMBDA2` output field, the middle eigenvalue of S² + Ω² by Jacobi rotations (`src/solver/derived_fields.h`).
 
