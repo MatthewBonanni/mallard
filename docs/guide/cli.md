@@ -104,6 +104,9 @@ Commands:
   Mesh
     mallard mesh convert   Write a mesh file, or the mesh of an input file, as a
                            Mallard HDF5 mesh
+  Post
+    mallard post extract   Probes, region integrals and snapshots of existing
+                           output, as the run would have written them
   Maintain
     mallard test           Run the unit and regression tests
     mallard completion     Print the shell completion script for bash, zsh or
@@ -504,6 +507,116 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-mesh-convert
+```
+
+### mallard post
+
+```text
+Usage: mallard post <command> [options]
+
+Commands on a run's output: probes, integrals and snapshots of it.
+
+Commands:
+  mallard post extract     Probes, region integrals and snapshots of existing
+                           output, as the run would have written them
+
+mallard post <command> --help shows the page of a command.
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post
+```
+
+### mallard post extract
+
+```text
+Usage: mallard post extract FILE... [-i input.toml] [--probe NAMES] [-o DIR]
+       mallard post extract FILE... --region REGION [--fields LIST] [--reductions LIST]
+       mallard post extract FILE... --snapshot vtkhdf|vtu [--fields LIST] [--region REGION]
+
+Sets up the case of a restart file, snapshot or series and writes probes of its
+stored state, without rerunning: the input's [[probes]] (points, curves, cut
+planes, surfaces with their fluxes, region integrals, means and extremes), a
+region given with --region, or snapshots of chosen fields and regions. It runs
+the run's own code, so a probe gives at each step what the run's probe gave
+there: the same values for restart files and for snapshots of the conservative
+variables, the same to rounding for snapshots of RHO, U and P.
+
+FILE is a restart file, a snapshot of the whole mesh (.vtkhdf, the .h5 of XDMF
+output) or a series of them (.vtkhdf.series, a series file, .xmf); several
+files, or a glob, extract in the order given. The case comes from -i, else from
+FILE's provenance, and its mesh must be the file's: run it where the run ran, so
+that relative paths (the mesh file) resolve. --steps, --times, --every and
+--latest choose the snapshots. VTKHDF files record no step: their snapshots are
+numbered by their position in FILE.
+
+Files go to the output directory under the names the input gives them, so a
+run's files are never overwritten. The report lists each file with its times and
+fields, and every reduction of the last snapshot with its units. Under mpirun -n
+N the probes are evaluated on N ranks.
+
+Options:
+  -i FILE                The input file of the case: its mesh, physics,
+                         numerics, [regions] and [[probes]]. Default: the input
+                         in the provenance of FILE (Mallard 0.10 and later
+                         record it resolved).
+  --probe NAMES          The [[probes]] of the input to extract, by name,
+                         separated by commas (--probe wake,box). Default: every
+                         one, unless --region or --snapshot is given.
+  --region REGION        Extract a region as a [[probes]] entry of --fields with
+                         this region: the name of a region of the input's
+                         [regions] or of the mesh (domain, a boundary or cell
+                         zone), or an inline TOML table, a region ('{type =
+                         "rectangle", center = [0.5, 0.5], size = [0.4, 0.2]}')
+                         or a probe type ('{type = "line", start = [0, 0], end =
+                         [1, 0], n_points = 50}'). Default: none.
+  --name NAME            The name of the --region probe and of --snapshot:
+                         probe_NAME.csv, probe_NAME_reductions.csv,
+                         NAME_<step>.vtkhdf. Default: extract.
+  --fields LIST          The variables of --region and --snapshot, separated by
+                         commas, as [[probes]] and [[write_data]] take them
+                         (RHO,U,P,T,MASS_FLUX). Default: RHO,U,P,T.
+  --reductions LIST      The reductions of --region, separated by commas:
+                         integral, mean, favre, rms, min, max. Default:
+                         integral, mean, min and max of a region; none of a
+                         probe type.
+  --sampling cell|point  Whether --region samples cell averages or the
+                         reconstruction's point values. Default: cell.
+  --snapshot vtkhdf|vtu  Also write a snapshot of --fields (of --region, if
+                         given) at each step extracted, as [[write_data]] writes
+                         it: OUTPUT/NAME_<step>.vtkhdf, or .vtu files with a
+                         .pvd index. Default: none.
+  --steps LIST           Extract the snapshots of these steps, separated by
+                         commas (--steps 100,200). Default: every snapshot.
+  --times T|T1:T2        Extract the snapshot nearest to simulated time T, or
+                         every one with T1 <= t <= T2, in seconds. Default:
+                         every snapshot.
+  --every N              Extract every Nth of the snapshots selected, starting
+                         with the first. Default: 1.
+  --latest               Extract only the last snapshot selected.
+  -o, --output DIR       The directory the files go to, under the names the
+                         input gives them (a probe's file and reductions_file).
+                         Default: extract.
+  --format text|json     text: sections and tables, with the units of every
+                         quantity; json: the same as one JSON object, for
+                         scripts. Default: text.
+  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                         per rank) or --kokkos-device-id=1 (the GPU; by default
+                         each rank gets its own).
+  -h, --help             Show this page.
+
+Examples:
+  $ mallard post extract solut/flow.vtkhdf.series      # every [[probes]] of the run
+  $ mallard post extract solut/restart_*.restart --probe wake -o wake
+  $ mallard post extract solut/flow.vtkhdf.series --latest --region domain --fields RHO,RHOE
+  $ mallard post extract solut/flow.xmf --times 0.1:0.5 --fields MASS_FLUX --reductions integral \
+        --region '{type = "cut_plane", point = [0.5, 0, 0], normal = [1, 0, 0]}'
+  $ mallard post extract solut/flow.vtkhdf.series --latest --snapshot vtkhdf --fields P,T
+
+Exit status:
+  0  every snapshot was extracted
+  1  a file cannot be read, the case cannot be set up, or the file is not of its mesh
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-extract
 ```
 
 ### mallard test

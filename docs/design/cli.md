@@ -29,7 +29,7 @@ Maintain  mallard test | completion | --version
 | `diff` | Inspect | planned ([#506](https://github.com/MatthewBonanni/mallard/issues/506)) |
 | `mesh convert` | Mesh | available |
 | `mesh extrude` | Mesh | planned |
-| `post extract` | Post | planned ([#505](https://github.com/MatthewBonanni/mallard/issues/505)) |
+| `post extract` | Post | available; on the [output reader](output_reader.md#mallard-post-extract) |
 | `post derive` | Post | planned ([#511](https://github.com/MatthewBonanni/mallard/issues/511)) |
 | `post average` | Post | planned ([#512](https://github.com/MatthewBonanni/mallard/issues/512)) |
 | Reacting-flow analysis | Post | planned ([#513](https://github.com/MatthewBonanni/mallard/issues/513)) |

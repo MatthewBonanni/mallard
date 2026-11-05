@@ -894,13 +894,13 @@ namespace {
 // Probe types that are regions too: points, curves and cut planes with the probe keys
 const std::vector<std::string> SAMPLED_TYPES = {"point", "points", "line", "polyline", "arc", "curve", "cut_plane", "surface"};
 
+} // namespace
+
 bool sampled(const Input & table) {
     if (!table.is_table() || !table.contains("type") || !table.at("type").is_string()) return false;
     const std::string type = table.at("type").as_string();
     return std::find(SAMPLED_TYPES.begin(), SAMPLED_TYPES.end(), type) != SAMPLED_TYPES.end();
 }
-
-} // namespace
 
 RegionValue classify_region(const Input & input, region::Regions & regions, const Input & value,
                             const std::string & where) {
@@ -1027,14 +1027,17 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         p.format = snapshot->format;
         p.file = snapshot->file;
     } else {
-    const std::string sampling = find_value_or<std::string>(entry, "sampling", "cell");
+    // Keys that do not apply to a region probe are not read, so its resolved input does not set them
+    const bool reductions_only = region && !p.resampled;
+    const bool sampled_region = !region || region->dimension() < N_DIM;
+    const std::string sampling = sampled_region ? find_value_or<std::string>(entry, "sampling", "cell") : "cell";
     record_options(key + ".sampling", {"cell", "point"});
     if (sampling == "point") {
         p.sampling = Sampling::POINT;
     } else if (sampling != "cell") {
         throw InputError(key + ".sampling = \"" + sampling + "\" is not one of: cell, point.");
     }
-    const std::string format = find_value_or<std::string>(entry, "format", "csv");
+    const std::string format = reductions_only ? "csv" : find_value_or<std::string>(entry, "format", "csv");
     record_options(key + ".format", {"csv", "hdf5", "vtkhdf", "vtp"});
     if (format == "hdf5" || format == "vtkhdf") {
 #ifndef Mallard_HAS_HDF5
@@ -1050,7 +1053,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                              : p.format == Format::HDF5   ? ".h5"
                              : p.format == Format::VTKHDF ? ".vtkhdf"
                                                           : ".pvd";
-    p.file = find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
+    p.file = reductions_only ? "" : find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
     p.write_samples = (!p.from_region || p.resampled) && find_value_or<bool>(entry, "samples", true);
     std::vector<std::string> reductions = find_value_or<std::vector<std::string>>(entry, "reductions", {});
     if (p.from_region && reductions.empty()) reductions = {"integral", "mean", "min", "max"};
@@ -1126,7 +1129,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
 
     const bool boundary = !region_zones.empty() || (where == &entry && !p.from_region &&
                                                      (entry.contains("boundary") || entry.contains("boundary_type")));
-    const std::string type = find_value_or<std::string>(*where, "type", "");
+    const std::string type = p.from_region ? "" : find_value_or<std::string>(*where, "type", "");
     const bool cut = type == "cut_plane";
     const bool oriented = (region && region->dimension() == N_DIM - 1) ||
                           (elements && elements->dimension() == N_DIM - 1) ||
