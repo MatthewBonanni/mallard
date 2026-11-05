@@ -7,10 +7,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -24,6 +26,8 @@
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
+
+constexpr double ROUNDING = std::max(1e-12, 4.0 * double(std::numeric_limits<rtype>::epsilon()));
 
 namespace {
 
@@ -158,7 +162,7 @@ TEST(PostExtractTest, SnapshotsOfPrimitivesGiveTheRunsProbesToRounding) {
         ASSERT_EQ(a.size(), b.size());
         // VTKHDF files record no step: their snapshots are numbered by position in the series
         EXPECT_EQ(a[0], double(1 + i / 7));
-        for (size_t c = 1; c < a.size(); c++) EXPECT_NEAR(a[c], b[c], 1e-12 * (1.0 + std::abs(b[c]))) << got[i];
+        for (size_t c = 1; c < a.size(); c++) EXPECT_NEAR(a[c], b[c], ROUNDING * (1.0 + std::abs(b[c]))) << got[i];
     }
 }
 
