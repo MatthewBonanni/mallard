@@ -1992,16 +1992,16 @@
   "set_in": [],
   "type": "bool"
  },
- "les.effective_width": {
-  "default": "false",
+ "les.filter_width": {
+  "default": "\"scotti\"",
   "dims": [
    3
   ],
   "set_in": [],
-  "type": "bool"
+  "type": "string"
  },
- "les.filter_width": {
-  "default": "\"scotti\"",
+ "les.gradients": {
+  "default": "\"least_squares\"",
   "dims": [
    3
   ],

@@ -44,13 +44,18 @@ struct EddyViscosityFunctor {
     rtype cp;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
+    Kokkos::View<rtype *[N_DIM][N_DIM]> velocity;  // the models' own (les.reconstruction_gradients), else empty
     Kokkos::View<rtype *> delta;
     Kokkos::View<rtype *[3]> sgs;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         double g[3][3];
-        velocity_gradient([&](int i, int j) { return gradients(c, 1 + i, j); }, g);
+        if (velocity.is_allocated()) {
+            velocity_gradient([&](int i, int j) { return velocity(c, i, j); }, g);
+        } else {
+            velocity_gradient([&](int i, int j) { return gradients(c, 1 + i, j); }, g);
+        }
         const rtype mu_t = W(c, 0) * les.nu_t(g, delta(c));
         sgs(c, 0) = mu_t;
         sgs(c, 1) = cp * mu_t / les.Pr_t;
@@ -71,6 +76,7 @@ struct MixtureEddyViscosityFunctor {
     ScalarView scalars;
     Kokkos::View<rtype **, Kokkos::LayoutRight> values;
     Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;
+    Kokkos::View<rtype *[N_DIM][N_DIM]> velocity;  // the models' own (les.reconstruction_gradients), else empty
     Kokkos::View<rtype *> delta;
     Kokkos::View<rtype *[3]> coefficients;
     Kokkos::View<rtype *[3]> sgs;
@@ -78,7 +84,11 @@ struct MixtureEddyViscosityFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         double g[3][3];
-        velocity_gradient([&](int i, int j) { return gradients(c, i, j); }, g);
+        if (velocity.is_allocated()) {
+            velocity_gradient([&](int i, int j) { return velocity(c, i, j); }, g);
+        } else {
+            velocity_gradient([&](int i, int j) { return gradients(c, i, j); }, g);
+        }
         const double rho = static_cast<double>(W(c, 0));
         const double nu_t = static_cast<double>(les.nu_t(g, delta(c)));
         const ScalarMassFractions y{&scalars(c, 0)};
@@ -896,7 +906,6 @@ void Solver::init_les() {
         }
         Kokkos::deep_copy(les_width, h_width);
     }
-    if (les.effective_width) init_effective_width();
     if (les.dynamic) {
         dynamic_halo = State("dynamic_halo", mesh->n_cells, 9);
         dynamic_terms = Kokkos::View<double *[2]>("dynamic_terms", mesh->n_owned());
@@ -904,6 +913,20 @@ void Solver::init_les() {
     }
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
     h_les_coefficients = Kokkos::create_mirror_view(les_coefficients);
+    if (les.reconstruction_gradients) {
+        if (dynamic_cast<const TENO *>(face_reconstruction.get()) == nullptr) {
+            throw InputError("les.gradients = \"reconstruction\" takes the models' velocity gradients from the "
+                             "central polynomials of a TENO reconstruction, but this run reconstructs with " +
+                             FACE_RECONSTRUCTION_NAMES.at(face_reconstruction->get_type()) +
+                             ". Set [numerics.face_reconstruction] type = \"TENO\", or remove the key "
+                             "(docs/guide/les.md).");
+        }
+        reconstruction_gradients.polynomial =
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("les_polynomial_gradients", mesh->n_cells);
+        dynamic_cast<TENO &>(*face_reconstruction).smooth_gradients = reconstruction_gradients.polynomial;
+        if (halo.active()) reconstruction_gradients.halo = State("les_gradients_halo", mesh->n_cells, N_DIM * N_DIM);
+        les_velocity_gradients = Kokkos::View<rtype *[N_DIM][N_DIM]>("les_velocity_gradients", mesh->n_cells);
+    }
     if (!input.at("les").contains("combustion")) return;
     if (!reacting || !is_viscous()) {
         throw InputError("[les.combustion] needs a reacting viscous mixture (gas = \"mixture\", navier_stokes, [chemistry]).");
@@ -931,67 +954,51 @@ void Solver::init_les() {
     tfles_gradients = Kokkos::View<rtype *[3][N_DIM]>("tfles_gradients", mesh->n_cells);
 }
 
-void Solver::init_effective_width() {
-    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
-    if (teno == nullptr) {
-        throw InputError("les.effective_width = true scales the filter width by the effective resolution of a TENO "
-                         "reconstruction, but this run reconstructs with " +
-                         FACE_RECONSTRUCTION_NAMES.at(face_reconstruction->get_type()) +
-                         ". Set [numerics.face_reconstruction] type = \"TENO\", or remove the key: V^(1/d) is "
-                         "already the width of second-order schemes (docs/guide/les.md).");
-    }
-    EffectiveWidth & e = effective_width;
-    e.smooth = LES::width_ratio(teno->degree + 1);
-    e.base_delta = les_delta;
-    e.base_width = les_width;
-    les_delta = Kokkos::View<rtype *>("les_delta_effective", mesh->n_cells);
-    les_width = les.scotti ? Kokkos::View<rtype *>("les_width_effective", mesh->n_cells) : les_delta;
-    // Runs start at the cell widths; restarts at the ratios they saved (copy_host_to_device)
-    e.ratio = Kokkos::View<rtype *>("les_width_ratio", mesh->n_cells);
-    e.h_ratio = Kokkos::create_mirror_view(e.ratio);
-    Kokkos::deep_copy(e.h_ratio, 1.0_r);
-    Kokkos::deep_copy(e.ratio, 1.0_r);
-    if (halo.active()) e.halo = State("les_width_ratio_halo", mesh->n_cells, 1);
-    apply_effective_width();
-}
-
-void Solver::update_effective_width() {
-    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
-    Kokkos::View<rtype *> ratio = effective_width.ratio, sigma = teno->troubled;
-    const rtype threshold = teno->sigma_threshold, smooth = effective_width.smooth;
-    Kokkos::parallel_for("les_width_ratio", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
-        ratio(c) = LES::relaxed_width_ratio(ratio(c), sigma(c) < threshold ? smooth : 1.0_r);
-    });
-    if (halo.active()) {
-        SpeciesView packed = effective_width.halo.species;
-        Kokkos::parallel_for("halo_pack", mesh->n_owned(),
-                             KOKKOS_LAMBDA(const uint32_t c) { packed(c, 0) = ratio(c); });
-        halo.exchange(effective_width.halo);
-        Kokkos::parallel_for("halo_unpack", mesh->n_cells,
-                             KOKKOS_LAMBDA(const uint32_t c) { ratio(c) = packed(c, 0); });
-    }
-    apply_effective_width();
-}
-
-void Solver::apply_effective_width() {
-    Kokkos::View<rtype *> ratio = effective_width.ratio, delta = les_delta, width = les_width;
-    Kokkos::View<rtype *> base_delta = effective_width.base_delta, base_width = effective_width.base_width;
-    Kokkos::parallel_for("les_effective_width", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
-        delta(c) = base_delta(c) * ratio(c);
-        width(c) = base_width(c) * ratio(c);
-    });
-}
-
 void Solver::update_eddy_viscosity(const uint32_t n) {
+    if (les.reconstruction_gradients) update_reconstruction_gradients(n);
     if (is_mixture()) {
         Kokkos::parallel_for("eddy_viscosity", n,
                              MixtureEddyViscosityFunctor{les, mixture, W_cells, cell_scalars, transport_values,
-                                                         transport_gradients, les_width, cell_transport,
-                                                         les_coefficients});
+                                                         transport_gradients, les_velocity_gradients, les_width,
+                                                         cell_transport, les_coefficients});
     } else {
         Kokkos::parallel_for("eddy_viscosity", n,
-                             EddyViscosityFunctor{les, physics.cp, W_cells, viscous_gradients, les_width, les_coefficients});
+                             EddyViscosityFunctor{les, physics.cp, W_cells, viscous_gradients,
+                                                  les_velocity_gradients, les_width, les_coefficients});
     }
+}
+
+void Solver::update_reconstruction_gradients(const uint32_t n) {
+    const uint32_t n_owned = mesh->n_owned();
+    ReconstructionGradients & r = reconstruction_gradients;
+    const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
+    Kokkos::View<rtype *> sigma = teno.troubled;
+    const rtype threshold = teno.sigma_threshold;
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> P = r.polynomial, G = viscous_gradients;
+    Kokkos::View<rtype ***, Kokkos::LayoutRight> T = transport_gradients;
+    Kokkos::View<rtype *[N_DIM][N_DIM]> g = les_velocity_gradients;
+    const bool mixture_gradients = is_mixture();
+    Kokkos::parallel_for("les_reconstruction_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        const bool smooth = sigma(c) < threshold;
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) {
+            g(c, i, j) = smooth ? P(c, 1 + i, j) : mixture_gradients ? T(c, i, j) : G(c, 1 + i, j);
+        }
+    });
+    if (n <= n_owned) return;
+    if (!halo.active()) {
+        Kokkos::parallel_for("les_gradients_rest", Kokkos::RangePolicy<>(n_owned, n), KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) g(c, i, j) = mixture_gradients ? T(c, i, j) : G(c, 1 + i, j);
+        });
+        return;
+    }
+    SpeciesView packed = r.halo.species;
+    Kokkos::parallel_for("les_gradients_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) packed(c, i * N_DIM + j) = g(c, i, j);
+    });
+    halo.exchange(r.halo);
+    Kokkos::parallel_for("les_gradients_unpack", Kokkos::RangePolicy<>(n_owned, n), KOKKOS_LAMBDA(const uint32_t c) {
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) g(c, i, j) = packed(c, i * N_DIM + j);
+    });
 }
 
 void Solver::eddy_viscosity_of_state(const uint32_t n) {
@@ -1016,8 +1023,13 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
         });
         Kokkos::parallel_for("les_gradients", HeavyRange<>(0, n), viscous_gradient);
     }
+    // The right-hand side's reconstruction writes the polynomials' gradients of its stage; here, those of this state
+    if (les.reconstruction_gradients) {
+        face_reconstruction->cell_gradients(W_cells, reconstruction_gradients.polynomial, mesh->n_owned());
+    }
     update_eddy_viscosity(n);
 }
+
 
 rtype Solver::kinetic_energy_rate() const {
     rtype sum = 0.0_r;

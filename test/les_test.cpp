@@ -12,13 +12,12 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
-#include <complex>
 #include <filesystem>
 #include <functional>
 #include <iomanip>
-#include <limits>
 #include <sstream>
 #include <string>
 
@@ -26,7 +25,6 @@
 #include "exact_riemann.h"
 #include "input.h"
 #include "les.h"
-#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -456,6 +454,131 @@ TEST(LESSolver, BudgetSplitsTheKineticEnergyRateOfTheRightHandSide) {
     EXPECT_NEAR(b.viscous, viscous, 0.08 * std::abs(viscous));
 }
 
+namespace {
+
+/**
+ * @brief A box of n^d cells with outflow boundaries and a cubic velocity field at uniform density and pressure,
+ *        TENO of order 4 (whose central polynomials hold cubics exactly) and Smagorinsky's model.
+ */
+std::string cubic_box(const uint32_t n, const std::string & les, const std::string & teno = "") {
+    std::ostringstream s;
+    s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\n" : "")
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"10.0\"\n"
+      << (N_DIM == 3 ? "u = [\"0.3 * x^3 - 0.5 * x * y^2 + 0.2 * z^2\", \"0.4 * y^3 + 0.6 * x^2 * z\", "
+                       "\"-0.2 * z^3 + 0.5 * x * y * z\"]\n"
+                     : "u = [\"0.3 * x^3 - 0.5 * x * y^2\", \"0.4 * y^3 + 0.6 * x^2 * y\"]\n");
+    for (const char * side : {"left", "right", "bottom", "top", "back", "front"}) {
+        if (N_DIM == 2 && (std::string(side) == "back" || std::string(side) == "front")) continue;
+        s << "[[boundaries]]\nname = \"" << side << "\"\ntype = \"outlet_extrapolation\"\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n" << teno
+      << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1e-3\n"
+      << "[output]\ncheck_interval = 1000000\n" << les;
+    return s.str();
+}
+
+Gradient cubic_gradient(const double * x) {
+    Gradient g{};
+    if constexpr (N_DIM == 3) {
+        g[0] = {0.9 * x[0] * x[0] - 0.5 * x[1] * x[1], -x[0] * x[1], 0.4 * x[2]};
+        g[1] = {1.2 * x[0] * x[2], 1.2 * x[1] * x[1], 0.6 * x[0] * x[0]};
+        g[2] = {0.5 * x[1] * x[2], 0.5 * x[0] * x[2], -0.6 * x[2] * x[2] + 0.5 * x[0] * x[1]};
+    } else {
+        g[0] = {0.9 * x[0] * x[0] - 0.5 * x[1] * x[1], -x[0] * x[1], 0.0};
+        g[1] = {1.2 * x[0] * x[1], 1.2 * x[1] * x[1] + 0.6 * x[0] * x[0], 0.0};
+    }
+    return g;
+}
+
+/** @brief Whether the cell is at least `margin` from the boundaries of [0, 1]^d, beyond the one-sided stencils. */
+bool interior(const Mesh & mesh, const uint32_t c, const double margin) {
+    FOR_I_DIM {
+        const double x = double(mesh.h_cell_coords(c, i));
+        if (x < margin || x > 1.0 - margin) return false;
+    }
+    return true;
+}
+
+const std::string SMAGORINSKY = "[les]\nmodel = \"smagorinsky\"\nC = 0.2\nfilter_width = \"volume\"\n";
+
+} // namespace
+
+TEST(LESReconstructionGradients, EddyViscosityOfACubicFieldIsExact) {
+    // TENO's central polynomials of degree 3 hold the cubic field, so their gradient at the centroid is the
+    // field's: the eddy viscosity is the model's of the exact gradient, which least squares misses at O(h^2)
+    const uint32_t n = N_DIM == 2 ? 16 : 10;
+    auto polynomial = make_solver(cubic_box(n, SMAGORINSKY + "gradients = \"reconstruction\"\n"));
+    auto least_squares = make_solver(cubic_box(n, SMAGORINSKY));
+    polynomial->copy_device_to_host();
+    least_squares->copy_device_to_host();
+    const auto mesh = polynomial->get_mesh();
+    double worst_polynomial = 0.0, worst_least_squares = 0.0;
+    uint32_t checked = 0;
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        if (!interior(*mesh, c, 0.3)) continue;
+        double x[3] = {};
+        FOR_I_DIM x[i] = double(mesh->h_cell_coords(c, i));
+        const double delta = std::pow(double(mesh->h_cell_measure(c)), 1.0 / N_DIM);
+        const double exact = 0.2 * 0.2 * delta * delta * D(SGSModel::SMAGORINSKY, cubic_gradient(x));
+        worst_polynomial = std::max(worst_polynomial,
+                                    std::abs(double(polynomial->get_les_coefficients()(c, 0)) - exact) / exact);
+        worst_least_squares = std::max(worst_least_squares,
+                                       std::abs(double(least_squares->get_les_coefficients()(c, 0)) - exact) / exact);
+        checked++;
+    }
+    ASSERT_GT(comm::allreduce(checked, comm::Op::SUM), 0u);
+    EXPECT_LT(comm::allreduce(worst_polynomial, comm::Op::MAX), precision_tol<double>(1e-9, 1e-4));
+    EXPECT_GT(comm::allreduce(worst_least_squares, comm::Op::MAX), 1e-3);
+}
+
+TEST(LESReconstructionGradients, RightHandSideTakesTheGradientsOfItsOwnReconstruction) {
+    // The reconstruction of each stage writes the gradients the model then uses, and they are the cubic's
+    const uint32_t n = N_DIM == 2 ? 16 : 10;
+    auto solver = make_solver(cubic_box(n, SMAGORINSKY + "gradients = \"reconstruction\"\n"));
+    const auto mesh = solver->get_mesh();
+    State rhs("rhs", mesh->n_cells, 0);
+    solver->calc_rhs(solver->state(), rhs, 0.0_r);
+    const auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver->get_les_velocity_gradients());
+    uint32_t checked = 0;
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        if (!interior(*mesh, c, 0.3)) continue;
+        double x[3] = {};
+        FOR_I_DIM x[i] = double(mesh->h_cell_coords(c, i));
+        const Gradient exact = cubic_gradient(x);
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) {
+            EXPECT_NEAR(double(g(c, i, j)), exact[i][j], precision_tol<double>(1e-9, 1e-4)) << c << " " << i << j;
+        }
+        checked++;
+    }
+    EXPECT_GT(comm::allreduce(checked, comm::Op::SUM), 0u);
+}
+
+TEST(LESReconstructionGradients, TroubledCellsKeepTheLeastSquaresGradients) {
+    // Every cell troubled (sigma >= 0): the run is that of the least-squares gradients, bit for bit
+    const uint32_t n = N_DIM == 2 ? 12 : 6;
+    const std::string run = "n_steps = 3\ncfl = 0.5\n";
+    auto with_flux = [&](const std::string & les) {
+        std::string s = periodic_box(MESH, n, les, "", run);
+        const std::string from = "type = \"MUSCL\"\nlimiter = \"none\"\n";
+        return s.replace(s.find(from), from.size(), "type = \"TENO\"\norder = 3\ntroubled_threshold = 0.0\n");
+    };
+    auto polynomial = make_solver(with_flux(LES_DEFAULT + "gradients = \"reconstruction\"\n"));
+    auto least_squares = make_solver(with_flux(LES_DEFAULT));
+    polynomial->run();
+    least_squares->run();
+    polynomial->copy_device_to_host();
+    least_squares->copy_device_to_host();
+    for (uint32_t c = 0; c < polynomial->get_mesh()->n_owned(); c++) {
+        FOR_I_CONSERVATIVE EXPECT_EQ(polynomial->h_conservatives(c, i), least_squares->h_conservatives(c, i)) << c;
+    }
+}
+
+TEST(LESReconstructionGradients, NeedTENO) {
+    EXPECT_THROW(make_solver(periodic_box(MESH, 4, LES_DEFAULT + "gradients = \"reconstruction\"\n")), InputError);
+    EXPECT_THROW(make_solver(cubic_box(4, SMAGORINSKY + "gradients = \"polynomial\"\n")), InputError);
+}
+
 TEST(LESSolver, ModelDrainsResolvedKineticEnergy) {
     const uint32_t n = N_DIM == 2 ? 24 : 10;
     const std::string run = "t_stop = 0.05\ncfl = 0.5\n";
@@ -505,135 +628,6 @@ TEST(LESSolver, InputErrors) {
     if constexpr (N_DIM == 2) {
         EXPECT_THROW(make_solver(periodic_box(MESH, 4, "[les]\nmodel = \"sigma\"\n")), InputError);
     }
-}
-
-namespace {
-
-/** @brief periodic_box with a TENO reconstruction of the given options and effective_width (if on). */
-std::string teno_box(uint32_t n, const std::string & teno, bool effective, const std::string & run, const std::string & extra = "") {
-    std::string s = periodic_box("cartesian", n, LES_DEFAULT + (effective ? "effective_width = true\n" : ""), extra, run);
-    const std::string muscl = "type = \"MUSCL\"\nlimiter = \"none\"\n";
-    s.replace(s.find(muscl), muscl.size(), "type = \"TENO\"\norder = 5\n" + teno);
-    return s;
-}
-
-/**
- * @brief k_eff Delta of a reconstruction: the wavenumber at which the numerical dissipation of linear advection
- *        reaches 1% per cell, -Im(k~) Delta = 0.01, measured as tools/docs/effective_resolution.py does: one
- *        right-hand side of a density wave of every resolved wavenumber superposed (along x, uniform velocity
- *        and pressure, HLLC: the exact upwind flux of the reconstructed density) on uniform periodic cells.
- */
-double effective_wavenumber(const std::string & reconstruction) {
-    const uint32_t nx = N_DIM == 2 ? 128 : 64, ny = 6;
-    const double h = 1.0 / nx, a = 0.5;
-    std::ostringstream s;
-    s << std::setprecision(17) << "[run]\nn_steps = 0\ndt = 1e-5\n[mesh]\ntype = \"cartesian\"\nNx = " << nx
-      << "\nNy = " << ny << "\nLx = 1.0\nLy = " << ny * h << "\n"
-      << (N_DIM == 3 ? "Nz = 6\nLz = " + std::to_string(ny * h) + "\n" : std::string())
-      << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
-      << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "") << "[initialize]\ntype = \"analytical\"\nrho = \"1.0";
-    for (uint32_t m = 1; m < nx / 2; m++) s << " + 0.01 * cos(" << TWO_PI * m << " * x + " << 0.7 * m << ")";
-    s << "\"\nu = " << (N_DIM == 2 ? "[0.5, 0.0]" : "[0.5, 0.0, 0.0]") << "\np = \"1.0\"\n"
-      << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n" << reconstruction
-      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-      << "[output]\ncheck_interval = 1000000\n";
-    Solver solver;
-    solver.set_distributed(false);
-    solver.init(parse_toml(s.str()));
-    const auto mesh = solver.get_mesh();
-    State rhs("rhs", mesh->n_cells, 0);
-    solver.calc_rhs(solver.state(), rhs, 0.0_r);
-    solver.copy_device_to_host();
-    const auto R = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), rhs.flow);
-    double previous = 0.0;
-    for (uint32_t m = 1; m < nx / 2; m++) {
-        const double k = TWO_PI * m;
-        std::complex<double> response = 0.0, wave = 0.0;
-        for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-            const std::complex<double> e = std::polar(1.0, -k * double(mesh->h_cell_coords(c, 0)));
-            response += double(R(c, 0)) * e;
-            wave += (double(solver.h_conservatives(c, 0)) - 1.0) * e;
-        }
-        // d rho / dt = -i a k~ rho
-        const double damping = -std::imag(std::complex<double>(0.0, 1.0) * response / wave / a) * h;
-        if (damping >= 0.01) return (k - TWO_PI) * h + (0.01 - previous) / (damping - previous) * TWO_PI * h;
-        previous = damping;
-    }
-    return std::numeric_limits<double>::quiet_NaN();
-}
-
-} // namespace
-
-TEST(LESEffectiveWidth, RatioIsThatOfTheModifiedWavenumbersOfTENOAndMUSCL) {
-    // r = Delta_eff / Delta = pi / (k_eff Delta): the ratio the solver applies in smooth cells must be what the
-    // reconstructions do now; a change of the TENO stencils, of the face quadrature or of MUSCL moves it
-    const double muscl = effective_wavenumber("type = \"MUSCL\"\nlimiter = \"none\"\n");
-    const double teno = effective_wavenumber("type = \"TENO\"\norder = 5\ntroubled_threshold = 1e30\n");
-    EXPECT_NEAR(muscl, 0.535, 0.02);
-    EXPECT_NEAR(double(LES::width_ratio(5)), muscl / teno, 0.005);
-    EXPECT_LT(LES::width_ratio(5), 0.8_r);
-}
-
-TEST(LESEffectiveWidth, TroubledCellsKeepTheCellWidthAndSmoothOnesRelaxToTheRatio) {
-    const uint32_t n = N_DIM == 2 ? 12 : 8, steps = 4;
-    const std::string run = "n_steps = " + std::to_string(steps) + "\ncfl = 0.5\n";
-    auto delta_V = [](const Solver & solver, uint32_t c) {
-        return std::pow(double(solver.get_mesh()->h_cell_volume(c)), 1.0 / N_DIM);
-    };
-    // Every cell troubled (sigma >= 0): the width V^(1/d), and the run of the cell widths exactly
-    auto troubled = make_solver(teno_box(n, "troubled_threshold = 0.0\n", true, run));
-    auto reference = make_solver(teno_box(n, "troubled_threshold = 0.0\n", false, run));
-    troubled->run();
-    reference->run();
-    troubled->copy_device_to_host();
-    reference->copy_device_to_host();
-    auto h_delta = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), troubled->get_les_delta());
-    for (uint32_t c = 0; c < troubled->get_mesh()->n_owned(); c++) {
-        EXPECT_EQ(troubled->get_les_width_ratio()(c), 1.0_r) << "cell " << c;
-        EXPECT_NEAR(double(h_delta(c)), delta_V(*troubled, c), precision_tol<double>(1e-12, 1e-6) * delta_V(*troubled, c));
-        FOR_I_CONSERVATIVE EXPECT_EQ(troubled->h_conservatives(c, i), reference->h_conservatives(c, i));
-    }
-    // Every cell smooth: from 1 toward LES::width_ratio by 1 / WIDTH_RELAXATION_STEPS of the gap per step
-    auto smooth = make_solver(teno_box(n, "troubled_threshold = 1e30\n", true, run));
-    smooth->run();
-    smooth->copy_device_to_host();
-    const double target = double(LES::width_ratio(5)), keep = 1.0 - 1.0 / double(LES::WIDTH_RELAXATION_STEPS);
-    const double ratio = target + (1.0 - target) * std::pow(keep, steps);
-    h_delta = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), smooth->get_les_delta());
-    for (uint32_t c = 0; c < smooth->get_mesh()->n_owned(); c++) {
-        EXPECT_NEAR(double(smooth->get_les_width_ratio()(c)), ratio, precision_tol<double>(1e-14, 1e-6)) << "cell " << c;
-        EXPECT_NEAR(double(h_delta(c)), ratio * delta_V(*smooth, c), precision_tol<double>(1e-12, 1e-6) * delta_V(*smooth, c));
-    }
-}
-
-TEST(LESEffectiveWidth, RestartContinuesTheRelaxationExactly) {
-    const std::string dir = (scratch_dir() / "les_effective_width").string();
-    const uint32_t n = N_DIM == 2 ? 10 : 6;
-    auto input = [&](const std::string & sub, uint32_t steps, const std::string & init) {
-        std::string s = teno_box(n, "troubled_threshold = 1e30\n", true, "n_steps = " + std::to_string(steps) + "\ncfl = 0.5\n",
-                                 "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/restart\"\nformat = \"restart\"\ninterval = 3\n");
-        if (!init.empty()) {
-            const size_t a = s.find("[initialize]"), b = s.find("[numerics]");
-            s.replace(a, b - a, "[initialize]\ntype = \"restart\"\nfile = \"" + init + "\"\n");
-        }
-        return s;
-    };
-    auto straight = make_solver(input("a", 6, ""));
-    straight->run();
-    auto first = make_solver(input("b", 3, ""));
-    first->run();
-    auto second = make_solver(input("b", 6, dir + "/b/restart_000003.restart"));
-    second->run();
-    straight->copy_device_to_host();
-    second->copy_device_to_host();
-    for (uint32_t c = 0; c < straight->get_mesh()->n_owned(); c++) {
-        EXPECT_EQ(second->get_les_width_ratio()(c), straight->get_les_width_ratio()(c)) << "cell " << c;
-        FOR_I_CONSERVATIVE EXPECT_EQ(second->h_conservatives(c, i), straight->h_conservatives(c, i)) << "cell " << c;
-    }
-}
-
-TEST(LESEffectiveWidth, NeedsTENO) {
-    EXPECT_THROW(make_solver(periodic_box(MESH, 4, LES_DEFAULT + "effective_width = true\n")), InputError);
 }
 
 #if Mallard_DIM == 2

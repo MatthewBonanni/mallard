@@ -11,10 +11,7 @@
 
 #include "les.h"
 
-#include <algorithm>
-#include <array>
 #include <cmath>
-#include <stdexcept>
 
 #include "input.h"
 
@@ -65,21 +62,17 @@ LES LES::from_input(const Input & input) {
     }
     les.scotti = width == "scotti";
     les.dynamic = find_value_or<bool>(table, "dynamic", false);
-    les.effective_width = find_value_or<bool>(table, "effective_width", false);
+    const std::string gradients = find_value_or<std::string>(table, "gradients", "least_squares");
+    if (gradients != "least_squares" && gradients != "reconstruction") {
+        throw InputError("les.gradients = \"" + gradients + "\" is not one of: least_squares, reconstruction.");
+    }
+    les.reconstruction_gradients = gradients == "reconstruction";
     if (N_DIM == 2 && les.scotti) throw InputError("les.filter_width = \"scotti\" is for 3D builds.");
     for (const auto & [key, value] : std::initializer_list<std::pair<const char *, rtype>>{
              {"C", les.C}, {"Pr_t", les.Pr_t}, {"Sc_t", les.Sc_t}}) {
         if (!(value > 0.0_r)) throw InputError(std::string("les.") + key + " must be positive.");
     }
     return les;
-}
-
-rtype LES::width_ratio(const int order) {
-    // r(TENO, central stencil) / r(MUSCL), r = pi / (k_eff Delta) at -Im(k~) Delta = 0.01
-    constexpr std::array<double, 4> RATIO = N_DIM == 2 ? std::array<double, 4>{1.160, 0.631, 0.740, 0.497}
-                                                       : std::array<double, 4>{0.893, 0.624, 0.560, 0.488};
-    if (order < 3 || order > 6) throw std::invalid_argument("LES::width_ratio: TENO order " + std::to_string(order));
-    return static_cast<rtype>(std::min(1.0, RATIO[static_cast<size_t>(order - 3)]));
 }
 
 double LES::scotti_factor(const double h1, const double h2, const double h3) {
@@ -93,6 +86,6 @@ logging::Items LES::summary() const {
                         real(double(C)) + "), Pr_t " + real(double(Pr_t)) + ", Sc_t " + real(double(Sc_t)) +
                         ", filter width V^(1/" + std::to_string(N_DIM) + ")" +
                         (scotti ? " times Scotti's f(a_1, a_2)" : "") +
-                        (effective_width ? " times the effective-resolution ratio" : "") +
+                        (reconstruction_gradients ? ", gradients of the reconstruction polynomials" : "") +
                         (dynamic ? "; C from the global dynamic procedure" : "")}};
 }

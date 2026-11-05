@@ -375,6 +375,12 @@ class Solver {
          *        time-step diffusivity NU_EFF also grows).
          */
         void update_eddy_viscosity(uint32_t n);
+        /**
+         * @brief [les] gradients = "reconstruction": les_velocity_gradients of the owned cells from TENO's
+         *        central polynomials where its last reconstruction found the cell smooth, else the
+         *        least-squares ones; for n beyond the owned cells, the owners' values in the halo.
+         */
+        void update_reconstruction_gradients(uint32_t n);
         void update_wall_model();  // the modeled walls' flux from W_cells and viscous_gradients
         /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
         void eddy_viscosity_of_state(uint32_t n);
@@ -405,14 +411,6 @@ class Solver {
         void thicken_transport();
         /** @brief Overwrite the halo cells of a 3-vector cell field with their owners' values. */
         void exchange_cell_vectors(const Kokkos::View<rtype *[3]> & v);
-        /**
-         * @brief [les] effective_width, at the end of a step: relax each owned cell's width ratio toward its
-         *        target (LES::width_ratio where the step's last reconstruction found the cell smooth, else 1),
-         *        take the owners' ratios into the halo, and apply them (apply_effective_width).
-         */
-        void update_effective_width();
-        /** @brief les_delta and les_width: the cell widths times the width ratios. */
-        void apply_effective_width();
 
         /**
          * @brief Reacting mixtures: read [chemistry]; advance every owned cell
@@ -450,10 +448,6 @@ class Solver {
         rtype les_constant() const { return les.C; }
         /** @brief LES: <L:M> / <M:M> of the latest dynamic procedure, before clipping at zero. */
         double les_dynamic_ratio() const { return dynamic_ratio; }
-        /** @brief [les] effective_width: each cell's ratio Delta_eff / Delta (host copy; empty without it). */
-        const Kokkos::View<rtype *>::host_mirror_type & get_les_width_ratio() const { return effective_width.h_ratio; }
-        /** @brief The filter widths of the subgrid models, per cell (with effective_width, the effective ones). */
-        Kokkos::View<rtype *> get_les_delta() const { return les_delta; }
         /** @brief Thickened flame: the efficiency's exponent beta (the dynamic procedure's latest with efficiency = "dynamic"). */
         double tfles_beta() const { return thickened_flame.beta; }
         bool dynamic_efficiency() const {
@@ -467,6 +461,8 @@ class Solver {
         const LES & get_les() const { return les; }
         /** @brief LES: [mu_t, lambda_t, mu_t / (Sc_t W)] of each cell as of the last copy_device_to_host. */
         const Kokkos::View<rtype *[3]>::host_mirror_type & get_les_coefficients() const { return h_les_coefficients; }
+        /** @brief [les] gradients = "reconstruction": the models' velocity gradients of the latest update (device). */
+        const Kokkos::View<rtype *[N_DIM][N_DIM]> & get_les_velocity_gradients() const { return les_velocity_gradients; }
         /** @brief PaSR: the reacting fraction kappa per cell, after copy_device_to_host. */
         const Kokkos::View<rtype *>::host_mirror_type & get_chem_time_scale() const { return h_chem_time_scale; }
         /** @brief Thickened flame: [F, E, Omega] per cell, after copy_device_to_host. */
@@ -688,7 +684,6 @@ class Solver {
         void init_rhs_split();
         void init_axisymmetric_weights();
         void init_les();
-        void init_effective_width();
         /** @brief Exchange points of the modeled walls (after the boundary data). */
         void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
         /** @brief Hybrid flux: the upwind fraction of every cell from the gradients of W_cells. */
@@ -831,15 +826,13 @@ class Solver {
         LES les;
         Kokkos::View<rtype *> les_delta;               // (cell): filter width V^(1/d)
         Kokkos::View<rtype *> les_width;               // (cell): the eddy viscosity's width (les_delta or Scotti's)
-        // [les] effective_width: les_delta and les_width are base_delta and base_width times ratio
-        struct EffectiveWidth {
-            Kokkos::View<rtype *> ratio;               // (cell): Delta_eff / Delta, relaxed in time
-            Kokkos::View<rtype *>::host_mirror_type h_ratio;
-            Kokkos::View<rtype *> base_delta, base_width;
-            State halo;                                // the ratio as a species, for the halo exchange
-            rtype smooth = 1.0_r;                      // LES::width_ratio of the reconstruction
-        } effective_width;
         Kokkos::View<rtype *[3]> les_coefficients;     // (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), empty without LES
+        // [les] gradients = "reconstruction": the models' velocity gradients (cell, i, j) = d u_i / d x_j
+        Kokkos::View<rtype *[N_DIM][N_DIM]> les_velocity_gradients;
+        struct ReconstructionGradients {
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> polynomial;  // (owned cell): of W
+            State halo;
+        } reconstruction_gradients;
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
         bool budget_pass = false;                      // calc_rhs evaluates kinetic_energy_budget
         bool tfles_on = false;                         // [les.combustion]: thickened flame

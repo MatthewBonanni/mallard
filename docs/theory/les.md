@@ -137,18 +137,21 @@ $h_m = \lvert\Omega_i\rvert/\lambda_m$, with $\lambda_m$ the eigenvalues of
 its projected-area tensor $\tfrac12\sum_f A_f\,\mathbf{n}_f\mathbf{n}_f^T$
 (exact for boxes, equal for regular tetrahedra).
 
-## Effective filter width
+## Resolution of the reconstructions and the model's gradients
 
 $\Delta_V$ does not depend on the reconstruction, but how far below the grid
-cutoff $\pi/\Delta_V$ a scheme resolves the flow does. For linear advection
+cutoff $k_c = \pi/\Delta_V$ a scheme resolves the flow does, and so does how
+well the model sees the resolved velocity gradient.
+
+**Effective resolution.** For linear advection
 $\partial_t u + a\,\partial_x u = 0$, a scheme turns a wave $e^{ikx}$ into
 $\mathrm{d}\overline{u}/\mathrm{d}t = -\mathrm{i}a\tilde k(k)\,\overline{u}$;
-the modified wavenumber $\tilde k$ equals $k$ for an exact scheme, its real
-part measures the dispersion and $-\mathrm{Im}\,\tilde k$ the numerical
-dissipation. After the "1% rule" of
-[Moura, Sherwin & Peiró 2015](../references.md#moura-2015), the effective
-wavenumber $k_\mathrm{eff}$ is where the dissipation reaches 1% per cell,
-and the effective filter width the grid cutoff at that wavenumber:
+the modified wavenumber $\tilde k$ equals $k$ for an exact scheme, and
+$-\mathrm{Im}\,\tilde k$ measures the numerical dissipation. After the "1%
+rule" of [Moura, Sherwin & Peiró 2015](../references.md#moura-2015), the
+effective wavenumber $k_\mathrm{eff}$ is where the dissipation reaches 1% per
+cell, and $r = \pi/(k_\mathrm{eff}\Delta_V)$ the ratio of the effective filter
+width to $\Delta_V$:
 
 $$
 \begin{equation}
@@ -160,60 +163,73 @@ $$
 
 `tools/docs/effective_resolution.py` measures $\tilde k$ of Mallard's own
 reconstructions with the HLLC flux, from one forward-Euler step of a density
-wave at uniform velocity and pressure (the exact upwind flux of the
-reconstructed density), projected onto the wave
+wave at uniform velocity and pressure, projected onto the wave
 ([Pirozzoli 2006](../references.md#pirozzoli-2006)'s approximate dispersion
-relation for the nonlinear schemes). On uniform quadrilaterals:
+relation for the nonlinear schemes):
 
-| Scheme | $k_\mathrm{eff}\Delta_V$ | $r$ |
-|---|---|---|
-| First order | 0.14 | 22.4 |
-| MUSCL, no limiter | 0.54 | 5.84 |
-| TENO3, central polynomial | 0.46 | 6.77 |
-| TENO4, central polynomial | 0.85 | 3.68 |
-| TENO5, central polynomial | 0.73 | 4.32 |
-| TENO6, central polynomial | 1.08 | 2.90 |
-| TENO5, every cell troubled | 0.72 | 4.36 |
-| TENO5, sector stencils only | 0.46 | 6.78 |
-
-On hexahedra the TENO central stencils are larger (a Lebesgue bound of 4
-instead of 10) and resolve more: $r$ = 5.91 (MUSCL), 5.27, 3.69, 3.31 and
-2.88 (TENO3 to 6), 4.63 (TENO5 sector stencils). On irregular triangles,
-measured in units of $\Delta_V = \lvert\Omega_i\rvert^{1/2}$, $r$ = 4.34
-(MUSCL), 5.45 (TENO3) and 3.83 (TENO5).
+| Scheme | Quadrilaterals | Hexahedra | Irregular triangles |
+|---|---|---|---|
+| First order | 22.4 | | |
+| MUSCL, no limiter | 5.84 | 5.91 | 4.34 |
+| TENO3, central polynomial | 6.77 | 5.27 | 5.45 |
+| TENO4, central polynomial | 3.68 | 3.69 | |
+| TENO5, central polynomial | 4.32 | 3.31 | 3.83 |
+| TENO6, central polynomial | 2.90 | 2.88 | |
+| TENO5, every cell troubled | 4.36 | 3.34 | 3.83 |
+| TENO5, sector stencils only | 6.78 | 4.63 | |
 
 ![Modified wavenumbers of the reconstructions](../images/theory/effective_resolution-light.svg#gh-light-mode-only)
 ![Modified wavenumbers of the reconstructions](../images/theory/effective_resolution-dark.svg#gh-dark-mode-only)
 
-With `effective_width = true`, every width of the subgrid models
-($\Delta$ of the eddy viscosity, $\Delta_V$ of PaSR and of the thickened
-flame) is multiplied by each cell's ratio $\rho_i$, which relaxes toward a
-target $\rho^\ast_i$ once per step,
+TENO5 resolves 1.35 (2D) to 1.8 (3D) times MUSCL's wavenumber. A smaller
+width for TENO (Moura et al.'s argument for DG) lowers the model, and in
+decaying isotropic turbulence that made TENO5 less accurate
+([design notes](../design/les.md#31-order-aware-models-660)): what sets the
+balance is the total spectral eddy viscosity near $k_c$, not the resolution.
+
+**Spectral eddy viscosities.** On a developed field of the Comte-Bellot &
+Corrsin case, the numerical and model parts of the spectral eddy viscosity
+$\nu(k) = -T(k)/(2k^2E(k))$ follow from one right-hand side: $T$ is the
+transfer of resolved energy by Mallard's operator minus that of the exact,
+dealiased nonlinear term of the same band-limited field (numerics), or the
+change of $T$ when the model is switched on (model)
+([Domaradzki, Xiao & Smolarkiewicz 2003](../references.md#domaradzki-2003)).
+In units of $\sqrt{E(k_c)/k_c}$ at $32^3$, with HLLC: the numerical part of
+MUSCL rises to 0.27 at $k_c$ and that of TENO5 to 0.39 (less below
+$0.6\,k_c$), while Sigma at its constant adds only 0.07 to 0.12 everywhere.
+The Chollet-Lesieur target ([Chollet & Lesieur 1981](../references.md#chollet-1981))
+is 0.27 on its plateau and 0.71 at $k_c$, so both schemes with the model
+under-dissipate there, as the spectra show.
+
+**The model's gradient.** The models' velocity gradient is the least-squares
+gradient on the face neighbors, second order: on uniform cells its transfer
+function is $\sin(k h)/(k h)$ per direction, near zero at the cutoff. On the
+same fields, Sigma's mean eddy viscosity from these gradients is 0.54 ($32^3$)
+and 0.56 ($48^3$) of its value from the exact gradient of the band-limited
+field: the constant 1.35 acts like 1.8, the value that the coarse meshes
+needed in [section 8.1](../design/les.md#81-decaying-isotropic-turbulence-comte-bellot--corrsin-1971)
+of the design notes. Fourth- and sixth-order central gradients recover 0.65
+and 0.69.
+
+With `gradients = "reconstruction"` (TENO), the models take in each smooth cell
+the gradient of TENO's central polynomial $u_i(\mathbf{x}) = \overline{u}_i +
+\sum_l a_{il}\,\psi_l(\mathbf{x})$ (degree $p - 1$ at order $p$, exact for
+polynomials of that degree) at the centroid,
 
 $$
 \begin{equation}
-\rho_i^{n+1} =
-\begin{cases}
-\rho^\ast_i & \rho^\ast_i \ge \rho_i^n, \\
-\rho_i^n + (\rho^\ast_i - \rho_i^n)/10 & \text{otherwise},
-\end{cases}
-\qquad
-\rho^\ast_i =
-\begin{cases}
-\min\left(1,\ r_\mathrm{TENO}/r_\mathrm{MUSCL}\right) & \sigma_i < \sigma_\mathrm{threshold}, \\
-1 & \text{otherwise},
-\end{cases}
-\label{eq:width-ratio}
+\frac{\partial u_i}{\partial x_j}\bigg|_{\mathbf{x}_c} = \frac{a_{ij}}{h},
+\label{eq:polynomial-gradient}
 \end{equation}
 $$
 
-with $\sigma_i$ the troubled-cell measure of the step's last reconstruction
-and $r$ of the order's central polynomial on uniform quadrilaterals (2D) or
-hexahedra (3D) (`LES::width_ratio`; $\rho_i^0 = 1$). MUSCL is the reference:
-the model constants and the thickened flame's $n_\mathrm{res}$ come from
-second-order codes. Troubled cells keep $\Delta_V$: their sector stencils
-resolve less than MUSCL in 2D and only somewhat more in 3D ($r$ 4.63 against
-5.91), and next to a discontinuity the smaller width is not wanted.
+the coefficients of the linear monomials (scaled by $h = V^{1/d}$), which
+the reconstruction computes in the same pass over its stencil; velocity
+gradients follow from those of the conservative variables. Troubled cells
+($\sigma_i \ge \sigma_\mathrm{threshold}$), whose faces may use the sector
+stencils, keep the least-squares gradient. The viscous fluxes keep the
+least-squares gradients. The eddy viscosity enters PaSR's mixing time and the
+thickened flame's efficiency as before, so both follow.
 
 ## Global dynamic procedure
 

@@ -57,7 +57,6 @@ const Entry NAMED[] = {
     {"CHEM_COST", dim::none, "chemistry sub-steps in the last step"},
     {"QRAD", dim::power_density, "radiative heat source"},
     {"MU_T", dim::dynamic_viscosity, "eddy viscosity"},
-    {"LES_WIDTH_RATIO", dim::none, "effective filter width over the cell width"},
     {"TF_F", dim::none, "flame thickening factor"},
     {"TF_E", dim::none, "flame wrinkling efficiency"},
     {"TF_OMEGA", dim::none, "flame sensor"},

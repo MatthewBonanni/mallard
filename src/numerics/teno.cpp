@@ -2021,7 +2021,8 @@ struct TENOFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<uint32_t *> cells;  // cells to reconstruct; empty for [0, n)
-    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;  // GradientPass output
+    // GradientPass output; when allocated, the smooth passes also write their cells' gradients
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
     // PRIM (gas mixtures): reconstruct W itself, see TENO::set_mixture
     Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;
     Kokkos::View<rtype *> cell_molar_mass;
@@ -2174,25 +2175,11 @@ struct TENOFunctor {
     }
 
     /**
-     * @brief Gradients of W at the centroid from the central (large-stencil)
-     *        polynomial of the conservative variables, whose linear monomials
-     *        carry the first derivatives at the centroid.
+     * @brief gradients(i_cell) of W from dU, the gradients at the centroid of the central polynomial of the
+     *        conservative variables (of W itself with PRIM), whose linear monomials carry them.
      */
     KOKKOS_INLINE_FUNCTION
-    void operator()(GradientPass, const uint32_t i_cell) const {
-        rtype U0[N_CONSERVATIVE];
-        conservatives(i_cell, U0);
-        rtype dU[N_CONSERVATIVE][N_DIM] = {};
-        const rtype inv_h = 1.0_r / scale(i_cell);
-        const auto stencil = stencil_large.template row<TABLE>(i_cell);
-        for (uint16_t s = 0; s < stencil_large_size(i_cell); s++) {
-            rtype U[N_CONSERVATIVE];
-            entry_conservatives(stencil.cell(s), stencil.face(s), U);
-            FOR_I_DIM {
-                const rtype P = stencil.template pinv<NK>(s, i) * inv_h;
-                for (uint8_t v = 0; v < N_CONSERVATIVE; v++) dU[v][i] += P * (U[v] - U0[v]);
-            }
-        }
+    void store_gradients(const uint32_t i_cell, const rtype (&dU)[N_CONSERVATIVE][N_DIM]) const {
         if constexpr (PRIM) {
             FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) gradients(i_cell, i, d) = dU[i][d];
         } else {
@@ -2210,6 +2197,25 @@ struct TENOFunctor {
                 gradients(i_cell, N_DIM + 1, i) = (gamma - 1.0_r) * work;
             }
         }
+    }
+
+    /** @brief Gradients of W at the centroid from the central (large-stencil) polynomial. */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(GradientPass, const uint32_t i_cell) const {
+        rtype U0[N_CONSERVATIVE];
+        conservatives(i_cell, U0);
+        rtype dU[N_CONSERVATIVE][N_DIM] = {};
+        const rtype inv_h = 1.0_r / scale(i_cell);
+        const auto stencil = stencil_large.template row<TABLE>(i_cell);
+        for (uint16_t s = 0; s < stencil_large_size(i_cell); s++) {
+            rtype U[N_CONSERVATIVE];
+            entry_conservatives(stencil.cell(s), stencil.face(s), U);
+            FOR_I_DIM {
+                const rtype P = stencil.template pinv<NK>(s, i) * inv_h;
+                for (uint8_t v = 0; v < N_CONSERVATIVE; v++) dU[v][i] += P * (U[v] - U0[v]);
+            }
+        }
+        store_gradients(i_cell, dU);
     }
 
     // PointPass (probes, transmissive boundaries)
@@ -2319,6 +2325,12 @@ struct TENOFunctor {
                 }
             }
             return;
+        }
+        if (gradients.extent(0)) {
+            rtype dU[N_CONSERVATIVE][N_DIM];
+            const rtype inv_h = 1.0_r / scale(i_cell);
+            FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) dU[i][d] = aK[d][i] * inv_h;
+            store_gradients(i_cell, dU);
         }
 
         const uint8_t n_quad = this->n_quad();
@@ -2482,6 +2494,15 @@ struct TENOFunctor {
                     FOR_I_CONSERVATIVE coeffs(slot, l, i) = aK[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane];
                 }
             });
+        }
+
+        if (active && smooth && part == 0 && gradients.extent(0)) {
+            rtype dU[N_CONSERVATIVE][N_DIM];
+            const rtype inv_h = 1.0_r / scale(i_cell);
+            FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) {
+                dU[i][d] = aK[(d * N_CONSERVATIVE + i) * TEAM_CELLS + lane] * inv_h;
+            }
+            store_gradients(i_cell, dU);
         }
 
         // The cell's face points, shared out among its threads
@@ -3133,7 +3154,8 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                     scale, basis_mean, stencil_large_size, stencil_large, stencil_small_size, stencil_small,
                     si_matrix, moments, si_terms, troubled, troubled_coeffs, troubled_small_coeffs, troubled_cells,
                     n_troubled,
-                    solution, face_solution, cells, {}, cell_gamma, cell_molar_mass, selection, entry_rotations, boundary_faces};
+                    solution, face_solution, cells, smooth_gradients, cell_gamma, cell_molar_mass, selection,
+                    entry_rotations, boundary_faces};
     using Dynamic = Kokkos::Schedule<Kokkos::Dynamic>;
     using Space = Kokkos::DefaultExecutionSpace;
     // A cell's place in the queue follows the order of the atomic increments.
