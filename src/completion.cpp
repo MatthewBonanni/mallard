@@ -79,7 +79,7 @@ Values values_of(std::string_view spec, std::string_view option = {}) {
             v.push_back("@dirs");
         } else if (alt == "TEMPLATE") {
             v.push_back("@templates");
-        } else if (alt == "FILE" || alt == "INPUT") {
+        } else if (alt == "FILE" || alt == "INPUT" || alt.starts_with("FILE_")) {
             std::string token = "@files";
             for (const auto & [name, glob] : FILE_GLOBS) {
                 if (name == option) token += ":" + std::string(glob);

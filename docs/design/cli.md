@@ -26,7 +26,7 @@ Maintain  mallard test | completion | --version
 | `info <file>`, `info <run-dir>` | Inspect | available; on the [output reader](output_reader.md) |
 | `info <run-dir> --html` (the run report) | Inspect | planned ([#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
 | `list fields\|species\|templates\|keys` | Inspect | planned ([#502](https://github.com/MatthewBonanni/mallard/issues/502)) |
-| `diff` | Inspect | planned ([#506](https://github.com/MatthewBonanni/mallard/issues/506)) |
+| `diff` | Inspect | available; on the [output reader](output_reader.md), `--remap` on the [remap](remap.md) |
 | `mesh convert` | Mesh | available |
 | `mesh extrude` | Mesh | planned |
 | `post extract` | Post | planned ([#505](https://github.com/MatthewBonanni/mallard/issues/505)) |
