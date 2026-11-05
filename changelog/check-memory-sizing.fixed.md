@@ -1,0 +1,1 @@
+- The initial solution's setup peak no longer holds two chunks' cell geometry at once on meshes initialized in several chunks.

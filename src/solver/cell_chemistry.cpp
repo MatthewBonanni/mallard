@@ -20,12 +20,12 @@
 
 #include "chemistry_balance.h"
 #include "launch_bounds.h"
+#include "memory_tracker.h"
 
 
 // A named namespace: functors in an anonymous one make GCC warn about the visibility of the lanes' closures
 namespace cell_chemistry_kernels {
 
-constexpr double WORK_MEMORY_BYTES = 1024.0 * 1024.0 * 1024.0;
 // Teams per cell: cells whose last call took at least WIDE_TEAM_COST sub-steps get several warps
 constexpr float WIDE_TEAM_COST = 16.0f;
 
@@ -518,7 +518,7 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
     const double per_cell = 8.0 * work_size + 4.0 * (ns + 3) + 8.0;
     const size_t concurrency = static_cast<size_t>(Kokkos::DefaultExecutionSpace().concurrency());
     size_t chunk = std::max<size_t>(4096, 4 * concurrency);
-    chunk = std::min<size_t>(chunk, static_cast<size_t>(WORK_MEMORY_BYTES / per_cell));
+    chunk = std::min<size_t>(chunk, static_cast<size_t>(double(memory::MAX_WORK_BYTES) / per_cell));
     chunk = std::max<size_t>(1, std::min<size_t>(chunk, n_cells));
     work = Kokkos::View<double **, Kokkos::LayoutRight>("chem_work", chunk, work_size);
     pivot = Kokkos::View<uint32_t **, Kokkos::LayoutRight>("chem_pivot", chunk, ns + 1);

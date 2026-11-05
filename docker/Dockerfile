@@ -24,6 +24,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # Mallard's executables only, not the bundled Kokkos's tools
 COPY --from=build /opt/mallard/bin/mallard* /opt/mallard/bin/
 COPY --from=build /opt/mallard/share /opt/mallard/share
+# Tab completion of mallard in interactive shells
+RUN echo '[ -r /opt/mallard/share/bash-completion/completions/mallard ] && . /opt/mallard/share/bash-completion/completions/mallard' \
+        >> /etc/bash.bashrc
 ENV PATH=/opt/mallard/bin:$PATH \
     MALLARD_SHARE=/opt/mallard/share/mallard \
     OMP_PROC_BIND=spread \
