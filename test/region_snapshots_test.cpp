@@ -26,7 +26,7 @@
 #include "comm.h"
 #include "input.h"
 #include "mesh_block.h"
-#include "region.h"
+#include "region_input.h"
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -151,7 +151,7 @@ std::vector<std::vector<double>> cell_points(const std::vector<double> & points,
 /** @brief The region's cells (fraction > 0) of the solver's mesh, in global order, and every cell's fraction. */
 std::pair<std::vector<uint32_t>, std::vector<double>> region_cells(const Solver & solver, const std::string & table) {
     const Input value = parse_toml("r = " + table + "\n").at("r");
-    const region::Region region(value, "test");
+    const region::Region region = region::read(value, "test");
     const std::vector<double> fractions = region::cell_fractions(*solver.get_mesh(), region);
     std::vector<uint32_t> cells;
     for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {

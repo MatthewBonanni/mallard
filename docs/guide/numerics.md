@@ -85,7 +85,7 @@ input overrides, and its Numerics section lists what is used:
 
 ```
 == Numerics ===========================
-  Preset             accurate (the input sets numerics.riemann_solver = RHLL)
+  Preset             accurate (the input sets numerics.riemann_solver = "RHLL")
   Reconstruction     TENO, order 5 (degree 4), 3 face quadrature points
   Riemann solver     RHLL
 ```

@@ -41,14 +41,17 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table) {
             }
         }
     }
-    tf.beta = tf.efficiency == Efficiency::DYNAMIC ? 0.0 : find_double_or(table, "beta", dim::none, 0.5);
-    const std::string velocity = find_value_or<std::string>(table, "subgrid_velocity", "colin");
-    if (velocity != "colin" && velocity != "eddy_viscosity") {
-        throw InputError("les.combustion.subgrid_velocity = \"" + velocity + "\" is not one of: colin, eddy_viscosity.");
+    // Read only where they are accepted, so that the resolved input does not write them
+    if (tf.efficiency != Efficiency::DYNAMIC) {
+        tf.beta = find_double_or(table, "beta", dim::none, 0.5);
+        const std::string velocity = find_value_or<std::string>(table, "subgrid_velocity", "colin");
+        if (velocity != "colin" && velocity != "eddy_viscosity") {
+            throw InputError("les.combustion.subgrid_velocity = \"" + velocity + "\" is not one of: colin, eddy_viscosity.");
+        }
+        tf.eddy_viscosity_velocity = velocity == "eddy_viscosity";
+        tf.C_u = find_double_or(table, "C_u", dim::none, 28.0);
+        if (!(tf.C_u > 0.0)) throw InputError("les.combustion.C_u must be positive.");
     }
-    tf.eddy_viscosity_velocity = velocity == "eddy_viscosity";
-    tf.C_u = find_double_or(table, "C_u", dim::none, 28.0);
-    if (!(tf.C_u > 0.0)) throw InputError("les.combustion.C_u must be positive.");
     if (!(tf.delta_L > 0.0) || !(tf.s_L > 0.0) || !(tf.n_res > 0.0) ||
         (tf.efficiency == Efficiency::CHARLETTE && !(tf.beta > 0.0))) {
         throw InputError("les.combustion: delta_L, s_L, n_res and beta must be positive.");

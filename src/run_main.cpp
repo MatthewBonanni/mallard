@@ -52,7 +52,8 @@ std::string error_text(const std::exception & e) {
     comm::abort(1);
 }
 
-int solve(const cli::Args & args, const std::string & input_file, const CheckOptions * check) {
+/** @brief With check: checks the case, and with resolve writes its resolved input (and nothing else) to stdout. */
+int solve(const cli::Args & args, const std::string & input_file, const CheckOptions * check, bool resolve = false) {
     const std::string restart_file = args.value_or("--restart", "");
     int argc = args.argc;
     char ** argv = args.argv;
@@ -60,7 +61,8 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
     run_control::install_signal_handlers();
     // MPI before Kokkos, so Kokkos can map each rank to its own device
     comm::Session session(argc, argv);
-    if (!comm::is_root()) std::cout.rdbuf(nullptr);
+    std::streambuf * const out = std::cout.rdbuf();
+    if (!comm::is_root() || resolve) std::cout.rdbuf(nullptr);
 
     binding::select_device(argc, argv);
     Kokkos::initialize(argc, argv);
@@ -74,7 +76,19 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                 Input input = parse_input(input_file);
                 if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
                 const CheckReport report = solver.check(input, *check);
-                print_check(report);
+                if (resolve && report.ok()) {
+                    if (comm::is_root()) std::cout.rdbuf(out);
+                    std::cout << report.resolved << std::flush;
+                } else if (resolve) {
+                    for (const auto & e : report.errors) error += (error.empty() ? "" : "\n") + e;
+                    if (!report.unused.empty()) {
+                        error += std::string(error.empty() ? "" : "\n") +
+                                 "keys that are unknown or unused with these settings (mallard check lists them all):";
+                        for (const Diagnostic & key : report.unused) error += "\n  " + describe(key);
+                    }
+                } else {
+                    print_check(report);
+                }
                 status = report.ok() ? 0 : 1;
             } else {
                 binding::report();
@@ -140,4 +154,10 @@ int check_main(const cli::Args & args) {
         return cli::usage_error(command, error);
     }
     return solve(args, input_file, &options);
+}
+
+int resolve_main(const cli::Args & args) {
+    CheckOptions options;
+    options.input_file = args.positional[0];
+    return solve(args, options.input_file, &options, true);
 }

@@ -46,7 +46,7 @@ comparisons on the same file.
 
 The filled region that the surface bounds is known by its signed distance,
 or for `implicit` regions by any function `phi` negative inside
-(`src/common/region.h`), on the host; the zone lies on `phi = 0`. The
+(`src/common/geometry.h`), on the host; the zone lies on `phi = 0`. The
 projection of a point `x` is its closest point `p` on `phi = 0`, with the
 Jacobian `dp/dx` that the face map's derivatives need:
 

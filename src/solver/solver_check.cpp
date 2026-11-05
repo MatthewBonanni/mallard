@@ -25,7 +25,7 @@
 #include "mesh_quality.h"
 #include "partition.h"
 #include "case_view.h"
-#include "region.h"
+#include "region_input.h"
 #include "region_mesh.h"
 
 namespace {
@@ -82,9 +82,11 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         if (r.setup_done || !key.suggestion.empty()) r.unused.push_back(key);
     }
     for (const auto & finding : deprecated_keys) r.warnings.push_back(input_upgrade::advice(finding));
+    const ResolvedInput resolved = resolve_input(input);
+    if (r.setup_done) r.resolved = resolved.toml;
     if (!options.catalog_file.empty() && comm::is_root()) {
         std::ofstream file(options.catalog_file);
-        file << key_catalog(input);
+        file << key_catalog(resolved);
         if (!file) r.errors.push_back(cannot_write("the key catalog", options.catalog_file).what());
     }
     if (!r.setup_done || !mesh) return r;
@@ -435,7 +437,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     Box domain;
     for (const std::string & name : automatic.names()) {
         const Input value = parse_input_string("r = \"" + name + "\"").at("r");
-        const region::Region region(value, name, nullptr, &automatic);
+        const region::Region region = region::read(value, name, nullptr, &automatic);
         OnMesh m = on_mesh(*mesh, region, block_name(name));
         if (name == "domain") domain = m.box;
         r.regions.emplace_back(name, text(region, m, true));

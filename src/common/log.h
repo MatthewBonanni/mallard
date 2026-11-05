@@ -66,16 +66,6 @@ void section(std::string_view title, std::string_view right = "");
 void item(std::string_view key, std::string_view value);
 void items(const Items & list);
 
-/** @brief Sections and their key-value lines, as printed while recording. */
-using Record = std::vector<std::pair<std::string, Items>>;
-
-/**
- * @brief Keeps the sections and items printed from now on (rank 0) until
- *        end_record(), which returns them.
- */
-void begin_record();
-Record end_record();
-
 /**
  * @brief Starts a line naming a setup phase; end_phase() completes it with the elapsed time.
  *        Anything printed in between first ends the open line.
