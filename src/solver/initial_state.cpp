@@ -48,10 +48,12 @@ constexpr uint32_t STACK = (N_CHILDREN - 1) * MAX_LEVEL + 1;
 constexpr uint32_t MAX_PLANES = 3;
 constexpr uint32_t PIECES = 1 + (N_DIM == 2 ? 2 : 5) * MAX_PLANES;
 /**
- * @brief Scratch memory of a kernel launch: as many cells as fit, so that a
- *        GPU gets enough threads (a launch of 16K cells keeps an A100 half idle).
+ * @brief Scratch memory of a device launch: as many cells as fit, so that a
+ *        GPU gets enough threads (launches of 16k cells leave an A100 partly idle).
+ *        Host threads are busy at 16k cells.
  */
 constexpr size_t CHUNK_BYTES = size_t{64} << 20;
+constexpr uint32_t HOST_CHUNK = 1u << 14;
 /**
  * @brief Points whose base programs a host thread evaluates at once (kexpr's
  *        evaluate_lanes): the 3D rule's 14, the 2D rule's 7. A GPU thread
@@ -1663,7 +1665,8 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
     const size_t row_bytes = sizeof(double) * (2 * n_species + (3 + LANES) * n_vars +
                                                (impl->from_cells ? 6 + n_species + n_vars + 1 : 0) +
                                                (LANES > 1 ? impl->programs.size() * LANES : 0));
-    const uint32_t chunk = static_cast<uint32_t>(std::clamp<size_t>(CHUNK_BYTES / row_bytes, 1, std::max(n_cells, 1u)));
+    const size_t fit = LANES > 1 ? HOST_CHUNK : CHUNK_BYTES / row_bytes;
+    const uint32_t chunk = static_cast<uint32_t>(std::clamp<size_t>(fit, 1, std::max(n_cells, 1u)));
     e.Y_below = Scratch("init_Y_below", chunk, n_species);
     e.Y_layer = Scratch("init_Y_layer", chunk, n_species);
     e.base = Scratch("init_base", chunk, impl->from_cells ? 6 + n_species : 0);
