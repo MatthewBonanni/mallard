@@ -22,7 +22,7 @@
 
 #include "gmsh_fixtures.h"
 #include "input.h"
-#include "region.h"
+#include "region_input.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -31,7 +31,7 @@ using Point = std::array<double, 3>;
 constexpr double PI = 3.14159265358979323846;
 
 region::Region make_region(const std::string & table) {
-    return region::Region(parse_toml("r = " + table).at("r"), "r");
+    return region::read(parse_toml("r = " + table).at("r"), "r");
 }
 
 std::vector<Point> random_points(const int n, const double lo, const double hi, const uint32_t seed = 3) {
@@ -476,7 +476,7 @@ TEST(RegionTest, MeshZonesAndTheDomainAreRegionsByName) {
     EXPECT_EQ(names[0], "domain");
     EXPECT_NE(std::find(names.begin(), names.end(), "left"), names.end());
     auto region = [&](const std::string & table) {
-        return region::Region(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic);
+        return region::read(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic);
     };
     EXPECT_EQ(region::cell_fractions(*mesh, region("\"domain\"")), std::vector<double>(mesh->n_cells, 1.0));
     const region::Region left = region("\"left\"");
@@ -514,7 +514,7 @@ TEST(RegionTest, TheInteriorOfClosedZonesIsTheCellsTheyEnclose) {
 #endif
     const region::MeshRegions automatic(*mesh);
     auto fractions = [&](const std::string & table) {
-        return region::cell_fractions(*mesh, region::Region(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic));
+        return region::cell_fractions(*mesh, region::read(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic));
     };
     EXPECT_TRUE(automatic.closed({"outer"}));
     EXPECT_TRUE(automatic.closed({"inner"}));
@@ -535,7 +535,7 @@ TEST(RegionTest, CellZonesOfMeshFilesAreRegions) {
     for (uint32_t c = 0; c < mesh->n_cells; c++) mesh->h_cell_zone[c] = mesh->h_cell_coords(c, 0) < 0.5_r ? 0 : 1;
     const region::MeshRegions automatic(*mesh);
     auto fractions = [&](const std::string & table) {
-        return region::cell_fractions(*mesh, region::Region(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic));
+        return region::cell_fractions(*mesh, region::read(parse_toml("r = " + table).at("r"), "r", nullptr, &automatic));
     };
     const std::vector<double> left = fractions("\"left_half\""), right = fractions("\"right_half\"");
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
@@ -561,7 +561,7 @@ TEST(RegionTest, ReportsKeysTheRegionDoesNotRead) {
                                           : "{type = \"box\", center = [0, 0, 0], size = [1, 1, 1], axis = [1, 0, 0]}";
     const Input input = parse_toml("r = {type = \"union\", regions = [{type = \"sphere\", center = [0, 0, 0], "
                                    "raduis = 1, radius = 1}, " + second + "]}");
-    const region::Region r(input.at("r"), "r");
+    const region::Region r = region::read(input.at("r"), "r");
     std::vector<std::string> unused;
     for (const Diagnostic & d : unused_keys(input)) unused.push_back(d.key);
     EXPECT_EQ(unused, (std::vector<std::string>{"r.regions[0].raduis", "r.regions[1].axis"}));
