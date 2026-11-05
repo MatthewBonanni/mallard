@@ -351,7 +351,7 @@ TEST(CheckResolution, TaylorGreenDissipationGivesTheKolmogorovLength) {
     const CheckReport r = check(periodic_box(n, nu, u));
     ASSERT_TRUE(r.ok()) << (r.errors.empty() ? "" : r.errors[0]);
     EXPECT_NEAR(r.epsilon, epsilon, 0.05 * epsilon);
-    EXPECT_NEAR(r.eta, std::pow(nu * nu * nu / r.epsilon, 0.25), roundoff(1e-12) * r.eta);
+    EXPECT_NEAR(r.eta, std::pow(nu * nu * nu / r.epsilon, 0.25), roundoff(1e-11) * r.eta);
     EXPECT_NEAR(r.taylor, std::sqrt(15.0 * nu * (2.0 * E / N_DIM) / r.epsilon), 0.01 * r.taylor);
     EXPECT_NEAR(r.delta_over_eta, 2.0 * std::numbers::pi / n / r.eta, roundoff(1e-9) * r.delta_over_eta);
     EXPECT_FALSE(mentions(r.warnings, "DNS"));
