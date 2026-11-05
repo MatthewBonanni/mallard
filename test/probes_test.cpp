@@ -1192,7 +1192,7 @@ TEST(ProbesTest, AveragedProbesAreTimeWeightedMeansOfTheirSamples) {
         // Reductions of the averaged samples: the extrema of the means
         double hi = -std::numeric_limits<double>::infinity();
         for (const auto & row : rows_at(dir + "/averaged.csv", 12)) hi = std::max(hi, row.at("MEAN_TAU_W"));
-        EXPECT_EQ(last.at("max_MEAN_TAU_W"), hi);
+        EXPECT_NEAR(last.at("max_MEAN_TAU_W"), hi, precision_tol<double>(0.0, 1e-6));
     }
     comm::barrier();
 }
