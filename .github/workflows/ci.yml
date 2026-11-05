@@ -266,7 +266,7 @@ jobs:
           CCACHE_MAXSIZE: 500M
         run: |
           cmake --version | head -1
-          cmake --build build -j $(getconf _NPROCESSORS_ONLN)
+          cmake --build build -j $(getconf _NPROCESSORS_ONLN) -- -k
           ccache --show-stats
       - name: Save compiler cache
         if: github.ref == 'refs/heads/main'
