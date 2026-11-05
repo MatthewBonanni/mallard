@@ -12,6 +12,7 @@ its progress on the terminal and in a machine-readable run record.
 | Restart files | `PREFIX_<step>.restart` | `[[write_data]]` with `format = "restart"` | [Initialization and restarts](initialization.md#restarts) |
 | Terminal output | standard output (errors: standard error) | always; `[output] check_interval` sets the progress rows | [Terminal output](#terminal-output) |
 | Run record | `mallard.jsonl` | on by default; `[output] run_log` | [Run record](#run-record-mallardjsonl) |
+| Divergence report | `divergence_report.txt`, `.json`, `divergence_report_neighborhood_<step>.vtkhdf` | a run that diverges; `[output] divergence_report` | [The divergence report](running.md#the-divergence-report) |
 | Run health | the run record's `health` and the terminal output's **Health** section | on by default; `[output] health` | [Run health](#run-health) |
 | Probes | `probe_<name>.csv` (or `.h5`, `.vtkhdf`, `.pvd`), `probe_<name>_reductions.csv` | `[[probes]]` | [Probes and monitors](probes.md#probes-probes) |
 | Wall forces | `forces_<zone>.csv` | `[[forces]]` | [Wall forces](probes.md#wall-forces-forces) |
@@ -260,6 +261,7 @@ Each record has a `type`:
 | `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
 | `progress` | Every progress row | as below |
 | `event` | A file written, or a request acted on (the rows between progress rows) | `step`, `t`, `kind` (`vtkhdf`, `surface`, `vtu`, `xdmf`, `restart`, ...; `checkpoint`, `stop`, `set` and `diverged` from [run control](running.md)), `text` |
+| `divergence` | A run that diverged, before its `error` record | the [divergence report](running.md#the-divergence-report): `step`, `t`, `invalid_cells`, `failed` (cells by the quantity that failed first), `box` (their extent), `last_valid` (`step`, `t`, `file`, or `null`), `causes` (most likely first: `kind` (`time_step`, `mesh`, `boundary`, `initial_state`, `chemistry`, `numerics`), `title`, `score`, `evidence`, `fix`), `cell`, `neighbors`, `others` (`id`, `rank`, `x`, `failed`, `rho`, `speed`, `p`, `T`, `cfl`, `quality`, `repaired`, `troubled`), `time_step` (`integrator`, `limit`, `dt`, `dt_cfl1`, `cfl`, `cells_over_limit`), `zones` (`name`, `type`, `near`, and where compared `inadmissible`, `ratio`, `jump`), `history` (the last progress rows), `snapshot` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |
 | `end` | The end of the run | `reason`, `step`, `t`, `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
 
@@ -512,8 +514,38 @@ build reads. It is never misread.
 
 `mallard info` tells what any of these files holds, without an input file:
 its kind, format version, mesh, times, fields with their units and ranges, and
-provenance; `mallard info solut` does so for each file a run wrote
-([Command line](cli.md#mallard-info)).
+provenance; `mallard info solut` does so for each file a run wrote, one table
+row each ([Command line](cli.md#mallard-info)). Every number comes in a table
+column or a labeled line that names its units (`t [s]`, `min [m]`, a field's
+units, `dimensionless`); a `-` is something the file does not record:
+
+```
+$ mallard info solut/flow.vtkhdf.series
+== solut/flow.vtkhdf.series ===============================================================
+  Kind               snapshot
+  Format             VTKHDF series index (VTKHDF snapshots), version 1
+  Values             2D, double precision
+  Simulated time     3 snapshots, t = 0 to 0.002 s
+
+== Mesh ===================================================================================
+  cells  points
+  12     20
+...
+== Snapshots ================================================================== 3 snapshots
+  #  t [s]  file
+  0  0      flow_000000.vtkhdf
+  1  0.001  flow_000001.vtkhdf
+  2  0.002  flow_000002.vtkhdf
+
+== Fields ================================================= ranges at t = 0.002 s, the last
+  field  units       components  min      max      description
+  P      kg m-1 s-2  1           1        1        pressure
+  RHO    kg m-3      1           1.03804  1.26232  density
+  U      m s-1       3           0.3      0.3      velocity
+  min and max of fields with several components are of their magnitude.
+```
+
+`--format json` prints the same as one JSON object, for scripts.
 
 The Python scripts in `tools/` (numpy, matplotlib; see
 [Tools](https://matthewbonanni.github.io/mallard/docs/tools/)) read Mallard's output directly:

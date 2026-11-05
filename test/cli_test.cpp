@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -25,6 +26,7 @@
 #include "build_info.h"
 #include "cli.h"
 #include "comm.h"
+#include "common_typedef.h"
 #include "data_paths.h"
 #include "json.h"
 
@@ -121,6 +123,29 @@ std::vector<std::string> words(std::string_view name) {
 }
 
 bool contains(const std::string & text, std::string_view part) { return text.find(part) != std::string::npos; }
+
+/** @brief A time as mallard info prints it: the run's time in this build's precision, %.9g. */
+std::string printed_time(double t) {
+    char out[32];
+    std::snprintf(out, sizeof out, "%.9g", static_cast<double>(static_cast<rtype>(t)));
+    return out;
+}
+
+/** @brief Whether a line of text starts with these cells, columns apart (two spaces or more). */
+bool has_row(const std::string & text, const std::vector<std::string> & cells) {
+    std::istringstream in(text);
+    for (std::string line; std::getline(in, line);) {
+        std::vector<std::string> found;
+        size_t at = line.find_first_not_of(' ');
+        while (at != std::string::npos) {
+            const size_t end = line.find("  ", at);
+            found.push_back(line.substr(at, end == std::string::npos ? std::string::npos : end - at));
+            at = end == std::string::npos ? end : line.find_first_not_of(' ', end);
+        }
+        if (found.size() >= cells.size() && std::equal(cells.begin(), cells.end(), found.begin())) return true;
+    }
+    return false;
+}
 
 /** @brief The help page as the CLI docs show it: the build's version as <version>. */
 template <typename T>
@@ -314,10 +339,19 @@ TEST(CliTest, InfoOfAPastReleasesRestartFileSaysWhatIsInIt) {
     const std::string file = source_dir() + "/test/data/formats/v0.8.0/gas_000002.restart";
     const Result r = run({"info", file}, true);
     EXPECT_EQ(r.status, 0) << r.err;
-    for (const char * part : {"restart, version 2", "2D, double precision", "30 cells", "step 2",
-                              "no provenance: written before Mallard 0.9", "RHOE", "kg m-1 s-2"}) {
-        EXPECT_TRUE(contains(r.out, part)) << part << "\n" << r.out;
-    }
+    const std::vector<std::vector<std::string>> rows = {
+        {"Kind", "restart"},
+        {"Format", "restart, version 2"},
+        {"Values", "2D, double precision"},
+        {"Simulated time", "t = 0.0288616582 s, step 2"},
+        {"Note", "no provenance: written before Mallard 0.9, or not by Mallard"},
+        {"cells"},
+        {"30"},
+        {"field", "units", "components", "min", "max", "description"},
+        {"RHO", "kg m-3", "1"},
+        {"RHOE", "kg m-1 s-2", "1"},
+    };
+    for (const auto & row : rows) EXPECT_TRUE(has_row(r.out, row)) << row[0] << "\n" << r.out;
     const Result input = run({"info", "--input", file}, true);
     EXPECT_EQ(input.status, 1);
     EXPECT_TRUE(contains(input.err, "has no provenance block")) << input.err;
@@ -334,7 +368,25 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
     EXPECT_EQ(input.out, resolved.out);
     EXPECT_EQ(run({"info", "--input", "case/restart_000002.restart"}, true).out, resolved.out);
 
-    const Result described = run({"info", "--json", "case/flow_000002.vtu"}, true);
+    const Result text = run({"info", "case/flow_000002.vtu"}, true);
+    ASSERT_EQ(text.status, 0) << text.err;
+    const std::vector<std::vector<std::string>> rows = {
+        {"Kind", "snapshot"},
+        {"Simulated time", "t = " + printed_time(2.0e-3) + " s"},
+        {"cells", "points"},
+        {Mallard_DIM == 3 ? "36" : "12"},
+        {"axis", "min [m]", "max [m]"},
+        {"x", "0", "1"},
+        {"RHO", "kg m-3", "1"},
+        {"U", "m s-1", "3"},
+        {"Input file", "small.toml"},
+        {"Input recorded", "resolved; mallard info --input prints it"},
+    };
+    for (const auto & row : rows) EXPECT_TRUE(has_row(text.out, row)) << row[0] << "\n" << text.out;
+    EXPECT_TRUE(contains(text.out, "ranges at t = " + printed_time(2.0e-3) + " s")) << text.out;
+    EXPECT_EQ(run({"info", "--format", "yaml", "case/flow_000002.vtu"}, true).status, 2);
+
+    const Result described = run({"info", "--format", "json", "case/flow_000002.vtu"}, true);
     ASSERT_EQ(described.status, 0) << described.err;
     const json::Value v = json::parse(described.out);
     EXPECT_EQ(v["kind"].string, "snapshot");
@@ -357,10 +409,15 @@ TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {
     ASSERT_EQ(small_run().status, 0);
     const Result r = run({"info", "."}, true);
     EXPECT_EQ(r.status, 0) << r.err;
-    for (const char * part : {"n_steps = 2 reached at step 2", "case/flow.pvd", "t = 0 to 0.002",
-                              "case/restart_000002.restart"}) {
-        EXPECT_TRUE(contains(r.out, part)) << part << "\n" << r.out;
-    }
+    const std::vector<std::vector<std::string>> rows = {
+        {"Ended", "n_steps = 2 reached"},
+        {"Last step", "2"},
+        {"Simulated time", "t = 0.002 s at the end"},
+        {"file", "kind", "times", "first t [s]", "last t [s]", "last step", "fields", "format"},
+        {"case/flow.pvd", "snapshot", "2", "0", printed_time(2.0e-3), "-", "2", "PVD series index (VTU snapshots)"},
+        {"case/restart_000002.restart", "restart", "1", printed_time(2.0e-3), printed_time(2.0e-3), "2", Mallard_DIM == 3 ? "5" : "4", "restart"},
+    };
+    for (const auto & row : rows) EXPECT_TRUE(has_row(r.out, row)) << row[0] << "\n" << r.out;
     EXPECT_FALSE(contains(r.out, "flow_000002.vtu")) << r.out;
     EXPECT_EQ(run({"info", "--input", "."}, true).out, run({"input", "resolve", "small.toml"}, true).out);
 }
@@ -371,9 +428,17 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
         source_dir() + (Mallard_DIM == 3 ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh");
     const Result r = run({"info", "--quality", "quality", mesh}, true);
     EXPECT_EQ(r.status, 0) << r.err;
-    for (const char * part : {"Gmsh", "non-orthogonality", "skewness", "aspect ratio", "wall"}) {
-        EXPECT_TRUE(contains(r.out, part)) << part << "\n" << r.out;
-    }
+    const std::vector<std::vector<std::string>> rows = {
+        {"Format", "Gmsh"},
+        {"boundary zone", "faces"},
+        {"metric", "units", "max", "mean", "limit", "cells over limit"},
+        {"non-orthogonality", "deg"},
+        {"skewness", "dimensionless"},
+        {"aspect ratio", "dimensionless"},
+        {"volume ratio", "dimensionless"},
+        {"metric", "value", "cell", "x [m]", "y [m]"},
+    };
+    for (const auto & row : rows) EXPECT_TRUE(has_row(r.out, row)) << row[0] << "\n" << r.out;
     size_t written = 0;
     for (const auto & entry : fs::directory_iterator(".")) {
         written += entry.path().filename().string().starts_with("quality_");

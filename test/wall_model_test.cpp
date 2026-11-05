@@ -414,7 +414,7 @@ TEST(WallModel3D, LaminarCouetteFlowOverAModeledWall) {
             max_err = std::max(max_err, std::abs(double(solver->h_primitives(i, 0)) - 0.1 * double(m->h_cell_coords(i, 1))));
         }
         EXPECT_LT(max_err, 1e-4) << mesh << " " << bottom;
-        const auto F = solver->calc_force(m->get_face_zone("bottom")->faces);
+        const auto F = solver->calc_force(device_zone_faces(*m, "bottom"));
         // Shear mu U / H = 0.02 on the area 0.6, along +x on the slower wall
         EXPECT_NEAR(F[3], 0.02 * 0.6, 2e-3 * 0.012) << mesh << " " << bottom;
         EXPECT_NEAR(F[4], 0.0, 1e-12);
@@ -434,7 +434,7 @@ TEST(WallModel3D, ExpressionVelocityKeepsTheModel) {
             "type = \"analytical\"\nrho = \"1.0\"\nu = [\"0.1 * y\", \"0.0\", \"0.0\"]\np = \"1.0\"\n", "n_steps = 20\ncfl = 0.4\n")));
         solver.run();
         solver.copy_device_to_host();
-        return solver.calc_force(solver.get_mesh()->get_face_zone("bottom")->faces);
+        return solver.calc_force(device_zone_faces(*solver.get_mesh(), "bottom"));
     };
     const auto numbers = run("[-0.05, 0.0, 0.0]");
     const auto expressions = run("[\"-0.05 + 0 * x\", \"0 * y\", \"0 * z\"]");
@@ -501,11 +501,9 @@ TEST(WallModel3D, EachWallTakesItsOwnModel) {
         solver.run();
         solver.copy_device_to_host();
         // calc_force sums over the ranks: those without faces of a zone take part with none
-        auto faces = [&](const char * name) {
-            const FaceZone * zone = solver.get_mesh()->get_face_zone(name);
-            return zone ? zone->faces : Kokkos::View<uint32_t *>("no faces", 0);
-        };
-        return std::make_pair(solver.calc_force(faces("bottom"))[3], solver.calc_force(faces("top"))[3]);
+        const Mesh & mesh = *solver.get_mesh();
+        return std::make_pair(solver.calc_force(device_zone_faces(mesh, "bottom"))[3],
+                              solver.calc_force(device_zone_faces(mesh, "top"))[3]);
     };
     const auto mixed = forces(gfm, ode("0.2"));
     const auto both_gfm = forces(gfm, gfm);

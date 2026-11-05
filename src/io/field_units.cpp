@@ -93,6 +93,8 @@ const Entry NAMED[] = {
     {"SKEWNESS", dim::none, "largest face skewness", QUALITY, "mallard check or info --quality"},
     {"ASPECT_RATIO", dim::none, "cell aspect ratio", QUALITY, "mallard check or info --quality"},
     {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor", QUALITY, "mallard check or info --quality"},
+    {"DIVERGED", dim::none, "1 in the cells that became invalid", DERIVED,
+     "a run that diverges, whose divergence report snapshot writes it"},
 };
 
 // <prefix><species>

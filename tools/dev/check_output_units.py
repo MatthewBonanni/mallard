@@ -126,7 +126,7 @@ def main():
         assert len(read_csv(path("integrals.csv"))[0]["t"]) == 3
 
         def info(name):
-            out = subprocess.run([mallard, "info", "--json", name], cwd=work, check=True, capture_output=True,
+            out = subprocess.run([mallard, "info", "--format", "json", name], cwd=work, check=True, capture_output=True,
                                  text=True).stdout
             return {f["name"]: f["units"] for f in json.loads(out)["fields"]}
 

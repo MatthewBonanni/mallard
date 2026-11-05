@@ -47,7 +47,7 @@ The Python package ([#517](https://github.com/MatthewBonanni/mallard/issues/517)
 binds this reader and the commands built on it; it does not reimplement them.
 Until it does, `tools/mallard/*.py` keep reading the formats with h5py and
 numpy, and `tools/dev/check_output_units.py` (run in CI) checks that
-`mallard info --json` and the Python readers report the same fields, units
+`mallard info --format json` and the Python readers report the same fields, units
 and times for every format a run writes.
 
 ## What later commands need from it
@@ -71,8 +71,13 @@ and times for every format a run writes.
 ## `mallard info`
 
 `mallard info FILE` prints `open()`'s contents and the ranges of the last
-snapshot; `--json` the same as one object; `--input` the input of the
-file's provenance. On a mesh file it also reports mesh quality with the
-function and report of `mallard check` (`--quality PREFIX` writes the
-fields). On a run directory it lists the run's output files and the run's
+snapshot; `--format json` the same as one object; `--input` the input of the
+file's provenance. On a mesh file it also reports mesh quality from
+`mallard check`'s summary (`--quality PREFIX` writes the fields). The text
+follows the output principles of #657: tables rather than sentences, units
+on every dimensional quantity (column headers included) and `dimensionless`
+on the others, and each number labeled with what it is (which snapshot, per
+file or for the run, simulated or wall time). The tables come from
+`logging::table`, a plain column layout that #657's report layer can take
+over. On a run directory it lists the run's output files and the run's
 start and end from `mallard.jsonl`.

@@ -5,6 +5,7 @@
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <exception>
@@ -94,119 +95,209 @@ void print_provenance(const json::Value & p) {
     std::string mallard = text(at(p, {"mallard", "version"}));
     if (const json::Value * sha = at(p, {"mallard", "git_sha"}); sha && !sha->is_null()) {
         const json::Value * dirty = at(p, {"mallard", "git_dirty"});
-        mallard += " (" + sha->string.substr(0, 12) + (dirty && dirty->boolean ? ", dirty" : "") + ")";
+        mallard += " (commit " + sha->string.substr(0, 12) + (dirty && dirty->boolean ? ", uncommitted changes" : "") + ")";
     }
-    item("Mallard", mallard + ", provenance version " + text(p.find("version")));
-    item("Build", text(at(p, {"build", "dim"})) + "D, " + text(at(p, {"build", "precision"})) + ", " +
-                      text(at(p, {"build", "build_type"})) + ", " + text(at(p, {"build", "backend"})) + ", MPI " +
+    item("Mallard", mallard);
+    item("Provenance", "version " + text(p.find("version")));
+    item("Build", text(at(p, {"build", "dim"})) + "D, " + text(at(p, {"build", "precision"})) + " precision, " +
+                      text(at(p, {"build", "build_type"})) + ", " + text(at(p, {"build", "backend"})) + " backend, MPI " +
                       text(at(p, {"build", "mpi"})) + ", HDF5 " + text(at(p, {"build", "hdf5"})));
     if (p.find("run")) {
         const json::Value * hosts = at(p, {"run", "hosts"});
-        item("Run", text(at(p, {"run", "start_time"})) + ", " + plural(at(p, {"run", "ranks"}), "rank") +
-                        (hosts ? " on " + plural(hosts, "host") : "") + ", " + text(at(p, {"run", "device"})));
-        item("", "on " + text(at(p, {"run", "host"})) + " in " + text(at(p, {"run", "directory"})));
+        item("Run started", text(at(p, {"run", "start_time"})));
+        item("Ranks", plural(at(p, {"run", "ranks"}), "rank") + (hosts ? " on " + plural(hosts, "host") : ""));
+        item("Device", text(at(p, {"run", "device"})));
+        item("Host", text(at(p, {"run", "host"})));
+        item("Directory", text(at(p, {"run", "directory"})));
     }
     if (p.find("input")) {
         bool resolved = false;
         recorded_input(p, resolved);
-        item("Input", text(at(p, {"input", "file"})) + ", sha256 " + text(at(p, {"input", "sha256"})));
-        item("", std::string(resolved ? "resolved" : "as written") + "; mallard info --input prints it");
+        item("Input file", text(at(p, {"input", "file"})));
+        item("Input sha256", text(at(p, {"input", "sha256"})));
+        item("Input recorded", std::string(resolved ? "resolved" : "as written") + "; mallard info --input prints it");
     }
     if (const json::Value * mesh = p.find("mesh")) {
-        std::string m = text(mesh->find("type"));
-        if (mesh->find("file")) m += ", " + text(mesh->find("file"));
-        if (mesh->find("sha256")) m += ", sha256 " + text(mesh->find("sha256"));
-        item("Mesh", m);
+        item("Mesh", text(mesh->find("type")));
+        if (mesh->find("file")) item("Mesh file", text(mesh->find("file")));
+        if (mesh->find("sha256")) item("Mesh sha256", text(mesh->find("sha256")));
     }
     if (const json::Value * preset = p.find("preset"); preset && !preset->is_null()) {
         item("Preset", text(preset->find("name")));
     }
 }
 
+std::string seconds(double t) { return format("%.9g", t); }
+
+/** @brief "t = 0.002 s, step 2", or the range of several times. */
 std::string time_text(const output::Contents & c) {
+    const output::Snapshot & first = c.snapshots.front();
     const output::Snapshot & last = c.snapshots.back();
-    std::string t = c.snapshots.size() == 1 ? "t = " + format("%.9g", last.t)
-                                            : "t = " + format("%.9g", c.snapshots.front().t) + " to " + format("%.9g", last.t);
-    if (last.step >= 0) t += ", step " + std::to_string(last.step) + (c.snapshots.size() > 1 ? " last" : "");
+    if (c.snapshots.size() == 1) {
+        return "t = " + seconds(last.t) + " s" + (last.step >= 0 ? ", step " + std::to_string(last.step) : "");
+    }
+    std::string t = "t = " + seconds(first.t) + " to " + seconds(last.t) + " s";
+    if (first.step >= 0 && last.step >= 0) {
+        t += ", steps " + std::to_string(first.step) + " to " + std::to_string(last.step);
+    }
     return t;
+}
+
+std::string units_text(const std::string & units) {
+    if (units.empty()) return "not recorded";
+    return units == "1" ? "dimensionless" : units;
+}
+
+
+/** @brief Explains the "-" of a table's cells that the file does not record. */
+void unrecorded_note(const std::vector<std::vector<std::string>> & rows) {
+    for (const auto & r : rows) {
+        if (std::find(r.begin(), r.end(), "-") != r.end()) {
+            logging::line("  -: the file does not record it.");
+            return;
+        }
+    }
+}
+
+void print_mesh(const output::Contents & c) {
+    using output::Kind;
+    const output::MeshSummary & m = c.mesh;
+    const bool counts = c.kind != Kind::table && (m.n_cells > 0 || m.n_points > 0);
+    if (!counts && c.kind != Kind::table && !m.has_bounds && m.boundary_zones.empty() && m.cell_zones.empty()) return;
+    logging::section(c.kind == Kind::table ? "Rows" : c.kind == Kind::probe ? "Probe geometry" : "Mesh");
+    if (c.kind == Kind::table) {
+        logging::table({"rows per time"}, {{count(m.n_points)}});
+    } else if (counts) {
+        std::vector<std::string> header, row;
+        const auto add = [&](const char * name, uint64_t n) {
+            if (n == 0) return;
+            header.emplace_back(name);
+            row.push_back(count(n));
+        };
+        add(c.kind == Kind::probe ? "elements" : "cells", m.n_cells);
+        add("points", m.n_points);
+        add("faces", m.n_faces);
+        add("boundary faces", m.n_boundary_faces);
+        logging::table(header, {row});
+    }
+    if (!m.cell_types.empty()) {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto & [name, n] : m.cell_types) rows.push_back({name, count(n)});
+        logging::line();
+        logging::table({"cell type", c.kind == Kind::probe ? "elements" : "cells"}, rows);
+    }
+    if (m.has_bounds) {
+        std::vector<std::vector<std::string>> rows;
+        for (size_t i = 0; i < size_t(c.dim ? c.dim : 3); i++) {
+            rows.push_back({std::string(1, "xyz"[i]), format("%.6g", m.lo[i]), format("%.6g", m.hi[i])});
+        }
+        logging::line();
+        logging::table({"axis", "min [m]", "max [m]"}, rows);
+    }
+    if (!m.boundary_zones.empty()) {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto & [name, n] : m.boundary_zones) rows.push_back({name, count(n)});
+        logging::line();
+        logging::table({"boundary zone", "faces"}, rows);
+    }
+    if (!m.cell_zones.empty()) {
+        std::vector<std::vector<std::string>> rows;
+        for (const auto & [name, n] : m.cell_zones) rows.push_back({name, count(n)});
+        logging::line();
+        logging::table({"cell zone", "cells"}, rows);
+    }
+}
+
+/** @brief The snapshots of a series, the middle ones elided past this many. */
+constexpr size_t SNAPSHOT_ROWS = 12;
+
+void print_snapshots(const output::Contents & c) {
+    const size_t n = c.snapshots.size();
+    logging::section("Snapshots", count(n) + " snapshots");
+    bool steps = false;
+    for (const auto & s : c.snapshots) steps = steps || s.step >= 0;
+    std::vector<std::vector<std::string>> rows;
+    const auto row = [&](size_t i) {
+        const output::Snapshot & s = c.snapshots[i];
+        std::vector<std::string> r = {std::to_string(i), seconds(s.t)};
+        if (steps) r.push_back(s.step >= 0 ? std::to_string(s.step) : "not recorded");
+        r.push_back(fs::path(s.file).filename().string() + (s.index ? ", index " + std::to_string(s.index) : ""));
+        rows.push_back(std::move(r));
+    };
+    for (size_t i = 0; i < n; i++) {
+        if (n > SNAPSHOT_ROWS && i == SNAPSHOT_ROWS / 2) {
+            rows.push_back({"...", count(n - SNAPSHOT_ROWS) + " more; --format json lists every one"});
+            i = n - SNAPSHOT_ROWS / 2;
+        }
+        row(i);
+    }
+    logging::table(steps ? std::vector<std::string>{"#", "t [s]", "step", "file"} : std::vector<std::string>{"#", "t [s]", "file"}, rows);
+}
+
+void print_fields(const output::Contents & c) {
+    using output::Kind;
+    std::string where;
+    if (c.kind == Kind::table) {
+        where = "ranges of the last time";
+    } else if (!c.snapshots.empty()) {
+        where = "ranges at t = " + seconds(c.snapshots.back().t) + " s" + (c.snapshots.size() > 1 ? ", the last" : "");
+    }
+    logging::section("Fields", where);
+    bool vectors = false;
+    std::vector<std::vector<std::string>> rows;
+    for (const auto & f : c.fields) {
+        vectors = vectors || f.components > 1;
+        const bool range = !std::isnan(f.min);
+        rows.push_back({f.name, units_text(f.units), std::to_string(f.components), range ? format("%.6g", f.min) : "-",
+                        range ? format("%.6g", f.max) : "-", f.long_name.empty() ? "-" : f.long_name});
+    }
+    logging::table({"field", "units", "components", "min", "max", "description"}, rows);
+    unrecorded_note(rows);
+    if (vectors) logging::line("  min and max of fields with several components are of their magnitude.");
+}
+
+void print_restart(const output::Contents & c) {
+    const RestartHeader & r = c.restart;
+    if (!r.attributes.empty()) {
+        logging::section("Solver state", "units not recorded");
+        std::vector<std::vector<std::string>> rows;
+        for (const auto & [name, value] : r.attributes) rows.push_back({name, format("%.9g", value)});
+        logging::table({"attribute", "value"}, rows);
+    }
+    if (!r.arrays.empty() || r.n_faces > 0) {
+        logging::section("Restart arrays");
+        std::vector<std::vector<std::string>> rows;
+        for (const auto & [name, values] : r.arrays) rows.push_back({name, count(values.size())});
+        if (r.n_faces > 0) rows.push_back({"characteristic boundary states", count(r.n_faces) + " faces"});
+        logging::table({"array", "values"}, rows);
+    }
 }
 
 void print_contents(const output::Contents & c) {
     using output::Kind;
     logging::section(c.path);
-    std::string kind = output::kind_name(c.kind);
-    if (c.snapshots.size() > 1) kind += ", " + count(c.snapshots.size()) + (c.kind == Kind::table ? " times" : " snapshots");
-    item("Kind", kind);
+    item("Kind", output::kind_name(c.kind));
     item("Format", c.format + (c.version >= 0 ? ", version " + std::to_string(c.version) : ""));
     std::vector<std::string> values;
     if (c.dim) values.push_back(std::to_string(c.dim) + "D");
     if (c.real_size) values.push_back(std::string(c.real_size == 8 ? "double" : "single") + " precision");
     if (c.compressed) values.emplace_back("compressed");
     if (!values.empty()) item("Values", list_text(values, ", "));
-    const output::MeshSummary & m = c.mesh;
-    if (c.kind == Kind::table) {
-        item("Rows", count(m.n_points) + " per time");
-    } else if (m.n_cells > 0 || m.n_points > 0) {
-        std::vector<std::string> parts;
-        if (m.n_cells > 0) parts.push_back(count(m.n_cells) + (c.kind == Kind::probe ? " elements" : " cells"));
-        if (m.n_points > 0) parts.push_back(count(m.n_points) + " points");
-        std::string line = list_text(parts, ", ");
-        if (m.n_faces > 0) line += ", " + count(m.n_faces) + " faces";
-        if (m.n_boundary_faces > 0) line += ", " + count(m.n_boundary_faces) + " boundary faces";
-        item("Mesh", line);
-        std::vector<std::string> types;
-        for (const auto & [name, n] : m.cell_types) types.push_back(count(n) + " " + name);
-        if (!types.empty()) item("", list_text(types, ", "));
-    }
-    if (m.has_bounds) {
-        std::string box;
-        for (size_t i = 0; i < size_t(c.dim ? c.dim : 3); i++) {
-            box += (i ? " x " : "") + format("[%.6g, %.6g]", m.lo[i], m.hi[i]);
+    if (!c.snapshots.empty() && c.kind != Kind::mesh) {
+        std::string times = time_text(c);
+        if (c.snapshots.size() > 1) {
+            times = count(c.snapshots.size()) + (c.kind == Kind::snapshot ? " snapshots, " : " times, ") + times;
         }
-        item("Bounds", box);
-    }
-    for (size_t z = 0; z < m.boundary_zones.size(); z++) {
-        item(z ? "" : "Boundary zones", m.boundary_zones[z].first + ": " + count(m.boundary_zones[z].second) + " faces");
-    }
-    for (size_t z = 0; z < m.cell_zones.size(); z++) {
-        item(z ? "" : "Cell zones", m.cell_zones[z].first + ": " + count(m.cell_zones[z].second) + " cells");
+        item("Simulated time", times);
     }
     if (!c.mesh_file.empty()) item("Mesh file", c.mesh_file);
-    if (!c.snapshots.empty() && c.kind != Kind::mesh) item("Time", time_text(c));
-    if (c.kind == Kind::restart) {
-        for (size_t a = 0; a < c.restart.attributes.size(); a++) {
-            item(a ? "" : "Attributes", c.restart.attributes[a].first + " = " + format("%.9g", c.restart.attributes[a].second));
-        }
-        for (size_t a = 0; a < c.restart.arrays.size(); a++) {
-            item(a ? "" : "Arrays", c.restart.arrays[a].first + ": " + count(c.restart.arrays[a].second.size()) + " values");
-        }
-        if (c.restart.n_faces > 0) item("Boundary states", count(c.restart.n_faces) + " characteristic boundary faces");
-    }
     const std::vector<std::string> species = c.species();
     if (!species.empty()) item("Species", count(species.size()) + ": " + list_text(species, " "));
     for (const auto & note : c.notes) item("Note", note);
-
-    if (!c.fields.empty()) {
-        std::string where;
-        if (c.kind == Kind::table) {
-            where = "ranges of the last time";
-        } else if (!c.snapshots.empty()) {
-            where = "ranges at t = " + format("%.9g", c.snapshots.back().t);
-        }
-        logging::section("Fields", where);
-        for (const auto & f : c.fields) {
-            std::string line = f.units.empty() ? "-" : f.units;
-            if (line.size() < 14) line.resize(14, ' ');
-            std::vector<std::string> parts;
-            if (!f.long_name.empty()) parts.push_back(f.long_name);
-            if (f.components > 1) parts.push_back(std::to_string(f.components) + " components");
-            if (!std::isnan(f.min)) {
-                parts.push_back((f.components > 1 ? "magnitude " : "") + format("%.6g", f.min) + " to " +
-                                format("%.6g", f.max));
-            }
-            item(f.name, line + " " + list_text(parts, ", "));
-        }
-    }
+    print_mesh(c);
+    if (c.kind == Kind::snapshot && c.snapshots.size() > 1) print_snapshots(c);
+    if (c.kind == Kind::restart) print_restart(c);
+    if (!c.fields.empty()) print_fields(c);
     const json::Value p = parsed_provenance(c);
     if (!p.is_null()) print_provenance(p);
 }
@@ -357,7 +448,7 @@ int run_directory(const std::string & dir, const cli::Args & args) {
             errors.emplace_back(f, e.what());
         }
     }
-    if (args.has("--json")) {
+    if (args.value_or("--format", "text") == "json") {
         json::Object o;
         o.add("directory", dir);
         o.raw("start", record.start.type == json::Value::Type::OBJECT ? "true" : "false");
@@ -376,31 +467,43 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         item("Run record", "none (no mallard.jsonl)");
     } else {
         const json::Value & s = record.start;
-        item("Started", text(at(s, {"provenance", "run", "start_time"})) + ", " +
-                            plural(at(s, {"provenance", "run", "ranks"}), "rank") + ", Mallard " +
-                            text(at(s, {"provenance", "mallard", "version"})));
+        item("Run record", "mallard.jsonl, the last run in it");
+        item("Started", text(at(s, {"provenance", "run", "start_time"})));
+        item("Ranks", plural(at(s, {"provenance", "run", "ranks"}), "rank"));
+        item("Mallard", text(at(s, {"provenance", "mallard", "version"})));
         if (const json::Value * restart = s.find("restart")) {
-            item("", "from " + text(restart->find("file")) + " (step " + text(restart->find("step")) + ")");
+            item("Restarted from", text(restart->find("file")) + ", step " + text(restart->find("step")));
         }
         if (record.end.type == json::Value::Type::OBJECT) {
             const json::Value & e = record.end;
             const json::Value * wall = e.find("wall");
-            item("Ended", text(e.find("reason")) + " at step " + text(e.find("step")) + ", t = " + text(e.find("t")) +
-                              ", " + logging::duration(wall ? wall->number : 0.0) + " wall");
+            item("Ended", text(e.find("reason")));
+            item("Last step", text(e.find("step")));
+            item("Simulated time", "t = " + text(e.find("t")) + " s at the end");
+            item("Wall time", logging::duration(wall ? wall->number : 0.0) + ", the whole run");
         } else {
-            item("Ended", "no end record: still running, or stopped without one (last record at step " +
-                              text(record.last.find("step")) + ")");
+            item("Ended", "no end record: still running, or stopped without one");
+            item("Last step", text(record.last.find("step")) + ", of the last record");
         }
     }
-    logging::section("Output files", count(files.size()));
+    logging::section("Output files", count(files.size()) + " files");
+    std::vector<std::vector<std::string>> rows;
     for (const auto & c : files) {
-        std::string line = std::string(output::kind_name(c.kind));
-        if (c.format != line) line += ", " + c.format;
-        if (!c.snapshots.empty() && c.kind != output::Kind::mesh) line += ", " + time_text(c);
-        line += ", " + count(c.fields.size()) + (c.kind == output::Kind::table ? " columns" : " fields");
-        item(fs::relative(c.path, dir).string(), line);
+        const bool timed = !c.snapshots.empty() && c.kind != output::Kind::mesh;
+        const output::Snapshot * last = timed ? &c.snapshots.back() : nullptr;
+        rows.push_back({fs::relative(c.path, dir).string(), output::kind_name(c.kind),
+                        timed ? count(c.snapshots.size()) : "-", timed ? seconds(c.snapshots.front().t) : "-",
+                        last ? seconds(last->t) : "-", last && last->step >= 0 ? std::to_string(last->step) : "-",
+                        count(c.fields.size()), c.format});
     }
-    for (const auto & [f, e] : errors) item(fs::relative(f, dir).string(), logging::style(e, logging::Style::RED));
+    logging::table({"file", "kind", "times", "first t [s]", "last t [s]", "last step", "fields", "format"}, rows);
+    unrecorded_note(rows);
+    if (!errors.empty()) {
+        logging::section("Unreadable files", count(errors.size()));
+        rows.clear();
+        for (const auto & [f, e] : errors) rows.push_back({fs::relative(f, dir).string(), e});
+        logging::table({"file", "error"}, rows);
+    }
     return errors.empty() ? 0 : 1;
 }
 
@@ -425,6 +528,29 @@ std::string quality_json(const std::array<QualitySummary, MeshQuality::N_METRICS
                                           .str());
     }
     return o.str();
+}
+
+void print_quality_table(const std::array<QualitySummary, MeshQuality::N_METRICS> & summary) {
+    constexpr std::array<const char *, MeshQuality::N_METRICS> UNITS = {"deg", "dimensionless", "dimensionless",
+                                                                         "dimensionless"};
+    logging::section("Mesh quality", "over every cell");
+    std::vector<std::vector<std::string>> rows, worst;
+    for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
+        const QualitySummary & s = summary[m];
+        rows.push_back({MeshQuality::NAMES[m], UNITS[m], format("%.3g", s.max), format("%.3g", s.mean),
+                        logging::real(MeshQuality::LIMITS[m]), count(s.n_over_limit)});
+        for (const QualityCell & q : s.worst) {
+            std::vector<std::string> row = {MeshQuality::NAMES[m], format("%.3g", q.value), count(q.cell)};
+            for (size_t i = 0; i < N_DIM; i++) row.push_back(format("%.4g", q.x[i]));
+            worst.push_back(std::move(row));
+        }
+    }
+    logging::table({"metric", "units", "max", "mean", "limit", "cells over limit"}, rows);
+    if (worst.empty()) return;
+    logging::section("Worst cells", "per metric, worst first");
+    std::vector<std::string> header = {"metric", "value", "cell"};
+    for (size_t i = 0; i < N_DIM; i++) header.push_back(std::string(1, "xyz"[i]) + " [m]");
+    logging::table(header, worst);
 }
 
 /** @brief mallard info on a mesh file: read once, for its summary and, as a Mesh, its quality. */
@@ -456,7 +582,7 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         }
         std::cout.rdbuf(out);
     }
-    if (args.has("--json")) {
+    if (args.value_or("--format", "text") == "json") {
         std::string out = contents_json(c);
         out.pop_back();
         std::cout << out << ",\"quality\":" << quality_json(summary)
@@ -464,8 +590,7 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         return 0;
     }
     print_contents(c);
-    logging::section("Mesh quality");
-    print_quality(summary);
+    print_quality_table(summary);
     if (!written.empty()) item("Quality fields", written);
     return 0;
 }
@@ -477,6 +602,9 @@ int info_main(const cli::Args & args) {
     char ** argv = args.argv;
     comm::Session session(argc, argv);
     const std::string & path = args.positional[0];
+    if (const std::string f = args.value_or("--format", "text"); f != "text" && f != "json") {
+        return cli::usage_error(*cli::command("info"), "--format takes text or json, not " + f);
+    }
     try {
         std::error_code error;
         const bool mesh_file = output::is_mesh_file(path);
@@ -488,7 +616,7 @@ int info_main(const cli::Args & args) {
         output::Contents c = output::open(path);
         if (args.has("--input")) return print_input(parsed_provenance(c), path);
         if (!c.snapshots.empty() && !c.fields.empty()) output::read_ranges(c, c.snapshots.size() - 1);
-        if (args.has("--json")) {
+        if (args.value_or("--format", "text") == "json") {
             std::cout << contents_json(c) << "\n";
         } else {
             print_contents(c);
