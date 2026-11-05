@@ -27,6 +27,7 @@
 #include "input_upgrade.h"
 #include "mesh/mesh_block.h"
 #include "mesh/mesh_file.h"
+#include "output_reader.h"
 
 namespace fs = std::filesystem;
 
@@ -221,6 +222,9 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
         case cli::Case::mesh:
             if (first.empty()) return dimension_free();
             return {fs::path(first).extension() == ".toml" ? input_dimension(first) : mesh_file_dimension(first), first};
+        case cli::Case::file:
+            if (first.empty() || !output::is_mesh_file(first)) return free;
+            return {mesh_file_dimension(first), first};
         default:
             return dimension_free();
     }
