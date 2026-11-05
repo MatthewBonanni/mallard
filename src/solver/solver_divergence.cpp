@@ -83,8 +83,6 @@ bool prescribes_state(const BoundaryType type, const bool mixture) {
     }
 }
 
-bool finite(double v) { return std::isfinite(v); }
-
 } // namespace
 
 divergence::Evidence Solver::diagnose_divergence(const bool has_valid, std::vector<int> & failed, MeshQuality & quality) {
@@ -121,20 +119,20 @@ divergence::Evidence Solver::diagnose_divergence(const bool has_valid, std::vect
         const auto P = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), primitives);
         for (uint32_t c = 0; c < n_local; c++) {
             bool all = true, momentum = true;
-            for (uint32_t v = 0; v < N_CONSERVATIVE; v++) all = all && !finite(double(U(c, v)));
-            for (uint32_t v = 1; v <= N_DIM; v++) momentum = momentum && finite(double(U(c, v)));
+            for (uint32_t v = 0; v < N_CONSERVATIVE; v++) all = all && !std::isfinite(double(U(c, v)));
+            for (uint32_t v = 1; v <= N_DIM; v++) momentum = momentum && std::isfinite(double(U(c, v)));
             const double rho = double(U(c, 0)), p = double(P(c, N_DIM)), T = double(P(c, N_DIM + 1));
             bool species_ok = true;
-            for (uint32_t k = 0; k < n_species; k++) species_ok = species_ok && finite(double(Y(c, k)));
+            for (uint32_t k = 0; k < n_species; k++) species_ok = species_ok && std::isfinite(double(Y(c, k)));
             if (all) {
                 failed[c] = AMBIGUOUS;
             } else if (!(rho > 0.0)) {
                 failed[c] = divergence::DENSITY;
             } else if (!momentum) {
                 failed[c] = divergence::VELOCITY;
-            } else if (!finite(double(U(c, N_DIM + 1))) || !(p > 0.0) || !finite(p)) {
+            } else if (!std::isfinite(double(U(c, N_DIM + 1))) || !(p > 0.0) || !std::isfinite(p)) {
                 failed[c] = divergence::PRESSURE;
-            } else if (mix && (!(T > 0.0) || !finite(T))) {
+            } else if (mix && (!(T > 0.0) || !std::isfinite(T))) {
                 failed[c] = divergence::TEMPERATURE;
             } else if (!species_ok) {
                 failed[c] = divergence::MASS_FRACTION;
@@ -160,7 +158,7 @@ divergence::Evidence Solver::diagnose_divergence(const bool has_valid, std::vect
     std::vector<double> inadmissible;
     for (uint32_t c = 0; c < n_owned; c++) {
         const double V = double(mesh->h_cell_measure(c)), rho = double(U(c, 0)), p = double(P(c, N_DIM));
-        if (finite(rho) && finite(p)) {
+        if (std::isfinite(rho) && std::isfinite(p)) {
             sums[0] += V * rho;
             sums[1] += V * p;
             sums[2] += V;
@@ -192,7 +190,7 @@ divergence::Evidence Solver::diagnose_divergence(const bool has_valid, std::vect
     }
     auto margin = [&](uint32_t c) {
         const double rho = double(U(c, 0)), p = double(P(c, N_DIM));
-        if (!state_known || !finite(rho) || !finite(p)) return 0.0;
+        if (!state_known || !std::isfinite(rho) || !std::isfinite(p)) return 0.0;
         return std::min(e.rho_mean > 0.0 ? rho / e.rho_mean : rho, e.p_mean > 0.0 ? p / e.p_mean : p);
     };
     for (uint32_t c = 0; c < n_local; c++) {
@@ -412,7 +410,7 @@ divergence::Evidence Solver::diagnose_divergence(const bool has_valid, std::vect
                 const auto c = static_cast<uint32_t>(mesh->h_cells_of_face(f, 0));
                 const double rho_g = double(W_g(k, 0)), p_g = double(W_g(k, N_DIM + 1));
                 const double rho_c = double(U(c, 0)), p_c = double(P(c, N_DIM));
-                const bool bad = !(rho_g > 0.0) || !(p_g > 0.0) || !finite(rho_g) || !finite(p_g);
+                const bool bad = !(rho_g > 0.0) || !(p_g > 0.0) || !std::isfinite(rho_g) || !std::isfinite(p_g);
                 double ratio = 1.0, jump = 0.0;
                 if (!bad && rho_c > 0.0 && p_c > 0.0) {
                     ratio = std::max({p_g / p_c, p_c / p_g, rho_g / rho_c, rho_c / rho_g});
