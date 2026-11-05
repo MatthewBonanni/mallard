@@ -466,13 +466,13 @@ std::pair<double, size_t> largest_difference(const std::string & a, const std::s
     return out;
 }
 
-/** @brief Runs two steps of a periodic case on an N x (3N/4) mesh (x N/2 in 3D), writing restart files and VTU snapshots to dir/. */
+/** @brief Runs two steps of a periodic case on an N x (3N/4) mesh (x 3N/4 in 3D), writing restart files and VTU snapshots to dir/. */
 Result diff_case(const std::string & dir, uint32_t n, const std::string & rho) {
     const bool three = Mallard_DIM == 3;
     fs::create_directories(dir);
     std::ofstream(dir + "/input.toml")
         << "[run]\nn_steps = 2\ndt = 1.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << 3 * n / 4
-        << "\nLx = 1.0\nLy = 1.0\n" << (three ? "Nz = " + std::to_string(n / 2) + "\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+        << "\nLx = 1.0\nLy = 1.0\n" << (three ? "Nz = " + std::to_string(3 * n / 4) + "\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
         << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
         << "[initialize]\ntype = \"analytical\"\nrho = \"" << rho << "\"\n"
         << (three ? "u = [\"0.3\", \"0.0\", \"0.0\"]\n" : "u = [\"0.3\", \"0.0\"]\n")
@@ -572,7 +572,7 @@ TEST(CliTest, DiffMatchesCellsByTheirPlaceAndRemapsAcrossMeshes) {
     EXPECT_EQ(remapped.status, 0) << remapped.err << remapped.out;
     const json::Value r = json::parse(remapped.out);
     EXPECT_EQ(r["compared"].string, "remap");
-    EXPECT_EQ(r["remap"]["source_cells"].number, Mallard_DIM == 3 ? 8 * 6 * 4 : 8 * 6);
+    EXPECT_EQ(r["remap"]["source_cells"].number, Mallard_DIM == 3 ? 8 * 6 * 6 : 8 * 6);
     for (const json::Value & f : r["fields"].array) {
         EXPECT_LT(f["relative"]["linf"].number, 1e-13) << f["name"].string;
     }
