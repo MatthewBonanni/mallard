@@ -125,7 +125,7 @@ std::string write(const std::string & path, const std::vector<Block> & local) {
     Handle file(H5Fcreate(path.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + path);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-        write_strings_attribute(root, "provenance", {provenance});
+        write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
     }
     // VTK reads the blocks and the assembly in the order of creation
     Handle gcpl(H5Pcreate(H5P_GROUP_CREATE), H5Pclose, "H5Pcreate");

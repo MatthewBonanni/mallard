@@ -24,6 +24,7 @@
 
 #include "comm.h"
 #include "data_paths.h"
+#include "json.h"
 #include "test_fixtures.h"
 #include "solver.h"
 #include "scratch.h"
@@ -314,8 +315,9 @@ TEST(RestartTest, RejectsZeroForceInterval) {
 namespace {
 
 /**
- * @brief A restart file split into its header fields,
- *        names, value blocks and (version 4) face count and records.
+ * @brief An uncompressed restart file split into its header fields, names,
+ *        value blocks and (version 4) face count and records; arrays (version
+ *        6) and the trailers are dropped.
  */
 struct RestartFile {
     std::string prefix;  // magic through time
@@ -356,11 +358,24 @@ struct RestartFile {
             std::memcpy(&n_faces, bytes.data() + pos, sizeof(n_faces));
             pos += sizeof(uint64_t) + sizeof(uint32_t);
         }
+        if (version >= 5) pos += sizeof(uint32_t) + sizeof(uint64_t);  // codec and chunk cells: none
+        if (version >= 6) {
+            uint64_t n_arrays;
+            std::memcpy(&n_arrays, bytes.data() + pos, sizeof(n_arrays));
+            pos += sizeof(uint64_t);
+            for (uint64_t a = 0; a < n_arrays; a++) {
+                uint32_t length;
+                uint64_t n;
+                std::memcpy(&length, bytes.data() + pos, sizeof(length));
+                std::memcpy(&n, bytes.data() + pos + 4 + length, sizeof(n));
+                pos += 4 + length + sizeof(uint64_t) + n * sizeof(double);
+            }
+        }
         for (uint64_t v = 0; v < n_vars; v++) {
             blocks.push_back(bytes.substr(pos, n_cells * sizeof(rtype)));
             pos += n_cells * sizeof(rtype);
         }
-        faces = bytes.substr(pos);
+        faces = bytes.substr(pos, n_faces * (sizeof(uint64_t) + RestartFaces::WIDTH * sizeof(rtype)));
     }
 
     void write(const std::string & path, uint32_t version) const {
@@ -496,7 +511,7 @@ TEST(RestartTest, LatestIsTheNewestRunsHighestCompleteStep) {
     first.init(parse_toml(restart_input(dir, BLAST, 40)));
     first.run();
     const std::string bytes = file_bytes(dir + "/restart_000040.restart");
-    const std::string run_start = "\"run\":{\"start_time\":\"";
+    const std::string run_start = "\"start_time\":\"";
     const size_t started = bytes.find(run_start);
     ASSERT_NE(started, std::string::npos);
     if (comm::is_root()) {
@@ -504,7 +519,6 @@ TEST(RestartTest, LatestIsTheNewestRunsHighestCompleteStep) {
         std::ofstream(dir + "/restart_000060.restart", std::ios::binary) << with_step(bytes, 60).substr(0, bytes.size() / 2);
         std::ofstream(dir + "/restart_000070.restart", std::ios::binary) << with_step(bytes, 70).substr(0, bytes.size() - 1);
         std::ofstream(dir + "/restart_000080.restart.partial", std::ios::binary) << with_step(bytes, 80);
-        std::ofstream(dir + "/restart_x00090.restart", std::ios::binary) << with_step(bytes, 90);
         // The same step under a later prefix
         std::ofstream(dir + "/z_000040.restart", std::ios::binary) << bytes;
     }
@@ -530,6 +544,31 @@ TEST(RestartTest, LatestIsTheNewestRunsHighestCompleteStep) {
     found = newest_restart({dir + "/restart", dir + "/z"}, skipped);
     EXPECT_EQ(found.file, dir + "/z_000030.restart");
     EXPECT_EQ(found.step, 30u);
+    EXPECT_NE(found.source.find("<prefix>_*.restart"), std::string::npos) << found.source;
+
+    // A run log's output index names the files its runs wrote: a file it does not list is not one of them
+    comm::barrier();
+    const std::string log = dir + "/indexed.jsonl";
+    if (comm::is_root()) {
+        std::ofstream(dir + "/restart_000050.restart", std::ios::binary) << with_step(bytes, 50);
+        std::ofstream(log) << json::Object()
+                                  .add("type", "output")
+                                  .add("step", 40)
+                                  .add("t", 0.0)
+                                  .add("kind", "restart")
+                                  .add("path", dir + "/restart_000040.restart")
+                                  .add("reason", "interval")
+                                  .add("writer", dir + "/restart")
+                                  .add("run_id", "a")
+                                  .str()
+                           << "\n";
+    }
+    comm::barrier();
+    skipped.clear();
+    EXPECT_EQ(newest_restart({dir + "/restart"}, skipped).file, dir + "/restart_000050.restart");
+    found = newest_restart({dir + "/restart"}, skipped, log);
+    EXPECT_EQ(found.file, dir + "/restart_000040.restart");
+    EXPECT_EQ(found.source, "the output index of " + log);
 }
 
 TEST(RestartTest, LatestResumesAsTheNamedFileDoesOrStartsFresh) {

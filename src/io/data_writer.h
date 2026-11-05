@@ -28,6 +28,7 @@
 #include "field_units.h"
 #include "global_order.h"
 #include "mesh.h"
+#include "snapshot_block.h"
 
 enum class DataFormat {
     VTU,
@@ -83,7 +84,8 @@ struct RestartData {
     RestartAttributes attributes;
     RestartArrays arrays;
     RestartFaces faces;                      // every face of the file, in increasing key
-    std::string provenance;                  // the writing run's provenance block, or empty
+    std::string provenance;                  // the writing run's run block, or empty
+    std::string snapshot;                    // its snapshot block, or empty (written before Mallard 0.10)
     bool complete = true;                    // false if cut short in the provenance trailer
 
     /** @brief Values of the named variable, or nullptr if the file has none. */
@@ -117,7 +119,8 @@ struct RestartHeader {
     std::vector<uint64_t> chunk_at;  // compressed: offset of each chunk, variable by variable, then of the faces
     uint64_t data_offset = 0;        // where the values (or the chunk table) start
     uint64_t faces_offset = 0;       // where the face records start
-    std::string provenance;          // the provenance trailer, or empty
+    std::string provenance;          // the run block's trailer, or empty
+    std::string snapshot;            // the snapshot block's trailer, or empty (written before Mallard 0.10)
 };
 
 /**
@@ -147,16 +150,25 @@ struct FoundRestart {
     std::string file;
     uint64_t step = 0;
     double t = 0.0;
+    std::string run_id;   // of the run that wrote it; empty where the file records none
+    std::string source;   // where the file was found: the run log's output index, or the fallback
 };
 
 /**
- * @brief The newest complete restart file <prefix>_<step>.restart of any of
- *        the prefixes: of the run that started last (by the start time in its
- *        provenance), then of the highest step, then of the earliest prefix.
- *        Files that do not read completely are skipped, each added to skipped
- *        with the reason.
+ * @brief The newest complete restart file of the writers with these
+ *        prefixes, by what the files record, never by their names: of the
+ *        run that started last (the start time of its run block), then of
+ *        the highest step (its header), then of the earliest prefix. The
+ *        candidates are the restart files of the output index of run_log
+ *        (mallard.jsonl; "" for none) written for one of the prefixes; a
+ *        run log without an index (written before Mallard 0.10), or none,
+ *        falls back to the files of the prefixes' directories that start
+ *        with "<prefix>_" and carry the restart magic, as source says.
+ *        Files that do not read completely are skipped, each added to
+ *        skipped with the reason.
  */
-FoundRestart newest_restart(const std::vector<std::string> & prefixes, std::vector<std::string> & skipped);
+FoundRestart newest_restart(const std::vector<std::string> & prefixes, std::vector<std::string> & skipped,
+                            const std::string & run_log = "");
 
 /** @brief Whether the HDF5 library has the shuffle and deflate filters (compressed HDF5 output). */
 bool have_hdf5_deflate();
@@ -240,6 +252,9 @@ class DataWriter {
         void write(uint64_t step, rtype t, bool force = false, const RestartAttributes & attributes = {},
                    const RestartFaces & faces = {}, const RestartArrays & arrays = {});
 
+        /** @brief Write the run block only, no snapshot block (mesh-quality fields, which are not a snapshot of a run). */
+        void omit_snapshot_block() { snapshot_blocks = false; }
+
         /**
          * @brief Next simulation time at which a snapshot is due
          *        (infinity for step-based writers).
@@ -285,6 +300,18 @@ class DataWriter {
     protected:
         /** @brief A snapshot's cell values: per field, its cells' components interleaved. */
         using Values = std::vector<std::vector<rtype>>;
+        using Block = snapshot_block::Block;
+
+        /** @brief A snapshot of a series index: its time, step (-1 where an older index records none) and file. */
+        struct IndexEntry {
+            double t = 0.0;
+            int64_t step = -1;
+            std::string file;
+        };
+        using Index = std::vector<IndexEntry>;
+
+        /** @brief The snapshot block of the snapshot at (step, t), written now. */
+        Block snapshot_of(uint64_t step, rtype t, bool force) const;
 
         /** @brief The values of the first n_cells cells, or of the subset's cells. */
         Values capture(uint32_t n_cells, bool in_subset = false) const;
@@ -295,14 +322,14 @@ class DataWriter {
          */
         void publish_restart(bool wait);
 
-        void write_vtu(const std::string & filename, rtype t, Values & values);
-        void write_pvd(const std::vector<std::pair<rtype, std::string>> & series) const;
+        void write_vtu(const std::string & filename, const Block & block, Values & values);
+        void write_pvd(const Index & series) const;
 
         /** @brief Submit a restart file: written by this rank alone, or by every rank (distributed). */
-        void write_restart(const std::string & filename, uint64_t step, rtype t,
+        void write_restart(const std::string & filename, const Block & block,
                            const RestartAttributes & attributes, const RestartFaces & faces,
                            const RestartArrays & arrays);
-        void write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
+        void write_restart_distributed(const std::string & filename, const Block & block,
                                        const RestartAttributes & attributes, const RestartFaces & faces,
                                        const RestartArrays & arrays);
 
@@ -312,9 +339,9 @@ class DataWriter {
          *        order, and the XDMF indexes that let ParaView read them.
          */
         void write_hdf5_mesh();
-        void write_hdf5(const std::string & stem, uint64_t step, rtype t, const Values & values);
-        void write_xdmf(const std::string & stem, const std::vector<std::pair<rtype, std::string>> & series) const;
-        std::string xdmf_grid(const std::string & stem, double t, const std::string & indent) const;
+        void write_hdf5(const std::string & stem, const Block & block, const Values & values);
+        void write_xdmf(const std::string & stem, const Index & series) const;
+        std::string xdmf_grid(const std::string & stem, const IndexEntry & entry, const std::string & indent) const;
         void resume_xdmf(rtype t);
 
         /**
@@ -323,9 +350,9 @@ class DataWriter {
          *        every rank in global order; one file per snapshot, or with
          *        series, one file of every snapshot.
          */
-        void write_vtkhdf(const std::string & filename, rtype t, const Values & values);
+        void write_vtkhdf(const std::string & filename, const Block & block, const Values & values);
         void build_vtkhdf_cells();
-        void write_vtkhdf_series(const std::vector<std::pair<rtype, std::string>> & series) const;
+        void write_vtkhdf_series(const Index & series) const;
         void resume_vtkhdf(rtype t);
         void resume_pvd(rtype t);
         std::string snapshot_stem(uint64_t number) const;
@@ -354,14 +381,15 @@ class DataWriter {
         DataFormat format;
         std::vector<Field> fields;
         std::shared_ptr<Mesh> mesh;
-        std::vector<std::pair<rtype, std::string>> history;
+        Index history;
+        bool snapshot_blocks = true;
         uint64_t n_snapshots = 0;  // numbers the next snapshot of time-based writers
         uint64_t n_files = 0;
         std::string last_file;
         std::string partial_file;  // the restart file being written, renamed to last_file once complete
-        void write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const;
-        /** @brief The VTU field data: TIME, MALLARD_FORMAT_VERSION and the fields' units record. */
-        std::string vtu_field_data(rtype t) const;
+        void write_pvtu(const std::string & filename, const std::string & stem, int n_ranks, const Block & block) const;
+        /** @brief The VTU field data: TIME, STEP, MALLARD_FORMAT_VERSION and the fields' units record. */
+        std::string vtu_field_data(const Block & block) const;
         // A region's cells (subset), their places among the region's cells of every rank, and its fractions
         bool subset = false;
         std::string region_name;
@@ -402,6 +430,7 @@ class DataWriter {
         bool one_file = false;  // series = true: every snapshot in one file
         uint64_t vtkhdf_steps = 0;  // snapshots in the series file
         bool vtkhdf_resumed = false;
+        bool vtkhdf_run_written = false;  // this run's block is in the series file
 };
 
 #endif // DATA_WRITER_H

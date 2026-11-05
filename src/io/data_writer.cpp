@@ -27,6 +27,7 @@
 #include <iomanip>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <string_view>
 #include <unistd.h>
@@ -35,6 +36,7 @@
 #include "common_io.h"
 #include "compression.h"
 #include "file_format.h"
+#include "json.h"
 #include "log.h"
 #include "mesh_block.h"
 #include "provenance.h"
@@ -417,25 +419,26 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     const bool distributed = mesh->n_global_cells > 0;
     const bool root = comm::is_root();
     const std::string stem = snapshot_stem(interval > 0 || format == DataFormat::RESTART ? step : n_snapshots);
+    const Block block = snapshot_of(step, t, force);
     if (format == DataFormat::RESTART) {
         // Written under another name, so that no file of this name is ever incomplete
         last_file = stem + ".restart";
-        write_restart(last_file + ".partial", step, t, attributes, faces, arrays);
+        write_restart(last_file + ".partial", block, attributes, faces, arrays);
         partial_file = last_file + ".partial";
         publish_restart(false);
-        logging::event(step, double(t), "restart", stem + ".restart");
+        logging::output(step, double(t), "restart", last_file, block.reason, prefix);
     } else if (format == DataFormat::HDF5) {
         last_file = stem + ".h5";
-        history.emplace_back(t, last_file);
+        history.push_back({double(t), static_cast<int64_t>(step), last_file});
         // Parallel HDF5 writes collectively through MPI, which only the main thread calls
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
-            auto job = [this, stem, step, t, root, values = capture(mesh->n_owned()), series = history]() {
+            auto job = [this, stem, block, root, values = capture(mesh->n_owned()), series = history]() {
                 if (!hdf5_mesh_written) {
                     write_hdf5_mesh();
                     if (root) n_bytes += file_bytes(prefix + "_mesh.h5");
                 }
-                write_hdf5(stem, step, t, values);
+                write_hdf5(stem, block, values);
                 if (root) {
                     n_bytes += file_bytes(stem + ".h5");
                     write_xdmf(stem, series);
@@ -443,17 +446,17 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             };
             run(std::move(job), !collective);
         }
-        logging::event(step, double(t), "xdmf", stem + ".h5");
+        logging::output(step, double(t), "xdmf", last_file, block.reason, prefix);
     } else if (format == DataFormat::VTKHDF) {
         const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
         last_file = filename;
-        history.emplace_back(t, filename);
+        history.push_back({double(t), static_cast<int64_t>(step), filename});
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
-            auto job = [this, filename, t, root,
+            auto job = [this, filename, block, root,
                         values = capture(mesh->n_owned(), subset), list = history]() {
                 const uint64_t before = one_file ? file_bytes(filename) : 0;
-                write_vtkhdf(filename, t, values);
+                write_vtkhdf(filename, block, values);
                 if (root) {
                     n_bytes += file_bytes(filename) - std::min(before, file_bytes(filename));
                     if (!one_file) write_vtkhdf_series(list);
@@ -461,7 +464,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             };
             run(std::move(job), !collective);
         }
-        logging::event(step, double(t), "vtkhdf", filename);
+        logging::output(step, double(t), "vtkhdf", filename, block.reason, prefix);
     } else {
         // Distributed runs: one piece per rank and a .pvtu index
         std::ostringstream piece;
@@ -469,21 +472,21 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         if (distributed) piece << "_p" << std::setw(4) << std::setfill('0') << comm::rank();
         const std::string filename = stem + (distributed ? ".pvtu" : ".vtu");
         last_file = filename;
-        history.emplace_back(t, filename);
+        history.push_back({double(t), static_cast<int64_t>(step), filename});
         const int n_ranks = comm::size();
         if (distributed || root) {
-            auto job = [this, piece = piece.str() + ".vtu", filename, stem, t, root, distributed, n_ranks,
+            auto job = [this, piece = piece.str() + ".vtu", filename, stem, block, root, distributed, n_ranks,
                         values = capture(mesh->n_owned(), subset), series = history]() mutable {
-                write_vtu(piece, t, values);
+                write_vtu(piece, block, values);
                 n_bytes += file_bytes(piece);
                 if (distributed && root) {
-                    write_pvtu(filename, std::filesystem::path(stem).filename().string(), n_ranks);
+                    write_pvtu(filename, std::filesystem::path(stem).filename().string(), n_ranks, block);
                 }
                 if (root) write_pvd(series);
             };
             run(std::move(job));
         }
-        logging::event(step, double(t), "vtu", filename);
+        logging::output(step, double(t), "vtu", filename, block.reason, prefix);
     }
     if (interval == 0) {
         // Skip any output times already passed (e.g. if dt exceeded time_interval)
@@ -498,6 +501,29 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     t_last = t;
     n_files++;
     t_blocking += seconds_since(start);
+}
+
+DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) const {
+    std::vector<snapshot_block::Field> list;
+    const char * stored = sizeof(rtype) == 8 ? "float64" : "float32";
+    for (const auto & field : fields) {
+        snapshot_block::Field f{field.name, field.description.units(), field.description.long_name, stored,
+                                relative_error};
+        if (format == DataFormat::RESTART) {
+            const auto d = field_units::find(field.name);
+            f.units = d ? d->units() : "";
+            f.long_name = d ? d->long_name : "";
+            f.relative_error = 0.0;
+        }
+        list.push_back(std::move(f));
+    }
+    if (fraction) list.push_back({"REGION_FRACTION", "1", "volume fraction of the region", stored, 0.0});
+    const int64_t version = format == DataFormat::RESTART  ? file_format::RESTART.version
+                            : format == DataFormat::HDF5   ? file_format::HDF5_OUTPUT.version
+                            : format == DataFormat::VTKHDF ? file_format::VTKHDF_OUTPUT.version
+                                                           : file_format::VTU_OUTPUT.version;
+    return snapshot_block::make(step, double(t), snapshot_block::current_reason(force), FORMAT_NAMES.at(format),
+                                version, std::move(list));
 }
 
 std::string DataWriter::set_interval(uint64_t steps) {
@@ -571,8 +597,10 @@ void DataWriter::resume_pvd(rtype t) {
         const double t_entry = std::stod(line.substr(a + 10));
         const size_t b0 = b + 6;
         const std::string file = line.substr(b0, line.find('"', b0) - b0);
+        const size_t s = line.find(" step=\"");
+        const int64_t step_entry = s == std::string::npos ? -1 : std::stoll(line.substr(s + 7));
         if (t_entry <= static_cast<double>(t) * (1.0 + 1.0e-12) + 1.0e-300) {
-            history.emplace_back(t_entry, (dir / file).string());
+            history.push_back({t_entry, step_entry, (dir / file).string()});
         }
     }
 }
@@ -583,41 +611,65 @@ constexpr char RESTART_MAGIC[16] = "MALLARD-RESTART";
 // Codec of the chunks of compressed restart files (version 5)
 constexpr uint32_t RESTART_CODEC_ZLIB = 1;
 constexpr char PROVENANCE_MAGIC[16] = "MLRD-PROVENANCE";
+constexpr char SNAPSHOT_MAGIC[16] = "MLRD-SNAPSHOT";
+constexpr std::streamoff TRAILER_TAIL = sizeof(uint64_t) + sizeof(PROVENANCE_MAGIC);
 
-/**
- * @brief Provenance trailer, after everything else in a restart file of any
- *        version: the provenance JSON, its length as a uint64, and
- *        PROVENANCE_MAGIC. Readers that stop after the faces skip it.
- */
-std::vector<char> provenance_trailer() {
-    const std::string & text = provenance::json();
-    std::vector<char> out(text.begin(), text.end());
+void append_trailer(std::vector<char> & out, const std::string & text, const char (&magic)[16]) {
+    out.insert(out.end(), text.begin(), text.end());
     const uint64_t length = text.size();
     out.insert(out.end(), reinterpret_cast<const char *>(&length), reinterpret_cast<const char *>(&length) + 8);
-    out.insert(out.end(), PROVENANCE_MAGIC, PROVENANCE_MAGIC + sizeof(PROVENANCE_MAGIC));
+    out.insert(out.end(), magic, magic + sizeof(magic));
+}
+
+/**
+ * @brief Trailers, after everything else in a restart file: (version 7) the
+ *        snapshot block, its length as a uint64 and SNAPSHOT_MAGIC, then (any
+ *        version since 0.9) the run block, its length and PROVENANCE_MAGIC.
+ *        Readers that stop after the faces skip them.
+ */
+std::vector<char> restart_trailers(const std::string & snapshot) {
+    std::vector<char> out;
+    append_trailer(out, snapshot, SNAPSHOT_MAGIC);
+    append_trailer(out, provenance::json(), PROVENANCE_MAGIC);
     return out;
 }
 
-/** @brief The provenance trailer's JSON, or "" if the file has none. */
-std::string read_provenance_trailer(std::ifstream & in) {
-    constexpr std::streamoff TAIL = sizeof(uint64_t) + sizeof(PROVENANCE_MAGIC);
+/** @brief The JSON of the trailer with this magic that ends at byte end of the file, or "" if there is none. */
+std::string read_trailer(std::ifstream & in, std::streamoff end, const char (&expected)[16]) {
     in.clear();
-    in.seekg(0, std::ios::end);
-    const std::streamoff size = in.tellg();
-    if (size < TAIL) return "";
-    in.seekg(size - TAIL);
+    if (end < TRAILER_TAIL) return "";
+    in.seekg(end - TRAILER_TAIL);
     uint64_t length = 0;
-    char magic[sizeof(PROVENANCE_MAGIC)] = {};
+    char magic[16] = {};
     in.read(reinterpret_cast<char *>(&length), sizeof(length));
     in.read(magic, sizeof(magic));
-    if (!in.good() || std::memcmp(magic, PROVENANCE_MAGIC, sizeof(magic)) != 0 ||
-        length > static_cast<uint64_t>(size - TAIL)) {
+    if (!in.good() || std::memcmp(magic, expected, sizeof(magic)) != 0 ||
+        length > static_cast<uint64_t>(end - TRAILER_TAIL)) {
         return "";
     }
     std::string text(length, '\0');
-    in.seekg(size - TAIL - static_cast<std::streamoff>(length));
+    in.seekg(end - TRAILER_TAIL - static_cast<std::streamoff>(length));
     in.read(text.data(), static_cast<std::streamsize>(length));
     return in.good() ? text : "";
+}
+
+/** @brief The JSON of the run block's and the snapshot block's trailers, "" for those the file lacks. */
+std::pair<std::string, std::string> read_trailers(std::ifstream & in) {
+    in.clear();
+    in.seekg(0, std::ios::end);
+    const std::streamoff size = in.tellg();
+    std::string run = read_trailer(in, size, PROVENANCE_MAGIC);
+    if (run.empty()) return {"", ""};
+    const std::streamoff before = size - TRAILER_TAIL - static_cast<std::streamoff>(run.size());
+    std::string snapshot = read_trailer(in, before, SNAPSHOT_MAGIC);
+    return {std::move(run), std::move(snapshot)};
+}
+
+uint64_t trailers_size(const std::string & run, const std::string & snapshot) {
+    const auto size = [](const std::string & text) {
+        return text.empty() ? 0 : text.size() + static_cast<uint64_t>(TRAILER_TAIL);
+    };
+    return size(run) + size(snapshot);
 }
 
 /**
@@ -647,8 +699,9 @@ std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, cons
     };
     const uint32_t real_size = sizeof(rtype);
     const uint64_t n_vars = names.size();
-    static_assert(file_format::RESTART.version == 6, "restart_header writes versions 2 to 6");
-    const uint32_t version = !arrays.empty() ? 6 : chunk_cells > 0 ? 5 : n_faces > 0 ? 4 : attributes.empty() ? 2 : 3;
+    // Every file ends with its snapshot block, which version 7 added; the header is that of version 6
+    static_assert(file_format::RESTART.version == 7, "restart_header writes version 7");
+    const uint32_t version = 7;
     put(RESTART_MAGIC, sizeof(RESTART_MAGIC));
     put(&version, sizeof(version));
     put(&real_size, sizeof(real_size));
@@ -661,7 +714,6 @@ std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, cons
         put(&length, sizeof(length));
         put(name.data(), name.size());
     }
-    if (version < 3) return header;
     const uint64_t n_attributes = attributes.size();
     put(&n_attributes, sizeof(n_attributes));
     for (const auto & [name, value] : attributes) {
@@ -670,15 +722,12 @@ std::vector<char> restart_header(uint64_t n_cells, uint64_t step, double t, cons
         put(name.data(), name.size());
         put(&value, sizeof(value));
     }
-    if (version < 4) return header;
     const uint32_t width = RestartFaces::WIDTH;
     put(&n_faces, sizeof(n_faces));
     put(&width, sizeof(width));
-    if (version < 5) return header;
     const uint32_t codec = chunk_cells > 0 ? RESTART_CODEC_ZLIB : 0;
     put(&codec, sizeof(codec));
     put(&chunk_cells, sizeof(chunk_cells));
-    if (version < 6) return header;
     const uint64_t n_arrays = arrays.size();
     put(&n_arrays, sizeof(n_arrays));
     for (const auto & [name, values] : arrays) {
@@ -831,17 +880,19 @@ const rtype * RestartData::face(uint64_t key) const {
     return &faces.values[size_t(it - faces.keys.begin()) * RestartFaces::WIDTH];
 }
 
-void DataWriter::write_restart(const std::string & filename, uint64_t step, rtype t,
+void DataWriter::write_restart(const std::string & filename, const Block & block,
                                const RestartAttributes & attributes, const RestartFaces & faces,
                                const RestartArrays & arrays) {
     if (mesh->n_global_cells > 0) {
-        write_restart_distributed(filename, step, t, attributes, faces, arrays);
+        write_restart_distributed(filename, block, attributes, faces, arrays);
         return;
     }
     // Serial runs on several ranks (tests) hold the whole mesh on every rank
     if (!comm::is_root()) return;
+    const uint64_t step = static_cast<uint64_t>(block.step);
+    const double t = block.time;
     auto job = [this, filename, step, t, attributes, arrays, ordered = order_faces(faces, mesh->n_cells, false),
-                values = capture(mesh->n_cells), trailer = provenance_trailer()]() {
+                values = capture(mesh->n_cells), trailer = restart_trailers(block.json())]() {
         std::ofstream out(filename, std::ios::binary);
         if (!out.good()) {
             throw cannot_write("the restart file", filename);
@@ -877,10 +928,12 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     run(std::move(job));
 }
 
-void DataWriter::write_restart_distributed(const std::string & filename, uint64_t step, rtype t,
+void DataWriter::write_restart_distributed(const std::string & filename, const Block & snapshot,
                                            const RestartAttributes & attributes, const RestartFaces & faces,
                                            const RestartArrays & arrays) {
 #ifdef Mallard_HAS_MPI
+    const uint64_t step = static_cast<uint64_t>(snapshot.step);
+    const double t = snapshot.time;
     const OrderedFaces ordered = order_faces(faces, mesh->n_global_cells, true);
     const uint64_t n_global = mesh->n_global_cells;
     std::vector<std::string> names;
@@ -931,7 +984,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
         comm::barrier();
         auto job = [this, filename, root, header = std::move(header), table = std::move(table),
                     offsets = std::move(offsets), block = std::move(block), chunks, ordered,
-                    trailer = root ? provenance_trailer() : std::vector<char>()]() {
+                    trailer = root ? restart_trailers(snapshot.json()) : std::vector<char>()]() {
             const int fd = ::open(filename.c_str(), O_WRONLY);
             if (fd < 0) throw cannot_write("the restart file", filename);
             uint64_t written = 0;
@@ -1014,7 +1067,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
                                 ordered.part.values.data(), static_cast<int>(ordered.part.values.size()), real_type,
                                 MPI_STATUS_IGNORE));
     if (comm::is_root()) {
-        const std::vector<char> trailer = provenance_trailer();
+        const std::vector<char> trailer = restart_trailers(snapshot.json());
         check(MPI_File_write_at(fh, faces_at + MPI_Offset(ordered.total * (sizeof(uint64_t) + W * sizeof(rtype))),
                                 trailer.data(), static_cast<int>(trailer.size()), MPI_BYTE, MPI_STATUS_IGNORE));
     }
@@ -1025,8 +1078,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     t_writing += seconds_since(start);
 #else
     (void)filename;
-    (void)step;
-    (void)t;
+    (void)block;
     (void)attributes;
     (void)faces;
     (void)arrays;
@@ -1133,7 +1185,8 @@ RestartHeader read_restart_header(std::ifstream & in, const std::string & filena
         }
     }
     h.faces_offset = h.chunk_cells > 0 ? h.chunk_at.back() : h.data_offset + h.names.size() * h.n_cells * h.real_size;
-    h.provenance = read_provenance_trailer(in);
+    std::tie(h.provenance, h.snapshot) = read_trailers(in);
+    if (h.version >= 7 && h.snapshot.empty()) throw std::runtime_error("Restart file " + filename + " is truncated.");
     in.clear();
     in.seekg(static_cast<std::streamoff>(h.data_offset));
     return h;
@@ -1167,6 +1220,7 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     data.attributes = h.attributes;
     data.arrays = h.arrays;
     data.provenance = h.provenance;
+    data.snapshot = h.snapshot;
     if (h.version > 1) {
         const bool has_z = std::find(data.names.begin(), data.names.end(), "RHOU_Z") != data.names.end();
         if (has_z != (N_DIM == 3)) {
@@ -1254,43 +1308,91 @@ RestartData read_restart(const std::string & filename, const std::vector<uint64_
     }
     const std::streamoff end = in.tellg();
     in.seekg(0, std::ios::end);
-    const size_t trailer =
-        data.provenance.empty() ? 0 : data.provenance.size() + sizeof(uint64_t) + sizeof(PROVENANCE_MAGIC);
+    const uint64_t trailer = trailers_size(data.provenance, data.snapshot);
     data.complete = in.tellg() == end + static_cast<std::streamoff>(trailer);
     return data;
 }
 
-FoundRestart newest_restart(const std::vector<std::string> & prefixes, std::vector<std::string> & skipped) {
+namespace {
+
+/**
+ * @brief The restart files of the output index of a run log, per prefix (in
+ *        the order they were written), or nullopt if the log has no index.
+ */
+std::optional<std::vector<std::vector<std::string>>> indexed_restarts(const std::string & run_log,
+                                                                      const std::vector<std::string> & prefixes) {
+    std::ifstream in(run_log);
+    if (run_log.empty() || !in.good()) return std::nullopt;
+    bool indexed = false;
+    std::vector<std::vector<std::string>> files(prefixes.size());
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.find("\"type\":\"output\"") == std::string::npos) continue;
+        try {
+            const json::Value record = json::parse(line);
+            indexed = true;
+            const json::Value * kind = record.find("kind");
+            const json::Value * writer = record.find("writer");
+            const json::Value * path = record.find("path");
+            if (!kind || kind->string != "restart" || !writer || !path) continue;
+            for (size_t i = 0; i < prefixes.size(); i++) {
+                auto & list = files[i];
+                if (writer->string == prefixes[i] && std::find(list.begin(), list.end(), path->string) == list.end()) {
+                    list.push_back(path->string);
+                }
+            }
+        } catch (const std::exception &) {
+            // A line cut short by a killed run
+        }
+    }
+    if (!indexed) return std::nullopt;
+    return files;
+}
+
+} // namespace
+
+FoundRestart newest_restart(const std::vector<std::string> & prefixes, std::vector<std::string> & skipped,
+                            const std::string & run_log) {
     namespace fs = std::filesystem;
     constexpr std::string_view EXTENSION = ".restart";
     FoundRestart best;
     std::string best_started;
     const std::vector<uint64_t> no_cells;
-    for (const std::string & prefix : prefixes) {
-        const fs::path path(prefix);
-        const std::string stem = path.filename().string() + "_";
+    const auto indexed = indexed_restarts(run_log, prefixes);
+    const std::string listed = "the output index of " + run_log;
+    const std::string enumerated =
+        "the files <prefix>_*.restart (" +
+        (run_log.empty() ? std::string("no run log")
+         : indexed       ? run_log + " lists none of this writer's"
+                         : run_log + " has no output index: written before Mallard 0.10, or none") +
+        "), ordered by what they record";
+    std::string source = indexed ? listed : enumerated;
+    for (size_t i = 0; i < prefixes.size(); i++) {
         std::vector<std::string> files;
-        std::error_code error;
-        for (fs::directory_iterator it(path.has_parent_path() ? path.parent_path() : fs::path("."), error), end;
-             !error && it != end; it.increment(error)) {
-            const std::string name = it->path().filename().string();
-            if (name.size() <= stem.size() + EXTENSION.size() || !name.starts_with(stem) ||
-                !name.ends_with(EXTENSION)) {
-                continue;
+        const bool from_index = indexed && !(*indexed)[i].empty();
+        if (from_index) {
+            for (const std::string & file : (*indexed)[i]) {
+                if (fs::exists(file)) files.push_back(file);
             }
-            const std::string_view digits =
-                std::string_view(name).substr(stem.size(), name.size() - stem.size() - EXTENSION.size());
-            if (!std::ranges::all_of(digits, [](char c) { return c >= '0' && c <= '9'; })) continue;
-            files.push_back(prefix + "_" + std::string(digits) + std::string(EXTENSION));
+        } else {
+            const fs::path path(prefixes[i]);
+            const std::string stem = path.filename().string() + "_";
+            std::error_code error;
+            for (fs::directory_iterator it(path.has_parent_path() ? path.parent_path() : fs::path("."), error), end;
+                 !error && it != end; it.increment(error)) {
+                const std::string name = it->path().filename().string();
+                if (name.starts_with(stem) && name.ends_with(EXTENSION)) files.push_back(prefixes[i] + name.substr(stem.size() - 1));
+            }
+            std::sort(files.begin(), files.end());
         }
-        std::sort(files.begin(), files.end());
         for (const std::string & file : files) {
             try {
                 const RestartData data = read_restart(file, &no_cells);
                 if (!data.complete) throw std::runtime_error("Restart file " + file + " is truncated.");
                 const std::string started = provenance::find_string(data.provenance, "run", "start_time");
                 if (best.file.empty() || started > best_started || (started == best_started && data.step > best.step)) {
-                    best = {file, data.step, data.t};
+                    source = from_index ? listed : enumerated;
+                    best = {file, data.step, data.t, provenance::find_string(data.provenance, "run", "run_id"), source};
                     best_started = started;
                 }
             } catch (const std::exception & e) {
@@ -1298,12 +1400,15 @@ FoundRestart newest_restart(const std::vector<std::string> & prefixes, std::vect
             }
         }
     }
+    best.source = source;
     return best;
 }
 
-void DataWriter::write_pvtu(const std::string & filename, const std::string & stem, int n_ranks) const {
+void DataWriter::write_pvtu(const std::string & filename, const std::string & stem, int n_ranks,
+                            const Block & block) const {
     std::ofstream out(filename);
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
+    if (snapshot_blocks) out << provenance::xml_comment(snapshot_block::NAME, block.json()) << "\n";
     out << "<VTKFile type=\"PUnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
         << "\" header_type=\"UInt64\">\n";
     out << "  <PUnstructuredGrid GhostLevel=\"0\">\n";
@@ -1322,7 +1427,7 @@ void DataWriter::write_pvtu(const std::string & filename, const std::string & st
     out << "</VTKFile>\n";
 }
 
-std::string DataWriter::vtu_field_data(rtype t) const {
+std::string DataWriter::vtu_field_data(const Block & block) const {
     std::vector<std::string> names;
     std::vector<FieldDescription> descriptions;
     for (const auto & field : fields) {
@@ -1332,8 +1437,12 @@ std::string DataWriter::vtu_field_data(rtype t) const {
     std::ostringstream out;
     out << std::setprecision(17);
     out << "    <FieldData>\n";
-    out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
-        << static_cast<double>(t) << "</DataArray>\n";
+    out << "      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">" << block.time
+        << "</DataArray>\n";
+    if (snapshot_blocks) {
+        out << "      <DataArray type=\"Int64\" Name=\"STEP\" NumberOfTuples=\"1\" format=\"ascii\">" << block.step
+            << "</DataArray>\n";
+    }
     out << "      <DataArray type=\"Int32\" Name=\"MALLARD_FORMAT_VERSION\" NumberOfTuples=\"1\" format=\"ascii\">"
         << file_format::VTU_OUTPUT.version << "</DataArray>\n";
     out << field_units::vtk_field_data(names, descriptions, "      ");
@@ -1341,14 +1450,15 @@ std::string DataWriter::vtu_field_data(rtype t) const {
     return out.str();
 }
 
-void DataWriter::write_pvd(const std::vector<std::pair<rtype, std::string>> & series) const {
+void DataWriter::write_pvd(const Index & series) const {
     std::ofstream out(prefix + ".pvd");
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
     out << "<VTKFile type=\"Collection\" version=\"0.1\" byte_order=\"" << endianness() << "\">\n";
     out << "  <Collection>\n";
-    for (const auto & [t, filename] : series) {
-        out << "    <DataSet timestep=\"" << std::setprecision(std::numeric_limits<double>::max_digits10) << t << "\" file=\""
-            << std::filesystem::path(filename).filename().string() << "\"/>\n";
+    for (const auto & e : series) {
+        out << "    <DataSet timestep=\"" << std::setprecision(std::numeric_limits<double>::max_digits10) << e.t << "\"";
+        if (e.step >= 0) out << " step=\"" << e.step << "\"";
+        out << " file=\"" << std::filesystem::path(e.file).filename().string() << "\"/>\n";
     }
     out << "  </Collection>\n";
     out << "</VTKFile>\n";
@@ -1385,7 +1495,7 @@ std::vector<char> vtu_zlib_array(const void * data, size_t n_bytes, unsigned n_t
 
 } // namespace
 
-void DataWriter::write_vtu(const std::string & filename, rtype t, Values & values) {
+void DataWriter::write_vtu(const std::string & filename, const Block & block, Values & values) {
     std::ofstream out(filename, std::ios::binary);
     if (!out.good()) {
         throw cannot_write("the snapshot", filename);
@@ -1458,10 +1568,11 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
     };
 
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n";
+    if (snapshot_blocks) out << provenance::xml_comment(snapshot_block::NAME, block.json()) << "\n";
     out << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
         << "\" header_type=\"UInt64\"" << (zlib ? " compressor=\"vtkZLibDataCompressor\"" : "") << ">\n";
     out << "  <UnstructuredGrid>\n";
-    out << vtu_field_data(t);
+    out << vtu_field_data(block);
     out << "    <Piece NumberOfPoints=\"" << vtu_points << "\" NumberOfCells=\"" << n_out << "\">\n";
     out << "      <CellData>\n";
     for (size_t f = 0; f < fields.size(); f++) {

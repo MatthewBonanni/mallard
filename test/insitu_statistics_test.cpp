@@ -28,6 +28,7 @@
 #include "solver.h"
 #include "provenance.h"
 #include "scratch.h"
+#include "snapshot_block.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -360,19 +361,35 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
             }
         }
     }
-    // The values; the provenance line names each run's own input
-    auto read = [](const std::string & path, std::string & provenance_line) {
+    // The values and the averaging window; the run block names each run's own input
+    auto read = [](const std::string & path, std::string & run, snapshot_block::Block & block) {
         std::ifstream in(path);
-        std::getline(in, provenance_line);
-        std::stringstream ss;
-        ss << in.rdbuf();
-        return ss.str();
+        std::string values;
+        for (std::string line; std::getline(in, line);) {
+            if (line.starts_with("# mallard-run ")) {
+                run = provenance::parse_comment(line);
+            } else if (line.starts_with("# mallard-snapshot ")) {
+                block = snapshot_block::parse(provenance::parse_comment(line, snapshot_block::NAME));
+            } else {
+                values += line + "\n";
+            }
+        }
+        return values;
     };
-    std::string provenance_a, provenance_b;
-    const std::string values_a = read(dir + "/a/spectra.csv", provenance_a);
+    std::string run_a, run_b;
+    snapshot_block::Block block_a, block_b;
+    const std::string values_a = read(dir + "/a/spectra.csv", run_a, block_a);
     EXPECT_FALSE(values_a.empty());
-    EXPECT_EQ(read(dir + "/b/spectra.csv", provenance_b), values_a);
-    EXPECT_FALSE(provenance::parse_comment(provenance_a).empty()) << provenance_a;
+    EXPECT_EQ(read(dir + "/b/spectra.csv", run_b, block_b), values_a);
+    EXPECT_FALSE(run_a.empty());
+    EXPECT_EQ(block_b.step, block_a.step);
+    EXPECT_EQ(block_b.time, block_a.time);
+    EXPECT_TRUE(block_a.averaged);
+    EXPECT_EQ(block_b.average_start, block_a.average_start);
+    EXPECT_EQ(block_b.average_end, block_a.average_end);
+    EXPECT_EQ(block_b.samples, block_a.samples);
+    EXPECT_GT(block_a.samples, 0);
+    EXPECT_TRUE(block_b.restarted);
     const PhaseAverage & pa = straight->get_statistics().get_phase();
     const PhaseAverage & pb = second->get_statistics().get_phase();
     EXPECT_GT(pa.samples(), 0u);

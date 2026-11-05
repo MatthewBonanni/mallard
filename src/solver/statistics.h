@@ -15,6 +15,7 @@
 #include <array>
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -178,10 +179,13 @@ class Statistics {
         RestartAttributes attributes() const;
         RestartArrays arrays() const { return spectra.arrays(); }
         /** @brief Write the averaged spectra (rank 0), with the other output. */
-        void write(uint64_t step, rtype t) const { spectra.write(step, t); }
+        void write(uint64_t step, rtype t, const std::string & reason) const { spectra.write(step, t, reason); }
 
         std::vector<std::pair<std::string, std::string>> summary() const;
         uint64_t samples() const { return n_samples; }
+        /** @brief The means' averaging window: from where the first sample's weight starts to the last sample (NaN before one). */
+        double average_start() const { return n_samples ? double(t_last - weight) : std::numeric_limits<double>::quiet_NaN(); }
+        double average_end() const { return n_samples ? double(t_last) : std::numeric_limits<double>::quiet_NaN(); }
         const Spectra & get_spectra() const { return spectra; }
         const PhaseAverage & get_phase() const { return phase; }
         /** @brief Host copies (see copy_device_to_host): (cell, field) means, (cell, product) covariances. */

@@ -28,6 +28,8 @@
 #include "mesh.h"
 #include "mesh_quality.h"
 #include "output_reader.h"
+#include "provenance.h"
+#include "snapshot_block.h"
 
 namespace fs = std::filesystem;
 
@@ -69,7 +71,7 @@ std::string list_text(const std::vector<std::string> & items, const char * sep) 
     return out;
 }
 
-/** @brief The input a provenance block records: input.resolved (version 2), else input.text as written. */
+/** @brief The input a run block records: input.resolved (version 2 on), else input.text as written. */
 std::string recorded_input(const json::Value & p, bool & resolved) {
     resolved = false;
     if (const json::Value * r = at(p, {"input", "resolved"}); r && r->type == json::Value::Type::STRING) {
@@ -80,30 +82,42 @@ std::string recorded_input(const json::Value & p, bool & resolved) {
     return "";
 }
 
-/** @brief A file's provenance block, parsed; null if it has none. */
-json::Value parsed_provenance(const output::Contents & c) {
-    if (c.provenance.empty()) return {};
+/** @brief A file's run block, parsed; null if it has none. */
+json::Value parsed_run(const output::Contents & c) {
+    if (c.run.empty()) return {};
     try {
-        return json::parse(c.provenance);
+        return json::parse(c.run);
     } catch (const std::exception & e) {
-        throw std::runtime_error(c.path + ": the provenance block is not valid JSON (" + e.what() + ")");
+        throw std::runtime_error(c.path + ": the run block is not valid JSON (" + e.what() + ")");
     }
 }
 
-void print_provenance(const json::Value & p) {
-    logging::section("Provenance");
+/** @brief "file, step N (run <id>)" of a restart_of object; "-" if null. */
+std::string restart_of_text(const json::Value * r) {
+    if (!r || r->type != json::Value::Type::OBJECT) return "no: a fresh start";
+    const json::Value * id = r->find("run_id");
+    return text(r->find("file")) + ", step " + text(r->find("step")) +
+           (id && !id->is_null() ? " (run " + id->string + ")" : " (a run that recorded no run id)");
+}
+
+void print_run(const json::Value & p) {
+    logging::section("Run", "same for every file of the run");
     std::string mallard = text(at(p, {"mallard", "version"}));
     if (const json::Value * sha = at(p, {"mallard", "git_sha"}); sha && !sha->is_null()) {
         const json::Value * dirty = at(p, {"mallard", "git_dirty"});
         mallard += " (commit " + sha->string.substr(0, 12) + (dirty && dirty->boolean ? ", uncommitted changes" : "") + ")";
     }
     item("Mallard", mallard);
-    item("Provenance", "version " + text(p.find("version")));
+    const json::Value * schema = p.find("schema");
+    item("Run block", "version " + text(p.find("version")) +
+                          (schema && schema->string == provenance::LEGACY_SCHEMA ? ", named \"provenance\"" : ""));
     item("Build", text(at(p, {"build", "dim"})) + "D, " + text(at(p, {"build", "precision"})) + " precision, " +
                       text(at(p, {"build", "build_type"})) + ", " + text(at(p, {"build", "backend"})) + " backend, MPI " +
                       text(at(p, {"build", "mpi"})) + ", HDF5 " + text(at(p, {"build", "hdf5"})));
     if (p.find("run")) {
         const json::Value * hosts = at(p, {"run", "hosts"});
+        item("Run id", text(at(p, {"run", "run_id"})));
+        if (const json::Value * r = at(p, {"run", "restart_of"})) item("Restarted from", restart_of_text(r));
         item("Run started", text(at(p, {"run", "start_time"})));
         item("Ranks", plural(at(p, {"run", "ranks"}), "rank") + (hosts ? " on " + plural(hosts, "host") : ""));
         item("Device", text(at(p, {"run", "device"})));
@@ -128,6 +142,31 @@ void print_provenance(const json::Value & p) {
 }
 
 std::string seconds(double t) { return format("%.9g", t); }
+
+/** @brief The snapshot block of the snapshot shown (the last), with units. */
+void print_snapshot_block(const output::Contents & c) {
+    if (c.snapshots.empty() || !c.snapshots.back().has_block) return;
+    const output::Snapshot & s = c.snapshots.back();
+    const snapshot_block::Block & b = s.block;
+    logging::section("This snapshot", c.snapshots.size() > 1 ? "the last" : "");
+    item("Step", b.step >= 0 ? std::to_string(b.step) : "-");
+    item("Time", seconds(b.time) + " s");
+    item("Reason", b.reason.empty() ? "-" : b.reason);
+    item("Written at", b.written_at.empty() ? "-" : b.written_at);
+    item("Run id", b.run_id.empty() ? "-" : b.run_id);
+    if (b.restarted) {
+        item("Restarted from", b.restart_of_file + ", step " + std::to_string(b.restart_of_step) +
+                                   (b.restart_of_run_id.empty() ? " (a run that recorded no run id)"
+                                                                : " (run " + b.restart_of_run_id + ")"));
+    }
+    item("Format", b.format + (b.format_version >= 0 ? ", version " + std::to_string(b.format_version) : ""));
+    item("Solver precision", b.solver_precision.empty() ? "-" : b.solver_precision);
+    if (b.averaged) {
+        item("Averaged over", "t = " + seconds(b.average_start) + " to " + seconds(b.average_end) + " s, " +
+                                  (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples)) : std::string("-")) +
+                                  " samples");
+    }
+}
 
 /** @brief "t = 0.002 s, step 2", or the range of several times. */
 std::string time_text(const output::Contents & c) {
@@ -243,15 +282,25 @@ void print_fields(const output::Contents & c) {
         where = "ranges at t = " + seconds(c.snapshots.back().t) + " s" + (c.snapshots.size() > 1 ? ", the last" : "");
     }
     logging::section("Fields", where);
+    const snapshot_block::Block * block =
+        !c.snapshots.empty() && c.snapshots.back().has_block ? &c.snapshots.back().block : nullptr;
     bool vectors = false;
     std::vector<std::vector<std::string>> rows;
     for (const auto & f : c.fields) {
         vectors = vectors || f.components > 1;
         const bool range = !std::isnan(f.min);
-        rows.push_back({f.name, units_text(f.units), std::to_string(f.components), range ? format("%.6g", f.min) : "-",
-                        range ? format("%.6g", f.max) : "-", f.long_name.empty() ? "-" : f.long_name});
+        std::vector<std::string> row = {f.name, units_text(f.units), std::to_string(f.components),
+                                        range ? format("%.6g", f.min) : "-", range ? format("%.6g", f.max) : "-"};
+        if (block) {
+            const snapshot_block::Field * stored = block->field(f.name);
+            row.push_back(stored && !stored->stored.empty() ? stored->stored : "-");
+        }
+        row.push_back(f.long_name.empty() ? "-" : f.long_name);
+        rows.push_back(std::move(row));
     }
-    logging::table({"field", "units", "components", "min", "max", "description"}, rows);
+    logging::table(block ? std::vector<std::string>{"field", "units", "components", "min", "max", "stored", "description"}
+                         : std::vector<std::string>{"field", "units", "components", "min", "max", "description"},
+                   rows);
     unrecorded_note(rows);
     if (vectors) logging::line("  min and max of fields with several components are of their magnitude.");
 }
@@ -298,8 +347,9 @@ void print_contents(const output::Contents & c) {
     if (c.kind == Kind::snapshot && c.snapshots.size() > 1) print_snapshots(c);
     if (c.kind == Kind::restart) print_restart(c);
     if (!c.fields.empty()) print_fields(c);
-    const json::Value p = parsed_provenance(c);
-    if (!p.is_null()) print_provenance(p);
+    const json::Value p = parsed_run(c);
+    if (!p.is_null()) print_run(p);
+    print_snapshot_block(c);
 }
 
 std::string zones_json(const std::vector<std::pair<std::string, uint64_t>> & list) {
@@ -339,6 +389,8 @@ std::string contents_json(const output::Contents & c) {
     for (const auto & s : c.snapshots) {
         json::Object e;
         e.add("t", s.t).raw("step", s.step >= 0 ? std::to_string(s.step) : "null").add("file", s.file).add("index", s.index);
+        e.raw("run_id", s.run_id.empty() ? "null" : json::quote(s.run_id));
+        e.raw("snapshot", s.has_block ? s.block.json() : "null");
         snapshots += (snapshots.size() > 1 ? "," : "") + e.str();
     }
     o.raw("snapshots", snapshots + "]");
@@ -360,7 +412,7 @@ std::string contents_json(const output::Contents & c) {
                              .add("boundary_faces", c.restart.n_faces)
                              .str());
     }
-    o.raw("provenance", parsed_provenance(c).is_null() ? "null" : c.provenance);
+    o.raw("run", parsed_run(c).is_null() ? "null" : c.run);
     o.raw("notes", strings_json(c.notes));
     return o.str();
 }
@@ -394,17 +446,19 @@ Record run_record(const std::string & dir) {
     return r;
 }
 
-/** @brief The provenance of a run directory: its run record's, else that of its newest output file. */
-json::Value run_provenance(const std::string & dir, const Record & record) {
+/** @brief The run block of a run directory: its run record's, else that of its output file of the latest run start. */
+json::Value run_block(const std::string & dir, const Record & record) {
     if (const json::Value * p = record.start.find("provenance")) return *p;
     json::Value newest;
-    fs::file_time_type when{};
+    std::string when;
     for (const auto & f : output::run_files(dir)) {
         try {
             const output::Contents c = output::open(f);
-            const auto t = fs::last_write_time(f);
-            if (!c.provenance.empty() && (newest.is_null() || t > when)) {
-                newest = parsed_provenance(c);
+            if (c.run.empty()) continue;
+            json::Value p = parsed_run(c);
+            const std::string t = text(at(p, {"run", "start_time"}));
+            if (newest.is_null() || t > when) {
+                newest = std::move(p);
                 when = t;
             }
         } catch (const std::exception &) {
@@ -416,20 +470,20 @@ json::Value run_provenance(const std::string & dir, const Record & record) {
 
 int print_input(const json::Value & block, const std::string & what) {
     if (block.is_null()) {
-        std::cerr << "mallard info: " << what << " has no provenance block (files of Mallard 0.9 and later have one), "
+        std::cerr << "mallard info: " << what << " has no run block (files of Mallard 0.9 and later have one), "
                   << "so no input.\n";
         return 1;
     }
     bool resolved = false;
     const std::string input = recorded_input(block, resolved);
     if (input.empty()) {
-        std::cerr << "mallard info: the provenance of " << what << " records no input.\n";
+        std::cerr << "mallard info: the run block of " << what << " records no input.\n";
         return 1;
     }
     std::cout << input;
     if (!input.ends_with('\n')) std::cout << "\n";
     if (!resolved) {
-        std::cerr << "mallard info: provenance version " << text(block.find("version"))
+        std::cerr << "mallard info: run block version " << text(block.find("version"))
                   << " records the input as written, not resolved (defaults, presets and units filled in); the "
                      "Mallard version that wrote it reads it the same way.\n";
     }
@@ -438,7 +492,7 @@ int print_input(const json::Value & block, const std::string & what) {
 
 int run_directory(const std::string & dir, const cli::Args & args) {
     const Record record = run_record(dir);
-    if (args.has("--input")) return print_input(run_provenance(dir, record), dir);
+    if (args.has("--input")) return print_input(run_block(dir, record), dir);
     std::vector<output::Contents> files;
     std::vector<std::pair<std::string, std::string>> errors;
     for (const auto & f : output::run_files(dir)) {
@@ -468,10 +522,12 @@ int run_directory(const std::string & dir, const cli::Args & args) {
     } else {
         const json::Value & s = record.start;
         item("Run record", "mallard.jsonl, the last run in it");
+        item("Run id", text(s.find("run_id")));
+        if (const json::Value * r = s.find("restart_of")) item("Restarted from", restart_of_text(r));
         item("Started", text(at(s, {"provenance", "run", "start_time"})));
         item("Ranks", plural(at(s, {"provenance", "run", "ranks"}), "rank"));
         item("Mallard", text(at(s, {"provenance", "mallard", "version"})));
-        if (const json::Value * restart = s.find("restart")) {
+        if (const json::Value * restart = s.find("restart"); restart && !s.find("restart_of")) {
             item("Restarted from", text(restart->find("file")) + ", step " + text(restart->find("step")));
         }
         if (record.end.type == json::Value::Type::OBJECT) {
@@ -614,7 +670,7 @@ int info_main(const cli::Args & args) {
         if (mesh_file) return mesh_info(path, args, argc, argv);
         if (fs::is_directory(path, error)) return run_directory(path, args);
         output::Contents c = output::open(path);
-        if (args.has("--input")) return print_input(parsed_provenance(c), path);
+        if (args.has("--input")) return print_input(parsed_run(c), path);
         if (!c.snapshots.empty() && !c.fields.empty()) output::read_ranges(c, c.snapshots.size() - 1);
         if (args.value_or("--format", "text") == "json") {
             std::cout << contents_json(c) << "\n";

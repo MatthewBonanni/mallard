@@ -447,10 +447,10 @@ full.toml` runs bitwise the same as `input.toml`, and resolves to `full.toml`
 again, so comparing two resolved inputs (`diff`) shows every setting in which
 two runs differ.
 
-Every output file's [provenance](output.md#provenance) holds the same text,
+Every output file's [run block](output.md#run-block) holds the same text,
 `input.resolved`, next to the input file's own text: the results of a run carry
 the input that reproduces them. The resolved input, the key catalog above and
-the preset's keys in the provenance are all made from the same record, the
+the preset's keys in the run block are all made from the same record, the
 setup's accessors, so they cannot disagree.
 
 ## The other commands

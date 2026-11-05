@@ -37,30 +37,39 @@ bool kept_on_resume(double t_entry, rtype t) {
 
 } // namespace
 
-void DataWriter::write_vtkhdf_series(const std::vector<std::pair<rtype, std::string>> & list) const {
+void DataWriter::write_vtkhdf_series(const Index & list) const {
     std::ofstream out(prefix + ".vtkhdf.series");
     if (!out.good()) throw std::runtime_error("DataWriter: Could not open file: " + prefix + ".vtkhdf.series.");
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     out << "{\n  \"file-series-version\": \"1.0\",\n  \"files\": [\n";
     for (size_t i = 0; i < list.size(); i++) {
-        out << "    {\"name\": " << json::quote(std::filesystem::path(list[i].second).filename().string())
-            << ", \"time\": " << static_cast<double>(list[i].first) << "}" << (i + 1 < list.size() ? "," : "") << "\n";
+        out << "    {\"name\": " << json::quote(std::filesystem::path(list[i].file).filename().string())
+            << ", \"time\": " << list[i].t;
+        if (list[i].step >= 0) out << ", \"step\": " << list[i].step;
+        out << "}" << (i + 1 < list.size() ? "," : "") << "\n";
     }
     out << "  ]\n}\n";
 }
 
 void DataWriter::resume_vtkhdf(rtype t) {
+    vtkhdf_run_written = false;
     if (!one_file) {
         // Keep the snapshots of the previous run's index up to the restart time
         std::ifstream in(prefix + ".vtkhdf.series");
+        if (!in.good()) return;
         const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();
-        const std::regex entry(R"re("name":\s*"((?:[^"\\]|\\.)*)",\s*"time":\s*([^\s}]+))re");
-        std::string line;
-        while (std::getline(in, line)) {
-            std::smatch match;
-            if (!std::regex_search(line, match, entry)) continue;
-            const double t_entry = std::stod(match[2].str());
-            if (kept_on_resume(t_entry, t)) history.emplace_back(t_entry, (dir / match[1].str()).string());
+        try {
+            const json::Value index = json::parse(std::string(std::istreambuf_iterator<char>(in), {}));
+            for (const auto & e : index["files"].array) {
+                const double t_entry = e["time"].number;
+                const json::Value * step = e.find("step");
+                if (kept_on_resume(t_entry, t)) {
+                    history.push_back({t_entry, step ? static_cast<int64_t>(step->number) : -1,
+                                       (dir / e["name"].string).string()});
+                }
+            }
+        } catch (const std::exception & error) {
+            throw std::runtime_error("DataWriter: " + prefix + ".vtkhdf.series is not a series index: " + error.what());
         }
         return;
     }
@@ -354,7 +363,7 @@ void DataWriter::build_vtkhdf_cells() {
     m.built = true;
 }
 
-void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Values & values) {
+void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapshot, const Values & values) {
     const std::lock_guard<std::mutex> lock(h5::mutex());
     const bool distributed = mesh->n_global_cells > 0;
     if (!vtkhdf.built) build_vtkhdf_cells();
@@ -372,9 +381,18 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
     Handle file(append ? H5Fopen(filename.c_str(), H5F_ACC_RDWR, fapl)
                        : H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl),
                 H5Fclose, (append ? "opening " : "creating ") + filename);
+    if (append && !vtkhdf_run_written) {
+        // A series continued by another run carries that run's block; each step's snapshot block names its run
+        Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
+        for (const char * name : {provenance::ATTRIBUTE, provenance::LEGACY_ATTRIBUTE}) {
+            if (H5Aexists(root, name) > 0) check(H5Adelete(root, name), "H5Adelete");
+        }
+        write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
+    }
+    vtkhdf_run_written = true;
     if (!append) {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-        write_strings_attribute(root, "provenance", {provenance});
+        write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
         write_int_attribute(root, "version", static_cast<int>(file_format::VTKHDF_OUTPUT.version));
         Handle top(H5Gcreate2(file, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating VTKHDF");
         write_array_attribute(top, "Version", VTKHDF_VERSION);
@@ -400,14 +418,25 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
                       serial, io_threads);
         for (const char * name : {"CellData", "PointData", "FieldData"}) {
             Handle group(H5Gcreate2(top, name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, name);
-            if (!one_file && std::string(name) == "FieldData") {
-                const double time = double(t);
-                write_rows<double>(group, "TIME", 1, 1, 0, first_rank(distributed) ? 1 : 0, &time, dxpl);
-                annotate(group, "TIME", FieldDescription{dim::time, "time", "time", ""});
-            }
         }
     }
     Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+    {
+        // The snapshot's time and step as field data (ParaView shows them), and its snapshot block
+        const uint64_t mine = first_rank(distributed) ? 1 : 0;
+        Handle field_data(H5Gopen2(top, "FieldData", H5P_DEFAULT), H5Gclose, "opening FieldData");
+        const double time = snapshot.time;
+        put_rows(field_data, "TIME", k + 1, 1, k, mine, &time, dxpl);
+        if (!append) annotate(field_data, "TIME", FieldDescription{dim::time, "time", "time", ""});
+        if (snapshot_blocks) {
+            const int64_t step = snapshot.step;
+            put_rows(field_data, "STEP", k + 1, 1, k, mine, &step, dxpl);
+            if (!append) annotate(field_data, "STEP", FieldDescription{dim::none, "time step number", "", ""});
+            const std::string text = snapshot.json();
+            put_string_row(file, snapshot_block::DATASET, k + 1, k, mine, text,
+                           snapshot_block::dataset_width(text.size()), dxpl);
+        }
+    }
     if (append) {
         Handle cells(H5Gopen2(top, ".", H5P_DEFAULT), H5Gclose, "opening the cells");
         bool same = read_rows<int64_t>(cells, "NumberOfCells", 0, 1, 1, H5P_DEFAULT)[0] == static_cast<int64_t>(m.n_cells);
@@ -446,7 +475,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
     Handle steps = open_or_create_group(top, "Steps");
     set_attribute<int64_t>(steps, "NSteps", static_cast<int64_t>(k + 1));
     const uint64_t mine = first_rank(distributed) ? 1 : 0;
-    const double time = double(t);
+    const double time = snapshot.time;
     const std::array<int64_t, 4> zeros = {0, 0, 0, 0};
     const int64_t one = 1;
     put_rows(steps, "Values", k + 1, 1, k, mine, &time, dxpl);
@@ -456,7 +485,11 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
     put_rows(steps, "PointOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
     put_rows(steps, "CellOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
     put_rows(steps, "ConnectivityIdOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
-    for (const char * name : {"PointDataOffsets", "FieldDataOffsets"}) open_or_create_group(steps, name);
+    open_or_create_group(steps, "PointDataOffsets");
+    Handle field_offsets = open_or_create_group(steps, "FieldDataOffsets");
+    const int64_t field_offset = static_cast<int64_t>(k);
+    put_rows(field_offsets, "TIME", k + 1, 1, k, mine, &field_offset, dxpl);
+    if (snapshot_blocks) put_rows(field_offsets, "STEP", k + 1, 1, k, mine, &field_offset, dxpl);
     Handle data_offsets = open_or_create_group(steps, "CellDataOffsets");
     const int64_t offset = static_cast<int64_t>(k * m.n_cells);
     for (const auto & field : fields) put_rows(data_offsets, field.name.c_str(), k + 1, 1, k, mine, &offset, dxpl);
@@ -465,7 +498,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, rtype t, const Value
 
 #else
 
-void DataWriter::write_vtkhdf(const std::string &, rtype, const Values &) {
+void DataWriter::write_vtkhdf(const std::string &, const Block &, const Values &) {
     throw std::logic_error("DataWriter: VTKHDF output without HDF5");
 }
 

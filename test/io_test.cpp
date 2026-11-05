@@ -395,7 +395,7 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
                 continue;
             }
 #endif
-            EXPECT_TRUE(without_provenance(async.at(name)) == without_provenance(bytes)) << name << " " << snapshot_keys;
+            EXPECT_TRUE(without_run_metadata(async.at(name)) == without_run_metadata(bytes)) << name << " " << snapshot_keys;
         }
     }
 }

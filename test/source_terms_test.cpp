@@ -185,7 +185,7 @@ TEST(SourceTermsTest, NamedRegionsActAsTheTablesTheyName) {
     for (size_t i = 0; i < r[0].values.size(); i++) EXPECT_EQ(r[0].values[i], r[1].values[i]) << "column " << i;
     EXPECT_NE(r[0].values[0], std::vector<double>(r[0].measure.size(), 0.0));
     const std::string named = read_text(dir + "/named.csv");
-    EXPECT_EQ(without_provenance(named), without_provenance(read_text(dir + "/inline.csv")));
+    EXPECT_EQ(without_run_metadata(named), without_run_metadata(read_text(dir + "/inline.csv")));
     EXPECT_NE(named.find("integral_RHO"), std::string::npos);
 }
 

@@ -71,8 +71,8 @@ std::vector<std::string> vtk_arrays(const std::string & text) {
     const std::regex re("<DataArray[^>]* Name=\"([^\"]+)\"");
     for (auto it = std::sregex_iterator(text.begin(), text.end(), re); it != std::sregex_iterator(); ++it) {
         const std::string name = (*it)[1];
-        if (name != "TIME" && name != "MALLARD_FORMAT_VERSION" && name != "Points" && name != "connectivity" &&
-            name != "offsets" && name != "types") {
+        if (name != "TIME" && name != "STEP" && name != "MALLARD_FORMAT_VERSION" && name != "Points" &&
+            name != "connectivity" && name != "offsets" && name != "types") {
             names.push_back(name);
         }
     }
@@ -367,7 +367,7 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
     std::ifstream in(dir + "/integrals.csv");
     std::string line;
     for (int i = 0; i < 3; i++) std::getline(in, line);
-    EXPECT_EQ(line.rfind("# provenance ", 0), 0u);
+    EXPECT_EQ(line.rfind("# mallard-run ", 0), 0u);
 
 #ifdef Mallard_HAS_HDF5
     if (comm::size() == 1 || have_parallel_hdf5()) {

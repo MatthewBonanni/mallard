@@ -83,19 +83,60 @@ def read_h5_cells(path):
 def read_series(path):
     """(time, snapshot file) of every snapshot of a series index PREFIX.xmf."""
     text = open(path).read()
-    entries = re.findall(r'<Grid Name="([^"]+)" GridType="Uniform">\s*<Time Value="([^"]+)"/>', text)
     base = os.path.dirname(path)
-    return [(float(t), os.path.join(base, name + ".h5")) for name, t in entries]
+    out = []
+    for grid in re.findall(r'<Grid [^>]*GridType="Uniform">.*?</Grid>', text, re.S):
+        t = re.search(r'<Time Value="([^"]+)"/>', grid)
+        f = re.search(r'>([^<>:]+):/fields/', grid)
+        if f:
+            out.append((float(t.group(1)) if t else 0.0, os.path.join(base, f.group(1))))
+    return out
 
 
-def provenance(path):
-    """The provenance block of an HDF5 file (the root group's attribute), as a dict; None if it has none."""
+def run_block(path):
+    """The run block of an HDF5 file (the root group's attribute mallard_run,
+    named provenance before Mallard 0.10), as a dict; None if it has none."""
     with h5py.File(path, "r") as f:
-        value = f["/"].attrs.get("provenance")
+        value = f["/"].attrs.get("mallard_run")
+        if value is None:
+            value = f["/"].attrs.get("provenance")
     if value is None:
         return None
     value = value[0]
     return json.loads(value.decode() if isinstance(value, bytes) else value)
+
+
+provenance = run_block
+
+
+def snapshot_blocks(path):
+    """The snapshot blocks of an HDF5 or VTKHDF file (dataset mallard_snapshot,
+    one row per snapshot), as dicts; [] for files before Mallard 0.10."""
+    with h5py.File(path, "r") as f:
+        if "mallard_snapshot" not in f:
+            return []
+        return [json.loads(_text(v).rstrip("\0")) for v in f["mallard_snapshot"][()]]
+
+
+def recorded_time(path):
+    """The time an HDF5 or VTKHDF snapshot file records (of its last step), in s."""
+    with h5py.File(path, "r") as f:
+        if "VTKHDF" in f:
+            g = f["VTKHDF"]
+            if "Steps" in g:
+                return float(g["Steps"]["Values"][-1])
+            return float(g["FieldData"]["TIME"][0]) if "TIME" in g.get("FieldData", {}) else 0.0
+        return float(f["/"].attrs.get("time", 0.0))
+
+
+def is_mesh(path):
+    """Whether an HDF5 file is a mesh file (its format attribute), not a snapshot."""
+    with h5py.File(path, "r") as f:
+        value = f["/"].attrs.get("format")
+    if value is None:
+        return False
+    value = value[0] if not isinstance(value, (bytes, str)) else value
+    return "mesh" in _text(value)
 
 
 def _text(value):

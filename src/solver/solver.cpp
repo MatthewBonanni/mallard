@@ -45,6 +45,7 @@
 #include "partition.h"
 #include "provenance.h"
 #include "run_log.h"
+#include "snapshot_block.h"
 #include "expression.h"
 #include "gradient.h"
 #include "viscous_flux.h"
@@ -122,9 +123,14 @@ void Solver::start_from_restart(Input & input, const std::string & restart_file)
         std::string error;
         if (comm::is_root()) {
             std::vector<std::string> skipped;
-            const FoundRestart found = newest_restart(prefixes, skipped);
+            const std::string run_log = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
+            const FoundRestart found = newest_restart(prefixes, skipped, run_log);
             for (const std::string & reason : skipped) logging::warning(reason + " Skipped by --restart latest.");
             file = found.file;
+            if (!file.empty()) {
+                logging::line("--restart latest: " + file + " (step " + std::to_string(found.step) + ", t = " +
+                              logging::real(found.t) + " s), from " + found.source);
+            }
             if (file.empty() && !skipped.empty()) {
                 error = "--restart latest: no restart file " + list + " reads completely. Name one with --restart "
                         "FILE, or delete them to start from [initialize].";
@@ -271,7 +277,7 @@ void Solver::write_provenance() {
         if (monitor.out) *monitor.out << line << std::flush;
     }
     if (integral_monitor.out) *integral_monitor.out << line << std::flush;
-    probes.annotate(line);
+    probes.annotate(line, step);
     std::vector<std::string> names;
     std::vector<double> seconds, ones;
     for (const auto & [name, s] : run_health.setup_phases) {
@@ -287,6 +293,8 @@ void Solver::write_provenance() {
     start.add("type", "start")
         .add("schema", run_log::SCHEMA)
         .add("version", run_log::VERSION)
+        .add("run_id", provenance::run_id())
+        .raw("restart_of", provenance::restart_of())
         .raw("provenance", provenance::json())
         .raw("placement", provenance::placement())
         .raw("setup_phases", setup_phases.str());
@@ -2064,6 +2072,7 @@ int Solver::run() {
         if (step == 0) {
             Kokkos::Timer output_timer;
             copy_device_to_host();
+            const snapshot_block::Reason reason(snapshot_block::reason::START);
             write_data(true);
             write_probes();
             t_wall_output += output_timer.seconds();
@@ -2127,6 +2136,7 @@ int Solver::run() {
     Kokkos::Timer output_timer;
     copy_device_to_host();
     write_data(true);
+    const snapshot_block::Reason reason(snapshot_block::reason::STOP);
     const std::string restart_file = control_stop.empty() ? std::string() : write_restarts();
     for (auto & writer : data_writers) writer->finish();
     if (checkpoint_writer) checkpoint_writer->finish();
@@ -2488,6 +2498,10 @@ void Solver::write_data(bool force) {
     if (!any_due) {
         return;
     }
+    if (statistics.means_enabled()) {
+        snapshot_block::set_averages(statistics.average_start(), statistics.average_end(),
+                                     static_cast<int64_t>(statistics.samples()));
+    }
     update_primitives();
     copy_device_to_host();
     // Snapshots first, so that a restart file at this step counts them
@@ -2500,7 +2514,7 @@ void Solver::write_data(bool force) {
     for (auto & writer : data_writers) {
         if (writer->get_format() == DataFormat::RESTART) writer->write(step, t, force, attributes, faces, arrays);
     }
-    statistics.write(step, t);
+    statistics.write(step, t, snapshot_block::current_reason(force));
     if (snapshots) {
         // Regions of lower dimension: point values, written as probes write them
         update_cell_W();

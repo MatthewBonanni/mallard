@@ -20,7 +20,7 @@ namespace run_log {
 
 /** @brief Name and version of the record format, in each start record. */
 inline constexpr const char * SCHEMA = "mallard-run-log";
-constexpr int VERSION = 1;
+constexpr int VERSION = 2;
 
 /**
  * @brief Opens the log on rank 0 (other ranks ignore the log): appended to
