@@ -1573,12 +1573,15 @@ std::vector<double> column_at(const std::vector<std::map<std::string, double>> &
     return c;
 }
 
-/** @brief The last n values of a column up to time t. */
+/** @brief The last n values of a column up to time t (of rtype values: those of a samples file). */
 std::vector<double> history_of(const std::vector<std::map<std::string, double>> & rows, const std::string & name,
-                               double t, size_t n, const std::string & key = "", double value = 0.0) {
+                               double t, size_t n, bool precision, const std::string & key = "", double value = 0.0) {
     std::vector<double> c;
     for (const auto & row : rows) {
-        if (row.at("t") <= t && (key.empty() || row.at(key) == value)) c.push_back(row.at(name));
+        // Samples files hold rtype values, printed to its precision
+        if (row.at("t") <= t && (key.empty() || row.at(key) == value)) {
+            c.push_back(precision ? static_cast<double>(static_cast<rtype>(row.at(name))) : row.at(name));
+        }
     }
     return std::vector<double>(c.end() - static_cast<long>(std::min(n, c.size())), c.end());
 }
@@ -1617,7 +1620,7 @@ TEST(ProbesTest, SpectraOfAnAdvectedWavePeakAtItsFrequency) {
             ASSERT_EQ(psd.size(), 21u);
             for (size_t k = 0; k < f.size(); k++) {
                 EXPECT_NEAR(f[k], 0.1 * double(k), 1e-12);
-                EXPECT_NEAR(st[k], f[k] * 2.0 / 0.3, 1e-12);
+                EXPECT_NEAR(st[k], f[k] * 2.0 / 0.3, precision_tol<double>(1e-12, 1e-6));
             }
             const auto peak = probe_spectra::peak(psd, 0.1);
             EXPECT_EQ(peak.bin, 3u);
@@ -1625,12 +1628,12 @@ TEST(ProbesTest, SpectraOfAnAdvectedWavePeakAtItsFrequency) {
             const double amplitude = std::sqrt(3 * 0.1 * psd[3]);
             EXPECT_GT(amplitude, 0.09);
             EXPECT_LT(amplitude, 0.1);
-            const auto expected = probe_spectra::welch(history_of(samples, "RHO", 10.0, 40, "point", point), 1,
+            const auto expected = probe_spectra::welch(history_of(samples, "RHO", 10.0, 40, true, "point", point), 1,
                                                        probe_spectra::Window::HANN, 0.25);
             for (size_t k = 0; k < psd.size(); k++) EXPECT_NEAR(psd[k], expected[k], 1e-12 * expected[3]);
         }
         const auto reduced = column_at(read_csv(dir + "/rs.csv"), step, "PSD_max_RHO");
-        const auto expected = probe_spectra::welch(history_of(read_csv(dir + "/p_reductions.csv"), "max_RHO", 10.0, 40),
+        const auto expected = probe_spectra::welch(history_of(read_csv(dir + "/p_reductions.csv"), "max_RHO", 10.0, 40, false),
                                                    1, probe_spectra::Window::HANN, 0.25);
         ASSERT_EQ(reduced.size(), expected.size());
         for (size_t k = 0; k < reduced.size(); k++) EXPECT_NEAR(reduced[k], expected[k], 1e-12 * expected[3]);
