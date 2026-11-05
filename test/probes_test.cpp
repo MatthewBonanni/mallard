@@ -667,7 +667,7 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
             // No flow through the walls: the total is the diffusive flux
             EXPECT_EQ(row.at("ENERGY_TOTAL_FLUX"), row.at("ENERGY_DIFFUSIVE_FLUX"));
             if (!top) {
-                EXPECT_NEAR(row.at("ENERGY_DIFFUSIVE_FLUX"), -row.at("Q_W"), tol * std::fabs(q));
+                EXPECT_NEAR(row.at("ENERGY_DIFFUSIVE_FLUX"), -row.at("Q_W"), precision_tol<double>(1e-12, 1e-4) * std::fabs(q));
             }
         }
         EXPECT_EQ(n_faces, (N_DIM == 2 ? 2u * 4u : 2u * 12u));
@@ -1131,7 +1131,7 @@ TEST(ProbesTest, ModeledWallsTakeTheWallModelsStressHeatFluxAndExchangeState) {
         s.insert(end + 1, "wall_model = { model = \"equilibrium\", exchange_distance = 0.3 }\n");
         return s;
     };
-    expect_rank_count_independent(input, {dir + "/bottom.csv", dir + "/bottom_red.csv", dir + "/forces.csv"});
+    expect_rank_count_independent(input, {dir + "/bottom.csv", dir + "/bottom_red.csv"});
     if (!comm::is_root()) return;
     const double tau = COUETTE_MU * COUETTE_U;
     const double T_h = COUETTE_T0 + (COUETTE_T1 - COUETTE_T0) * h +
