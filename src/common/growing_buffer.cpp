@@ -90,12 +90,12 @@ bool GrowingBuffer::supported() { return true; }
 Kokkos::Tools::SpaceHandle device_space() { return Kokkos::Tools::make_space_handle(Kokkos::CudaSpace::name()); }
 
 GrowingBuffer::GrowingBuffer(const size_t max_bytes, std::string label_) : label(std::move(label_)) {
-    if (cudaGetDevice(&device) != cudaSuccess) throw std::runtime_error("GrowingBuffer: cudaGetDevice failed");
-    const CUmemAllocationProp prop = properties(device);
-    check(driver().granularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), "cuMemGetAllocationGranularity");
-    reserved = (max_bytes + granularity - 1) / granularity * granularity;
+    if (cudaGetDevice(&vm.device) != cudaSuccess) throw std::runtime_error("GrowingBuffer: cudaGetDevice failed");
+    const CUmemAllocationProp prop = properties(vm.device);
+    check(driver().granularity(&vm.granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), "cuMemGetAllocationGranularity");
+    vm.reserved = (max_bytes + vm.granularity - 1) / vm.granularity * vm.granularity;
     CUdeviceptr ptr = 0;
-    check(driver().address_reserve(&ptr, reserved, 0, 0, 0), "cuMemAddressReserve");
+    check(driver().address_reserve(&ptr, vm.reserved, 0, 0, 0), "cuMemAddressReserve");
     base = ptr;
 }
 
@@ -112,43 +112,44 @@ GrowingBuffer::~GrowingBuffer() {
         driver().release(handles[k]);
         offset += sizes[k];
     }
-    if (base != 0) driver().address_free(base, reserved);
+    if (base != 0) driver().address_free(base, vm.reserved);
 }
 
 void GrowingBuffer::report_rounding(const bool allocate) const {
-    if (mapped == used) return;
-    void * p = reinterpret_cast<void *>(base + used);
+    if (vm.mapped == vm.used) return;
+    void * p = reinterpret_cast<void *>(base + vm.used);
     if (allocate) {
-        Kokkos::Tools::allocateData(device_space(), label + "_pages", p, mapped - used);
+        Kokkos::Tools::allocateData(device_space(), label + "_pages", p, vm.mapped - vm.used);
     } else {
-        Kokkos::Tools::deallocateData(device_space(), label + "_pages", p, mapped - used);
+        Kokkos::Tools::deallocateData(device_space(), label + "_pages", p, vm.mapped - vm.used);
     }
 }
 
 void GrowingBuffer::ensure(const size_t bytes) {
-    if (bytes <= used) return;
-    if (bytes > reserved) throw std::length_error("GrowingBuffer: more than the reserved size");
+    if (bytes <= vm.used) return;
+    if (bytes > vm.reserved) throw std::length_error("GrowingBuffer: more than the reserved size");
     report_rounding(false);
-    if (bytes > mapped) map(bytes);
-    Kokkos::Tools::allocateData(device_space(), label, reinterpret_cast<void *>(base + used), bytes - used);
-    filled.emplace_back(used, bytes - used);
-    used = bytes;
+    if (bytes > vm.mapped) map(bytes);
+    Kokkos::Tools::allocateData(device_space(), label, reinterpret_cast<void *>(base + vm.used), bytes - vm.used);
+    filled.emplace_back(vm.used, bytes - vm.used);
+    vm.used = bytes;
     report_rounding(true);
 }
 
 void GrowingBuffer::map(const size_t bytes) {
-    const size_t size = std::min((bytes - mapped + granularity - 1) / granularity * granularity, reserved - mapped);
-    const CUmemAllocationProp prop = properties(device);
+    const size_t size =
+        std::min((bytes - vm.mapped + vm.granularity - 1) / vm.granularity * vm.granularity, vm.reserved - vm.mapped);
+    const CUmemAllocationProp prop = properties(vm.device);
     CUmemGenericAllocationHandle handle;
     check(driver().create(&handle, size, &prop, 0), "cuMemCreate");
     handles.push_back(handle);
     sizes.push_back(size);
-    check(driver().map(base + mapped, size, 0, handle, 0), "cuMemMap");
+    check(driver().map(base + vm.mapped, size, 0, handle, 0), "cuMemMap");
     CUmemAccessDesc access = {};
     access.location = prop.location;
     access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    check(driver().set_access(base + mapped, size, &access, 1), "cuMemSetAccess");
-    mapped += size;
+    check(driver().set_access(base + vm.mapped, size, &access, 1), "cuMemSetAccess");
+    vm.mapped += size;
 }
 
 #else
