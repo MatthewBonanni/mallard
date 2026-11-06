@@ -17,8 +17,8 @@
 namespace file_format {
 
 /**
- * @brief A file format: files are written with `version` (or, for restart
- *        files, the lowest version that holds their contents) and every
+ * @brief A file format: files are written with `version` (restart files before
+ *        version 7: the lowest version that held their contents) and every
  *        version from `oldest` to `version` is read. docs/guide/output.md
  *        lists each version and the release that introduced it.
  */
@@ -28,7 +28,7 @@ struct Format {
     int64_t oldest;
 };
 
-inline constexpr Format RESTART{"restart", 6, 1};
+inline constexpr Format RESTART{"restart", 7, 1};
 inline constexpr Format MESH{"HDF5 mesh", 1, 1};
 inline constexpr Format HDF5_OUTPUT{"HDF5 output", 1, 1};
 inline constexpr Format VTU_OUTPUT{"VTU output", 1, 1};

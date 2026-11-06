@@ -1,7 +1,8 @@
 """Minimal reader for Mallard's raw-appended VTU files, and (through
 mallard.vtkhdf and mallard.h5, which need h5py) its VTKHDF and HDF5 snapshots:
-every function also takes a snapshot .vtkhdf or .h5 file. provenance() reads the
-provenance block of any output file, units() and long_names() the units and
+every function also takes a snapshot .vtkhdf or .h5 file. run_block() reads the
+run block of any output file (named "provenance" before Mallard 0.10),
+snapshot_blocks() its snapshot blocks, units() and long_names() the units and
 descriptions of its fields, resolved_input() the input that made it."""
 import json
 import os
@@ -118,19 +119,57 @@ def _read_pvtu(path):
 
 
 def series(directory, pattern="*"):
-    """The snapshots of a series in a directory, oldest first: the VTKHDF
-    files, else the PVTU files of an MPI run (not their pieces), else the VTU,
-    VTP (or HDF5) files."""
+    """The snapshots of a series in a directory that match pattern, in the
+    order of the step and time they record (files of Mallard before 0.10 by
+    time alone): the VTKHDF files, else the PVTU files of an MPI run (not
+    their pieces), else the VTU, VTP (or HDF5) files."""
     import glob
     files = sorted(glob.glob(os.path.join(directory, pattern)))
     vtkhdf = [f for f in files if f.endswith(".vtkhdf")]
-    if vtkhdf:
-        return vtkhdf
     parallel = [f for f in files if f.endswith(".pvtu")]
-    if parallel:
-        return parallel
-    return [f for f in files if (f.endswith(".vtu") or f.endswith(".vtp") or f.endswith(".h5"))
-            and not re.search(r"_p\d{4}\.vtu$", f)]
+    if vtkhdf:
+        chosen = vtkhdf
+    elif parallel:
+        chosen = parallel
+    else:
+        pieces = set()
+        for f in glob.glob(os.path.join(directory, "*.pvtu")):
+            pieces.update(_pvtu_pieces(f))
+        chosen = [f for f in files if f.endswith((".vtu", ".vtp", ".h5")) and os.path.abspath(f) not in pieces
+                  and not _is_mesh_h5(f)]
+    return sorted(chosen, key=_recorded_order)
+
+
+def _pvtu_pieces(path):
+    text = open(path).read()
+    return {os.path.abspath(os.path.join(os.path.dirname(path), s)) for s in re.findall(r'<Piece Source="([^"]+)"', text)}
+
+
+def _is_mesh_h5(path):
+    if not path.endswith(".h5"):
+        return False
+    from .h5 import is_mesh
+    return is_mesh(path)
+
+
+def _recorded_order(path):
+    """(step, time) a snapshot file records; a file without a step sorts by time."""
+    blocks = snapshot_blocks(path)
+    if blocks:
+        return (blocks[0]["time"], blocks[0]["step"])
+    return (recorded_time(path), -1)
+
+
+def recorded_time(path):
+    """The time a snapshot file records (its TIME field data), in s."""
+    if path.endswith((".h5", ".vtkhdf")):
+        from .h5 import recorded_time as h5_time
+        return h5_time(path)
+    if path.endswith(".pvtu"):
+        path = sorted(_pvtu_pieces(path))[0]
+    head = open(path, "rb").read(1 << 20).decode("utf-8", "replace")
+    m = re.search(r'Name="TIME"[^>]*>\s*([^<\s]+)', head)
+    return float(m.group(1)) if m else 0.0
 
 
 def snapshot(stem):
@@ -144,15 +183,28 @@ def snapshot(stem):
 
 def read_index(series):
     """(time, file) of every snapshot of a series: its index, PREFIX.vtkhdf.series
-    or PREFIX.pvd (VTU, builds without HDF5), or PREFIX for whichever exists."""
+    or PREFIX.pvd (VTU, builds without HDF5), or PREFIX for whichever exists.
+    read_index_steps() also gives each one's step."""
+    return [(t, f) for t, _, f in read_index_steps(series)]
+
+
+def read_index_steps(series):
+    """(time, step, file) of every snapshot of a series index; step is None in
+    indexes of Mallard before 0.10, which record none."""
     if not series.endswith((".series", ".pvd")):
         series += ".vtkhdf.series" if os.path.exists(series + ".vtkhdf.series") else ".pvd"
     if series.endswith(".series"):
-        from .vtkhdf import read_series
-        return read_series(series)
-    text = open(series).read()
-    return [(float(t), os.path.join(os.path.dirname(series), f))
-            for t, f in re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)]
+        from .vtkhdf import read_series_steps
+        return read_series_steps(series)
+    out = []
+    for tag in re.findall(r"<DataSet [^>]*>", open(series).read()):
+        t = re.search(r'timestep="([^"]+)"', tag)
+        f = re.search(r'file="([^"]+)"', tag)
+        s = re.search(r' step="([^"]+)"', tag)
+        if f:
+            out.append((float(t.group(1)) if t else 0.0, int(s.group(1)) if s else None,
+                        os.path.join(os.path.dirname(series), f.group(1))))
+    return out
 
 
 def _inflate_blocks(raw, off, hdr_dt):
@@ -256,32 +308,68 @@ def grid_fields(path, names):
     return time, xs, ys, out
 
 
-_PROVENANCE_MAGIC = b"MLRD-PROVENANCE\0"
+_RUN_MAGIC = b"MLRD-PROVENANCE\0"
+_SNAPSHOT_MAGIC = b"MLRD-SNAPSHOT\0\0\0"
 
 
-def provenance(path):
-    """The provenance block (docs/guide/output.md) of any Mallard output file,
-    as a dict: of the first run that wrote to it for CSV files and run records,
-    None if the file has none."""
+def _trailer(raw, end, magic):
+    """The JSON of the restart trailer with this magic ending at byte end, and where it starts."""
+    if end < 24 or raw[end - 16:end] != magic:
+        return None, end
+    (length,) = struct.unpack("<Q", raw[end - 24:end - 16])
+    start = end - 24 - length
+    return json.loads(raw[start:end - 24]), start
+
+
+def run_block(path):
+    """The run block (docs/guide/output.md#snapshot-metadata) of any Mallard
+    output file, as a dict: of the first run that wrote to it for CSV files and
+    run records, None if the file has none. Files before Mallard 0.10 name it
+    "provenance", read the same way."""
+    blocks = run_blocks(path)
+    return blocks[0] if blocks else None
+
+
+provenance = run_block
+
+
+def run_blocks(path):
+    """Every run block of a file, oldest first: one per run that wrote to a CSV
+    file (each precedes the rows its run appended), or a run record; one for
+    other files."""
     if path.endswith(".h5") or path.endswith(".vtkhdf"):
-        from .h5 import provenance as h5_provenance
-        return h5_provenance(path)
+        from .h5 import run_block as h5_run_block
+        block = h5_run_block(path)
+        return [block] if block else []
     if path.endswith(".jsonl"):
-        for line in open(path):
-            record = json.loads(line)
-            if record["type"] == "start":
-                return record["provenance"]
-        return None
+        return [json.loads(line)["provenance"] for line in open(path) if '"type":"start"' in line]
     raw = open(path, "rb").read()
-    if raw.endswith(_PROVENANCE_MAGIC):
-        (length,) = struct.unpack("<Q", raw[-24:-16])
-        return json.loads(raw[-24 - length:-24])
-    head = raw[:1 << 20].decode("utf-8", "replace")
-    m = re.search(r"<!-- provenance (.*?) -->", head, re.S)
+    if raw.endswith(_RUN_MAGIC):
+        return [_trailer(raw, len(raw), _RUN_MAGIC)[0]]
+    head = raw[:1 << 22].decode("utf-8", "replace")
+    m = re.search(r"<!-- (?:mallard-run|provenance) (.*?) -->", head, re.S)
     if m:
-        return json.loads(m.group(1))
-    m = re.search(r"^# provenance (.*)$", head, re.M)
-    return json.loads(m.group(1)) if m else None
+        return [json.loads(m.group(1))]
+    return [json.loads(m) for m in re.findall(r"^# (?:mallard-run|provenance) (.*)$", head, re.M)]
+
+
+def snapshot_blocks(path):
+    """The snapshot blocks of a file (docs/guide/output.md#snapshot-metadata),
+    one per snapshot it holds, as dicts with step, time (s), run_id,
+    restart_of, written_at, reason and fields (units, stored precision); []
+    for files before Mallard 0.10, which record none."""
+    if path.endswith(".h5") or path.endswith(".vtkhdf"):
+        from .h5 import snapshot_blocks as h5_blocks
+        return h5_blocks(path)
+    if path.endswith(".pvtu"):
+        path = sorted(_pvtu_pieces(path))[0]
+    raw = open(path, "rb").read()
+    if raw.endswith(_RUN_MAGIC):
+        _, start = _trailer(raw, len(raw), _RUN_MAGIC)
+        block, _ = _trailer(raw, start, _SNAPSHOT_MAGIC)
+        return [block] if block else []
+    head = raw[:1 << 22].decode("utf-8", "replace")
+    return [json.loads(m) for m in re.findall(r"(?:<!-- |^# )mallard-snapshot (\{.*?\})(?: -->|$)", head, re.M | re.S)]
 
 
 def resolved_input(path):
@@ -289,7 +377,7 @@ def resolved_input(path):
     file: its provenance's input.resolved. None for a file without provenance, or
     of Mallard 0.9 (provenance version 1, whose `setup` holds only the terminal
     output's setup summary)."""
-    block = provenance(path)
+    block = run_block(path)
     if block is None or block.get("version", 1) < 2:
         return None
     return block["input"].get("resolved")

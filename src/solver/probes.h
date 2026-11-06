@@ -176,10 +176,12 @@ class Probes {
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
         /**
-         * @brief Rank 0 adds the provenance to the files written so far: csv_line to every CSV file,
-         *        the block as the root attribute of HDF5 files (VTP and PVD files carry it as they are written).
+         * @brief Rank 0 adds the run block of a run starting at step to the files written so
+         *        far: csv_line to every CSV file, which marks where the run joins them; to HDF5
+         *        files, the block as the root attribute and the run in mallard_runs (the row it
+         *        starts at). VTP, PVD and VTKHDF files carry it as they are written.
          */
-        void annotate(const std::string & csv_line);
+        void annotate(const std::string & csv_line, uint64_t step);
 
         enum class Sampling { CELL, POINT };
         enum class Reduction { INTEGRAL, MEAN, FAVRE, MIN, MAX, RMS };
@@ -263,8 +265,14 @@ class Probes {
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
-            std::vector<std::pair<double, std::string>> series;  // vtp: (t, file) of the .pvd
+            struct SeriesEntry {
+                double t = 0.0;
+                int64_t step = -1;  // -1 where an older .pvd records none
+                std::string file;
+            };
+            std::vector<SeriesEntry> series;  // vtp: the snapshots of the .pvd
             uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
+            std::string last_file;                               // vtp, vtkhdf: the file written last
 
             bool due(uint64_t step, rtype t) const;
             uint64_t n_evaluated() const { return codes.extent(0); }
@@ -273,8 +281,11 @@ class Probes {
             /** @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values. */
             void sample(const ProbeFields & fields, std::vector<double> & nodes, std::vector<double> & quad);
             void write_hdf5(uint64_t step, rtype t, const std::vector<double> & values) const;
-            void write_vtp(uint64_t step, rtype t, const std::vector<double> & values);
-            void write_vtkhdf(rtype t, const std::vector<double> & values);
+            /** @brief The snapshot block of the samples at (step, t), written now for reason. */
+            snapshot_block::Block snapshot_of(uint64_t step, rtype t, const std::string & reason) const;
+            void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
+            void write_vtkhdf(const snapshot_block::Block & block, const std::vector<double> & values);
+            bool vtkhdf_run_written = false;  // this run's block is in the vtkhdf file
             void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
                                   const std::vector<double> & quad) const;
         };

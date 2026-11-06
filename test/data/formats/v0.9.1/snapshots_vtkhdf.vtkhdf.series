@@ -1,0 +1,7 @@
+{
+  "file-series-version": "1.0",
+  "files": [
+    {"name": "snapshots_vtkhdf_000000.vtkhdf", "time": 0},
+    {"name": "snapshots_vtkhdf_000001.vtkhdf", "time": 0.014430646149284233}
+  ]
+}

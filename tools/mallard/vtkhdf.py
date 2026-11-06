@@ -97,17 +97,19 @@ def field_metadata(path):
 
 def read_series(path):
     """(time, file) of every snapshot of an index PREFIX.vtkhdf.series."""
+    return [(t, f) for t, _, f in read_series_steps(path)]
+
+
+def read_series_steps(path):
+    """(time, step, file) of every entry of a .vtkhdf.series index; step is None
+    in indexes of Mallard before 0.10."""
     with open(path) as f:
         index = json.load(f)
     base = os.path.dirname(path)
-    return [(float(e["time"]), os.path.join(base, e["name"])) for e in index["files"]]
+    return [(float(e["time"]), e.get("step"), os.path.join(base, e["name"])) for e in index["files"]]
 
 
 def provenance(path):
-    """The provenance block of a VTKHDF file, as a dict; None if it has none."""
-    with h5py.File(path, "r") as f:
-        value = f["/"].attrs.get("provenance")
-    if value is None:
-        return None
-    value = value[0]
-    return json.loads(value.decode() if isinstance(value, bytes) else value)
+    """The run block of a VTKHDF file (named provenance before Mallard 0.10), as a dict; None if it has none."""
+    from .h5 import run_block
+    return run_block(path)

@@ -284,7 +284,7 @@ def ignition_data(args):
     text = (ROOT / "examples" / "h2_ignition" / "input.toml").read_text()
     text = text.replace("../../mechanisms/", str(ROOT / "mechanisms") + "/")
     run(args.mallard, text, work, command=["reactor"])
-    return list(csv.DictReader(open(work / "reactor.csv")))
+    return list(csv.DictReader(line for line in open(work / "reactor.csv") if not line.startswith("#")))
 
 
 def ignition(P, args):

@@ -83,7 +83,7 @@ constexpr Option INFO_OPTIONS[] = {
      "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
      "scripts. Default: text."},
     {"--input", "", "",
-     "Print the input file that produced the file, from its provenance: the resolved input (every key the "
+     "Print the input file that produced the file, from its run block: the resolved input (every key the "
      "run read, defaults filled in) for files of Mallard 0.10 and later, the input as written for 0.9. For a "
      "run directory, its run's."},
     {"--quality", "", "PREFIX",
@@ -350,7 +350,7 @@ constexpr Command COMMANDS[] = {
             "on.\n"
             "\n"
             "The result runs bitwise the same as the input and resolves to itself. Every output file's "
-            "provenance holds the same text (input.resolved), so a run's results carry the full input that "
+            "run block holds the same text (input.resolved), so a run's results carry the full input that "
             "made them.",
         .options = RESOLVE_OPTIONS,
         .arguments = FILE_ARGUMENTS,
@@ -396,10 +396,13 @@ constexpr Command COMMANDS[] = {
         .description =
             "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
             "version; the mesh (cells, points, cell types, bounds, boundary and cell zones); its times and steps; "
-            "its fields with their units, descriptions and ranges (of the last snapshot); the species; and its "
-            "provenance (Mallard version and commit, build, when, where and on how many ranks it ran, the input "
-            "file and mesh with their SHA-256). Files without provenance (before Mallard 0.9) or from a newer "
-            "Mallard are reported with a note.\n"
+            "its fields with their units, descriptions, ranges (of the last snapshot) and stored precision; the "
+            "species; its run block, the same for every file of the run (Mallard version and commit, build, run "
+            "id and the run it restarted from, when, where and on how many ranks it ran, the input file and mesh "
+            "with their SHA-256); and the last snapshot's block (step, time, reason, when and by which run it was "
+            "written). Step, time and run come from what the file records, never from its name. Files without a "
+            "run block (before Mallard 0.9), without snapshot blocks (before 0.10) or from a newer Mallard are "
+            "reported with a note that says what is read instead.\n"
             "\n"
             "FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5) or a series index (.vtkhdf.series, .pvd, .xmf), "
             "a restart file (compressed too), a probe file (.csv, .h5, .vtkhdf, .vtp, .pvd), a CSV file of forces "
@@ -417,7 +420,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard info wing.msh --quality quality\n"
                     "$ mallard info runs/cylinder",
         .exit_status = "0  the file was read\n"
-                       "1  a file cannot be read (missing, not Mallard's, newer), or --input finds no provenance\n"
+                       "1  a file cannot be read (missing, not Mallard's, newer), or --input finds no run block\n"
                        "2  usage error",
         .dim = Case::file,
         .run = info_main,

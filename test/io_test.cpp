@@ -395,7 +395,7 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
                 continue;
             }
 #endif
-            EXPECT_TRUE(without_provenance(async.at(name)) == without_provenance(bytes)) << name << " " << snapshot_keys;
+            EXPECT_TRUE(without_run_metadata(async.at(name)) == without_run_metadata(bytes)) << name << " " << snapshot_keys;
         }
     }
 }
@@ -684,7 +684,7 @@ TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
     std::ifstream index(dir + "/f.vtkhdf.series");
     std::stringstream text;
     text << index.rdbuf();
-    EXPECT_NE(text.str().find("{\"name\": \"f_000010.vtkhdf\", \"time\": 0.25}"), std::string::npos) << text.str();
+    EXPECT_NE(text.str().find("{\"name\": \"f_000010.vtkhdf\", \"time\": 0.25, \"step\": 10}"), std::string::npos) << text.str();
 }
 
 TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {

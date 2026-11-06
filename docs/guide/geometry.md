@@ -580,12 +580,12 @@ Use `point` to compare with references or to measure orders of accuracy, and
 ## Reading probe output
 
 `format = "csv"` (default) writes one row per sample and output, after the
-header and a `# provenance` line:
+header, its units line and a `# mallard-run` line:
 
 ```python
 import numpy as np
 
-d = np.genfromtxt("probe_wake.csv", delimiter=",", names=True)  # skips the provenance line
+d = np.genfromtxt("probe_wake.csv", delimiter=",", names=True)  # skips the comment lines
 last = d[d["step"] == d["step"].max()]
 print(last["x"], last["y"], last["P"])
 ```

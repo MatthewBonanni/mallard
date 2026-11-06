@@ -24,6 +24,7 @@
 #include "comm.h"
 #include "log.h"
 #include "run_control.h"
+#include "snapshot_block.h"
 #include "units.h"
 
 namespace {
@@ -152,6 +153,7 @@ std::string Solver::describe_invalid_cells() {
 }
 
 void Solver::diverged() {
+    const snapshot_block::Reason reason(snapshot_block::reason::DIVERGENCE);
     if (source_terms) source_terms->check_loops();
     if (stepped_past_divergence && last_good_set) {
         // A step graph went on from the invalid state: recompute it kernel by kernel
@@ -349,6 +351,7 @@ std::string Solver::write_restarts() {
 }
 
 void Solver::write_checkpoint() {
+    const snapshot_block::Reason reason(snapshot_block::reason::CHECKPOINT);
     checkpoint_requested = false;
     const std::string file = write_restarts();
     for (auto & command : checkpoint_replies) {

@@ -633,7 +633,7 @@ TEST(MPITest, AsynchronousAndCompressedRestartFilesDoNotDependOnTheRankCount) {
                 const std::string bytes_d((std::istreambuf_iterator<char>(a)), std::istreambuf_iterator<char>());
                 const std::string bytes_s((std::istreambuf_iterator<char>(b)), std::istreambuf_iterator<char>());
                 EXPECT_FALSE(bytes_s.empty()) << s;
-                EXPECT_TRUE(without_provenance(bytes_d) == without_provenance(bytes_s)) << d << " on " << comm::size() << " ranks";
+                EXPECT_TRUE(without_run_metadata(bytes_d) == without_run_metadata(bytes_s)) << d << " on " << comm::size() << " ranks";
             }
         }
         std::string input = restart_case(20, "");
@@ -851,9 +851,9 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
             return ss.str();
         };
         for (const char * file : {"circle.csv", "circle_red.csv", "line.pvd", "line_000020.vtp"}) {
-            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            const std::string a = without_run_metadata(read(dir + "/serial/" + file));
             EXPECT_FALSE(a.empty()) << file;
-            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+            EXPECT_EQ(without_run_metadata(read(dir + "/ranks/" + file)), a) << file;
         }
     }
     comm::barrier();
@@ -896,9 +896,9 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
             return ss.str();
         };
         for (const char * file : {"walls.csv", "open.csv", "open.pvd", "open_000010.vtp", "cut.csv", "cut_000010.vtp"}) {
-            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            const std::string a = without_run_metadata(read(dir + "/serial/" + file));
             EXPECT_FALSE(a.empty()) << file;
-            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+            EXPECT_EQ(without_run_metadata(read(dir + "/ranks/" + file)), a) << file;
         }
     }
     comm::barrier();

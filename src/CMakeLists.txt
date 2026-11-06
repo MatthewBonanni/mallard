@@ -18,6 +18,7 @@ add_library(MallardCore STATIC
     common/json.cpp
     common/log.cpp
     common/provenance.cpp
+    common/snapshot_block.cpp
     common/run_control.cpp
     common/run_health.cpp
     common/run_log.cpp
