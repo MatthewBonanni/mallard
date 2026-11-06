@@ -76,6 +76,8 @@ add_library(MallardCore STATIC
     solver/solver_graph.cpp
     solver/solver_health.cpp
     solver/solver_step_control.cpp
+    solver/solver_triggers.cpp
+    solver/triggers.cpp
     solver/initial_state.cpp
     solver/synthetic_turbulence.cpp
     solver/solver_initialize.cpp

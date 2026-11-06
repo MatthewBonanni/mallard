@@ -173,6 +173,10 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     }
     step = restart.step;
     t = static_cast<rtype>(restart.t);
+    if (resume_output) {
+        triggers.restore(restart.attributes);
+        if (const auto started = triggers.statistics_started()) statistics.set_start(static_cast<rtype>(*started));
+    }
     statistics.restore(restart, file, t);
     probes.restore_averages(restart, file, t, statistics.resets());
     if (step_controller.enabled()) step_controller.restore(restart.attributes);

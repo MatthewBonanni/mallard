@@ -5769,6 +5769,64 @@
   ],
   "type": "number"
  },
+ "triggers": {
+  "dims": [
+   2,
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "array"
+ },
+ "triggers.do": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "array"
+ },
+ "triggers.for": {
+  "default": "0.0",
+  "dimension": "time (s)",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "number"
+ },
+ "triggers.name": {
+  "default": "\"trigger_0\"",
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string"
+ },
+ "triggers.repeat": {
+  "default": "false",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "bool"
+ },
+ "triggers.when": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/source_regions/input.toml"
+  ],
+  "type": "string"
+ },
  "write_data": {
   "dims": [
    2,

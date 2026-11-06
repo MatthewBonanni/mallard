@@ -41,6 +41,7 @@
 #include "data_writer.h"
 #include "probes.h"
 #include "statistics.h"
+#include "triggers.h"
 #include "health_state.h"
 #include "divergence_report.h"
 #include "synthetic_inflow.h"
@@ -328,6 +329,11 @@ class Solver {
         RestartAttributes restart_attributes() const;
         void write_checkpoint();
         void poll_control_files();
+        // Triggers (see triggers.h)
+        void init_triggers();
+        /** @brief The monitored values triggers read, in the order of init_triggers' names. */
+        std::vector<double> trigger_values() const;
+        void act_on_triggers();
         void publish_status();
         std::string stop_conditions() const;
 
@@ -954,6 +960,8 @@ class Solver {
         IntegralMonitor integral_monitor;
         Statistics statistics;
         Probes probes;
+        Triggers triggers;
+        std::string trigger_stop;  // why a trigger stopped the run, else empty
         HealthState run_health;
 };
 

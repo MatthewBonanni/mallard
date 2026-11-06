@@ -91,6 +91,7 @@ class PhaseAverage {
         void register_data(std::vector<Data> & data) const;
         void copy_device_to_host();
         void start(rtype t);
+        void set_start(rtype t) { t_start = t; }
         void restore(const RestartData & restart, const std::string & file, rtype t, bool reset);
         RestartAttributes attributes() const;
         std::string summary() const;
@@ -175,6 +176,12 @@ class Statistics {
         void restore(const RestartData & restart, const std::string & file, rtype t);
         /** @brief Start afresh at time t (first sample weighted from max(t, t_start)). */
         void start(rtype t);
+        /** @brief Sample from time t on (as t_start = t), in the means, spectra and phases. */
+        void set_start(rtype t) {
+            t_start = t;
+            spectra.set_start(t);
+            phase.set_start(t);
+        }
         RestartAttributes attributes() const;
         RestartArrays arrays() const { return spectra.arrays(); }
         /** @brief Write the averaged spectra (rank 0), with the other output. */
