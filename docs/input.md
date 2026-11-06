@@ -32,14 +32,14 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 
 | Dimension | Keys |
 |---|---|
-| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
 | Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`; `boundaries.p0`; `physics.p_ref` |
 | Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries and `probes.reference` |
-| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
 | Acceleration (m/s^2) | `source.gravity` |
 | Rate (1/s) | `sponges.strength` |
@@ -1049,6 +1049,7 @@ ranks. A probe that is not due costs nothing.
 | `file` | Output file, default `probe_<name>.csv`, `.h5`, `.vtkhdf` or `.pvd` |
 | `samples` | `false` writes only the reductions (default `true`) |
 | `average` | `true`: write the running time averages of the samples instead (columns `MEAN_<variable>`), sampled on the `[statistics]` schedule (below); default `false` |
+| `spectra` | Time spectra of the samples or reductions (table below); default none |
 | `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms` (below); default none, and `["integral", "mean", "min", "max"]` with `region` |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
 | `scale`, `rotate`, `pivot`, `translate` | Transform of the geometry, as for [regions](#regions): scaled (a factor, or one per axis), then rotated (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`), both about `pivot` (default the origin), then translated |
@@ -1138,6 +1139,51 @@ reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}
 average = true
 interval = 1000
 reductions = ["integral"]
+```
+
+**Time spectra.** `spectra` (a table) keeps the last `length / time_interval`
+samples from `t_start` on, rank 0 in sample order, and writes their one-sided
+power spectral density by Welch's method once the history is full: at the
+end of the run and, with `time_interval`, at its multiples. The `segments`
+segments of `M = floor(2 N / (segments + 1))` of the `N` samples overlap by
+`floor(M / 2)`, the last ending at the latest sample; each has its mean
+removed and is windowed, and `PSD_k = c_k |X_k|^2 / (f_s sum w^2)` is averaged
+over them at `f_k = k f_s / M`, `k = 0 .. floor(M / 2)`, `f_s = 1 / time_interval`,
+`c_k = 2` except at `k = 0` and the Nyquist frequency (as `scipy.signal.welch`
+with `scaling = "density"`). Spectra of sample variables are written to `file`
+(`step, t, point` (or `face`, `cell`), `f`, `St`, `PSD_<variable>`, one block
+of rows per write, by sample then frequency), of reduction columns to
+`reductions_file` (`step, t, f, St, PSD_<column>`); `PSD` has the units of the
+variable squared times time. Each write logs the peak of each spectrum (of
+the sample with the largest, for sample variables), its frequency refined by
+a parabola through the logarithms of the three largest bins, and the run
+record carries it (monitor `probe_<name>_spectra`). Restart files (format
+version 6) carry the history; `statistics.reset = true` starts it afresh, and a
+restart file holding the history of other samples, variables or
+`time_interval` is an error. The probe needs `time_interval`, which then
+cannot be changed during the run.
+
+| `spectra` key | Description |
+|---|---|
+| `variables` | Variables of the probe (`U` for its components) and columns of its reductions file (`<reduction>_<variable>`); required |
+| `length` | Time spanned by the history, at least 4 samples per segment; required |
+| `t_start` | Time of the first sample, default 0 |
+| `segments` | Welch segments, overlapping by half, default 1 |
+| `window` | `hann` (default; periodic, `w_n = (1 - cos(2 pi n / M)) / 2`) or `rectangular` |
+| `time_interval` | Also write at its multiples once the history is full; default none (at the end of the run only) |
+| `strouhal` | `{length, velocity}`: adds the column `St = f length / velocity` and the peak's Strouhal number; default none |
+| `file` | Default `probe_<name>_spectra.csv` |
+| `reductions_file` | Default `probe_<name>_reductions_spectra.csv` |
+
+```toml
+# The shedding frequency in a cylinder's wake: the spectrum of U_Y over the last 140 time units
+[[probes]]
+name = "wake"
+type = "point"
+point = [3.0, 0.5]
+variables = ["U_Y"]
+time_interval = 0.5
+spectra = {variables = ["U_Y"], t_start = 60.0, length = 140.0, strouhal = {length = 1.0, velocity = 0.2}}
 ```
 
 ```toml

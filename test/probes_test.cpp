@@ -29,6 +29,7 @@
 #include "file_format.h"
 #include "input.h"
 #include "probe_geometry.h"
+#include "probe_spectra.h"
 #include "region_input.h"
 #include "region_mesh.h"
 #include "scratch.h"
@@ -1266,4 +1267,223 @@ TEST(ProbesTest, RejectsAveragesOfAverages) {
     } catch (const InputError & e) {
         EXPECT_NE(std::string(e.what()).find("averaged already"), std::string::npos) << e.what();
     }
+}
+
+TEST(ProbeSpectraTest, TonesAtBinCentersHaveTheirPowerInTheirBins) {
+    // x = c + A sin(2 pi k0 n / M + phase) + B cos(2 pi k1 n / M): the
+    // periodic Hann window spreads a tone at a bin center over three bins,
+    // A^2 / (3 df) at k0 and A^2 / (12 df) at k0 +- 1, and the PSD integrates
+    // to the variance (A^2 + B^2) / 2; without a window each tone is one bin,
+    // A^2 / (2 df). Even and odd (prime) lengths: the mixed-radix and the
+    // direct transforms
+    const double pi = std::numbers::pi, dt = 0.1, a = 0.7, b = 0.3;
+    for (const uint32_t m : {48u, 47u}) {
+        const uint32_t k0 = 5, k1 = 13;
+        const double df = 1.0 / (m * dt);
+        std::vector<double> x(m);
+        for (uint32_t n = 0; n < m; n++) {
+            x[n] = 2.5 + a * std::sin(2 * pi * k0 * n / m + 0.4) + b * std::cos(2 * pi * k1 * n / m);
+        }
+        const auto hann = probe_spectra::welch(x, 1, probe_spectra::Window::HANN, dt);
+        const auto flat = probe_spectra::welch(x, 1, probe_spectra::Window::RECTANGULAR, dt);
+        ASSERT_EQ(hann.size(), m / 2 + 1);
+        const double tol = 1e-12;
+        double total = 0.0;
+        for (uint32_t k = 0; k < hann.size(); k++) {
+            total += hann[k] * df;
+            const int d0 = std::abs(int(k) - int(k0)), d1 = std::abs(int(k) - int(k1));
+            const double expected = d0 == 0 ? a * a / (3 * df) : d0 == 1 ? a * a / (12 * df)
+                                  : d1 == 0 ? b * b / (3 * df) : d1 == 1 ? b * b / (12 * df) : 0.0;
+            EXPECT_NEAR(hann[k], expected, tol) << "M = " << m << ", k = " << k;
+            const double one = k == k0 ? a * a / (2 * df) : k == k1 ? b * b / (2 * df) : 0.0;
+            EXPECT_NEAR(flat[k], one, tol) << "M = " << m << ", k = " << k;
+        }
+        EXPECT_NEAR(total, (a * a + b * b) / 2, tol);
+        const probe_spectra::Peak peak = probe_spectra::peak(hann, df);
+        EXPECT_EQ(peak.bin, k0);
+        EXPECT_NEAR(peak.f, k0 * df, 1e-12);
+    }
+    // The Nyquist frequency is counted once: (-1)^n has mean square 1
+    std::vector<double> alternating(50);
+    for (size_t n = 0; n < alternating.size(); n++) alternating[n] = n % 2 ? -1.0 : 1.0;
+    const auto nyquist = probe_spectra::welch(alternating, 1, probe_spectra::Window::RECTANGULAR, dt);
+    EXPECT_NEAR(nyquist.back() / (50 * dt), 1.0, 1e-12);
+}
+
+TEST(ProbeSpectraTest, WelchAveragesHalfOverlappingSegmentsEndingAtTheLastSample) {
+    // Parseval: each segment's PSD integrates to its windowed variance, so
+    // the Welch PSD integrates to the mean of those of the K segments of
+    // M = 2 N / (K + 1) samples starting every M / 2, the last ending at the
+    // last sample; a peak between bins is located by the parabola through
+    // log P to a fraction of the bin width
+    const double dt = 0.05;
+    std::vector<double> x(53);
+    uint64_t state = 12345;
+    for (auto & v : x) {
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        v = static_cast<double>(state >> 11) / 9007199254740992.0;
+    }
+    for (const auto w : {probe_spectra::Window::HANN, probe_spectra::Window::RECTANGULAR}) {
+        const uint32_t segments = 4, m = probe_spectra::segment_length(x.size(), segments);
+        ASSERT_EQ(m, 21u);
+        const auto psd = probe_spectra::welch(x, segments, w, dt);
+        ASSERT_EQ(psd.size(), m / 2 + 1);
+        double integral = 0.0;
+        for (const double p : psd) integral += p / (m * dt);
+        const std::vector<double> win = probe_spectra::window(w, m);
+        double power = 0.0;
+        for (const double v : win) power += v * v;
+        double expected = 0.0;
+        for (uint32_t s = 0; s < segments; s++) {
+            const size_t first = x.size() - (segments - 1) * (m / 2) - m + s * (m / 2);
+            double mean = 0.0;
+            for (uint32_t i = 0; i < m; i++) mean += x[first + i] / m;
+            for (uint32_t i = 0; i < m; i++) expected += std::pow(win[i] * (x[first + i] - mean), 2) / (power * segments);
+        }
+        EXPECT_NEAR(integral, expected, 1e-13 * expected);
+    }
+    const double pi = std::numbers::pi;
+    std::vector<double> tone(256);
+    for (size_t n = 0; n < tone.size(); n++) tone[n] = std::sin(2 * pi * 0.1234 * double(n));
+    const auto psd = probe_spectra::welch(tone, 1, probe_spectra::Window::HANN, 1.0);
+    EXPECT_NEAR(probe_spectra::peak(psd, 1.0 / 256).f, 0.1234, 0.05 / 256);
+}
+
+namespace {
+
+/** @brief The column of rows at a step, in row order (of the rows whose key column has value, if key is given). */
+std::vector<double> column_at(const std::vector<std::map<std::string, double>> & rows, double step,
+                              const std::string & name, const std::string & key = "", double value = 0.0) {
+    std::vector<double> c;
+    for (const auto & row : rows) {
+        if (row.at("step") == step && (key.empty() || row.at(key) == value)) c.push_back(row.at(name));
+    }
+    return c;
+}
+
+/** @brief The last n values of a column up to time t (of rtype values: those of a samples file). */
+std::vector<double> history_of(const std::vector<std::map<std::string, double>> & rows, const std::string & name,
+                               double t, size_t n, bool precision, const std::string & key = "", double value = 0.0) {
+    std::vector<double> c;
+    for (const auto & row : rows) {
+        // Samples files hold rtype values, printed to its precision
+        if (row.at("t") <= t && (key.empty() || row.at(key) == value)) {
+            c.push_back(precision ? static_cast<double>(static_cast<rtype>(row.at(name))) : row.at(name));
+        }
+    }
+    return std::vector<double>(c.end() - static_cast<long>(std::min(n, c.size())), c.end());
+}
+
+/** @brief An entropy wave rho = 1 + 0.1 sin(2 pi x) carried by u_x = 0.3: at a point, a sine of frequency 0.3. */
+std::string advected_wave(const std::string & extra, const std::string & t_stop) {
+    return box_case(16, "1.0 + 0.1 * sin(2 * pi * x)", "type = \"MUSCL\"\n", extra,
+                    "t_stop = " + t_stop + "\ndt = 0.015625\n");
+}
+
+} // namespace
+
+TEST(ProbesTest, SpectraOfAnAdvectedWavePeakAtItsFrequency) {
+    // Three periods (length 10, bin width 0.1, f = 0.3 at bin 3), sampled every
+    // 0.25: the Hann PSD there is A^2 / (3 df) for the amplitude A <= 0.1 the
+    // scheme leaves, and the spectra are those of the probe's own samples
+    const std::string dir = fresh_dir("spectra");
+    const std::string extra =
+        "[[probes]]\nname = \"p\"\nfile = \"" + dir + "/p.csv\"\ntype = \"points\"\npoints = [" +
+        numbers3("0.5", "0.1", "0.3") + ", " + numbers3("0.25", "0.6", "0.7") + "]\nvariables = [\"RHO\", \"P\"]\n"
+        "time_interval = 0.25\nreductions = [\"max\"]\nreductions_file = \"" + dir + "/p_reductions.csv\"\n"
+        "[probes.spectra]\nvariables = [\"RHO\", \"max_RHO\"]\nlength = 10.0\nfile = \"" + dir + "/s.csv\"\n"
+        "reductions_file = \"" + dir + "/rs.csv\"\nstrouhal = {length = 2.0, velocity = 0.3}\n";
+    Solver solver;
+    solver.init(parse_toml(advected_wave(extra, "10.0")));
+    run(solver);
+    if (comm::is_root()) {
+        const auto spectra = read_csv(dir + "/s.csv");
+        const double step = 640;
+        ASSERT_EQ(column_at(spectra, step, "f").size(), 2u * 21u) << "written once, at the end";
+        const auto samples = read_csv(dir + "/p.csv");
+        for (const double point : {0.0, 1.0}) {
+            const auto f = column_at(spectra, step, "f", "point", point);
+            const auto st = column_at(spectra, step, "St", "point", point);
+            const auto psd = column_at(spectra, step, "PSD_RHO", "point", point);
+            ASSERT_EQ(psd.size(), 21u);
+            for (size_t k = 0; k < f.size(); k++) {
+                EXPECT_NEAR(f[k], 0.1 * double(k), 1e-12);
+                EXPECT_NEAR(st[k], f[k] * 2.0 / 0.3, precision_tol<double>(1e-12, 1e-6));
+            }
+            const auto peak = probe_spectra::peak(psd, 0.1);
+            EXPECT_EQ(peak.bin, 3u);
+            EXPECT_NEAR(peak.f, 0.3, 0.01);
+            const double amplitude = std::sqrt(3 * 0.1 * psd[3]);
+            EXPECT_GT(amplitude, 0.09);
+            EXPECT_LT(amplitude, 0.1);
+            const auto expected = probe_spectra::welch(history_of(samples, "RHO", 10.0, 40, true, "point", point), 1,
+                                                       probe_spectra::Window::HANN, 0.25);
+            for (size_t k = 0; k < psd.size(); k++) EXPECT_NEAR(psd[k], expected[k], 1e-12 * expected[3]);
+        }
+        const auto reduced = column_at(read_csv(dir + "/rs.csv"), step, "PSD_max_RHO");
+        const auto expected = probe_spectra::welch(history_of(read_csv(dir + "/p_reductions.csv"), "max_RHO", 10.0, 40, false),
+                                                   1, probe_spectra::Window::HANN, 0.25);
+        ASSERT_EQ(reduced.size(), expected.size());
+        for (size_t k = 0; k < reduced.size(); k++) EXPECT_NEAR(reduced[k], expected[k], 1e-12 * expected[3]);
+    }
+    comm::barrier();
+}
+
+TEST(ProbesTest, RestartedRunsContinueTheSpectraHistoriesBitwise) {
+    // The restart file at t = 3.75 holds the sample of that time, which fills
+    // the history (length 4); spectra at t = 4, 5 and 6
+    const std::string dir = fresh_dir("spectra_restart");
+    auto probe = [&](const std::string & name) {
+        return "[[probes]]\nname = \"p\"\nfile = \"" + dir + "/" + name + ".csv\"\ntype = \"point\"\npoint = " +
+               numbers3("0.5", "0.1", "0.3") + "\nvariables = [\"RHO\", \"U_X\"]\ntime_interval = 0.25\n"
+               "spectra = {variables = [\"RHO\", \"U_X\"], length = 4.0, segments = 3, time_interval = 1.0, file = \"" +
+               dir + "/" + name + "_spectra.csv\"}\n";
+    };
+    Solver straight;
+    straight.init(parse_toml(advected_wave(probe("p") + "[[write_data]]\nprefix = \"" + dir +
+                                               "/r\"\nformat = \"restart\"\ninterval = 80\n",
+                                           "6.0")));
+    run(straight);
+    std::vector<std::map<std::string, double>> straight_rows;
+    for (const auto & row : read_csv(dir + "/p_spectra.csv")) {
+        if (row.at("t") > 3.75) straight_rows.push_back(row);
+    }
+    std::string input = advected_wave(probe("p"), "6.0");
+    const size_t from = input.find("[initialize]\n"), to = input.find("[numerics]");
+    input.replace(from, to - from, "[initialize]\ntype = \"restart\"\nfile = \"" + dir + "/r_000240.restart\"\n");
+    Solver continued;
+    continued.init(parse_toml(input));
+    run(continued);
+    if (comm::is_root()) {
+        // Written at t = 4, 5 and 6 (5 frequencies): the rows after the restart time again
+        ASSERT_EQ(straight_rows.size(), 3u * 5u);
+        const auto all = read_csv(dir + "/p_spectra.csv");
+        ASSERT_EQ(all.size(), 2 * straight_rows.size());
+        EXPECT_EQ(std::vector(all.end() - static_cast<long>(straight_rows.size()), all.end()), straight_rows);
+    }
+    comm::barrier();
+    // Another history: other variables
+    input.replace(input.find("variables = [\"RHO\", \"U_X\"], length"), 30, "variables = [\"RHO\"], length");
+    Solver other;
+    EXPECT_THROW(other.init(parse_toml(input)), InputError);
+}
+
+TEST(ProbesTest, RejectsSpectraOfUnevenSamplesAndOfUnknownVariables) {
+    auto message = [](const std::string & keys) {
+        const std::string extra = "[[probes]]\nname = \"p\"\ntype = \"point\"\npoint = " + numbers3("0.3", "0.3", "0.3") +
+                                  "\nvariables = [\"P\"]\n" + keys;
+        Solver solver;
+        try {
+            solver.init(parse_toml(box_case(8, "1.0", "type = \"MUSCL\"\n", extra)));
+        } catch (const InputError & e) {
+            return std::string(e.what());
+        }
+        return std::string("accepted");
+    };
+    EXPECT_NE(message("interval = 2\nspectra = {variables = [\"P\"], length = 1.0}\n").find("time_interval"),
+              std::string::npos);
+    EXPECT_NE(message("time_interval = 0.1\nspectra = {variables = [\"RHO\"], length = 1.0}\n").find("List one of: P"),
+              std::string::npos);
+    EXPECT_NE(message("time_interval = 0.1\nspectra = {variables = [\"P\"], length = 0.2}\n").find("at least 4"),
+              std::string::npos);
 }

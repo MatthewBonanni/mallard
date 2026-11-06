@@ -11,10 +11,11 @@ RUN_DIR holds a run of input.toml. From --t-start on, prints
   plus the net enthalpy flux out);
 - the drag and lift from the box's momentum balance (the momentum flux,
   pressure included, through its sides plus d/dt of its momentum);
-- the Strouhal number from the lift's zero crossings and from the peak of the
-  wake probe's spectrum;
+- the Strouhal number from the lift's zero crossings, from the peak of the
+  spectrum the run computed of the wake probe's U_Y (probe_wake_spectra.csv)
+  and from the peak of a spectrum of the probe's samples computed here;
 and writes the figures measuring_balance (mass residual and the two drags
-against time), measuring_spectrum (spectrum of the wake's U_Y) and
+against time), measuring_spectrum (the run's spectrum of the wake's U_Y) and
 measuring_phase (the phase-averaged U_Y in the box at four phases).
 """
 import argparse
@@ -110,6 +111,11 @@ def main():
     selw = wake["t"] >= args.t_start
     f, s = spectrum(wake["t"][selw], wake["U_Y"][selw])
     st_spec = peak(f, s) * D / U
+    # The spectrum the run wrote at its end: the last block of rows
+    run_spec = table(run, "probe_wake_spectra.csv")
+    run_spec = run_spec[run_spec["step"] == run_spec["step"][-1]]
+    st_run = peak(run_spec["St"], run_spec["PSD_U_Y"])
+    bin_width = run_spec["St"][1] - run_spec["St"][0]
 
     print(f"t >= {args.t_start:g}, {len(tc) - 1} shedding periods")
     print(f"wall:     mean Cd {cd[sel].mean():.4f} ([[forces]]), {cd_wall[sel].mean():.4f} (wall probe); "
@@ -122,7 +128,8 @@ def main():
           f"net outflow alone {np.sqrt(np.mean(flux['ENTHALPY_FLUX'][selb] ** 2)) / enthalpy_in[selb].mean():.1e}")
     print(f"momentum: mean Cd {cd_box[selb].mean():.4f} from the box against {cd[sel].mean():.4f} on the wall; "
           f"Cl amplitude {0.5 * np.ptp(cl_box[selb]):.4f} against {0.5 * np.ptp(cl[sel]):.4f}")
-    print(f"Strouhal: {st_lift:.4f} from the lift's crossings, {st_spec:.4f} from the wake spectrum")
+    print(f"Strouhal: {st_lift:.4f} from the lift's crossings, {st_run:.4f} from the run's wake spectrum "
+          f"(bin width {bin_width:.4f}), {st_spec:.4f} from the wake samples' spectrum")
 
     phase_snap = snapshots.last(os.path.join(run, "solut", "box"))
     pts, conn, offs, a = snapshots.read(phase_snap)
@@ -146,13 +153,17 @@ def main():
 
     def spec(th):
         fig, ax = plt.subplots(figsize=(7, 3.6))
-        ax.semilogy(f * D / U, s / s.max(), color=th["series"][0])
-        ax.axvline(st_spec, color=th["ink2"], ls="--", lw=1)
+        psd = run_spec["PSD_U_Y"]
+        ax.semilogy(run_spec["St"], psd / psd.max(), color=th["series"][0], marker="o", ms=3,
+                    label="run (probe_wake_spectra.csv)")
+        ax.semilogy(f * D / U, s / s.max(), color=th["series"][1], lw=0.8, label="samples, zero-padded")
+        ax.axvline(st_run, color=th["ink2"], ls="--", lw=1)
         ax.set_xlim(0, 1.0)
         ax.set_ylim(1e-6, 2)
         ax.set_xlabel("St = f D / U")
-        ax.set_ylabel("power of U_Y at (3, 0.5)")
-        ax.set_title(f"peak St = {st_spec:.3f}; its harmonics follow", fontsize=11)
+        ax.set_ylabel("PSD of U_Y at (3, 0.5) / peak")
+        ax.set_title(f"peak St = {st_run:.3f}; its harmonics follow", fontsize=11)
+        ax.legend(loc="upper right", fontsize=9)
         return fig
 
     def phase(th):

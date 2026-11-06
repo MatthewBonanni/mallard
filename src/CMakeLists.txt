@@ -66,6 +66,7 @@ add_library(MallardCore STATIC
     solver/repair_audit.cpp
     solver/probe_geometry.cpp
     solver/probe_surface.cpp
+    solver/probe_spectra.cpp
     solver/probes.cpp
     solver/solver.cpp
     solver/solver_check.cpp
