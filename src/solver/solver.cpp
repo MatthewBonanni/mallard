@@ -3086,14 +3086,14 @@ void Solver::update_vortex_fields() {
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> g = viscous_gradients;
     Kokkos::View<rtype **> out = vortex_fields;
     Kokkos::parallel_for("vortex_fields", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
-        if constexpr (N_DIM == 2) {
-            out(c, 0) = g(c, 2, 0) - g(c, 1, 1);
-        } else {
-            for (uint8_t k = 0; k < 3; k++) {
-                const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
-                out(c, k) = g(c, 1 + b, a) - g(c, 1 + a, b);
-            }
+#if N_DIM == 2
+        out(c, 0) = g(c, 2, 0) - g(c, 1, 1);
+#else
+        for (uint8_t k = 0; k < 3; k++) {
+            const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
+            out(c, k) = g(c, 1 + b, a) - g(c, 1 + a, b);
         }
+#endif
     });
 }
 
