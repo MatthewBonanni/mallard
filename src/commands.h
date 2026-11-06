@@ -34,6 +34,9 @@ int list_species_main(const cli::Args & args);
 /** @brief `mallard list templates`: the case templates of mallard new. */
 int list_templates_main(const cli::Args & args);
 
+/** @brief `mallard diff A B`: how two solutions differ, field by field. */
+int diff_main(const cli::Args & args);
+
 /** @brief `mallard mesh convert INPUT OUTPUT.h5`. */
 int mesh_convert_main(const cli::Args & args);
 

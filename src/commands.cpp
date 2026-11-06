@@ -99,6 +99,37 @@ constexpr Option INFO_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option DIFF_OPTIONS[] = {
+    {"--fields", "", "LIST",
+     "Compare only these fields, comma separated (RHO,P,U); each file must hold them. Default: every field both "
+     "files hold."},
+    {"--tol", "", "TOL",
+     "The tolerance on each field's max |B - A| / max |A|, and on t relative to the larger |t|: a number for every "
+     "field, then FIELD=TOL for some (1e-12,P=1e-6). Restart attributes and arrays take it too. Default: 0, so "
+     "any difference in value fails."},
+    {"--step", "", "N",
+     "Compare the snapshot of each file at this step, as the files record it, for series and files of several "
+     "times. Default: the last snapshot."},
+    {"--time", "", "T",
+     "Compare the snapshot of each file nearest this simulated time, in s; the Time table shows the times "
+     "compared. Default: the last snapshot."},
+    {"--snapshot", "", "N|last",
+     "Compare the snapshot of each file at this position, counting from 0 (in time order); for files that "
+     "record no step. Default: last."},
+    {"--remap", "", "",
+     "Compare files on different meshes: B's cell values remapped conservatively onto A's mesh (as [initialize] "
+     "type = \"remap\" does, degree 2, limited), then compared cell by cell. Needs both meshes: as the files' "
+     "provenance records them, or --mesh-a and --mesh-b."},
+    {"--mesh-a", "", "FILE",
+     "A's mesh file, where its provenance does not record it or the file has moved: for --remap and for the "
+     "coordinates of the largest differences. Default: from A's provenance."},
+    {"--mesh-b", "", "FILE", "B's mesh file, for --remap. Default: from B's provenance."},
+    {"--format", "", "text|json",
+     "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
+     "scripts. Default: text."},
+    KOKKOS,
+};
+
 constexpr Option RESOLVE_OPTIONS[] = {
     {"--restart", "", "FILE", "The input of the run as started from this restart file."},
     KOKKOS,
@@ -131,6 +162,7 @@ constexpr std::string_view CHECK_ARGUMENTS[] = {"[INPUT]"};
 constexpr std::string_view NEW_ARGUMENTS[] = {"[TEMPLATE]", "[DIRECTORY]"};
 constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "status|checkpoint|stop|set", "[KEY=VALUE...]"};
 constexpr std::string_view FILE_ARGUMENTS[] = {"FILE"};
+constexpr std::string_view DIFF_ARGUMENTS[] = {"FILE_A", "FILE_B"};
 constexpr std::string_view CONVERT_ARGUMENTS[] = {"INPUT", "OUTPUT.h5"};
 constexpr std::string_view OPTIONAL_INPUT[] = {"[INPUT]"};
 constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
@@ -454,6 +486,44 @@ constexpr Command COMMANDS[] = {
                     "$ mallard new cylinder",
         .exit_status = "0  listed",
         .run = list_templates_main,
+    },
+    {
+        .name = "diff",
+        .group = "Inspect",
+        .summary = "Compare two solutions field by field: norms of the difference, where it is largest, bitwise",
+        .synopsis = "mallard diff FILE_A FILE_B [--fields LIST] [--tol TOL] [--step N|--time T] [--format text|json]\n"
+                    "mallard diff FILE_A FILE_B --remap [--mesh-a FILE] [--mesh-b FILE] [options]",
+        .description =
+            "Compares two snapshot, restart, probe or CSV files of the same case, of any format each (a restart "
+            "file against a VTKHDF snapshot, say): for every field both hold, how many values differ bit for "
+            "bit, the L1, L2 and Linf norms of B - A (mean, root mean square and max over the cells, in the "
+            "field's units) and the same relative to A's norms, and where the largest difference is (the cell, "
+            "its coordinates and both values there). Restart files are also compared bit for bit in the rest of "
+            "their state: step, time, scalar attributes, named arrays and the face records of characteristic "
+            "boundaries; the provenance, which records when and where each ran, is not compared.\n"
+            "\n"
+            "Each field passes if its max |B - A| / max |A| is at most --tol (0 by default), and so does t; the "
+            "result is identical (every value bitwise the same), within tolerance or beyond it, on the first and "
+            "last line and as the exit status. Cells are matched by their global index: restart files and VTKHDF "
+            "or XDMF snapshots of the whole mesh are in the mesh's order whatever the ranks that wrote them, so a "
+            "serial run compares with an MPI run. Files on different meshes are refused, unless --remap.\n"
+            "\n"
+            "Uses: regression checks in CI, comparing two settings, checking that a restart reproduces a run, "
+            "serial against MPI, and against a finer mesh with --remap.",
+        .options = DIFF_OPTIONS,
+        .arguments = DIFF_ARGUMENTS,
+        .examples = "$ mallard diff run1/solut/restart_001000.restart run2/solut/restart_001000.restart\n"
+                    "$ mallard diff serial/flow_000100.vtkhdf mpi/flow_000100.vtkhdf --tol 1e-12\n"
+                    "$ mallard diff a/flow.vtkhdf.series b/flow.vtkhdf.series --step 300 --fields RHO,P\n"
+                    "$ mallard diff fine/restart_000500.restart coarse/restart_000500.restart --remap --tol 1e-2\n"
+                    "$ mallard diff a.restart b.restart --format json | jq '.fields[] | {name, status}'",
+        .exit_status = "0  identical, or every difference within tolerance\n"
+                       "1  a difference beyond tolerance\n"
+                       "2  usage error\n"
+                       "3  a file cannot be read, or the files cannot be compared (no field in common, different "
+                       "meshes without --remap)",
+        .dim = Case::output,
+        .run = diff_main,
     },
     {
         .name = "mesh convert",

@@ -40,6 +40,7 @@ enum class Case {
     template_name,  ///< the case template named by the first argument
     mesh,           ///< the mesh file, or input file, named by the first argument
     file,           ///< the first argument's: a mesh file's dimension; any solver for output files
+    output,         ///< the first argument's: an output file's dimension, where it records one and that solver is there
     front_end,      ///< runs in the front end itself
 };
 
