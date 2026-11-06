@@ -363,12 +363,12 @@ TEST(InSituStatisticsTest, SpectraAndPhaseAveragesRestartBitwise) {
         }
     }
     // The values and the averaging window; the run block names each run's own input
-    auto read = [](const std::string & path, std::string & run, snapshot_block::Block & block) {
+    auto read = [](const std::string & path, std::string & run_json, snapshot_block::Block & block) {
         std::ifstream in(path);
         std::string values;
         for (std::string line; std::getline(in, line);) {
             if (line.starts_with("# mallard-run ")) {
-                run = provenance::parse_comment(line);
+                run_json = provenance::parse_comment(line);
             } else if (line.starts_with("# mallard-snapshot ")) {
                 block = snapshot_block::parse(provenance::parse_comment(line, snapshot_block::NAME));
             } else {
