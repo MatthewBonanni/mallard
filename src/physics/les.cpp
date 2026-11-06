@@ -62,6 +62,11 @@ LES LES::from_input(const Input & input) {
     }
     les.scotti = width == "scotti";
     les.dynamic = find_value_or<bool>(table, "dynamic", false);
+    const std::string gradients = find_value_or<std::string>(table, "gradients", "least_squares");
+    if (gradients != "least_squares" && gradients != "reconstruction") {
+        throw InputError("les.gradients = \"" + gradients + "\" is not one of: least_squares, reconstruction.");
+    }
+    les.reconstruction_gradients = gradients == "reconstruction";
     if (N_DIM == 2 && les.scotti) throw InputError("les.filter_width = \"scotti\" is for 3D builds.");
     for (const auto & [key, value] : std::initializer_list<std::pair<const char *, rtype>>{
              {"C", les.C}, {"Pr_t", les.Pr_t}, {"Sc_t", les.Sc_t}}) {
@@ -81,5 +86,6 @@ logging::Items LES::summary() const {
                         real(double(C)) + "), Pr_t " + real(double(Pr_t)) + ", Sc_t " + real(double(Sc_t)) +
                         ", filter width V^(1/" + std::to_string(N_DIM) + ")" +
                         (scotti ? " times Scotti's f(a_1, a_2)" : "") +
+                        (reconstruction_gradients ? ", gradients of the reconstruction polynomials" : "") +
                         (dynamic ? "; C from the global dynamic procedure" : "")}};
 }

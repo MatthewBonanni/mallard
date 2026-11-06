@@ -370,6 +370,9 @@ class TENO : public FaceReconstruction {
         // Pseudo-inverses stored in single precision (opt-in: halves the
         // largest tables, and changes results at single-precision round-off)
         bool single_tables = false;
+        // When allocated (cell, var, d), the reconstruction also writes there the gradients of W that
+        // cell_gradients gives, for the cells it finds smooth (sigma < sigma_threshold)
+        Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> smooth_gradients;
 
         // Per-cell precomputed data, for the reconstructed cells [0, n_reconstructed)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)

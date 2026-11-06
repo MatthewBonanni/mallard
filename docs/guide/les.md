@@ -67,6 +67,7 @@ model = "wale"     # sigma (default in 3D), wale, vreman or smagorinsky
 | `Pr_t`, `Sc_t` | 0.9, 0.9 | Turbulent Prandtl and Schmidt numbers |
 | `filter_width` | `scotti` (3D), `volume` (2D) | `scotti` corrects `V^(1/3)` for anisotropic cells; `volume` is `V^(1/d)` |
 | `dynamic` | `false` | Constant from the global dynamic procedure (Germano/Lilly), once per step; written to `integrals.csv` as `les_C` |
+| `gradients` | `least_squares` | (TENO) `reconstruction`: the models' velocity gradients from TENO's central polynomials in its smooth cells; [below](#gradients-of-the-reconstruction) |
 
 Pitfalls:
 
@@ -77,6 +78,38 @@ Pitfalls:
 - `[les]` needs `navier_stokes`, works for single gases and mixtures, in planar
   runs (not `axisymmetric`). Wall faces keep their molecular fluxes.
 - Output `MU_T` (the eddy viscosity) to see where the model acts.
+
+### Gradients of the reconstruction
+
+The models compute the eddy viscosity from the resolved velocity gradient. By
+default that is the least-squares gradient on the face neighbors, second
+order, which reads the smallest resolved scales as almost uniform: on the
+coarse meshes of decaying isotropic turbulence it halves Sigma's eddy
+viscosity, and the flow keeps too much energy near the cutoff. With TENO,
+`gradients = "reconstruction"` takes the gradient of TENO's central polynomial
+instead (exact for polynomials of degree `order - 1`), in the cells TENO finds
+smooth; troubled cells and the viscous fluxes keep the least-squares one.
+
+```toml
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[les]
+model = "sigma"
+gradients = "reconstruction"
+```
+
+The reconstruction computes the gradients in its own pass over the stencil,
+for about 7% more time per step with TENO5 in 3D. The key is experimental: it
+improves decaying isotropic turbulence at $32^3$ but makes it worse at $64^3$,
+where the least-squares gradient's lower eddy viscosity is closer to what the
+flow needs. PaSR's mixing time and the
+thickened flame's efficiency take the eddy viscosity, so they follow. With
+MUSCL or first order, the key is an error (their gradient is the least-squares
+one already). What it does to decaying isotropic turbulence, and why:
+[theory](../theory/les.md#resolution-of-the-reconstructions-and-the-models-gradients)
+and [design notes](../design/les.md#31-order-aware-models-660).
 
 ## Low-dissipation flux and the budget
 
