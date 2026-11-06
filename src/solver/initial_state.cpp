@@ -295,7 +295,7 @@ struct Evaluator {
 
     /** @brief The base programs at the LANES points x into lane_values(row, ...). */
     KOKKOS_INLINE_FUNCTION void evaluate_base(const uint32_t row, const double (*x)[3]) const {
-        double out[LANES];
+        double out[size_t(LANES)];
         for (uint32_t b = 0; b < base_programs.extent(0); b++) {
             const uint32_t p = base_programs(b);
             if (constant(p)) {
@@ -540,7 +540,7 @@ struct Evaluator {
         if constexpr (LANES > 1) {
             if (base_programs.extent(0) > 0) {
                 for (uint32_t q0 = 0; q0 < n_points; q0 += LANES) {
-                    double x[LANES][3];
+                    double x[size_t(LANES)][3];
                     // Lanes past the last point repeat it
                     for (uint32_t l = 0; l < static_cast<uint32_t>(LANES); l++) point_of(Kokkos::min(q0 + l, n_points - 1), x[l]);
                     evaluate_base(row, x);

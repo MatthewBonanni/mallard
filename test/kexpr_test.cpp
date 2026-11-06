@@ -438,7 +438,7 @@ TEST(KexprTest, LanesMatchPointByPointBitwise) {
     Kokkos::View<double **> lanes("lanes", table.size(), n_points), single("single", table.size(), n_points);
     Kokkos::parallel_for("evaluate", n_groups, KOKKOS_LAMBDA(const uint32_t g) {
         for (uint32_t p = 0; p < table.size(); p++) {
-            double out[K];
+            double out[size_t(K)];
             auto at = [&](const int l) { return g * K + static_cast<uint32_t>(l); };
             table.lanes<K>(p, [&](const int l, const uint16_t v) { return d_points(at(l), v); }, out);
             for (int l = 0; l < K; l++) {

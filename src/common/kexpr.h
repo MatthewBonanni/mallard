@@ -299,7 +299,7 @@ KOKKOS_INLINE_FUNCTION bool has_jumps(const Instr * code, const uint32_t n) {
  */
 template <int K, typename Vars>
 KOKKOS_INLINE_FUNCTION void evaluate_lanes(const Instr * code, const uint32_t n, const Vars & vars, double * out) {
-    double s[MAX_STACK][K];
+    double s[MAX_STACK][size_t(K)];
     int top = -1;
     for (uint32_t i = 0; i < n; i++) {
         const Instr & in = code[i];
