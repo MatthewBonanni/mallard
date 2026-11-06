@@ -23,6 +23,7 @@ add_library(MallardCore STATIC
     common/run_log.cpp
     common/run_status.cpp
     common/input_upgrade.cpp
+    mesh/cell_order.cpp
     mesh/curved.cpp
     mesh/mesh.cpp
     mesh/mesh_io.cpp
@@ -78,6 +79,7 @@ add_library(MallardCore STATIC
     solver/solver_triggers.cpp
     solver/triggers.cpp
     solver/initial_state.cpp
+    solver/synthetic_turbulence.cpp
     solver/solver_initialize.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
@@ -222,7 +224,7 @@ if(Mallard_ENABLE_CGNS)
 endif()
 
 # The commands of the mallard executable (cli.h), which the test suite also runs
-add_library(MallardCommands STATIC cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp)
+add_library(MallardCommands STATIC cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp diff_main.cpp)
 target_link_libraries(MallardCommands PUBLIC MallardCore)
 mallard_target_warnings(MallardCommands)
 

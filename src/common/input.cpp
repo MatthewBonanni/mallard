@@ -488,7 +488,12 @@ std::string key_catalog(const ResolvedInput & resolved) {
             out += ", \"type\": " + json_string(entry.use.type);
             if (!d.same_as(dim::none)) out += ", \"dimension\": " + json_string(d.describe());
             if (std::string(d.plain_unit) != "SI") out += ", \"unit\": " + json_string(d.plain_unit);
-            out += entry.use.required ? ", \"required\": true" : ", \"default\": " + json_string(entry.use.fallback);
+            // An optional key without a fallback has a default the run sets (e.g. from the mesh)
+            if (entry.use.required) {
+                out += ", \"required\": true";
+            } else if (!entry.use.fallback.empty()) {
+                out += ", \"default\": " + json_string(entry.use.fallback);
+            }
         }
         if (!entry.values.empty()) {
             out += ", \"values\": [";
