@@ -1085,7 +1085,7 @@ void DataWriter::write_restart_distributed(const std::string & filename, const B
     t_writing += seconds_since(start);
 #else
     (void)filename;
-    (void)block;
+    (void)snapshot;
     (void)attributes;
     (void)faces;
     (void)arrays;
