@@ -66,13 +66,6 @@ std::array<QualitySummary, MeshQuality::N_METRICS> summarize(const Mesh & mesh, 
 std::string quality_point(const std::array<double, N_DIM> & x);
 
 /**
- * @brief The quality report of mallard check and mallard info: per metric its
- *        maximum, mean and cells above the limit, and the worst cells where it
- *        is notable; key-value lines of the current section.
- */
-void print_quality(const std::array<QualitySummary, MeshQuality::N_METRICS> & summary);
-
-/**
  * @brief Writes the quality fields, then the extra (name, per-owned-cell values)
  *        fields, as a snapshot PREFIX_000000 in the default format (collective).
  * @return The file written.

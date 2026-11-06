@@ -347,14 +347,19 @@ Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial
 solution) without time stepping and without writing any file, then reports:
 unknown or unused keys, boundary zones without a condition, mesh quality with
 the worst cells, the stable time step and the cell that sets it, memory per rank
-and, with --throughput or --steps, the cost. It lists every region the case uses
-and the mesh's own (domain, boundary zones, cell zones) with its dimension,
-measure and cells, and whether a surface or curve is exact or extracted; a
-region that covers no cell is an error. Under mpirun -n N it checks the run on N
-ranks.
+and, with --throughput or --steps, the cost. Each row has a status, each error
+or warning a stable code (E-REGION-OUTSIDE, W-CFL-LIMIT) and the docs that
+explain it. It lists every region the case uses and the mesh's own (domain,
+boundary zones, cell zones) with its dimension, measure and cells, and whether a
+surface or curve is exact or extracted; a region that covers no cell is an
+error. Under mpirun -n N it checks the run on N ranks.
 
 Options:
   -i FILE                   The input file, instead of the argument.
+  --format text|json        text: a section per part of the check, each row with
+                            its status (ok, WARN, ERROR) and units, then the
+                            diagnostics with their codes; json: the same report
+                            as one JSON object, for scripts. Default: text.
   --restart FILE|latest     Check the run as started from this restart file, or
                             as --restart latest would.
   --ranks N                 Memory and cost per rank for a run on N ranks; from

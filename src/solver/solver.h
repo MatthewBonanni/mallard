@@ -744,7 +744,7 @@ class Solver {
 
         // Run log
         logging::Items mesh_summary;
-        logging::Items boundary_summary;
+        std::vector<CheckBoundary> boundary_summary;
         logging::Items source_summary;
         std::string initial_state;
         double t_wall_setup = 0.0;

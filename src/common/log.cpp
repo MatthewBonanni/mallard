@@ -107,6 +107,8 @@ std::string style(std::string_view text, Style s) {
     return paint(text, s, color_stdout());
 }
 
+std::string style(std::string_view text, Style s, bool on) { return paint(text, s, on); }
+
 void line(std::string_view text) {
     if (!comm::is_root()) return;
     close_phase();

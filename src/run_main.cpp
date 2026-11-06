@@ -62,7 +62,8 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
     // MPI before Kokkos, so Kokkos can map each rank to its own device
     comm::Session session(argc, argv);
     std::streambuf * const out = std::cout.rdbuf();
-    if (!comm::is_root() || resolve) std::cout.rdbuf(nullptr);
+    const bool json = check && args.value_or("--format", "text") == "json";
+    if (!comm::is_root() || resolve || json) std::cout.rdbuf(nullptr);
 
     binding::select_device(argc, argv);
     Kokkos::initialize(argc, argv);
@@ -73,21 +74,32 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
             print_header(input_file);
             Solver solver;
             if (check) {
-                Input input = parse_input(input_file);
-                if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
-                const CheckReport report = solver.check(input, *check);
+                CheckReport report;
+                try {
+                    Input input = parse_input(input_file);
+                    if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
+                    report = solver.check(input, *check);
+                } catch (const InputError & e) {
+                    if (resolve) throw;
+                    report.input_file = input_file;
+                    report.error(check_code::INPUT, input_file + ": " + error_text(e));
+                }
                 if (resolve && report.ok()) {
                     if (comm::is_root()) std::cout.rdbuf(out);
                     std::cout << report.resolved << std::flush;
                 } else if (resolve) {
-                    for (const auto & e : report.errors) error += (error.empty() ? "" : "\n") + e;
+                    for (const CheckDiagnostic & d : report.diagnostics) {
+                        if (d.severity != report::Status::ERROR || d.code == check_code::KEY_UNUSED) continue;
+                        error += (error.empty() ? "" : "\n") + d.message;
+                    }
                     if (!report.unused.empty()) {
                         error += std::string(error.empty() ? "" : "\n") +
                                  "keys that are unknown or unused with these settings (mallard check lists them all):";
                         for (const Diagnostic & key : report.unused) error += "\n  " + describe(key);
                     }
                 } else {
-                    print_check(report);
+                    if (json && comm::is_root()) std::cout.rdbuf(out);
+                    print_check(report, json);
                 }
                 status = report.ok() ? 0 : 1;
             } else {
@@ -148,6 +160,9 @@ int check_main(const cli::Args & args) {
     options.quality_file = args.value_or("--quality", "");
     options.catalog_file = args.value_or("--catalog", "");
     options.view_dir = args.value_or("--view", "");
+    if (const std::string f = args.value_or("--format", "text"); f != "text" && f != "json") {
+        return cli::usage_error(command, "--format takes text or json, not " + f);
+    }
     std::string error;
     if (args.has("--memory")) error = set_memory_target(args.value_or("--memory", ""), options);
     if (!error.empty()) return cli::usage_error(command, error);

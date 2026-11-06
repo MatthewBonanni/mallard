@@ -17,6 +17,7 @@ add_library(MallardCore STATIC
     common/growing_buffer.cpp
     common/json.cpp
     common/log.cpp
+    common/report.cpp
     common/provenance.cpp
     common/run_control.cpp
     common/run_health.cpp
@@ -68,6 +69,7 @@ add_library(MallardCore STATIC
     solver/probes.cpp
     solver/solver.cpp
     solver/solver_check.cpp
+    solver/check_report.cpp
     solver/solver_resolution.cpp
     solver/solver_chemistry.cpp
     solver/solver_control.cpp

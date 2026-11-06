@@ -29,7 +29,8 @@ constexpr double WALL_Y_PLUS = 1.0;
 constexpr double DNS_X_PLUS = 15.0, DNS_Z_PLUS = 8.0;
 constexpr double LES_X_PLUS = 150.0, LES_Z_PLUS = 40.0;
 constexpr double LOG_LAYER_Y_PLUS = 30.0;
-constexpr double TRANSITION_RE = 5e5;  // flat plate: laminar below, turbulent above
+constexpr double TRANSITION_RE = 5e5;     // flat plate: laminar below, turbulent above
+constexpr double TFLES_THICKENING = 5.0;  // above it the flame's response to turbulence is unreliable
 
 using Point = std::array<double, N_DIM>;
 
@@ -40,6 +41,31 @@ std::string point(const Point & x) {
 }
 
 std::string g3(const double v) { return logging::format("%.3g", v); }
+
+constexpr double NONE = std::numeric_limits<double>::quiet_NaN();
+
+/** @brief Adds an estimate to the report. */
+CheckEstimate & estimate(CheckReport & r, const std::string & id, const std::string & quantity, const double value,
+                         const std::string & units, const std::string & basis) {
+    CheckEstimate e;
+    e.id = id;
+    e.quantity = quantity;
+    e.value = value;
+    e.units = units;
+    e.basis = basis;
+    r.resolution.push_back(std::move(e));
+    return r.resolution.back();
+}
+
+void locate(CheckEstimate & e, const Point & x) {
+    e.located = true;
+    e.x = x;
+}
+
+void target(CheckEstimate & e, const std::string & text, const bool met) {
+    e.target = text;
+    e.status = met ? report::Status::OK : report::Status::WARNING;
+}
 
 /** @brief The largest value over ranks and where it is (on the lowest rank that has it). */
 struct Worst {
@@ -99,11 +125,13 @@ CheckFields Solver::check_resolution(CheckReport & r) {
     r.delta_min = comm::allreduce(delta_min, comm::Op::MIN);
     r.delta_max = coarsest.value;
     const double delta_mean = sizes[1] / sizes[0];
-    r.resolution.emplace_back("Cell size", "V^(1/" + std::to_string(N_DIM) + ") from " + g3(r.delta_min) + " to " +
-                                               g3(r.delta_max) + ", mean " + g3(delta_mean));
+    const std::string size = "cell size V^(1/" + std::to_string(N_DIM) + ")";
+    estimate(r, "cell_size_min", size + ", smallest", r.delta_min, "m", "over every cell");
+    estimate(r, "cell_size_mean", size + ", mean", delta_mean, "m", "volume-weighted");
+    locate(estimate(r, "cell_size_max", size + ", largest", r.delta_max, "m", "over every cell"), coarsest.x);
 
     if (!is_viscous()) {
-        r.resolution.emplace_back("Scales", "inviscid: no Kolmogorov length or wall units");
+        estimate(r, "viscous_scales", "Kolmogorov length, wall units", NONE, "", "not estimated: inviscid");
     } else {
         check_viscous_scales(r, fields, delta, delta_mean, coarsest.x);
     }
@@ -112,16 +140,34 @@ CheckFields Solver::check_resolution(CheckReport & r) {
         const double delta_L = thickened_flame.delta_L;
         r.cells_per_delta_L_min = delta_L / r.delta_max;
         r.cells_per_delta_L_max = delta_L / r.delta_min;
-        r.resolution.emplace_back("Flame", "delta_L " + real(delta_L) + " (les.combustion): " +
-                                               g3(r.cells_per_delta_L_min) + " to " + g3(r.cells_per_delta_L_max) +
-                                               " cells across it, thickened to " + g3(thickened_flame.n_res) +
-                                               " cells by TFLES");
+        estimate(r, "delta_L", "laminar flame thickness delta_L", delta_L, "m", "les.combustion.delta_L");
+        estimate(r, "cells_per_delta_L_min", "cells across delta_L, fewest", r.cells_per_delta_L_min,
+                 "dimensionless", "delta_L over the largest cell size");
+        estimate(r, "cells_per_delta_L_max", "cells across delta_L, most", r.cells_per_delta_L_max, "dimensionless",
+                 "delta_L over the smallest cell size");
+        const auto h_delta = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), les_delta);
+        double F_max = 1.0;
+        for (uint32_t c = 0; c < n_owned; c++) {
+            F_max = std::max(F_max, thickened_flame.thickening(static_cast<double>(h_delta(c)), 1.0));
+        }
+        r.tfles_thickening_max = comm::allreduce(F_max, comm::Op::MAX);
+        target(estimate(r, "tfles_thickening_max", "TFLES thickening F, largest", r.tfles_thickening_max,
+                        "dimensionless", "n_res Delta / delta_L, the flame thickened to n_res = " +
+                                             g3(thickened_flame.n_res) + " cells (les.combustion.n_res)"),
+               "<= " + real(TFLES_THICKENING), r.tfles_thickening_max <= TFLES_THICKENING);
+        if (r.tfles_thickening_max > TFLES_THICKENING) {
+            r.warning(check_code::TFLES_THICKENING,
+                      format("TFLES thickens the flame up to F = %.3g (n_res Delta / delta_L): above %.0f the flame's "
+                             "response to turbulence is unreliable; refine the mesh or lower les.combustion.n_res",
+                             r.tfles_thickening_max, TFLES_THICKENING));
+        }
         std::vector<double> across(n_owned);
         for (uint32_t c = 0; c < n_owned; c++) across[c] = delta_L / delta[c];
         fields.emplace_back("CELLS_PER_DELTA_L", across);
     } else if (reacting) {
-        r.resolution.emplace_back("Flame", "laminar flame thickness not estimated: only les.combustion (TFLES) "
-                                           "gives one; a resolved flame needs about 10 cells across it");
+        estimate(r, "delta_L", "laminar flame thickness delta_L", NONE, "m",
+                 "not estimated: only les.combustion (TFLES) gives one; a resolved flame needs about 10 cells across "
+                 "it");
     }
     return fields;
 }
@@ -337,49 +383,66 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
     exchange[1] = comm::allreduce(exchange[1], comm::Op::MAX);
     const double mean_tau = comm::allreduce(sum_tau, comm::Op::SUM) / std::max(wall_area, 1e-300);
     if (wall_area > 0.0 && !have_u_tau) {
-        r.resolution.emplace_back("Walls", "wall units not estimated: no flow at the initial state, no forcing and "
-                                           "no previous run's wall shear");
+        estimate(r, "u_tau", "friction velocity u_tau", NONE, "m/s",
+                 "not estimated, nor wall units: no flow at the initial state, no forcing and no previous run's wall "
+                 "shear");
     } else if (wall_area > 0.0) {
         r.u_tau = std::sqrt(mean_tau);
         r.y_plus_mean = comm::allreduce(sum_y_plus, comm::Op::SUM) / wall_area;
-        r.resolution.emplace_back("Walls", "u_tau " + g3(r.u_tau) + " from " + u_tau_source);
+        estimate(r, "u_tau", "friction velocity u_tau", r.u_tau, "m/s",
+                 "root mean square over the walls' area, from " + u_tau_source);
+        const std::string regime = les_on ? "wall-resolved LES" : "DNS";
+        const double x_max = les_on ? LES_X_PLUS : DNS_X_PLUS, z_max = les_on ? LES_Z_PLUS : DNS_Z_PLUS;
         if (resolved) {
             r.y_plus_max = y_plus.value;
             r.x_plus_max = x_plus.value;
             r.z_plus_max = z_plus.value;
-            std::string text = "first-cell y+ up to " + g3(r.y_plus_max) + " at " + point(y_plus.x) + ", mean " +
-                               g3(r.y_plus_mean);
-            if (r.x_plus_max > 0.0) text += "; x+ up to " + g3(r.x_plus_max);
-            if (r.z_plus_max > 0.0) text += ", z+ up to " + g3(r.z_plus_max);
-            r.resolution.emplace_back("", text);
+            CheckEstimate & e = estimate(r, "y_plus_max", "first-cell y+, largest", r.y_plus_max, "wall units",
+                                         "first cell centers of the walls without a wall model");
+            locate(e, y_plus.x);
+            target(e, format("<= %.0f (%s)", WALL_Y_PLUS, regime.c_str()), r.y_plus_max <= WALL_Y_PLUS);
+        }
+        estimate(r, "y_plus_mean", "first-cell y+, mean", r.y_plus_mean, "wall units",
+                 "area-weighted over every wall");
+        if (resolved && r.x_plus_max > 0.0) {
+            target(estimate(r, "x_plus_max", "wall-cell x+, largest", r.x_plus_max, "wall units",
+                            "wall faces' extent along the flow"),
+                   format("<= %.0f (%s)", x_max, regime.c_str()), r.x_plus_max <= x_max);
+        }
+        if (resolved && r.z_plus_max > 0.0) {
+            target(estimate(r, "z_plus_max", "wall-cell z+, largest", r.z_plus_max, "wall units",
+                            "wall faces' extent across the flow"),
+                   format("<= %.0f (%s)", z_max, regime.c_str()), r.z_plus_max <= z_max);
         }
         if (with_model) {
             r.y_plus_exchange_min = exchange[0];
-            r.resolution.emplace_back("", "wall model's exchange points from y+ " + g3(exchange[0]) + " to " +
-                                              g3(exchange[1]));
+            target(estimate(r, "y_plus_exchange_min", "wall model's exchange point y+, lowest", exchange[0],
+                            "wall units", "exchange_distance, or exchange_cells wall-cell heights"),
+                   format(">= %.0f (log layer)", LOG_LAYER_Y_PLUS), exchange[0] >= LOG_LAYER_Y_PLUS);
+            estimate(r, "y_plus_exchange_max", "wall model's exchange point y+, highest", exchange[1], "wall units",
+                     "exchange_distance, or exchange_cells wall-cell heights");
         }
-        const std::string regime = les_on ? "wall-resolved LES" : "DNS";
-        const double x_max = les_on ? LES_X_PLUS : DNS_X_PLUS, z_max = les_on ? LES_Z_PLUS : DNS_Z_PLUS;
         if (resolved && r.y_plus_max > WALL_Y_PLUS) {
-            r.warnings.push_back(format("first cells at y+ up to %.3g (at %s; u_tau from %s): %s needs y+ <= %.0f at "
-                                        "the first cell centers: place them at most %s from the wall, or model the "
-                                        "walls (wall_model)",
-                                        r.y_plus_max, point(y_plus.x).c_str(), u_tau_basis.c_str(), regime.c_str(),
-                                        WALL_Y_PLUS, g3(y1_fix).c_str()));
+            r.warning(check_code::WALL_Y_PLUS,
+                      format("first cells at y+ up to %.3g (at %s m; u_tau from %s): %s needs y+ <= %.0f at the "
+                             "first cell centers: place them at most %s m from the wall, or model the walls "
+                             "(wall_model)",
+                             r.y_plus_max, point(y_plus.x).c_str(), u_tau_basis.c_str(), regime.c_str(), WALL_Y_PLUS,
+                             g3(y1_fix).c_str()));
         }
         if (resolved && (r.x_plus_max > x_max || r.z_plus_max > z_max)) {
             const std::string spacings =
                 N_DIM == 3 ? format("x+ %.3g and z+ %.3g", r.x_plus_max, r.z_plus_max) : format("x+ %.3g", r.x_plus_max);
             const std::string targets =
                 N_DIM == 3 ? format("x+ <= %.0f and z+ <= %.0f", x_max, z_max) : format("x+ <= %.0f", x_max);
-            r.warnings.push_back("wall cells up to " + spacings + " (along the flow and across it): " + regime +
-                                 " needs " + targets + ": refine the mesh along the walls");
+            r.warning(check_code::WALL_SPACING, "wall cells up to " + spacings + " (along the flow and across it): " +
+                                                    regime + " needs " + targets + ": refine the mesh along the walls");
         }
         if (with_model && exchange[0] < LOG_LAYER_Y_PLUS) {
-            r.warnings.push_back(format("the wall model's exchange points reach down to y+ %.3g (u_tau from %s), "
-                                        "below the log layer (y+ >= %.0f) its law assumes: raise exchange_distance "
-                                        "or exchange_cells",
-                                        exchange[0], u_tau_basis.c_str(), LOG_LAYER_Y_PLUS));
+            r.warning(check_code::WALL_MODEL_EXCHANGE,
+                      format("the wall model's exchange points reach down to y+ %.3g (u_tau from %s), below the log "
+                             "layer (y+ >= %.0f) its law assumes: raise exchange_distance or exchange_cells",
+                             exchange[0], u_tau_basis.c_str(), LOG_LAYER_Y_PLUS));
         }
         fields.emplace_back("Y_PLUS", cell_y_plus);
     }
@@ -391,28 +454,39 @@ void Solver::check_viscous_scales(CheckReport & r, CheckFields & fields, const s
     const std::string eps_source = from_forcing ? "the forcing's power, u_tau^2 U_b / h"
                                                 : state_name + " resolved dissipation";
     if (!(eps > 0.0)) {
-        r.resolution.emplace_back("Kolmogorov",
-                                  "not estimated: no forcing, and " + state_name + " velocity has no gradients");
+        estimate(r, "eta", "Kolmogorov length eta", NONE, "m",
+                 "not estimated: no forcing, and " + state_name + " velocity has no gradients");
         return;
     }
     r.epsilon = eps;
     r.eta = std::pow(nu * nu * nu / eps, 0.25);
     r.delta_over_eta = delta_mean / r.eta;
-    r.resolution.emplace_back("Kolmogorov", "eta " + g3(r.eta) + " from the mean epsilon " + g3(eps) + " (" +
-                                                eps_source + ") and nu " + g3(nu));
-    r.resolution.emplace_back("", "cells of " + g3(r.delta_over_eta) + " eta on average, up to " +
-                                      g3(r.delta_max / r.eta) + " at " + point(coarsest));
+    estimate(r, "epsilon", "dissipation epsilon, mean", eps, "m^2/s^3",
+             from_forcing ? eps_source : eps_source + ", mass-weighted");
+    estimate(r, "nu", "kinematic viscosity nu, mean", nu, "m^2/s", "the mean mu over the mean rho");
+    estimate(r, "eta", "Kolmogorov length eta", r.eta, "m", "(nu^3 / epsilon)^(1/4)");
+    CheckEstimate & mean_ratio = estimate(r, "delta_over_eta_mean", "cell size / eta, mean", r.delta_over_eta,
+                                          "dimensionless", "the volume-weighted mean cell size over eta");
+    if (!les_on) {
+        target(mean_ratio, format("<= %.0f (DNS)", DNS_DELTA_OVER_ETA), r.delta_over_eta <= DNS_DELTA_OVER_ETA);
+    }
+    locate(estimate(r, "delta_over_eta_max", "cell size / eta, largest", r.delta_max / r.eta, "dimensionless",
+                    "the largest cell size over eta"),
+           coarsest);
     if (!from_forcing && u_prime2 > 0.0) {
         r.taylor = std::sqrt(15.0 * nu * u_prime2 / eps);
-        r.resolution.emplace_back("Taylor", "lambda " + g3(r.taylor) + " (u' " + g3(std::sqrt(u_prime2)) + "): " +
-                                                g3(r.taylor / delta_mean) + " cells across it on average");
+        estimate(r, "u_prime", "velocity fluctuation u'", std::sqrt(u_prime2), "m/s",
+                 "root mean square per component about the mass-weighted mean velocity");
+        estimate(r, "taylor", "Taylor microscale lambda", r.taylor, "m", "(15 nu u'^2 / epsilon)^(1/2)");
+        estimate(r, "cells_per_taylor", "cells across lambda, mean", r.taylor / delta_mean, "dimensionless",
+                 "lambda over the mean cell size");
     }
     if (!les_on && r.delta_over_eta > DNS_DELTA_OVER_ETA) {
-        r.warnings.push_back(format("DNS: cells of %.3g eta on average (eta %s from %s): resolving the dissipation "
-                                    "needs about %.0f eta or less: refine to cells of %s, or model the small scales with LES "
-                                    "([les])",
-                                    r.delta_over_eta, g3(r.eta).c_str(), eps_source.c_str(), DNS_DELTA_OVER_ETA,
-                                    g3(DNS_DELTA_OVER_ETA * r.eta).c_str()));
+        r.warning(check_code::DNS_ETA,
+                  format("DNS: cells of %.3g eta on average (eta %s m from %s): resolving the dissipation needs about "
+                         "%.0f eta or less: refine to cells of %s m, or model the small scales with LES ([les])",
+                         r.delta_over_eta, g3(r.eta).c_str(), eps_source.c_str(), DNS_DELTA_OVER_ETA,
+                         g3(DNS_DELTA_OVER_ETA * r.eta).c_str()));
     }
     std::vector<double> ratio(n_owned);
     for (uint32_t c = 0; c < n_owned; c++) ratio[c] = delta[c] / r.eta;

@@ -289,6 +289,6 @@ TEST(ErrorMessages, CheckReportsInputErrorsAsARunDoes) {
     options.input_file = "case.toml";
     Solver solver;
     const CheckReport report = solver.check(parse_input_string(input), options);
-    ASSERT_EQ(report.errors.size(), 1u);
-    EXPECT_EQ(report.errors[0], "case.toml: " + run_error(input));
+    ASSERT_EQ(report.errors().size(), 1u);
+    EXPECT_EQ(report.errors()[0], "case.toml: " + run_error(input));
 }
