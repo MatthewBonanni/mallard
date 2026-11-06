@@ -411,6 +411,51 @@ TEST(KexprTest, DeviceMatchesHost) {
     }
 }
 
+/**
+ * @brief ProgramTable::lanes gives each point the bits of the table's own
+ *        evaluation: evaluate_lanes repeats evaluate's operations lane by
+ *        lane, and programs with jumps go point by point.
+ */
+TEST(KexprTest, LanesMatchPointByPointBitwise) {
+    constexpr int K = 4;
+    std::vector<std::string> all = texts(ARITHMETIC);
+    for (const auto & cases : {FUNCTIONS, CONTROL_FLOW}) {
+        for (const auto & text : texts(cases)) all.push_back(text);
+    }
+    std::vector<kexpr::Program> programs;
+    for (const auto & text : all) programs.emplace_back("test", text, VARIABLES);
+    std::vector<const kexpr::Program *> pointers;
+    for (const auto & p : programs) pointers.push_back(&p);
+    const kexpr::ProgramTable<> table(pointers);
+    const auto points = sample_points();
+    const uint32_t n_groups = static_cast<uint32_t>(points.size()) / K, n_points = n_groups * static_cast<uint32_t>(K);
+    Kokkos::View<double *[4]> d_points("points", n_points);
+    auto h_points = Kokkos::create_mirror_view(d_points);
+    for (uint32_t i = 0; i < n_points; i++) {
+        for (size_t k = 0; k < 4; k++) h_points(i, k) = points[i][k];
+    }
+    Kokkos::deep_copy(d_points, h_points);
+    Kokkos::View<double **> lanes("lanes", table.size(), n_points), single("single", table.size(), n_points);
+    Kokkos::parallel_for("evaluate", n_groups, KOKKOS_LAMBDA(const uint32_t g) {
+        for (uint32_t p = 0; p < table.size(); p++) {
+            double out[size_t(K)];
+            auto at = [&](const int l) { return g * K + static_cast<uint32_t>(l); };
+            table.lanes<K>(p, [&](const int l, const uint16_t v) { return d_points(at(l), v); }, out);
+            for (int l = 0; l < K; l++) {
+                lanes(p, at(l)) = out[l];
+                single(p, at(l)) = table(p, [&](const uint16_t v) { return d_points(at(l), v); });
+            }
+        }
+    });
+    auto h_lanes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), lanes);
+    auto h_single = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), single);
+    for (uint32_t p = 0; p < table.size(); p++) {
+        for (uint32_t i = 0; i < n_points; i++) {
+            EXPECT_TRUE(same(h_lanes(p, i), h_single(p, i))) << all[p] << ": " << h_lanes(p, i) << " vs " << h_single(p, i);
+        }
+    }
+}
+
 TEST(KexprTest, VariablesAreCaseSensitiveAndTracked) {
     const kexpr::Program program("test", "T * t + rho", {"t", "T", "rho", "p"});
     EXPECT_TRUE(program.uses(0));

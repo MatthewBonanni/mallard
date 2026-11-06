@@ -384,6 +384,46 @@ free. Small meshes are overestimated, on the safe side:
 - TENO6's tables take 2-4% more per cell on the GPU than in a check on a CPU, the largest underestimate above
   (-1.6% of the Kokkos peak).
 
+### 9. Analytical initialization (#677)
+
+`[initialize]` expressions and regions are cell averages: every cell is split into simplices (24 tetrahedra
+for a hexahedron, from its vertex average and face averages), each carrying a 14-point degree-5 rule (7 points
+in 2D), so a 1M-hexahedron start evaluates the expressions at 336M points. The Taylor-Green start of the
+performance set at $100^3$, timed as the "initial solution" phase:
+
+| A100 (16 OpenMP host threads) | main | change |
+|---|---|---|
+| host: simplices of each 16k-cell chunk (`h_cell_tetrahedra`) | 1.23-1.39 s | — |
+| copies of the simplices to the device (2.3 GB) | 1.20-1.27 s | — |
+| kernels (62 launches of 16k cells / 3 of up to 419k) | 0.63 s | about 0.3 s |
+| initial solution | 3.04-3.08 s | 0.31-0.34 s |
+
+- The kernel builds a cell's simplices itself, from the mesh's cell-node lists and node coordinates (still on
+  the device during the setup), with `cell_tetrahedra`'s order and arithmetic; only curved cells' rules
+  (`curved::Geometry::cell_rule`) come from the host.
+- A device launch takes as many cells as 64 MB of scratch rows hold (419k here, at 160 bytes a row) instead of
+  16k, which left the A100 partly idle: 16k cells per launch took 0.53 s, 64k 0.36 s, 256k 0.31 s, 1M 0.28 s.
+  Host builds keep launches of 16k cells, which keep their threads busy.
+
+On CPUs the time is the expressions and the conversions to conservatives at every point. kexpr's `evaluate`
+dispatches each instruction through a switch for each point; `evaluate_lanes` runs one program over the 14
+points of a simplex's rule (7 in 2D) at once, each instruction over all of them before the next, so the dispatch
+is paid once per 14 points and the points' operations overlap. Every point gets `evaluate`'s operations in its
+order, so the values are its bits (`KexprTest.LanesMatchPointByPointBitwise`); programs with jumps (statements,
+loops) go point by point. GPU threads keep one point each. The lanes cover the base layer's programs; regions'
+programs, which apply at some points only, stay per point.
+
+| M4 Pro, 2 threads (Threads backend), fastest of 2-3 runs | 0.8 (exprtk) | main | change |
+|---|---|---|---|
+| Taylor-Green, $100^3$ hexahedra, machine load about 9 | 6.65 s | 18.8 s | 6.49 s |
+| the same, machine load about 17 | 8.92 s | 25.4 s | 9.01 s |
+
+Half of the change's time is `sin` and `cos`; most of the rest is the conversions and the interpreter.
+
+Initial states are bitwise those of `main`: 2D and 3D generated meshes of every cell type, file meshes with
+tetrahedra, prisms and curved (second-order) boundaries, regions with sharp and smooth edges, tabulated data,
+mixtures and synthetic turbulence, on CPUs and on an A100.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
