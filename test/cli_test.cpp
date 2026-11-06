@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -31,6 +32,7 @@
 #include "common_typedef.h"
 #include "data_paths.h"
 #include "json.h"
+#include "output_reader.h"
 
 extern char ** environ;
 
@@ -450,6 +452,147 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
         run({"info", "--quality", "quality", source_dir() + "/test/data/formats/gas.toml"}, true);
     EXPECT_EQ(not_a_mesh.status, 2);
     EXPECT_TRUE(contains(not_a_mesh.err, "--quality takes a mesh file")) << not_a_mesh.err;
+}
+
+namespace {
+
+/** @brief The largest |B - A| over the cells of a field of two files, and its cell, from the reader. */
+std::pair<double, size_t> largest_difference(const std::string & a, const std::string & b, const std::string & field) {
+    const std::vector<double> x = output::read(output::open(a), field, 0);
+    const std::vector<double> y = output::read(output::open(b), field, 0);
+    std::pair<double, size_t> out = {0.0, 0};
+    for (size_t i = 0; i < x.size(); i++) {
+        if (std::abs(y[i] - x[i]) > out.first) out = {std::abs(y[i] - x[i]), i};
+    }
+    return out;
+}
+
+/** @brief Runs steps (two) steps of a periodic case on an N x (3N/4) mesh (x 3N/4 in 3D), writing restart files and VTU snapshots to dir/. */
+Result diff_case(const std::string & dir, uint32_t n, const std::string & rho, int steps = 2) {
+    const bool three = Mallard_DIM == 3;
+    fs::create_directories(dir);
+    std::ofstream(dir + "/input.toml")
+        << "[run]\nn_steps = " << steps << "\ndt = 1.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << 3 * n / 4
+        << "\nLx = 1.0\nLy = 1.0\n" << (three ? "Nz = " + std::to_string(3 * n / 4) + "\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+        << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+        << "[initialize]\ntype = \"analytical\"\nrho = \"" << rho << "\"\n"
+        << (three ? "u = [\"0.3\", \"0.0\", \"0.0\"]\n" : "u = [\"0.3\", \"0.0\"]\n")
+        << "p = \"1.0\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\", \"U\"]\n"
+        << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
+    return run({"-i", dir + "/input.toml", "--kokkos-num-threads=1"}, true);
+}
+
+/** @brief The column at which a line holding text has it, or npos. */
+size_t column_of(const std::string & out, const std::string & text) {
+    std::istringstream in(out);
+    for (std::string line; std::getline(in, line);) {
+        const size_t at = line.find(text);
+        if (at == std::string::npos) continue;
+        size_t columns = 0;
+        for (size_t i = 0; i < at; i++) columns += (static_cast<unsigned char>(line[i]) & 0xC0) != 0x80;
+        return columns;
+    }
+    return std::string::npos;
+}
+
+} // namespace
+
+TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
+    SKIP_UNDER_MPI();
+    const std::string dir = source_dir() + "/test/data/formats/";
+    const std::string first = dir + "v0.8.0/gas_000000.restart", later = dir + "v0.8.0/gas_000002.restart";
+    const Result same = run({"diff", later, dir + "v0.7.0/gas_000002.restart"}, true);
+    EXPECT_EQ(same.status, 0) << same.err;
+    EXPECT_TRUE(has_row(same.out, {"Result", "✓ identical: the same state, bit for bit"})) << same.out;
+    EXPECT_TRUE(has_row(same.out, {"✓", "RHOE", "kg m-1 s-2", "0 of 30", "0", "0", "0"})) << same.out;
+    EXPECT_EQ(column_of(same.out, "field   units"), column_of(same.out, "RHOE    kg m-1 s-2")) << same.out;
+
+    const Result differ = run({"diff", first, later, "--format", "json"}, true);
+    EXPECT_EQ(differ.status, 1) << differ.err;
+    const json::Value v = json::parse(differ.out);
+    EXPECT_EQ(v["result"].string, "beyond_tolerance");
+    EXPECT_EQ(v["time"]["status"].string, "beyond_tolerance");
+    ASSERT_EQ(v["fields"].array.size(), 4u);
+    for (const json::Value & f : v["fields"].array) {
+        SCOPED_TRACE(f["name"].string);
+        const auto [linf, cell] = largest_difference(first, later, f["name"].string);
+        EXPECT_GT(linf, 0.0);
+        EXPECT_DOUBLE_EQ(f["absolute"]["linf"].number, linf);
+        EXPECT_EQ(f["max_at"]["index"].number, static_cast<double>(cell));
+        EXPECT_EQ(f["status"].string, "beyond_tolerance");
+    }
+    const Result loose = run({"diff", first, later, "--tol", "1"}, true);
+    EXPECT_EQ(loose.status, 0) << loose.err;
+    EXPECT_TRUE(has_row(loose.out, {"Result", "⚠ within tolerance: differences, none beyond it"})) << loose.out;
+    EXPECT_EQ(run({"diff", first, later, "--tol", "1,RHOE=1e-6"}, true).status, 1);
+    EXPECT_EQ(run({"diff", first, later, "--tol", "small"}, true).status, 2);
+
+    const std::string nscbc = dir + "v0.8.0/nscbc_000002.restart";
+    const Result faces = run({"diff", nscbc, dir + "v0.7.0/nscbc_000002.restart", "--format", "json"}, true);
+    EXPECT_EQ(faces.status, 0) << faces.err;
+    const json::Value f = json::parse(faces.out)["restart"]["faces"];
+    EXPECT_EQ(f["values"].number, static_cast<double>(output::open(nscbc).restart.n_faces));
+    EXPECT_EQ(f["status"].string, "identical");
+    const Result no_faces = run({"diff", dir + "v0.8.0/nscbc_000000.restart", nscbc}, true);
+    EXPECT_EQ(no_faces.status, 1);
+    EXPECT_TRUE(has_row(no_faces.out, {"✗", "face records", "0 faces in A, 10 in B"})) << no_faces.out;
+
+    const Result mesh = run({"diff", dir + "annulus.msh", later}, true);
+    EXPECT_EQ(mesh.status, 3);
+    EXPECT_TRUE(contains(mesh.err, "is a mesh file, which holds no field values")) << mesh.err;
+}
+
+TEST(CliTest, DiffMatchesCellsByTheirPlaceAndRemapsAcrossMeshes) {
+    SKIP_UNDER_MPI();
+    const std::string linear = "1.0 + 0.3 * x";
+    ASSERT_EQ(diff_case("coarse", 4, linear).status, 0);
+    ASSERT_EQ(diff_case("other", 4, linear + " + 0.1 * x * y").status, 0);
+    ASSERT_EQ(diff_case("fine", 8, linear).status, 0);
+
+    const Result located = run({"diff", "coarse/restart_000000.restart", "other/restart_000000.restart", "--format", "json"}, true);
+    EXPECT_EQ(located.status, 1) << located.err;
+    const json::Value rho = json::parse(located.out)["fields"].array.at(0);
+    ASSERT_EQ(rho["name"].string, "RHO");
+    const auto & x = rho["max_at"]["x"].array;
+    ASSERT_EQ(x.size(), size_t(Mallard_DIM));
+    EXPECT_NEAR(x[0].number, 0.875, 1e-6);
+    EXPECT_NEAR(x[1].number, 5.0 / 6.0, 1e-6);
+
+    // Series of different lengths are matched by time, not position
+    ASSERT_EQ(diff_case("longer", 4, linear, 4).status, 0);
+    const Result timed = run({"diff", "longer/flow.pvd", "coarse/flow.pvd", "--time", "0.0021", "--format", "json"}, true);
+    EXPECT_EQ(timed.status, 0) << timed.err;
+    const json::Value t = json::parse(timed.out);
+    EXPECT_EQ(t["a"]["snapshot"].number, 1);
+    EXPECT_EQ(t["b"]["snapshot"].number, 1);
+    EXPECT_EQ(run({"diff", "longer/flow.pvd", "coarse/flow.pvd", "--format", "json"}, true).status, 1);
+    const Result no_step = run({"diff", "coarse/restart_000002.restart", "other/restart_000002.restart", "--step", "3"}, true);
+    EXPECT_EQ(no_step.status, 3);
+    EXPECT_TRUE(contains(no_step.err, "has no snapshot of step 3")) << no_step.err;
+    EXPECT_EQ(run({"diff", "longer/flow.pvd", "coarse/flow.pvd", "--step", "2", "--time", "0"}, true).status, 2);
+
+    const Result mixed = run({"diff", "coarse/restart_000002.restart", "coarse/flow_000002.vtu"}, true);
+    EXPECT_EQ(mixed.status, 3);
+    EXPECT_TRUE(contains(mixed.err, "not the mesh's global cell order")) << mixed.err;
+
+    const Result refused = run({"diff", "coarse/restart_000000.restart", "fine/restart_000000.restart"}, true);
+    EXPECT_EQ(refused.status, 3);
+    EXPECT_TRUE(contains(refused.err, "different meshes; --remap compares B on A's mesh")) << refused.err;
+
+    // The fine mesh nests in the coarse one: its averages, remapped conservatively, are the coarse averages
+    const double rounding = 100.0 * static_cast<double>(std::numeric_limits<rtype>::epsilon());
+    char tol[32];
+    std::snprintf(tol, sizeof tol, "%.3g", rounding);
+    const Result remapped = run({"diff", "coarse/restart_000000.restart", "fine/restart_000000.restart", "--remap", "--tol",
+                                 tol, "--format", "json"}, true);
+    EXPECT_EQ(remapped.status, 0) << remapped.err << remapped.out;
+    const json::Value r = json::parse(remapped.out);
+    EXPECT_EQ(r["compared"].string, "remap");
+    EXPECT_EQ(r["remap"]["source_cells"].number, Mallard_DIM == 3 ? 8 * 6 * 6 : 8 * 6);
+    for (const json::Value & f : r["fields"].array) {
+        EXPECT_LT(f["relative"]["linf"].number, rounding) << f["name"].string;
+    }
 }
 
 TEST(CliTest, CompletionCoversEveryCommandAndOption) {
