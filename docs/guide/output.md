@@ -59,13 +59,49 @@ variables = ["P", "T"]
 |---|---|
 | Conservative | `RHO`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `RHOU` (vector) |
 | Primitive | `U_X`, `U_Y`, `U_Z`, `U` (vector), `P`, `T`, `H` |
-| Derived | `CFL`, `VORTICITY`, `Q` (Q-criterion) |
+| Derived | `CFL`, `VORTICITY`, `MACH`, `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN` ([below](#derived-fields)) |
 | TENO | `TENO_SIGMA` (troubled-cell indicator) |
 | Mixtures | `Y_<s>`, `X_<s>`, `RHOY_<s>`; viscous: `MU`, `LAMBDA`, `D_<s>` (and `DT_<s>` with `soret`) |
 | Chemistry, radiation | `HRR`, `OMEGA_<s>`, `CHEM_COST`, `QRAD` |
 | LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
 | [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
+
+### Derived fields
+
+Fields that show the flow's structure, computed from the state being written
+(with the same cell gradients as `VORTICITY` and the `[integrals]` monitor:
+the TENO reconstruction polynomials, else least squares), so they cost nothing
+in steps that write none:
+
+```toml
+[[write_data]]
+prefix = "solut/jet"
+interval = 500
+variables = ["RHO", "U", "P", "MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN"]
+```
+
+| Name | Units | Definition |
+|---|---|---|
+| `MACH` | `1` | \|u\| / c, with c = √(γ p / ρ) and, for mixtures, each cell's frozen γ |
+| `Q_CRITERION` | `s-2` | Q = (‖Ω‖² − ‖S‖²) / 2 ([Hunt, Wray & Moin 1988](../references.md#hunt-wray-moin-1988)): positive where rotation dominates strain, i.e. in vortices. Before 0.10.0 it was called `Q`, which is now an error that names `Q_CRITERION` |
+| `LAMBDA2` | `s-2` | λ₂, the middle eigenvalue of S² + Ω² ([Jeong & Hussain 1995](../references.md#jeong-hussain-1995)): negative in vortex cores |
+| `SCHLIEREN` | `kg m-4` | \|∇ρ\|, a numerical schlieren image of shocks, contact surfaces and mixing layers |
+
+S and Ω are the symmetric and antisymmetric parts of the velocity
+gradient ∂u_i/∂x_j. A 2D run treats its flow as a 3D one
+with no third velocity component and no variation along z, so that Q and
+λ₂ mean what they do in 3D; axisymmetric runs add the hoop strain
+u_r / r to the gradient. In 2D, λ₂ = −Q for an incompressible flow,
+so `LAMBDA2` adds little to `Q_CRITERION` there.
+
+Pitfalls: both vortex criteria are squares of gradients, so their magnitude
+scales with the flow's rate squared; pick isosurface levels relative to a
+reference rate (e.g. Q = 0.1 (U/D)²) rather than absolute values. On coarse
+meshes the gradients, and hence the criteria, are smoothed. `SCHLIEREN` spans
+orders of magnitude between shocks and the rest of the flow; a logarithmic
+color map or exp(−k \|∇ρ\| / max \|∇ρ\|) in
+ParaView's calculator shows both.
 
 ### Which format
 
@@ -410,11 +446,12 @@ those of `A` per second.
 | `T`, `T_SEED` | `K` | `HRR`, `QRAD` | `kg m-1 s-3` (W/m³) |
 | `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
-| `Q` | `s-2` | `CFL`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
+| `Q_CRITERION`, `LAMBDA2` | `s-2` | `CFL`, `MACH`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
 | `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
 | `MASS_FLUX`, `SPECIES_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
 | `CF`, `CP`, `Y_PLUS` | `1` | `REGION_FRACTION` (regions) | `1` |
+| `SCHLIEREN` | `kg m-4` | | |
 
 CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
 `point`, `face`, `cell`, `count` and the normal `nx`, `ny`, `nz` `1`; the

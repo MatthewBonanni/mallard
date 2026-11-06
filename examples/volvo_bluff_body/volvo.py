@@ -14,7 +14,7 @@
     volvo.py animate slice.npz --out MP4 [--field vorticity|T]
     volvo.py meanfield STATS.vtkhdf --u-bulk U --out PNG [--temperature]
         span-averaged mean velocity (recirculation contour), fluctuation level (and temperature)
-    volvo.py grid "snap/PREFIX_*.vtkhdf" --out-dir FRAMES [--fields Q,U_X,T --follow --delete]
+    volvo.py grid "snap/PREFIX_*.vtkhdf" --out-dir FRAMES [--fields Q_CRITERION,U_X,T --follow --delete]
         snapshots resampled onto a uniform grid (float32 npz), e.g. in the pod while a run writes them
     volvo.py render FRAMES --out-dir PNGS [--q 3e6 --flame 1200 --section T]
         3D frames: Q vortices, flame surface, a section on the far spanwise plane, body, duct (needs pyvista)
@@ -381,7 +381,7 @@ def cmd_grid(a):
             for n in fields:
                 v = f[n] if f[n].ndim == 1 else f[n][:, 0]
                 g = v[index].astype(np.float32)
-                if n == "Q":
+                if n == "Q_CRITERION":
                     g[solid] = 0.0
                 out[n] = g.reshape(shape)
             np.savez_compressed(os.path.join(a.out_dir, os.path.basename(s) + ".npz"), **out)
@@ -432,7 +432,7 @@ def cmd_render(a):
                                specular=0.4)
                 else:
                     p.add_mesh(flame, color=a.flame_color, smooth_shading=True, specular=0.4, opacity=0.85)
-        q = g.point_data["Q"].copy()
+        q = g.point_data["Q_CRITERION"].copy()
         q[np.abs(g.points[:, 1]) > 0.06 - a.wall_margin] = 0.0  # the channel walls' unresolved boundary layers
         g.point_data["Q_core"] = q
         vort = g.contour([a.q], scalars="Q_core")
@@ -503,7 +503,7 @@ def main():
     p = sub.add_parser("grid")
     p.add_argument("pattern", help="glob of the snapshots, e.g. 'snap/media_*.vtkhdf' (or *.pvtu)")
     p.add_argument("--out-dir", required=True)
-    p.add_argument("--fields", default="Q,U")
+    p.add_argument("--fields", default="Q_CRITERION,U")
     p.add_argument("--dx", type=float, default=1.25e-3)
     p.add_argument("--x0", type=float, default=-0.04)
     p.add_argument("--x1", type=float, default=0.36)

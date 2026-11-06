@@ -106,7 +106,7 @@ budget = true
 [[write_data]]
 prefix = "./solut/les"
 time_interval = 2.5e-5
-variables = ["T", "HRR", "Q", "Y_H2", "OMEGA_H2", "TF_E", "TF_F", "MU_T"]
+variables = ["T", "HRR", "Q_CRITERION", "Y_H2", "OMEGA_H2", "TF_E", "TF_F", "MU_T"]
 
 [[write_data]]
 prefix = "./restart/les"

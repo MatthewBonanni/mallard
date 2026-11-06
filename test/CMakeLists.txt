@@ -3,6 +3,7 @@
 set(MALLARD_TEST_SOURCES
     test_main.cpp
     divergence_report_test.cpp
+    derived_fields_test.cpp
     scratch.cpp
     common_math_test.cpp
     kexpr_test.cpp

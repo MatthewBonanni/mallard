@@ -1781,14 +1781,22 @@ void Solver::allocate_memory() {
         h_p_max = Kokkos::create_mirror_view(p_max);
     }
     bool vortex_output = false;
-    for (const char * name : {"Q", "VORTICITY", "VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z"}) {
+    for (const char * name : {"VORTICITY", "VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z"}) {
         vortex_output = vortex_output || writes_variable(input, name);
     }
     if (vortex_output) {
-        vortex_fields = Kokkos::View<rtype **>("vortex_fields", mesh->n_cells, N_DIM == 2 ? 2 : 4);
+        vortex_fields = Kokkos::View<rtype **>("vortex_fields", mesh->n_cells, N_DIM == 2 ? 1 : 3);
         h_vortex_fields = Kokkos::create_mirror_view(vortex_fields);
     }
-    if (is_viscous() || vortex_output) {
+    derived_selection = {};
+    for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
+        if (writes_variable(input, derived::NAMES[f])) derived_selection.add(static_cast<derived::Field>(f));
+    }
+    if (derived_selection.any()) {
+        derived_fields = Kokkos::View<rtype **>("derived_fields", mesh->n_cells, derived_selection.n_columns);
+        h_derived_fields = Kokkos::create_mirror_view(derived_fields);
+    }
+    if (is_viscous() || vortex_output || derived_selection.any()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
     }
@@ -1916,9 +1924,14 @@ void Solver::copy_device_to_host() {
     if (pasr_on) Kokkos::deep_copy(h_chem_time_scale, chem_time_scale);
     statistics.copy_device_to_host();
     if (p_max.is_allocated()) Kokkos::deep_copy(h_p_max, p_max);
+    if (vortex_fields.is_allocated() || derived_fields.is_allocated()) update_velocity_gradients();
     if (vortex_fields.is_allocated()) {
         update_vortex_fields();
         Kokkos::deep_copy(h_vortex_fields, vortex_fields);
+    }
+    if (derived_fields.is_allocated()) {
+        update_derived_fields();
+        Kokkos::deep_copy(h_derived_fields, derived_fields);
     }
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         Kokkos::deep_copy(h_teno_sigma, teno->troubled);
@@ -1991,15 +2004,19 @@ void Solver::register_data() {
     statistics.register_data(data);
     if (p_max.is_allocated()) data.push_back(Data("P_MAX", h_p_max));
     if (vortex_fields.is_allocated()) {
-        data.push_back(Data("Q", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
         if constexpr (N_DIM == 2) {
-            data.push_back(Data("VORTICITY", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 1)));
+            data.push_back(Data("VORTICITY", Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 0)));
         } else {
             FOR_I_DIM {
                 data.push_back(Data(std::string("VORTICITY_") + "XYZ"[i],
-                                    Kokkos::subview(h_vortex_fields, Kokkos::ALL(), 1 + i)));
+                                    Kokkos::subview(h_vortex_fields, Kokkos::ALL(), i)));
             }
         }
+    }
+    for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
+        if (derived_selection.column[f] < 0) continue;
+        data.push_back(Data(derived::NAMES[f], Kokkos::subview(h_derived_fields, Kokkos::ALL(),
+                                                               static_cast<uint32_t>(derived_selection.column[f]))));
     }
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         // Troubled-cell indicator: TENO stencil selection is active where it exceeds the threshold
@@ -3066,32 +3083,25 @@ std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
 }
 
 void Solver::update_vortex_fields() {
-    update_velocity_gradients();
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> g = viscous_gradients;
     Kokkos::View<rtype **> out = vortex_fields;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::View<rtype *[N_DIM]> radius_coords = axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>();
     Kokkos::parallel_for("vortex_fields", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
-        // g(c, 1 + k, i) = d u_k / d x_i, and |S|^2 - |Omega|^2 = d u_k / d x_i d u_i / d x_k,
-        // plus the hoop strain (u_r / r)^2 in axisymmetric runs
-        rtype gg = 0.0;
-        FOR_I_DIM {
-            for (uint8_t k = 0; k < N_DIM; k++) gg += g(c, 1 + k, i) * g(c, 1 + i, k);
+#if N_DIM == 2
+        out(c, 0) = g(c, 2, 0) - g(c, 1, 1);
+#else
+        for (uint8_t k = 0; k < 3; k++) {
+            const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
+            out(c, k) = g(c, 1 + b, a) - g(c, 1 + a, b);
         }
-        if (radius_coords.extent(0) > 0) {
-            const rtype hoop = W(c, 2) / radius_coords(c, 1);
-            gg += hoop * hoop;
-        }
-        out(c, 0) = -0.5_r * gg;
-        if constexpr (N_DIM == 2) {
-            out(c, 1) = g(c, 2, 0) - g(c, 1, 1);
-        } else {
-            for (uint8_t k = 0; k < 3; k++) {
-                const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
-                out(c, 1 + k) = g(c, 1 + b, a) - g(c, 1 + a, b);
-            }
-        }
+#endif
     });
+}
+
+void Solver::update_derived_fields() {
+    derived::Inputs inputs{W_cells, viscous_gradients, physics.get_gamma(), {},
+                           axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
+    if (is_mixture()) inputs.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
+    derived::compute(derived_selection, inputs, mesh->n_owned(), derived_fields);
 }
 
 void Solver::write_integrals() {

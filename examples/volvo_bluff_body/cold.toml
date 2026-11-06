@@ -142,4 +142,4 @@ variables = ["MEAN_*", "COV_*", "MU_T"]
 [[write_data]]
 prefix = "snap/cold"
 time_interval = 0.15
-variables = ["U", "Q", "MU_T"]
+variables = ["U", "Q_CRITERION", "MU_T"]
