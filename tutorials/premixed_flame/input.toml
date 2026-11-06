@@ -1,0 +1,81 @@
+# Freely propagating H2/air flame at phi = 1, 300 K and 1 atm with
+# mixture-averaged transport, in the flame's frame, against Cantera's
+# FreeFlame. Tutorial: docs/tutorials/premixed_flame.md. Written by
+#   python flame_setup.py 1 RUN_DIR
+# Cantera: S_L = 2.3324 m/s, T_b = 2384.3 K, thermal thickness
+# delta = 0.3301 mm. Strip of 300 cells (20 per delta) from
+# 6 delta upstream of the flame to 9 delta downstream: fresh gas
+# enters on the left at S_L and leaves through a pressure outlet; the run
+# lasts 4 flame times delta / S_L = 4 x 0.1415 ms.
+#
+# Initial state: temperature and mole fractions blend from the fresh to the
+# burnt gas of Cantera's flame along c(x) = (1 + tanh(2 (x - x_f) / delta)) / 2
+# at x_f = 1.9808 mm, with the velocity of a steady flame of that density.
+
+[run]
+t_stop = 5.661866e-04
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "strip.msh"
+
+[initialize]
+type = "analytical"
+p = "101325.0"
+T = "300.0 + 2084.2817 * 0.5 * (1 + tanh((x - 1.980839e-03) / 1.650699e-04))"
+u = ["2.332374 * (1 + 5.84043 * 0.5 * (1 + tanh((x - 1.980839e-03) / 1.650699e-04)))", "0"]
+balance = "N2"
+
+[initialize.X]
+"H2" = "0.295858 - 0.281792 * 0.5 * (1 + tanh((x - 1.980839e-03) / 1.650699e-04))"
+"H" = "0.00177571 * 0.5 * (1 + tanh((x - 1.980839e-03) / 1.650699e-04))"
+"O" = "0.000623129 * 0.5 * (1 + tanh((x - 1.980839e-03) / 1.650699e-04))"
+"O2" = "0.147929 - 0.141972 * 0.5 * (1 + tanh((x - 1.980839e-03) / 1.650699e-04))"
+"OH" = "0.00735583 * 0.5 * (1 + tanh((x - 1.980839e-03) / 1.650699e-04))"
+"H2O" = "0.323963 * 0.5 * (1 + tanh((x - 1.980839e-03) / 1.650699e-04))"
+
+[[boundaries]]
+name = "inlet"
+type = "upt"
+u = [2.332374, 0.0]
+p = 101325.0
+T = 300.0
+X = { "H2" = 0.2958579882, "O2" = 0.1479289941, "N2" = 0.5562130178 }
+
+[[boundaries]]
+name = "outlet"
+type = "p_out"
+p = 101325.0
+
+[[boundaries]]
+name = "sides"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+
+[output]
+check_interval = 5000
+
+[[write_data]]
+prefix = "./solut/flame"
+format = "vtu"
+time_interval = 1.415466e-05
+variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]
