@@ -4576,6 +4576,7 @@
    "max",
    "mean",
    "min",
+   "moment",
    "rms"
   ]
  },

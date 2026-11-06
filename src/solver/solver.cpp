@@ -48,6 +48,7 @@
 #include "expression.h"
 #include "gradient.h"
 #include "viscous_flux.h"
+#include "probe_fluxes.h"
 
 Solver::Solver() {
     // Empty
@@ -2526,7 +2527,9 @@ void Solver::write_data(bool force) {
         // Regions of lower dimension: point values, written as probes write them
         update_cell_W();
         if (is_mixture() && probes.snapshots_need_transport()) update_transport();
-        probes.write(step, t, probe_fields(), true, force);
+        if (probes.all_gradients_due(step, t, wall_model_on, true, force)) update_probe_gradients();
+        ProbeFluxes fluxes;
+        probes.write(step, t, probe_fields(fluxes), true, force);
     }
 }
 
@@ -2535,22 +2538,26 @@ void Solver::write_probes() {
     if (probes.point_values_due(step, t) || probes.gradients_due(step, t)) {
         update_cell_W();
         if (is_mixture() && probes.transport_due(step, t)) update_transport();
+        if (probes.all_gradients_due(step, t, wall_model_on)) update_probe_gradients();
     } else {
         update_primitives();
     }
     if (probes.statistics_due(step, t)) statistics.copy_device_to_host();
-    probes.write(step, t, probe_fields());
+    ProbeFluxes fluxes;
+    probes.write(step, t, probe_fields(fluxes));
 }
 
 void Solver::sample_probe_averages() {
-    const auto [cell_W, transport] = probes.average_needs();
+    const auto [cell_W, transport, all_gradients] = probes.average_needs(wall_model_on);
     if (cell_W) {
         update_cell_W();
         if (is_mixture() && transport) update_transport();
+        if (all_gradients) update_probe_gradients();
     } else {
         update_primitives();
     }
-    probes.sample_averages(step, t, probe_fields());
+    ProbeFluxes fluxes;
+    probes.sample_averages(step, t, probe_fields(fluxes));
 }
 
 RestartArrays Solver::restart_arrays() const {
@@ -2559,13 +2566,36 @@ RestartArrays Solver::restart_arrays() const {
     return arrays;
 }
 
-ProbeFields Solver::probe_fields() {
+void Solver::update_probe_gradients() {
+    // Diffusive fluxes read the gradients of image cells, and modeled walls those of their exchange points
+    Kokkos::parallel_for("probe_all_gradients", mesh->n_cells, viscous_gradient);
+    if (wall_model_on) update_wall_model();
+}
+
+ProbeFields Solver::probe_fields(ProbeFluxes & fluxes) {
     ProbeFields fields{cell_sampler(), W_cells,      viscous_gradient,    viscous_gradients, face_reconstruction.get(),
                        physics,        boundary_data, is_viscous(),        axisymmetric,      mesh->face_coords,
                        {},             {}};
     if (is_mixture()) {
         fields.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
         if (is_viscous()) fields.transport = cell_transport;
+    }
+    if (wall_model_on) {
+        fields.wall_model = WallModelFunctor{wall_model,        mesh->face_normals, mesh->face_area, W_cells,
+                                             viscous_gradients, boundary_data,      wall_model::Gas{physics}};
+    }
+    fields.fluxes = &fluxes;
+    if (is_viscous() && is_mixture()) {
+        fluxes.mixture = MixtureViscousFluxFunctor{
+            mesh->face_normals, mesh->face_measure, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
+            mesh->periodic_maps(), mesh->face_shift, boundary_data, mixture, cell_scalars, transport_values,
+            transport_gradients, cell_transport, cell_diffusion, {}, {}, axisymmetric, mesh->cell_covariance,
+            {}, false, {}};
+    } else if (is_viscous()) {
+        fluxes.viscous = ViscousFluxFunctor{
+            mesh->face_normals, mesh->face_measure, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
+            mesh->periodic_maps(), mesh->face_shift, W_cells, viscous_gradients, boundary_data, {}, physics,
+            axisymmetric, mesh->cell_covariance, {}, false, wall_model.out};
     }
     return fields;
 }

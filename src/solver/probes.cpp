@@ -10,6 +10,7 @@
  */
 
 #include "probes.h"
+#include "probe_fluxes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -92,7 +93,8 @@ void on_root(bool distributed, F && f) {
 
 const std::unordered_map<std::string, Reduction> REDUCTIONS = {
     {"integral", Reduction::INTEGRAL}, {"mean", Reduction::MEAN}, {"favre", Reduction::FAVRE},
-    {"min", Reduction::MIN},           {"max", Reduction::MAX},   {"rms", Reduction::RMS}};
+    {"min", Reduction::MIN},           {"max", Reduction::MAX},   {"rms", Reduction::RMS},
+    {"moment", Reduction::MOMENT}};
 
 /** @brief The name of the measure of g's elements: a revolved boundary's per radian is an area. */
 const char * measure_name(const probe::Geometry & g) {
@@ -120,8 +122,9 @@ std::string reduction_name(Reduction r) {
 
 /**
  * @brief Codes of the variables of samples on faces, after CellSampler's:
- *        convective flux densities through the face along its normal, and
- *        wall quantities. Vector quantities take one code per component.
+ *        convective flux densities through the face along its normal, wall
+ *        quantities, and the diffusive and total fluxes of boundary faces.
+ *        Vector quantities take one code per component.
  */
 namespace code {
 constexpr int32_t FIRST = 1 << 20;
@@ -137,16 +140,43 @@ constexpr int32_t CP = FIRST + 16;
 constexpr int32_t Q_W = FIRST + 17;
 constexpr int32_t U_TAU = FIRST + 18;
 constexpr int32_t Y_PLUS = FIRST + 19;
-constexpr int32_t SPECIES_FLUX = FIRST + 32;  // + species
+constexpr int32_t ENERGY_DIFFUSIVE_FLUX = FIRST + 20;
+constexpr int32_t ENERGY_TOTAL_FLUX = FIRST + 21;
+constexpr int32_t EXCHANGE_U = FIRST + 22;
+constexpr int32_t EXCHANGE_T = FIRST + 23;
+constexpr int32_t EXCHANGE_H = FIRST + 24;
+constexpr int32_t SPECIES_FLUX = FIRST + 32;                     // + species
+constexpr int32_t SPECIES_DIFFUSIVE_FLUX = FIRST + (1 << 16);    // + species
+constexpr int32_t SPECIES_TOTAL_FLUX = FIRST + (2 << 16);        // + species
 
-constexpr bool on_faces(int32_t k) { return k >= TRACTION_PRESSURE && k < SPECIES_FLUX; }
+constexpr bool on_faces(int32_t k) { return (k >= TRACTION_PRESSURE && k < SPECIES_FLUX) || k >= SPECIES_DIFFUSIVE_FLUX; }
 constexpr bool normals(int32_t k) { return k >= FIRST; }
-constexpr bool gradients(int32_t k) { return (k >= TRACTION_VISCOUS && k <= Q_W && k != CP) || k == U_TAU || k == Y_PLUS; }
+KOKKOS_INLINE_FUNCTION constexpr bool diffusive(int32_t k) {
+    return k == ENERGY_DIFFUSIVE_FLUX || k == ENERGY_TOTAL_FLUX || k >= SPECIES_DIFFUSIVE_FLUX;
+}
+constexpr bool gradients(int32_t k) {
+    return (k >= TRACTION_VISCOUS && k <= Q_W && k != CP) || k == U_TAU || k == Y_PLUS || diffusive(k) ||
+           (k >= EXCHANGE_U && k <= EXCHANGE_H);
+}
 constexpr bool reference(int32_t k) { return k == CF || k == CP; }
 
 const std::vector<std::pair<std::string, int32_t>> SCALARS = {
-    {"MASS_FLUX", MASS_FLUX}, {"ENTHALPY_FLUX", ENTHALPY_FLUX}, {"TAU_W", TAU_W}, {"CF", CF}, {"CP", CP},
-    {"Q_W", Q_W},             {"U_TAU", U_TAU},                 {"Y_PLUS", Y_PLUS}};
+    {"MASS_FLUX", MASS_FLUX},
+    {"ENTHALPY_FLUX", ENTHALPY_FLUX},
+    {"TAU_W", TAU_W},
+    {"CF", CF},
+    {"CP", CP},
+    {"Q_W", Q_W},
+    {"U_TAU", U_TAU},
+    {"Y_PLUS", Y_PLUS},
+    {"ENERGY_DIFFUSIVE_FLUX", ENERGY_DIFFUSIVE_FLUX},
+    {"ENERGY_TOTAL_FLUX", ENERGY_TOTAL_FLUX},
+    {"WALL_MODEL_U", EXCHANGE_U},
+    {"WALL_MODEL_T", EXCHANGE_T},
+    {"WALL_MODEL_H", EXCHANGE_H}};
+const std::vector<std::pair<std::string, int32_t>> PER_SPECIES = {{"SPECIES_FLUX_", SPECIES_FLUX},
+                                                                  {"SPECIES_DIFFUSIVE_FLUX_", SPECIES_DIFFUSIVE_FLUX},
+                                                                  {"SPECIES_TOTAL_FLUX_", SPECIES_TOTAL_FLUX}};
 const std::vector<std::pair<std::string, int32_t>> VECTORS = {{"MOMENTUM_FLUX", MOMENTUM_FLUX},
                                                               {"TRACTION_PRESSURE", TRACTION_PRESSURE},
                                                               {"TRACTION_VISCOUS", TRACTION_VISCOUS},
@@ -165,23 +195,27 @@ int32_t variable_code(const std::string & name, const std::vector<std::string> &
             if (name == base + "_" + AXES[d]) return k + static_cast<int32_t>(d);
         }
     }
-    for (size_t k = 0; k < species_names.size(); k++) {
-        if (name == "SPECIES_FLUX_" + species_names[k]) return code::SPECIES_FLUX + static_cast<int32_t>(k);
+    for (const auto & [prefix, first] : code::PER_SPECIES) {
+        for (size_t k = 0; k < species_names.size(); k++) {
+            if (name == prefix + species_names[k]) return first + static_cast<int32_t>(k);
+        }
     }
     try {
         return CellSampler::code(name, species_names, key);
     } catch (const InputError &) {
         throw InputError(key + ": unknown variable \"" + name + "\" (the [statistics] fields and " +
                          "the averages it keeps, MEAN_<field> and COV_<a>_<b>, or on boundaries " +
-                         "MASS_FLUX, MOMENTUM_FLUX, ENTHALPY_FLUX, SPECIES_FLUX_<species>, TRACTION_PRESSURE, " +
-                         "TRACTION_VISCOUS, TAU_W, TAU_W_<axis>, CF, CP, Q_W, U_TAU, Y_PLUS).");
+                         "MASS_FLUX, MOMENTUM_FLUX, ENTHALPY_FLUX, SPECIES_FLUX_<species>, ENERGY_DIFFUSIVE_FLUX, " +
+                         "ENERGY_TOTAL_FLUX, SPECIES_DIFFUSIVE_FLUX_<species>, SPECIES_TOTAL_FLUX_<species>, " +
+                         "TRACTION_PRESSURE, TRACTION_VISCOUS, TAU_W, TAU_W_<axis>, CF, CP, Q_W, U_TAU, Y_PLUS, " +
+                         "WALL_MODEL_U, WALL_MODEL_T, WALL_MODEL_H).");
     }
 }
 
 /**
  * @brief The variables a [[probes]] entry lists, with U, RHOU, MOMENTUM_FLUX,
  *        TRACTION_PRESSURE and TRACTION_VISCOUS for their components, Y_*,
- *        RHOY_* and SPECIES_FLUX_* for every species.
+ *        RHOY_*, SPECIES_FLUX_*, SPECIES_DIFFUSIVE_FLUX_* and SPECIES_TOTAL_FLUX_* for every species.
  */
 std::vector<std::string> expand_variables(const std::vector<std::string> & listed,
                                           const std::vector<std::string> & species_names, const std::string & key) {
@@ -189,7 +223,8 @@ std::vector<std::string> expand_variables(const std::vector<std::string> & liste
     for (const auto & v : listed) {
         if (v == "U" || v == "RHOU" || v == "MOMENTUM_FLUX" || v == "TRACTION_PRESSURE" || v == "TRACTION_VISCOUS") {
             for (size_t d = 0; d < N_DIM; d++) names.push_back(v + "_" + AXES[d]);
-        } else if (v == "Y_*" || v == "RHOY_*" || v == "SPECIES_FLUX_*") {
+        } else if (v == "Y_*" || v == "RHOY_*" || v == "SPECIES_FLUX_*" || v == "SPECIES_DIFFUSIVE_FLUX_*" ||
+                   v == "SPECIES_TOTAL_FLUX_*") {
             if (species_names.empty()) throw InputError(key + ".variables: " + v + " needs a gas mixture.");
             for (const auto & s : species_names) names.push_back(v.substr(0, v.size() - 1) + s);
         } else {
@@ -388,6 +423,38 @@ void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & 
 }
 
 namespace {
+
+/**
+ * @brief The diffusive fluxes of a face out of the domain, written to the
+ *        columns of sample s whose codes take them (as the out argument of
+ *        MixtureViscousFluxFunctor::flux, whose fluxes are into the fluid).
+ */
+struct DiffusiveColumns {
+    Kokkos::View<rtype **, Kokkos::LayoutRight> out;
+    Kokkos::View<int32_t *> codes;
+    uint32_t s, n_vars;
+
+    KOKKOS_INLINE_FUNCTION void clear() const {
+        for (uint32_t v = 0; v < n_vars; v++) {
+            if (code::diffusive(codes(v))) out(s, v) = 0.0_r;
+        }
+    }
+    KOKKOS_INLINE_FUNCTION void momentum(uint8_t, rtype, rtype) const {}
+    KOKKOS_INLINE_FUNCTION void species(const uint32_t k, rtype, const double j) const {
+        const int32_t species = static_cast<int32_t>(k);
+        for (uint32_t v = 0; v < n_vars; v++) {
+            const int32_t c = codes(v);
+            if (c == code::SPECIES_DIFFUSIVE_FLUX + species || c == code::SPECIES_TOTAL_FLUX + species) {
+                out(s, v) = static_cast<rtype>(j);
+            }
+        }
+    }
+    KOKKOS_INLINE_FUNCTION void energy(rtype, const rtype e) const {
+        for (uint32_t v = 0; v < n_vars; v++) {
+            if (codes(v) == code::ENERGY_DIFFUSIVE_FLUX || codes(v) == code::ENERGY_TOTAL_FLUX) out(s, v) = -e;
+        }
+    }
+};
 
 /** @brief Device views of samples in cells (inside: index into cells of those with an offset). */
 void allocate_samples(Probes::Samples & s, const std::vector<uint32_t> & h_cells, const std::vector<uint32_t> & h_inside,
@@ -668,7 +735,7 @@ void Probes::Samples::set_normals(const std::vector<probe::Point> & n) {
 }
 
 void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
-                               const ProbeReference & reference, bool need_gradients) {
+                               const ProbeReference & reference, bool need_gradients, bool diffusive) {
     const uint32_t n = static_cast<uint32_t>(cells.extent(0));
     const uint32_t n_vars = static_cast<uint32_t>(codes.extent(0));
     const auto cell = cells;
@@ -758,10 +825,33 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         });
     }
 
+    if (diffusive && on_faces) {
+        // The scheme's diffusive fluxes of each face, out of the domain
+        if (mixture) {
+            const MixtureViscousFluxFunctor mixture_flux = fields.fluxes->mixture;
+            Kokkos::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
+                const DiffusiveColumns columns{out, code, s, n_vars};
+                columns.clear();
+                mixture_flux.flux(face(s), columns);
+            });
+        } else {
+            const ViscousFluxFunctor viscous_flux = fields.fluxes->viscous;
+            Kokkos::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
+                const DiffusiveColumns columns{out, code, s, n_vars};
+                const uint32_t f = face(s);
+                rtype F[N_CONSERVATIVE] = {};
+                viscous_flux.flux(f, F);
+                columns.energy(0.0_r, F[E] / viscous_flux.face_area(f));
+            });
+        }
+    }
+
     const auto transport = fields.transport;
     const auto face_coords = fields.face_coords;
     const bool axisymmetric = fields.axisymmetric;
     const ProbeReference ref = reference;
+    const WallModelFunctor wall_model = fields.wall_model;
+    const bool modeled = wall_model.wm.active();
     Kokkos::parallel_for("probe_values", n, KOKKOS_LAMBDA(const uint32_t s) {
         const uint32_t c = cell(s);
         const rtype g = mixture ? cell_gamma(c) : physics.gamma;
@@ -810,6 +900,24 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
             if (bc.type == BoundaryType::WALL_ADIABATIC) q_n = 0.0_r;
             if (bc.type == BoundaryType::WALL_HEAT_FLUX) q_n = bc.data[N_DIM + 1];
         }
+        // Modeled walls: the model's traction and heat flux, and its exchange point's state
+        int32_t row = -1;
+        if (on_faces && modeled && boundaries.bcs(ibc).modeled) row = wall_model.wm.out.face_index(face(s));
+        rtype exchange[3] = {};  // tangential speed, T and height of the exchange point
+        if (row >= 0) {
+            FOR_I_DIM tau_n[i] = wall_model.wm.out.flux(row, i);
+            q_n = wall_model.wm.out.flux(row, N_DIM);
+            if (wall_model.wm.cells(row, 0) >= 0) {
+                const uint32_t f = face(s);
+                rtype n_w[N_DIM];
+                FOR_I_DIM n_w[i] = wall_model.normals(f, i) / wall_model.face_area(f);
+                double u_t[N_DIM], T_x, p_x;
+                wall_model.sample(static_cast<uint32_t>(row), 0, n_w, boundaries.bcs(ibc), u_t, T_x, p_x);
+                exchange[0] = static_cast<rtype>(WallModelFunctor::norm(u_t));
+                exchange[1] = static_cast<rtype>(T_x);
+                exchange[2] = wall_model.wm.heights(row, 0);
+            }
+        }
         // Wall shear stress: the tangential part of the fluid's viscous traction on the wall
         rtype tau_w[N_DIM];
         FOR_I_DIM tau_w[i] = -tau_n[i];
@@ -855,14 +963,23 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
                 value = u_tau;
             } else if (k == code::Y_PLUS) {
                 value = Wf[0] * u_tau * dist(s) / mu;
+            } else if (k == code::ENERGY_DIFFUSIVE_FLUX) {
+                value = out(s, v);
+            } else if (k == code::ENERGY_TOTAL_FLUX) {
+                value = Wf[0] * u_n * (h + 0.5_r * dot<N_DIM>(Wf + 1, Wf + 1)) + out(s, v);
+            } else if (k >= code::EXCHANGE_U && k <= code::EXCHANGE_H) {
+                value = exchange[k - code::EXCHANGE_U];
+            } else if (k >= code::SPECIES_DIFFUSIVE_FLUX && k < code::SPECIES_TOTAL_FLUX) {
+                value = out(s, v);
             } else {
-                const int32_t species = k - code::SPECIES_FLUX;
+                const bool total = k >= code::SPECIES_TOTAL_FLUX;
+                const int32_t species = k - (total ? code::SPECIES_TOTAL_FLUX : code::SPECIES_FLUX);
                 const bool prescribed = ibc >= 0 && boundaries.bcs(ibc).type == BoundaryType::INLET_STATE &&
                                         !boundaries.bcs(ibc).is_characteristic() &&
                                         boundaries.bc_Y.extent(0) > 0;
                 const rtype Y = prescribed ? boundaries.bc_Y(ibc, species)
                                            : sampler(c, CellSampler::FIRST_SPECIES + species);
-                value = Wf[0] * Y * u_n;
+                value = Wf[0] * Y * u_n + (total ? out(s, v) : 0.0_r);
             }
             out(s, v) = value;
         }
@@ -1081,7 +1198,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     std::vector<std::string> listed;
     for (const auto & v : find_value<std::vector<std::string>>(entry, "variables")) {
         const bool probe_name = v == "U" || v == "RHOU" || v == "MOMENTUM_FLUX" || v == "TRACTION_PRESSURE" ||
-                                v == "TRACTION_VISCOUS" || v == "Y_*" || v == "RHOY_*" || v == "SPECIES_FLUX_*";
+                                v == "TRACTION_VISCOUS" || v == "Y_*" || v == "RHOY_*" || v == "SPECIES_FLUX_*" ||
+                                v == "SPECIES_DIFFUSIVE_FLUX_*" || v == "SPECIES_TOTAL_FLUX_*";
         if (snapshot && cell_data && !probe_name && !v.empty() && v.back() == '*') {
             const size_t before = listed.size();
             for (const Data & d : *cell_data) {
@@ -1161,6 +1279,36 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         }
     }
     p.transport = p.gradients && !species_names.empty();
+    p.diffusive = std::any_of(h_codes.begin(), h_codes.end(), [](int32_t k) { return code::diffusive(k); });
+    if (std::find(p.reductions.begin(), p.reductions.end(), Reduction::MOMENT) != p.reductions.end()) {
+        const std::string rkey = key + ".reductions";
+        if (!boundary) throw InputError(rkey + ": moment is for boundary probes, whose faces carry the tractions.");
+        if (mesh.axisymmetric) throw InputError(rkey + ": moment is not supported with physics.axisymmetric.");
+        for (const auto & [base, first] : code::VECTORS) {
+            std::array<uint32_t, N_DIM> columns{};
+            bool complete = true;
+            for (size_t d = 0; d < N_DIM; d++) {
+                const auto it = std::find(p.variables.begin(), p.variables.end(), base + "_" + AXES[d]);
+                complete = complete && it != p.variables.end();
+                if (complete) columns[d] = static_cast<uint32_t>(it - p.variables.begin());
+            }
+            if (complete) p.moment_vectors.emplace_back(base, columns);
+        }
+        if (p.moment_vectors.empty()) {
+            throw InputError(Diagnostic{.key = rkey,
+                                        .line = line_of(entry, "reductions"),
+                                        .message = "moment needs a vector variable with all its components",
+                                        .fix = "Add TRACTION_PRESSURE or TRACTION_VISCOUS (or MOMENTUM_FLUX) to variables",
+                                        .docs = "docs/guide/probes.md#boundary-data"});
+        }
+        const std::vector<rtype> center = entry.contains("moment_center")
+                                              ? find_real_vector(entry, "moment_center", dim::length)
+                                              : std::vector<rtype>(N_DIM, 0.0_r);
+        if (center.size() != N_DIM) {
+            throw InputError(key + ".moment_center must have " + std::to_string(N_DIM) + " components.");
+        }
+        for (size_t d = 0; d < N_DIM; d++) p.moment_center[d] = static_cast<double>(center[d]);
+    }
     if (entry.contains("reference")) {
         const Input & ref = entry.at("reference");
         const std::string rkey = key + ".reference";
@@ -1322,6 +1470,16 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             std::vector<std::pair<std::string, Dimension>> columns = {
                 {"step", dim::none}, {"t", dim::time}, {measure_name(p.geometry), measure}};
             for (const Reduction r : p.reductions) {
+                if (r == Reduction::MOMENT) {
+                    // About moment_center: the z component in 2D
+                    for (const auto & vector : p.moment_vectors) {
+                        const Dimension d = field_units::describe(vector.first).dimension.times(measure).times(dim::length);
+                        for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) {
+                            columns.emplace_back("moment_" + vector.first + "_" + AXES[a], d);
+                        }
+                    }
+                    continue;
+                }
                 for (const auto & v : p.variables) {
                     const Dimension d = field_units::describe(v).dimension;
                     // Integrals take the units of the measure (sums over points)
@@ -1544,6 +1702,13 @@ bool Probes::transport_due(uint64_t step, rtype t) const {
                        [&](const auto & p) { return !p->snapshot && p->transport && p->due(step, t); });
 }
 
+bool Probes::all_gradients_due(uint64_t step, rtype t, bool wall_model, bool snapshots, bool force) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return p->snapshot == snapshots && (p->diffusive || (wall_model && p->gradients)) &&
+               p->due_or_forced(step, t, force);
+    });
+}
+
 bool Probes::any_gradients() const {
     return std::any_of(probes.begin(), probes.end(),
                        [](const auto & p) { return p->gradients || p->sampling == Sampling::POINT; });
@@ -1569,7 +1734,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
     for (auto & pp : probes) {
         Probe & p = *pp;
         if (p.snapshot != snapshots) continue;
-        if (!p.due(step, t) && !(force && snapshots && step != p.step_last)) continue;
+        if (!p.due_or_forced(step, t, force)) continue;
         p.step_last = step;
         if (p.time_interval > 0.0_r) {
             while (static_cast<rtype>(p.n_written) * p.time_interval <=
@@ -1628,7 +1793,7 @@ void Probes::Probe::sample(const ProbeFields & fields, std::vector<double> & nod
                            std::vector<double> & quad_values) {
     // Collective on every rank (the geometry lives on rank 0 for some shapes)
     if (samples_nodes()) {
-        nodes.evaluate(sampling, codes, fields, reference, gradients);
+        nodes.evaluate(sampling, codes, fields, reference, gradients, diffusive);
         node_values = nodes.gather(cell_columns);
     }
     if (samples_quadrature()) {
@@ -1654,14 +1819,15 @@ bool Probes::averages_due(uint64_t step, rtype t) const {
            std::any_of(probes.begin(), probes.end(), [](const auto & p) { return p->average; });
 }
 
-std::pair<bool, bool> Probes::average_needs() const {
-    bool cell_W = false, transport = false;
+std::tuple<bool, bool, bool> Probes::average_needs(bool wall_model) const {
+    bool cell_W = false, transport = false, all_gradients = false;
     for (const auto & p : probes) {
         if (!p->average) continue;
         cell_W = cell_W || p->sampling == Sampling::POINT || p->gradients;
         transport = transport || p->transport;
+        all_gradients = all_gradients || p->diffusive || (wall_model && p->gradients);
     }
-    return {cell_W, transport};
+    return {cell_W, transport, all_gradients};
 }
 
 void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields) {
@@ -1900,6 +2066,24 @@ void Probes::Probe::write_reductions(uint64_t step, rtype t, const std::vector<d
     std::ostream & row = *out_reductions;
     row << step << "," << std::setprecision(std::numeric_limits<double>::max_digits10) << double(t) << "," << measure;
     for (const Reduction r : reductions) {
+        if (r == Reduction::MOMENT) {
+            // sum of (x - x_c) x f w over the faces (boundary probes reduce their samples)
+            for (const auto & [base, columns] : moment_vectors) {
+                double M[3] = {0.0, 0.0, 0.0};
+                for (size_t i = 0; i < n_q; i++) {
+                    double x[3] = {0.0, 0.0, 0.0}, f[3] = {0.0, 0.0, 0.0};
+                    for (size_t d = 0; d < N_DIM; d++) {
+                        x[d] = geometry.nodes[i][d] - moment_center[d];
+                        f[d] = weight(i) * q[i * n_cols + columns[d]];
+                    }
+                    M[0] += x[1] * f[2] - x[2] * f[1];
+                    M[1] += x[2] * f[0] - x[0] * f[2];
+                    M[2] += x[0] * f[1] - x[1] * f[0];
+                }
+                for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) row << "," << M[a];
+            }
+            continue;
+        }
         for (size_t v = 0; v < variables.size(); v++) {
             double sum = 0.0, sum_rho = 0.0;
             double lo = std::numeric_limits<double>::infinity(), hi = -lo;
@@ -1916,6 +2100,7 @@ void Probes::Probe::write_reductions(uint64_t step, rtype t, const std::vector<d
                     case Reduction::RMS: sum += w * value * value; break;
                     case Reduction::MIN: lo = std::min(lo, value); break;
                     case Reduction::MAX: hi = std::max(hi, value); break;
+                    case Reduction::MOMENT: break;
                 }
             }
             if (r == Reduction::MIN || r == Reduction::MAX) {
@@ -1932,6 +2117,7 @@ void Probes::Probe::write_reductions(uint64_t step, rtype t, const std::vector<d
                 case Reduction::RMS: result = std::sqrt(sum / measure); break;
                 case Reduction::MIN: result = lo; break;
                 case Reduction::MAX: result = hi; break;
+                case Reduction::MOMENT: break;
             }
             row << "," << result;
         }

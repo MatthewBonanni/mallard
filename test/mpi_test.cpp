@@ -860,7 +860,8 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
 }
 
 TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
-    // Wall polylines chained across ranks, face states and wall gradients
+    // Wall polylines chained across ranks, face states, wall gradients, the
+    // scheme's diffusive fluxes and the moments summed on rank 0
     const std::string dir = io_dir() + "_boundary_probes";
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
@@ -870,14 +871,16 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
                              "type = \"wall_isothermal\"\nT = 1.2\n"),
                          10) +
                "[[probes]]\nname = \"walls\"\nboundary_type = \"wall\"\nsampling = \"point\"\nfile = \"" + dir + "/" +
-               sub + "/walls.csv\"\nvariables = [\"P\", \"T\", \"CF\", \"Q_W\", \"Y_PLUS\"]\ninterval = 5\n"
-               "reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}\n"
+               sub + "/walls.csv\"\nvariables = [\"P\", \"T\", \"CF\", \"Q_W\", \"Y_PLUS\", \"ENERGY_DIFFUSIVE_FLUX\", "
+               "\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\ninterval = 5\n"
+               "reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}\nreductions = [\"integral\", \"moment\"]\n"
+               "moment_center = [0.3, 0.2]\nreductions_file = \"" + dir + "/" + sub + "/walls_red.csv\"\n"
                "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\npoint = [0.5, 0.4]\nnormal = [1.0, 0.7]\n"
                "sampling = \"point\"\nvariables = [\"RHO\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub +
                "/cut.pvd\"\ninterval = 10\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub +
                "/cut.csv\"\n"
                "[[probes]]\nname = \"open\"\nboundary = [\"left\", \"right\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
-               sub + "/open.pvd\"\nvariables = [\"MASS_FLUX\", \"MOMENTUM_FLUX\"]\ninterval = 10\n"
+               sub + "/open.pvd\"\nvariables = [\"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENERGY_TOTAL_FLUX\"]\ninterval = 10\n"
                "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/open.csv\"\n";
     };
     Solver reference;
@@ -895,7 +898,8 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
             ss << in.rdbuf();
             return ss.str();
         };
-        for (const char * file : {"walls.csv", "open.csv", "open.pvd", "open_000010.vtp", "cut.csv", "cut_000010.vtp"}) {
+        for (const char * file : {"walls.csv", "walls_red.csv", "open.csv", "open.pvd", "open_000010.vtp", "cut.csv",
+                                  "cut_000010.vtp"}) {
             const std::string a = without_provenance(read(dir + "/serial/" + file));
             EXPECT_FALSE(a.empty()) << file;
             EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;

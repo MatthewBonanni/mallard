@@ -614,7 +614,10 @@ class Solver {
         /** @brief The named arrays of restart files: averaged spectra and probes (collective). */
         RestartArrays restart_arrays() const;
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
-        ProbeFields probe_fields();
+        /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
+        ProbeFields probe_fields(ProbeFluxes & fluxes);
+        /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
+        void update_probe_gradients();
 
     private:
         /**

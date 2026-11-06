@@ -308,8 +308,38 @@ struct MixtureViscousFluxFunctor {
         return 0.5_r * (q0 + q1);
     }
 
+    /** @brief Adds face i_face's fluxes, times its area, to face_flux, the species slots and face_energy_1. */
+    struct Slots {
+        Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
+        Kokkos::View<rtype ***, Kokkos::LayoutRight> slots;
+        Kokkos::View<rtype *> face_energy_1;
+        uint32_t i_face;
+
+        KOKKOS_INLINE_FUNCTION void momentum(const uint8_t i, const rtype A, const rtype tau_n) const {
+            face_flux(i_face, 1 + i) += A * tau_n;
+        }
+        KOKKOS_INLINE_FUNCTION void species(const uint32_t k, const rtype A, const double j) const {
+            slots(i_face, 0, k) += static_cast<rtype>(static_cast<double>(A) * j);
+        }
+        KOKKOS_INLINE_FUNCTION void energy(const rtype A, const rtype e) const {
+            face_flux(i_face, N_DIM + 1) += A * e;
+            if (face_energy_1.extent(0) > 0) face_energy_1(i_face) += A * e;
+        }
+    };
+
     KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t i_face) const {
+    void operator()(const uint32_t i_face) const { flux(i_face, Slots{face_flux, slots, face_energy_1, i_face}); }
+
+    /**
+     * @brief The fluxes of face i_face per unit area, handed to out (see
+     *        Slots) with its area A: the traction tau . n (momentum, per
+     *        component), the species fluxes j_k . n out of cell 0 (species,
+     *        only where species diffuse), and the energy flux u . tau . n +
+     *        q - sum_k h_k j_k . n into cell 0 (energy).
+     */
+    template <typename Out>
+    KOKKOS_INLINE_FUNCTION
+    void flux(const uint32_t i_face, const Out & out) const {
         const int32_t c0 = cells_of_face(i_face, 0);
         rtype n[N_DIM], n_vec[N_DIM];
         FOR_I_DIM n_vec[i] = normals(i_face, i);
@@ -392,7 +422,7 @@ struct MixtureViscousFluxFunctor {
             FOR_I_DIM q_f[i] -= u_n * n[i];
         }
         const rtype A = face_area(i_face);
-        FOR_I_DIM face_flux(i_face, 1 + i) += A * tau_n[i];
+        FOR_I_DIM out.momentum(i, A, tau_n[i]);
         rtype energy = dot<N_DIM>(q_f, tau_n);
         if (isothermal) {
             const ScalarMassFractions y{&scalars(c0, 0)};
@@ -458,12 +488,11 @@ struct MixtureViscousFluxFunctor {
                 double j = -c * dX + Y_k(k) * correction;
                 if (soret) j -= DT_k(k) * dlnT_dn;
                 enthalpy += gas.thermo.h_RT(k, p) * RT * gas.thermo.inv_W(k) * j;
-                slots(i_face, 0, k) += static_cast<rtype>(static_cast<double>(A) * j);
+                out.species(k, A, j);
             }
             energy -= static_cast<rtype>(enthalpy);
         }
-        face_flux(i_face, N_DIM + 1) += A * energy;
-        if (face_energy_1.extent(0) > 0) face_energy_1(i_face) += A * energy;
+        out.energy(A, energy);
     }
 };
 

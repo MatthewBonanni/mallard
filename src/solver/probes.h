@@ -14,10 +14,12 @@
 #ifndef PROBES_H
 #define PROBES_H
 
+#include <array>
 #include <cstdint>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -34,11 +36,13 @@
 #include "probe_surface.h"
 #include "data.h"
 #include "statistics.h"
+#include "wall_exchange.h"
 
 namespace region {
 class Region;
 class Regions;
 }
+struct ProbeFluxes;
 
 /**
  * @brief The fields probes read. Point values need W of every local cell
@@ -46,7 +50,9 @@ class Regions;
  *        gradient functor that fills `gradients` from W, and the face
  *        reconstruction, whose polynomials (if any) give the point values.
  *        Wall quantities need the gradients too, and for mixtures the cell
- *        transport properties.
+ *        transport properties; on modeled walls they are the wall model's,
+ *        evaluated on the current state. Diffusive fluxes are those of the
+ *        scheme's viscous flux (molecular), from the gradients of every cell.
  */
 struct ProbeFields {
     CellSampler cells;
@@ -61,6 +67,8 @@ struct ProbeFields {
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;  // mixtures: frozen gamma per cell, else empty
     Kokkos::View<rtype *[3]> transport;                      // viscous mixtures: (cell, [mu, lambda, ...]), else empty
+    WallModelFunctor wall_model = {};                        // wall-modeled runs, else empty
+    const ProbeFluxes * fluxes = nullptr;                    // viscous runs (probe_fluxes.h)
 };
 
 /** @brief Reference state of C_f and C_p: dynamic pressure, pressure and flow direction. */
@@ -136,8 +144,11 @@ class Probes {
 
         /** @brief Whether an averaging probe samples now. */
         bool averages_due(uint64_t step, rtype t) const;
-        /** @brief Whether the averaging probes need point values or gradients (ProbeFields::W current), and transport. */
-        std::pair<bool, bool> average_needs() const;
+        /**
+         * @brief Whether the averaging probes need point values or gradients (ProbeFields::W current),
+         *        transport, and, as all_gradients_due, the gradients of every cell and the wall model.
+         */
+        std::tuple<bool, bool, bool> average_needs(bool wall_model) const;
         /** @brief Adds the samples at (step, t) to the time averages of the averaging probes (collective). */
         void sample_averages(uint64_t step, rtype t, const ProbeFields & fields);
         /** @brief Start the time averages afresh at time t (the first sample weighted from max(t, t_start)). */
@@ -161,6 +172,13 @@ class Probes {
         bool any_point_values() const;
         /** @brief Whether a probe due now needs the gradients (ProbeFields::W current) / mixture transport properties. */
         bool gradients_due(uint64_t step, rtype t) const;
+        /**
+         * @brief Whether a probe or snapshot due now (or forced) needs the gradients of every cell
+         *        and the wall model on the current state: diffusive fluxes, or, with a wall model,
+         *        any wall quantity.
+         */
+        bool all_gradients_due(uint64_t step, rtype t, bool wall_model, bool snapshots = false,
+                               bool force = false) const;
         bool transport_due(uint64_t step, rtype t) const;
         bool any_gradients() const;
         /** @brief Earliest output time of the time-based probes (infinity if none). */
@@ -182,7 +200,7 @@ class Probes {
         void annotate(const std::string & csv_line);
 
         enum class Sampling { CELL, POINT };
-        enum class Reduction { INTEGRAL, MEAN, FAVRE, MIN, MAX, RMS };
+        enum class Reduction { INTEGRAL, MEAN, FAVRE, MIN, MAX, RMS, MOMENT };
 
         /** @brief Columns of the values filled on the host with a cell field's value in each sample's cell. */
         using CellColumns = std::vector<std::pair<uint32_t, const Data *>>;
@@ -221,7 +239,7 @@ class Probes {
             /** @brief The faces of a face set, sampled on their cell side. */
             void on_faces(const Mesh & mesh, const probe::FaceSet & set, uint32_t n_variables);
             void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
-                          const ProbeReference & reference, bool gradients);
+                          const ProbeReference & reference, bool gradients, bool diffusive = false);
             /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
             std::vector<double> gather(const CellColumns & columns = {}) const;
 
@@ -248,6 +266,10 @@ class Probes {
             Kokkos::View<int32_t *> codes;       // evaluated: the written ones, then RHO if favre needs it
             bool gradients = false;              // some variable needs velocity or temperature gradients
             bool transport = false;              // some variable needs the viscosity or conductivity
+            bool diffusive = false;              // some variable is a diffusive flux
+            std::array<double, 3> moment_center = {0.0, 0.0, 0.0};
+            // moment: the vectors whose every component is a variable, and those components' columns
+            std::vector<std::pair<std::string, std::array<uint32_t, N_DIM>>> moment_vectors;
             bool average = false;                // writes the time averages of its samples
             // Averages: total weight, time of the last sample, samples, and (rank 0) the means of the
             // gathered node and quadrature values
@@ -267,6 +289,9 @@ class Probes {
             uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
 
             bool due(uint64_t step, rtype t) const;
+            bool due_or_forced(uint64_t step, rtype t, bool force) const {
+                return due(step, t) || (force && snapshot && step != step_last);
+            }
             uint64_t n_evaluated() const { return codes.extent(0); }
             bool samples_nodes() const;
             bool samples_quadrature() const;
