@@ -19,7 +19,7 @@
 /** @brief The molecular viscous flux of the run: of a single gas, or of a mixture (the other is empty). */
 struct ProbeFluxes {
     ViscousFluxFunctor viscous = {};
-    MixtureViscousFluxFunctor mixture = {};
+    MixtureViscousFluxFunctor<true> mixture = {};
 };
 
 #endif // PROBE_FLUXES_H

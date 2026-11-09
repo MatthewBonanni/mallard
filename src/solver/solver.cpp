@@ -2665,7 +2665,7 @@ ProbeFields Solver::probe_fields(ProbeFluxes & fluxes) {
     }
     fields.fluxes = &fluxes;
     if (is_viscous() && is_mixture()) {
-        fluxes.mixture = MixtureViscousFluxFunctor{
+        fluxes.mixture = MixtureViscousFluxFunctor<true>{
             mesh->face_normals, mesh->face_measure, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
             mesh->periodic_maps(), mesh->face_shift, boundary_data, mixture, cell_scalars, transport_values,
             transport_gradients, cell_transport, cell_diffusion, {}, {}, axisymmetric, mesh->cell_covariance,

@@ -837,7 +837,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     if (diffusive && on_faces) {
         // The scheme's diffusive fluxes of each face, out of the domain
         if (mixture) {
-            const MixtureViscousFluxFunctor mixture_flux = fields.fluxes->mixture;
+            const MixtureViscousFluxFunctor<true> mixture_flux = fields.fluxes->mixture;
             Kokkos::parallel_for("probe_diffusive_fluxes", n, KOKKOS_LAMBDA(const uint32_t s) {
                 const DiffusiveColumns columns{out, code, s, n_vars};
                 columns.clear();
