@@ -132,9 +132,9 @@ formats compare, and matches cells by `Contents::global_order`: two files in
 the mesh's global order compare cell by cell, two in their own order value by
 value, and a mix is refused rather than silently misaligned. Restart files are
 compared bit for bit through their `RestartHeader` (attributes, arrays, face
-records read raw from `faces_offset`); the provenance trailer is left out.
+records read raw from `faces_offset`); the run block and snapshot blocks are left out.
 The mesh, for `--remap` and for the coordinates of the largest differences, is
-set up from the provenance's recorded input (`[mesh]` and `[[periodic]]`, a
+set up from the run block's recorded input (`[mesh]` and `[[periodic]]`, a
 mesh file relative to `run.directory` and checked against `mesh.sha256`) with
 `remap::source_mesh`, and `remap::Source` maps B onto A's cells. It runs on
 one rank: reading is whole-field (see Partial reads), and the remap is only

@@ -899,7 +899,7 @@ void restart_section(report::Text & text, const RestartResult & st) {
         }
     }
     text.section("Restart state", s);
-    text.note("Bit for bit; the provenance is not compared.");
+    text.note("Bit for bit; the run and snapshot blocks are not compared.");
     text.table({"header", "A", "B"}, header);
     if (!attributes.empty()) {
         text.blank();

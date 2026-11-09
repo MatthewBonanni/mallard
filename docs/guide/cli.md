@@ -597,8 +597,8 @@ A (mean, root mean square and max over the cells, in the field's units) and the
 same relative to A's norms, and where the largest difference is (the cell, its
 coordinates and both values there). Restart files are also compared bit for bit
 in the rest of their state: step, time, scalar attributes, named arrays and the
-face records of characteristic boundaries; the provenance, which records when
-and where each ran, is not compared.
+face records of characteristic boundaries; the run and snapshot blocks, which
+record when and where each ran, are not compared.
 
 Each field passes if its max |B - A| / max |A| is at most --tol (0 by default),
 and so does t; the result is identical (every value bitwise the same), within
@@ -631,12 +631,12 @@ Options:
   --remap             Compare files on different meshes: B's cell values
                       remapped conservatively onto A's mesh (as [initialize]
                       type = "remap" does, degree 2, limited), then compared
-                      cell by cell. Needs both meshes: as the files' provenance
-                      records them, or --mesh-a and --mesh-b.
-  --mesh-a FILE       A's mesh file, where its provenance does not record it or
+                      cell by cell. Needs both meshes: as the files' run blocks
+                      record them, or --mesh-a and --mesh-b.
+  --mesh-a FILE       A's mesh file, where its run block does not record it or
                       the file has moved: for --remap and for the coordinates of
                       the largest differences. Default: from A's run block.
-  --mesh-b FILE       B's mesh file, for --remap. Default: from B's provenance.
+  --mesh-b FILE       B's mesh file, for --remap. Default: from B's run block.
   --format text|json  text: sections and tables, with the units of every
                       quantity; json: the same as one JSON object, for scripts.
                       Default: text.

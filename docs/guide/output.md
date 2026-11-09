@@ -638,8 +638,8 @@ $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.rest
   only is an infinite difference.
 - **Restart files** are also compared in the rest of their state, bit for bit:
   scalar attributes, named arrays (statistics weights) and the face records of
-  characteristic boundaries. The provenance is not compared: it records when
-  and where each run ran.
+  characteristic boundaries. The [run block](#run-block) and snapshot blocks
+  are not compared: they record when and where each run ran.
 - **Tolerance and exit status.** A field passes if its max |B - A| / max |A|
   is at most `--tol` (default 0: any difference in value fails), and so does t,
   relative to the larger |t|; `--tol 1e-12,P=1e-6` sets one field apart. Steps
