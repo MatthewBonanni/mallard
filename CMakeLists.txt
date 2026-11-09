@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.22)
 project(Mallard VERSION 0.9.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 
@@ -46,10 +46,36 @@ endfunction()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     add_compile_options(-fp-model=precise)
 endif()
+# GCC fuses multiplies and adds across statements where the CPU has FMA (arm64, or x86-64
+# with -march), so equal expressions round differently by where they are inlined, and
+# results differ from other CPUs'; Clang fuses only within an expression
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT Kokkos_ENABLE_CUDA)
+    add_compile_options(-ffp-contract=off)
+endif()
 
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
     set(MALLARD_THIRD_PARTY SYSTEM)
 endif()
+# add_subdirectory and FetchContent take SYSTEM from CMake 3.25; before, the bundled
+# libraries' targets give their headers to Mallard's targets as system headers here
+function(mallard_system_headers)
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
+        return()
+    endif()
+    foreach(target IN LISTS ARGN)
+        if(NOT TARGET ${target})
+            continue()
+        endif()
+        get_target_property(aliased ${target} ALIASED_TARGET)
+        if(aliased)
+            set(target ${aliased})
+        endif()
+        get_target_property(dirs ${target} INTERFACE_INCLUDE_DIRECTORIES)
+        if(dirs)
+            set_property(TARGET ${target} APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${dirs})
+        endif()
+    endforeach()
+endfunction()
 
 # libFuzzer harnesses of the input and mesh readers (test/fuzz), with every
 # target built with the sanitizers of Mallard_FUZZ_SANITIZERS
@@ -114,6 +140,7 @@ if(${PROJECT_NAME}_ENABLE_MPI)
         set(KAMINPAR_64BIT_NODE_IDS ON CACHE BOOL "" FORCE)
         set(KAMINPAR_64BIT_EDGE_IDS ON CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(KaMinPar)
+        mallard_system_headers(KaMinPar::dKaMinPar)
     endif()
 endif()
 
@@ -132,6 +159,7 @@ if(${PROJECT_NAME}_ENABLE_HDF5)
         set(HDF5_ENABLE_PARALLEL ${${PROJECT_NAME}_ENABLE_MPI} CACHE BOOL "" FORCE)
         add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5 ${MALLARD_THIRD_PARTY})
         set(HDF5_C_LIBRARIES hdf5-static)
+        mallard_system_headers(hdf5-static)
     endif()
 endif()
 
@@ -177,6 +205,7 @@ if(${PROJECT_NAME}_ENABLE_CGNS)
         set(CGNS_BUILD_SHARED OFF CACHE BOOL "" FORCE)
         set(CGNS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(cgns)
+        mallard_system_headers(cgns_static)
         # A parallel HDF5's headers include mpi.h
         if(${PROJECT_NAME}_ENABLE_MPI)
             target_link_libraries(cgns_static PUBLIC MPI::MPI_CXX)
@@ -192,6 +221,7 @@ if(USE_SYSTEM_KOKKOS)
     find_package(Kokkos 5 REQUIRED)
 else()
     add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos ${MALLARD_THIRD_PARTY})
+    mallard_system_headers(kokkoscore kokkoscontainers kokkosalgorithms kokkossimd)
 endif()
 
 # Cantera YAML mechanism files
@@ -210,6 +240,7 @@ else()
     set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
     set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(yaml-cpp)
+    mallard_system_headers(yaml-cpp)
     # yaml-cpp has no device code, and nvcc cannot compile its bundled dragonbox:
     # Kokkos' nvcc_wrapper passes it to the host compiler
     if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")

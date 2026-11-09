@@ -48,12 +48,15 @@ class GrowingBuffer {
 
         std::string label;
         unsigned long long base = 0;
-        [[maybe_unused]] size_t reserved = 0;
-        [[maybe_unused]] size_t mapped = 0;
-        [[maybe_unused]] size_t used = 0;  // the most bytes ensured
+        // CUDA builds only. A struct, not [[maybe_unused]] members, which GCC 11 rejects
+        struct Mapping {
+            size_t reserved = 0;
+            size_t mapped = 0;
+            size_t used = 0;  // the most bytes ensured
+            size_t granularity = 0;
+            int device = 0;
+        } vm;
         std::vector<std::pair<size_t, size_t>> filled;  // offset and size of each ensure's new bytes
-        [[maybe_unused]] size_t granularity = 0;
-        [[maybe_unused]] int device = 0;
         std::vector<unsigned long long> handles;
         std::vector<size_t> sizes;  // of each handle's mapping, in address order
 };

@@ -152,8 +152,10 @@ jobs:
         run: sh tools/dev/ci_status.sh ${{ job.status }}
 
   # Branches run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
-  # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), and a
-  # Clang build (no tests) for the warnings GCC misses. main also runs the
+  # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), a
+  # Clang build (no tests) for the warnings GCC misses, the 2D and 3D suites on macOS
+  # (arm64, AppleClang, Threads backend), the 2D suite on arm64 Linux, and the suites
+  # built with the oldest supported compilers and CMake. main also runs the
   # serial-backend and non-MPI 3D builds.
   matrix:
     needs: [changelog, device]
@@ -180,7 +182,13 @@ jobs:
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true},
             {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true},
-            {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true}
+            {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true},
+            {"name": "macos", "flags": "-DKokkos_ENABLE_THREADS=ON", "os": "macos-latest"},
+            {"name": "macos-3d", "flags": "-DKokkos_ENABLE_THREADS=ON -DMallard_DIM=3", "os": "macos-latest"},
+            {"name": "arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "hdf5": true, "os": "ubuntu-24.04-arm"},
+            {"name": "gcc-15", "flags": "-DKokkos_ENABLE_OPENMP=ON", "os": "ubuntu-26.04"},
+            {"name": "gcc-11", "flags": "-DKokkos_ENABLE_SERIAL=ON -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11", "os": "ubuntu-22.04", "packages": "g++-11", "cmake": "3.22.1"},
+            {"name": "clang-16", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-16 -DCMAKE_CXX_COMPILER=clang++-16", "os": "ubuntu-24.04", "packages": "clang-16", "cmake": "3.22.1"}
           ]'
           if [ "$ALL" != true ]; then backends=$(jq -c 'map(select(.main_only | not))' <<< "$backends"); fi
           if [ -n "$ONLY" ]; then
@@ -193,7 +201,7 @@ jobs:
   build-and-test:
     needs: matrix
     if: needs.matrix.outputs.any == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.backend.os || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
@@ -225,7 +233,21 @@ jobs:
         run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=3 install -y -qq libhdf5-dev libcgns-dev
       - name: Install ccache
         timeout-minutes: 15
-        run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=3 install -y -qq ccache
+        if: runner.os == 'Linux'
+        run: >
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=3 install -y -qq
+          ccache ${{ matrix.backend.packages }}
+      - name: Install ccache (macOS)
+        timeout-minutes: 15
+        if: runner.os == 'macOS'
+        run: brew install ccache
+      # The oldest CMake that Mallard supports (cmake_minimum_required)
+      - name: Install CMake ${{ matrix.backend.cmake }}
+        if: matrix.backend.cmake
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cmake"
+          "$RUNNER_TEMP/cmake/bin/pip" install -q "cmake==${{ matrix.backend.cmake }}"
+          echo "$RUNNER_TEMP/cmake/bin" >> "$GITHUB_PATH"
       - name: Restore compiler cache
         uses: actions/cache/restore@v4
         with:
@@ -244,7 +266,8 @@ jobs:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
           CCACHE_MAXSIZE: 500M
         run: |
-          cmake --build build -j $(nproc)
+          cmake --version | head -1
+          cmake --build build -j $(getconf _NPROCESSORS_ONLN) -- -k
           ccache --show-stats
       - name: Save compiler cache
         if: github.ref == 'refs/heads/main'
@@ -256,6 +279,7 @@ jobs:
         if: ${{ !matrix.backend.mpi && !matrix.backend.build_only && !matrix.backend.concurrent }}
         env:
           OMP_NUM_THREADS: 2
+          KOKKOS_NUM_THREADS: 2
         run: ./build/src/mallard test
       - name: Upgrade the inputs of every release
         if: matrix.backend.name == 'openmp'
