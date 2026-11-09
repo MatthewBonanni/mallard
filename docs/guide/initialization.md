@@ -15,7 +15,7 @@ T = 1.0
 # X = { O2 = 1.0, N2 = 3.76 }   gas mixtures: the composition
 ```
 
-*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct) and 7 more.
+*Used in:* [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct) and 8 more.
 
 ## Expressions
 
@@ -91,7 +91,7 @@ region.rotate = 30
 X = { H2 = 1.0 }
 ```
 
-*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
+*Used in:* [`shock_bubble_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-bubble-2d), [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo).
 
 Each `[[initialize.regions]]` entry sets some of `u`, `rho`, `p`, `T` and the
 composition inside a region, and leaves the rest to the state below it. The

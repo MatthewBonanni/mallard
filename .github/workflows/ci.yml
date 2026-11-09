@@ -23,8 +23,9 @@ on:
         default: false
       only:
         description: >-
-          Run only these jobs, comma-separated (backend names, tutorials, device, fuzz),
-          e.g. after resolving a conflict that can affect only them; empty runs all
+          Run only these jobs, comma-separated (backend names, tutorials, device, fuzz;
+          any other name fails the run), e.g. after resolving a conflict that can affect
+          only them; empty runs all
         type: string
         default: ''
 
@@ -64,6 +65,11 @@ jobs:
         run: |
           python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q --break-system-packages pyyaml
           python3 tools/dev/check_workflow_triggers.py
+      - name: Check the job names of the only input
+        if: inputs.only
+        env:
+          ONLY: ${{ inputs.only }}
+        run: python3 tools/dev/check_ci_only.py "$ONLY"
       - name: Check that the support matrix names every CI job
         run: python3 tools/dev/check_support_matrix.py
       - name: Check for British spellings
@@ -72,6 +78,8 @@ jobs:
         run: python3 tools/dev/input_catalog.py docs
       - name: Check that the TOML snippets of the docs parse
         run: python3 tools/dev/check_doc_toml.py
+      - name: Check the "Used in" lines of the user guide
+        run: python3 tools/docs/used_in.py --check
       - name: Check for a changelog fragment
         env:
           GH_TOKEN: ${{ github.token }}
@@ -218,24 +226,24 @@ jobs:
           STATUS_NAME: ${{ matrix.backend.name }}
         run: sh tools/dev/ci_status.sh running
       - name: Install MPI
-        timeout-minutes: 15
+        timeout-minutes: 25
         if: matrix.backend.mpi
         run: >
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=3 install -y -qq
+          sh tools/dev/apt_install.sh
           libopenmpi-dev openmpi-bin libtbb-dev libhdf5-openmpi-dev
       - name: Install HDF5
-        timeout-minutes: 15
+        timeout-minutes: 25
         if: matrix.backend.hdf5
-        run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=3 install -y -qq libhdf5-dev
+        run: sh tools/dev/apt_install.sh libhdf5-dev
       - name: Install CGNS
-        timeout-minutes: 15
+        timeout-minutes: 25
         if: matrix.backend.cgns
-        run: sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=3 install -y -qq libhdf5-dev libcgns-dev
+        run: sh tools/dev/apt_install.sh libhdf5-dev libcgns-dev
       - name: Install ccache
-        timeout-minutes: 15
+        timeout-minutes: 25
         if: runner.os == 'Linux'
         run: >
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=3 install -y -qq
+          sh tools/dev/apt_install.sh
           ccache ${{ matrix.backend.packages }}
       - name: Install ccache (macOS)
         timeout-minutes: 15
@@ -362,9 +370,9 @@ jobs:
           STATUS_NAME: tutorials
         run: sh tools/dev/ci_status.sh running
       - name: Install MPI, ccache and Gmsh's libraries
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: >
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && sudo apt-get -o Acquire::Retries=3 install -y -qq
+          sh tools/dev/apt_install.sh
           libopenmpi-dev openmpi-bin libhdf5-openmpi-dev ccache libglu1-mesa libxcursor1 libxft2 libxinerama1 zsh fish
       - uses: actions/setup-python@v5
         with:
@@ -456,10 +464,13 @@ jobs:
     env:
       SCCACHE_GHA_ENABLED: "true"
     steps:
+      # Without git in the image, checkout downloads the sources through the REST API:
+      # enough for the install script; the checkout after it clones with submodules
+      - uses: actions/checkout@v4
       - name: Install tools
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: >
-          apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && apt-get -o Acquire::Retries=3 install -y -qq --no-install-recommends
+          sh tools/dev/apt_install.sh --no-install-recommends
           git cmake make curl libopenmpi-dev openmpi-bin ca-certificates
       - uses: actions/checkout@v4
         with:
@@ -529,10 +540,13 @@ jobs:
     env:
       SCCACHE_GHA_ENABLED: "true"
     steps:
+      # Without git in the image, checkout downloads the sources through the REST API:
+      # enough for the install script; the checkout after it clones with submodules
+      - uses: actions/checkout@v4
       - name: Install tools
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: >
-          apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq && apt-get -o Acquire::Retries=3 install -y -qq --no-install-recommends
+          sh tools/dev/apt_install.sh --no-install-recommends
           git cmake make curl libopenmpi-dev openmpi-bin ca-certificates
       - uses: actions/checkout@v4
         with:
