@@ -22,8 +22,10 @@ namespace {
 /**
  * @brief Least-squares gradients of the scalars (with the flow block's
  *        neighbors and ghost placement, see LSQGradientFunctor) and the
- *        shared limiter of each cell.
+ *        shared limiter of each cell; ROTATIONS = false for meshes without
+ *        rotational pairs (see with_rotations).
  */
+template <bool ROTATIONS>
 struct ScalarLimiterFunctor {
     Kokkos::View<uint32_t *> offsets_faces_of_cell;
     Kokkos::View<uint32_t *> faces_of_cell;
@@ -60,9 +62,9 @@ struct ScalarLimiterFunctor {
             rtype x[N_DIM];
             FOR_I_DIM x[i] = cell_coords(nb, i);
             if (from_0) {
-                periodic.forward(s, x, dx);
+                periodic.forward<ROTATIONS>(s, x, dx);
             } else {
-                periodic.backward(s, x, dx);
+                periodic.backward<ROTATIONS>(s, x, dx);
             }
             FOR_I_DIM dx[i] = dx[i] - cell_coords(c, i);
             return nb;
@@ -128,7 +130,7 @@ struct ScalarLimiterFunctor {
             const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
             rtype x_f[N_DIM];
             FOR_I_DIM x_f[i] = face_coords(f, i);
-            periodic.backward(s, x_f, r[m]);
+            periodic.backward<ROTATIONS>(s, x_f, r[m]);
             FOR_I_DIM r[m][i] = r[m][i] - cell_coords(c, i);
         }
         rtype M_inv[N_DIM * N_DIM];
@@ -331,11 +333,13 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
         return;
     }
     if (linear) {
-        ScalarLimiterFunctor functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
-                                     mesh->cell_coords, mesh->face_coords, mesh->face_normals,
-                                     mesh->periodic_maps(), mesh->face_shift, mesh->cell_volume, boundaries, scalars, W, gradients,
-                                     limiter, limiter_type, venkat_K, n_species};
-        Kokkos::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
+        with_rotations(mesh->periodic_maps(), [&](auto rotations) {
+            ScalarLimiterFunctor<decltype(rotations)::value> functor{
+                mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face, mesh->cell_coords,
+                mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift, mesh->cell_volume,
+                boundaries, scalars, W, gradients, limiter, limiter_type, venkat_K, n_species};
+            Kokkos::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
+        });
     }
     Kokkos::parallel_for("face_thermo", mesh->n_faces, FaceThermoFunctor{face_values(scalars), face_thermo, n_species});
 }

@@ -949,9 +949,12 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
         Kokkos::parallel_for("mixture_transport", mesh->n_cells,
                              MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
                                                      transport_values});
-        Kokkos::parallel_for("mixture_gradients", n,
-                             MixtureGradientFunctor{viscous_gradient, transport_values, transport_gradients,
-                                                    bc_transport_values, mixture.n_species, cell_transport});
+        with_rotations(mesh->periodic_maps(), [&](auto rotations) {
+            Kokkos::parallel_for("mixture_gradients", n,
+                                 MixtureGradientFunctor<decltype(rotations)::value>{
+                                     viscous_gradient, transport_values, transport_gradients, bc_transport_values,
+                                     mixture.n_species, cell_transport});
+        });
     } else {
         const Euler phys = physics;
         StateView U = conservatives;
