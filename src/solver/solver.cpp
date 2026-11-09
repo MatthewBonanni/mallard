@@ -310,7 +310,7 @@ namespace {
 logging::Items describe_mesh(const Mesh & mesh) {
     using logging::count;
     using logging::format;
-    const bool distributed = !mesh.h_global_cell_id.empty();
+    const bool distributed = mesh.n_global_cells > 0;
     const uint32_t n_owned = mesh.n_owned();
     auto owned = [&](int32_t c) { return c >= 0 && static_cast<uint32_t>(c) < n_owned; };
 
@@ -427,7 +427,7 @@ void Solver::init_mesh() {
                               : partitioner == "multijagged" ? partition_multijagged(*setup, comm::size())
                                                              : partition_hilbert(*setup, comm::size()));
         }
-        mesh = setup->build_local_mesh(halo_layers, distribution);
+        mesh = setup->build_local_mesh(halo_layers, distribution, cell_numbering_of_input(input));
         if (exchange == "nccl" && !comm::nccl_available()) {
             throw InputError({.key = "parallel.halo_exchange",
                               .line = line_of(input.at("parallel"), "halo_exchange"),
@@ -479,6 +479,25 @@ void Solver::init_mesh() {
                                                   logging::count(min_owned).c_str(),
                                                   logging::count(max_owned).c_str(), static_cast<double>(max_owned) / mean,
                                                   logging::count(max_halo).c_str()));
+    }
+    {
+        const CellOrderChoice & choice = mesh->cell_order_choice;
+        const bool hilbert = choice.order == CellOrder::HILBERT;
+        std::string text = hilbert ? "Hilbert curve" : "input order";
+        if (is_distributed()) {
+            const int n_hilbert = comm::allreduce(int(hilbert), comm::Op::SUM);
+            if (n_hilbert > 0 && n_hilbert < comm::size()) {
+                text = logging::format("Hilbert curve on %d of %d ranks, input order on the others", n_hilbert, comm::size());
+            } else {
+                text = n_hilbert > 0 ? "Hilbert curve" : "input order";
+            }
+        } else if (choice.input_lines > 0.0) {
+            text += logging::format(" (auto: %.3g cache lines per cell, %.3g %s)",
+                                    hilbert ? choice.hilbert_lines : choice.input_lines,
+                                    hilbert ? choice.input_lines : choice.hilbert_lines,
+                                    hilbert ? "in the input order" : "along the Hilbert curve");
+        }
+        mesh_summary.emplace_back("Cell order", text);
     }
     if (mesh->curved_geometry) {
         // Curved boundary faces of owned cells, and curved faces in all
@@ -810,7 +829,7 @@ void Solver::init_boundaries() {
         boundary_fields[i_bc] = fields;
         const bool composition = is_mixture() && bcs.back().prescribes_composition() &&
                                  MixtureModel::composition_varies(bound);
-        // The target of an average-pressure outlet is one number, of t at most: update_average_pressure_outlets
+        // The target of an average-pressure outlet is one number, of t at most: one entry of timed_fields
         const bool average = bcs.back().has(BoundaryCondition::AVERAGE);
         const bool profiled = composition || (!average && (fields->varies() || fields->per_face()));
         rtype direction[N_DIM];
@@ -920,12 +939,13 @@ void Solver::init_boundaries() {
             average_pressure_outlets.push_back({static_cast<int32_t>(i_bc), faces, std::move(order), fields});
         }
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
-        std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
-        if (where) text += ", where " + find_value<std::string>(bound, "where");
-        if (composition) text += ", varying composition";
-        if (fields->varies()) text += fields->depends_on_time() ? ", time dependent" : ", varying along it";
-        if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
-        boundary_summary.emplace_back(name, text);
+        std::string details;
+        auto detail = [&](const std::string & text) { details += (details.empty() ? "" : ", ") + text; };
+        if (where) detail("where " + find_value<std::string>(bound, "where"));
+        if (composition) detail("varying composition");
+        if (fields->varies()) detail(fields->depends_on_time() ? "time dependent" : "varying along it");
+        if (bcs.back().modeled) detail(wall_model_spec.summary());
+        boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
     on_every_rank([&] {
         for (size_t k = 0; k < profiled_faces.size(); k++) {
@@ -1007,6 +1027,11 @@ void Solver::init_boundaries() {
             n_in[i] = -static_cast<double>(mesh->h_face_normals(i_face, i)) / static_cast<double>(mesh->h_face_area(i_face));
         }
         timed_fields.add(i_bc, x, n_in, boundary_fields[base], composition);
+    }
+    for (const auto & outlet : average_pressure_outlets) {
+        if (outlet.fields->depends_on_time()) {
+            timed_fields.add(static_cast<uint32_t>(outlet.i_bc), Point{}, Point{}, outlet.fields, nullptr, false);
+        }
     }
     if (!timed_fields.empty()) timed_fields.finish();
     dirichlet_states = DirichletStates();
@@ -1202,7 +1227,7 @@ double Solver::get_mass_flow_force() const {
     return force;
 }
 
-void Solver::update_average_pressure_outlets(StateView solution, const rtype t_eval) {
+void Solver::update_average_pressure_outlets(StateView solution) {
     const Euler phys = physics;
     for (const auto & outlet : average_pressure_outlets) {
         Kokkos::View<uint32_t *> faces = outlet.faces;
@@ -1226,15 +1251,12 @@ void Solver::update_average_pressure_outlets(StateView solution, const rtype t_e
             pA += all[2 * k];
             A += all[2 * k + 1];
         }
-        auto bc = Kokkos::subview(boundary_data.bcs, outlet.i_bc);
-        auto h_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bc);
-        if (outlet.fields->depends_on_time()) {
-            BoundaryCondition target = h_bc();
-            outlet.fields->apply(target, Point{}, double(t_eval), double(physics.R), Point{});
-            h_bc().data[N_DIM + 1] = target.data[N_DIM + 1];
-        }
-        h_bc().data[0] = h_bc().data[N_DIM + 1] - pA / A;
-        Kokkos::deep_copy(bc, h_bc);
+        const Kokkos::View<BoundaryCondition *> bcs = boundary_data.bcs;
+        const int32_t i_bc = outlet.i_bc;
+        const rtype mean = pA / A;
+        Kokkos::parallel_for("outlet_average_offset", 1, KOKKOS_LAMBDA(const int) {
+            bcs(i_bc).data[0] = bcs(i_bc).data[N_DIM + 1] - mean;
+        });
     }
 }
 
@@ -1599,7 +1621,8 @@ void Solver::init_output(region::Regions & regions) {
         }
     }
     probes.init(input, *mesh, regions, species_names,
-                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous());
+                find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
+                statistics);
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
     run_log_on = !run_log_file.empty() && output_files_enabled();
     divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
@@ -1986,6 +2009,21 @@ void Solver::register_data() {
     }
 }
 
+std::vector<std::string> Solver::output_fields() const {
+    std::vector<std::string> names;
+    for (const auto & d : data) names.push_back(d.name());
+    std::vector<std::string> on_request = {"P_MAX", "Q"};
+    if constexpr (N_DIM == 2) {
+        on_request.emplace_back("VORTICITY");
+    } else {
+        FOR_I_DIM on_request.push_back(std::string("VORTICITY_") + "XYZ"[i]);
+    }
+    for (const auto & name : on_request) {
+        if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
+    }
+    return names;
+}
+
 std::vector<std::string> Solver::restart_variables() const {
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     for (const auto & name : species_names) names.push_back("RHOY_" + name);
@@ -2093,6 +2131,7 @@ int Solver::run() {
                 update_primitives();
                 statistics.sample(step, t, cell_sampler(), mesh->n_owned());
             }
+            if (probes.averages_due(step, t)) sample_probe_averages();
             t_wall_stepping += step_timer.seconds();
             Kokkos::Timer output_timer;
             write_forces();
@@ -2160,7 +2199,7 @@ bool Solver::state_needed() const {
         if (step % monitor.interval == 0) return true;
     }
     return (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || statistics.due(step, t) ||
-           probes.due(step, t);
+           probes.due(step, t) || probes.averages_due(step, t);
 }
 
 double Solver::progress() const {
@@ -2336,7 +2375,11 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     }
 
     logging::section("Boundaries");
-    logging::items(boundary_summary);
+    for (const CheckBoundary & b : boundary_summary) {
+        logging::item(b.zone, b.condition + ", " + logging::count(b.faces) + " faces" +
+                                  (b.details.empty() ? "" : ", " + b.details));
+        if (!b.turbulence.empty()) logging::item(b.zone + " turbulence", b.turbulence);
+    }
 
     logging::section("Output");
     logging::item("Progress", "every " + logging::count(check_interval) + " steps");
@@ -2465,6 +2508,7 @@ void Solver::check_fields() {
 
 RestartAttributes Solver::restart_attributes() const {
     RestartAttributes attributes = statistics.attributes();
+    for (const auto & a : probes.attributes()) attributes.push_back(a);
     if (step_controller.enabled()) {
         for (const auto & a : step_controller.attributes()) attributes.push_back(a);
     }
@@ -2493,7 +2537,7 @@ void Solver::write_data(bool force) {
     }
     const RestartAttributes attributes = restart_attributes();
     const RestartFaces faces = characteristic_restart_faces();
-    const RestartArrays arrays = statistics.arrays();
+    const RestartArrays arrays = restart_arrays();
     for (auto & writer : data_writers) {
         if (writer->get_format() == DataFormat::RESTART) writer->write(step, t, force, attributes, faces, arrays);
     }
@@ -2514,7 +2558,25 @@ void Solver::write_probes() {
     } else {
         update_primitives();
     }
+    if (probes.statistics_due(step, t)) statistics.copy_device_to_host();
     probes.write(step, t, probe_fields());
+}
+
+void Solver::sample_probe_averages() {
+    const auto [cell_W, transport] = probes.average_needs();
+    if (cell_W) {
+        update_cell_W();
+        if (is_mixture() && transport) update_transport();
+    } else {
+        update_primitives();
+    }
+    probes.sample_averages(step, t, probe_fields());
+}
+
+RestartArrays Solver::restart_arrays() const {
+    RestartArrays arrays = statistics.arrays();
+    for (auto && a : probes.arrays()) arrays.push_back(std::move(a));
+    return arrays;
 }
 
 ProbeFields Solver::probe_fields() {

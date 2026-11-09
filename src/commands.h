@@ -25,6 +25,18 @@ int reactor_main(const cli::Args & args);
 /** @brief `mallard info FILE|RUN_DIR`: what a file or a run directory holds. */
 int info_main(const cli::Args & args);
 
+/** @brief `mallard list fields [INPUT]`: the output fields there are, or those of a case. */
+int list_fields_main(const cli::Args & args);
+
+/** @brief `mallard list species INPUT`: the species of a case. */
+int list_species_main(const cli::Args & args);
+
+/** @brief `mallard list templates`: the case templates of mallard new. */
+int list_templates_main(const cli::Args & args);
+
+/** @brief `mallard diff A B`: how two solutions differ, field by field. */
+int diff_main(const cli::Args & args);
+
 /** @brief `mallard mesh convert INPUT OUTPUT.h5`. */
 int mesh_convert_main(const cli::Args & args);
 

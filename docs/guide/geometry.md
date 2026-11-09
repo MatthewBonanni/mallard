@@ -357,15 +357,26 @@ of the revolved surface.
 ### Checking regions
 
 `mallard check` lists every region a case uses, and the mesh's own, with its
-dimension, measure and cells; surfaces and curves say whether they are exact
-or extracted. A region that covers no cell is an error naming it with its
-extent and the domain's:
+kind, measure and cells; surfaces and curves say whether they are exact
+or extracted. A region that covers no cell is an error (`E-REGION-OUTSIDE` or
+`E-REGION-EMPTY`) naming it with its extent and the domain's:
 
 ```
-  Regions            domain: area 1, 800 cells (of the mesh)
-                     left: curve, length 1, 20 cells (of the mesh)
-                     ring: area 0.0339292, 58 cells
-                     probes[name = "around"].region: curve, length 0.942478, 30 cells, exact
+== Regions =========================================================================== ERROR
+  The mesh's own (the domain, its boundary and cell zones) and every region the case uses;
+  cells: the cells each touches. A region of the case that touches no cell is an error.
+  status  region                        kind    measure  units  cells  made from
+  ok      domain                        filled  2        m^2    128    the mesh's
+  ok      bottom                        curve   2        m      16     the mesh's
+  ok      left                          curve   1        m      8      the mesh's
+  ok      right                         curve   1        m      8      the mesh's
+  ok      top                           curve   2        m      16     the mesh's
+  ERROR   sponges[0].region             filled  0        m^2    0      cell fractions
+  ok      probes[name = "ring"].region  curve   1.5708   m      13     exact
+...
+  ERROR   E-REGION-OUTSIDE  region sponges[0].region lies outside the domain: it spans (4.5, 4) to (5.5, 6) m, the
+                            domain (0, 0) to (2, 1) m: move or resize it (--view shows both)
+                            docs/guide/input_files.md#e-region-outside
 ```
 
 `mallard check input.toml --view view` also writes `view/case.vtkhdf`, the

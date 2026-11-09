@@ -105,6 +105,16 @@ TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {
     expect_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"));
 }
 
+TEST(MPI3DTest, SyntheticTurbulenceMatchesSerial) {
+    // The default period is the mesh's bounding box, reduced over the ranks;
+    // the modes come from the seed alone
+    expect_matches_serial(blast_input("cartesian_tet", "type = \"MUSCL\"\n") +
+                          "[initialize.turbulence]\nspectrum = \"passot_pouquet\"\nintensity = 0.1\nlength_scale = 0.2\n"
+                          "[[initialize.regions]]\nregion = {type = \"box\", center = [0.4, 0.5, 0.5], size = [0.4, 0.5, 0.3], "
+                          "pivot = [0.4, 0.5, 0.5], rotate = {axis = [1, 1, 0], angle = 30}}\n"
+                          "turbulence = {intensity = 0.05, length_scale = 0.15, kolmogorov_scale = 0.02, seed = 2}\n");
+}
+
 TEST(MPI3DTest, NavierStokesOnTetrahedraMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tet", "type = \"MUSCL\"\n",
                                     "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n"));

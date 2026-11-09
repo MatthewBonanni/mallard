@@ -17,7 +17,7 @@ its progress on the terminal and in a machine-readable run record.
 | Probes | `probe_<name>.csv` (or `.h5`, `.vtkhdf`, `.pvd`), `probe_<name>_reductions.csv` | `[[probes]]` | [Probes and monitors](probes.md#probes-probes) |
 | Wall forces | `forces_<zone>.csv` | `[[forces]]` | [Wall forces](probes.md#wall-forces-forces) |
 | Domain integrals | `integrals.csv` | `[integrals]` | [Domain integrals](probes.md#domain-integrals-integrals) |
-| Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files | `[statistics]`, `[statistics.phase]` | [Statistics](statistics.md) |
+| Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files; probe columns `MEAN_<variable>` with `average = true` | `[statistics]`, `[statistics.phase]`, `[[probes]]` | [Statistics](statistics.md), [Probes](probes.md#time-averages) |
 | Spectra and two-point correlations | `spectra.csv` | `[statistics.spectra]` | [Spectra](statistics.md#spectra-and-two-point-correlations-statisticsspectra) |
 
 Every file records its [units](#units), its [provenance](#provenance) and a
@@ -53,7 +53,9 @@ variables = ["P", "T"]
 | `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `xdmf` with `compression = "zlib"`: lossy, each cell value within this relative error |
 | `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
 
-**Variables:**
+**Variables:** `mallard list fields input.toml` lists exactly those of a case, and
+`mallard list fields` all of them with their units and what each needs
+([Command line](cli.md#mallard-list-fields)).
 
 | Group | Names |
 |---|---|
@@ -411,7 +413,7 @@ those of `A` per second.
 | `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
 | `Q` | `s-2` | `CFL`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
-| `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` | `1` |
+| `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
 | `MASS_FLUX`, `SPECIES_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
 | `CF`, `CP`, `Y_PLUS` | `1` | `REGION_FRACTION` (regions) | `1` |
@@ -485,7 +487,7 @@ build reads. It is never misread.
 
 | File | Version, where | Versions (written from) | Read by |
 |---|---|---|---|
-| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9) | Mallard: all |
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), and that of time-averaged probes (0.10) | Mallard: all |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
@@ -544,6 +546,78 @@ $ mallard info solut/flow.vtkhdf.series
 ```
 
 `--format json` prints the same as one JSON object, for scripts.
+
+### Comparing two solutions: `mallard diff`
+
+`mallard diff A B` tells whether two files hold the same solution and, if not,
+how far apart and where: for a regression check in CI, two settings of a case,
+a restart that should reproduce a run, or a serial run against an MPI one
+([Command line](cli.md#mallard-diff)). A and B are snapshot, restart, probe or
+CSV files, of any format each; it compares every field both hold (`--fields`
+picks some), at the last snapshot of each, or at the one of a step (`--step N`) or
+nearest a time (`--time T`) as the files record them:
+
+```
+$ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.restart
+== mallard diff ========================================================================= ✓
+  A                  serial/solut/restart_000020.restart (restart)
+  B                  mpi/solut/restart_000020.restart (restart)
+  Compared           cell by cell, in the mesh's global cell order (768 cells)
+  Tolerance          0 (values must be equal); on max |B - A| / max |A| per field
+  Result             ✓ identical: the same state, bit for bit
+...
+== Fields ========================================== |B - A| per cell, in the field's units
+     field   units       differing cells  L1  L2  Linf
+  ✓  RHO     kg m-3      0 of 768         0   0   0
+  ✓  RHOU_X  kg m-2 s-1  0 of 768         0   0   0
+...
+```
+
+- **Per field**, the `Fields` table gives the cells whose values are not
+  bitwise equal and the L1, L2 and Linf norms of B - A (mean, root mean square
+  and max over the cells, not weighted by volume) in the field's units;
+  `Relative differences` divides each by the same norm of A; `Largest
+  differences` names the cell of the max, its coordinates and both values.
+  Vectors are compared by the magnitude of the difference; a NaN in one file
+  only is an infinite difference.
+- **Restart files** are also compared in the rest of their state, bit for bit:
+  scalar attributes, named arrays (statistics weights) and the face records of
+  characteristic boundaries. The provenance is not compared: it records when
+  and where each run ran.
+- **Tolerance and exit status.** A field passes if its max |B - A| / max |A|
+  is at most `--tol` (default 0: any difference in value fails), and so does t,
+  relative to the larger |t|; `--tol 1e-12,P=1e-6` sets one field apart. Steps
+  that differ, or fields only one file holds, are warnings. The status column
+  and the first and last lines read ✓ identical, ⚠ within tolerance or
+  ✗ beyond it; the exit status is 0, 0 and 1, and 3 when the files cannot be
+  compared, so `mallard diff a b --tol 1e-10 || exit 1` gates a CI job.
+  `--format json` prints the same as one object.
+- **Cells are matched by their global index**, which restart files and VTKHDF
+  or XDMF snapshots of the whole mesh keep whatever the ranks that wrote them;
+  a restart file against a snapshot compares the fields both hold (RHO). VTU
+  pieces and region snapshots are in their own order: `mallard diff` refuses
+  to match them against those files, and compares two of the same layout value
+  by value.
+- **Different meshes** are refused, unless `--remap`: B's cell values are
+  remapped onto A's mesh by the conservative remap of
+  [`[initialize] type = "remap"`](initialization.md) (degree 2, limited) and
+  compared there. The meshes, and the cell coordinates of the largest
+  differences, come from the input each file's provenance records (a mesh file
+  relative to the run's directory, checked against its SHA-256), or from
+  `--mesh-a` and `--mesh-b`.
+
+```
+$ mallard diff coarse/solut/restart_000020.restart fine/solut/restart_000020.restart --remap --tol 1e-2
+...
+== Remap ================================================== conservative, degree 2, limited
+  B cells  A cells  integrals kept to  A cells partly covered  A cells outside B
+  3,072    768      1.2e-15            0                       0
+...
+== Relative differences ===================== dimensionless: a norm of B - A over that of A
+     field   L1           L2           Linf         tolerance on Linf
+  ⚠  RHO     0.000213803  0.000262748  0.000440052  0.01
+...
+```
 
 The Python scripts in `tools/` (numpy, matplotlib; see
 [Tools](https://matthewbonanni.github.io/mallard/docs/tools/)) read Mallard's output directly:

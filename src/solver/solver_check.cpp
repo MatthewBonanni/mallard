@@ -41,10 +41,8 @@ std::string error_text(const std::exception & e) {
 std::string bytes(const double b) { return logging::si(b) + "B"; }
 
 // Sizing: the device memory outside Kokkos when not measured, CUDA's context and the local memory of
-// kernels with large stacks (A100, CUDA 12.9: 1.5 GB in 2D, 2.1 GB in 3D; see docs/design/performance.md),
-// and the halo the recommended ranks stay below
+// kernels with large stacks (A100, CUDA 12.9: 1.5 GB in 2D, 2.1 GB in 3D; see docs/design/performance.md)
 constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'000;
-constexpr double HALO_FRACTION = 0.1;
 
 std::string point(const std::array<double, N_DIM> & x) { return quality_point(x); }
 
@@ -61,6 +59,7 @@ double cfl_limit(const TimeIntegratorType type) {
 
 CheckReport Solver::check(const Input & input_in, const CheckOptions & options) {
     CheckReport r;
+    r.input_file = options.input_file;
     struct Restore {
         bool files = output_files_enabled();
         bool * check;
@@ -77,27 +76,31 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         init(input_in);
         r.setup_done = true;
     } catch (const InputError & e) {
-        r.errors.push_back((options.input_file.empty() ? "" : options.input_file + ": ") + error_text(e));
+        r.error(check_code::INPUT, (options.input_file.empty() ? "" : options.input_file + ": ") + error_text(e));
     } catch (const std::exception & e) {
-        r.errors.push_back(error_text(e));
+        r.error(check_code::SETUP, error_text(e));
     }
     for (const Diagnostic & key : unused_keys(input)) {
-        if (r.setup_done || !key.suggestion.empty()) r.unused.push_back(key);
+        if (!r.setup_done && key.suggestion.empty()) continue;
+        r.unused.push_back(key);
+        r.error(check_code::KEY_UNUSED, describe(key));
     }
-    for (const auto & finding : deprecated_keys) r.warnings.push_back(input_upgrade::advice(finding));
+    for (const auto & finding : deprecated_keys) r.warning(check_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     const ResolvedInput resolved = resolve_input(input);
     if (r.setup_done) r.resolved = resolved.toml;
     if (!options.catalog_file.empty() && comm::is_root()) {
         std::ofstream file(options.catalog_file);
         file << key_catalog(resolved);
-        if (!file) r.errors.push_back(cannot_write("the key catalog", options.catalog_file).what());
+        if (!file) r.error(check_code::CATALOG_WRITE, cannot_write("the key catalog", options.catalog_file).what());
     }
     if (!r.setup_done || !mesh) return r;
 
     check_memory(r, options, tracker);
     r.boundaries = boundary_summary;
+    r.t = static_cast<double>(t);
     check_time_step(r);
-    check_mesh_quality(r, options);
+    const CheckFields resolution = check_resolution(r);
+    check_mesh_quality(r, options, resolution);
     check_cost(r, options, tracker);
     check_sizing(r, options);
     check_settings(r);
@@ -105,20 +108,20 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     return r;
 }
 
-void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options) const {
+void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, const CheckFields & extra) const {
     const MeshQuality quality = mesh_quality(*mesh);
     r.quality = summarize(*mesh, quality, options.n_worst);
     r.has_quality = true;
     for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
         if (r.quality[m].n_over_limit == 0) continue;
-        r.warnings.push_back(logging::count(r.quality[m].n_over_limit) + " cells with " + MeshQuality::NAMES[m] +
-                             " above " + logging::real(MeshQuality::LIMITS[m]) + " (worst " +
-                             logging::format("%.3g", r.quality[m].max) + " at " +
-                             point(r.quality[m].worst.front().x) +
-                             "); such cells limit the time step and accuracy and can make a run diverge: improve "
-                             "the mesh there (--quality shows where). See docs/guide/meshes.md#mesh-quality");
+        r.warning(check_code::QUALITY[m], logging::count(r.quality[m].n_over_limit) + " cells with " +
+                                              MeshQuality::NAMES[m] + " above " +
+                                              logging::real(MeshQuality::LIMITS[m]) + ", the worst " +
+                                              logging::format("%.3g", r.quality[m].max) + " at " +
+                                              point(r.quality[m].worst.front().x) +
+                                              " m: improve the mesh there (--quality shows where)");
     }
-    if (!options.quality_file.empty()) write_quality(mesh, quality, options.quality_file);
+    if (!options.quality_file.empty()) r.quality_file = write_quality(mesh, quality, options.quality_file, extra);
 }
 
 void Solver::check_time_step(CheckReport & r) {
@@ -131,6 +134,8 @@ void Solver::check_time_step(CheckReport & r) {
         r.dt_limit = "sponge";
     }
     r.cfl = r.dt / r.dt_cfl1;
+    r.cfl_limit = cfl_limit(time_integrator->get_type());
+    r.integrator = TIME_INTEGRATOR_NAMES.at(time_integrator->get_type());
 
     const auto h_dt = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cfl_local);
     const uint32_t n_owned = mesh->n_owned();
@@ -254,6 +259,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
     r.steady_bytes = of_largest_rank(usage.by_category, usage.peak);
     for (const memory::Bytes & phase : usage.phases) r.setup_phases.push_back(of_largest_rank(phase, usage.peak));
     r.local_cells = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_cells) : 0, comm::Op::MAX);
+    r.local_owned = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_owned()) : 0, comm::Op::MAX);
     r.ranks = comm::size();
     r.target_ranks = options.ranks > 0 ? options.ranks : r.ranks;
     r.n_cells = n_cells_global;
@@ -278,15 +284,17 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
         r.target_bytes = static_cast<uint64_t>(scale * static_cast<double>(r.bytes));
         r.target_bytes_peak = static_cast<uint64_t>(scale * static_cast<double>(r.bytes_peak));
     } else {
-        r.errors.push_back("--ranks " + std::to_string(r.target_ranks) + ": run the check serially or on " +
-                           std::to_string(r.target_ranks) + " ranks.");
+        r.error(check_code::RANKS, "--ranks " + std::to_string(r.target_ranks) + " in a check on " +
+                                       std::to_string(r.ranks) + " ranks: run the check serially or on " +
+                                       std::to_string(r.target_ranks) + " ranks");
         r.target_ranks = r.ranks;
         return;
     }
     if (r.device_capacity > 0 && r.target_bytes_peak > r.device_capacity) {
-        r.errors.push_back("estimated " + bytes(double(r.target_bytes_peak)) + " per rank on " +
-                           std::to_string(r.target_ranks) + " ranks exceeds the device's " +
-                           bytes(double(r.device_capacity)) + ": run on more ranks or GPUs, or on a coarser mesh");
+        r.error(check_code::MEMORY_DEVICE, "estimated peak of " + bytes(double(r.target_bytes_peak)) +
+                                               " per rank on " + std::to_string(r.target_ranks) +
+                                               " ranks exceeds the device's " + bytes(double(r.device_capacity)) +
+                                               ": run on more ranks or GPUs, or on a coarser mesh");
     }
 }
 
@@ -322,7 +330,13 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
         r.fixed_bytes = static_cast<uint64_t>(m.fixed);
         r.sizing_setup = k + 1 < snapshots.size();
     }
-    if (!(n_max >= 1.0)) return;
+    const std::string per = r.sizing_name + "'s " + bytes(double(r.sizing_memory)) + " per " +
+                            (r.sizing_gpu ? "GPU" : "rank");
+    if (!(n_max >= 1.0)) {
+        r.warning(check_code::SIZING_FIXED, "the memory that does not scale with the cells does not fit in " + per +
+                                                ": size the run for a larger memory (--memory)");
+        return;
+    }
     r.max_local_cells = static_cast<uint64_t>(n_max);
 
     auto fits = [&](const PartSize & p) { return peak(double(p.owned + p.halo)) <= usable; };
@@ -346,7 +360,12 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     const DistributedMesh whole(read_mesh_block(input), Mesh::periodic_pairs(input));
     PartSize part = n == 1 ? PartSize{n_cells_global, 0} : check_part(whole, n);
     for (int tries = 0; !fits(part); tries++) {
-        if (tries == 16 || uint64_t(n) >= max_ranks) return;
+        if (tries == 16 || uint64_t(n) >= max_ranks) {
+            r.warning(check_code::SIZING_PARTS, "no partition into up to " + logging::count(uint64_t(n)) +
+                                                    " parts fits in " + per +
+                                                    ": size the run for a larger memory (--memory) or coarsen the mesh");
+            return;
+        }
         const double over = double(part.owned + part.halo) / n_max;
         n = std::max(n + 1, static_cast<int>(std::ceil(n * std::min(over, 2.0))));
         part = check_part(whole, n);
@@ -355,7 +374,7 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     // Halo below 10% of the owned cells: doubling the ranks while it holds
     for (int m = n; uint64_t(m) <= max_ranks; m *= 2) {
         const PartSize p = m == n ? part : check_part(whole, m);
-        if (double(p.halo) >= HALO_FRACTION * double(p.owned)) break;
+        if (double(p.halo) >= SIZING_HALO_FRACTION * double(p.owned)) break;
         r.halo_ranks = m;
     }
 }
@@ -423,26 +442,10 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
 }
 
 void Solver::check_settings(CheckReport & r) const {
-    const double limit = cfl_limit(time_integrator->get_type());
-    if (r.cfl > limit) {
-        r.warnings.push_back(logging::format("CFL %.3g at the initial state is above %.3g, the stability limit of %s "
-                                             "for smooth flow: lower run.cfl (or run.dt)",
-                                             r.cfl, limit,
-                                             TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()).c_str()));
-    }
-    if (tfles_on) {
-        const auto h_delta = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), les_delta);
-        double F_max = 1.0;
-        for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-            F_max = std::max(F_max, thickened_flame.thickening(static_cast<double>(h_delta(c)), 1.0));
-        }
-        F_max = comm::allreduce(F_max, comm::Op::MAX);
-        if (F_max > 5.0) {
-            r.warnings.push_back(logging::format("TFLES thickens the flame up to F = %.3g (n_res Delta / delta_L): "
-                                                 "above 5 the flame's response to turbulence is unreliable; refine "
-                                                 "the mesh or lower les.combustion.n_res",
-                                                 F_max));
-        }
+    if (r.cfl > r.cfl_limit) {
+        r.warning(check_code::CFL_LIMIT, logging::format("CFL %.3g at the initial state is above %.3g, the stability "
+                                                         "limit of %s for smooth flow: lower run.cfl (or run.dt)",
+                                                         r.cfl, r.cfl_limit, r.integrator.c_str()));
     }
 }
 
@@ -471,7 +474,7 @@ struct OnMesh {
 OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name) {
     OnMesh m;
     m.block.name = name;
-    const bool distributed = !mesh.h_global_cell_id.empty();
+    const bool distributed = mesh.n_global_cells > 0;
     const double inf = std::numeric_limits<double>::infinity();
     Box box = {std::array<double, 3>{inf, inf, inf}, std::array<double, 3>{-inf, -inf, -inf}};
     auto extend = [&](const std::array<double, 3> & x) {
@@ -540,16 +543,10 @@ std::string block_name(std::string name) {
 void Solver::check_regions(CheckReport & r, const CheckOptions & options) const {
     if (!used_regions) return;
     std::vector<case_view::Block> blocks;
-    auto text = [&](const region::Region & region, const OnMesh & m, const bool of_mesh) {
+    auto entry = [&](const std::string & name, const region::Region & region, const OnMesh & m, const bool of_mesh) {
         const int d = region.dimension();
-        static const char * kinds[4] = {"points, count ", "curve, length ", "surface, area ", ""};
-        std::string line = d == N_DIM ? std::string(N_DIM == 2 ? "area " : "volume ") : kinds[d];
-        line += logging::real(m.measure) + (mesh->axisymmetric && d == N_DIM ? " per radian" : "") + ", " +
-                logging::count(m.cells) + (m.cells == 1 ? " cell" : " cells");
-        if (d < N_DIM && !of_mesh) {
-            line += m.exact ? ", exact" : ", extracted (resolution " + std::to_string(region.resolution()) + ")";
-        }
-        return line + (of_mesh ? " (of the mesh)" : "");
+        return CheckRegion{name,   of_mesh, d, m.measure, mesh->axisymmetric && d == N_DIM, m.cells,
+                           m.exact, d < N_DIM && !m.exact ? region.resolution() : 0};
     };
     // The mesh's own regions: the domain, its boundary zones and cell zones
     const region::MeshRegions & automatic = used_regions->automatic();
@@ -559,21 +556,22 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         const region::Region region = region::read(value, name, nullptr, &automatic);
         OnMesh m = on_mesh(*mesh, region, block_name(name));
         if (name == "domain") domain = m.box;
-        r.regions.emplace_back(name, text(region, m, true));
+        r.regions.push_back(entry(name, region, m, true));
         if (name != "domain") blocks.push_back(std::move(m.block));
     }
     const std::vector<std::string> mesh_names = automatic.names();
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
         OnMesh m = on_mesh(*mesh, *region, block_name(label));
-        r.regions.emplace_back(label, text(*region, m, false));
+        r.regions.push_back(entry(label, *region, m, false));
         if (m.cells == 0) {
             const Box b = region::bounds(*region);
             bool outside = false;
             for (size_t i = 0; i < N_DIM; i++) outside = outside || b[1][i] < domain[0][i] || b[0][i] > domain[1][i];
-            r.errors.push_back("region " + label + (outside ? " lies outside the domain" : " covers no cell of the mesh") +
-                               ": it spans " + box_text(b) + ", the domain " + box_text(domain) +
-                               ". See docs/guide/geometry.md#regions-on-a-mesh");
+            r.error(outside ? check_code::REGION_OUTSIDE : check_code::REGION_EMPTY,
+                    "region " + label + (outside ? " lies outside the domain" : " covers no cell of the mesh") +
+                        ": it spans " + box_text(b) + " m, the domain " + box_text(domain) +
+                        " m: move or resize it (--view shows both)");
         }
         blocks.push_back(std::move(m.block));
     }
@@ -581,76 +579,6 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         r.view_file = case_view::write(options.view_dir + "/case.vtkhdf", blocks);
     }
 }
-
-namespace {
-
-void print_breakdown(const CheckReport & r) {
-    using logging::format;
-    using logging::item;
-    const double cells = static_cast<double>(std::max<uint64_t>(r.local_cells, 1));
-    item("By category", std::string("at the setup's peak / ") +
-                            (r.steps_timed > 0 ? "at the steps' peak" : "after setup") + ", largest rank");
-    for (size_t c = 0; c < memory::N_CATEGORIES; c++) {
-        const double a = double(r.setup_bytes[c]), b = double(r.steady_bytes[c]);
-        if (a < 0.0005 * double(r.bytes_peak) && b < 0.0005 * double(r.bytes_peak)) continue;
-        const bool per_cell = memory::scales_with_cells(memory::Category(c));
-        item("", format("%-22s %7s / %-7s", memory::category_name(memory::Category(c)), bytes(a).c_str(),
-                        bytes(b).c_str()) +
-                     (per_cell ? format("  %s / %s per cell", bytes(a / cells).c_str(), bytes(b / cells).c_str())
-                               : std::string("  not proportional to the cells")));
-    }
-    if (r.outside_kokkos > 0) {
-        item("", format("%-22s %7s", "outside Kokkos", bytes(double(r.outside_kokkos)).c_str()) +
-                     "  CUDA's context and kernels' local memory, the most measured");
-    }
-}
-
-void print_sizing(const CheckReport & r) {
-    using logging::count;
-    using logging::format;
-    using logging::item;
-    if (r.sizing_name.empty()) return;
-    const std::string unit = r.sizing_gpu ? "GPU" : "rank";
-    auto units = [&](const int n) { return std::to_string(n) + " " + unit + (n == 1 ? "" : "s"); };
-    std::string what = r.sizing_name + ": " + bytes(double(r.sizing_memory)) + " per " + unit + ", " +
-                       format("%.0f%%", 100.0 * SIZING_MARGIN) + " kept free";
-    if (r.sizing_gpu) {
-        what += ", " + bytes(double(r.sizing_overhead)) + " outside Kokkos" +
-                (r.overhead_measured ? " (measured)" : " (typical)");
-    }
-    item(r.sizing_gpu ? "GPU sizing" : "Rank sizing", what);
-    if (r.max_local_cells == 0) {
-        item("", logging::style("this case's fixed memory alone does not fit", logging::Style::RED));
-        return;
-    }
-    item("", "at most " + count(r.max_local_cells) + " cells per " + unit + ", halo included (" +
-                 bytes(r.bytes_per_cell) + " per cell" +
-                 (r.fixed_bytes > 0 ? " + " + bytes(double(r.fixed_bytes)) : "") +
-                 (r.sizing_setup ? " at the setup's peak)" : " in the steady state)"));
-    if (r.min_ranks == 0) {
-        item("", logging::style("no partition into a few thousand parts fits", logging::Style::RED));
-        return;
-    }
-    item("", (r.min_ranks == 1 ? std::string("fits on 1 ") + unit : "fits on " + units(r.min_ranks)) +
-                 ": largest part " + count(r.min_owned) + " + " + count(r.min_halo) + " halo cells, " +
-                 bytes(double(r.min_peak)) + " peak" + (r.min_partitioned ? "" : " (halo estimated)"));
-    if (r.halo_ranks > r.min_ranks) {
-        item("", format("halo below %.0f%% of the owned cells up to %s", 100.0 * HALO_FRACTION,
-                        units(r.halo_ranks).c_str()));
-    } else if (r.min_partitioned && r.min_ranks > 1) {
-        item("", format("halo above %.0f%% of the owned cells already on %s: a coarser mesh or larger %ss "
-                        "keep more of the work local",
-                        100.0 * HALO_FRACTION, units(r.min_ranks).c_str(), unit.c_str()));
-    }
-    if (r.throughput > 0.0 && r.dt > 0.0) {
-        const int n = std::max(r.min_ranks, r.halo_ranks);
-        item("", format("on %s at %s cells/s each: %s wall per unit simulated time", units(n).c_str(),
-                        logging::si(r.throughput).c_str(),
-                        logging::duration(double(r.n_cells) / (n * r.throughput * r.dt)).c_str()));
-    }
-}
-
-} // namespace
 
 std::string set_memory_target(const std::string & text, CheckOptions & options) {
     // Memory as the driver reports it (cudaGetDeviceProperties, hipGetDeviceProperties; measured on the A100-80GB)
@@ -697,82 +625,4 @@ std::string set_memory_target(const std::string & text, CheckOptions & options) 
         return "";
     }
     return error;
-}
-
-void print_check(const CheckReport & r) {
-    using logging::count;
-    using logging::format;
-    using logging::item;
-    logging::section("Check");
-    if (r.unused.empty()) {
-        item("Input keys", r.setup_done ? "all used" : "-");
-    } else {
-        item("Input keys", logging::style(count(r.unused.size()) + " unknown or unused with these settings",
-                                          logging::Style::RED));
-        for (const Diagnostic & key : r.unused) item("", describe(key));
-    }
-    if (r.setup_done) {
-        item("Boundaries", "every boundary face has a condition (" + count(r.boundaries.size()) + " conditions)");
-    }
-    for (size_t i = 0; i < r.regions.size(); i++) item(i ? "" : "Regions", r.regions[i].first + ": " + r.regions[i].second);
-    if (!r.view_file.empty()) item("Case view", r.view_file);
-    if (r.has_quality) print_quality(r.quality);
-    if (r.dt > 0.0) {
-        const std::string source = r.dt_limit == "CFL"      ? "from run.cfl"
-                                   : r.dt_limit == "sponge" ? "limited by the sponge strength"
-                                                            : "run.dt";
-        item("Time step", format("%.4g (%s), CFL %.3g at the initial state", r.dt, source.c_str(), r.cfl));
-        item("CFL-limiting", "cell " + count(r.limiting_cell) + " at " + point(r.limiting_x));
-        if (r.n_region_cells > 1) {
-            item("", count(r.n_region_cells) + " cells within 10% of it, in " + point(r.region_lo) + " to " +
-                         point(r.region_hi));
-        }
-    }
-    if (r.bytes > 0) {
-        item("Memory", bytes(double(r.bytes)) + (r.device_memory ? " device memory" : "") +
-                           " per rank after setup (peak " + bytes(double(r.bytes_peak)) + "), " +
-                           count(r.local_cells) + " cells, " + std::to_string(r.ranks) +
-                           (r.ranks == 1 ? " rank" : " ranks"));
-        if (r.target_ranks != r.ranks) {
-            item("", format("on %d ranks: about %s per rank (peak %s), largest part %s + %s halo cells",
-                            r.target_ranks, bytes(double(r.target_bytes)).c_str(),
-                            bytes(double(r.target_bytes_peak)).c_str(), count(r.target_owned).c_str(),
-                            count(r.target_halo).c_str()));
-        }
-        if (r.device_capacity > 0) {
-            item("", format("peak %.0f%% of the device's %s", 100.0 * double(r.target_bytes_peak) /
-                                                                   double(r.device_capacity),
-                            bytes(double(r.device_capacity)).c_str()));
-        }
-        print_breakdown(r);
-    }
-    print_sizing(r);
-    if (r.wall_per_time > 0.0) {
-        const std::string units = r.device_memory ? "GPU-hours" : "rank-hours";
-        const double hours = r.wall_per_time * r.target_ranks / 3600.0;
-        item("Throughput", logging::si(r.throughput) + " cells/s per rank" +
-                               (r.throughput_measured ? " (measured over " + count(r.steps_timed) + " steps)" : ""));
-        auto cost = [&](const std::string & per, double time) {
-            item("", format("%s: %s wall on %d %s, %.3g %s", per.c_str(),
-                            logging::duration(r.wall_per_time * time).c_str(), r.target_ranks,
-                            r.target_ranks == 1 ? "rank" : "ranks", hours * time, units.c_str()));
-        };
-        item("Cost", format("%.4g steps per unit simulated time", 1.0 / r.dt));
-        cost("per unit time", 1.0);
-        if (r.flow_through_time > 0.0) cost(format("per flow-through (%.4g)", r.flow_through_time), r.flow_through_time);
-        if (r.t_stop > 0.0) cost(format("to t_stop = %.4g", r.t_stop), r.t_stop);
-    } else if (r.setup_done) {
-        item("Cost", "--throughput CELLS_PER_S or --steps N gives an estimate");
-    }
-    for (const auto & w : r.warnings) logging::warning(w);
-    for (const auto & e : r.errors) logging::error(e);
-    const size_t n_errors = r.errors.size() + r.unused.size();
-    const std::string warnings = count(r.warnings.size()) + (r.warnings.size() == 1 ? " warning" : " warnings");
-    if (n_errors > 0) {
-        item("Result", logging::style(count(n_errors) + (n_errors == 1 ? " error, " : " errors, ") + warnings,
-                                      logging::Style::RED));
-    } else {
-        item("Result", r.warnings.empty() ? logging::style("ok", logging::Style::GREEN)
-                                          : logging::style("ok, " + warnings, logging::Style::YELLOW));
-    }
 }

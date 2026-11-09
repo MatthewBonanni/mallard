@@ -955,7 +955,7 @@ MeshRegions::MeshRegions(const Mesh & m) : mesh(&m) {
         for (const char c : z.get_name()) local.push_back(static_cast<unsigned char>(c));
         local.push_back(0);
     }
-    const std::vector<uint64_t> all = m.h_global_cell_id.empty() ? local : comm::allgatherv(local);
+    const std::vector<uint64_t> all = m.n_global_cells == 0 ? local : comm::allgatherv(local);
     std::string name;
     for (const uint64_t c : all) {
         if (c != 0) {
@@ -989,7 +989,7 @@ std::vector<std::string> MeshRegions::names() const {
 
 bool MeshRegions::closed(const std::vector<std::string> & zones) const {
     // Closed: every node (2D) or edge (3D) of the faces belongs to exactly two of them
-    const bool distributed = !mesh->h_global_cell_id.empty();
+    const bool distributed = mesh->n_global_cells > 0;
     auto key = [&](const uint32_t n) { return distributed ? mesh->h_global_node_id[n] : uint64_t(n); };
     std::vector<uint64_t> ends;
     for (const uint32_t f : owned_zone_faces(*mesh, zones)) {

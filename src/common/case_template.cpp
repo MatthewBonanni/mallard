@@ -711,7 +711,7 @@ int new_case(const std::vector<std::string> & positional, bool list, bool quick,
         if (best != m.templates.end() && edit_distance(best->name, name) <= 3) {
             std::cerr << " Did you mean " << best->name << "?";
         }
-        std::cerr << "\n`mallard new --list` shows them all.\n";
+        std::cerr << "\n`mallard list templates` shows them all.\n";
         return 2;
     } catch (const std::exception & e) {
         std::cerr << "mallard new: " << e.what() << "\n";

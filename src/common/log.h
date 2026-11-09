@@ -42,6 +42,8 @@ std::string format(const char * fmt, ...) MALLARD_PRINTF(1, 2);
  * @brief Wraps text in an ANSI style when stdout gets color, else returns it unchanged.
  */
 std::string style(std::string_view text, Style s);
+/** @brief As style, with color when on whatever stdout is (text rendered for later, or for a test). */
+std::string style(std::string_view text, Style s, bool on);
 
 /**
  * @brief Whether to color stdout (stderr): a terminal, NO_COLOR unset and not under an MPI

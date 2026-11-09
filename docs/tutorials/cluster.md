@@ -59,25 +59,43 @@ mpirun -n 2 mallard check input.toml --steps 20 --kokkos-num-threads=2
 ```
 
 ```text
-== Check ==================================================================================
-  Input keys         all used
-  Boundaries         every boundary face has a condition (5 conditions)
-  ...
-  Time step          0.0002196 (from run.cfl), CFL 1 at the initial state
-  CFL-limiting       cell 16,247 at (0.5611, 0.6972)
-                     13,136 cells within 10% of it, in (0.002778, 0.002778) to (0.7389, 0.9972)
-  Memory             498MB per rank after setup (peak 506MB), 59,520 cells, 2 ranks
-  Throughput         531k cells/s per rank (measured over 20 steps)
-  Cost               4555 steps per unit simulated time
-                     per unit time: 8m 14s wall on 2 ranks, 0.275 rank-hours
-                     per flow-through (1.06): 8m 44s wall on 2 ranks, 0.291 rank-hours
-                     to t_stop = 0.2: 1m 39s wall on 2 ranks, 0.0549 rank-hours
-  Result             ok
+== Check ================================================================================ ok
+  Result: ok, 0 errors and 0 warnings (exit status 0)
+  Input: input.toml, set up on 2 ranks
+  Units: SI (m, s, kg, K) wherever a column or a value names none; bytes with decimal
+  prefixes (1 GB = 10^9 B)
+...
+== Time step ============================================================================ ok
+  At the initial state, t = 0 s.
+  status  quantity                      value      units          target  basis
+          time step dt                  0.0002196  s                      run.cfl times the time step at CFL 1
+  ok      CFL number                    1          dimensionless  <= 1.2  SSPRK3's stability limit for smooth flow
+          time step at CFL 1            0.0002196  s                      the smallest over the cells
+          CFL-limiting cell             16,247     global id              at (0.5611, 0.6972) m
+          cells within 10% of its step  13,136     cells                  in (0.002778, 0.002778) m to (0.7389, 0.9972)
+                                                                          m
+...
+== Memory =============================================================================== ok
+  Kokkos allocations in host memory per rank, of the rank with the largest peak (with
+  --ranks from a serial check, scaled to the largest part the partitioner makes); peak:
+  during the setup and the timed steps.
+  status  run         ranks  owned cells  halo cells  after setup  peak    peak of the device
+          this check  2      57,600       1,920       498 MB       506 MB  -
+...
+== Cost ====================================================================================
+  On 2 ranks at 568k cells/s per rank (measured over 20 steps), at the initial time step;
+  rank-hours: ranks times wall hours.
+  period                   simulated time [s]  steps  wall time  rank-hours
+  per unit simulated time  1                   4,555  7m 42s     0.257
+  per flow-through time    1.06                4,828  8m 10s     0.272
+  to run.t_stop            0.2                 910.9  1m 32s     0.0514
+...
+  Result: ok, 0 errors and 0 warnings (exit status 0)
 ```
 
 The cost comes from the time step of the initial state. Here the flow speeds
 up behind the reflected shock, and the run below takes 1,167 steps rather
-than 911 and 2m 46s of time stepping, about 1.7 times the estimate: ask the
+than 911 and 2m 46s of time stepping, about 1.8 times the estimate: ask the
 scheduler for a generous margin, and let the restarts catch the rest.
 
 You need not have the cluster at hand to size a run on it. `--ranks N`
@@ -93,19 +111,38 @@ mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --throughput 5e
 ```
 
 ```text
-  Memory             3.96GB per rank after setup (peak 3.96GB), 460,800 cells, 1 rank
-                     on 4 ranks: about 1.06GB per rank (peak 1.06GB), largest part 115,200 + 7,680 halo cells
-  ...
-  GPU sizing         A100-80GB: 85.1GB per GPU, 5% kept free, 1.60GB outside Kokkos (typical)
-                     at most 9,226,236 cells per GPU, halo included (8.59kB per cell + 4.67MB at the setup's peak)
-                     fits on 1 GPU: largest part 460,800 + 0 halo cells, 5.56GB peak
-                     halo below 10% of the owned cells up to 4 GPUs
-                     on 4 GPUs at 50.0M cells/s each: 21.0 s wall per unit simulated time
-  Throughput         50.0M cells/s per rank
-  Cost               9109 steps per unit simulated time
-                     per unit time: 21.0 s wall on 4 ranks, 0.0233 rank-hours
-                     per flow-through (1.135): 23.8 s wall on 4 ranks, 0.0265 rank-hours
-                     to t_stop = 0.2: 4.20 s wall on 4 ranks, 0.00466 rank-hours
+== Memory =============================================================================== ok
+  Kokkos allocations in host memory per rank, of the rank with the largest peak (with
+  --ranks from a serial check, scaled to the largest part the partitioner makes); peak:
+  during the setup.
+  status  run         ranks  owned cells  halo cells  after setup  peak     peak of the device
+          this check  1      460,800      0           3.96 GB      3.96 GB  -
+          --ranks 4   4      115,200      7,680       1.06 GB      1.06 GB  -
+...
+== GPU sizing =========================================================================== ok
+  The largest rank's predicted peak (the larger of the setup's and the steady state's, plus
+  the memory outside Kokkos) against the memory per GPU, for --memory or this build's GPU.
+  status  quantity                            value      units                 basis
+          memory per GPU                      85.1       GB                    A100-80GB
+          kept free                           5          % of the memory       fragmentation and allocations during the
+                                                                               run
+          outside Kokkos per GPU              1.60       GB                    typical: CUDA's context and kernels'
+                                                                               local memory on an A100
+  ok      most cells per GPU                  9,226,381  owned and halo cells  8.59 kB per cell + 3.43 MB, at the
+                                                                               setup's peak
+  ok      fewest GPUs                         1          GPUs                  largest part 460,800 owned + 0 halo
+                                                                               cells, predicted peak 5.56 GB (from the
+                                                                               partitioner)
+          most GPUs with halo < 10% of owned  4          GPUs                  doubling from the fewest
+          wall time per unit simulated time   21.0       s                     on 4 GPUs at 50.0M cells/s each
+
+== Cost ====================================================================================
+  On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:
+  ranks times wall hours.
+  period                   simulated time [s]  steps   wall time  rank-hours
+  per unit simulated time  1                   9,109   21.0 s     0.0233
+  per flow-through time    1.135               10,340  23.8 s     0.0265
+  to run.t_stop            0.2                 1,822   4.20 s     0.00466
 ```
 
 (From a CPU build; a GPU build counts GPU-hours and device memory.) Seconds

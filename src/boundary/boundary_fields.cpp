@@ -270,14 +270,14 @@ bool CompositionPrograms::depends_on_time() const {
 
 void TimedBoundaryFields::add(const uint32_t i_bc, const Point & x, const Point & n_in,
                               const std::shared_ptr<const BoundaryFields> & fields,
-                              const std::shared_ptr<const CompositionPrograms> & composition) {
+                              const std::shared_ptr<const CompositionPrograms> & composition, const bool at_face) {
     uint32_t set = 0;
     while (set < sets.size() && sets[set] != fields) set++;
     if (set == sets.size()) {
         sets.push_back(fields);
         compositions.push_back(composition);
     }
-    faces_host.push_back({i_bc, set, x, n_in});
+    faces_host.push_back({i_bc, set, x, n_in, at_face});
 }
 
 void TimedBoundaryFields::finish() {
@@ -530,9 +530,12 @@ void TimedBoundaryFields::check() const {
     const FaceHost & f = faces_host[static_cast<size_t>(face - 1)];
     const BoundaryFields & fields = *sets[f.set];
     const int slot = static_cast<int>(h_error(2));
-    std::string at = " at t = " + real(h_error(0)) + ", face (";
-    for (size_t d = 0; d < N_DIM; d++) at += (d ? ", " : "") + real(f.x[d]);
-    at += ")";
+    std::string at = " at t = " + real(h_error(0));
+    if (f.at_face) {
+        at += ", face (";
+        for (size_t d = 0; d < N_DIM; d++) at += (d ? ", " : "") + real(f.x[d]);
+        at += ")";
+    }
     if (slot == BoundaryFields::N_SLOTS) {
         throw InputError(fields.get_where() + ": the composition is zero" + at + ".");
     }

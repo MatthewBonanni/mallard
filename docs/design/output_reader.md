@@ -81,3 +81,18 @@ file or for the run, simulated or wall time). The tables come from
 `logging::table`, a plain column layout that #657's report layer can take
 over. On a run directory it lists the run's output files and the run's
 start and end from `mallard.jsonl`.
+
+## `mallard diff`
+
+`mallard diff A B` reads both files with `open()` and `read()`, so any two
+formats compare, and matches cells by `Contents::global_order`: two files in
+the mesh's global order compare cell by cell, two in their own order value by
+value, and a mix is refused rather than silently misaligned. Restart files are
+compared bit for bit through their `RestartHeader` (attributes, arrays, face
+records read raw from `faces_offset`); the provenance trailer is left out.
+The mesh, for `--remap` and for the coordinates of the largest differences, is
+set up from the provenance's recorded input (`[mesh]` and `[[periodic]]`, a
+mesh file relative to `run.directory` and checked against `mesh.sha256`) with
+`remap::source_mesh`, and `remap::Source` maps B onto A's cells. It runs on
+one rank: reading is whole-field (see Partial reads), and the remap is only
+collective over ranks that each hold part of both meshes.

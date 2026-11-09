@@ -87,28 +87,34 @@ restart file does.
 
 Commands:
   Run
-    mallard -i input.toml  Run a case
-    mallard ctl            Ask a running case for its status, a restart file or
-                           a stop, or change its settings
-    mallard reactor        Integrate a 0D reactor, or benchmark the chemistry
+    mallard -i input.toml   Run a case
+    mallard ctl             Ask a running case for its status, a restart file or
+                            a stop, or change its settings
+    mallard reactor         Integrate a 0D reactor, or benchmark the chemistry
   Set up
-    mallard new            Create a ready-to-run case from a template
-    mallard input upgrade  Bring an input file from an older release up to date
-    mallard input resolve  Write the input as a run uses it: every key explicit,
-                           defaults and preset included
+    mallard new             Create a ready-to-run case from a template
+    mallard input upgrade   Bring an input file from an older release up to date
+    mallard input resolve   Write the input as a run uses it: every key
+                            explicit, defaults and preset included
   Inspect
-    mallard check          Set up a case without running it and report on it:
-                           keys, mesh, time step, memory, cost
-    mallard info           What a mesh, snapshot, restart, probe or CSV file, or
-                           a run directory, holds
+    mallard check           Set up a case without running it and report on it:
+                            keys, mesh, time step, memory, cost
+    mallard info            What a mesh, snapshot, restart, probe or CSV file,
+                            or a run directory, holds
+    mallard list fields     The output fields there are, or exactly those of one
+                            case
+    mallard list species    The species of a case
+    mallard list templates  The case templates of mallard new
+    mallard diff            Compare two solutions field by field: norms of the
+                            difference, where it is largest, bitwise
   Mesh
-    mallard mesh convert   Write a mesh file, or the mesh of an input file, as a
-                           Mallard HDF5 mesh
+    mallard mesh convert    Write a mesh file, or the mesh of an input file, as
+                            a Mallard HDF5 mesh
   Maintain
-    mallard test           Run the unit and regression tests
-    mallard completion     Print the shell completion script for bash, zsh or
-                           fish
-    mallard --version      Print the version
+    mallard test            Run the unit and regression tests
+    mallard completion      Print the shell completion script for bash, zsh or
+                            fish
+    mallard --version       Print the version
 
 Options:
   -i FILE                The input file (TOML). Required.
@@ -214,27 +220,27 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 
 ```text
 Usage: mallard new <template> [directory] [--quick] [--force]
-       mallard new --list
+       mallard list templates
 
 Creates a ready-to-run case from one of Mallard's examples or tutorials:
 input.toml, run.sh, the mesh or initial-state script it needs, post.sh and a
 README. The directory defaults to the template's name. Without a template, lists
-them.
+them, as mallard list templates does.
 
 Options:
-  -l, --list  List the templates, with what each shows and what it costs.
+  -l, --list  Deprecated: mallard list templates. List the templates.
   --quick     A coarse, short version that runs in seconds to a minute: for
               trying the steps, not for the physical result.
   --force     Write into a directory that is not empty.
   -h, --help  Show this page.
 
 Examples:
-  $ mallard new --list
+  $ mallard list templates
   $ mallard new cylinder
   $ mallard new cylinder runs/cyl --quick
 
 Exit status:
-  0  the case was created, or --list
+  0  the case was created, or the templates were listed
   1  the case could not be written
   2  usage error, no template given, or no template of that name
 
@@ -249,9 +255,9 @@ Usage: mallard input <command> [options]
 Commands on input files.
 
 Commands:
-  mallard input upgrade    Bring an input file from an older release up to date
-  mallard input resolve    Write the input as a run uses it: every key explicit,
-                           defaults and preset included
+  mallard input upgrade     Bring an input file from an older release up to date
+  mallard input resolve     Write the input as a run uses it: every key
+                            explicit, defaults and preset included
 
 mallard input <command> --help shows the page of a command.
 
@@ -345,14 +351,19 @@ Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial
 solution) without time stepping and without writing any file, then reports:
 unknown or unused keys, boundary zones without a condition, mesh quality with
 the worst cells, the stable time step and the cell that sets it, memory per rank
-and, with --throughput or --steps, the cost. It lists every region the case uses
-and the mesh's own (domain, boundary zones, cell zones) with its dimension,
-measure and cells, and whether a surface or curve is exact or extracted; a
-region that covers no cell is an error. Under mpirun -n N it checks the run on N
-ranks.
+and, with --throughput or --steps, the cost. Each row has a status, each error
+or warning a stable code (E-REGION-OUTSIDE, W-CFL-LIMIT) and the docs that
+explain it. It lists every region the case uses and the mesh's own (domain,
+boundary zones, cell zones) with its dimension, measure and cells, and whether a
+surface or curve is exact or extracted; a region that covers no cell is an
+error. Under mpirun -n N it checks the run on N ranks.
 
 Options:
   -i FILE                   The input file, instead of the argument.
+  --format text|json        text: a section per part of the check, each row with
+                            its status (ok, WARN, ERROR) and units, then the
+                            diagnostics with their codes; json: the same report
+                            as one JSON object, for scripts. Default: text.
   --restart FILE|latest     Check the run as started from this restart file, or
                             as --restart latest would.
   --ranks N                 Memory and cost per rank for a run on N ranks; from
@@ -372,10 +383,11 @@ Options:
                             the most cells per rank, the fewest ranks the mesh
                             fits on and up to how many the halo stays below 10%.
                             Default: the GPU's memory in GPU builds, else none.
-  --quality PREFIX          Write the mesh-quality fields to
-                            PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds
-                            without HDF5), the default snapshot format. Default:
-                            none.
+  --quality PREFIX          Write the mesh-quality fields, and those of the
+                            resolution estimates (Y_PLUS, DELTA_OVER_ETA,
+                            CELLS_PER_DELTA_L), to PREFIX_000000.vtkhdf
+                            (PREFIX_000000.vtu in builds without HDF5), the
+                            default snapshot format. Default: none.
   --catalog KEYS.json       Write every key the setup looked up, with its type,
                             unit, default and accepted values, as JSON. Default:
                             none.
@@ -462,6 +474,189 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-info
 ```
 
+### mallard list
+
+```text
+Usage: mallard list <command> [options]
+
+Catalogs: the fields, species and case templates there are.
+
+Commands:
+  mallard list fields       The output fields there are, or exactly those of one
+                            case
+  mallard list species      The species of a case
+  mallard list templates    The case templates of mallard new
+
+mallard list <command> --help shows the page of a command.
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list
+```
+
+### mallard list fields
+
+```text
+Usage: mallard list fields [INPUT] [--format text|json]
+
+Without an input file, lists every field the [[write_data]] variables,
+[[probes]] and [statistics] take, by group, with its units, its description and
+what a case needs to have it, and the patterns (Y_<s>, MEAN_<A>, COV_<A>_<B>,
+...).
+
+With an input file, sets the case up as mallard check does (reading its mesh,
+writing nothing) and lists exactly the fields [[write_data]] variables accept
+for it: its species, its physics, chemistry, LES and statistics, and its
+dimension; then the common fields it does not have, with what they need.
+
+Options:
+  --format text|json  text: one table per group, with the units of every field;
+                      json: the same as one JSON object, for scripts. Default:
+                      text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard list fields
+  $ mallard list fields input.toml
+  $ mallard list fields input.toml --format json
+
+Exit status:
+  0  listed
+  1  the case cannot be set up (the errors are printed)
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-fields
+```
+
+### mallard list species
+
+```text
+Usage: mallard list species INPUT [--format text|json]
+
+Sets the case up as mallard check does and lists its species, one table row
+each, in the order of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s>
+fields. A single gas has none.
+
+Options:
+  --format text|json  text: one table per group, with the units of every field;
+                      json: the same as one JSON object, for scripts. Default:
+                      text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard list species flame.toml
+  $ mallard list species flame.toml --format json
+
+Exit status:
+  0  listed
+  1  the case cannot be set up (the errors are printed)
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-species
+```
+
+### mallard list templates
+
+```text
+Usage: mallard list templates
+
+Lists the templates mallard new creates cases from, with what each shows and
+what it costs.
+
+Options:
+  -h, --help  Show this page.
+
+Examples:
+  $ mallard list templates
+  $ mallard new cylinder
+
+Exit status:
+  0  listed
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-templates
+```
+
+### mallard diff
+
+```text
+Usage: mallard diff FILE_A FILE_B [--fields LIST] [--tol TOL] [--step N|--time T] [--format text|json]
+       mallard diff FILE_A FILE_B --remap [--mesh-a FILE] [--mesh-b FILE] [options]
+
+Compares two snapshot, restart, probe or CSV files of the same case, of any
+format each (a restart file against a VTKHDF snapshot, say): for every field
+both hold, how many values differ bit for bit, the L1, L2 and Linf norms of B -
+A (mean, root mean square and max over the cells, in the field's units) and the
+same relative to A's norms, and where the largest difference is (the cell, its
+coordinates and both values there). Restart files are also compared bit for bit
+in the rest of their state: step, time, scalar attributes, named arrays and the
+face records of characteristic boundaries; the provenance, which records when
+and where each ran, is not compared.
+
+Each field passes if its max |B - A| / max |A| is at most --tol (0 by default),
+and so does t; the result is identical (every value bitwise the same), within
+tolerance or beyond it, on the first and last line and as the exit status. Cells
+are matched by their global index: restart files and VTKHDF or XDMF snapshots of
+the whole mesh are in the mesh's order whatever the ranks that wrote them, so a
+serial run compares with an MPI run. Files on different meshes are refused,
+unless --remap.
+
+Uses: regression checks in CI, comparing two settings, checking that a restart
+reproduces a run, serial against MPI, and against a finer mesh with --remap.
+
+Options:
+  --fields LIST       Compare only these fields, comma separated (RHO,P,U); each
+                      file must hold them. Default: every field both files hold.
+  --tol TOL           The tolerance on each field's max |B - A| / max |A|, and
+                      on t relative to the larger |t|: a number for every field,
+                      then FIELD=TOL for some (1e-12,P=1e-6). Restart attributes
+                      and arrays take it too. Default: 0, so any difference in
+                      value fails.
+  --step N            Compare the snapshot of each file at this step, as the
+                      files record it, for series and files of several times.
+                      Default: the last snapshot.
+  --time T            Compare the snapshot of each file nearest this simulated
+                      time, in s; the Time table shows the times compared.
+                      Default: the last snapshot.
+  --snapshot N|last   Compare the snapshot of each file at this position,
+                      counting from 0 (in time order); for files that record no
+                      step. Default: last.
+  --remap             Compare files on different meshes: B's cell values
+                      remapped conservatively onto A's mesh (as [initialize]
+                      type = "remap" does, degree 2, limited), then compared
+                      cell by cell. Needs both meshes: as the files' provenance
+                      records them, or --mesh-a and --mesh-b.
+  --mesh-a FILE       A's mesh file, where its provenance does not record it or
+                      the file has moved: for --remap and for the coordinates of
+                      the largest differences. Default: from A's provenance.
+  --mesh-b FILE       B's mesh file, for --remap. Default: from B's provenance.
+  --format text|json  text: sections and tables, with the units of every
+                      quantity; json: the same as one JSON object, for scripts.
+                      Default: text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard diff run1/solut/restart_001000.restart run2/solut/restart_001000.restart
+  $ mallard diff serial/flow_000100.vtkhdf mpi/flow_000100.vtkhdf --tol 1e-12
+  $ mallard diff a/flow.vtkhdf.series b/flow.vtkhdf.series --step 300 --fields RHO,P
+  $ mallard diff fine/restart_000500.restart coarse/restart_000500.restart --remap --tol 1e-2
+  $ mallard diff a.restart b.restart --format json | jq '.fields[] | {name, status}'
+
+Exit status:
+  0  identical, or every difference within tolerance
+  1  a difference beyond tolerance
+  2  usage error
+  3  a file cannot be read, or the files cannot be compared (no field in common, different meshes without --remap)
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-diff
+```
+
 ### mallard mesh
 
 ```text
@@ -470,8 +665,8 @@ Usage: mallard mesh <command> [options]
 Commands on meshes.
 
 Commands:
-  mallard mesh convert     Write a mesh file, or the mesh of an input file, as a
-                           Mallard HDF5 mesh
+  mallard mesh convert      Write a mesh file, or the mesh of an input file, as
+                            a Mallard HDF5 mesh
 
 mallard mesh <command> --help shows the page of a command.
 

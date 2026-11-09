@@ -222,6 +222,13 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="batchelor-townsend-1948"></a>G. K. Batchelor and A. A. Townsend, Decay of turbulence in the final period, *Proc. R. Soc. Lond. A* 194(1039), 527–543 (1948). [doi:10.1098/rspa.1948.0095](https://doi.org/10.1098/rspa.1948.0095)
   Used in: the final-period decay exponent, the low-Reynolds-number bound of the duct validation.
 
+- <a id="kraichnan-1970"></a>R. H. Kraichnan, Diffusion by a random velocity field, *Phys. Fluids* 13(1), 22–31 (1970). [doi:10.1063/1.1692799](https://doi.org/10.1063/1.1692799)
+  Used in: synthetic turbulence of initial states (`[initialize.turbulence]`; `src/solver/synthetic_turbulence.cpp`): a sum of Fourier modes, each normal to its wavevector, so divergence-free at every point.
+- <a id="bailly-juve-1999"></a>C. Bailly and D. Juvé, A stochastic approach to compute subsonic noise using linearized Euler's equations, AIAA Paper 99-1872, 5th AIAA/CEAS Aeroacoustics Conference (1999). [doi:10.2514/6.1999-1872](https://doi.org/10.2514/6.1999-1872)
+  Used in: the von Kármán-Pao spectrum of synthetic turbulence (`spectrum = "von_karman_pao"`) and its dissipation range.
+- <a id="pope-2000"></a>S. B. Pope, *Turbulent Flows*, Cambridge University Press (2000).
+  Used in: the integral length scale of synthetic turbulence (`length_scale`), from the energy spectrum (§6.5).
+
 ## Time integration and time step
 
 - <a id="shu-osher-1988"></a>C.-W. Shu and S. Osher, Efficient implementation of essentially non-oscillatory shock-capturing schemes, *J. Comput. Phys.* 77, 439–471 (1988). [doi:10.1016/0021-9991(88)90177-5](https://doi.org/10.1016/0021-9991%2888%2990177-5)
@@ -377,4 +384,4 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="chen-2006"></a>J. H. Chen, E. R. Hawkes, R. Sankaran, S. D. Mason and H. G. Im, Direct numerical simulation of ignition front propagation in a constant volume with temperature inhomogeneities: I. Fundamental analysis and diagnostics, *Combust. Flame* 145, 128–144 (2006). [doi:10.1016/j.combustflame.2005.09.017](https://doi.org/10.1016/j.combustflame.2005.09.017)
 - <a id="hawkes-2006"></a>E. R. Hawkes, R. Sankaran, P. P. Pébay and J. H. Chen, Direct numerical simulation of ignition front propagation in a constant volume with temperature inhomogeneities: II. Parametric study, *Combust. Flame* 145, 145–159 (2006). [doi:10.1016/j.combustflame.2005.09.018](https://doi.org/10.1016/j.combustflame.2005.09.018)
 - <a id="passot-pouquet-1987"></a>T. Passot and A. Pouquet, Numerical simulation of compressible homogeneous flows in the turbulent regime, *J. Fluid Mech.* 181, 441–466 (1987). [doi:10.1017/S0022112087002167](https://doi.org/10.1017/S0022112087002167)
-  Used in: `examples/autoignition_2d` (the configuration of Chen et al. and Hawkes et al., the displacement-speed diagnostic of their fronts, and the regime criterion of Sankaran et al. in `examples/autoignition_2d/autoignition_analysis.py`; the Passot–Pouquet spectrum of the initial temperature and velocity fields in `examples/autoignition_2d/autoignition_restart.py`).
+  Used in: `examples/autoignition_2d` (the configuration of Chen et al. and Hawkes et al., the displacement-speed diagnostic of their fronts, and the regime criterion of Sankaran et al. in `examples/autoignition_2d/autoignition_analysis.py`; the Passot–Pouquet spectrum of the initial temperature and velocity fields in `examples/autoignition_2d/autoignition_restart.py`); `spectrum = "passot_pouquet"` of synthetic turbulence (`[initialize.turbulence]`).

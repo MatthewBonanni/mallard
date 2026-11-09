@@ -426,6 +426,9 @@ TEST(KexprTest, RejectsInvalidExpressions) {
     const std::vector<std::pair<std::string, std::string>> cases = {
         {"x +", "unexpected end of expression"},
         {"foo(x)", "unknown symbol 'foo'"},
+        {"X + 1", "case sensitive (unlike exprtk's); did you mean 'x'?"},
+        {"dot(x, y)", "'dot' is exprtk's, not kexpr's"},
+        {"shl(x, 2)", "'shl' is exprtk's, not kexpr's"},
         {"sin(x, y)", "wrong number of arguments"},
         {"(x + 1", "expected ')'"},
         {"x y", "expected ';'"},

@@ -158,15 +158,18 @@ Result run(const std::string & input) {
     solver.run();
     solver.copy_device_to_host();
     auto mesh = solver.get_mesh();
+    // Cells by global id: the mesh file's order
     Result r;
+    r.U.resize(mesh->n_cells);
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
-        std::array<double, N_CONSERVATIVE> u;
-        FOR_I_CONSERVATIVE u[i] = static_cast<double>(solver.h_conservatives(c, i));
-        r.U.push_back(u);
+        FOR_I_CONSERVATIVE r.U[mesh->h_global_cell(c)][i] = static_cast<double>(solver.h_conservatives(c, i));
     }
     const auto F = solver.calc_force(device_zone_faces(*mesh, "bottom"));
     for (size_t i = 0; i < 2 * N_DIM; i++) r.force[i] = static_cast<double>(F[i]);
-    for (uint32_t f = 0; f < mesh->n_faces; f++) r.face_cells.emplace_back(mesh->h_cells_of_face(f, 0), mesh->h_cells_of_face(f, 1));
+    auto global = [&](int32_t c) { return c < 0 ? c : int32_t(mesh->h_global_cell(uint32_t(c))); };
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        r.face_cells.emplace_back(global(mesh->h_cells_of_face(f, 0)), global(mesh->h_cells_of_face(f, 1)));
+    }
     return r;
 }
 

@@ -51,7 +51,7 @@ double ordered_sum(const Mesh & mesh, const std::vector<double> & values) {
         ids.push_back(mesh.h_global_cell(c));
         local.push_back(values[c]);
     }
-    if (!mesh.h_global_cell_id.empty()) {
+    if (mesh.n_global_cells > 0) {
         ids = comm::allgatherv(ids);
         local = comm::allgatherv(local);
     }
@@ -311,7 +311,7 @@ void SourceTerms::update_means(const State & solution) {
         terms(c, 5) = double(U(c, N_DIM + 1)) * v;
         terms(c, 6) = 0.5 * (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]) / rho * v;
     });
-    const auto sums = exact_sums(terms, mesh->n_owned(), !mesh->h_global_cell_id.empty());
+    const auto sums = exact_sums(terms, mesh->n_owned(), mesh->n_global_cells > 0);
     auto h_means = Kokkos::create_mirror_view(means);
     for (int i = 0; i < N_MEANS; i++) h_means(i) = sums[size_t(i) + 1] / sums[0];
     Kokkos::deep_copy(means, h_means);

@@ -15,7 +15,10 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <complex>
+#include <fstream>
 #include <functional>
 #include <random>
 #include <sstream>
@@ -290,8 +293,8 @@ TEST(InitialStateTest, TableInterpolationHasItsDesignOrder) {
         const auto h = data.host();
         double e = 0.0;
         for (int i = 0; i <= 997; i++) {
-            const double q = i / 997.0;
-            e = std::max(e, std::abs(h(0, 0, &q) - f(q)));
+            const double q[tabulated::MAX_DIMS] = {i / 997.0, 0.0, 0.0};
+            e = std::max(e, std::abs(h(0, 0, q) - f(q[0])));
         }
         return e;
     };
@@ -431,4 +434,188 @@ TEST(InitialStateTest, RegionsOverARestartKeepTheCellsTheyMiss) {
         }
     }
     EXPECT_GT(inside, 0u);
+}
+
+namespace {
+
+/** @brief The periodic box [0, 2] x [0, 1] (x [0, 1]) of 2n x n (x n) cells, uniform, with init added to [initialize]. */
+std::string periodic_box(const uint32_t n, const std::string & init) {
+    std::ostringstream s;
+    s << "[run]\nn_steps = 1\ncfl = 0.25\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = " << 2 * n << "\nNy = " << n << "\nLx = 2.0\nLy = 1.0\n"
+      << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[initialize]\n" << UNIFORM << init
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    return s.str();
+}
+
+struct MeasuredSpectrum {
+    std::vector<double> shells;  // energy of the shells [j - 1/2, j + 1/2) 2 pi, j = 1, 2, ...
+    double divergence = 0.0;     // sum of |k . u_hat|^2 over sum of |k|^2 |u_hat|^2
+};
+
+/**
+ * @brief The spectrum of the point velocity behind a periodic_box's cell
+ *        averages: a direct Fourier transform of the cells, divided by the
+ *        transfer function of exact box averages, sinc(k_i h_i / 2).
+ */
+MeasuredSpectrum measure_spectrum(const Solver & s, const uint32_t n) {
+    const Mesh & mesh = *s.get_mesh();
+    const int N[3] = {2 * int(n), int(n), N_DIM == 3 ? int(n) : 1};
+    const double L[3] = {2.0, 1.0, 1.0};
+    const size_t n_cells = size_t(N[0]) * size_t(N[1]) * size_t(N[2]);
+    std::vector<std::array<double, 3>> u(n_cells, {0.0, 0.0, 0.0});
+    std::vector<std::array<int, 3>> index(n_cells);
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        std::array<int, 3> i = {0, 0, 0};
+        for (uint32_t d = 0; d < N_DIM; d++) i[d] = int(std::floor(double(mesh.h_cell_coords(c, d)) / L[d] * N[d]));
+        const size_t g = (size_t(i[0]) * size_t(N[1]) + size_t(i[1])) * size_t(N[2]) + size_t(i[2]);
+        index[g] = i;
+        for (uint32_t d = 0; d < N_DIM; d++) u[g][d] = double(s.h_conservatives(c, 1 + d)) / double(s.h_conservatives(c, 0));
+    }
+    // exp(-i k_d x_d) per direction, wavenumber index (mod N) and cell index
+    std::vector<std::vector<std::vector<std::complex<double>>>> phase(3);
+    for (size_t d = 0; d < 3; d++) {
+        phase[d].resize(size_t(N[d]));
+        for (int m = 0; m < N[d]; m++) {
+            const double k = 2.0 * PI * (m <= N[d] / 2 ? m : m - N[d]) / L[d];
+            for (int i = 0; i < N[d]; i++) phase[d][size_t(m)].push_back(std::polar(1.0, -k * (i + 0.5) * L[d] / N[d]));
+        }
+    }
+    MeasuredSpectrum out;
+    double div = 0.0, grad = 0.0;
+    for (int m0 = 0; m0 < N[0] / 2; m0++) {
+        for (int m1 = -(N[1] / 2 - 1); m1 < N[1] / 2; m1++) {
+            for (int m2 = N_DIM == 3 ? -(N[2] / 2 - 1) : 0; m2 < (N_DIM == 3 ? N[2] / 2 : 1); m2++) {
+                if (m0 == 0 && (m1 < 0 || (m1 == 0 && m2 <= 0))) continue;
+                const int m[3] = {m0, m1, m2};
+                double k[3], transfer = 1.0, k2 = 0.0;
+                for (size_t d = 0; d < 3; d++) {
+                    k[d] = 2.0 * PI * m[d] / L[d];
+                    const double z = 0.5 * k[d] * L[d] / N[d];
+                    transfer *= z == 0.0 ? 1.0 : std::sin(z) / z;
+                    k2 += k[d] * k[d];
+                }
+                std::complex<double> u_hat[3] = {0.0, 0.0, 0.0};
+                for (size_t g = 0; g < n_cells; g++) {
+                    std::complex<double> e = 1.0;
+                    for (size_t d = 0; d < 3; d++) e *= phase[d][size_t((m[d] + N[d]) % N[d])][size_t(index[g][d])];
+                    for (size_t d = 0; d < 3; d++) u_hat[d] += u[g][d] * e;
+                }
+                double energy = 0.0;
+                std::complex<double> k_dot_u = 0.0;
+                for (size_t d = 0; d < 3; d++) {
+                    u_hat[d] /= double(n_cells) * transfer;
+                    energy += std::norm(u_hat[d]);
+                    k_dot_u += k[d] * u_hat[d];
+                }
+                const size_t j = size_t(std::lround(std::sqrt(k2) / (2.0 * PI)));
+                if (out.shells.size() < j) out.shells.resize(j, 0.0);
+                out.shells[j - 1] += energy;
+                div += std::norm(k_dot_u);
+                grad += k2 * energy;
+            }
+        }
+    }
+    out.divergence = div / grad;
+    return out;
+}
+
+/** @brief The integral of f over [a, b], composite Simpson. */
+double simpson(const std::function<double(double)> & f, const double a, const double b) {
+    const int n = 2000;
+    const double h = (b - a) / n;
+    double s = f(a) + f(b);
+    for (int i = 1; i < n; i++) s += (i % 2 ? 4.0 : 2.0) * f(a + i * h);
+    return s * h / 3.0;
+}
+
+} // namespace
+
+TEST(InitialStateTest, TurbulenceHasItsSpectrumAndEnergyAndNoDivergence) {
+    // An anisotropic periodic box (periods 2 and 1), so that wavevectors are
+    // not their integer indices. The shells of width 2 pi up to the default
+    // k_max (pi over the mean cell size) hold the spectrum's share of the
+    // energy, scaled to (N_DIM / 2) u'^2. The model spectra are written here
+    // from their definitions, with k_e from the integral length scale
+    // L = C int E / k dk / int E dk (C = 3 pi / 4 in 3D, 2 in 2D) in closed form.
+    const uint32_t n = N_DIM == 2 ? 32 : 12;
+    const int n_shells = N_DIM == 2 ? 15 : 5;
+    const double u_rms = 0.3, L = 0.2, C = N_DIM == 3 ? 0.75 * PI : 2.0;
+    auto beta = [](const double a, const double b) { return std::tgamma(a) * std::tgamma(b) / std::tgamma(a + b); };
+    // int x^3 e^(-2 x^2) = 1/8 and int x^4 e^(-2 x^2) = 3 sqrt(pi) / 2^(11/2);
+    // int x^a / (1 + x^2)^(17/6) = B((a + 1) / 2, 17/6 - (a + 1) / 2) / 2
+    const double k_pp = C * 0.125 / (3.0 * std::sqrt(PI) / std::pow(2.0, 5.5)) / L;
+    const double k_vkp = C * beta(2.0, 5.0 / 6.0) / beta(2.5, 1.0 / 3.0) / L;
+    auto passot_pouquet = [&](const double k) { return std::pow(k / k_pp, 4) * std::exp(-2.0 * std::pow(k / k_pp, 2)); };
+    auto von_karman_pao = [&](const double k) { return std::pow(k / k_vkp, 4) / std::pow(1.0 + std::pow(k / k_vkp, 2), 17.0 / 6.0); };
+    // A tabulated spectrum, without an intensity: its own values
+    const std::string table = (scratch_dir() / "spectrum.csv").string();
+    {
+        std::ofstream f(table);
+        f << "k,E\n";
+        for (int i = 0; i <= 2000; i++) f << 0.1 * i << "," << 0.01 * passot_pouquet(0.1 * i) << "\n";
+    }
+    struct Case {
+        std::string turbulence;
+        std::function<double(double)> E;
+        bool scaled;
+        double tolerance;  // per shell: quadrature (measured 1e-5 in 3D), and the table's linear interpolation
+    };
+    const std::vector<Case> cases = {
+        {"spectrum = \"passot_pouquet\", intensity = 0.3, length_scale = 0.2", passot_pouquet, true, 1e-4},
+        {"spectrum = \"von_karman_pao\", intensity = 0.3, length_scale = 0.2, seed = 4", von_karman_pao, true, 1e-4},
+        {"spectrum = \"table\", file = \"" + table + "\"", [&](const double k) { return 0.01 * passot_pouquet(k); }, false, 2e-3},
+    };
+    for (const auto & c : cases) {
+        SCOPED_TRACE(c.turbulence);
+        const auto s = initialized(periodic_box(n, "turbulence = {" + c.turbulence + "}\n"));
+        const MeasuredSpectrum measured = measure_spectrum(*s, n);
+        std::vector<double> target(static_cast<size_t>(n_shells));
+        double sum = 0.0;
+        for (int j = 1; j <= n_shells; j++) {
+            target[size_t(j - 1)] = simpson(c.E, 2.0 * PI * (j - 0.5), 2.0 * PI * (j + 0.5));
+            sum += target[size_t(j - 1)];
+        }
+        const double scale = c.scaled ? 0.5 * N_DIM * u_rms * u_rms / sum : 1.0;
+        double energy = 0.0;
+        for (size_t j = 0; j < measured.shells.size(); j++) {
+            const double expected = j < target.size() ? scale * target[j] : 0.0;
+            EXPECT_NEAR(measured.shells[j], expected, c.tolerance * expected + 1e-6 * scale * sum) << "shell " << j + 1;
+            energy += measured.shells[j];
+        }
+        EXPECT_NEAR(energy, scale * sum, 1e-5 * scale * sum);
+        // Every mode is normal to its wavevector, and cell averaging keeps that (measured 1e-28)
+        EXPECT_LT(measured.divergence, 1e-12);
+    }
+}
+
+TEST(InitialStateTest, TurbulenceInARegionIsTheBaseTurbulenceThere) {
+    // The modes depend on the seed and the period alone, so a region's
+    // turbulence is the base turbulence inside it, bit for bit, and cells
+    // beyond its edge stay at rest
+    const uint32_t n = N_DIM == 2 ? 16 : 6;
+    const std::string turbulence = "turbulence = {spectrum = \"passot_pouquet\", intensity = 0.2, length_scale = 0.2, seed = 9}\n";
+    const auto everywhere = initialized(periodic_box(n, turbulence));
+    const auto region = initialized(periodic_box(
+        n, std::string("[[initialize.regions]]\nregion = {type = \"half_space\", point = ") +
+               (N_DIM == 2 ? "[0.75, 0], normal = [1, 0]}\n" : "[0.75, 0, 0], normal = [1, 0, 0]}\n") + turbulence));
+    const Mesh & mesh = *region->get_mesh();
+    const double h = 1.0 / n;
+    uint32_t inside = 0, outside = 0;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        const double x = double(mesh.h_cell_coords(c, 0));
+        if (x < 0.75 - h) {
+            FOR_I_CONSERVATIVE EXPECT_EQ(region->h_conservatives(c, i), everywhere->h_conservatives(c, i));
+            inside++;
+        } else if (x > 0.75 + h) {
+            FOR_I_DIM EXPECT_EQ(region->h_conservatives(c, 1 + i), 0.0_r);
+            outside++;
+        }
+    }
+    EXPECT_GT(inside, 0u);
+    EXPECT_GT(outside, 0u);
 }

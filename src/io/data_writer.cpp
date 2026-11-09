@@ -105,6 +105,8 @@ void DataWriter::init(const Input & input,
     }
 
     this->mesh = mesh_in;
+    owned_by_id = mesh->cells_by_global_id();
+    std::erase_if(owned_by_id, [&](uint32_t c) { return c >= mesh->n_owned(); });
     const bool many_writers = mesh->n_global_cells > 0 && comm::size() > 1;
     if (input.contains("format")) {
         format = find_option(FORMAT_TYPES, "write_data.format", find_value<std::string>(input, "format"),
@@ -153,7 +155,7 @@ void DataWriter::init(const Input & input,
                            .valid = names,
                            .suggestion = suggest_value(var, names),
                            .fix = "Vectors also go by their name without _X, _Y, _Z (e.g. U); a trailing * selects "
-                                  "every variable it starts (e.g. Y_*)",
+                                  "every variable it starts (e.g. Y_*); mallard list fields input.toml lists them",
                            .docs = "docs/guide/output.md#solution-snapshots-write_data"});
     };
     auto find_data = [&](const std::string & name) -> const Data * {
@@ -229,6 +231,8 @@ void DataWriter::init(const Input & input,
         subset = true;
         region_name = cell_subset->name;
         subset_cells = cell_subset->cells;
+        std::sort(subset_cells.begin(), subset_cells.end(),
+                  [&](uint32_t a, uint32_t b) { return mesh->h_global_cell(a) < mesh->h_global_cell(b); });
         std::vector<uint64_t> global;
         for (uint32_t c : subset_cells) global.push_back(mesh->h_global_cell(c));
         std::vector<uint64_t> all = mesh->n_global_cells > 0 ? comm::allgatherv(global) : global;
@@ -379,9 +383,9 @@ void DataWriter::publish_restart(bool wait) {
     }
 }
 
-DataWriter::Values DataWriter::capture(uint32_t n_cells, bool in_subset) const {
+DataWriter::Values DataWriter::capture(uint32_t n_cells, bool in_subset, bool by_id) const {
     if (in_subset) n_cells = static_cast<uint32_t>(subset_cells.size());
-    const uint32_t * cell = in_subset ? subset_cells.data() : nullptr;
+    const uint32_t * cell = in_subset ? subset_cells.data() : by_id ? owned_by_id.data() : nullptr;
     Values values(fields.size());
     for (size_t f = 0; f < fields.size(); f++) values[f].resize(size_t(n_cells) * fields[f].n_vtk_components());
     // The run waits for this copy: blocks of cells of every field on io_threads threads
@@ -473,7 +477,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         const int n_ranks = comm::size();
         if (distributed || root) {
             auto job = [this, piece = piece.str() + ".vtu", filename, stem, t, root, distributed, n_ranks,
-                        values = capture(mesh->n_owned(), subset), series = history]() mutable {
+                        values = capture(mesh->n_owned(), subset, true), series = history]() mutable {
                 write_vtu(piece, t, values);
                 n_bytes += file_bytes(piece);
                 if (distributed && root) {
@@ -841,7 +845,7 @@ void DataWriter::write_restart(const std::string & filename, uint64_t step, rtyp
     // Serial runs on several ranks (tests) hold the whole mesh on every rank
     if (!comm::is_root()) return;
     auto job = [this, filename, step, t, attributes, arrays, ordered = order_faces(faces, mesh->n_cells, false),
-                values = capture(mesh->n_cells), trailer = provenance_trailer()]() {
+                values = capture(mesh->n_cells, false, true), trailer = provenance_trailer()]() {
         std::ofstream out(filename, std::ios::binary);
         if (!out.good()) {
             throw cannot_write("the restart file", filename);
@@ -991,14 +995,17 @@ void DataWriter::write_restart_distributed(const std::string & filename, uint64_
     }
     const MPI_Offset header_size = static_cast<MPI_Offset>(header.size());
     const MPI_Datatype real_type = sizeof(rtype) == sizeof(double) ? MPI_DOUBLE : MPI_FLOAT;
+    // File views need increasing displacements
     std::vector<MPI_Aint> displacements(n_owned);
-    for (uint32_t i = 0; i < n_owned; i++) displacements[i] = static_cast<MPI_Aint>(mesh->h_global_cell_id[i] * sizeof(rtype));
+    for (uint32_t i = 0; i < n_owned; i++) {
+        displacements[i] = static_cast<MPI_Aint>(mesh->h_global_cell_id[owned_by_id[i]] * sizeof(rtype));
+    }
     MPI_Datatype file_type;
     MPI_Type_create_hindexed_block(static_cast<int>(n_owned), 1, displacements.data(), real_type, &file_type);
     MPI_Type_commit(&file_type);
     std::vector<rtype> values(n_owned);
     for (size_t v = 0; v < fields.size(); v++) {
-        for (uint32_t i = 0; i < n_owned; i++) values[i] = fields[v].value(i, 0);
+        for (uint32_t i = 0; i < n_owned; i++) values[i] = fields[v].value(owned_by_id[i], 0);
         MPI_File_set_view(fh, header_size + MPI_Offset(v * n_global * sizeof(rtype)), real_type, file_type, "native",
                           MPI_INFO_NULL);
         check(MPI_File_write_all(fh, values.data(), static_cast<int>(n_owned), real_type, MPI_STATUS_IGNORE));
@@ -1418,7 +1425,7 @@ void DataWriter::write_vtu(const std::string & filename, rtype t, Values & value
         std::vector<uint8_t> types;
         int64_t cell_offset = 0;
         for (uint32_t k = 0; k < n_out; k++) {
-            const uint32_t i = subset ? subset_cells[k] : k;
+            const uint32_t i = subset ? subset_cells[k] : owned_by_id[k];
             const uint32_t n_nodes = mesh->h_n_nodes_of_cell(i);
             for (uint32_t j = 0; j < n_nodes; j++) {
                 connectivity.push_back(point_of[mesh->h_node_of_cell(i, vtk_local_node(n_nodes, j))]);

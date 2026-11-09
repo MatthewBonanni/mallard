@@ -178,28 +178,8 @@ std::string quality_point(const std::array<double, N_DIM> & x) {
     return text + ")";
 }
 
-void print_quality(const std::array<QualitySummary, MeshQuality::N_METRICS> & summary) {
-    for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
-        const QualitySummary & s = summary[m];
-        std::string text = logging::format("max %.3g, mean %.3g", s.max, s.mean);
-        if (s.n_over_limit > 0) {
-            text += logging::style(", " + logging::count(s.n_over_limit) + " cells above " +
-                                       logging::real(MeshQuality::LIMITS[m]),
-                                   logging::Style::YELLOW);
-        }
-        logging::item(MeshQuality::NAMES[m], text);
-        if (s.max < MeshQuality::NOTABLE[m]) continue;
-        std::string worst;
-        for (const QualityCell & c : s.worst) {
-            const std::string entry = logging::format("%.3g at ", c.value) + quality_point(c.x);
-            if (!worst.empty() && worst.size() + entry.size() > 64) break;
-            worst += (worst.empty() ? "" : ", ") + entry;
-        }
-        logging::item("", "worst " + worst);
-    }
-}
-
-std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & quality, const std::string & prefix) {
+std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & quality, const std::string & prefix,
+                          const std::vector<std::pair<std::string, std::vector<double>>> & extra) {
     std::vector<Kokkos::View<rtype *>::host_mirror_type> fields;
     std::vector<Data> quality_data;
     std::vector<std::string> names;
@@ -208,6 +188,12 @@ std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & qualit
         for (uint32_t c = 0; c < mesh->n_owned(); c++) fields.back()(c) = static_cast<rtype>(quality.cells[m][c]);
         quality_data.emplace_back(MeshQuality::FIELDS[m], fields.back());
         names.emplace_back(MeshQuality::FIELDS[m]);
+    }
+    for (const auto & [name, values] : extra) {
+        fields.emplace_back(name, mesh->n_cells);
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) fields.back()(c) = static_cast<rtype>(values[c]);
+        quality_data.emplace_back(name, fields.back());
+        names.emplace_back(name);
     }
     Input writer_input(Input::table_type{});
     writer_input.as_table()["prefix"] = prefix;

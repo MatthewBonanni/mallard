@@ -197,35 +197,43 @@ struct Need {
     bool dimension_free = false;
 };
 
+Need dimension_free() { return {{}, "", true}; }
+
 Need command_need(const cli::Command * command, const std::vector<std::string> & args) {
-    const Need free = {{}, "", true};
     cli::Args parsed;
     std::string error;
-    if (!command || !cli::parse(*command, args, parsed, error) || parsed.help) return free;
+    if (!command || !cli::parse(*command, args, parsed, error) || parsed.help) return dimension_free();
     const std::string first = parsed.positional.empty() ? "" : parsed.positional[0];
     switch (command->dim) {
         case cli::Case::input: {
             const std::string file = parsed.has("-i") ? parsed.value_or("-i", "") : first;
-            if (file.empty()) return free;
+            if (file.empty()) return dimension_free();
             return {input_dimension(file), file};
         }
         case cli::Case::template_name: {
-            if (first.empty() || parsed.has("--list")) return free;
+            if (first.empty() || parsed.has("--list")) return dimension_free();
             try {
                 const int dim = case_template::template_dimension(first);
-                return dim == 0 ? free : Need{{dim, ""}, "template " + first};
+                return dim == 0 ? dimension_free() : Need{{dim, ""}, "template " + first};
             } catch (const std::exception & e) {
                 return {unknown(e.what()), "template " + first};
             }
         }
         case cli::Case::mesh:
-            if (first.empty()) return free;
+            if (first.empty()) return dimension_free();
             return {fs::path(first).extension() == ".toml" ? input_dimension(first) : mesh_file_dimension(first), first};
         case cli::Case::file:
-            if (first.empty() || !output::is_mesh_file(first)) return free;
+            if (first.empty() || !output::is_mesh_file(first)) return dimension_free();
             return {mesh_file_dimension(first), first};
+        case cli::Case::output:
+            try {
+                const int dim = first.empty() || output::is_mesh_file(first) ? 0 : output::open(first).dim;
+                return dim == 0 ? free : Need{{dim, ""}, first, true};
+            } catch (const std::exception &) {
+                return free;
+            }
         default:
-            return free;
+            return dimension_free();
     }
 }
 
@@ -334,6 +342,7 @@ int main(int argc, char ** argv) {
     const Need need = stated ? Need{{dim, ""}, "", false}
                              : command_need(command, {args.begin() + std::ptrdiff_t(words), args.end()});
     dim = need.dimension.dim;
+    if (!stated && command && command->dim == cli::Case::output && !fs::exists(solver(bin, dim))) dim = 0;
     if (dim == 0) {
         if (!need.dimension_free && !need.dimension.unreadable && installed.size() > 1) {
             std::cerr << "mallard: cannot tell whether " << need.what << " is 2D or 3D: " << need.dimension.why

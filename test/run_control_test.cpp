@@ -39,6 +39,7 @@
 
 #include "comm.h"
 #include "data_paths.h"
+#include "device_comm.h"
 #include "run_control.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -471,9 +472,11 @@ std::vector<std::string> restart_files(const std::string & dir) {
 }
 
 /** @brief Starts a long run in a fresh directory and waits until it answers on its socket. */
-pid_t start_run(const std::string & dir, [[maybe_unused]] int ranks) {
-    std::ofstream(dir + "/input.toml") << case_input(".", "n_steps = 100000000\nt_wall_stop = 300\ncfl = 0.25\n",
-                                                    100000000);
+pid_t start_run(const std::string & dir, int ranks) {
+    std::string input = case_input(".", "n_steps = 100000000\nt_wall_stop = 300\ncfl = 0.25\n", 100000000);
+    // The ranks may share one GPU, which NCCL refuses
+    if (comm::nccl_available() && ranks > 1) input += "[parallel]\nhalo_exchange = \"mpi\"\n";
+    std::ofstream(dir + "/input.toml") << input;
     std::vector<std::string> args;
 #ifdef MALLARD_MPIEXEC
     // An MPI library need not start a process without its launcher (a singleton)
