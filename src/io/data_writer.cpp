@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cerrno>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
 #include <exception>
 #include <fcntl.h>
@@ -26,10 +27,12 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <thread>
 #include <unistd.h>
 #include <unordered_map>
 
@@ -65,6 +68,67 @@ void sync_file(const std::string & filename) {
     if (fd >= 0) ::close(fd);
     if (!synced) throw cannot_write("the restart file", filename);
 }
+
+/**
+ * @brief The one thread that hashes written files for the run log, first in first out. A run writing
+ *        faster than it hashes waits to queue more, rather than taking more cores from the solver.
+ */
+class HashQueue {
+    public:
+        static HashQueue & instance() {
+            static HashQueue queue;
+            return queue;
+        }
+
+        /** @brief Queue a job, waiting while the queue is full. @return the job's completion */
+        std::future<void> submit(std::function<void()> job) {
+            std::packaged_task<void()> task(std::move(job));
+            std::future<void> done = task.get_future();
+            std::unique_lock lock(mutex);
+            if (!worker.joinable()) worker = std::thread([this] { work(); });
+            room.wait(lock, [this] { return jobs.size() < CAPACITY; });
+            jobs.push_back(std::move(task));
+            ready.notify_one();
+            return done;
+        }
+
+        HashQueue(const HashQueue &) = delete;
+        HashQueue & operator=(const HashQueue &) = delete;
+
+    private:
+        static constexpr size_t CAPACITY = 2;
+
+        HashQueue() = default;
+
+        ~HashQueue() {
+            {
+                std::lock_guard lock(mutex);
+                stopping = true;
+            }
+            ready.notify_one();
+            if (worker.joinable()) worker.join();
+        }
+
+        void work() {
+            std::unique_lock lock(mutex);
+            while (true) {
+                ready.wait(lock, [this] { return stopping || !jobs.empty(); });
+                if (jobs.empty()) return;
+                std::packaged_task<void()> task = std::move(jobs.front());
+                jobs.pop_front();
+                room.notify_all();
+                lock.unlock();
+                task();
+                lock.lock();
+            }
+        }
+
+        std::mutex mutex;
+        std::condition_variable ready, room;
+        std::deque<std::packaged_task<void()>> jobs;
+        bool stopping = false;
+        std::thread worker;
+};
 
 } // namespace
 
@@ -338,11 +402,14 @@ rtype DataWriter::next_time() const {
 }
 
 DataWriter::~DataWriter() {
-    if (!pending.valid()) return;
     try {
-        pending.get();
+        if (pending.valid()) pending.get();
     } catch (...) {
         // Unwinding from another error, or the run ended without finish()
+    }
+    // The hash jobs fill the records
+    for (const auto & w : recording) {
+        if (w->hashed.valid()) w->hashed.wait();
     }
 }
 
@@ -360,21 +427,33 @@ bool DataWriter::run(std::function<void()> job, bool allow_async) {
     return false;
 }
 
+void DataWriter::start_record(uint64_t step, double t, const std::string & kind, const std::string & path,
+                              const std::string & reason) {
+    in_flight.emplace();
+    in_flight->step = step;
+    in_flight->t = t;
+    in_flight->kind = kind;
+    in_flight->path = path;
+    in_flight->reason = reason;
+}
+
 void DataWriter::hash_written() {
     if (!in_flight) return;
     auto w = std::make_unique<InFlight>(std::move(*in_flight));
     in_flight.reset();
     if (!w->hash.empty()) {
-        // Hashing never holds up the next write: its record waits for it instead
-        w->hashed = std::async(std::launch::async, [p = w.get()]() {
-            const auto start = std::chrono::steady_clock::now();
+        // The record waits for its hashes, and only a full queue holds up the run
+        const auto start = std::chrono::steady_clock::now();
+        w->hashed = HashQueue::instance().submit([p = w.get()]() {
+            const auto hashing = std::chrono::steady_clock::now();
             for (const ToHash & h : p->hash) {
                 WrittenFile f = written_file(h.file, h.contents);
                 f.path = h.name;
                 p->files.push_back(std::move(f));
             }
-            p->seconds = seconds_since(start);
+            p->seconds = seconds_since(hashing);
         });
+        t_hash_queue += seconds_since(start);
     }
     recording.push_back(std::move(w));
 }
@@ -496,16 +575,14 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     if (format == DataFormat::RESTART) {
         // Written under another name, so that no file of this name is ever incomplete
         last_file = stem + ".restart";
-        in_flight = InFlight{.step = step, .t = double(t),
-                             .kind = "restart", .path = last_file, .reason = block.reason};
+        start_record(step, double(t), "restart", last_file, block.reason);
         write_restart(partial_name(last_file), block, attributes, faces, arrays);
         partial_file = partial_name(last_file);
         publish_restart(false);
     } else if (format == DataFormat::HDF5) {
         last_file = stem + ".h5";
         history.push_back({double(t), static_cast<int64_t>(step), last_file});
-        in_flight = InFlight{.step = step, .t = double(t),
-                             .kind = "xdmf", .path = last_file, .reason = block.reason};
+        start_record(step, double(t), "xdmf", last_file, block.reason);
         // Parallel HDF5 writes collectively through MPI, which only the main thread calls
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
@@ -532,8 +609,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
         last_file = filename;
         history.push_back({double(t), static_cast<int64_t>(step), filename});
-        in_flight = InFlight{.step = step, .t = double(t),
-                             .kind = "vtkhdf", .path = filename, .reason = block.reason};
+        start_record(step, double(t), "vtkhdf", filename, block.reason);
         const bool collective = distributed && comm::size() > 1;
         if (distributed || root) {
             // A series in one file is appended to in place: its size, but no hash of the whole file at every step
@@ -559,8 +635,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         const std::string filename = stem + (distributed ? ".pvtu" : ".vtu");
         last_file = filename;
         history.push_back({double(t), static_cast<int64_t>(step), filename});
-        in_flight = InFlight{.step = step, .t = double(t),
-                             .kind = "vtu", .path = filename, .reason = block.reason};
+        start_record(step, double(t), "vtu", filename, block.reason);
         const int n_ranks = comm::size();
         if (distributed || root) {
             in_flight->hash.push_back({piece.str() + ".vtu", piece.str() + ".vtu"});

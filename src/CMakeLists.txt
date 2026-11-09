@@ -19,6 +19,7 @@ add_library(MallardCore STATIC
     common/log.cpp
     common/report.cpp
     common/provenance.cpp
+    common/sha256_hw.cpp
     common/snapshot_block.cpp
     common/run_control.cpp
     common/run_health.cpp
@@ -174,6 +175,10 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-Wno-overriding-option")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
+# CPU SHA intrinsics, which nvcc's front end need not parse
+if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+    set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
 endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)
 mallard_target_warnings(MallardCore)

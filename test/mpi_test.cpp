@@ -992,7 +992,9 @@ TEST(MPITest, OutputRecordsListEveryRanksPieceWithItsSizeAndHash) {
         if (pieces) expected.insert("f_000002.pvtu");
         EXPECT_EQ(names, expected);
         // Ranks' pieces of different sizes, each recorded with its own
-        if (comm::size() == 3) EXPECT_GT(piece_sizes.size(), 1u);
+        if (comm::size() == 3) {
+            EXPECT_GT(piece_sizes.size(), 1u);
+        }
     }
     EXPECT_EQ(records, 1u);
 }

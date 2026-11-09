@@ -25,6 +25,7 @@
 #include "provenance.h"
 #include "run_log.h"
 #include "scratch.h"
+#include "sha256_hw.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #ifdef Mallard_HAS_HDF5
@@ -100,14 +101,25 @@ std::set<std::string> key_set(const Value & v) {
 } // namespace
 
 TEST(ProvenanceTest, Sha256MatchesTheStandardDigests) {
-    // FIPS 180-4 examples, including messages that fill the last block past its length field
-    EXPECT_EQ(provenance::sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    EXPECT_EQ(provenance::sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    EXPECT_EQ(provenance::sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
-              "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
-    EXPECT_EQ(provenance::sha256(std::string(1000000, 'a')),
-              "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+    // FIPS 180-4 examples, including messages that fill the last block past its length field, on
+    // the CPU's SHA instructions where it has them and on the portable compression
+    const bool hardware = sha256_hw::enabled();
+    for (const bool on : {true, false}) {
+        sha256_hw::set_enabled(on);
+        SCOPED_TRACE(sha256_hw::enabled() ? "SHA instructions" : "portable");
+        EXPECT_EQ(provenance::sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        EXPECT_EQ(provenance::sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        EXPECT_EQ(provenance::sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+                  "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+        EXPECT_EQ(provenance::sha256("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmno"
+                                     "ijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"),
+                  "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1");
+        EXPECT_EQ(provenance::sha256(std::string(1000000, 'a')),
+                  "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+    }
+    sha256_hw::set_enabled(hardware);
 }
+
 
 TEST(ProvenanceTest, FileHashesCoverContentsAndDirectoryLayout) {
     if (!comm::is_root()) return;

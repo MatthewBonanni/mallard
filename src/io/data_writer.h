@@ -299,6 +299,8 @@ class DataWriter {
         double writing_seconds() const { return t_writing; }
         /** @brief Seconds spent hashing this rank's files for the run log, off the main thread; call after finish(). */
         double hashing_seconds() const { return t_hashing; }
+        /** @brief Seconds the run waited for room in the hashing queue: hashing falling behind writing. */
+        double hash_queue_seconds() const { return t_hash_queue; }
         /** @brief Bytes of this rank's snapshot files; call after finish(). */
         uint64_t bytes_written() const { return n_bytes; }
 
@@ -322,6 +324,9 @@ class DataWriter {
         Values capture(uint32_t n_cells, bool in_subset = false, bool by_id = false) const;
         /** @brief Run a write: in the background if async and allowed. @return whether in the background */
         bool run(std::function<void()> job, bool allow_async = true);
+        /** @brief Start the output record of the snapshot about to be written. */
+        void start_record(uint64_t step, double t, const std::string & kind, const std::string & path,
+                          const std::string & reason);
         /** @brief Start sizing and hashing this rank's files of the snapshot just written, in the background. */
         void hash_written();
         /**
@@ -438,7 +443,7 @@ class DataWriter {
         };
         std::optional<InFlight> in_flight;                // being written
         std::deque<std::unique_ptr<InFlight>> recording;  // written, being hashed, recorded in order
-        double t_blocking = 0.0, t_writing = 0.0, t_hashing = 0.0;
+        double t_blocking = 0.0, t_writing = 0.0, t_hashing = 0.0, t_hash_queue = 0.0;
         uint64_t n_bytes = 0;
         // VTU arrays of the mesh, built by the first snapshot: raw, or compressed
         std::vector<std::vector<char>> vtu_mesh;

@@ -369,8 +369,10 @@ behind is one whose write did not finish: `mallard info`, `mallard diff` and
 picks it.
 
 The `output` record of a snapshot is written once all its files are
-complete, with each file's size and SHA-256 (hashed off the main thread,
-after the write), so a snapshot without a record was not completely written.
+complete, with each file's size and SHA-256, so a snapshot without a record
+was not completely written. One thread hashes the files after their write, on
+the CPU's SHA instructions where it has them (over 1 GB/s); a run that writes
+faster than that waits for it, and the run summary says how long.
 `mallard info DIR` checks every recorded file against its record (its size;
 `--verify` also its SHA-256) and reports one that is missing or differs.
 

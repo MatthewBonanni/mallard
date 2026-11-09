@@ -2499,12 +2499,14 @@ void Solver::print_summary(const std::string & stop) const {
         for (const auto & writer : data_writers) {
             s.writing += writer->writing_seconds();
             s.hashing += writer->hashing_seconds();
+            s.hash_queue += writer->hash_queue_seconds();
             bytes += writer->bytes_written();
         }
         // Ranks write their parts at the same time
         s.writers = true;
         s.writing = comm::allreduce(s.writing, comm::Op::MAX);
         s.hashing = comm::allreduce(s.hashing, comm::Op::MAX);
+        s.hash_queue = comm::allreduce(s.hash_queue, comm::Op::MAX);
         s.bytes = static_cast<double>(comm::allreduce(bytes, comm::Op::SUM));
         s.background = data_writers.front()->is_async();
     }
