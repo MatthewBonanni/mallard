@@ -2038,7 +2038,8 @@ void Solver::register_data() {
 std::vector<std::string> Solver::output_fields() const {
     std::vector<std::string> names;
     for (const auto & d : data) names.push_back(d.name());
-    std::vector<std::string> on_request = {"P_MAX", "Q"};
+    std::vector<std::string> on_request = {"P_MAX"};
+    for (const char * name : derived::NAMES) on_request.emplace_back(name);
     if constexpr (N_DIM == 2) {
         on_request.emplace_back("VORTICITY");
     } else {

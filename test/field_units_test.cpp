@@ -555,7 +555,7 @@ TEST(FieldUnitsTest, EveryFieldACaseListsIsWrittenAndNoOther) {
     listing.set_distributed(false);
     listing.init(parse_toml(base));
     const std::vector<std::string> listed = listing.output_fields();
-    for (const char * name : {"RHO", "U_X", "P", "CFL", "Q", "P_MAX", "TENO_SIGMA", "MEAN_P"}) {
+    for (const char * name : {"RHO", "U_X", "P", "CFL", "Q_CRITERION", "MACH", "LAMBDA2", "SCHLIEREN", "P_MAX", "TENO_SIGMA", "MEAN_P"}) {
         EXPECT_NE(std::find(listed.begin(), listed.end(), name), listed.end()) << name;
     }
     EXPECT_EQ(std::find(listed.begin(), listed.end(), "MU_T"), listed.end());
