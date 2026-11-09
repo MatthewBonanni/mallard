@@ -1104,9 +1104,9 @@ void expect_rank_count_independent(const std::function<std::string(const std::st
     }
     if (!comm::is_root()) return;
     for (const auto & file : files) {
-        const std::string a = without_provenance(read_all(file + "_serial"));
+        const std::string a = without_run_metadata(read_all(file + "_serial"));
         EXPECT_FALSE(a.empty()) << file;
-        EXPECT_EQ(without_provenance(read_all(file + "_ranks")), a) << file;
+        EXPECT_EQ(without_run_metadata(read_all(file + "_ranks")), a) << file;
     }
 }
 
