@@ -34,7 +34,8 @@ Each section of `docs/guide/` that documents an input feature opens with the sma
 TOML that enables it, then a line `*Used in:* ...` listing the examples whose inputs
 use it. `python tools/docs/used_in.py` writes those lines from the example inputs, with a
 rule per section in its `RULES` (add one for a new feature section);
-`python tools/docs/used_in.py --check` reports stale ones.
+`python tools/docs/used_in.py --check` reports stale ones, and fails the first job of
+`ci.yml` on them.
 
 ## Figures
 
