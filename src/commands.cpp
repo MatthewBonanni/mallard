@@ -67,8 +67,15 @@ constexpr Option CHECK_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option LIST_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: one table per group, with the units of every field; json: the same as one JSON object, for "
+     "scripts. Default: text."},
+    KOKKOS,
+};
+
 constexpr Option NEW_OPTIONS[] = {
-    {"--list", "-l", "", "List the templates, with what each shows and what it costs."},
+    {"--list", "-l", "", "Deprecated: mallard list templates. List the templates."},
     {"--quick", "", "",
      "A coarse, short version that runs in seconds to a minute: for trying the steps, not for the "
      "physical result."},
@@ -160,9 +167,12 @@ constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "status|checkpoint|stop
 constexpr std::string_view FILE_ARGUMENTS[] = {"FILE"};
 constexpr std::string_view DIFF_ARGUMENTS[] = {"FILE_A", "FILE_B"};
 constexpr std::string_view CONVERT_ARGUMENTS[] = {"INPUT", "OUTPUT.h5"};
+constexpr std::string_view OPTIONAL_INPUT[] = {"[INPUT]"};
+constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
+    if (args.has("--list")) std::cerr << "mallard new --list is deprecated: use mallard list templates\n";
     return case_template::new_case(args.positional, args.has("--list"), args.has("--quick"), args.has("--force"));
 }
 
@@ -293,17 +303,17 @@ constexpr Command COMMANDS[] = {
         .group = "Set up",
         .summary = "Create a ready-to-run case from a template",
         .synopsis = "mallard new <template> [directory] [--quick] [--force]\n"
-                    "mallard new --list",
+                    "mallard list templates",
         .description =
             "Creates a ready-to-run case from one of Mallard's examples or tutorials: input.toml, run.sh, the "
             "mesh or initial-state script it needs, post.sh and a README. The directory defaults to the "
-            "template's name. Without a template, lists them.",
+            "template's name. Without a template, lists them, as mallard list templates does.",
         .options = NEW_OPTIONS,
         .arguments = NEW_ARGUMENTS,
-        .examples = "$ mallard new --list\n"
+        .examples = "$ mallard list templates\n"
                     "$ mallard new cylinder\n"
                     "$ mallard new cylinder runs/cyl --quick",
-        .exit_status = "0  the case was created, or --list\n"
+        .exit_status = "0  the case was created, or the templates were listed\n"
                        "1  the case could not be written\n"
                        "2  usage error, no template given, or no template of that name",
         .dim = Case::template_name,
@@ -425,6 +435,61 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::file,
         .run = info_main,
+    },
+    {
+        .name = "list fields",
+        .group = "Inspect",
+        .summary = "The output fields there are, or exactly those of one case",
+        .synopsis = "mallard list fields [INPUT] [--format text|json]",
+        .description =
+            "Without an input file, lists every field the [[write_data]] variables, [[probes]] and [statistics] "
+            "take, by group, with its units, its description and what a case needs to have it, and the patterns "
+            "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).\n"
+            "\n"
+            "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
+            "lists exactly the fields [[write_data]] variables accept for it: its species, its physics, chemistry, "
+            "LES and statistics, and its dimension; then the common fields it does not have, with what they need.",
+        .options = LIST_OPTIONS,
+        .arguments = OPTIONAL_INPUT,
+        .examples = "$ mallard list fields\n"
+                    "$ mallard list fields input.toml\n"
+                    "$ mallard list fields input.toml --format json",
+        .exit_status = "0  listed\n"
+                       "1  the case cannot be set up (the errors are printed)\n"
+                       "2  usage error",
+        .dim = Case::input,
+        .run = list_fields_main,
+    },
+    {
+        .name = "list species",
+        .group = "Inspect",
+        .summary = "The species of a case",
+        .synopsis = "mallard list species INPUT [--format text|json]",
+        .description =
+            "Sets the case up as mallard check does and lists its species, one table row each, in the order "
+            "of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s> fields. A single gas has none.",
+        .options = LIST_OPTIONS,
+        .arguments = INPUT_ARGUMENT,
+        .examples = "$ mallard list species flame.toml\n"
+                    "$ mallard list species flame.toml --format json",
+        .exit_status = "0  listed\n"
+                       "1  the case cannot be set up (the errors are printed)\n"
+                       "2  usage error",
+        .dim = Case::input,
+        .run = list_species_main,
+    },
+    {
+        .name = "list templates",
+        .group = "Inspect",
+        .summary = "The case templates of mallard new",
+        .synopsis = "mallard list templates",
+        .description = "Lists the templates mallard new creates cases from, with what each shows and what it costs.",
+        .options = {},
+        .arguments = {},
+        .examples = "$ mallard list templates\n"
+                    "$ mallard new cylinder",
+        .exit_status = "0  listed",
+        .run = list_templates_main,
     },
     {
         .name = "diff",
@@ -549,6 +614,7 @@ constexpr Command COMMANDS[] = {
 
 constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
+    {"list", "Catalogs: the fields, species and case templates there are."},
     {"mesh", "Commands on meshes."},
 };
 

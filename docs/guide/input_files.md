@@ -12,7 +12,7 @@ prints the version and `mallard --help` the usage. Errors in the input stop
 the run before it starts, with the file name, the key and, for options, the
 accepted values.
 
-The quickest way to a working input is a template: `mallard new --list`
+The quickest way to a working input is a template: `mallard list templates`
 shows them, and `mallard new cylinder` creates a directory with the input,
 the scripts that generate its mesh, run it and plot the results, and a README
 ([First simulation](../tutorials/first_simulation.md#7-templates)). The input is the

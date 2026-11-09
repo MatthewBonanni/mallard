@@ -155,7 +155,7 @@ void DataWriter::init(const Input & input,
                            .valid = names,
                            .suggestion = suggest_value(var, names),
                            .fix = "Vectors also go by their name without _X, _Y, _Z (e.g. U); a trailing * selects "
-                                  "every variable it starts (e.g. Y_*)",
+                                  "every variable it starts (e.g. Y_*); mallard list fields input.toml lists them",
                            .docs = "docs/guide/output.md#solution-snapshots-write_data"});
     };
     auto find_data = [&](const std::string & name) -> const Data * {

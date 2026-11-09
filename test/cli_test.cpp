@@ -454,6 +454,87 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     EXPECT_TRUE(contains(not_a_mesh.err, "--quality takes a mesh file")) << not_a_mesh.err;
 }
 
+TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
+    SKIP_UNDER_MPI();
+    const Result catalog = run({"list", "fields"}, true);
+    EXPECT_EQ(catalog.status, 0) << catalog.err;
+    EXPECT_TRUE(contains(catalog.out, "== Fields: conservative")) << catalog.out;
+    const std::vector<std::vector<std::string>> catalog_rows = {
+        {"field", "units", "description", "needs"},
+        {"RHO", "kg m-3", "density", "every case"},
+        {"CFL", "dimensionless", "local CFL number", "every case"},
+        {"MU_T", "kg m-1 s-1", "eddy viscosity", "[les]"},
+    };
+    for (const auto & row : catalog_rows) EXPECT_TRUE(has_row(catalog.out, row)) << row[0] << "\n" << catalog.out;
+    EXPECT_TRUE(contains(catalog.out, "MEAN_<A>")) << catalog.out;
+    ASSERT_EQ(small_run().status, 0);
+    const Result text = run({"list", "fields", "small.toml"}, true);
+    ASSERT_EQ(text.status, 0) << text.err;
+    const std::vector<std::vector<std::string>> case_rows = {
+        {"field", "units", "description"},
+        {"RHO", "kg m-3", "density"},
+        {"U_X", "m s-1", "x component of velocity"},
+        {"field", "units", "needs"},
+        {"MU_T", "kg m-1 s-1", "[les]"},
+    };
+    for (const auto & row : case_rows) EXPECT_TRUE(has_row(text.out, row)) << row[0] << "\n" << text.out;
+    EXPECT_EQ(run({"list", "fields", "--format", "yaml"}, true).status, 2);
+    const Result listed = run({"list", "fields", "small.toml", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value v = json::parse(listed.out);
+    EXPECT_EQ(v["dim"].number, Mallard_DIM);
+    std::vector<std::string> names;
+    for (const auto & f : v["fields"].array) names.push_back(f["name"].string);
+    for (const char * name : {"RHO", "U_X", "P", "Q", "P_MAX"}) {
+        EXPECT_NE(std::find(names.begin(), names.end(), name), names.end()) << name;
+    }
+    EXPECT_EQ(std::count(names.begin(), names.end(), "U_Z"), Mallard_DIM == 3 ? 1 : 0);
+    std::vector<std::string> missing;
+    for (const auto & f : v["missing"].array) missing.push_back(f["name"].string + ": " + f["needs"].string);
+    EXPECT_NE(std::find(missing.begin(), missing.end(), "MU_T: [les]"), missing.end());
+    EXPECT_NE(std::find(missing.begin(), missing.end(), "Y_<s>: a mixture"), missing.end());
+}
+
+TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
+    SKIP_UNDER_MPI();
+    if (Mallard_DIM != 2) GTEST_SKIP() << "the mixture fixture is a 2D case";
+    std::string mixture = read_file(source_dir() + "/test/data/formats/mixture.toml");
+    const std::string relative = "\"../../../mechanisms/h2o2.yaml\"";
+    ASSERT_NE(mixture.find(relative), std::string::npos);
+    mixture.replace(mixture.find(relative), relative.size(), "\"" + source_dir() + "/mechanisms/h2o2.yaml\"");
+    std::ofstream("mixture.toml") << mixture;
+    const Result r = run({"list", "species", "mixture.toml"}, true);
+    EXPECT_EQ(r.status, 0) << r.err;
+    EXPECT_TRUE(has_row(r.out, {"#", "species"})) << r.out;
+    const std::vector<std::string> species = {"H2", "H", "O", "O2", "OH", "H2O", "HO2", "H2O2", "AR", "N2"};
+    for (size_t i = 0; i < species.size(); i++) {
+        EXPECT_TRUE(has_row(r.out, {std::to_string(i), species[i]})) << species[i] << "\n" << r.out;
+    }
+    const Result listed = run({"list", "species", "mixture.toml", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    std::vector<std::string> names;
+    const json::Value v = json::parse(listed.out);
+    for (const auto & s : v["species"].array) names.push_back(s.string);
+    EXPECT_EQ(names, species);
+    ASSERT_EQ(small_run().status, 0);
+    const Result gas = run({"list", "species", "small.toml"}, true);
+    EXPECT_EQ(gas.status, 0) << gas.err;
+    EXPECT_TRUE(contains(gas.out, "a single gas, no species")) << gas.out;
+    const Result broken = run({"list", "species", "missing.toml"}, true);
+    EXPECT_EQ(broken.status, 1);
+}
+
+TEST(CliTest, ListTemplatesIsWhatNewListShowedWhichStillWorks) {
+    SKIP_UNDER_MPI();
+    const Result listed = run({"list", "templates"});
+    EXPECT_EQ(listed.status, 0) << listed.err;
+    EXPECT_TRUE(contains(listed.out, "cylinder")) << listed.out;
+    const Result old = run({"new", "--list"});
+    EXPECT_EQ(old.status, 0);
+    EXPECT_EQ(old.out, listed.out);
+    EXPECT_TRUE(contains(old.err, "use mallard list templates")) << old.err;
+}
+
 namespace {
 
 /** @brief The largest |B - A| over the cells of a field of two files, and its cell, from the reader. */
