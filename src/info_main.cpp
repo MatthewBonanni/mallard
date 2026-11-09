@@ -13,6 +13,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -417,9 +418,16 @@ std::string contents_json(const output::Contents & c) {
     return o.str();
 }
 
-/** @brief The last start and end records of a run's mallard.jsonl, and its last record. */
+/** @brief A file an output record of the run log lists: as complete, of this size and SHA-256 (empty: not hashed). */
+struct RecordedFile {
+    uint64_t bytes = 0;
+    std::string sha256;
+};
+
+/** @brief The last start and end records of a run's mallard.jsonl, its last record, and the files written. */
 struct Record {
     json::Value start, end, last;
+    std::map<std::string, RecordedFile> written;  ///< by path as recorded, the latest record of each
     bool found = false;
 };
 
@@ -437,6 +445,13 @@ Record run_record(const std::string & dir) {
                 r.end = json::Value{};
             } else if (type == "end") {
                 r.end = v;
+            } else if (type == "output") {
+                if (const json::Value * files = v.find("files"); files && files->type == json::Value::Type::ARRAY) {
+                    for (const json::Value & f : files->array) {
+                        const json::Value * bytes = f.find("bytes");
+                        r.written[text(f.find("path"))] = {bytes ? uint64_t(bytes->number) : 0, text(f.find("sha256"))};
+                    }
+                }
             }
             r.last = std::move(v);
         } catch (const std::exception &) {
@@ -490,6 +505,26 @@ int print_input(const json::Value & block, const std::string & what) {
     return 0;
 }
 
+/** @brief Files the run log records as written that are missing, or differ from their record. */
+std::vector<std::pair<std::string, std::string>> check_records(const std::string & dir, const Record & record,
+                                                               bool verify) {
+    std::vector<std::pair<std::string, std::string>> problems;
+    for (const auto & [path, recorded] : record.written) {
+        const fs::path file = fs::path(path).is_absolute() ? fs::path(path) : fs::path(dir) / path;
+        std::error_code error;
+        const auto size = fs::file_size(file, error);
+        if (error) {
+            problems.emplace_back(path, "missing: removed or moved since the run wrote it");
+        } else if (uint64_t(size) != recorded.bytes) {
+            problems.emplace_back(path, count(uint64_t(size)) + " bytes, the run wrote " + count(recorded.bytes) +
+                                            ": changed or cut short since");
+        } else if (verify && !recorded.sha256.empty() && provenance::sha256_file(file.string()) != recorded.sha256) {
+            problems.emplace_back(path, "its contents differ from what the run wrote (SHA-256)");
+        }
+    }
+    return problems;
+}
+
 int run_directory(const std::string & dir, const cli::Args & args) {
     const Record record = run_record(dir);
     if (args.has("--input")) return print_input(run_block(dir, record), dir);
@@ -502,6 +537,7 @@ int run_directory(const std::string & dir, const cli::Args & args) {
             errors.emplace_back(f, e.what());
         }
     }
+    const auto problems = check_records(dir, record, args.has("--verify"));
     if (args.value_or("--format", "text") == "json") {
         json::Object o;
         o.add("directory", dir);
@@ -513,8 +549,13 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         std::string bad = "[";
         for (const auto & [f, e] : errors) bad += (bad.size() > 1 ? "," : "") + json::Object().add("path", f).add("error", e).str();
         o.raw("errors", bad + "]");
+        std::string differ = "[";
+        for (const auto & [f, p] : problems) {
+            differ += (differ.size() > 1 ? "," : "") + json::Object().add("path", f).add("problem", p).str();
+        }
+        o.add("recorded_files", static_cast<uint64_t>(record.written.size())).raw("differ_from_record", differ + "]");
         std::cout << o.str() << "\n";
-        return errors.empty() ? 0 : 1;
+        return errors.empty() && problems.empty() ? 0 : 1;
     }
     logging::section("Run " + dir);
     if (!record.found) {
@@ -560,7 +601,19 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         for (const auto & [f, e] : errors) rows.push_back({fs::relative(f, dir).string(), e});
         logging::table({"file", "error"}, rows);
     }
-    return errors.empty() ? 0 : 1;
+    if (record.found) {
+        const std::string checked = args.has("--verify") ? "size and SHA-256" : "size";
+        logging::section("Files against the run record",
+                         count(record.written.size()) + " recorded as written, " + checked + " checked");
+        if (problems.empty()) {
+            item("Recorded files", record.written.empty() ? "none" : "all present, as written");
+        } else {
+            rows.clear();
+            for (const auto & [f, p] : problems) rows.push_back({f, p});
+            logging::table({"file", "problem"}, rows);
+        }
+    }
+    return errors.empty() && problems.empty() ? 0 : 1;
 }
 
 /** @brief The quality summary as JSON: per metric its max, mean, limit, cells above it and worst cells. */

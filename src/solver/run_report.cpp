@@ -179,6 +179,8 @@ void summary_section(report::Text & text, const RunSummary & s) {
         rows.push_back({Status::NONE, {"written", value, bytes_unit, "",
                                        "in " + format("%.3g", s.writing) + " s of writing" +
                                            (s.background ? ", in the background" : "")}});
+        rows.push_back({Status::NONE, {"hashed for the run log", format("%.3g", s.hashing), "s", "",
+                                       "off the main thread"}});
     }
     if (!rows.empty()) {
         text.blank();

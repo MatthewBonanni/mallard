@@ -59,4 +59,23 @@ std::runtime_error cannot_write(const std::string & what, const std::string & fi
 /** @brief Create the directories a file goes in, or throw cannot_write's error. */
 void create_parent_directories(const std::string & what, const std::string & file);
 
+/** @brief Suffix of a file being written: it gets its name once complete, so no file of that name is incomplete. */
+inline constexpr const char * PARTIAL = ".partial";
+
+/** @brief The name file is written under until it is complete. */
+inline std::string partial_name(const std::string & file) { return file + PARTIAL; }
+
+/** @brief Give a file written under partial_name(file) its name, or throw cannot_write's error. */
+void publish_file(const std::string & what, const std::string & file);
+
+/** @brief A file a run wrote: its size and SHA-256, for the run log's output records. */
+struct WrittenFile {
+    std::string path;
+    uint64_t bytes = 0;
+    std::string sha256;
+};
+
+/** @brief Size and (contents) SHA-256 of a complete file. */
+WrittenFile written_file(const std::string & path, bool contents = true);
+
 #endif // COMMON_IO_H

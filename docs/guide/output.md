@@ -326,7 +326,7 @@ Each record has a `type`:
 |---|---|---|
 | `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
 | `progress` | Every progress row | as below |
-| `output` | A file written: the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`; probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id` |
+| `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`; probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; no `sha256` for a [file appended to](#complete-files)) |
 | `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
 | `divergence` | A run that diverged, before its `error` record | the [divergence report](running.md#the-divergence-report): `step`, `t`, `invalid_cells`, `failed` (cells by the quantity that failed first), `box` (their extent), `last_valid` (`step`, `t`, `file`, or `null`), `causes` (most likely first: `kind` (`time_step`, `mesh`, `boundary`, `initial_state`, `chemistry`, `numerics`), `title`, `score`, `evidence`, `fix`), `cell`, `neighbors`, `others` (`id`, `rank`, `x`, `failed`, `rho`, `speed`, `p`, `T`, `cfl`, `quality`, `repaired`, `troubled`), `time_step` (`integrator`, `limit`, `dt`, `dt_cfl1`, `cfl`, `cells_over_limit`), `zones` (`name`, `type`, `near`, and where compared `inadmissible`, `ratio`, `jump`), `history` (the last progress rows), `snapshot` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |
@@ -356,6 +356,31 @@ removing or changing the meaning of one increments it. Version 2 (0.10) added
 `run_id`, `restart_of` and the `output` records, which replace version 1's
 `event` records of written files; `--restart latest` and `mallard info DIR`
 find a run's files through them.
+
+#### Complete files
+
+A file is written under the name `NAME.partial` and gets its name `NAME`
+once complete, as restart files always were: snapshots (each rank's piece
+too), their indexes (`.pvd`, `.vtkhdf.series`, `.xmf`), XDMF data and mesh
+files, probe snapshots and spectra. A file under its own name is therefore
+never cut short by a job killed while writing it, and a `NAME.partial` left
+behind is one whose write did not finish: `mallard info`, `mallard diff` and
+`mallard post extract` refuse it and say so, and `--restart latest` never
+picks it.
+
+The `output` record of a snapshot is written once all its files are
+complete, with each file's size and SHA-256 (hashed off the main thread,
+after the write), so a snapshot without a record was not completely written.
+`mallard info DIR` checks every recorded file against its record (its size;
+`--verify` also its SHA-256) and reports one that is missing or differs.
+
+Files appended to in place cannot be renamed: a series in one file
+(`series = true`), a probe's HDF5 or VTKHDF series and the CSV files of
+probes, forces and integrals. A job killed while appending can leave such a
+file damaged (HDF5 files are not safe against it) or ending in a partial
+row; the step's missing `output` record says that step was not completely
+written. Their records give the size after each step and no SHA-256, which
+would rehash the whole file at every step.
 
 ## Run health
 

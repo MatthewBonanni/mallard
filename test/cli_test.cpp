@@ -447,6 +447,42 @@ TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {
     EXPECT_EQ(run({"info", "--input", "."}, true).out, run({"input", "resolve", "small.toml"}, true).out);
 }
 
+TEST(CliTest, InfoOfARunDirectoryChecksItsFilesAgainstTheirRecords) {
+    SKIP_UNDER_MPI();
+    ASSERT_EQ(small_run().status, 0);
+    const Result clean = run({"info", "--verify", "."}, true);
+    EXPECT_EQ(clean.status, 0) << clean.out;
+    EXPECT_TRUE(has_row(clean.out, {"Recorded files", "all present, as written"})) << clean.out;
+
+    // Same size, other contents: only the hash tells
+    const std::string vtu = "case/flow_000000.vtu";
+    {
+        std::fstream f(vtu, std::ios::in | std::ios::out | std::ios::binary);
+        f.seekg(-2, std::ios::end);
+        const char c = static_cast<char>(f.get());
+        f.seekp(-2, std::ios::end);
+        f.put(c == 'x' ? 'y' : 'x');
+    }
+    EXPECT_EQ(run({"info", "."}, true).status, 0);
+    const Result changed = run({"info", "--verify", "."}, true);
+    EXPECT_EQ(changed.status, 1);
+    EXPECT_TRUE(has_row(changed.out, {vtu, "its contents differ from what the run wrote (SHA-256)"})) << changed.out;
+
+    const std::string restart = "case/restart_000002.restart";
+    fs::resize_file(restart, fs::file_size(restart) - 8);
+    const Result cut = run({"info", "."}, true);
+    EXPECT_EQ(cut.status, 1);
+    EXPECT_TRUE(contains(cut.out, "the run wrote")) << cut.out;
+    EXPECT_TRUE(contains(cut.out, "changed or cut short since")) << cut.out;
+
+    // A file whose write did not finish keeps its temporary name, and is refused
+    fs::copy_file("case/flow_000002.vtu", "case/flow_000004.vtu.partial");
+    const Result partial = run({"info", "case/flow_000004.vtu.partial"}, true);
+    EXPECT_EQ(partial.status, 1);
+    EXPECT_TRUE(contains(partial.err, "its write did not finish")) << partial.err;
+    EXPECT_TRUE(contains(run({"info", "."}, true).out, "its write did not finish"));
+}
+
 TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     SKIP_UNDER_MPI();
     const std::string mesh =

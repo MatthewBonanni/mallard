@@ -61,6 +61,7 @@ struct RunSummary {
     uint64_t rejected = 0;
     bool writers = false;
     double bytes = 0.0, writing = 0.0;
+    double hashing = 0.0;  // seconds hashing the files for the run log, off the main thread
     bool background = false;
     struct Files {
         std::string kind;

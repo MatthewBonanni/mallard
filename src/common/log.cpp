@@ -220,9 +220,19 @@ void event(uint64_t step, double t, std::string_view kind, std::string_view text
 }
 
 void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
-             std::string_view writer) {
+             std::string_view writer, const std::vector<WrittenFile> & files) {
     if (!comm::is_root()) return;
     if (verbose) remark(step, t, "wrote " + std::string(kind), path);
+    uint64_t bytes = 0;
+    std::string list = "[";
+    for (const WrittenFile & f : files) {
+        if (list.size() > 1) list += ",";
+        json::Object o;
+        o.add("path", f.path).add("bytes", f.bytes);
+        if (!f.sha256.empty()) o.add("sha256", f.sha256);
+        list += o.str();
+        bytes += f.bytes;
+    }
     run_log::write(json::Object()
                        .add("type", "output")
                        .add("step", step)
@@ -231,13 +241,21 @@ void written(uint64_t step, double t, std::string_view kind, std::string_view pa
                        .add("path", path)
                        .add("reason", reason)
                        .add("writer", writer)
-                       .add("run_id", provenance::run_id()));
+                       .add("run_id", provenance::run_id())
+                       .add("complete", true)
+                       .add("bytes", bytes)
+                       .raw("files", list + "]"));
     auto it = std::find_if(written_since.begin(), written_since.end(), [&](const auto & k) { return k.first == kind; });
     if (it == written_since.end()) {
         written_since.emplace_back(std::string(kind), 1);
     } else {
         it->second++;
     }
+}
+
+void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+             std::string_view writer) {
+    if (comm::is_root()) written(step, t, kind, path, reason, writer, {written_file(std::string(path))});
 }
 
 std::string take_written() {

@@ -15,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include "common_io.h"
+
 #if defined(__GNUC__) || defined(__clang__)
 #define MALLARD_PRINTF(fmt, args) __attribute__((format(printf, fmt, args)))
 #else
@@ -91,11 +93,15 @@ void event(uint64_t step, double t, std::string_view kind, std::string_view text
            const std::vector<std::pair<std::string, std::string>> & fields = {});
 
 /**
- * @brief A file written during the run: an output record of the run log, which indexes every file the run
- *        writes (path, kind, step, time, reason, run id, and the writer: a [[write_data]] prefix or a
- *        probe's file), counted for the progress table's written column (take_written), and a remark line
- *        too when verbose.
+ * @brief A file completely written during the run: an output record of the run log, which indexes every
+ *        file the run writes (path, kind, step, time, reason, run id, the writer: a [[write_data]] prefix or
+ *        a probe's file, and each file's size and SHA-256; a file with no record was not completely
+ *        written), counted for the progress table's written column (take_written), and a remark line too
+ *        when verbose.
  */
+void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+             std::string_view writer, const std::vector<WrittenFile> & files);
+/** @brief written() of the one file at path, written on the main thread: sized and hashed now. */
 void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
              std::string_view writer);
 

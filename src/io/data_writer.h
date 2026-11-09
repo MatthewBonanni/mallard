@@ -12,16 +12,19 @@
 #ifndef DATA_WRITER_H
 #define DATA_WRITER_H
 
+#include <deque>
 #include <functional>
 #include <future>
 #include <iosfwd>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "common_io.h"
 #include "input.h"
 
 #include "data.h"
@@ -294,6 +297,8 @@ class DataWriter {
         double blocking_seconds() const { return t_blocking; }
         /** @brief Seconds spent writing files (in the background when asynchronous); call after finish(). */
         double writing_seconds() const { return t_writing; }
+        /** @brief Seconds spent hashing this rank's files for the run log, off the main thread; call after finish(). */
+        double hashing_seconds() const { return t_hashing; }
         /** @brief Bytes of this rank's snapshot files; call after finish(). */
         uint64_t bytes_written() const { return n_bytes; }
 
@@ -315,7 +320,16 @@ class DataWriter {
 
         /** @brief The values of the first n_cells cells (by_id: of the owned cells by global id), or of the subset's cells. */
         Values capture(uint32_t n_cells, bool in_subset = false, bool by_id = false) const;
-        void run(std::function<void()> job, bool allow_async = true);
+        /** @brief Run a write: in the background if async and allowed. @return whether in the background */
+        bool run(std::function<void()> job, bool allow_async = true);
+        /** @brief Start sizing and hashing this rank's files of the snapshot just written, in the background. */
+        void hash_written();
+        /**
+         * @brief The output records of the hashed snapshots, in order, every rank's
+         *        files gathered: those hashed on every rank, or all if wait
+         *        (collective on a distributed mesh).
+         */
+        void record_hashed(bool wait);
         /**
          * @brief Rename the restart file written under a temporary name once
          *        every rank has written its part: at once if wait, else only if done.
@@ -407,7 +421,24 @@ class DataWriter {
         bool async = false;
         unsigned io_threads = 1;
         std::future<void> pending;
-        double t_blocking = 0.0, t_writing = 0.0;
+        // A snapshot's output record: this rank's files to hash (read under file, recorded under name; contents:
+        // hashed, else only sized), and once hashed in the background, their sizes and SHA-256
+        struct ToHash {
+            std::string file, name;
+            bool contents = true;
+        };
+        struct InFlight {
+            uint64_t step = 0;
+            double t = 0.0;
+            std::string kind, path, reason;
+            std::vector<ToHash> hash;
+            std::vector<WrittenFile> files;
+            std::future<void> hashed;
+            double seconds = 0.0;
+        };
+        std::optional<InFlight> in_flight;                // being written
+        std::deque<std::unique_ptr<InFlight>> recording;  // written, being hashed, recorded in order
+        double t_blocking = 0.0, t_writing = 0.0, t_hashing = 0.0;
         uint64_t n_bytes = 0;
         // VTU arrays of the mesh, built by the first snapshot: raw, or compressed
         std::vector<std::vector<char>> vtu_mesh;

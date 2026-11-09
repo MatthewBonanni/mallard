@@ -155,7 +155,8 @@ void read_ranges(Contents & file, size_t snapshot);
 /**
  * @brief The output files of a run directory: its series indexes and the
  *        snapshots no index lists, restart files, probe and CSV files, sorted
- *        by name; directories one level down (solut/) included.
+ *        by name; directories one level down (solut/) included, and files whose
+ *        write did not finish (NAME.partial), which open() refuses.
  */
 std::vector<std::string> run_files(const std::string & dir);
 

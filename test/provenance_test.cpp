@@ -192,12 +192,23 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
             EXPECT_EQ(r["cells_per_second"].type == Value::Type::NUMBER, timed);
             EXPECT_EQ(r["eta"].type == Value::Type::NUMBER, timed);
         } else if (type == "output") {
-            // The output index: every file written, by step, time, writer and reason
+            // The output index: every file completely written, by step, time, writer and reason, with its size and hash
             EXPECT_EQ(key_set(r), (std::set<std::string>{"type", "step", "t", "kind", "path", "reason", "writer",
-                                                         "run_id"}));
+                                                         "run_id", "complete", "bytes", "files"}));
             EXPECT_EQ(r["run_id"].string, provenance::run_id());
             EXPECT_EQ(r["reason"].string, r["step"].number == 0 ? "start" : "interval") << r["path"].string;
             EXPECT_TRUE(std::filesystem::exists(r["path"].string)) << r["path"].string;
+            EXPECT_TRUE(r["complete"].boolean);
+            ASSERT_FALSE(r["files"].array.empty()) << r["path"].string;
+            double bytes = 0.0;
+            for (const Value & f : r["files"].array) {
+                const std::string file = f["path"].string;
+                EXPECT_FALSE(std::filesystem::exists(file + ".partial")) << file;
+                EXPECT_EQ(f["bytes"].number, double(std::filesystem::file_size(file))) << file;
+                EXPECT_EQ(f["sha256"].string, provenance::sha256_file(file)) << file;
+                bytes += f["bytes"].number;
+            }
+            EXPECT_EQ(r["bytes"].number, bytes);
             outputs.insert({r["kind"].string, r["step"].number});
         }
     }
@@ -367,7 +378,8 @@ TEST(RunLogTest, ResumedRunsAppendAndMarkRewinds) {
         if (r["type"].string == "start") {
             starts.push_back(r);
             steps.emplace_back();
-        } else if (r.has("step")) {
+        } else if (r.has("step") && r["type"].string != "output") {
+            // Output records follow the completion of their write, not the step
             ASSERT_FALSE(steps.empty());
             steps.back().push_back(r["step"].number);
         }

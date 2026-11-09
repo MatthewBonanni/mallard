@@ -32,7 +32,7 @@ std::string mesh_file(const std::string & prefix) { return prefix + "_mesh.h5"; 
 std::string file_name(const std::string & path) { return std::filesystem::path(path).filename().string(); }
 
 void write_xdmf_file(const std::string & filename, const std::string & grids) {
-    std::ofstream out(filename);
+    std::ofstream out(partial_name(filename));
     if (!out.good()) throw cannot_write("the XDMF file", filename);
     out << "<?xml version=\"1.0\" ?>\n"
         << provenance::xml_comment() << "\n"
@@ -41,6 +41,9 @@ void write_xdmf_file(const std::string & filename, const std::string & grids) {
         << "  <Domain>\n"
         << grids << "  </Domain>\n"
         << "</Xdmf>\n";
+    out.close();
+    if (!out) throw cannot_write("the XDMF file", filename);
+    publish_file("the XDMF file", filename);
 }
 
 } // namespace
@@ -210,7 +213,8 @@ void DataWriter::write_hdf5_mesh() {
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
-    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
+    Handle file(H5Fcreate(partial_name(filename).c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose,
+                "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
         write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
@@ -257,7 +261,8 @@ void DataWriter::write_hdf5(const std::string & stem, const Block & meta, const 
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
-    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
+    Handle file(H5Fcreate(partial_name(filename).c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose,
+                "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
         write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
