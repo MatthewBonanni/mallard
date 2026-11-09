@@ -241,8 +241,6 @@ struct AdvanceFunctor {
     KOKKOS_INLINE_FUNCTION
     void account(const uint32_t c, const chemistry::RosenbrockResult & r) const {
         if (!repair.active()) return;
-        Kokkos::atomic_add(&counters(0), uint64_t(r.steps));
-        Kokkos::atomic_add(&counters(1), uint64_t(r.rejected));
         if (r.clipped) {
             repair.activate(-1);
             repaired(c) = 1;
