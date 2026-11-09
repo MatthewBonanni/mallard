@@ -220,22 +220,24 @@ struct AdvanceFunctor {
     Kokkos::View<uint8_t *> repaired{};
     Kokkos::View<uint64_t[2]> counters{};
 
-    /** @brief Adds the mass a clipping changed: species k of cell c, at the initial (0) or final (1) density. */
+    /**
+     * @brief Adds the mass a clipping changed: species k of cell c, at the
+     *        initial (0) or final (1) density. It holds only values the cell
+     *        keeps anyway, so that it adds no live state across the integration.
+     */
     struct Clip {
-        RepairRecorder repair;
-        double mass0 = 0.0, mass1 = 0.0;
+        const AdvanceFunctor * f;
+        uint32_t c;
+        double rho0, rho1;
 
         KOKKOS_INLINE_FUNCTION void operator()(const int which, const uint32_t k, const double dY) const {
-            if (dY != 0.0 && repair.active()) repair.add(k, (which ? mass1 : mass0) * dY);
+            if (dY != 0.0 && f->repair.active())
+                f->repair.add(k, (which ? rho1 : rho0) * static_cast<double>(f->volume(c)) * dY);
         }
     };
 
     KOKKOS_INLINE_FUNCTION
-    Clip clip(const uint32_t c, const double rho, const double rho_end) const {
-        if (!repair.active()) return Clip{};
-        const double V = static_cast<double>(volume(c));
-        return Clip{repair, rho * V, rho_end * V};
-    }
+    Clip clip(const uint32_t c, const double rho, const double rho_end) const { return Clip{this, c, rho, rho_end}; }
 
     /** @brief After cell c's integration: its sub-steps, and its flag if a clipping happened. */
     KOKKOS_INLINE_FUNCTION
