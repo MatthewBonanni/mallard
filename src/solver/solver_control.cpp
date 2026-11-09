@@ -191,6 +191,10 @@ void Solver::diverged() {
     for (auto & command : stop_replies) run_control::reply(command, "error: " + message);
     checkpoint_replies.clear();
     stop_replies.clear();
+    // Collective, as is the divergence: every rank's part of the last files is written and recorded first
+    for (auto & writer : data_writers) writer->finish();
+    if (checkpoint_writer) checkpoint_writer->finish();
+    write_end_record({"diverged", "", message});
     throw std::runtime_error(message);
 }
 
@@ -205,11 +209,18 @@ void Solver::act_on_requests() {
         logging::event(step, double(t), "checkpoint", "requested");
     }
     if (acted & run_control::STOP) {
-        const int signo = run_control::stop_signal();
-        control_stop = signo ? run_control::signal_name(signo) + " received"
-                       : stop_file_note.empty() ? std::string("stop requested") : stop_file_note;
-        logging::event(step, double(t), "stop", control_stop);
+        // The signal that reached any rank, so that rank 0 records it
+        const int signo = comm::allreduce(run_control::stop_signal(), comm::Op::MAX);
+        if (signo) {
+            const std::string name = run_control::signal_name(signo);
+            control_stop = {"signal", name, name + " received"};
+        } else {
+            const bool file = !stop_file_note.empty();
+            control_stop = {"stopped", file ? "stop_file" : "", file ? stop_file_note : "stop requested"};
+        }
+        logging::event(step, double(t), "stop", control_stop.reason);
     }
+    if (acted & run_control::WALL_TIME) wall_time_reached = true;
 }
 
 void Solver::apply_commands() {
@@ -230,9 +241,9 @@ void Solver::apply_commands() {
             checkpoint_replies.push_back(command);
             logging::event(step, double(t), "checkpoint", "requested by mallard ctl");
         } else if (line == "stop") {
-            control_stop = "stop requested by mallard ctl";
+            control_stop = {"stopped", "mallard_ctl", "stop requested by mallard ctl"};
             stop_replies.push_back(command);
-            logging::event(step, double(t), "stop", control_stop);
+            logging::event(step, double(t), "stop", control_stop.reason);
         } else if (line.rfind("set ", 0) == 0) {
             std::string reply;
             bool ok = true;

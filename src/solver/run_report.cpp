@@ -125,7 +125,7 @@ std::string progress_legend(const ProgressColumns & c) {
 
 void summary_section(report::Text & text, const RunSummary & s) {
     text.section("Summary");
-    text.line("Stopped: " + s.stop + ", at step " + logging::count(s.step) + ", t = " +
+    text.line("Ended (" + s.outcome + "): " + s.stop + ", at step " + logging::count(s.step) + ", t = " +
               units::with(logging::real(s.t), "s"));
 
     const auto [unit, scale] = wall_unit(s.total);

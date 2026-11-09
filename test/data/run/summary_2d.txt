@@ -1,5 +1,5 @@
 == Summary ================================================================================
-  Stopped: t_stop = 0.2 reached, at step 1,822, t = 0.2 s
+  Ended (finished): t_stop = 0.2 reached, at step 1,822, t = 0.2 s
   phase                                     wall time [min]  of the total [%]  of time stepping [%]
   setup                                     0.06833          3.3
   time stepping                             1.96             93.9              100.0

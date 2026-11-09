@@ -484,6 +484,7 @@ void DataWriter::record_hashed(bool wait) {
             }
         }
         logging::written(w.step, w.t, w.kind, w.path, w.reason, prefix, w.files);
+        last_record = Recorded{w.step, w.t, w.kind, w.path};
         recording.pop_front();
     }
 }

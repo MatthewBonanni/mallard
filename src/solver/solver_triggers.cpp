@@ -91,7 +91,9 @@ void Solver::act_on_triggers() {
                         {"values", read.str()}});
         for (const auto & act : trigger.actions) {
             switch (act.action) {
-                case Triggers::Action::STOP: trigger_stop = "trigger " + trigger.name + " (" + trigger.when + ")"; break;
+                case Triggers::Action::STOP:
+                    trigger_stop = {"stopped", "trigger", "trigger " + trigger.name + " (" + trigger.when + ")", trigger.name};
+                    break;
                 case Triggers::Action::CHECKPOINT: checkpoint_requested = true; break;
                 case Triggers::Action::START_STATISTICS:
                     statistics.set_start(t);

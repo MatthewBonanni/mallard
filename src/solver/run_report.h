@@ -48,6 +48,7 @@ std::string progress_legend(const ProgressColumns & columns);
 
 /** @brief Wall time and throughput of a run, and what it wrote. */
 struct RunSummary {
+    std::string outcome;  // as the end record's
     std::string stop;
     uint64_t step = 0, steps = 0;  // the last step, and those taken in this run
     double t = 0.0;

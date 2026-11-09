@@ -300,6 +300,14 @@ class DataWriter {
         double hashing_seconds() const { return t_hashing; }
         /** @brief Seconds the run waited for room in the hashing queue: hashing falling behind writing. */
         double hash_queue_seconds() const { return t_hash_queue; }
+        /** @brief A file of this writer with its output record: complete. */
+        struct Recorded {
+            uint64_t step = 0;
+            double t = 0.0;
+            std::string kind, path;
+        };
+        /** @brief The last file this writer recorded complete, if any. */
+        const std::optional<Recorded> & last_recorded() const { return last_record; }
         /** @brief Bytes of this rank's snapshot files; call after finish(). */
         uint64_t bytes_written() const { return n_bytes; }
 
@@ -442,6 +450,7 @@ class DataWriter {
         };
         std::unique_ptr<InFlight> in_flight;              // being written
         std::deque<std::unique_ptr<InFlight>> recording;  // written, being hashed, recorded in order
+        std::optional<Recorded> last_record;
         double t_blocking = 0.0, t_writing = 0.0, t_hashing = 0.0, t_hash_queue = 0.0;
         uint64_t n_bytes = 0;
         // VTU arrays of the mesh, built by the first snapshot: raw, or compressed

@@ -232,11 +232,19 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
 
     const Value & end = records.back();
     EXPECT_EQ(end["type"].string, "end");
-    EXPECT_EQ(key_set(end), (std::set<std::string>{"type", "reason", "step", "t", "steps", "wall", "wall_setup",
-                                                   "wall_stepping", "wall_diagnostics", "wall_output",
-                                                   "cells_per_second"}));
+    EXPECT_EQ(key_set(end), (std::set<std::string>{"type", "outcome", "cause", "reason", "step", "t", "last_snapshot",
+                                                   "last_restart", "steps", "wall", "wall_setup", "wall_stepping",
+                                                   "wall_diagnostics", "wall_output", "cells_per_second"}));
     EXPECT_EQ(end["step"].number, 4);
+    EXPECT_EQ(end["outcome"].string, "finished");
+    EXPECT_EQ(end["cause"].string, "n_steps");
     EXPECT_NE(end["reason"].string.find("n_steps"), std::string::npos);
+    EXPECT_EQ(end["last_restart"]["path"].string, dir + "/r_000004.restart");
+    for (const char * last : {"last_snapshot", "last_restart"}) {
+        EXPECT_EQ(end[last]["step"].number, 4) << last;
+        EXPECT_EQ(end[last]["t"].number, end["t"].number) << last;
+        EXPECT_TRUE(std::filesystem::exists(end[last]["path"].string)) << last;
+    }
     std::filesystem::remove_all(dir);
 }
 
