@@ -31,6 +31,12 @@ std::string clock_time(const double s) {
 
 std::string percent(const double fraction) { return format("%.2f", 100.0 * fraction); }
 
+/** @brief Three significant digits with trailing zeros kept, so a column of times keeps its decimals. */
+std::string milliseconds(const double seconds) {
+    const double ms = 1.0e3 * seconds;
+    return format(ms < 9.995 ? "%.2f" : ms < 99.95 ? "%.1f" : "%.0f", ms);
+}
+
 /** @brief The unit a table of wall times is in, from its largest: s, min or h. */
 std::pair<const char *, double> wall_unit(const double largest) {
     if (largest < 120.0) return {"s", 1.0};
@@ -84,7 +90,7 @@ std::vector<std::string> progress_cells(const ProgressColumns & c, const Progres
         format("%.4e", r.t),
         format("%.2e", r.dt),
         format("%.1f", 100.0 * r.done),
-        timed ? format("%.3g", 1.0e3 * r.wall_per_step) : "-",
+        timed ? milliseconds(r.wall_per_step) : "-",
         timed ? format("%.2e", r.cells_per_second) : "-",
         r.done >= 1.0 ? clock_time(0.0) : r.eta >= 0.0 ? clock_time(r.eta) : "-",
         format("%.3e", r.min_rho),
@@ -154,7 +160,7 @@ void summary_section(report::Text & text, const RunSummary & s) {
     if (s.steps > 0 && s.stepping > 0.0) {
         rows.push_back({Status::NONE, {"throughput", format("%.3g", double(s.n_cells * s.steps) / s.stepping),
                                        "cells/s", "", "over " + logging::count(s.steps) + " steps"}});
-        rows.push_back({Status::NONE, {"wall time per step", format("%.3g", 1.0e3 * s.stepping / double(s.steps)),
+        rows.push_back({Status::NONE, {"wall time per step", milliseconds(s.stepping / double(s.steps)),
                                        "ms", "", "time stepping"}});
     }
     if (s.rejected_counted) {

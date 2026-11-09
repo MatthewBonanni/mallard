@@ -26,7 +26,7 @@ namespace {
 const ProgressColumns ALL{true, true, true};
 
 ProgressRow typical() {
-    return {.step = 1200, .t = 0.0123, .dt = 1.1e-5, .done = 0.4, .wall_per_step = 0.0102, .cells_per_second = 4.52e5,
+    return {.step = 1200, .t = 0.0123, .dt = 1.1e-5, .done = 0.4, .wall_per_step = 0.035, .cells_per_second = 4.52e5,
             .eta = 3725.2, .min_rho = 0.0812, .min_p = 9.87e4, .max_mach = 1.879, .troubled = 0.0734, .min_T = 298.4,
             .max_T = 2401.7, .sum_Y_error = 3.1e-15, .reacting = 0.215, .chemistry_steps = 37,
             .written = "7 vtkhdf, 1 restart"};
