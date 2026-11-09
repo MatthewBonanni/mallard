@@ -130,7 +130,7 @@ For OpenMP threads, set `OMP_PROC_BIND=spread` and `OMP_PLACES=threads` (the scr
 Parallel runs list where each rank runs after the header:
 
 ```text
-== Ranks ===================================================================================
+== Ranks ==================================================================================
   rank  host    GPU  PCI bus       UUID          GPU NUMA  CPUs   CPU NUMA  threads
   0     node01  2    0000:c1:00.0  GPU-c03e7a55  0         0-15   0         16
   1     node01  3    0000:c4:00.0  GPU-71b2d9e8  0         16-31  0         16

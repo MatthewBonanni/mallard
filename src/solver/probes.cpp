@@ -2076,7 +2076,7 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.type + (p.from_region ? " over " : " of ") +
                            logging::count(n) + unit +
                            (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
-                                           : " every t = " + logging::real(double(p.time_interval))) +
+                                           : " every " + units::with(logging::real(double(p.time_interval)), "s") + " of simulated time") +
                            (p.average ? ", time averages" : "") +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;
         if (!p.reductions.empty()) {

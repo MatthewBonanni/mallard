@@ -808,7 +808,7 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const
 
 std::string Spectra::summary() const {
     std::string text = std::string(average ? "averaged" : "per sample") + " every " + logging::count(interval) +
-                       " steps from t = " + logging::real(double(t_start)) + " along ";
+                       " steps from t = " + units::with(logging::real(double(t_start)), "s") + " along ";
     for (size_t h = 0; h < directions.size(); h++) text += (h ? ", " : "") + std::string(1, AXES[directions[h]]);
     text += ": ";
     for (size_t p = 0; p < pairs.size(); p++) {

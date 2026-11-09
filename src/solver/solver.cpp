@@ -46,6 +46,7 @@
 #include "provenance.h"
 #include "run_log.h"
 #include "snapshot_block.h"
+#include "run_report.h"
 #include "expression.h"
 #include "gradient.h"
 #include "viscous_flux.h"
@@ -683,6 +684,19 @@ void Solver::init_physics() {
     }
     const std::string gas = find_value_or<std::string>(input, "physics", "gas", "perfect");
     record_options("physics.gas", {"perfect", "mixture"});
+    const std::string unit_system = find_value_or<std::string>(input, "physics", "units", "SI");
+    record_options("physics.units", {"SI", "nondimensional"});
+    if (unit_system != "SI" && unit_system != "nondimensional") {
+        throw not_accepted(input.at("physics"), "physics.units", unit_system, {"SI", "nondimensional"});
+    }
+    if (unit_system == "nondimensional" && gas == "mixture") {
+        throw InputError({.key = "physics.units",
+                          .line = line_of(input.at("physics"), "units"),
+                          .message = "a gas mixture reads real thermochemistry, so its numbers are always in SI units",
+                          .fix = "Remove units = \"nondimensional\" from [physics]",
+                          .docs = "docs/guide/input_files.md#units"});
+    }
+    units::set_system(unit_system == "SI" ? units::System::SI : units::System::NONDIMENSIONAL);
     if (gas == "perfect") {
         if (input.contains("chemistry")) {
             throw InputError({.key = "chemistry",
@@ -1096,7 +1110,7 @@ void Solver::init_sources(region::Regions & regions) {
         face_reconstruction->set_boundaries(boundary_data);
         std::string text;
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(gravity[i]));
-        source_summary.emplace_back("Gravity", text + "]");
+        source_summary.emplace_back("Gravity", units::with(text + "]", "m/s^2"));
     }
     if (source.contains("mass_flow")) {
         const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow", dim::mass_flux);
@@ -1129,7 +1143,8 @@ void Solver::init_sources(region::Regions & regions) {
         init_mass_flow_volume();
         std::string text;
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(m[i]));
-        source_summary.emplace_back("Mass flow", text + "] (volume average of rho u), held by a uniform body force");
+        source_summary.emplace_back("Mass flow", units::with(text + "]", "kg/(m^2 s)") +
+                                                     " (volume average of rho u), held by a uniform body force");
     }
 }
 
@@ -2118,22 +2133,18 @@ int Solver::run() {
     std::string stop;
     try {
         calc_dt();
-        // Monitors before the progress row, which reports their values
+        // Output before the progress row, which reports the monitors' values and counts the files
         if (step == 0) {
             Kokkos::Timer output_timer;
             write_integrals();
-            t_wall_output += output_timer.seconds();
-        }
-        print_progress();
-        publish_status();
-        if (step == 0) {
-            Kokkos::Timer output_timer;
             copy_device_to_host();
             const snapshot_block::Reason reason(snapshot_block::reason::START);
             write_data(true);
             write_probes();
             t_wall_output += output_timer.seconds();
         }
+        print_progress();
+        publish_status();
         // Strang splitting with the half steps of consecutive steps fused into one
         // chemistry call, except where output, checks or the end read the state
         defer_chemistry = reacting && fuse_chemistry;
@@ -2165,20 +2176,19 @@ int Solver::run() {
             Kokkos::Timer output_timer;
             write_forces();
             write_integrals();
-            t_wall_output += output_timer.seconds();
-            if (step % check_interval == 0) {
-                Kokkos::Timer check_timer;
-                check_timed_boundaries();
-                print_progress();
-                t_wall_checks += check_timer.seconds();
-            }
-            output_timer.reset();
             // Probes first, so that triggers read this step's values and restarts carry their state
             write_probes();
             act_on_triggers();
             write_data();
             if (checkpoint_requested) write_checkpoint();
             t_wall_output += output_timer.seconds();
+            // The last row comes after the end's own output
+            if (step % check_interval == 0 && stop_reason().empty()) {
+                Kokkos::Timer check_timer;
+                check_timed_boundaries();
+                print_progress();
+                t_wall_checks += check_timer.seconds();
+            }
             poll_control_files();
             publish_status();
         }
@@ -2191,13 +2201,17 @@ int Solver::run() {
     defer_chemistry = false;
     destroy_step_graph();
     check_timed_boundaries();
-    if (step != step_last_check) print_progress();
+    const bool row_due = step != step_last_check;
     Kokkos::Timer output_timer;
     copy_device_to_host();
     write_data(true);
     const snapshot_block::Reason reason(snapshot_block::reason::STOP);
     const std::string restart_file =
         control_stop.empty() && trigger_stop.empty() ? std::string() : write_restarts();
+    t_wall_output += output_timer.seconds();
+    // Files written at the step of the last row get a row of their own (rank 0 counts them)
+    if (row_due || comm::allreduce(int(logging::written_pending()), comm::Op::MAX) > 0) print_progress();
+    output_timer.reset();
     for (auto & writer : data_writers) writer->finish();
     if (checkpoint_writer) checkpoint_writer->finish();
     t_wall_output += output_timer.seconds();
@@ -2264,30 +2278,34 @@ void Solver::print_progress() {
     n_troubled = comm::allreduce(n_troubled, comm::Op::SUM);
 
     using logging::format;
+    const ProgressColumns columns{teno != nullptr, is_mixture(), reacting};
+    const report::Stream table = progress_stream(columns, logging::color_stdout());
+    if (n_progress_rows == 0) {
+        report::Text legend(logging::color_stdout());
+        legend.note(progress_legend(columns));
+        legend.print();
+    }
     if (n_progress_rows % HEADER_EVERY == 0) {
-        std::string header = format("%8s %10s %8s %6s  %9s %7s %7s  %9s %9s %6s", "step", "t", "dt", "done",
-                                    "wall/step", "cells/s", "ETA", "min rho", "min p", "max Ma");
-        if (teno) header += format(" %8s", "troubled");
-        if (is_mixture()) header += format(" %8s %8s %9s", "min T", "max T", "sum Y-1");
-        if (reacting) header += format(" %8s %6s", "reacting", "chem/c");
-        logging::line(logging::style(header, logging::Style::BOLD));
+        for (const std::string & line : table.header()) logging::line(line);
     }
     n_progress_rows++;
 
     RunStatus status = run_status();
-    const double eta = status.eta;
-    const std::string eta_text =
-        status.progress >= 1.0 ? "0 s" : (eta >= 0.0 && eta < 1.0 ? "<1 s" : logging::duration(eta));
-    const bool timed = status.wall_per_step >= 0.0;
-    std::string row = format("%8llu %10.4e %8.2e %5.1f%%  %9s %7s %7s  %9.2e %9.2e %6.3f",
-                             static_cast<unsigned long long>(step), static_cast<double>(t), static_cast<double>(dt),
-                             100.0 * status.progress, timed ? logging::duration(status.wall_per_step).c_str() : "--",
-                             timed ? logging::si(status.cells_per_second).c_str() : "--", eta_text.c_str(),
-                             static_cast<double>(mins[0]), static_cast<double>(mins[1]), static_cast<double>(-mins[2]));
-    if (teno) row += format(" %7.2f%%", 100.0 * static_cast<double>(n_troubled) / static_cast<double>(n_cells_global));
+    ProgressRow row{.step = step,
+                    .t = double(t),
+                    .dt = double(dt),
+                    .done = status.progress,
+                    .wall_per_step = status.wall_per_step,
+                    .cells_per_second = status.cells_per_second,
+                    .eta = status.eta,
+                    .min_rho = double(mins[0]),
+                    .min_p = double(mins[1]),
+                    .max_mach = double(-mins[2]),
+                    .troubled = static_cast<double>(n_troubled) / static_cast<double>(n_cells_global)};
     if (is_mixture()) {
-        row += format(" %8.1f %8.1f %9.2e", static_cast<double>(mix[3]), static_cast<double>(-mix[4]),
-                      static_cast<double>(-mix[5]));
+        row.min_T = double(mix[3]);
+        row.max_T = double(-mix[4]);
+        row.sum_Y_error = double(-mix[5]);
     }
     status.monitors = {{"min_rho", double(mins[0])}, {"min_p", double(mins[1])}, {"max_mach", double(-mins[2])}};
     if (teno) {
@@ -2300,12 +2318,14 @@ void Solver::print_progress() {
     }
     if (reacting) {
         const auto [active, max_cost] = chemistry_statistics();
-        row += format(" %7.2f%% %6.0f", 100.0 * static_cast<double>(active) / static_cast<double>(n_cells_global), max_cost);
+        row.reacting = static_cast<double>(active) / static_cast<double>(n_cells_global);
+        row.chemistry_steps = max_cost;
         status.monitors.insert(status.monitors.end(),
                                {{"reacting_cells", static_cast<double>(active) / static_cast<double>(n_cells_global)},
                                 {"max_chemistry_cost", max_cost}});
     }
-    logging::line(row);
+    row.written = logging::take_written();
+    logging::line(table.row(progress_cells(columns, row)));
 
     progress_history.push_back({step, double(t), double(dt), dt_cfl1 > 0.0_r ? double(dt / dt_cfl1) : 0.0, double(mins[0]),
                                 double(mins[1]), is_mixture() ? double(mix[3]) : divergence::UNKNOWN});
@@ -2357,9 +2377,20 @@ RunStatus Solver::run_status() const {
 void Solver::print_setup(const ResolvedInput & resolved) const {
     using logging::real;
     logging::section("Mesh");
-    logging::items(mesh_summary);
+    logging::Items mesh_items = mesh_summary;
+    for (auto & [name, value] : mesh_items) {
+        if (name == "Extent") value = units::with(value, "m");
+        if (name == "Cell area" || name == "Cell volume") {
+            const size_t ratio = value.find(" (ratio");
+            value = units::with(value.substr(0, ratio), N_DIM == 2 ? "m^2" : "m^3") + value.substr(ratio);
+        }
+    }
+    logging::items(mesh_items);
 
     logging::section("Physics");
+    logging::item("Units", units::system() == units::System::SI
+                               ? "SI (physics.units)"
+                               : "nondimensional: numbers carry no units (physics.units)");
     logging::items(is_mixture() ? mixture_model->summary() : physics.summary());
     logging::items(source_summary);
     logging::item("Initial state", initial_state);
@@ -2376,13 +2407,15 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
     if (step_controller.enabled()) {
         logging::item("Time step", step_controller.summary() + "; first step " +
-                                       (use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed))));
+                                       (use_cfl ? "CFL " + real(double(cfl))
+                                                : "dt " + units::with(real(double(dt_fixed)), "s")));
     } else {
-        logging::item("Time step", use_cfl ? "CFL " + real(double(cfl)) : "dt " + real(double(dt_fixed)) + " (fixed)");
+        logging::item("Time step", use_cfl ? "CFL " + real(double(cfl))
+                                           : "dt " + units::with(real(double(dt_fixed)), "s") + " (fixed)");
     }
     std::string stop;
     if (n_steps > 0) stop += "n_steps = " + logging::count(n_steps);
-    if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + real(double(t_stop));
+    if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + units::with(real(double(t_stop)), "s");
     if (t_wall_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("wall ") + logging::duration(double(t_wall_stop));
     logging::item("Stop at", stop);
 #ifdef KOKKOS_ENABLE_CUDA
@@ -2438,63 +2471,49 @@ void Solver::print_summary(const std::string & stop) const {
     using logging::duration;
     const double total = timer.seconds();
     const uint64_t steps = step - step_run_start;
-    logging::section("Summary");
-    logging::item("Stopped", stop + " at step " + logging::count(step) + ", t = " + logging::real(double(t)));
-    logging::item("Wall time", duration(total) + ": setup " + duration(t_wall_setup) + ", time stepping " +
-                                   duration(t_wall_stepping) + ", diagnostics " + duration(t_wall_checks) +
-                                   ", output " + duration(t_wall_output));
-    if (reacting && t_wall_stepping > 0.0) {
-        logging::item("Chemistry", duration(t_wall_chemistry) + " (" +
-                                       logging::format("%.0f%%", 100.0 * t_wall_chemistry / t_wall_stepping) +
-                                       " of time stepping)");
-        if (t_chemistry_mean > 0.0) {
-            const double waiting = t_chemistry_slowest - t_chemistry_mean;
-            logging::item("Chemistry ranks", "slowest " + duration(t_chemistry_slowest) + ", mean " +
-                                                 duration(t_chemistry_mean) + ": " + duration(waiting) + " waiting (" +
-                                                 logging::format("%.1f%%", 100.0 * waiting / t_wall_stepping) +
-                                                 " of time stepping)" +
-                                                 (chemistry_load_balance && chem_cells_integrated > 0.0
-                                                      ? logging::format(", %.1f%% of the integrations on other ranks",
-                                                                        100.0 * chem_cells_sent / chem_cells_integrated)
-                                                      : std::string()));
-        }
-    }
-    if (steps > 0 && t_wall_stepping > 0.0) {
-        logging::item("Throughput", logging::si(static_cast<double>(n_cells_global * steps) / t_wall_stepping) + " cells/s, " +
-                                        duration(t_wall_stepping / static_cast<double>(steps)) + " per step over " +
-                                        logging::count(steps) + " steps");
-    }
-    if (step_controller.enabled()) {
-        logging::item("Rejected steps", logging::count(n_rejected) + " (error control)");
-    }
+    RunSummary s{.stop = stop,
+                 .step = step,
+                 .steps = steps,
+                 .t = double(t),
+                 .n_cells = n_cells_global,
+                 .total = total,
+                 .setup = t_wall_setup,
+                 .stepping = t_wall_stepping,
+                 .diagnostics = t_wall_checks,
+                 .output = t_wall_output,
+                 .reacting = reacting,
+                 .chemistry = t_wall_chemistry,
+                 .chemistry_slowest = t_chemistry_slowest,
+                 .chemistry_mean = t_chemistry_mean,
+                 .rejected_counted = step_controller.enabled(),
+                 .rejected = n_rejected};
+    if (chemistry_load_balance && chem_cells_integrated > 0.0) s.chemistry_sent = chem_cells_sent / chem_cells_integrated;
     if (!data_writers.empty()) {
-        double writing = 0.0;
         uint64_t bytes = 0;
         for (const auto & writer : data_writers) {
-            writing += writer->writing_seconds();
+            s.writing += writer->writing_seconds();
             bytes += writer->bytes_written();
         }
         // Ranks write their parts at the same time
-        writing = comm::allreduce(writing, comm::Op::MAX);
-        bytes = comm::allreduce(bytes, comm::Op::SUM);
-        logging::item("Writing", logging::si(static_cast<double>(bytes)) + "B of files in " + duration(writing) +
-                                     (data_writers.front()->is_async() ? " (in the background)" : ""));
+        s.writers = true;
+        s.writing = comm::allreduce(s.writing, comm::Op::MAX);
+        s.bytes = static_cast<double>(comm::allreduce(bytes, comm::Op::SUM));
+        s.background = data_writers.front()->is_async();
     }
-    std::string files;
-    auto add = [&](const std::string & text) { files += (files.empty() ? "" : ", ") + text; };
     for (const auto & writer : data_writers) {
-        const uint64_t n = writer->files_written();
-        if (writer->get_format() == DataFormat::RESTART) {
-            add(logging::count(n) + " restart");
-        } else {
-            add(logging::count(n) + " " + FORMAT_NAMES.at(writer->get_format()) + " (" + writer->index_file() + ")");
-        }
+        const bool restart = writer->get_format() == DataFormat::RESTART;
+        s.files.push_back({restart ? "restart" : FORMAT_NAMES.at(writer->get_format()), writer->files_written(),
+                           restart ? (writer->last_written().empty() ? "-" : "last " + writer->last_written())
+                                   : writer->index_file()});
     }
-    for (const auto & monitor : force_monitors) add(monitor.file);
-    if (integral_monitor.interval > 0) add(integral_monitor.file);
-    for (const auto & file : probes.files()) add(file);
-    if (!files.empty()) logging::item("Files", files);
-    health_summary();
+    for (const auto & monitor : force_monitors) s.files.push_back({"forces", 0, monitor.file});
+    if (integral_monitor.interval > 0) s.files.push_back({"integrals", 0, integral_monitor.file});
+    for (const auto & file : probes.files()) s.files.push_back({"probes", 0, file});
+    report::Text text(logging::color_stdout());
+    summary_section(text, s);
+    if (run_health.on) health_section(text, run_health.last);
+    logging::line();
+    text.print();
 
     json::Object end;
     end.add("type", "end")

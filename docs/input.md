@@ -342,6 +342,7 @@ zones = ["back", "front"]
 | `type` | `euler` (default) or `navier_stokes` |
 | `gamma` | Ratio of specific heats |
 | `p_ref`, `T_ref`, `rho_ref` | A reference state, which sets the gas constant `R = p_ref / (rho_ref T_ref)` |
+| `units` | `SI` (default) or `nondimensional`: the units the case's numbers are in, which the terminal output states and labels its numbers with (nondimensional: none, `-` in a units row). A gas mixture is always `SI` ([Units](guide/input_files.md#units)) |
 | `mu` | (`navier_stokes`) Dynamic viscosity, or its value at `T_mu_ref` for Sutherland's law or the power law |
 | `Pr` | (`navier_stokes`) Prandtl number, default 0.72 |
 | `viscosity_model` | (`navier_stokes`) `constant` (default), `sutherland` or `power_law` (`mu (T / T_mu_ref)^viscosity_exponent`) |
@@ -1575,9 +1576,10 @@ The run's summary reports the size of the files written and the time spent writi
 Each progress row shows the step, time `t`, time step `dt`, the fraction of the run done (by
 whichever of `n_steps`, `t_stop` and `t_wall_stop` comes first), the time-stepping wall time
 per step, the throughput in cell updates per second, the estimated time remaining, the minimum
-density and pressure, the maximum Mach number and, with TENO, the percentage of troubled cells.
-Files written appear as rows led by their step and time. The run ends with a summary of wall
-time (setup, time stepping, diagnostics, output) and average throughput.
+density and pressure, the maximum Mach number, with TENO the percentage of troubled cells, and
+the files written since the previous row; a row under the column names gives their units
+([Terminal output](guide/output.md#terminal-output)). The run ends with a summary of wall
+time (setup, time stepping, diagnostics, output), average throughput and the files written.
 
 Only rank 0 prints, except for errors, which go to stderr from any rank and carry the rank in
 parallel runs. Output on a terminal is colored unless `NO_COLOR` is set (`CLICOLOR_FORCE=1`

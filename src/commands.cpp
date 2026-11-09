@@ -31,6 +31,9 @@ constexpr Option RUN_OPTIONS[] = {
      "Start from this restart file: replaces the input's [initialize] with type = \"restart\". latest: the "
      "newest complete restart file of the input's restart writers (of the run that started last, then of the "
      "highest step), or [initialize] if there is none. Default: as [initialize] says."},
+    {"--verbose", "", "",
+     "A line for every file written, between the progress rows. Default: the progress table's written column "
+     "counts them, and mallard.jsonl and the summary name them."},
     KOKKOS,
 };
 

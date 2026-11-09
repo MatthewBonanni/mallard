@@ -38,6 +38,7 @@ set(MALLARD_TEST_SOURCES
     numerics_preset_test.cpp
     tfles_test.cpp
     check_test.cpp
+    run_report_test.cpp
     error_messages_test.cpp
     synthetic_inflow_test.cpp
     provenance_test.cpp

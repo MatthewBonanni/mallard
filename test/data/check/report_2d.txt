@@ -1,16 +1,16 @@
-== Check ============================================================================= ERROR
+== Check ============================================================================ ERROR
   Result: ERROR, 2 errors and 1 warning (exit status 1)
   Input: input.toml, set up on 1 rank
   Units: SI (m, s, kg, K) wherever a column or a value names none; bytes with decimal
   prefixes (1 GB = 10^9 B)
 
-== Input ============================================================================= ERROR
+== Input ============================================================================ ERROR
   status  check                   result
   ok      setup                   completed: mesh, partition, boundaries, numerics, initial state
   ERROR   unknown or unused keys  1 key: see E-KEY-UNUSED
   ok      deprecated keys         none
 
-== Boundaries =========================================================================== ok
+== Boundaries ========================================================================== ok
   Every boundary face has a condition: 4 zones (periodic zones are paired, not listed).
   status  zone    condition  faces  details
   ok      left    symmetry   8      -
@@ -18,7 +18,7 @@
   ok      bottom  symmetry   16     -
   ok      top     symmetry   16     -
 
-== Regions =========================================================================== ERROR
+== Regions ========================================================================== ERROR
   The mesh's own (the domain, its boundary and cell zones) and every region the case uses;
   cells: the cells each touches. A region of the case that touches no cell is an error.
   status  region                        kind    measure  units  cells  made from
@@ -30,7 +30,7 @@
   ERROR   sponges[0].region             filled  0        m^2    0      cell fractions
   ok      probes[name = "ring"].region  curve   1.5708   m      13     exact
 
-== Mesh quality ========================================================================= ok
+== Mesh quality ======================================================================== ok
   Over every cell; a cell above the limit is questionable.
   status  metric             units          max  mean  limit  cells over limit
   ok      non-orthogonality  deg            0    0     70     0
@@ -38,7 +38,7 @@
   ok      aspect ratio       dimensionless  1    1     1000   0
   ok      volume ratio       dimensionless  1    1     10     0
 
-== Time step ========================================================================== WARN
+== Time step ========================================================================= WARN
   At the initial state, t = 0 s.
   status  quantity                      value    units          target  basis
           time step dt                  0.0557   s                      run.cfl times the time step at CFL 1
@@ -47,7 +47,7 @@
           CFL-limiting cell             0        global id              at (0.0625, 0.0625) m
           cells within 10% of its step  128      cells                  in (0.0625, 0.0625) m to (1.938, 0.9375) m
 
-== Resolution =========================================================================== ok
+== Resolution ========================================================================== ok
   Estimates from the initial state, against the targets of the case's regime (DNS, or LES
   with [les]); value -: not estimated, for the reason its basis gives. See
   docs/guide/input_files.md#resolution.
@@ -57,7 +57,7 @@
           cell size V^(1/2), largest     0.125  m      over every cell, at (0.0625, 0.0625) m
           Kolmogorov length, wall units  -             not estimated: inviscid
 
-== Memory =============================================================================== ok
+== Memory ============================================================================== ok
   Kokkos allocations in host memory per rank, of the rank with the largest peak (with
   --ranks from a serial check, scaled to the largest part the partitioner makes); peak:
   during the setup.
@@ -72,7 +72,7 @@
   setup                58.1 kB              -         0 B          -         no
   total                128 kB               -         70.0 kB      -
 
-== GPU sizing =========================================================================== ok
+== GPU sizing ========================================================================== ok
   The largest rank's predicted peak (the larger of the setup's and the steady state's, plus
   the memory outside Kokkos) against the memory per GPU, for --memory or this build's GPU.
   status  quantity                           value        units                 basis
@@ -88,7 +88,7 @@
                                                                                 partitioner)
           wall time per unit simulated time  2.30         ms                    on 1 GPU at 1.00M cells/s each
 
-== Cost ====================================================================================
+== Cost ===================================================================================
   On 1 rank at 1.00M cells/s per rank (--throughput), at the initial time step; rank-hours:
   ranks times wall hours.
   period                   simulated time [s]  steps  wall time  rank-hours
@@ -96,7 +96,7 @@
   per flow-through time    2                   35.91  4.60 ms    1.28e-06
   to run.t_stop            0.5                 8.977  1.15 ms    3.19e-07
 
-== Diagnostics ======================================================================= ERROR
+== Diagnostics ====================================================================== ERROR
   status  code              message, then the docs that explain it
   ERROR   E-KEY-UNUSED      line 16: numerics.riemann_solvr (did you mean numerics.riemann_solver?)
                             docs/guide/input_files.md#e-key-unused

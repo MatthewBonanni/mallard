@@ -382,6 +382,24 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     for (const char * field : MeshQuality::FIELDS) EXPECT_NE(text.find(field), std::string::npos) << field;
 }
 
+TEST(CheckUnits, PhysicsUnitsSetsTheUnitsOfWhatIsPrinted) {
+    std::string nondimensional = box();
+    nondimensional.replace(nondimensional.find("gamma = 1.4"), 11, "gamma = 1.4\nunits = \"nondimensional\"");
+    ASSERT_TRUE(check(nondimensional).ok());
+    EXPECT_EQ(units::system(), units::System::NONDIMENSIONAL);
+    EXPECT_EQ(units::with("0.5", "s"), "0.5");
+    ASSERT_TRUE(check(box()).ok());
+    EXPECT_EQ(units::system(), units::System::SI);
+    EXPECT_EQ(units::with("0.5", "s"), "0.5 s");
+
+    std::string unknown = box();
+    unknown.replace(unknown.find("gamma = 1.4"), 11, "gamma = 1.4\nunits = \"cgs\"");
+    EXPECT_NE(first_error(check(unknown)).find("physics.units"), std::string::npos);
+    std::string mixture = box();
+    mixture.replace(mixture.find("gamma = 1.4"), 11, "gas = \"mixture\"\nunits = \"nondimensional\"");
+    EXPECT_NE(first_error(check(mixture)).find("always in SI units"), std::string::npos);
+}
+
 TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     // Delta = 1 cm (4 x 4 cells of a 4 cm box), so F = n_res Delta / delta_L
     auto input = [](double delta_L) {

@@ -71,7 +71,7 @@ The startup lists each one with the cells or samples it found (the other sides a
   probe wall         probe_wall_reductions.csv, boundary cylinder of 96 points every 20 steps: TRACTION_PRESSURE_X, TRACTION_PRESSURE_Y, TRACTION_VISCOUS_X, TRACTION_VISCOUS_Y; integral
   probe box          probe_box_reductions.csv, region box = rectangle over 5,036 cells every 20 steps: RHO, RHOU_X, RHOU_Y, RHOE; integral
   probe west         probe_west_reductions.csv, cut_plane of 50 points every 20 steps (point values): MASS_FLUX, MOMENTUM_FLUX_X, MOMENTUM_FLUX_Y, ENTHALPY_FLUX; integral
-  probe wake         probe_wake.csv, point of 1 point every t = 0.5 (point values): U_Y, P
+  probe wake         probe_wake.csv, point of 1 point every 0.5 of simulated time (point values): U_Y, P
 ```
 
 ## 4. Time and phase averages

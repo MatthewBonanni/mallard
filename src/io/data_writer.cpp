@@ -303,7 +303,8 @@ std::pair<std::string, std::string> DataWriter::summary() const {
     if (compression == Compression::ZLIB) {
         text += relative_error > 0.0 ? ", zlib to relative error " + logging::real(relative_error) : ", zlib";
     }
-    text += interval > 0 ? " every " + logging::count(interval) + " steps" : " every t = " + logging::real(double(time_interval));
+    text += interval > 0 ? " every " + logging::count(interval) + " steps"
+                         : " every " + units::with(logging::real(double(time_interval)), "s") + " of simulated time";
     if (format != DataFormat::RESTART) {
         std::string names;
         for (const auto & field : fields) names += (names.empty() ? "" : ", ") + field.name;
@@ -438,7 +439,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
         write_restart(last_file + ".partial", block, attributes, faces, arrays);
         partial_file = last_file + ".partial";
         publish_restart(false);
-        logging::output(step, double(t), "restart", last_file, block.reason, prefix);
+        logging::written(step, double(t), "restart", last_file, block.reason, prefix);
     } else if (format == DataFormat::HDF5) {
         last_file = stem + ".h5";
         history.push_back({double(t), static_cast<int64_t>(step), last_file});
@@ -458,7 +459,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             };
             run(std::move(job), !collective);
         }
-        logging::output(step, double(t), "xdmf", last_file, block.reason, prefix);
+        logging::written(step, double(t), "xdmf", last_file, block.reason, prefix);
     } else if (format == DataFormat::VTKHDF) {
         const std::string filename = one_file ? prefix + ".vtkhdf" : stem + ".vtkhdf";
         last_file = filename;
@@ -476,7 +477,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             };
             run(std::move(job), !collective);
         }
-        logging::output(step, double(t), "vtkhdf", filename, block.reason, prefix);
+        logging::written(step, double(t), "vtkhdf", filename, block.reason, prefix);
     } else {
         // Distributed runs: one piece per rank and a .pvtu index
         std::ostringstream piece;
@@ -498,7 +499,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             };
             run(std::move(job));
         }
-        logging::output(step, double(t), "vtu", filename, block.reason, prefix);
+        logging::written(step, double(t), "vtu", filename, block.reason, prefix);
     }
     if (interval == 0) {
         // Skip any output times already passed (e.g. if dt exceeded time_interval)

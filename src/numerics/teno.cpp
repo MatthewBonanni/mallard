@@ -1837,13 +1837,12 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         }
     };
     // Outer halo cells are never reconstructed; their neighborhoods are cut off
-    Kokkos::Timer timer;
     if (subset == nullptr) {
         largest_stencil = precompute_in_chunks(*this, mesh->n_reconstructed(), precompute, n_failed_large, n_invalid_small);
     } else {
         rebuild_in_chunks(*this, *subset, precompute, n_failed_large, n_invalid_small);
     }
-    setup_status = logging::format("host, %.2f s", timer.seconds());
+    setup_status = "on the host (timed in Setup as numerics)";
 
     if (n_failed_large > 0) {
         throw std::runtime_error("TENO: could not build a full-rank large stencil for " +
@@ -1881,7 +1880,6 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
                                      std::to_string(teno::MAX_FACES) + " faces.");
         }
     }
-    Kokkos::Timer timer;
     teno_setup::Options options;
     options.degree = degree;
     options.nk = n_dof_large;
@@ -1941,9 +1939,9 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
     if (n_failed_large == 0) moments = setup.moments(static_cast<uint32_t>(scale.extent(0)));
     Kokkos::fence();
     const teno_setup::Timings & t = setup.timings();
-    setup_status = logging::format("%s, %.2f s (geometry %.2f s, tables %.2f s, packing %.2f s)",
-                                   setup_on_host ? "host" : Kokkos::DefaultExecutionSpace::name(), timer.seconds(),
-                                   t.geometry, t.tables, t_pack);
+    setup_status = logging::format("on %s; of Setup's numerics time: geometry %.2f s, tables %.2f s, packing %.2f s",
+                                   setup_on_host ? "the host" : Kokkos::DefaultExecutionSpace::name(), t.geometry,
+                                   t.tables, t_pack);
     if (t.n_host_cells > 0) {
         setup_status += logging::format(", %llu cells redone on the host in %.2f s",
                                         static_cast<unsigned long long>(t.n_host_cells), t.host_cells);

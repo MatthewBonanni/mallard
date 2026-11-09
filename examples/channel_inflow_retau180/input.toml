@@ -93,6 +93,7 @@ limiter = "none"
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 17.857142857142858
 T_ref = 1.0

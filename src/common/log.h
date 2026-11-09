@@ -82,20 +82,30 @@ void begin_phase(std::string_view name);
 void end_phase(double seconds);
 
 /**
- * @brief One-line event during the run (e.g. a file written), led by the step and time
- *        so it lines up with the progress table; also an event record of the run log,
- *        with the fields given as (key, JSON text) after its own.
+ * @brief An event during the run that is not a file written (a checkpoint or stop requested, a setting
+ *        changed, a divergence): a remark line between the progress rows, "  >> step 1200, t = 0.012 s:
+ *        stop: STOP file"; also an event record of the run log, with the fields given as (key, JSON text)
+        after its own.
  */
 void event(uint64_t step, double t, std::string_view kind, std::string_view text,
            const std::vector<std::pair<std::string, std::string>> & fields = {});
 
 /**
- * @brief A file written at (step, t): its event line, and an output record of
- *        the run log, which indexes every file the run writes (path, kind, step,
- *        time, reason, run id, and the writer: a [[write_data]] prefix or a probe's file).
+ * @brief A file written during the run: an output record of the run log, which indexes every file the run
+ *        writes (path, kind, step, time, reason, run id, and the writer: a [[write_data]] prefix or a
+ *        probe's file), counted for the progress table's written column (take_written), and a remark line
+ *        too when verbose.
  */
-void output(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
-            std::string_view writer);
+void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+             std::string_view writer);
+
+/** @brief The files written since the last call, by kind in the order first written: "16 vtu, 1 restart". */
+std::string take_written();
+/** @brief Whether files were written since the last take_written. */
+bool written_pending();
+
+/** @brief Remark lines for every file written (mallard -i ... --verbose). */
+void set_verbose(bool on);
 
 /**
  * @brief Warning on stderr from rank 0, for conditions every rank sees alike; also a
@@ -111,7 +121,7 @@ void error(std::string_view message);
 
 /// 1234567 -> "1,234,567".
 std::string count(uint64_t n);
-/// Wall-clock duration: "850 us", "12.3 ms", "4.56 s", "12m 03s", "2h 05m".
+/// Wall-clock duration: "850 us" ("850 µs" in a UTF-8 locale), "12.3 ms", "4.56 s", "12m 03s", "2h 05m".
 std::string duration(double seconds);
 /// Value with an SI suffix and 3 significant digits: "16.3M", "1.20k".
 std::string si(double value);

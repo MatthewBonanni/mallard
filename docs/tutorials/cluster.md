@@ -82,7 +82,7 @@ mpirun -n 2 mallard check input.toml --steps 20 --kokkos-num-threads=2
   status  run         ranks  owned cells  halo cells  after setup  peak    peak of the device
           this check  2      57,600       1,920       498 MB       506 MB  -
 ...
-== Cost ====================================================================================
+== Cost ===================================================================================
   On 2 ranks at 568k cells/s per rank (measured over 20 steps), at the initial time step;
   rank-hours: ranks times wall hours.
   period                   simulated time [s]  steps  wall time  rank-hours
@@ -136,7 +136,7 @@ mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --throughput 5e
           most GPUs with halo < 10% of owned  4          GPUs                  doubling from the fewest
           wall time per unit simulated time   21.0       s                     on 4 GPUs at 50.0M cells/s each
 
-== Cost ====================================================================================
+== Cost ===================================================================================
   On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:
   ranks times wall hours.
   period                   simulated time [s]  steps   wall time  rank-hours
@@ -216,18 +216,24 @@ catch most of what goes wrong on a cluster before it costs a queue wait.
 
 ## 4. Watch and steer the run
 
-Every `[output] check_interval` steps (50 here) the log prints a progress row,
-and between them a row for each file written or request acted on:
+Every `[output] check_interval` steps (50 here) the log prints a progress row.
+Each column keeps one unit, given in the row under the names (`-` for the
+simulated quantities of this nondimensional case), so a column reads straight
+down; `written` counts the files written since the previous row, and a request
+acted on prints a remark between the rows:
 
 ```text
 == Run ====================================================================================
-    step          t       dt   done  wall/step cells/s     ETA    min rho     min p max Ma troubled
-       0 0.0000e+00 2.20e-04   0.0%         --      --      --   1.40e+00  1.00e+00  1.827    0.00%
-       0 0.0000e+00  vtu      solut/dmr_000000.pvtu
-       0 0.0000e+00  restart  restart_000000.restart
-      50 1.0258e-02 1.91e-04   5.1%     131 ms    882k  2m 01s   1.40e+00  9.99e-01  2.148    1.44%
-     100 1.9370e-02 1.81e-04   9.7%     124 ms    927k  1m 59s   1.40e+00  9.93e-01  2.463    1.57%
-     104 2.0000e-02  restart  restart_000104.restart
+  done: of the run, by the stop that comes first; wall/step and throughput (cell updates per
+  second): time stepping since the previous row; ETA: wall time to the stop; min and max:
+  over the cells; troubled: cells where TENO selects stencils (shocks); written: files since
+  the previous row, named in mallard.jsonl and the summary (--verbose: a line each).
+  Nondimensional case (physics.units): no units.
+         step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
+            -           -         -      %         ms     cells/s    h:mm:ss           -           -        -         %  files
+            0  0.0000e+00  2.20e-04    0.0          -           -          -   1.400e+00   1.000e+00    1.827      0.00  1 vtu, 1 restart
+           50  1.0258e-02  1.91e-04    5.1        107    1.08e+06    0:01:39   1.399e+00   9.987e-01    2.148      1.44  -
+          100  1.9370e-02  1.81e-04    9.7        109    1.06e+06    0:01:41   1.399e+00   9.929e-01    2.463      1.57  -
 ```
 
 What to look for in a long job:
@@ -235,7 +241,7 @@ What to look for in a long job:
 - **`done` and `ETA`:** progress by whichever stop condition comes first, and
   the wall time left at the current rate. An ETA beyond the job's time limit
   means a chain of jobs (section 5).
-- **`wall/step` and `cells/s`:** the throughput. Divided by the ranks, it is
+- **`wall/step` and `throughput`:** the speed, in cell updates per second. Divided by the ranks, it is
   what `mallard check --throughput` takes for the next run. A drop partway
   through points at the machine (a slow node, a shared file system writing
   output) more often than at the solver.
@@ -244,6 +250,8 @@ What to look for in a long job:
   with the last valid state written ([Divergence](../guide/running.md#divergence)).
 - **`troubled`:** with TENO, the share of cells at shocks; it grows here as
   the reflected shocks lengthen.
+- **`written`:** the files since the previous row, by kind; the summary and
+  `mallard.jsonl` name them, and `--verbose` prints a line for each.
 
 The same rows go, as JSON, to `mallard.jsonl` ([the run record](../guide/output.md#run-record-mallardjsonl)),
 for scripts and dashboards. While the run goes, `mallard ctl` asks it directly,
@@ -255,19 +263,19 @@ mallard ctl . status
 
 ```text
 state: running
-step: 104
-t: 0.02
-dt: 8.44132e-05
-cfl: 0.4651
-progress: 10.00%
+step: 107
+t: 0.02054644664
+dt: 0.000183095
+cfl: 1
+progress: 10.27%
 stop_at: t_stop = 0.2
-wall: 24.3 s
-wall_per_step: 118 ms
-cells_per_second: 976k
-eta: 1m 59s
+wall: 22.3 s
+wall_per_step: 112 ms
+cells_per_second: 1.03M
+eta: 1m 41s
 cells: 115200
 ranks: 2
-memory_host: 712.89 MiB (peak 947.41 MiB, rank 0)
+memory_host: 734.70 MiB (peak 928.89 MiB, rank 0)
 monitors_step: 100
 min_rho: 1.39867
 min_p: 0.992887
@@ -275,8 +283,7 @@ max_mach: 2.46259
 troubled_cells: 0.0157465
 ```
 
-(The step to t = 0.02 is shortened to land on the restart's time, hence `cfl`
-0.47.) `checkpoint` writes a restart after the current step and carries on,
+`checkpoint` writes a restart after the current step and carries on,
 for instance before trying something risky with `mallard ctl . set`:
 
 ```bash
@@ -284,14 +291,14 @@ mallard ctl . checkpoint
 ```
 
 ```text
-checkpoint at step 106, t = 0.0203634: restart_000106.restart
+checkpoint at step 110, t = 0.0210926: restart_000110.restart
 ```
 
-and the log shows it:
+and the log shows it, with the restart counted in the next row:
 
 ```text
-     106 2.0363e-02  checkpoint requested by mallard ctl
-     106 2.0363e-02  restart  restart_000106.restart
+  >> step 110, t = 0.0210926: checkpoint: requested by mallard ctl
+          150  2.8399e-02  1.81e-04   14.2        113    1.02e+06    0:01:40   1.397e+00   9.922e-01    2.756      1.74  2 restart
 ```
 
 `mallard ctl` must run on the node of rank 0, in the directory the run was
@@ -314,23 +321,40 @@ with a summary of it, here at the end of the third job of section 5:
 
 ```text
 == Health =================================================================================
-  Lowest             rho 1.39 (step 461), p 0.982 (step 800), T 0.703 (step 1000)
-  Activity           troubled_cells 5.36% (ranks 3.97-6.74%) at the last report
-  Conservation       unexplained change mass -1.1e-14, momentum_x 9.9e-15, momentum_y 6.7e-15, energy 1.4e-13
-  Output             output_sync 569 us, output_async 177 us per step (slowest rank)
+  Lowest values at the progress rows, over the cells:
+  quantity  value  units  step   at
+  rho       1.39   -      850    (2.081, 0.2444)
+  p         0.982  -      800    (1.981, 0.1361)
+  T         0.703  -      1,000  (2.414, 0.1528)
+
+  Shares of the cells at the last progress row:
+  activity        all ranks [%]  least rank [%]  most rank [%]
+  troubled_cells  5.36           3.97            6.75
+
+  Conservation: the change of each total that the boundaries, sources and repairs do not
+  explain, relative to the total's scale:
+  total       unexplained change [-]
+  mass        -1.6e-13
+  momentum_x  9.6e-15
+  momentum_y  1.8e-15
+  energy      2.2e-13
+
+  output        per step, slowest rank [ms]
+  output_sync   0.738
+  output_async  0.162
 ```
 
-- **`Lowest`:** the smallest value over the job and when; each row's
-  `margins` also gives the cell centroid `x`, where to look in the next
-  snapshot. Mallard warns once in the log when the density or pressure falls
-  below 10<sup>-3</sup> of its domain mean, before it reaches zero.
-- **`Activity`:** the share of troubled cells over the domain, then on the
+- **Lowest values:** the smallest value over the job, the step and the cell
+  centroid where it occurred: where to look in the next snapshot. Mallard
+  warns once in the log when the density or pressure falls below
+  10<sup>-3</sup> of its domain mean, before it reaches zero.
+- **Shares of the cells:** the troubled cells over the domain, then on the
   least and the most active rank. With MUSCL it is `limited_cells`.
-- **`Conservation`:** the change of each total that the boundaries, sources
+- **Conservation:** the change of each total that the boundaries, sources
   and repairs do not explain, relative to the total. Round-off, as here, is a
   healthy run; Mallard warns above 10<sup>5</sup> machine epsilons, and
   anything near that is a bug to report, not a setting to tune.
-- **`Output`:** the time per step spent writing files, by the time loop
+- **`output`:** the time per step spent writing files, by the time loop
   (`output_sync`) and by the background writers (`output_async`), on the
   slowest rank. Next to `wall/step` it should stay small; when it grows on a
   cluster, the shared file system is the bottleneck.
@@ -351,10 +375,10 @@ for line in open("mallard.jsonl"):
 ```
 
 ```text
-461 0.9873881089968589 0 0
-500 0.989614939736035 0.05876736111111111 2.115455742435417e-13
+453 0.987578570833254 0 0
+500 0.9896149397360391 0.05876736111111111 1.032430645373206e-13
 ...
-1167 0.9874959351011933 0.06744791666666666 1.3776078206902286e-13
+1167 0.9859356686108751 0.06746527777777778 2.2217150853661987e-13
 ```
 
 ## 5. Stop, and resume from the newest restart
@@ -372,19 +396,29 @@ kill -TERM %1
 ```
 
 ```text
-     333 6.0000e-02  restart  restart_000333.restart
+          350  6.2896e-02  1.70e-04   31.4        126    9.13e+05    0:01:30   1.397e+00   9.895e-01    3.337      2.42  1 restart
 Stopping after the current step (Ctrl-C again to stop now)
-     339 6.1022e-02  stop     stop requested by mallard ctl
-     339 6.1022e-02 1.70e-04  30.5%     128 ms    900k  1m 38s   1.39e+00  9.88e-01  3.312    2.38%
-     339 6.1022e-02  vtu      solut/dmr_000002.pvtu
-     339 6.1022e-02  restart  restart_000339.restart
+  >> step 364, t = 0.0652797: stop: stop requested by mallard ctl
+          364  6.5280e-02  1.70e-04   32.6        126    9.18e+05    0:01:29   1.397e+00   9.904e-01    3.331      2.46  1 vtu, 1 restart
 
 == Summary ================================================================================
-  Stopped            stop requested by mallard ctl at step 339, t = 0.0610224
-  Wall time          54.1 s: setup 11.0 s, time stepping 43.0 s, diagnostics 1.34 ms, output 16.9 ms
-  Throughput         907k cells/s, 127 ms per step over 339 steps
-  Writing            43.5MB of files in 8.21 ms (in the background)
-  Files              3 vtu (solut/dmr.pvd), 6 restart
+  Stopped: stop requested by mallard ctl, at step 364, t = 0.0652797
+  phase          wall time [s]  of the total [%]
+  setup          10.63          19.8
+  time stepping  42.92          80.0
+  diagnostics    0.003741       0.0
+  output         0.0213         0.0
+  total          53.65          100.0
+
+  quantity            value     units    basis
+  throughput          9.77e+05  cells/s  over 364 steps
+  wall time per step  118       ms       time stepping
+  written             43.5      MB       in 0.0228 s of writing, in the background
+
+  Files (-: one file, appended to as the run goes):
+  kind     files  index, or file
+  vtu      3      solut/dmr.pvd
+  restart  6      last restart_000364.restart
 ```
 
 The stop says `mallard ctl` because that is how `mpirun.sh` asks: `mpirun`
@@ -396,7 +430,7 @@ that is the stop, not an error. A scheduler's grace period between its
 
 Resuming is running the same script again. Its command line has `--restart
 latest`, which on the first run found no restart file and started from
-`[initialize]`; now it finds the newest complete one, `restart_000339.restart`,
+`[initialize]`; now it finds the newest complete one, `restart_000364.restart`,
 and starts from it in place of the input's `[initialize]` table:
 
 ```bash
@@ -404,11 +438,12 @@ NRANKS=2 THREADS=2 ./mpirun.sh > run.log 2>&1 &
 ```
 
 ```text
-  Initial state      restart from restart_000339.restart (step 339, t = 0.0610224)
+  Initial state      restart from restart_000364.restart (step 364, t = 0.0652797)
   ...
-    step          t       dt   done  wall/step cells/s     ETA    min rho     min p max Ma troubled
-     339 6.1022e-02 1.70e-04  30.5%         --      --      --   1.39e+00  9.88e-01  3.312    0.00%
-     350 6.2896e-02 1.70e-04  31.4%     160 ms    722k  2m 09s   1.40e+00  9.89e-01  3.337    2.42%
+         step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
+            -           -         -      %         ms     cells/s    h:mm:ss           -           -        -         %  files
+          364  6.5280e-02  1.70e-04   32.6          -           -          -   1.397e+00   9.904e-01    3.331      0.00  -
+          400  7.1405e-02  1.70e-04   35.7        127    9.05e+05    0:01:37   1.393e+00   9.906e-01    3.355      2.58  -
 ```
 
 This time stop it with `mallard ctl`, which replies once the run has ended:
@@ -418,7 +453,7 @@ mallard ctl . stop
 ```
 
 ```text
-stopped at step 461, t = 0.0816988; restart: restart_000461.restart
+stopped at step 453, t = 0.0803399; restart: restart_000453.restart
 ```
 
 and run the script a third time, in the foreground, to the end:
@@ -432,9 +467,17 @@ exit 0
 ```
 
 ```text
-  Stopped            t_stop = 0.2 reached at step 1,167, t = 0.2
-  Wall time          1m 57s: setup 12.5 s, time stepping 1m 45s, diagnostics 22.1 ms, output 24.7 ms
-  Throughput         778k cells/s, 148 ms per step over 706 steps
+  Stopped: t_stop = 0.2 reached, at step 1,167, t = 0.2
+  phase          wall time [s]  of the total [%]
+  setup          12.23          10.9
+  time stepping  99.69          88.9
+  diagnostics    0.03069        0.0
+  output         0.03783        0.0
+  total          112.1          100.0
+
+  quantity            value     units    basis
+  throughput          8.25e+05  cells/s  over 714 steps
+  wall time per step  140       ms       time stepping
 ```
 
 The exit status tells a job chain what to do next: 0, finished; 1, an error
@@ -455,9 +498,9 @@ python3 $MALLARD/tutorials/cluster/plot_run.py . --out .
 ```
 
 ```text
-job 1: steps 0 to 339, t = 0 to 0.06102: stop requested by mallard ctl
-job 2: steps 339 to 461, t = 0.06102 to 0.0817: stop requested by mallard ctl
-job 3: steps 461 to 1167, t = 0.0817 to 0.2: t_stop = 0.2 reached
+job 1: steps 0 to 364, t = 0 to 0.06528: stop requested by mallard ctl
+job 2: steps 364 to 453, t = 0.06528 to 0.08034: stop requested by mallard ctl
+job 3: steps 453 to 1167, t = 0.08034 to 0.2: t_stop = 0.2 reached
 ```
 
 ![Top: density at t = 0.2 with the two ranks' halves of the domain. Bottom: simulated time against wall time over the three jobs, with the checkpoint and the two stops](../images/tutorials/cluster_run-light.svg#gh-light-mode-only)

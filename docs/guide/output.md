@@ -257,24 +257,50 @@ check_interval = 100   # a progress row every 100 steps
 *Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
-stage, summaries of mesh, physics, numerics, boundaries and output, then one
-progress row every `[output] check_interval` steps (default 1):
+stage, summaries of mesh, physics (with the case's units, `physics.units`),
+numerics, boundaries and output, then one progress row every
+`[output] check_interval` steps (default 1). A note above the table says what
+the columns are, and under the column names a row gives their units:
 
-| Column | Meaning |
-|---|---|
-| `step`, `t`, `dt` | Step, time and time step |
-| `done` | Fraction of the run, by whichever stop condition comes first |
-| `wall/step`, `cells/s`, `ETA` | Time-stepping wall time per step, cell updates per second, time remaining |
-| `min rho`, `min p`, `max Ma` | Positivity and Mach number at a glance |
-| `troubled` | TENO: share of cells selecting stencils (shocks) |
+```text
+       step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
+          -           s         s      %         ms     cells/s    h:mm:ss      kg/m^3          Pa        -         %  files
+          0  0.0000e+00  8.78e-04    0.0          -           -          -   1.400e+00   1.000e+00    1.827      0.00  1 vtu, 1 restart
+         10  8.6159e-03  8.53e-04   16.7       37.9    1.90e+05    0:00:02   1.399e+00   9.991e-01    1.881      5.72  2 vtu
+         20  1.7029e-02  8.28e-04   33.3       34.2    2.10e+05    0:00:02   1.399e+00   9.990e-01    1.882      5.89  3 vtu
+         30  2.4894e-02  8.08e-04   50.0       40.5    1.78e+05    0:00:02   1.399e+00   9.989e-01    1.878      6.19  2 vtu, 1 restart
+```
 
-Chemistry adds the share of cells advanced and the largest sub-step count.
-Written files appear as rows with their step and time. The run ends with a
-summary of wall time (setup, time stepping, diagnostics, output) and
-throughput. The same information, in machine-readable form, goes to the
-[run record](#run-record-mallardjsonl). Errors go to stderr from any rank. Colors are off when the output
-is not a terminal or `NO_COLOR` is set (`CLICOLOR_FORCE=1` forces them, e.g.
-under `mpirun`).
+| Column | Units | Meaning |
+|---|---|---|
+| `step`, `t`, `dt` | -, s, s | Step, simulated time and time step |
+| `done` | % | Of the run, by whichever stop condition comes first |
+| `wall/step`, `throughput`, `ETA` | ms, cells/s, h:mm:ss | Time-stepping wall time per step and cell updates per second since the previous row, wall time to the stop |
+| `min rho`, `min p`, `max Ma` | kg/m^3, Pa, - | Positivity and Mach number at a glance, over the cells |
+| `troubled` | % | TENO: share of cells selecting stencils (shocks) |
+| `min T`, `max T`, `sum Y-1` | K, K, - | Mixtures: temperature range, and the largest \|sum of the mass fractions - 1\| |
+| `reacting`, `chem/cell` | %, steps | Chemistry: share of cells advanced, most integrator steps of a cell |
+| `written` | files | Files written since the previous row, by kind (`2 vtu, 1 restart`) |
+
+Every column keeps one unit, so a column reads straight down. In a
+nondimensional case (`physics.units = "nondimensional"`, [Units](input_files.md#units))
+the units row shows `-` for the simulated quantities. The files themselves
+are named in the [run record](#run-record-mallardjsonl) and the summary;
+`mallard -i input.toml --verbose` adds a line for each between the rows.
+Requests acted on during the run (a checkpoint, a stop, a setting changed,
+[Run control](running.md)) and a divergence print a remark between the rows:
+
+```text
+  >> step 339, t = 0.0610224: stop: stop requested by mallard ctl
+```
+
+The run ends with a **Summary**: why and where it stopped, a table of wall
+time by phase (setup, time stepping and its chemistry, diagnostics, output),
+the throughput, the bytes written and every file kind written, then the
+[run health](#run-health). The same information, in machine-readable form,
+goes to the run record. Errors go to stderr from any rank. Colors are off when
+the output is not a terminal or `NO_COLOR` is set (`CLICOLOR_FORCE=1` forces
+them, e.g. under `mpirun`).
 
 ### Run record: `mallard.jsonl`
 

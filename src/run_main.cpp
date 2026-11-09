@@ -55,6 +55,7 @@ std::string error_text(const std::exception & e) {
 /** @brief With check: checks the case, and with resolve writes its resolved input (and nothing else) to stdout. */
 int solve(const cli::Args & args, const std::string & input_file, const CheckOptions * check, bool resolve = false) {
     const std::string restart_file = args.value_or("--restart", "");
+    logging::set_verbose(args.has("--verbose"));
     int argc = args.argc;
     char ** argv = args.argv;
     // A checkpoint requested while MPI and the device start up is kept for the first step

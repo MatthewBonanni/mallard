@@ -90,6 +90,7 @@ type = "MUSCL"
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 0.7142857142857143
 T_ref = 0.7142857142857143

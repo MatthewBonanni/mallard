@@ -70,20 +70,21 @@ Euler Euler::from_input(const Input & input) {
 }
 
 logging::Items Euler::summary() const {
-    using logging::real;
+    auto real = [](const rtype v, const char * unit) { return units::with(logging::real(double(v)), unit); };
     logging::Items out = {
         {"Model", is_viscous() ? "Navier-Stokes" : "Euler"},
-        {"Gas", "gamma " + real(double(gamma)) + ", R " + real(double(R)) + ", cp " + real(double(cp)) + ", cv " + real(double(cv))},
+        {"Gas", "gamma " + logging::real(double(gamma)) + ", R " + real(R, "J/(kg K)") + ", cp " + real(cp, "J/(kg K)") +
+                    ", cv " + real(cv, "J/(kg K)")},
     };
     if (is_viscous()) {
         if (viscosity_model == ViscosityModel::SUTHERLAND) {
-            out.emplace_back("Viscosity", "Sutherland, mu " + real(double(mu_ref)) + " at T " + real(double(T_mu_ref)) + ", S " +
-                                              real(double(S_mu)) + ", Pr " + real(double(Pr)));
+            out.emplace_back("Viscosity", "Sutherland, mu " + real(mu_ref, "Pa s") + " at T " + real(T_mu_ref, "K") +
+                                              ", S " + real(S_mu, "K") + ", Pr " + logging::real(double(Pr)));
         } else if (viscosity_model == ViscosityModel::POWER_LAW) {
-            out.emplace_back("Viscosity", "power law, mu " + real(double(mu_ref)) + " (T / " + real(double(T_mu_ref)) +
-                                              ")^" + real(double(n_mu)) + ", Pr " + real(double(Pr)));
+            out.emplace_back("Viscosity", "power law, mu " + real(mu_ref, "Pa s") + " (T / " + real(T_mu_ref, "K") +
+                                              ")^" + logging::real(double(n_mu)) + ", Pr " + logging::real(double(Pr)));
         } else {
-            out.emplace_back("Viscosity", "constant, mu " + real(double(mu_ref)) + ", Pr " + real(double(Pr)));
+            out.emplace_back("Viscosity", "constant, mu " + real(mu_ref, "Pa s") + ", Pr " + logging::real(double(Pr)));
         }
     }
     return out;

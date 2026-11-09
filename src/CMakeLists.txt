@@ -72,6 +72,7 @@ add_library(MallardCore STATIC
     solver/solver.cpp
     solver/solver_check.cpp
     solver/check_report.cpp
+    solver/run_report.cpp
     solver/solver_resolution.cpp
     solver/solver_chemistry.cpp
     solver/solver_control.cpp

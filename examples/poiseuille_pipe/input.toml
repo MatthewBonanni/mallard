@@ -46,6 +46,7 @@ type = "MUSCL"
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 axisymmetric = true
 gamma = 1.4
 p_ref = 0.7142857142857143

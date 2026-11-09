@@ -363,9 +363,3 @@ void Solver::report_health() {
         }
     }
 }
-
-void Solver::health_summary() const {
-    if (!run_health.on) return;
-    logging::section("Health");
-    for (const auto & [key, value] : health::summary(run_health.last)) logging::item(key, value);
-}
