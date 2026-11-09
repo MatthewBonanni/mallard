@@ -12,6 +12,8 @@
 #ifndef PERIODIC_MAPS_H
 #define PERIODIC_MAPS_H
 
+#include <type_traits>
+
 #include <Kokkos_Core.hpp>
 
 #include "common_typedef.h"
@@ -52,19 +54,24 @@ struct PeriodicMaps {
         FOR_I_DIM v[i] = r[i];
     }
 
-    /** @brief y = Q_s x + t_s: a neighbor's point in the frame of the cell that sees it. */
+    /**
+     * @brief y = Q_s x + t_s: a neighbor's point in the frame of the cell that
+     *        sees it. ROTATIONS = false leaves Q_s out (see with_rotations).
+     */
+    template <bool ROTATIONS = true>
     KOKKOS_INLINE_FUNCTION
     void forward(const uint8_t s, const rtype * x, rtype * y) const {
         FOR_I_DIM y[i] = x[i];
-        if (rotated()) rotate(s, y);
+        if (ROTATIONS && rotated()) rotate(s, y);
         FOR_I_DIM y[i] = y[i] + shifts(s, i);
     }
 
     /** @brief y = Q_s^T (x - t_s): the inverse of forward. */
+    template <bool ROTATIONS = true>
     KOKKOS_INLINE_FUNCTION
     void backward(const uint8_t s, const rtype * x, rtype * y) const {
         FOR_I_DIM y[i] = x[i] - shifts(s, i);
-        if (rotated()) unrotate(s, y);
+        if (ROTATIONS && rotated()) unrotate(s, y);
     }
 
     /** @brief The velocity (or momentum) of a state vector u, components [1, N_DIM], by Q_s or Q_s^T. */
@@ -105,5 +112,20 @@ struct PeriodicMaps {
         }
     }
 };
+
+/**
+ * @brief f(std::true_type()) if maps turns vectors, else f(std::false_type()):
+ *        kernels instantiated with ROTATIONS = decltype(arg)::value leave the
+ *        rotations out on meshes without rotational pairs, where they would
+ *        only take registers.
+ */
+template <typename F>
+void with_rotations(const PeriodicMaps & maps, F && f) {
+    if (maps.rotated()) {
+        f(std::true_type());
+    } else {
+        f(std::false_type());
+    }
+}
 
 #endif // PERIODIC_MAPS_H

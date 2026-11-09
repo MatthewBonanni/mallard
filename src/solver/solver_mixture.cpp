@@ -422,9 +422,12 @@ void Solver::update_transport() {
     Kokkos::parallel_for("mixture_transport", mesh->n_cells,
                          MixtureTransportFunctor{mixture, W_cells, cell_scalars, cell_transport, cell_diffusion,
                                                  transport_values});
-    Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
-                         MixtureGradientFunctor{viscous_gradient, transport_values, transport_gradients,
-                                                bc_transport_values, mixture.n_species, cell_transport});
+    with_rotations(mesh->periodic_maps(), [&](auto rotations) {
+        Kokkos::parallel_for("mixture_gradients", mesh->n_cells,
+                             MixtureGradientFunctor<decltype(rotations)::value>{
+                                 viscous_gradient, transport_values, transport_gradients, bc_transport_values,
+                                 mixture.n_species, cell_transport});
+    });
 }
 
 void Solver::freeze_thermodynamics() {
@@ -498,27 +501,28 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
         budget.convective = kinetic_energy_rate();
         budget.pressure_work = pressure_work_rate();
     }
-    MixtureViscousFluxFunctor viscous_functor;
+    bool sgs_only = false;
     auto viscous_flux = [&] {
-        if (rhs_faces.extent(0) == 0) {
-            Kokkos::parallel_for("mixture_viscous_flux", mesh->n_faces, viscous_functor);
-        } else {
-            Kokkos::View<uint32_t *> list = rhs_faces;
-            Kokkos::parallel_for("mixture_viscous_flux", list.extent(0),
-                                 OverFaces<MixtureViscousFluxFunctor>{viscous_functor, list});
-        }
+        with_rotations(mesh->periodic_maps(), [&](auto rotations) {
+            MixtureViscousFluxFunctor<decltype(rotations)::value> functor{
+                mesh->face_normals, mesh->face_measure, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
+                mesh->periodic_maps(), mesh->face_shift, boundary_data, mixture, cell_scalars, transport_values,
+                transport_gradients, cell_transport, cell_diffusion, face_flux, species_slots, axisymmetric,
+                mesh->cell_covariance, les_coefficients, sgs_only,
+                double_flux ? face_energy_1 : Kokkos::View<rtype *>()};
+            if (rhs_faces.extent(0) == 0) {
+                Kokkos::parallel_for("mixture_viscous_flux", mesh->n_faces, functor);
+            } else {
+                Kokkos::View<uint32_t *> list = rhs_faces;
+                Kokkos::parallel_for("mixture_viscous_flux", list.extent(0),
+                                     OverFaces<decltype(functor)>{functor, list});
+            }
+        });
     };
     if (is_viscous()) {
         update_transport();
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         if (tfles_on) thicken_transport();
-        viscous_functor = MixtureViscousFluxFunctor{mesh->face_normals, mesh->face_measure, mesh->face_coords,
-                                                    mesh->cell_coords, mesh->cells_of_face, mesh->periodic_maps(),
-                                                    mesh->face_shift, boundary_data, mixture, cell_scalars,
-                                                    transport_values, transport_gradients, cell_transport,
-                                                    cell_diffusion, face_flux, species_slots, axisymmetric,
-                                                    mesh->cell_covariance, les_coefficients, false,
-                                                    double_flux ? face_energy_1 : Kokkos::View<rtype *>()};
         viscous_flux();
         if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
     }
@@ -565,7 +569,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     if (budget_pass && les_on) {
         // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
         Kokkos::deep_copy(face_flux, 0.0_r);
-        viscous_functor.sgs_only = true;
+        sgs_only = true;
         viscous_flux();
         budget.sgs = kinetic_energy_rate();
         budget.viscous -= budget.sgs;
