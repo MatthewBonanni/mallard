@@ -204,12 +204,13 @@ under-dissipate there, as the spectra show.
 **The model's gradient.** The models' velocity gradient is the least-squares
 gradient on the face neighbors, second order: on uniform cells its transfer
 function is $\sin(k h)/(k h)$ per direction, near zero at the cutoff. On the
-same fields, Sigma's mean eddy viscosity from these gradients is 0.54 ($32^3$)
-and 0.56 ($48^3$) of its value from the exact gradient of the band-limited
-field: the constant 1.35 acts like 1.8, the value that the coarse meshes
-needed in [section 8.1](../design/les.md#81-decaying-isotropic-turbulence-comte-bellot--corrsin-1971)
-of the design notes. Fourth- and sixth-order central gradients recover 0.65
-and 0.69.
+same fields, Sigma's mean eddy viscosity from these gradients is 0.30-0.65 of
+its value from the exact gradient of the band-limited field (from 32³ to
+128³; lower with the hybrid flux, which leaves more energy at the cutoff, and
+higher with HLLC). The literature constants were set with such gradients
+in mind: undoing the attenuation over-dissipates on resolved meshes, so
+the constants are left as they are
+([design notes](../design/les.md#31-order-aware-models-660)).
 
 With `gradients = "reconstruction"` (TENO), the models take in each smooth cell
 the gradient of TENO's central polynomial $u_i(\mathbf{x}) = \overline{u}_i +

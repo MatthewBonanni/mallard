@@ -425,23 +425,83 @@ Hu & Adams 2019; Schranner et al. 2015), ALDM (Hickel, Adams & Domaradzki
 effective eddy viscosities (Domaradzki et al. 2003), high-order DG/FR LES and
 their filter widths (Moura, Sherwin & Peiró 2015; Beck et al. 2016; Flad &
 Gassner), the order of the SGS discretization (Banhos & Matheou 2025, no effect
-in their boundary layers), and order-aware TFLES/PaSR (nothing found).
+in their boundary layers), order-aware TFLES/PaSR (nothing found); and, for phase 3 (2026-11-06), local
+numerical dissipation (Schranner et al. 2015), low-mesh-Reynolds corrections
+(Voke 1996, after Pao 1965), and balancing numerical and eddy viscosity (Sun &
+Verstappen 2025; Rubio et al. 2025, arXiv:2512.04574; Duan & Wang 2024).
 Evaluating the model on the element's polynomial is standard in DG and
 spectral-element LES (Beck et al. 2016); taking it from a finite-volume
 reconstruction's polynomial is an adaptation of that, and the attenuation
 diagnosis is Domaradzki's and ALDM's method. **Verdict: not new; no row in the
 [originality page](../numerics/originality.md).**
 
-**Recommendation.** Do not make `gradients = "reconstruction"` the default for
-TENO, and do not land it as is: it improves under-resolved meshes and
-degrades resolved ones. What these data ask for is a model that supplies the
-dissipation the scheme does not, $\nu_\mathrm{sgs}(k) \approx
-\nu_\mathrm{target}(k) - \nu_\mathrm{num}(k)$, which shrinks as the scheme
-alone approaches the target, the explicit analog of ALDM's calibration; a
-constant or the Germano procedure on top of a fixed scheme cannot do it, as
-the C scan and the dynamic rows show. That needs a local estimate of the
-scheme's dissipation (the budget's $\varepsilon_\mathrm{num}$ is global), and
-validation at 64³-128³ on GPUs and on the channel.
+**Phase 3: calibrating the constants to the numerics.** The aim was for
+Mallard to set each model's constant (or its gradient) from the numerics in
+use, without changing the model's form, so that users need not tune it. C
+scans on the same set-up, plus 128³ on one A100 (spectral error at stations
+2 / 3; LS = least-squares gradients, rc = reconstruction gradients):
+
+| Numerics | Mesh | Default (LS, C = 1.35) | Other constants |
+|---|---|---|---|
+| MUSCL + hybrid | 32³ | 0.153 / 0.151 | LS 1.8: **0.103 / 0.082** |
+| MUSCL + hybrid | 48³ | 0.144 / 0.135 | LS 1.8: **0.080 / 0.060** |
+| MUSCL + hybrid | 64³ | 0.107 / 0.104 | LS 1.8: **0.058 / 0.063** |
+| MUSCL + hybrid | 128³ | **0.063 / 0.085** | LS 1.55: 0.082 / 0.102; LS 1.8: 0.124 / 0.141 |
+| MUSCL + HLLC | 32³ | 0.083 / 0.077 | LS 1.6: **0.062 / 0.067** |
+| MUSCL + HLLC | 48³ | 0.087 / 0.111 | LS 1.1: 0.101 / 0.102 |
+| TENO5 + HLLC | 32³ | 0.112 / 0.113 | LS 1.6: 0.087 / 0.089; LS 1.9: **0.062 / 0.084**; LS 2.3: 0.069 / 0.135; rc 1.1: 0.119 / 0.122; rc 1.6: 0.066 / 0.083 |
+| TENO5 + HLLC | 48³ | 0.107 / 0.115 | LS 1.6: 0.094 / 0.126; rc 0.9: 0.135 / 0.128; rc 1.1: 0.115 / 0.117 |
+| TENO5 + HLLC | 64³ | 0.117 / 0.140 | LS 1.1: 0.125 / 0.127; rc 0.9: 0.129 / 0.127; rc 1.1: 0.119 / 0.133 |
+| TENO5 + HLLC | 128³ | 0.187 / 0.222 | rc 1.35: 0.208 / 0.242 |
+
+- **The best constant falls with resolution for every scheme.** It is above
+  1.8 to 64³ and at most 1.35 at 128³ with the hybrid flux, and it falls from
+  about 1.9 at 32³ toward 0 by 128³ with HLLC. The set-up is not the cause:
+  with the hybrid flux, the error at a fixed constant falls under refinement
+  (and the 64³ and 128³ values reproduce section 8.1).
+- **With HLLC, the scheme sets an error floor** from 64³ on. All runs,
+  including those without a model, have an energy excess around
+  $0.2$-$0.3\,k_c$ and a deficit above about $0.4\,k_c$, the cascade blocked
+  by the upwind dissipation. HLLC's dissipation at $k_c$ scales like
+  $c\Delta$, the needed eddy viscosity like $\Delta^{4/3}$, and here
+  $c \approx 10\,u'$.
+- **Three parameter-free adjustments were tested, and none tracks the best
+  constant.**
+  - *Undoing the least-squares attenuation*, $C/\sqrt{r}$. On the
+    hybrid-flux fields $r$ (Sigma's least-squares eddy viscosity over its
+    exact-gradient value) is 0.34, 0.35 and 0.44 at 32³, 64³ and 128³ at
+    station 2 (0.30, 0.34, 0.54 at station 3). On HLLC fields, whose cutoff is
+    damped, it is 0.54, 0.60 and 0.65 at 32³-64³. The correction would set
+    $C \approx 2.0$-$2.3$ at 128³, where 1.35 is best.
+  - *Lilly's argument on a Pao spectrum* ([Pao 1965](../references.md#pao-1965),
+    after [Voke 1996](../references.md#voke-1996)). It gives a parameter-free
+    low-mesh-Reynolds factor: with $\rho = \nu_{t,\infty}/\nu$, solve
+    $q = \exp(-\rho^{-2/3}(1-q)^{1/3})$ and set $\nu_t = \nu\,q/(1-q)$, which
+    recovers Lilly's $C_s = 0.18$ as $\rho \to \infty$. At CBC's $\rho$ of
+    1-6 it lowers $\nu_t$ by 3-20%, far less than the data ask for.
+  - *Subtracting the scheme's own dissipation*,
+    $\nu_t = \max(0, \nu_\mathrm{target} - \nu_\mathrm{num})$, with
+    $\nu_\mathrm{num}$ from the kinetic-energy budget (localizable after
+    [Schranner et al. 2015](../references.md#schranner-2015)). With HLLC,
+    $\varepsilon_\mathrm{num}$ is 1.6-1.8 times Sigma's dissipation at every
+    resolution, so the subtraction removes the model even at 32³-64³, where
+    it is needed: TENO5 without a model scores 0.184 / 0.204 at 32³. It
+    would work only with a fitted fraction of $\nu_\mathrm{num}$.
+- The dynamic procedure, with either gradient, lowers C and is worse at
+  32³-48³ (0.114 / 0.119 and 0.114 / 0.118); at 64³ it matches the default
+  (0.121 / 0.131).
+
+**Recommendation.** Keep the defaults (the literature constants with the
+least-squares gradients) for every model and scheme. No parameter-free
+adjustment beat them at every resolution from 32³ to 128³, and a fitted one
+was ruled out. `gradients = "reconstruction"` stays opt-in and experimental:
+it helps TENO on coarse meshes (32³) and hurts from 64³ on. For high-order
+LES, the constant is not the problem: TENO5 with an upwind flux is limited by
+the scheme from 64³ on (0.19 / 0.22 at 128³, against 0.063 / 0.085 for
+MUSCL + hybrid), and TENO with the hybrid flux feeds energy into the resolved
+field (section 8.1). Which flux TENO should use for LES is an open question
+for 0.10.0. Section 8.1's advice stands: $C = 1.5$-$1.8$ for Sigma when
+$k_c$ lies in the inertial range, checked against the budget and the spectrum.
 
 ## 4. Keeping the model's dissipation dominant
 

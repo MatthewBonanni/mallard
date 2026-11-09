@@ -111,6 +111,12 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the order of the model's gradients, `[les] gradients` (LES design notes, section 3.1).
 - <a id="beck-2016"></a>A. D. Beck, D. G. Flad, C. Tonhäuser, G. Gassner and C.-D. Munz, On the influence of polynomial de-aliasing on subgrid scale models, *Flow Turbul. Combust.* 97, 475–511 (2016). [doi:10.1007/s10494-016-9704-y](https://doi.org/10.1007/s10494-016-9704-y)
   Used in: models evaluated on the element polynomials of high-order LES, `[les] gradients` (LES design notes, section 3.1).
+- <a id="pao-1965"></a>Y.-H. Pao, Structure of turbulent velocity and scalar fields at large wavenumbers, *Phys. Fluids* 8, 1063–1075 (1965). [doi:10.1063/1.1761356](https://doi.org/10.1063/1.1761356)
+  Used in: the low-mesh-Reynolds factor tested for the model constants (LES design notes, section 3.1).
+- <a id="voke-1996"></a>P. R. Voke, Subgrid-scale modelling at low mesh Reynolds number, *Theor. Comput. Fluid Dyn.* 8, 131–143 (1996). [doi:10.1007/BF00312367](https://doi.org/10.1007/BF00312367)
+  Used in: the low-mesh-Reynolds factor tested for the model constants (LES design notes, section 3.1).
+- <a id="schranner-2015"></a>F. S. Schranner, J. A. Domaradzki, S. Hickel and N. A. Adams, Assessing the numerical dissipation rate and viscosity in numerical simulations of fluid flows, *Comput. Fluids* 114, 84–97 (2015). [doi:10.1016/j.compfluid.2015.02.011](https://doi.org/10.1016/j.compfluid.2015.02.011)
+  Used in: the local numerical dissipation tested for the model constants (LES design notes, section 3.1).
 - <a id="scotti-1993"></a>A. Scotti, C. Meneveau and D. K. Lilly, Generalized Smagorinsky model for anisotropic grids, *Phys. Fluids A* 5, 2306–2308 (1993). [doi:10.1063/1.858537](https://doi.org/10.1063/1.858537)
   Used in: `[les] filter_width = "scotti"`.
 - <a id="vreman-geurts-kuerten-1995"></a>B. Vreman, B. Geurts and H. Kuerten, Subgrid-modelling in LES of compressible flow, *Appl. Sci. Res.* 54, 191–203 (1995). [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
