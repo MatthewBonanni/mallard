@@ -296,23 +296,21 @@ struct AdvanceFunctor {
             for (uint32_t k = 0; k <= ns; k++) g[k] = cell_forcing(c, k, rho, e);
             const chemistry::SerialLanes one;
             const double rho_end = static_cast<double>(U_end(c, 0));
-            const Clip clipped = clip(c, rho, rho_end);
             r = sparse ? chemistry::advance_reactor<true>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
                                                           Y + ns, pivots, chemistry::NoObserver(), &pattern,
-                                                          nullptr, g, clipped)
+                                                          nullptr, g, chemistry::NoRepair())
                        : chemistry::advance_reactor<false>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
                                                            Y + ns, pivots, chemistry::NoObserver(), &pattern,
-                                                           nullptr, g, clipped);
+                                                           nullptr, g, chemistry::NoRepair());
             for (uint32_t k = 0; k < ns; k++) rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]);
         } else {
             const chemistry::SerialLanes one;
-            const Clip clipped = clip(c, rho, rho);
             r = sparse ? chemistry::advance_reactor<true>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
                                                           Y + ns, pivots, chemistry::NoObserver(), &pattern,
-                                                          nullptr, nullptr, clipped)
+                                                          nullptr, nullptr, chemistry::NoRepair())
                        : chemistry::advance_reactor<false>(one, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options,
                                                            Y + ns, pivots, chemistry::NoObserver(), &pattern,
-                                                           nullptr, nullptr, clipped);
+                                                           nullptr, nullptr, chemistry::NoRepair());
             for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
         }
         chem_h(c) = static_cast<rtype>(h);
@@ -347,7 +345,7 @@ struct AdvanceFunctor {
         const chemistry::RosenbrockResult r = chemistry::advance_reactor<Sparse>(
             team, gas.thermo, kinetics, rho, cell_dt(c), Y, T, h, options, Y + ns, &pivot(slot, 0),
             chemistry::NoObserver(), &pattern, fast, g,
-            clip(c, rho, forcing_offset > 0 ? static_cast<double>(U_end(c, 0)) : rho));
+            chemistry::NoRepair());
         if (forcing_offset > 0) {
             const double rho_end = static_cast<double>(U_end(c, 0));
             team.for_each(ns, [&](const uint32_t k) { rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]); });
