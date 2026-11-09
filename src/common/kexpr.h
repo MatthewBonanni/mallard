@@ -187,6 +187,17 @@ KOKKOS_INLINE_FUNCTION double binary(const Op op, const double a, const double b
     }
 }
 
+/**
+ * @brief Point l of lane-batched variables. At namespace scope so that it
+ *        takes the visibility of Vars (hidden for nvcc's anonymous namespaces).
+ */
+template <typename Vars>
+struct Lane {
+    const Vars & vars;
+    int l;
+    KOKKOS_INLINE_FUNCTION double operator()(const uint16_t i) const { return vars(l, i); }
+};
+
 } // namespace detail
 
 /**
@@ -281,6 +292,122 @@ KOKKOS_INLINE_FUNCTION double evaluate(const Instr * code, const uint32_t n, con
     return evaluate(code, n, vars, runaway);
 }
 
+/** @brief Whether code[0, n) has jumps (control flow), which evaluate_lanes does not take. */
+KOKKOS_INLINE_FUNCTION bool has_jumps(const Instr * code, const uint32_t n) {
+    for (uint32_t i = 0; i < n; i++) {
+        const Op op = code[i].op;
+        if (op == Op::JUMP || op == Op::JUMP_IF_NOT || op == Op::ITERATE || op == Op::UNTIL) return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Evaluate a program without jumps at K points at once: each
+ *        instruction over all points before the next, which pays the
+ *        dispatch once per K points and lets the CPU overlap them. Each point
+ *        gets the operations of evaluate, so the values are its bits.
+ *        vars(l, i) is variable i at point l; out[l] the value at point l.
+ */
+template <int K, typename Vars>
+KOKKOS_INLINE_FUNCTION void evaluate_lanes(const Instr * code, const uint32_t n, const Vars & vars, double * out) {
+    double s[MAX_STACK][size_t(K)];
+    int top = -1;
+    for (uint32_t i = 0; i < n; i++) {
+        const Instr & in = code[i];
+        switch (in.op) {
+            case Op::CONST:
+                ++top;
+                for (int l = 0; l < K; l++) s[top][l] = in.value;
+                break;
+            case Op::VAR:
+                ++top;
+                for (int l = 0; l < K; l++) s[top][l] = vars(l, in.index);
+                break;
+            case Op::IPOW:
+                for (int l = 0; l < K; l++) s[top][l] = detail::ipow(s[top][l], in.index);
+                break;
+            case Op::IPOWINV:
+                for (int l = 0; l < K; l++) s[top][l] = 1.0 / detail::ipow(s[top][l], in.index);
+                break;
+            case Op::SELECT:
+                top -= 2;
+                for (int l = 0; l < K; l++) s[top][l] = s[top][l] != 0.0 ? s[top + 1][l] : s[top + 2][l];
+                break;
+            case Op::CLAMP:
+                top -= 2;
+                for (int l = 0; l < K; l++) {
+                    s[top][l] = s[top + 1][l] < s[top][l] ? s[top][l]
+                                                          : (s[top + 1][l] > s[top + 2][l] ? s[top + 2][l] : s[top + 1][l]);
+                }
+                break;
+            case Op::INRANGE:
+                top -= 2;
+                for (int l = 0; l < K; l++) s[top][l] = detail::truth(s[top][l] <= s[top + 1][l] && s[top + 1][l] <= s[top + 2][l]);
+                break;
+            case Op::LOCALS:
+                for (int j = 0; j < in.index; j++) {
+                    for (int l = 0; l < K; l++) s[j][l] = 0.0;
+                }
+                top = in.index - 1;
+                break;
+            case Op::LOAD:
+                top++;
+                for (int l = 0; l < K; l++) s[top][l] = s[in.index][l];
+                break;
+            case Op::STORE:
+                for (int l = 0; l < K; l++) s[in.index][l] = s[top][l];
+                break;
+            case Op::POP: top--; break;
+            case Op::KEEP:
+                for (int l = 0; l < K; l++) s[in.index][l] = s[top][l];
+                top = in.index;
+                break;
+            case Op::DROP: top = in.index; break;
+            case Op::NEG:
+                for (int l = 0; l < K; l++) s[top][l] = -s[top][l];
+                break;
+            case Op::ADD:
+                top--;
+                for (int l = 0; l < K; l++) s[top][l] = s[top][l] + s[top + 1][l];
+                break;
+            case Op::SUB:
+                top--;
+                for (int l = 0; l < K; l++) s[top][l] = s[top][l] - s[top + 1][l];
+                break;
+            case Op::MUL:
+                top--;
+                for (int l = 0; l < K; l++) s[top][l] = s[top][l] * s[top + 1][l];
+                break;
+            case Op::DIV:
+                top--;
+                for (int l = 0; l < K; l++) s[top][l] = s[top][l] / s[top + 1][l];
+                break;
+            case Op::SIN:
+                for (int l = 0; l < K; l++) s[top][l] = Kokkos::sin(s[top][l]);
+                break;
+            case Op::COS:
+                for (int l = 0; l < K; l++) s[top][l] = Kokkos::cos(s[top][l]);
+                break;
+            case Op::EXP:
+                for (int l = 0; l < K; l++) s[top][l] = Kokkos::exp(s[top][l]);
+                break;
+            case Op::SQRT:
+                for (int l = 0; l < K; l++) s[top][l] = Kokkos::sqrt(s[top][l]);
+                break;
+            default:
+                if ((in.op >= Op::MOD && in.op <= Op::POW) || (in.op >= Op::LT && in.op <= Op::XNOR) ||
+                    (in.op >= Op::MIN && in.op <= Op::ROUNDN)) {
+                    top--;
+                    for (int l = 0; l < K; l++) s[top][l] = detail::binary(in.op, s[top][l], s[top + 1][l]);
+                } else {
+                    for (int l = 0; l < K; l++) s[top][l] = detail::unary(in.op, s[top][l]);
+                }
+                break;
+        }
+    }
+    for (int l = 0; l < K; l++) out[l] = s[top][l];
+}
+
 /** @brief Variables read from an array. */
 struct ArrayVariables {
     const double * values;
@@ -344,6 +471,7 @@ struct ProgramTable {
     Kokkos::View<const Instr *, MemorySpace> code;
     Kokkos::View<const uint32_t *, MemorySpace> offsets;  // program p is code[offsets(p), offsets(p + 1))
     Kokkos::View<uint32_t, MemorySpace> runaway;          // 1 + a program stopped at MAX_ITERATIONS, or 0
+    Kokkos::View<const uint8_t *, MemorySpace> jumps;     // per program: whether it has jumps
     bool loops = false;
 
     ProgramTable() = default;
@@ -351,11 +479,16 @@ struct ProgramTable {
     explicit ProgramTable(const std::vector<const Program *> & programs) {
         std::vector<Instr> all;
         std::vector<uint32_t> off(1, 0);
+        std::vector<uint8_t> j;
         for (const Program * p : programs) {
             all.insert(all.end(), p->code().begin(), p->code().end());
             off.push_back(static_cast<uint32_t>(all.size()));
             loops = loops || p->has_loops();
+            j.push_back(has_jumps(p->code().data(), static_cast<uint32_t>(p->code().size())) ? 1 : 0);
         }
+        Kokkos::View<uint8_t *, MemorySpace> jv("expr_jumps", j.size());
+        Kokkos::deep_copy(jv, Kokkos::View<const uint8_t *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(j.data(), j.size()));
+        jumps = jv;
         Kokkos::View<Instr *, MemorySpace> c("expr_code", all.size());
         Kokkos::View<uint32_t *, MemorySpace> o("expr_offsets", off.size());
         Kokkos::deep_copy(c, Kokkos::View<const Instr *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(all.data(), all.size()));
@@ -376,6 +509,25 @@ struct ProgramTable {
         const double v = evaluate(code.data() + begin, offsets(p + 1) - begin, vars, stopped);
         if (stopped) Kokkos::atomic_store(&runaway(), p + 1);
         return v;
+    }
+
+    /**
+     * @brief Program p at K points, vars(l, i) being variable i at point l:
+     *        by evaluate_lanes, or point by point for programs with jumps.
+     */
+    template <int K, typename Vars>
+    KOKKOS_INLINE_FUNCTION void lanes(const uint32_t p, const Vars & vars, double * out) const {
+        const uint32_t begin = offsets(p), n = offsets(p + 1) - begin;
+        const Instr * c = code.data() + begin;
+        if (!jumps(p)) {
+            evaluate_lanes<K>(c, n, vars, out);
+            return;
+        }
+        for (int l = 0; l < K; l++) {
+            bool stopped = false;
+            out[l] = evaluate(c, n, detail::Lane<Vars>{vars, l}, stopped);
+            if (stopped) Kokkos::atomic_store(&runaway(), p + 1);
+        }
     }
 
     /** @brief 1 + the index of a program whose evaluation stopped at MAX_ITERATIONS, or 0 (no programs with loops: 0 without a copy). */
