@@ -648,7 +648,8 @@ $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.rest
   heading and the first and last lines read `ok` (identical), `WARN` (within
   tolerance) or `ERROR` (beyond it); the exit status is 0, 0 and 1, and 3 when the files cannot be
   compared, so `mallard diff a b --tol 1e-10 || exit 1` gates a CI job.
-  `--format json` prints the same as one object.
+  `--format json` prints the same as one object, its statuses `ok`, `warning`
+  and `error`.
 - **Cells are matched by their global index**, which restart files and VTKHDF
   or XDMF snapshots of the whole mesh keep whatever the ranks that wrote them;
   a restart file against a snapshot compares the fields both hold (RHO). VTU

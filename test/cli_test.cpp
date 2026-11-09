@@ -599,8 +599,8 @@ TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
     const Result differ = run({"diff", first, later, "--format", "json"}, true);
     EXPECT_EQ(differ.status, 1) << differ.err;
     const json::Value v = json::parse(differ.out);
-    EXPECT_EQ(v["result"].string, "beyond_tolerance");
-    EXPECT_EQ(v["time"]["status"].string, "beyond_tolerance");
+    EXPECT_EQ(v["result"].string, "error");
+    EXPECT_EQ(v["time"]["status"].string, "error");
     ASSERT_EQ(v["fields"].array.size(), 4u);
     for (const json::Value & f : v["fields"].array) {
         SCOPED_TRACE(f["name"].string);
@@ -608,7 +608,7 @@ TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
         EXPECT_GT(linf, 0.0);
         EXPECT_DOUBLE_EQ(f["absolute"]["linf"].number, linf);
         EXPECT_EQ(f["max_at"]["index"].number, static_cast<double>(cell));
-        EXPECT_EQ(f["status"].string, "beyond_tolerance");
+        EXPECT_EQ(f["status"].string, "error");
     }
     const Result loose = run({"diff", first, later, "--tol", "1"}, true);
     EXPECT_EQ(loose.status, 0) << loose.err;
@@ -622,7 +622,7 @@ TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
     EXPECT_EQ(faces.status, 0) << faces.err;
     const json::Value f = json::parse(faces.out)["restart"]["faces"];
     EXPECT_EQ(f["values"].number, static_cast<double>(output::open(nscbc).restart.n_faces));
-    EXPECT_EQ(f["status"].string, "identical");
+    EXPECT_EQ(f["status"].string, "ok");
     const Result no_faces = run({"diff", dir + "v0.8.0/nscbc_000000.restart", nscbc}, true);
     EXPECT_EQ(no_faces.status, 1);
     EXPECT_TRUE(has_row(no_faces.out, {"ERROR", "face records", "0 faces in A, 10 in B"})) << no_faces.out;
