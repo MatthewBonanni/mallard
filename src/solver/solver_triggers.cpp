@@ -17,6 +17,7 @@
 #include "comm.h"
 #include "json.h"
 #include "log.h"
+#include "snapshot_block.h"
 
 void Solver::init_triggers() {
     std::vector<std::string> monitored, writers;
@@ -99,6 +100,7 @@ void Solver::act_on_triggers() {
                 case Triggers::Action::WRITE: {
                     const auto writer = std::find_if(data_writers.begin(), data_writers.end(),
                                                      [&](const auto & w) { return w->get_prefix() == act.writer; });
+                    const snapshot_block::Reason reason(snapshot_block::reason::TRIGGER);
                     update_primitives();
                     copy_device_to_host();
                     if ((*writer)->get_format() == DataFormat::RESTART) {

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "comm.h"
+#include "output_reader.h"
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -175,6 +176,10 @@ TEST(TriggersTest, WriteActionWritesTheNamedSnapshotAtThatStep) {
     run(solver);
     EXPECT_TRUE(fs::exists(dir + "/snap_000004.vtu") || fs::exists(dir + "/snap_000004.pvtu"));
     EXPECT_FALSE(fs::exists(dir + "/snap_000003.vtu") || fs::exists(dir + "/snap_000003.pvtu"));
+    const std::string written = fs::exists(dir + "/snap_000004.vtu") ? dir + "/snap_000004.vtu" : dir + "/snap_000004.pvtu";
+    const output::Contents file = output::open(written);
+    ASSERT_EQ(file.snapshots.size(), 1u);
+    EXPECT_EQ(file.snapshots[0].block.reason, "trigger");
 }
 
 TEST(TriggersTest, StartedStatisticsEqualThoseOfTheSameStartTime) {
