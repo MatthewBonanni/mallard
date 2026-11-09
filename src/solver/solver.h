@@ -376,6 +376,12 @@ class Solver {
          *        time-step diffusivity NU_EFF also grows).
          */
         void update_eddy_viscosity(uint32_t n);
+        /**
+         * @brief [les] gradients = "reconstruction": les_velocity_gradients of the owned cells from TENO's
+         *        central polynomials where its last reconstruction found the cell smooth, else the
+         *        least-squares ones; for n beyond the owned cells, the owners' values in the halo.
+         */
+        void update_reconstruction_gradients(uint32_t n);
         void update_wall_model();  // the modeled walls' flux from W_cells and viscous_gradients
         /** @brief LES: the eddy viscosity of the current state for the time step (owned cells) or output (all). */
         void eddy_viscosity_of_state(uint32_t n);
@@ -456,6 +462,8 @@ class Solver {
         const LES & get_les() const { return les; }
         /** @brief LES: [mu_t, lambda_t, mu_t / (Sc_t W)] of each cell as of the last copy_device_to_host. */
         const Kokkos::View<rtype *[3]>::host_mirror_type & get_les_coefficients() const { return h_les_coefficients; }
+        /** @brief [les] gradients = "reconstruction": the models' velocity gradients of the latest update (device). */
+        const Kokkos::View<rtype *[N_DIM][N_DIM]> & get_les_velocity_gradients() const { return les_velocity_gradients; }
         /** @brief PaSR: the reacting fraction kappa per cell, after copy_device_to_host. */
         const Kokkos::View<rtype *>::host_mirror_type & get_chem_time_scale() const { return h_chem_time_scale; }
         /** @brief Thickened flame: [F, E, Omega] per cell, after copy_device_to_host. */
@@ -834,6 +842,12 @@ class Solver {
         Kokkos::View<rtype *> les_delta;               // (cell): filter width V^(1/d)
         Kokkos::View<rtype *> les_width;               // (cell): the eddy viscosity's width (les_delta or Scotti's)
         Kokkos::View<rtype *[3]> les_coefficients;     // (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), empty without LES
+        // [les] gradients = "reconstruction": the models' velocity gradients (cell, i, j) = d u_i / d x_j
+        Kokkos::View<rtype *[N_DIM][N_DIM]> les_velocity_gradients;
+        struct ReconstructionGradients {
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> polynomial;  // (owned cell): of W
+            State halo;
+        } reconstruction_gradients;
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
         bool budget_pass = false;                      // calc_rhs evaluates kinetic_energy_budget
         bool tfles_on = false;                         // [les.combustion]: thickened flame

@@ -145,6 +145,10 @@ TEST(MPI3DTest, LargeEddySimulationOnTetrahedraMatchesSerial) {
     expect_matches_serial(input + "[les]\nmodel = \"sigma\"\nC = 3.0\n");
     // The dynamic constant is a domain sum: exact in fixed point, so the same on any rank count
     expect_matches_serial(input + "[les]\nmodel = \"sigma\"\ndynamic = true\n");
+    // Only owned cells have central polynomials: the halo cells take their owners' gradients by exchange
+    const std::string muscl = "type = \"MUSCL\"\n";
+    input.replace(input.find(muscl), muscl.size(), "type = \"TENO\"\norder = 3\n");
+    expect_matches_serial(input + "[les]\nmodel = \"sigma\"\nC = 3.0\ngradients = \"reconstruction\"\n");
 }
 
 TEST(MPI3DTest, WallModelsMatchSerial) {

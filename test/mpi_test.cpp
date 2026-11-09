@@ -381,6 +381,17 @@ TEST(MPITest, LargeEddySimulationMatchesSerial) {
         expect_matches_serial(input + "[les]\nmodel = \"" + model + "\"\nC = 1.0\n");
     }
     expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "", "navier_stokes") + "[les]\nmodel = \"vreman\"\n");
+    // Only owned cells have central polynomials: the halo cells take their owners' gradients by exchange
+    const std::string polynomial = "gradients = \"reconstruction\"\n";
+    std::string input = box_input("cartesian_tri", "type = \"TENO\"\norder = 3\n", NS,
+                                  bcs("type = \"outlet_extrapolation\"\n", "type = \"outlet_pressure\"\np = 1.0\n",
+                                      "type = \"wall_isothermal\"\nT = 1.2\n", "type = \"wall_adiabatic\"\n"),
+                                  25);
+    const std::string u = "u = [\"0.3\", \"-0.1\"]\n";
+    input.replace(input.find(u), u.size(), "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * x + 2 * y)\"]\n");
+    expect_matches_serial(input + "[les]\nmodel = \"wale\"\nC = 1.0\n" + polynomial);
+    expect_matches_serial(mixture_input("", "type = \"TENO\"\norder = 3\n", "", "navier_stokes") +
+                          "[les]\nmodel = \"vreman\"\n" + polynomial);
 }
 
 TEST(MPITest, ThickenedFlameMatchesSerial) {

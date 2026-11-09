@@ -53,7 +53,7 @@ closure for the filtered reaction rates.
 | 1 | Favre-filtered equations closed by an eddy viscosity mu_t, with `lambda_t = cp mu_t / Pr_t` and `rho D_t = mu_t / Sc_t`; mu_t added to the molecular coefficients | Mixed or scale-similarity models; separate SGS flux kernels | Shares the viscous fluxes, boundary treatment, time step and transport infrastructure; the standard closure of compressible LES (Vreman et al. 1995; Garnier et al. 2009) |
 | 2 | **Sigma model** (Nicoud et al. 2011) as the primary eddy viscosity; WALE, Vreman and Smagorinsky also available | WALE, Vreman, dynamic Smagorinsky as primary | Local, no test filter, positive; vanishes in pure shear, solid rotation, two-component and axisymmetric/isotropic expansion; cubic near walls; insensitive to the one-dimensional dilatation of flames |
 | 3 | Dynamic Smagorinsky deferred | Germano-Lilly with local averaging | Needs a test filter and averaging on unstructured mixed meshes (section 2.5); Sigma gets near-wall and laminar behavior without it |
-| 4 | Filter width `Delta = V^(1/d)` (d = 2 or 3) of each cell, independent of the reconstruction order; in 3D times Scotti's anisotropy factor since stage 7 (section 3) | Largest cell extent; Scotti's anisotropy correction; `h / (p + 1)` | A finite volume has one degree of freedom per cell at any order; Sigma and WALE vanish where the cells are most anisotropic (walls) |
+| 4 | Filter width `Delta = V^(1/d)` (d = 2 or 3) of each cell, independent of the reconstruction order; in 3D times Scotti's anisotropy factor since stage 7 (section 3); a width scaled by the reconstruction's effective resolution was tried and rejected (section 3.1) | Largest cell extent; Scotti's anisotropy correction; `h / (p + 1)` | A finite volume has one degree of freedom per cell at any order; Sigma and WALE vanish where the cells are most anisotropic (walls) |
 | 5 | Eddy viscosity per cell from the viscous cell gradients, averaged to faces; zero on wall faces | Per face from face gradients | One evaluation per cell; enters the time step and output; consistent across ranks |
 | 6 | A **kinetic-energy budget diagnostic** that measures the numerical dissipation of resolved kinetic energy against the SGS and molecular dissipation at run time | Inferring numerical dissipation from -dK/dt after the fact | Proves at every output which term dissipates the energy; needs no reference |
 | 7 | A **low-dissipation convective flux**: a kinetic-energy-preserving (KEEP) central flux blended with the Riemann solver by a compression-only Ducros sensor | Lower TENO cutoff; Riemann solvers with scaled dissipation only; artificial viscosity | Upwind Riemann fluxes dissipate resolved energy at the grid scale at a rate comparable to the SGS model; the KEEP flux adds none, and shocks keep the Riemann solver |
@@ -299,6 +299,209 @@ axisymmetric runs), for every cell type and reconstruction order.
   cube root (a regular tetrahedron of edge h has `V^(1/3) = 0.49 h`, a cube
   `h`): tetrahedral regions get a smaller $\Delta$ at the same edge length,
   which is consistent with their higher number of cells per volume.
+
+### 3.1 Order-aware models (#660)
+
+Issue #660 asked whether the models should know the reconstruction's order: a
+fifth-order scheme resolves scales that a second-order one damps, so with the
+same width the model might damp scales the scheme already resolves. **Decision
+4 stands (the width stays `V^(1/d)`); what changes with the order is the
+gradient the models see** (`[les] gradients = "reconstruction"`, opt-in).
+
+**Phase 1: an effective width, refuted.** `tools/docs/effective_resolution.py`
+measures the modified wavenumber of each reconstruction through the real code
+([theory](../theory/les.md#resolution-of-the-reconstructions-and-the-models-gradients)):
+TENO5's central polynomial resolves 1.35 (2D) to 1.8 (3D) times MUSCL's
+wavenumber at the 1% rule of Moura et al., and on a smooth wave TENO resolves
+as its central polynomial whether or not the cell is flagged troubled (only the
+sector stencils drop to MUSCL's level). Shrinking the models' width by the ratio
+of TENO's effective width to MUSCL's (0.56 for TENO5 in 3D) made decaying
+isotropic turbulence worse at 32³ and 48³ (spectral error 0.112 / 0.113 ->
+0.158 / 0.172 at 32³): with an upwind flux TENO5 + Sigma under-dissipates near
+$k_c$ already, and less model makes it worse. The opt-in width was removed.
+
+**Diagnosis.** Two measurements on developed CBC fields:
+
+- *Spectral eddy viscosities* (Domaradzki, Xiao & Smolarkiewicz 2003): the
+  transfer of Mallard's one-step right-hand side minus the exact, dealiased
+  nonlinear transfer of the same band-limited field gives the numerical part;
+  the change when the model is switched on gives the model's. In units of
+  $\sqrt{E(k_c)/k_c}$ at 32³ with HLLC, the numerical part rises to 0.27 at
+  $k_c$ for MUSCL and to 0.39 for TENO5 (and is lower than MUSCL's below
+  $0.6\,k_c$); Sigma adds 0.07 to 0.12 at all $k$. Chollet & Lesieur's target
+  is 0.27 on its plateau and 0.71 at $k_c$. Both schemes plus the model fall
+  short near $k_c$, which is the pile-up in the spectra. This is the
+  calibration argument of ALDM (Hickel, Adams & Domaradzki 2006), applied to
+  an explicit model on top of a fixed scheme.
+- *The model's gradient.* The models took the least-squares gradient on the
+  face neighbors (second order, transfer function $\sin(kh)/(kh)$ per
+  direction). On the same fields, Sigma's mean eddy viscosity from it is 0.54
+  (32³) and 0.56 (48³) of its value from the exact gradient of the
+  band-limited field: Sigma at 1.35 acts like 0.75. That is why section 8.1's
+  coarse runs wanted C of about 1.8-1.9 (a scan at 32³ with TENO5 + HLLC:
+  C = 1.6, 1.9, 2.3 give 0.087 / 0.089, 0.062 / 0.084, 0.069 / 0.135).
+
+**Method.** With `gradients = "reconstruction"`, the models take in each cell
+TENO finds smooth the gradient of its central polynomial at the centroid,
+$a_{ij}/h$ from the linear coefficients (exact for polynomials of degree
+`order - 1`); troubled cells, whose faces may use the sector stencils, keep the
+least-squares gradient, and so do the viscous fluxes. This restores the model's
+own calibration (Nicoud et al. set $C = 1.35$ with exact gradients) instead of
+retuning C per mesh. PaSR's mixing time and TFLES's efficiency follow through
+$\mu_t$. Implementation:
+
+- `TENO::smooth_gradients` (a view, empty unless the key is on): the smooth
+  passes (`SmoothPass`, and `SmoothTeamPass` on GPUs) write the gradients of
+  W in the same pass that evaluates the face values, after the troubled-cell
+  return, so no stencil is read twice. A separate gradient pass cost +36% per
+  step; the fused write costs about +7% (TENO5, 3D, Threads).
+- `Solver::update_reconstruction_gradients` assembles
+  `les_velocity_gradients` (polynomial where smooth, least squares where
+  troubled), exchanges the halo, and the eddy-viscosity functors read it when
+  it is allocated. Outside the RHS (time step, output) `TENO::cell_gradients`
+  refills the polynomial gradients from the current state.
+- MUSCL and first order reject the key: their gradient is the least-squares
+  one already.
+
+**Validation: Comte-Bellot & Corrsin** (`examples/cbc_les` set-up, Sigma,
+HLLC, SSPRK3, CFL 0.8, two rescaled MUSCL pre-runs; columns as in section 8.1:
+log10 RMS of $E/E_\mathrm{CBC}$ for $k \le 2k_c/3$ and resolved over measured
+energy up to $k_c$ at stations 2 / 3, budget shares averaged to station 3).
+TENO flagged 0% of the cells troubled on every run, so the method used the
+polynomial gradient everywhere.
+
+| Mesh | Reconstruction | Model | Spectral error | Energy | Numerical | SGS | Molecular |
+|---|---|---|---|---|---|---|---|
+| 32³ | MUSCL, hybrid flux | Sigma | 0.153 / 0.151 | 1.54 / 1.50 | -0.044 | 0.856 | 0.188 |
+| 32³ | MUSCL | Sigma | 0.083 / 0.077 | 1.14 / 1.09 | 0.592 | 0.338 | 0.071 |
+| 32³ | TENO5 | none | 0.184 / 0.204 | 1.43 / 1.48 | 0.897 | 0.000 | 0.103 |
+| 32³ | TENO5 | Sigma | 0.112 / 0.113 | 1.18 / 1.16 | 0.584 | 0.345 | 0.071 |
+| 32³ | TENO5 | Sigma, dynamic, reconstruction gradients | 0.114 / 0.119 | 1.19 / 1.18 | 0.589 | 0.339 | 0.071 |
+| 32³ | TENO5 | **Sigma, reconstruction gradients** | **0.091 / 0.094** | 1.12 / 1.09 | 0.523 | 0.413 | 0.064 |
+| 48³ | MUSCL | Sigma | 0.087 / 0.111 | 1.08 / 1.03 | 0.560 | 0.338 | 0.102 |
+| 48³ | TENO5 | none | 0.187 / 0.178 | 1.33 / 1.26 | 0.853 | 0.000 | 0.147 |
+| 48³ | TENO5 | Sigma | 0.107 / 0.115 | 1.11 / 1.05 | 0.554 | 0.344 | 0.102 |
+| 48³ | TENO5 | Sigma, dynamic, reconstruction gradients | 0.114 / 0.118 | 1.13 / 1.09 | 0.576 | 0.318 | 0.106 |
+| 48³ | TENO5 | **Sigma, reconstruction gradients** | **0.097 / 0.121** | 1.06 / 1.02 | 0.501 | 0.405 | 0.094 |
+| 64³ | MUSCL | Sigma | 0.112 / 0.149 | 1.04 / 1.00 | 0.537 | 0.329 | 0.134 |
+| 64³ | TENO5 | Sigma | 0.117 / 0.140 | 1.06 / 1.01 | 0.531 | 0.335 | 0.134 |
+| 64³ | TENO5 | Sigma, dynamic, reconstruction gradients | 0.121 / 0.131 | 1.09 / 1.04 | 0.567 | 0.291 | 0.141 |
+| 64³ | TENO5 | **Sigma, reconstruction gradients** | **0.120 / 0.156** | 1.02 / 0.99 | 0.485 | 0.391 | 0.125 |
+
+![Spectra with the least-squares and the reconstruction gradients](../images/cbc_reconstruction_gradients.png)
+
+Findings:
+
+- **The success criterion is met at 32³ only.** The reconstruction gradients
+  beat TENO5 + Sigma at both stations at 32³ (0.091 / 0.094 against 0.112 /
+  0.113, energy pile-up 1.12 / 1.09 against 1.18 / 1.16), at station 2 only at
+  48³ (0.097 against 0.107; 0.121 against 0.115 at station 3), and at neither
+  at 64³ (0.120 / 0.156 against 0.117 / 0.140). The pile-up shrinks at every
+  resolution (the SGS share rises from 0.34 to 0.39-0.41), but from 48³ on
+  that pushes the spectrum below the measurement above $0.4\,k_c$.
+- **The right amount of model falls with resolution, for every scheme.** At
+  64³ all runs, MUSCL included, are below the measurement from $0.4\,k_c$ on
+  (log ratio -0.3 to -0.6 at $2k_c/3$) and above it by 0.15-0.2 around
+  $0.2\,k_c$ (as are the runs without a model at 32³ and 48³). The global
+  dynamic procedure, which lowers C, is then the best TENO5 run at station 3
+  of 64³ (0.131) and the worst at 32³. So the least-squares attenuation is not
+  a bias to remove everywhere: at 32³ it costs accuracy, from 48³ on it
+  partly compensates for the scheme's own dissipation near $k_c$.
+- **MUSCL + HLLC + Sigma stays the most accurate** at 32³ and 48³ (and the
+  cheapest, about a ninth of TENO5's cost); at 64³ TENO5 + Sigma and MUSCL
+  are within 0.01.
+- **Per-face stencils would not change these runs.** TENO flagged no cell
+  troubled, and on smooth flow every face takes the central polynomial (phase
+  1), so a width or gradient that follows the per-face stencil equals the
+  central polynomial's here.
+
+**Literature and originality.** Searched 2026-11-05 (web search over Google
+Scholar, arXiv and journal pages; DOIs checked on Crossref): numerics-aware
+explicit SGS models (Dairay et al. 2017; Duan & Wang 2024; Sun & Verstappen
+2025, arXiv:2502.08154), TENO and WENO as implicit or with explicit models (Fu,
+Hu & Adams 2019; Schranner et al. 2015), ALDM (Hickel, Adams & Domaradzki
+2006), MILES/ILES (Grinstein, Margolin & Rider), numerical errors in LES
+(Ghosal 1996; Kravchenko & Moin 1997; Chow & Moin 2003; Park & Mahesh),
+effective eddy viscosities (Domaradzki et al. 2003), high-order DG/FR LES and
+their filter widths (Moura, Sherwin & Peiró 2015; Beck et al. 2016; Flad &
+Gassner), the order of the SGS discretization (Banhos & Matheou 2025, no effect
+in their boundary layers), order-aware TFLES/PaSR (nothing found); and, for phase 3 (2026-11-06), local
+numerical dissipation (Schranner et al. 2015), low-mesh-Reynolds corrections
+(Voke 1996, after Pao 1965), and balancing numerical and eddy viscosity (Sun &
+Verstappen 2025; Rubio et al. 2025, arXiv:2512.04574; Duan & Wang 2024).
+Evaluating the model on the element's polynomial is standard in DG and
+spectral-element LES (Beck et al. 2016); taking it from a finite-volume
+reconstruction's polynomial is an adaptation of that, and the attenuation
+diagnosis is Domaradzki's and ALDM's method. **Verdict: not new; no row in the
+[originality page](../numerics/originality.md).**
+
+**Phase 3: calibrating the constants to the numerics.** The aim was for
+Mallard to set each model's constant (or its gradient) from the numerics in
+use, without changing the model's form, so that users need not tune it. C
+scans on the same set-up, plus 128³ on one A100 (spectral error at stations
+2 / 3; LS = least-squares gradients, rc = reconstruction gradients):
+
+| Numerics | Mesh | Default (LS, C = 1.35) | Other constants |
+|---|---|---|---|
+| MUSCL + hybrid | 32³ | 0.153 / 0.151 | LS 1.8: **0.103 / 0.082** |
+| MUSCL + hybrid | 48³ | 0.144 / 0.135 | LS 1.8: **0.080 / 0.060** |
+| MUSCL + hybrid | 64³ | 0.107 / 0.104 | LS 1.8: **0.058 / 0.063** |
+| MUSCL + hybrid | 128³ | **0.063 / 0.085** | LS 1.55: 0.082 / 0.102; LS 1.8: 0.124 / 0.141 |
+| MUSCL + HLLC | 32³ | 0.083 / 0.077 | LS 1.6: **0.062 / 0.067** |
+| MUSCL + HLLC | 48³ | 0.087 / 0.111 | LS 1.1: 0.101 / 0.102 |
+| TENO5 + HLLC | 32³ | 0.112 / 0.113 | LS 1.6: 0.087 / 0.089; LS 1.9: **0.062 / 0.084**; LS 2.3: 0.069 / 0.135; rc 1.1: 0.119 / 0.122; rc 1.6: 0.066 / 0.083 |
+| TENO5 + HLLC | 48³ | 0.107 / 0.115 | LS 1.6: 0.094 / 0.126; rc 0.9: 0.135 / 0.128; rc 1.1: 0.115 / 0.117 |
+| TENO5 + HLLC | 64³ | 0.117 / 0.140 | LS 1.1: 0.125 / 0.127; rc 0.9: 0.129 / 0.127; rc 1.1: 0.119 / 0.133 |
+| TENO5 + HLLC | 128³ | 0.187 / 0.222 | rc 1.35: 0.208 / 0.242 |
+
+- **The best constant falls with resolution for every scheme.** It is above
+  1.8 to 64³ and at most 1.35 at 128³ with the hybrid flux, and it falls from
+  about 1.9 at 32³ toward 0 by 128³ with HLLC. The set-up is not the cause:
+  with the hybrid flux, the error at a fixed constant falls under refinement
+  (and the 64³ and 128³ values reproduce section 8.1).
+- **With HLLC, the scheme sets an error floor** from 64³ on. All runs,
+  including those without a model, have an energy excess around
+  $0.2$-$0.3\,k_c$ and a deficit above about $0.4\,k_c$, the cascade blocked
+  by the upwind dissipation. HLLC's dissipation at $k_c$ scales like
+  $c\Delta$, the needed eddy viscosity like $\Delta^{4/3}$, and here
+  $c \approx 10\,u'$.
+- **Three parameter-free adjustments were tested, and none tracks the best
+  constant.**
+  - *Undoing the least-squares attenuation*, $C/\sqrt{r}$. On the
+    hybrid-flux fields $r$ (Sigma's least-squares eddy viscosity over its
+    exact-gradient value) is 0.34, 0.35 and 0.44 at 32³, 64³ and 128³ at
+    station 2 (0.30, 0.34, 0.54 at station 3). On HLLC fields, whose cutoff is
+    damped, it is 0.54, 0.60 and 0.65 at 32³-64³. The correction would set
+    $C \approx 2.0$-$2.3$ at 128³, where 1.35 is best.
+  - *Lilly's argument on a Pao spectrum* ([Pao 1965](../references.md#pao-1965),
+    after [Voke 1996](../references.md#voke-1996)). It gives a parameter-free
+    low-mesh-Reynolds factor: with $\rho = \nu_{t,\infty}/\nu$, solve
+    $q = \exp(-\rho^{-2/3}(1-q)^{1/3})$ and set $\nu_t = \nu\,q/(1-q)$, which
+    recovers Lilly's $C_s = 0.18$ as $\rho \to \infty$. At CBC's $\rho$ of
+    1-6 it lowers $\nu_t$ by 3-20%, far less than the data ask for.
+  - *Subtracting the scheme's own dissipation*,
+    $\nu_t = \max(0, \nu_\mathrm{target} - \nu_\mathrm{num})$, with
+    $\nu_\mathrm{num}$ from the kinetic-energy budget (localizable after
+    [Schranner et al. 2015](../references.md#schranner-2015)). With HLLC,
+    $\varepsilon_\mathrm{num}$ is 1.6-1.8 times Sigma's dissipation at every
+    resolution, so the subtraction removes the model even at 32³-64³, where
+    it is needed: TENO5 without a model scores 0.184 / 0.204 at 32³. It
+    would work only with a fitted fraction of $\nu_\mathrm{num}$.
+- The dynamic procedure, with either gradient, lowers C and is worse at
+  32³-48³ (0.114 / 0.119 and 0.114 / 0.118); at 64³ it matches the default
+  (0.121 / 0.131).
+
+**Recommendation.** Keep the defaults (the literature constants with the
+least-squares gradients) for every model and scheme. No parameter-free
+adjustment beat them at every resolution from 32³ to 128³, and a fitted one
+was ruled out. `gradients = "reconstruction"` stays opt-in and experimental:
+it helps TENO on coarse meshes (32³) and hurts from 64³ on. For high-order
+LES, the constant is not the problem: TENO5 with an upwind flux is limited by
+the scheme from 64³ on (0.19 / 0.22 at 128³, against 0.063 / 0.085 for
+MUSCL + hybrid), and TENO with the hybrid flux feeds energy into the resolved
+field (section 8.1). Which flux TENO should use for LES is an open question
+for 0.10.0. Section 8.1's advice stands: $C = 1.5$-$1.8$ for Sigma when
+$k_c$ lies in the inertial range, checked against the budget and the spectrum.
 
 ## 4. Keeping the model's dissipation dominant
 

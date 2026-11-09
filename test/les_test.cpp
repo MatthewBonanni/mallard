@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -451,6 +452,131 @@ TEST(LESSolver, BudgetSplitsTheKineticEnergyRateOfTheRightHandSide) {
     EXPECT_LT(b.sgs, 0.0);
     EXPECT_NEAR(b.sgs, sgs, 0.08 * std::abs(sgs));
     EXPECT_NEAR(b.viscous, viscous, 0.08 * std::abs(viscous));
+}
+
+namespace {
+
+/**
+ * @brief A box of n^d cells with outflow boundaries and a cubic velocity field at uniform density and pressure,
+ *        TENO of order 4 (whose central polynomials hold cubics exactly) and Smagorinsky's model.
+ */
+std::string cubic_box(const uint32_t n, const std::string & les, const std::string & teno = "") {
+    std::ostringstream s;
+    s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 1.0\nLy = 1.0\n" << (N_DIM == 3 ? "Nz = " + std::to_string(n) + "\nLz = 1.0\n" : "")
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"10.0\"\n"
+      << (N_DIM == 3 ? "u = [\"0.3 * x^3 - 0.5 * x * y^2 + 0.2 * z^2\", \"0.4 * y^3 + 0.6 * x^2 * z\", "
+                       "\"-0.2 * z^3 + 0.5 * x * y * z\"]\n"
+                     : "u = [\"0.3 * x^3 - 0.5 * x * y^2\", \"0.4 * y^3 + 0.6 * x^2 * y\"]\n");
+    for (const char * side : {"left", "right", "bottom", "top", "back", "front"}) {
+        if (N_DIM == 2 && (std::string(side) == "back" || std::string(side) == "front")) continue;
+        s << "[[boundaries]]\nname = \"" << side << "\"\ntype = \"outlet_extrapolation\"\n";
+    }
+    s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n" << teno
+      << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1e-3\n"
+      << "[output]\ncheck_interval = 1000000\n" << les;
+    return s.str();
+}
+
+Gradient cubic_gradient(const double * x) {
+    Gradient g{};
+    if constexpr (N_DIM == 3) {
+        g[0] = {0.9 * x[0] * x[0] - 0.5 * x[1] * x[1], -x[0] * x[1], 0.4 * x[2]};
+        g[1] = {1.2 * x[0] * x[2], 1.2 * x[1] * x[1], 0.6 * x[0] * x[0]};
+        g[2] = {0.5 * x[1] * x[2], 0.5 * x[0] * x[2], -0.6 * x[2] * x[2] + 0.5 * x[0] * x[1]};
+    } else {
+        g[0] = {0.9 * x[0] * x[0] - 0.5 * x[1] * x[1], -x[0] * x[1], 0.0};
+        g[1] = {1.2 * x[0] * x[1], 1.2 * x[1] * x[1] + 0.6 * x[0] * x[0], 0.0};
+    }
+    return g;
+}
+
+/** @brief Whether the cell is at least `margin` from the boundaries of [0, 1]^d, beyond the one-sided stencils. */
+bool interior(const Mesh & mesh, const uint32_t c, const double margin) {
+    FOR_I_DIM {
+        const double x = double(mesh.h_cell_coords(c, i));
+        if (x < margin || x > 1.0 - margin) return false;
+    }
+    return true;
+}
+
+const std::string SMAGORINSKY = "[les]\nmodel = \"smagorinsky\"\nC = 0.2\nfilter_width = \"volume\"\n";
+
+} // namespace
+
+TEST(LESReconstructionGradients, EddyViscosityOfACubicFieldIsExact) {
+    // TENO's central polynomials of degree 3 hold the cubic field, so their gradient at the centroid is the
+    // field's: the eddy viscosity is the model's of the exact gradient, which least squares misses at O(h^2)
+    const uint32_t n = N_DIM == 2 ? 16 : 10;
+    auto polynomial = make_solver(cubic_box(n, SMAGORINSKY + "gradients = \"reconstruction\"\n"));
+    auto least_squares = make_solver(cubic_box(n, SMAGORINSKY));
+    polynomial->copy_device_to_host();
+    least_squares->copy_device_to_host();
+    const auto mesh = polynomial->get_mesh();
+    double worst_polynomial = 0.0, worst_least_squares = 0.0;
+    uint32_t checked = 0;
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        if (!interior(*mesh, c, 0.3)) continue;
+        double x[3] = {};
+        FOR_I_DIM x[i] = double(mesh->h_cell_coords(c, i));
+        const double delta = std::pow(double(mesh->h_cell_measure(c)), 1.0 / N_DIM);
+        const double exact = 0.2 * 0.2 * delta * delta * D(SGSModel::SMAGORINSKY, cubic_gradient(x));
+        worst_polynomial = std::max(worst_polynomial,
+                                    std::abs(double(polynomial->get_les_coefficients()(c, 0)) - exact) / exact);
+        worst_least_squares = std::max(worst_least_squares,
+                                       std::abs(double(least_squares->get_les_coefficients()(c, 0)) - exact) / exact);
+        checked++;
+    }
+    ASSERT_GT(comm::allreduce(checked, comm::Op::SUM), 0u);
+    EXPECT_LT(comm::allreduce(worst_polynomial, comm::Op::MAX), precision_tol<double>(1e-9, 1e-4));
+    EXPECT_GT(comm::allreduce(worst_least_squares, comm::Op::MAX), 1e-3);
+}
+
+TEST(LESReconstructionGradients, RightHandSideTakesTheGradientsOfItsOwnReconstruction) {
+    // The reconstruction of each stage writes the gradients the model then uses, and they are the cubic's
+    const uint32_t n = N_DIM == 2 ? 16 : 10;
+    auto solver = make_solver(cubic_box(n, SMAGORINSKY + "gradients = \"reconstruction\"\n"));
+    const auto mesh = solver->get_mesh();
+    State rhs("rhs", mesh->n_cells, 0);
+    solver->calc_rhs(solver->state(), rhs, 0.0_r);
+    const auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver->get_les_velocity_gradients());
+    uint32_t checked = 0;
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        if (!interior(*mesh, c, 0.3)) continue;
+        double x[3] = {};
+        FOR_I_DIM x[i] = double(mesh->h_cell_coords(c, i));
+        const Gradient exact = cubic_gradient(x);
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) {
+            EXPECT_NEAR(double(g(c, i, j)), exact[i][j], precision_tol<double>(1e-9, 1e-4)) << c << " " << i << j;
+        }
+        checked++;
+    }
+    EXPECT_GT(comm::allreduce(checked, comm::Op::SUM), 0u);
+}
+
+TEST(LESReconstructionGradients, TroubledCellsKeepTheLeastSquaresGradients) {
+    // Every cell troubled (sigma >= 0): the run is that of the least-squares gradients, bit for bit
+    const uint32_t n = N_DIM == 2 ? 12 : 6;
+    const std::string run = "n_steps = 3\ncfl = 0.5\n";
+    auto with_flux = [&](const std::string & les) {
+        std::string s = periodic_box(MESH, n, les, "", run);
+        const std::string from = "type = \"MUSCL\"\nlimiter = \"none\"\n";
+        return s.replace(s.find(from), from.size(), "type = \"TENO\"\norder = 3\ntroubled_threshold = 0.0\n");
+    };
+    auto polynomial = make_solver(with_flux(LES_DEFAULT + "gradients = \"reconstruction\"\n"));
+    auto least_squares = make_solver(with_flux(LES_DEFAULT));
+    polynomial->run();
+    least_squares->run();
+    polynomial->copy_device_to_host();
+    least_squares->copy_device_to_host();
+    for (uint32_t c = 0; c < polynomial->get_mesh()->n_owned(); c++) {
+        FOR_I_CONSERVATIVE EXPECT_EQ(polynomial->h_conservatives(c, i), least_squares->h_conservatives(c, i)) << c;
+    }
+}
+
+TEST(LESReconstructionGradients, NeedTENO) {
+    EXPECT_THROW(make_solver(periodic_box(MESH, 4, LES_DEFAULT + "gradients = \"reconstruction\"\n")), InputError);
+    EXPECT_THROW(make_solver(cubic_box(4, SMAGORINSKY + "gradients = \"polynomial\"\n")), InputError);
 }
 
 TEST(LESSolver, ModelDrainsResolvedKineticEnergy) {

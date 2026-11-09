@@ -42,8 +42,10 @@ struct LES {
     rtype C = 1.35_r;
     rtype Pr_t = 0.9_r;
     rtype Sc_t = 0.9_r;
-    bool scotti = false;
-    bool dynamic = false;  // C from the Germano identity over the whole domain, once per step (see Solver)  // the eddy viscosity's width V^(1/3) f(a_1, a_2) (Scotti, Meneveau & Lilly 1993)
+    bool scotti = false;   // the eddy viscosity's width V^(1/3) f(a_1, a_2) (Scotti, Meneveau & Lilly 1993)
+    bool dynamic = false;  // C from the Germano identity over the whole domain, once per step (see Solver)
+    // The models' velocity gradients from the reconstruction's central polynomials (TENO) in its smooth cells
+    bool reconstruction_gradients = false;
 
     /** @brief The [les] table of an input (see in_input). */
     static LES from_input(const Input & input);

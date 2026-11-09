@@ -93,6 +93,30 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `[les] dynamic = true`, the least-squares constant `<L:M> / <M:M>`.
 - <a id="moin-1991"></a>P. Moin, K. Squires, W. Cabot and S. Lee, A dynamic subgrid-scale model for compressible turbulence and scalar transport, *Phys. Fluids A* 3, 2746–2757 (1991). [doi:10.1063/1.858164](https://doi.org/10.1063/1.858164)
   Used in: `[les] dynamic = true`, the Favre-weighted test-filtered stresses.
+- <a id="moura-2015"></a>R. C. Moura, S. J. Sherwin and J. Peiró, Linear dispersion–diffusion analysis and its application to under-resolved turbulence simulations using discontinuous Galerkin spectral/hp methods, *J. Comput. Phys.* 298, 695–710 (2015). [doi:10.1016/j.jcp.2015.06.020](https://doi.org/10.1016/j.jcp.2015.06.020)
+  Used in: the effective resolution of the reconstructions (`tools/docs/effective_resolution.py`, the 1% rule).
+- <a id="pirozzoli-2006"></a>S. Pirozzoli, On the spectral properties of shock-capturing schemes, *J. Comput. Phys.* 219, 489–497 (2006). [doi:10.1016/j.jcp.2006.07.009](https://doi.org/10.1016/j.jcp.2006.07.009)
+  Used in: the modified wavenumbers of the nonlinear reconstructions (`tools/docs/effective_resolution.py`).
+- <a id="chow-moin-2003"></a>F. K. Chow and P. Moin, A further study of numerical errors in large-eddy simulations, *J. Comput. Phys.* 184, 366–380 (2003). [doi:10.1016/S0021-9991(02)00020-7](https://doi.org/10.1016/S0021-9991(02)00020-7)
+  Used in: filter-to-grid ratios and numerical errors of LES (LES design notes, section 3.1).
+- <a id="garnier-1999"></a>E. Garnier, M. Mossi, P. Sagaut, P. Comte and M. Deville, On the use of shock-capturing schemes for large-eddy simulation, *J. Comput. Phys.* 153, 273–311 (1999). [doi:10.1006/jcph.1999.6268](https://doi.org/10.1006/jcph.1999.6268)
+  Used in: explicit models on top of upwind schemes (LES design notes, section 3.1).
+- <a id="domaradzki-2003"></a>J. A. Domaradzki, Z. Xiao and P. K. Smolarkiewicz, Effective eddy viscosities in implicit large eddy simulations of turbulent flows, *Phys. Fluids* 15, 3890–3893 (2003). [doi:10.1063/1.1624610](https://doi.org/10.1063/1.1624610)
+  Used in: the spectral eddy viscosities of the numerics and the model (LES theory, design notes section 3.1).
+- <a id="chollet-1981"></a>J.-P. Chollet and M. Lesieur, Parameterization of small scales of three-dimensional isotropic turbulence utilizing spectral closures, *J. Atmos. Sci.* 38, 2747–2757 (1981). [doi:10.1175/1520-0469(1981)038<2747:POSSOT>2.0.CO;2](https://doi.org/10.1175/1520-0469(1981)038%3C2747:POSSOT%3E2.0.CO;2)
+  Used in: the target spectral eddy viscosity (LES theory, design notes section 3.1).
+- <a id="hickel-2006"></a>S. Hickel, N. A. Adams and J. A. Domaradzki, An adaptive local deconvolution method for implicit LES, *J. Comput. Phys.* 213, 413–436 (2006). [doi:10.1016/j.jcp.2005.08.017](https://doi.org/10.1016/j.jcp.2005.08.017)
+  Used in: calibrating a scheme's spectral eddy viscosity against Chollet-Lesieur (LES design notes, section 3.1).
+- <a id="banhos-2025"></a>L. Banhos and G. Matheou, Effects of discretization of Smagorinsky–Lilly subgrid scale model on large-eddy simulation of stable boundary layers, *Atmosphere* 16, 310 (2025). [doi:10.3390/atmos16030310](https://doi.org/10.3390/atmos16030310)
+  Used in: the order of the model's gradients, `[les] gradients` (LES design notes, section 3.1).
+- <a id="beck-2016"></a>A. D. Beck, D. G. Flad, C. Tonhäuser, G. Gassner and C.-D. Munz, On the influence of polynomial de-aliasing on subgrid scale models, *Flow Turbul. Combust.* 97, 475–511 (2016). [doi:10.1007/s10494-016-9704-y](https://doi.org/10.1007/s10494-016-9704-y)
+  Used in: models evaluated on the element polynomials of high-order LES, `[les] gradients` (LES design notes, section 3.1).
+- <a id="pao-1965"></a>Y.-H. Pao, Structure of turbulent velocity and scalar fields at large wavenumbers, *Phys. Fluids* 8, 1063–1075 (1965). [doi:10.1063/1.1761356](https://doi.org/10.1063/1.1761356)
+  Used in: the low-mesh-Reynolds factor tested for the model constants (LES design notes, section 3.1).
+- <a id="voke-1996"></a>P. R. Voke, Subgrid-scale modelling at low mesh Reynolds number, *Theor. Comput. Fluid Dyn.* 8, 131–143 (1996). [doi:10.1007/BF00312367](https://doi.org/10.1007/BF00312367)
+  Used in: the low-mesh-Reynolds factor tested for the model constants (LES design notes, section 3.1).
+- <a id="schranner-2015"></a>F. S. Schranner, J. A. Domaradzki, S. Hickel and N. A. Adams, Assessing the numerical dissipation rate and viscosity in numerical simulations of fluid flows, *Comput. Fluids* 114, 84–97 (2015). [doi:10.1016/j.compfluid.2015.02.011](https://doi.org/10.1016/j.compfluid.2015.02.011)
+  Used in: the local numerical dissipation tested for the model constants (LES design notes, section 3.1).
 - <a id="scotti-1993"></a>A. Scotti, C. Meneveau and D. K. Lilly, Generalized Smagorinsky model for anisotropic grids, *Phys. Fluids A* 5, 2306–2308 (1993). [doi:10.1063/1.858537](https://doi.org/10.1063/1.858537)
   Used in: `[les] filter_width = "scotti"`.
 - <a id="vreman-geurts-kuerten-1995"></a>B. Vreman, B. Geurts and H. Kuerten, Subgrid-modelling in LES of compressible flow, *Appl. Sci. Res.* 54, 191–203 (1995). [doi:10.1007/BF00849116](https://doi.org/10.1007/BF00849116)
