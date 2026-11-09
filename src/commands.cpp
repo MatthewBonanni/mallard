@@ -130,12 +130,16 @@ constexpr Option DIFF_OPTIONS[] = {
      "A's mesh file, where its run block does not record it or the file has moved: for --remap and for the "
      "coordinates of the largest differences. Default: from A's run block."},
     {"--mesh-b", "", "FILE", "B's mesh file, for --remap. Default: from B's run block."},
+    {"--format", "", "text|json",
+     "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
+     "scripts. Default: text."},
+    KOKKOS,
 };
 
 constexpr Option EXTRACT_OPTIONS[] = {
     {"-i", "", "FILE",
      "The input file of the case: its mesh, physics, numerics, [regions] and [[probes]]. Default: the input in "
-     "the provenance of FILE (Mallard 0.10 and later record it resolved)."},
+     "the run block of FILE (Mallard 0.10 and later record it resolved)."},
     {"--probe", "", "NAMES",
      "The [[probes]] of the input to extract, by name, separated by commas (--probe wake,box). Default: every "
      "one, unless --region or --snapshot is given."},
@@ -612,10 +616,10 @@ constexpr Command COMMANDS[] = {
             "\n"
             "FILE is a restart file, a snapshot of the whole mesh (.vtkhdf, the .h5 of XDMF output) or a series "
             "of them (.vtkhdf.series, a series file, .xmf); several files, or a glob, extract in the order given. "
-            "The case comes from -i, else from FILE's provenance, and its mesh must be the file's: run it where "
+            "The case comes from -i, else from FILE's run block, and its mesh must be the file's: run it where "
             "the run ran, so that relative paths (the mesh file) resolve. --steps, --times, --every and --latest "
-            "choose the snapshots. VTKHDF files record no step: their snapshots are numbered by their position "
-            "in FILE.\n"
+            "choose the snapshots, by the steps and times the files record (files written before 0.10 that "
+            "record no step: by their position in FILE).\n"
             "\n"
             "Files go to the output directory under the names the input gives them, so a run's files are never "
             "overwritten. The report lists each file with its times and fields, and every reduction of the last "

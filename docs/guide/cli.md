@@ -110,6 +110,9 @@ Commands:
   Mesh
     mallard mesh convert    Write a mesh file, or the mesh of an input file, as
                             a Mallard HDF5 mesh
+  Post
+    mallard post extract    Probes, region integrals and snapshots of existing
+                            output, as the run would have written them
   Maintain
     mallard test            Run the unit and regression tests
     mallard completion      Print the shell completion script for bash, zsh or
@@ -716,8 +719,8 @@ Usage: mallard post <command> [options]
 Commands on a run's output: probes, integrals and snapshots of it.
 
 Commands:
-  mallard post extract     Probes, region integrals and snapshots of existing
-                           output, as the run would have written them
+  mallard post extract      Probes, region integrals and snapshots of existing
+                            output, as the run would have written them
 
 mallard post <command> --help shows the page of a command.
 
@@ -742,10 +745,10 @@ variables, the same to rounding for snapshots of RHO, U and P.
 FILE is a restart file, a snapshot of the whole mesh (.vtkhdf, the .h5 of XDMF
 output) or a series of them (.vtkhdf.series, a series file, .xmf); several
 files, or a glob, extract in the order given. The case comes from -i, else from
-FILE's provenance, and its mesh must be the file's: run it where the run ran, so
+FILE's run block, and its mesh must be the file's: run it where the run ran, so
 that relative paths (the mesh file) resolve. --steps, --times, --every and
---latest choose the snapshots. VTKHDF files record no step: their snapshots are
-numbered by their position in FILE.
+--latest choose the snapshots, by the steps and times the files record (files
+written before 0.10 that record no step: by their position in FILE).
 
 Files go to the output directory under the names the input gives them, so a
 run's files are never overwritten. The report lists each file with its times and
@@ -755,8 +758,8 @@ N the probes are evaluated on N ranks.
 Options:
   -i FILE                The input file of the case: its mesh, physics,
                          numerics, [regions] and [[probes]]. Default: the input
-                         in the provenance of FILE (Mallard 0.10 and later
-                         record it resolved).
+                         in the run block of FILE (Mallard 0.10 and later record
+                         it resolved).
   --probe NAMES          The [[probes]] of the input to extract, by name,
                          separated by commas (--probe wake,box). Default: every
                          one, unless --region or --snapshot is given.

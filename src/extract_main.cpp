@@ -71,7 +71,8 @@ std::string units_text(const std::string & units) {
     return units == "1" ? "dimensionless" : units;
 }
 
-/** @brief One snapshot to extract: of which file, its index there, and its step (recorded, or its position). */
+/** @brief One snapshot to extract: of which file, its index there, and its step as the file records it
+ *        (its position only in files that record none, written before 0.10). */
 struct Selected {
     size_t file = 0;
     size_t index = 0;  // in the file's snapshots
@@ -167,11 +168,11 @@ std::vector<Selected> select(const std::vector<output::Contents> & files, const 
     return out;
 }
 
-/** @brief The input recorded in an output file's provenance: resolved where recorded so, else as written. */
+/** @brief The input recorded in an output file's run block: resolved where recorded so, else as written. */
 std::string recorded_input(const output::Contents & c, bool & resolved) {
-    std::string block = c.provenance;
+    std::string block = c.run;
     if (block.empty() && !c.snapshots.empty() && c.snapshots[0].file != c.path) {
-        block = output::open(c.snapshots[0].file).provenance;
+        block = output::open(c.snapshots[0].file).run;
     }
     if (block.empty()) return "";
     const json::Value p = json::parse(block);
@@ -556,11 +557,11 @@ int extract(const cli::Args & args) {
         const std::string text = recorded_input(files[0], resolved);
         if (text.empty()) {
             throw std::runtime_error(files[0].path + " records no input (files of Mallard 0.9 and later do, in their "
-                                     "provenance): give the input file with -i");
+                                     "run block): give the input file with -i");
         }
-        case_from = std::string(resolved ? "the resolved input" : "the input as written") + " in the provenance of " +
+        case_from = std::string(resolved ? "the resolved input" : "the input as written") + " in the run block of " +
                     files[0].path;
-        input = parse_input_string(text, files[0].path + " (provenance)");
+        input = parse_input_string(text, files[0].path + " (its run block)");
     }
     const Plan plan = prepare(input, args, dir);
 
@@ -584,9 +585,9 @@ int extract(const cli::Args & args) {
     });
     solver.init(input);
     const auto hash = [](const std::string & block) { return provenance::find_string(block, "mesh", "sha256"); };
-    const std::string then = hash(files[0].provenance), now = hash(provenance::json());
+    const std::string then = hash(files[0].run), now = hash(provenance::json());
     if (comm::is_root() && !then.empty() && !now.empty() && then != now) {
-        logging::warning(files[0].path + " was written on a mesh file of other contents (the sha256 in its provenance "
+        logging::warning(files[0].path + " was written on a mesh file of other contents (the sha256 in its run block "
                          "differs) with as many cells: check that the case's mesh is the run's.");
     }
     for (current = 0; current < selected.size(); current++) {

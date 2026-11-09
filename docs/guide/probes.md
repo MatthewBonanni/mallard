@@ -384,7 +384,7 @@ Pitfalls:
 A probe added after the run, or a run that wrote too few, does not need a
 rerun: `mallard post extract` sets the case up again from a restart file or a
 snapshot and evaluates probes on its stored state, with the run's own probe
-code. The case comes from the file's provenance (every output of Mallard 0.10
+code. The case comes from the file's [run block](output.md#run-block) (every output of Mallard 0.10
 and later records its resolved input), or from `-i input.toml`, which may add
 probes the run did not have:
 
@@ -411,7 +411,7 @@ snapshot, each with its units:
 $ mallard post extract solut/restart_000002.restart solut/restart_000004.restart
 == Extract ================================================================================
   Files              solut/restart_000002.restart (restart), solut/restart_000004.restart (restart)
-  Case               the resolved input in the provenance of solut/restart_000002.restart
+  Case               the resolved input in the run block of solut/restart_000002.restart
   Snapshots          2 of 2, t = 0.002 to 0.004 s
   Output             extract
 

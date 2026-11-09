@@ -172,8 +172,10 @@ the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
   rewrite turns off `[output] health`, whose ledger follows steps. The
   reconstruction stays the run's, because point samples, gradients and
   `Q`/`VORTICITY` read its polynomials.
-- **Steps.** Restart and XDMF files record their steps; VTKHDF files do not,
-  and their snapshots are numbered by position.
+- **Steps.** Each snapshot's step and time are those the reader finds
+  recorded (`Snapshot::step` and `t`: the snapshot block, a restart file's
+  header), never the file name; only the snapshots of files written before
+  0.10 that record no step are numbered by position, as the report says.
 - **Same values.** A probe's samples are evaluated and gathered as in the run,
   so restart files give the run's probe rows bit for bit on any number of
   ranks (`PostExtractTest`); snapshots of primitives agree to rounding.

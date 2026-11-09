@@ -160,9 +160,34 @@ TEST(PostExtractTest, SnapshotsOfPrimitivesGiveTheRunsProbesToRounding) {
     for (size_t i = 0; i < got.size(); i++) {
         const std::vector<double> a = numbers(got[i]), b = numbers(expected[i]);
         ASSERT_EQ(a.size(), b.size());
-        // VTKHDF files record no step: their snapshots are numbered by position in the series
-        EXPECT_EQ(a[0], double(1 + i / 7));
+        // The step each snapshot's block records
+        EXPECT_EQ(a[0], b[0]) << got[i];
         for (size_t c = 1; c < a.size(); c++) EXPECT_NEAR(a[c], b[c], ROUNDING * (1.0 + std::abs(b[c]))) << got[i];
+    }
+}
+
+TEST(PostExtractTest, StepsAndTimesAreThoseTheFilesRecordNotTheirNames) {
+    const std::string run = run_dir();
+    const std::string renamed = fresh_dir("renamed");
+    if (comm::is_root()) fs::create_directories(renamed);
+    std::vector<std::string> files = {"restart_000004.restart"};
+    if (vtkhdf()) files.push_back("flow_000004.vtkhdf");
+    std::string at_step_4;
+    for (const std::string & r : rows(run + "/probe_line.csv")) {
+        if (r.starts_with("4,")) at_step_4 = r;
+    }
+    ASSERT_FALSE(at_step_4.empty());
+    for (const std::string & file : files) {
+        const std::string misnamed = renamed + "/" + file.substr(0, file.find('_')) + "_000099" + fs::path(file).extension().string();
+        if (comm::is_root()) fs::copy_file(run + "/" + file, misnamed, fs::copy_options::overwrite_existing);
+        comm::barrier();
+        const std::string out = fresh_dir("renamed_out_" + fs::path(file).extension().string().substr(1));
+        ASSERT_EQ(extract({misnamed, "--probe", "line", "-o", out}), 0) << file;
+        const std::vector<std::string> got = rows(out + "/probe_line.csv");
+        ASSERT_FALSE(got.empty()) << file;
+        const std::vector<double> a = numbers(got[0]), b = numbers(at_step_4);
+        EXPECT_EQ(a[0], 4.0) << file;
+        EXPECT_EQ(a[1], b[1]) << file;
     }
 }
 
