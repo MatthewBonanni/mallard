@@ -1,0 +1,1 @@
+Main builds again after the merges of `mallard list`, the structured `mallard check` report and the CI-gap fixes.

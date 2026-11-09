@@ -45,7 +45,7 @@ CaseFields set_up(const std::string & input_file, const cli::Args & args) {
         CheckOptions options;
         options.input_file = input_file;
         const CheckReport report = solver.check(parse_input(input_file), options);
-        out.errors = report.errors;
+        out.errors = report.errors();
         if (report.setup_done) {
             out.fields = solver.output_fields();
             out.species = solver.get_species_names();

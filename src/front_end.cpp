@@ -228,9 +228,9 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
         case cli::Case::output:
             try {
                 const int dim = first.empty() || output::is_mesh_file(first) ? 0 : output::open(first).dim;
-                return dim == 0 ? free : Need{{dim, ""}, first, true};
+                return dim == 0 ? dimension_free() : Need{{dim, ""}, first, true};
             } catch (const std::exception &) {
-                return free;
+                return dimension_free();
             }
         default:
             return dimension_free();
