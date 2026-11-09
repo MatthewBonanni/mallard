@@ -39,8 +39,10 @@ class Session {
         Session(const Session &) = delete;
         Session & operator=(const Session &) = delete;
 
+#ifdef Mallard_HAS_MPI
     private:
-        [[maybe_unused]] bool owns_mpi = false;
+        bool owns_mpi = false;
+#endif
 };
 
 /** @brief Rank of this process in the world communicator. */

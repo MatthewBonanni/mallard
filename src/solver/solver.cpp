@@ -939,12 +939,13 @@ void Solver::init_boundaries() {
             average_pressure_outlets.push_back({static_cast<int32_t>(i_bc), faces, std::move(order), fields});
         }
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
-        std::string text = BOUNDARY_NAMES.at(bcs.back().type) + ", " + logging::count(n_owned_selected) + " faces";
-        if (where) text += ", where " + find_value<std::string>(bound, "where");
-        if (composition) text += ", varying composition";
-        if (fields->varies()) text += fields->depends_on_time() ? ", time dependent" : ", varying along it";
-        if (bcs.back().modeled) text += ", " + wall_model_spec.summary();
-        boundary_summary.emplace_back(name, text);
+        std::string details;
+        auto detail = [&](const std::string & text) { details += (details.empty() ? "" : ", ") + text; };
+        if (where) detail("where " + find_value<std::string>(bound, "where"));
+        if (composition) detail("varying composition");
+        if (fields->varies()) detail(fields->depends_on_time() ? "time dependent" : "varying along it");
+        if (bcs.back().modeled) detail(wall_model_spec.summary());
+        boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
     on_every_rank([&] {
         for (size_t k = 0; k < profiled_faces.size(); k++) {
@@ -2008,6 +2009,21 @@ void Solver::register_data() {
     }
 }
 
+std::vector<std::string> Solver::output_fields() const {
+    std::vector<std::string> names;
+    for (const auto & d : data) names.push_back(d.name());
+    std::vector<std::string> on_request = {"P_MAX", "Q"};
+    if constexpr (N_DIM == 2) {
+        on_request.emplace_back("VORTICITY");
+    } else {
+        FOR_I_DIM on_request.push_back(std::string("VORTICITY_") + "XYZ"[i]);
+    }
+    for (const auto & name : on_request) {
+        if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
+    }
+    return names;
+}
+
 std::vector<std::string> Solver::restart_variables() const {
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     for (const auto & name : species_names) names.push_back("RHOY_" + name);
@@ -2359,7 +2375,11 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     }
 
     logging::section("Boundaries");
-    logging::items(boundary_summary);
+    for (const CheckBoundary & b : boundary_summary) {
+        logging::item(b.zone, b.condition + ", " + logging::count(b.faces) + " faces" +
+                                  (b.details.empty() ? "" : ", " + b.details));
+        if (!b.turbulence.empty()) logging::item(b.zone + " turbulence", b.turbulence);
+    }
 
     logging::section("Output");
     logging::item("Progress", "every " + logging::count(check_interval) + " steps");

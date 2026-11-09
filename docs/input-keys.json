@@ -1041,6 +1041,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -1067,6 +1068,7 @@
    "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/wedge/input.toml",
    "tutorials/wedge/input.toml"
@@ -1369,7 +1371,8 @@
   ],
   "set_in": [
    "examples/sedov_3d/input.toml",
-   "examples/sedov_axisymmetric/input.toml"
+   "examples/sedov_axisymmetric/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml"
   ],
   "type": "integer"
  },
@@ -1407,6 +1410,7 @@
    "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -1427,14 +1431,17 @@
    3
   ],
   "set_in": [
-   "examples/shock_bubble_2d/input.toml"
+   "examples/shock_bubble_2d/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml"
   ]
  },
  "initialize.regions.T": {
   "dims": [
    2
   ],
-  "set_in": []
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ]
  },
  "initialize.regions.X": {
   "dims": [
@@ -1468,11 +1475,15 @@
  },
  "initialize.regions.name": {
   "default": "\"initialize.regions[1]\"",
+  "defaults_by_dim": {
+   "2": "\"initialize.regions[0]\""
+  },
   "dims": [
    2
   ],
   "set_in": [
-   "examples/shock_bubble_2d/input.toml"
+   "examples/shock_bubble_2d/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml"
   ],
   "type": "string"
  },
@@ -1497,7 +1508,8 @@
    2
   ],
   "set_in": [
-   "examples/shock_bubble_2d/input.toml"
+   "examples/shock_bubble_2d/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml"
   ]
  },
  "initialize.regions.region.center": {
@@ -1505,14 +1517,17 @@
    2
   ],
   "set_in": [
-   "examples/shock_bubble_2d/input.toml"
+   "examples/shock_bubble_2d/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml"
   ]
  },
  "initialize.regions.region.edge": {
   "dims": [
    2
   ],
-  "set_in": []
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ]
  },
  "initialize.regions.region.filled": {
   "dims": [
@@ -1548,6 +1563,14 @@
   ],
   "set_in": [
    "examples/shock_bubble_2d/input.toml"
+  ]
+ },
+ "initialize.regions.region.radius": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
   ]
  },
  "initialize.regions.region.resolution": {
@@ -1590,7 +1613,8 @@
   ],
   "required": true,
   "set_in": [
-   "examples/shock_bubble_2d/input.toml"
+   "examples/shock_bubble_2d/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml"
   ],
   "type": "string",
   "values": [
@@ -1623,6 +1647,94 @@
    "examples/shock_bubble_2d/input.toml"
   ]
  },
+ "initialize.regions.turbulence": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ]
+ },
+ "initialize.regions.turbulence.intensity": {
+  "dimension": "velocity (m s^-1)",
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ],
+  "type": "number"
+ },
+ "initialize.regions.turbulence.k_max": {
+  "dimension": "m^-1",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "number"
+ },
+ "initialize.regions.turbulence.kolmogorov_scale": {
+  "default": "0.0",
+  "dimension": "length (m)",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "number"
+ },
+ "initialize.regions.turbulence.length_scale": {
+  "dimension": "length (m)",
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ],
+  "type": "number"
+ },
+ "initialize.regions.turbulence.modes_per_shell": {
+  "default": "32",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "integer"
+ },
+ "initialize.regions.turbulence.period": {
+  "dimension": "length (m)",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "array"
+ },
+ "initialize.regions.turbulence.seed": {
+  "default": "1",
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ],
+  "type": "integer"
+ },
+ "initialize.regions.turbulence.spectrum": {
+  "default": "\"von_karman_pao\"",
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "passot_pouquet",
+   "table",
+   "von_karman_pao"
+  ]
+ },
  "initialize.regions.u": {
   "dims": [
    2
@@ -1652,6 +1764,90 @@
    "examples/shu_osher/input.toml",
    "examples/sod/input.toml",
    "examples/viscous_shock_tube/input.toml"
+  ]
+ },
+ "initialize.turbulence": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ]
+ },
+ "initialize.turbulence.intensity": {
+  "dimension": "velocity (m s^-1)",
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ],
+  "type": "number"
+ },
+ "initialize.turbulence.k_max": {
+  "dimension": "m^-1",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "number"
+ },
+ "initialize.turbulence.kolmogorov_scale": {
+  "dims": [
+   2
+  ],
+  "set_in": []
+ },
+ "initialize.turbulence.length_scale": {
+  "dimension": "length (m)",
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ],
+  "type": "number"
+ },
+ "initialize.turbulence.modes_per_shell": {
+  "default": "32",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "integer"
+ },
+ "initialize.turbulence.period": {
+  "dimension": "length (m)",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "array"
+ },
+ "initialize.turbulence.seed": {
+  "default": "1",
+  "dims": [
+   2
+  ],
+  "set_in": [],
+  "type": "integer"
+ },
+ "initialize.turbulence.spectrum": {
+  "default": "\"von_karman_pao\"",
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/turbulent_hot_spot_2d/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "passot_pouquet",
+   "table",
+   "von_karman_pao"
   ]
  },
  "initialize.type": {
@@ -1715,6 +1911,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -1762,6 +1959,7 @@
    "examples/source_regions/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -1789,12 +1987,14 @@
    "examples/isotropic_turbulence/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
-   "examples/taylor_green_3d/remap.toml"
+   "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml"
   ]
  },
  "integrals.budget": {
   "default": "false",
   "dims": [
+   2,
    3
   ],
   "set_in": [
@@ -1814,19 +2014,22 @@
  "integrals.file": {
   "default": "\"integrals.csv\"",
   "dims": [
+   2,
    3
   ],
   "set_in": [
    "examples/isotropic_turbulence/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
-   "examples/taylor_green_3d/remap.toml"
+   "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml"
   ],
   "type": "string"
  },
  "integrals.interval": {
   "default": "1",
   "dims": [
+   2,
    3
   ],
   "set_in": [
@@ -1844,7 +2047,8 @@
    "examples/isotropic_turbulence/input.toml",
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
-   "examples/taylor_green_3d/remap.toml"
+   "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml"
   ],
   "type": "integer"
  },
@@ -2088,6 +2292,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -2158,6 +2363,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -2229,6 +2435,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -2352,6 +2559,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -2421,6 +2629,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -2618,6 +2827,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -2702,6 +2912,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -2853,6 +3064,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -2992,6 +3204,7 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "tutorials/cluster/input.toml"
   ],
@@ -3120,6 +3333,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -3235,6 +3449,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -3303,6 +3518,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -3378,6 +3594,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -3454,6 +3671,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -3535,6 +3753,7 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ],
   "type": "array"
@@ -3584,6 +3803,7 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ],
   "type": "array"
@@ -3650,6 +3870,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -3681,6 +3902,7 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml"
   ],
@@ -3745,6 +3967,7 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -3812,6 +4035,7 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -3912,6 +4136,7 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml"
   ],
@@ -3963,6 +4188,7 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -4039,6 +4265,7 @@
    "examples/taylor_green_3d/coarse.toml",
    "examples/taylor_green_3d/input.toml",
    "examples/taylor_green_3d/remap.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -4142,6 +4369,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -4901,6 +5129,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -4974,6 +5203,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -5101,6 +5331,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -5599,6 +5830,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -5780,6 +6012,7 @@
    "examples/taylor_green_3d/remap.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -5890,6 +6123,7 @@
    "examples/taylor_green_3d/input.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",
@@ -5960,6 +6194,7 @@
    "examples/taylor_green_3d/input.toml",
    "examples/triple_flame/input.toml",
    "examples/triple_flame/thick/input.toml",
+   "examples/turbulent_hot_spot_2d/input.toml",
    "examples/turbulent_inflow_duct/input.toml",
    "examples/viscous_shock_tube/input.toml",
    "examples/wedge/input.toml",

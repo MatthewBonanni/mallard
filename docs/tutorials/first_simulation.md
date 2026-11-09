@@ -151,7 +151,7 @@ The [verification page](https://matthewbonanni.github.io/mallard/validation/#sph
 
 ## 7. Templates
 
-`mallard new --list` shows every template, grouped as the examples are, with whether it is 2D or 3D:
+`mallard list templates` shows every template, grouped as the examples are, with whether it is 2D or 3D:
 
 ```text
 Shocks and compressible flow

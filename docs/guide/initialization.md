@@ -217,6 +217,96 @@ those of the interpolated field. Pitfalls:
 - An entry that no expression reads is an error; so are rows that do not
   form a grid.
 
+## Synthetic turbulence
+
+A divergence-free random velocity with a prescribed energy spectrum E(k),
+added to any initial state or inside a region: decaying turbulence, a
+turbulent hot spot, fluctuations over a restart.
+
+```toml
+# examples/turbulent_hot_spot_2d, on the periodic box [0, 2 pi]^2
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+n_subdivisions = 1   # smooth fields: no need for the 2D default, 4
+
+[initialize.turbulence]
+spectrum = "passot_pouquet"
+intensity = 0.1      # u', the rms of each component
+length_scale = 0.5   # the integral length scale
+
+[[initialize.regions]]
+name = "hot spot"
+region = {type = "disk", center = [3.141592653589793, 3.141592653589793], radius = 1.0, edge = 0.3}
+T = 2.142857142857143
+turbulence = {spectrum = "von_karman_pao", intensity = 0.2, length_scale = 0.2, seed = 2}
+```
+
+The field is a sum of Fourier modes `a cos(k · x + φ)`, each with `a`
+normal to `k`, so it is divergence-free at every point
+([Kraichnan 1970](../references.md#kraichnan-1970)). The wavevectors are
+those of a periodic box (`period`, by default the mesh's bounding box), so
+the field is periodic over it, grouped into shells of width
+dk = 2π / (shortest period) centered on `j dk`, up to `k_max`. Each shell
+holds the spectrum's energy between its edges, split evenly among at most
+`modes_per_shell` of its wavevectors; the shells' total is (d / 2) u'² in d
+dimensions, so u' is the rms of each velocity component. Shells of
+negligible energy (below 10⁻¹² of the total, as in the exponential tails)
+are left out. Like the other initial states, cells take the average of the
+field over their quadrature points.
+
+| `spectrum` | E(k), up to a constant |
+|---|---|
+| `von_karman_pao` (default) | (k / k_e)⁴ / (1 + (k / k_e)²)^(17/6) · exp(-2 (k η)²) ([Bailly & Juvé 1999](../references.md#bailly-juve-1999)) |
+| `passot_pouquet` | (k / k_e)⁴ exp(-2 (k / k_e)²) ([Passot & Pouquet 1987](../references.md#passot-pouquet-1987)) |
+| `table` | Linear between the rows of a CSV `file` of columns `k` (1/m) and `E` (m³/s²), zero outside |
+
+`k_e` follows from `length_scale`, the integral length scale
+L = C ∫E/k dk / ∫E dk with C = 3π/4 in 3D and 2 in 2D
+([Pope 2000](../references.md#pope-2000), §6.5): for Passot–Pouquet,
+k_e = √(2π) / L in 3D. `kolmogorov_scale` (η, default none) adds the
+dissipation range of von Kármán–Pao. A table gives E itself, and `intensity`,
+if given, scales it.
+
+**Determinism.** Each shell keeps its wavevectors of smallest hash of `seed`
+and the wavevector, and their directions and phases are hashes of the same,
+computed on the host: any rank count gives the same field bit for bit. A
+wavevector's direction and phase do not depend on `k_max`,
+`modes_per_shell` or the other shells, and the same table in the base state
+and in a region gives the same field.
+
+**Layering.** In `[initialize]` the field adds to the base velocity of any
+`type`, a restart or remap included (every cell then changes). In
+`[[initialize.regions]]` it adds to the region's `u`, or to the velocity
+below when the region sets none, and blends through the region's `edge`
+like any other value, so it fades out over the edge.
+
+The run log's *Initial state* lists the modes and shells, and the share of
+the spectrum's energy the shells hold. Pitfalls:
+
+- Cost is cells × quadrature points × modes, about 2.5 × 10⁸ modes times
+  points per second per CPU thread: 28 points per quadrilateral times
+  `n_subdivisions`² in 2D, 336 per hexahedron times `n_subdivisions`³ in 3D, and up to
+  `modes_per_shell` modes in each of up to `k_max / dk` shells. Smooth edges
+  of regions refine the cells along them. For large runs on CPUs, lower
+  `modes_per_shell` or `k_max`, or in 2D `n_subdivisions`.
+- The field is periodic over `period`, not over a region: the largest eddies
+  are a period long, and wavenumbers below dk / 2 get no energy.
+- A spectrum whose energy lies mostly beyond `k_max` (L close to the cell
+  size) is cut there, and the shells left carry all of u'²: the log's share
+  says how much was cut.
+- With the default `k_max` (π over the mean cell size), the smallest eddies
+  span two cells; they decay at once.
+- The velocity alone changes: density and pressure stay as given, not in
+  equilibrium with the eddies, so compressible runs start with weak acoustic
+  waves.
+- Not available on axisymmetric meshes.
+- `tools/setup/isotropic_turbulence_restart.py` writes the case of Johnsen
+  et al. as a restart file instead: every mode of the box, cell-averaged
+  exactly by FFT, for hexahedral boxes only.
+
 ## Restarts
 
 ```toml
@@ -286,7 +376,7 @@ to copy for your own cases:
 | `flame_restart.py` | Premixed flame in its own frame from a Cantera solution (1D, or a wrinkled 2D front) |
 | `znd_restart.py` | ZND detonation profile, with pockets of fresh gas to trigger cells |
 | `channel_init.py` | Turbulent channel: mean profile plus a divergence-free perturbation |
-| `isotropic_turbulence_restart.py` | Isotropic turbulence with a given spectrum |
+| `isotropic_turbulence_restart.py` | Isotropic turbulence of the Johnsen et al. case on a periodic box, every mode of the box (any spectrum, any mesh, any region: [synthetic turbulence](#synthetic-turbulence) without a script) |
 | `autoignition_restart.py` | Stratified temperature and velocity fields |
 | `interpolate_restart.py` | A restart file interpolated onto another Gmsh mesh (nearest cells; `type = "remap"` below is conservative and high order) |
 | `tile_restart.py` | A restart file of a periodic box tiled into a larger box |

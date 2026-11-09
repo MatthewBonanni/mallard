@@ -176,8 +176,9 @@ struct StaticTables {
     }
 };
 
+// Clang 16 counts only uses outside constant expressions
 template <int R>
-inline constexpr StaticTables<R> STATIC_TABLES{};
+[[maybe_unused]] inline constexpr StaticTables<R> STATIC_TABLES{};
 
 /**
  * @brief Reflected moments (CellSetup::reflected_moments) for degree R:

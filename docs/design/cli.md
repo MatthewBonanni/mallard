@@ -25,8 +25,9 @@ Maintain  mallard test | completion | --version
 | `check` with no input | Inspect | planned ([#508](https://github.com/MatthewBonanni/mallard/issues/508)) |
 | `info <file>`, `info <run-dir>` | Inspect | available; on the [output reader](output_reader.md) |
 | `info <run-dir> --html` (the run report) | Inspect | planned ([#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
-| `list fields\|species\|templates\|keys` | Inspect | planned ([#502](https://github.com/MatthewBonanni/mallard/issues/502)) |
-| `diff` | Inspect | planned ([#506](https://github.com/MatthewBonanni/mallard/issues/506)) |
+| `list fields\|species\|templates` | Inspect | available (`new --list` is a deprecated alias of `list templates`) |
+| `list keys` | Inspect | planned ([#502](https://github.com/MatthewBonanni/mallard/issues/502), on the key record of [#509](https://github.com/MatthewBonanni/mallard/issues/509)) |
+| `diff` | Inspect | available; on the [output reader](output_reader.md), `--remap` on the [remap](remap.md) |
 | `mesh convert` | Mesh | available |
 | `mesh extrude` | Mesh | planned |
 | `post extract` | Post | planned ([#505](https://github.com/MatthewBonanni/mallard/issues/505)) |

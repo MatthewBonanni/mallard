@@ -510,6 +510,12 @@ class Solver {
         /** @brief Names of the transported species, empty for a single gas. */
         const std::vector<std::string> & get_species_names() const { return species_names; }
 
+        /**
+         * @brief After init: every field [[write_data]] variables accept in this case, those computed
+         *        only when a writer asks for them (P_MAX, Q, VORTICITY) included.
+         */
+        std::vector<std::string> output_fields() const;
+
         StateView conservatives;
         SpeciesView species;
         Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
@@ -744,7 +750,7 @@ class Solver {
 
         // Run log
         logging::Items mesh_summary;
-        logging::Items boundary_summary;
+        std::vector<CheckBoundary> boundary_summary;
         logging::Items source_summary;
         std::string initial_state;
         double t_wall_setup = 0.0;

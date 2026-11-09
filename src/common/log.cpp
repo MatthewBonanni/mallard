@@ -64,6 +64,13 @@ std::string paint(std::string_view text, Style s, bool on) {
     return ansi(s) + std::string(text) + "\033[0m";
 }
 
+/// Columns a UTF-8 string takes: its code points (status marks like ✓ are one column).
+size_t columns(std::string_view text) {
+    size_t n = 0;
+    for (const char c : text) n += (static_cast<unsigned char>(c) & 0xC0) != 0x80;
+    return n;
+}
+
 void close_phase() {
     if (phase_open) {
         std::cout << "\n";
@@ -100,6 +107,8 @@ std::string style(std::string_view text, Style s) {
     return paint(text, s, color_stdout());
 }
 
+std::string style(std::string_view text, Style s, bool on) { return paint(text, s, on); }
+
 void line(std::string_view text) {
     if (!comm::is_root()) return;
     close_phase();
@@ -108,7 +117,7 @@ void line(std::string_view text) {
 
 void section(std::string_view title, std::string_view right) {
     if (!comm::is_root()) return;
-    const int used = 4 + static_cast<int>(title.size()) + (right.empty() ? 0 : 1 + static_cast<int>(right.size()));
+    const int used = 4 + static_cast<int>(columns(title)) + (right.empty() ? 0 : 1 + static_cast<int>(columns(right)));
     std::string text = style("== ", Style::DIM) + style(title, Style::BOLD) + " ";
     text += style(std::string(static_cast<size_t>(std::max(3, WIDTH - used - 1)), '='), Style::DIM);
     if (!right.empty()) text += " " + std::string(right);
@@ -129,15 +138,15 @@ void items(const Items & list) {
 
 void table(const std::vector<std::string> & header, const std::vector<std::vector<std::string>> & rows) {
     std::vector<size_t> width(header.size());
-    for (size_t c = 0; c < header.size(); c++) width[c] = header[c].size();
+    for (size_t c = 0; c < header.size(); c++) width[c] = columns(header[c]);
     for (const auto & row : rows) {
-        for (size_t c = 0; c < row.size() && c < width.size(); c++) width[c] = std::max(width[c], row[c].size());
+        for (size_t c = 0; c < row.size() && c < width.size(); c++) width[c] = std::max(width[c], columns(row[c]));
     }
     const auto text = [&](const std::vector<std::string> & row) {
         std::string out = " ";
         for (size_t c = 0; c < row.size() && c < width.size(); c++) {
             std::string cell = row[c];
-            if (c + 1 < row.size()) cell.resize(width[c], ' ');
+            if (c + 1 < row.size()) cell.append(width[c] - columns(cell), ' ');
             out += " " + cell + (c + 1 < row.size() ? " " : "");
         }
         while (!out.empty() && out.back() == ' ') out.pop_back();
