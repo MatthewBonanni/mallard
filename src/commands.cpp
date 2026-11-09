@@ -125,7 +125,7 @@ constexpr Option DIFF_OPTIONS[] = {
      "provenance records them, or --mesh-a and --mesh-b."},
     {"--mesh-a", "", "FILE",
      "A's mesh file, where its provenance does not record it or the file has moved: for --remap and for the "
-     "coordinates of the largest differences. Default: from A's provenance."},
+     "coordinates of the largest differences. Default: from A's run block."},
     {"--mesh-b", "", "FILE", "B's mesh file, for --remap. Default: from B's provenance."},
     {"--format", "", "text|json",
      "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "

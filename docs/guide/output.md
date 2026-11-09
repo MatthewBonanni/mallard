@@ -656,7 +656,7 @@ $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.rest
   remapped onto A's mesh by the conservative remap of
   [`[initialize] type = "remap"`](initialization.md) (degree 2, limited) and
   compared there. The meshes, and the cell coordinates of the largest
-  differences, come from the input each file's provenance records (a mesh file
+  differences, come from the input each file's run block records (a mesh file
   relative to the run's directory, checked against its SHA-256), or from
   `--mesh-a` and `--mesh-b`.
 

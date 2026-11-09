@@ -175,7 +175,7 @@ Status status(const Stats & s, double tol) {
 struct Side {
     output::Contents c;
     size_t snapshot = 0;
-    json::Value provenance;
+    json::Value run;  ///< its run block
     std::shared_ptr<Mesh> mesh;   ///< its case's mesh, where needed and found
     std::vector<uint64_t> local;  ///< [global cell] local cell of mesh
     std::string mesh_from;        ///< where the mesh came from
@@ -268,10 +268,10 @@ class Quiet {
         std::streambuf * saved;
 };
 
-json::Value parsed_provenance(const output::Contents & c) {
-    if (c.provenance.empty()) return {};
+json::Value parsed_run(const output::Contents & c) {
+    if (c.run.empty()) return {};
     try {
-        return json::parse(c.provenance);
+        return json::parse(c.run);
     } catch (const std::exception &) {
         return {};
     }
@@ -294,7 +294,7 @@ std::string string_at(const json::Value & v, std::initializer_list<const char *>
 
 /**
  * @brief The mesh of a file's case (collective): mesh_file, else the [mesh]
- *        table of the input its provenance records, with its [[periodic]]
+ *        table of the input its run block records, with its [[periodic]]
  *        entries; mesh files named relative to the run's directory.
  */
 void find_mesh(Side & s, const std::string & mesh_file) {
@@ -305,12 +305,12 @@ void find_mesh(Side & s, const std::string & mesh_file) {
                     "D solver; mallard --dim " + std::to_string(s.c.dim) + " diff ... runs the other";
         return;
     }
-    std::string text = string_at(s.provenance, {"input", "resolved"});
-    if (text.empty()) text = string_at(s.provenance, {"input", "text"});
+    std::string text = string_at(s.run, {"input", "resolved"});
+    if (text.empty()) text = string_at(s.run, {"input", "text"});
     Input recorded(Input::table_type{});
-    if (!text.empty()) recorded = parse_input_string(text, s.c.path + " (its provenance)");
+    if (!text.empty()) recorded = parse_input_string(text, s.c.path + " (its run block)");
     Input setup(Input::table_type{});
-    const std::string directory = string_at(s.provenance, {"run", "directory"});
+    const std::string directory = string_at(s.run, {"run", "directory"});
     std::string recorded_file;
     if (!mesh_file.empty()) {
         Input mesh(Input::table_type{});
@@ -326,14 +326,14 @@ void find_mesh(Side & s, const std::string & mesh_file) {
             if (file.is_relative() && !directory.empty()) file = fs::path(directory) / file;
             recorded_file = file.string();
             mesh.as_table()["filename"] = Input(recorded_file);
-            s.mesh_from = recorded_file + ", as its provenance records";
+            s.mesh_from = recorded_file + ", as its run block records";
         } else {
-            s.mesh_from = "the " + type + " mesh its provenance's input generates";
+            s.mesh_from = "the " + type + " mesh its run block's input generates";
         }
         setup.as_table()["mesh"] = mesh;
     } else {
-        s.no_mesh = s.provenance.is_null() ? "it has no provenance (files before Mallard 0.9), so no record of its mesh"
-                                           : "its provenance records no input";
+        s.no_mesh = s.run.is_null() ? "it has no run block (files before Mallard 0.9), so no record of its mesh"
+                                           : "its run block records no input";
         return;
     }
     if (recorded.contains("periodic")) setup.as_table()["periodic"] = recorded.at("periodic");
@@ -344,7 +344,7 @@ void find_mesh(Side & s, const std::string & mesh_file) {
             s.mesh_from.clear();
             return;
         }
-        const std::string sha = string_at(s.provenance, {"mesh", "sha256"});
+        const std::string sha = string_at(s.run, {"mesh", "sha256"});
         if (!sha.empty() && provenance::sha256_file(recorded_file) != sha) {
             s.no_mesh = "its mesh file " + recorded_file + " has changed since the run (its SHA-256 differs)";
             s.mesh_from.clear();
@@ -587,7 +587,7 @@ Side open_side(const std::string & path, const Selection & snapshot, const char 
                              "probe and CSV files");
     }
     s.snapshot = pick_snapshot(s.c, snapshot, which);
-    s.provenance = parsed_provenance(s.c);
+    s.run = parsed_run(s.c);
     return s;
 }
 
@@ -659,8 +659,8 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
     r.time = dt == 0.0 ? Status::same : dt <= r.tolerance.all * scale ? Status::within : Status::beyond;
     r.step = a.step() == b.step() ? Status::same : Status::within;
 
-    const std::string sha_a = string_at(a.provenance, {"mesh", "sha256"});
-    const std::string sha_b = string_at(b.provenance, {"mesh", "sha256"});
+    const std::string sha_a = string_at(a.run, {"mesh", "sha256"});
+    const std::string sha_b = string_at(b.run, {"mesh", "sha256"});
     std::map<std::string, std::vector<double>> remapped;
     if (remap) {
         for (Side * s : {&a, &b}) {
@@ -691,7 +691,7 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
         }
         r.how = a.c.global_order ? "same_mesh" : "file_order";
         if (!sha_a.empty() && !sha_b.empty() && sha_a != sha_b) {
-            r.notes.push_back("the provenance of A and B records different mesh files (SHA-256) with the same cell "
+            r.notes.push_back("the run blocks of A and B record different mesh files (SHA-256) with the same cell "
                               "count; --remap compares them as different meshes");
         }
         if (!a.c.global_order) {
@@ -850,7 +850,7 @@ void print_fields(const Comparison & r) {
 }
 
 void print_restart(const RestartResult & s) {
-    logging::section("Restart state", "bit for bit; provenance not compared");
+    logging::section("Restart state", "bit for bit; run block not compared");
     std::vector<std::vector<std::string>> rows;
     for (const Row & row : s.header) rows.push_back({mark(row.s), row.item, row.a, row.b});
     logging::table({"", "header", "A", "B"}, rows);
