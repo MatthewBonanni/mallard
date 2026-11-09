@@ -103,9 +103,9 @@ TEST(RunReport, ValuesAreBareAndTheirUnitsInTheUnitsRow) {
 TEST(RunReport, WrittenFilesAreCountedByKindUntilTheNextRow) {
     if (!comm::is_root()) GTEST_SKIP() << "rank 0 counts the files";
     logging::take_written();
-    logging::written(4, 0.1, "vtu", "a_000004.vtu");
-    logging::written(5, 0.2, "restart", "r_000005.restart");
-    logging::written(8, 0.3, "vtu", "a_000008.vtu");
+    logging::written(4, 0.1, "vtu", "a_000004.vtu", "interval", "a");
+    logging::written(5, 0.2, "restart", "r_000005.restart", "interval", "r");
+    logging::written(8, 0.3, "vtu", "a_000008.vtu", "interval", "a");
     EXPECT_TRUE(logging::written_pending());
     EXPECT_EQ(logging::take_written(), "2 vtu, 1 restart");
     EXPECT_FALSE(logging::written_pending());

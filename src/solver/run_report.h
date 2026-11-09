@@ -34,7 +34,7 @@ struct ProgressRow {
     double min_T = 0.0, max_T = 0.0, sum_Y_error = 0.0;
     double reacting = 0.0;  // fraction of the cells
     double chemistry_steps = 0.0;
-    std::string written;  // logging::take_written
+    std::string written{};  // logging::take_written
 };
 
 /** @brief The table's columns, with the case's units (units::column). */
@@ -67,7 +67,7 @@ struct RunSummary {
         uint64_t n = 0;  // 0: a file appended to as the run goes
         std::string where;
     };
-    std::vector<Files> files;
+    std::vector<Files> files{};
 };
 
 /** @brief The Summary section. */

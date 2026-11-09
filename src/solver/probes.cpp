@@ -1652,7 +1652,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
                     p.write_vtp(block, nodes);
                 }
                 if (p.snapshot) {
-                    logging::output(step, double(t), p.format == Format::VTKHDF ? "vtkhdf" : "vtp", p.last_file,
+                    logging::written(step, double(t), p.format == Format::VTKHDF ? "vtkhdf" : "vtp", p.last_file,
                                     block.reason, p.file);
                 }
             }
