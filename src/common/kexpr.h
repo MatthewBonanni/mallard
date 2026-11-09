@@ -187,6 +187,17 @@ KOKKOS_INLINE_FUNCTION double binary(const Op op, const double a, const double b
     }
 }
 
+/**
+ * @brief Point l of lane-batched variables. At namespace scope so that it
+ *        takes the visibility of Vars (hidden for nvcc's anonymous namespaces).
+ */
+template <typename Vars>
+struct Lane {
+    const Vars & vars;
+    int l;
+    KOKKOS_INLINE_FUNCTION double operator()(const uint16_t i) const { return vars(l, i); }
+};
+
 } // namespace detail
 
 /**
@@ -463,13 +474,6 @@ struct ProgramTable {
     Kokkos::View<const uint8_t *, MemorySpace> jumps;     // per program: whether it has jumps
     bool loops = false;
 
-    template <typename Vars>
-    struct Lane {
-        const Vars & vars;
-        int l;
-        KOKKOS_INLINE_FUNCTION double operator()(const uint16_t i) const { return vars(l, i); }
-    };
-
     ProgramTable() = default;
 
     explicit ProgramTable(const std::vector<const Program *> & programs) {
@@ -521,7 +525,7 @@ struct ProgramTable {
         }
         for (int l = 0; l < K; l++) {
             bool stopped = false;
-            out[l] = evaluate(c, n, Lane<Vars>{vars, l}, stopped);
+            out[l] = evaluate(c, n, detail::Lane<Vars>{vars, l}, stopped);
             if (stopped) Kokkos::atomic_store(&runaway(), p + 1);
         }
     }

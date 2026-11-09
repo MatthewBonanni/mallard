@@ -354,6 +354,25 @@ std::vector<double> device_values(const kexpr::ProgramTable<> & table, const dou
     return std::vector<double>(h_values.data(), h_values.data() + h_values.extent(0));
 }
 
+constexpr int LANE_POINTS = 4;
+
+/** @brief The table's programs at groups of LANE_POINTS points, by ProgramTable::lanes and point by point. */
+void lanes_and_points(const kexpr::ProgramTable<> & table, const Kokkos::View<double *[4]> & points, const uint32_t n_groups,
+                      const Kokkos::View<double **> & lanes, const Kokkos::View<double **> & single) {
+    constexpr int K = LANE_POINTS;
+    Kokkos::parallel_for("evaluate", n_groups, KOKKOS_LAMBDA(const uint32_t g) {
+        for (uint32_t p = 0; p < table.size(); p++) {
+            double out[size_t(K)];
+            auto at = [&](const int l) { return g * K + static_cast<uint32_t>(l); };
+            table.lanes<K>(p, [&](const int l, const uint16_t v) { return points(at(l), v); }, out);
+            for (int l = 0; l < K; l++) {
+                lanes(p, at(l)) = out[l];
+                single(p, at(l)) = table(p, [&](const uint16_t v) { return points(at(l), v); });
+            }
+        }
+    });
+}
+
 double literal(const std::string & text) {
     const double none[4] = {0.0, 0.0, 0.0, 0.0};
     return kexpr::Program("test", text, VARIABLES)(none);
@@ -417,7 +436,6 @@ TEST(KexprTest, DeviceMatchesHost) {
  *        lane, and programs with jumps go point by point.
  */
 TEST(KexprTest, LanesMatchPointByPointBitwise) {
-    constexpr int K = 4;
     std::vector<std::string> all = texts(ARITHMETIC);
     for (const auto & cases : {FUNCTIONS, CONTROL_FLOW}) {
         for (const auto & text : texts(cases)) all.push_back(text);
@@ -428,7 +446,7 @@ TEST(KexprTest, LanesMatchPointByPointBitwise) {
     for (const auto & p : programs) pointers.push_back(&p);
     const kexpr::ProgramTable<> table(pointers);
     const auto points = sample_points();
-    const uint32_t n_groups = static_cast<uint32_t>(points.size()) / K, n_points = n_groups * static_cast<uint32_t>(K);
+    const uint32_t n_groups = static_cast<uint32_t>(points.size()) / LANE_POINTS, n_points = n_groups * static_cast<uint32_t>(LANE_POINTS);
     Kokkos::View<double *[4]> d_points("points", n_points);
     auto h_points = Kokkos::create_mirror_view(d_points);
     for (uint32_t i = 0; i < n_points; i++) {
@@ -436,17 +454,7 @@ TEST(KexprTest, LanesMatchPointByPointBitwise) {
     }
     Kokkos::deep_copy(d_points, h_points);
     Kokkos::View<double **> lanes("lanes", table.size(), n_points), single("single", table.size(), n_points);
-    Kokkos::parallel_for("evaluate", n_groups, KOKKOS_LAMBDA(const uint32_t g) {
-        for (uint32_t p = 0; p < table.size(); p++) {
-            double out[size_t(K)];
-            auto at = [&](const int l) { return g * K + static_cast<uint32_t>(l); };
-            table.lanes<K>(p, [&](const int l, const uint16_t v) { return d_points(at(l), v); }, out);
-            for (int l = 0; l < K; l++) {
-                lanes(p, at(l)) = out[l];
-                single(p, at(l)) = table(p, [&](const uint16_t v) { return d_points(at(l), v); });
-            }
-        }
-    });
+    lanes_and_points(table, d_points, n_groups, lanes, single);
     auto h_lanes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), lanes);
     auto h_single = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), single);
     for (uint32_t p = 0; p < table.size(); p++) {
