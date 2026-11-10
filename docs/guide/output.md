@@ -710,6 +710,10 @@ $ mallard info solut/flow.vtkhdf.series
 chosen fields on the state of restart files and snapshots after the run, as
 the run would have written them ([Probes of existing output](probes.md#probes-of-existing-output)).
 
+`mallard post convergence` compares runs of a case at several resolutions:
+the observed order, the extrapolated value and the grid convergence index of
+their forces, integrals and probes ([Grid convergence](convergence.md)).
+
 ### Comparing two solutions: `mallard diff`
 
 `mallard diff A B` tells whether two files hold the same solution and, if not,
@@ -809,6 +813,7 @@ ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` 
 
 - [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output)
 - [Probes and monitors](probes.md): probes, wall forces, domain integrals
+- [Grid convergence](convergence.md): discretization error from runs at several resolutions
 - [Statistics](statistics.md): time averages, spectra and correlations, phase averages
 - [Initialization and restarts](initialization.md): restart files and their format
 - [Running](running.md): run control of a running case

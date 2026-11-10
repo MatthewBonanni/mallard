@@ -87,39 +87,43 @@ restart file does.
 
 Commands:
   Run
-    mallard -i input.toml   Run a case
-    mallard ctl             Ask a running case for its status, a restart file or
-                            a stop, or change its settings
-    mallard reactor         Integrate a 0D reactor, or benchmark the chemistry
+    mallard -i input.toml     Run a case
+    mallard ctl               Ask a running case for its status, a restart file
+                              or a stop, or change its settings
+    mallard reactor           Integrate a 0D reactor, or benchmark the chemistry
   Set up
-    mallard new             Create a ready-to-run case from a template
-    mallard input upgrade   Bring an input file from an older release up to date
-    mallard input resolve   Write the input as a run uses it: every key
-                            explicit, defaults and preset included
+    mallard new               Create a ready-to-run case from a template
+    mallard input upgrade     Bring an input file from an older release up to
+                              date
+    mallard input resolve     Write the input as a run uses it: every key
+                              explicit, defaults and preset included
   Inspect
-    mallard check           Set up a case without running it and report on it:
-                            keys, mesh, time step, memory, cost, environment
-    mallard info            What a mesh, snapshot, restart, probe or CSV file,
-                            or a run directory, holds
-    mallard list fields     The output fields there are, or exactly those of one
-                            case
-    mallard list species    The species of a case
-    mallard list keys       The input keys there are, or exactly those of one
-                            case: type, units, default, values
-    mallard list templates  The case templates of mallard new
-    mallard diff            Compare two solutions field by field: norms of the
-                            difference, where it is largest, bitwise
+    mallard check             Set up a case without running it and report on it:
+                              keys, mesh, time step, memory, cost, environment
+    mallard info              What a mesh, snapshot, restart, probe or CSV file,
+                              or a run directory, holds
+    mallard list fields       The output fields there are, or exactly those of
+                              one case
+    mallard list species      The species of a case
+    mallard list keys         The input keys there are, or exactly those of one
+                              case: type, units, default, values
+    mallard list templates    The case templates of mallard new
+    mallard diff              Compare two solutions field by field: norms of the
+                              difference, where it is largest, bitwise
   Mesh
-    mallard mesh convert    Write a mesh file, or the mesh of an input file, as
-                            a Mallard HDF5 mesh
+    mallard mesh convert      Write a mesh file, or the mesh of an input file,
+                              as a Mallard HDF5 mesh
   Post
-    mallard post extract    Probes, region integrals and snapshots of existing
-                            output, as the run would have written them
+    mallard post extract      Probes, region integrals and snapshots of existing
+                              output, as the run would have written them
+    mallard post convergence  Order of accuracy, extrapolated value and grid
+                              convergence index (GCI) of runs at several
+                              resolutions
   Maintain
-    mallard test            Run the unit and regression tests
-    mallard completion      Print the shell completion script for bash, zsh or
-                            fish
-    mallard --version       Print the version
+    mallard test              Run the unit and regression tests
+    mallard completion        Print the shell completion script for bash, zsh or
+                              fish
+    mallard --version         Print the version
 
 Options:
   -i FILE                The input file (TOML). Required.
@@ -264,9 +268,10 @@ Usage: mallard input <command> [options]
 Commands on input files.
 
 Commands:
-  mallard input upgrade     Bring an input file from an older release up to date
-  mallard input resolve     Write the input as a run uses it: every key
-                            explicit, defaults and preset included
+  mallard input upgrade       Bring an input file from an older release up to
+                              date
+  mallard input resolve       Write the input as a run uses it: every key
+                              explicit, defaults and preset included
 
 mallard input <command> --help shows the page of a command.
 
@@ -513,12 +518,12 @@ Usage: mallard list <command> [options]
 Catalogs: the fields, species, input keys and case templates there are.
 
 Commands:
-  mallard list fields       The output fields there are, or exactly those of one
-                            case
-  mallard list species      The species of a case
-  mallard list keys         The input keys there are, or exactly those of one
-                            case: type, units, default, values
-  mallard list templates    The case templates of mallard new
+  mallard list fields         The output fields there are, or exactly those of
+                              one case
+  mallard list species        The species of a case
+  mallard list keys           The input keys there are, or exactly those of one
+                              case: type, units, default, values
+  mallard list templates      The case templates of mallard new
 
 mallard list <command> --help shows the page of a command.
 
@@ -738,8 +743,8 @@ Usage: mallard mesh <command> [options]
 Commands on meshes.
 
 Commands:
-  mallard mesh convert      Write a mesh file, or the mesh of an input file, as
-                            a Mallard HDF5 mesh
+  mallard mesh convert        Write a mesh file, or the mesh of an input file,
+                              as a Mallard HDF5 mesh
 
 mallard mesh <command> --help shows the page of a command.
 
@@ -778,11 +783,15 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard post <command> [options]
 
-Commands on a run's output: probes, integrals and snapshots of it.
+Commands on a run's output: probes, integrals and snapshots of it, and the grid
+convergence of several runs.
 
 Commands:
-  mallard post extract      Probes, region integrals and snapshots of existing
-                            output, as the run would have written them
+  mallard post extract        Probes, region integrals and snapshots of existing
+                              output, as the run would have written them
+  mallard post convergence    Order of accuracy, extrapolated value and grid
+                              convergence index (GCI) of runs at several
+                              resolutions
 
 mallard post <command> --help shows the page of a command.
 
@@ -881,6 +890,85 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-extract
+```
+
+### mallard post convergence
+
+```text
+Usage: mallard post convergence RUN_DIR RUN_DIR [RUN_DIR...] [--quantity NAMES] [--time T | --average T0:T1]
+       mallard post convergence RUN_DIR|FILE... --field NAME --exact EXPR
+
+Estimates the discretization error of a case from runs of it at several
+resolutions: for each quantity, the order of accuracy the runs show, the value
+extrapolated to zero cell size and the fine run's grid convergence index (GCI),
+an error band, by the procedure of Celik et al. (2008) with Roache's factors of
+safety. A quantity's verdict says in words whether it converges, and how far to
+trust the band.
+
+Each RUN_DIR is a directory a run ran in. What identifies it is what its run
+record (mallard.jsonl) records, never its name: its run, its cell count and its
+input. The runs are ordered by cell count, whatever the order given, and their
+refinement ratios follow from it. The quantities are the columns of the forces,
+integrals and probe tables each run wrote ([[forces]], [integrals], [[probes]]),
+by default their last values. Inputs that differ other than in [mesh], [run],
+[output] and [[write_data]] are a warning.
+
+Three runs give an observed order; more give one per three successive runs,
+which agree once the runs are in the asymptotic range. Two runs assume the
+design order with a factor of safety of 3, a warning. With --field and --exact
+the report is the error norms of a field against an exact solution and their
+observed orders; then FILE can also be a snapshot or restart file of the whole
+mesh.
+
+Options:
+  --quantity NAMES    The quantities to study, separated by commas: TABLE:COLUMN
+                      (integrals:rho2, forces_wall:F_x), a column of every table
+                      (F_x), or a table (forces_wall), as the report names them.
+                      Default: every column of every forces, integrals and probe
+                      table that all the runs wrote.
+  --time T            Take each quantity at simulated time T, in seconds (a row
+                      every run wrote), or with --field the snapshot of time T.
+                      Default: each run's last value (snapshot).
+  --average T0:T1     Take the time average of each quantity over T0 <= t <= T1,
+                      in seconds (trapezoidal, over the rows of the window): for
+                      unsteady flows. Default: each run's last value.
+  --order P           The order of accuracy to compare the observed orders with,
+                      and the order a study of two runs assumes. Default: the
+                      design order of the runs' reconstruction (FO 1, MUSCL 2,
+                      TENO its order).
+  --safety-factor F   The GCI's factor of safety. Default: 1.25 with three or
+                      more runs, 3 with two (Roache).
+  --sizes LIST        A representative cell size of each run, in the order
+                      given, separated by commas: for refinements that are not
+                      uniform, or time-step studies. Default: (1 /
+                      cells)^(1/dim) from each run's cell count.
+  --field NAME        Instead of quantities, the L1, L2 and Linf errors of this
+                      field of each run's last snapshot (NAME[k] for a component
+                      of a vector) against --exact. Needs --exact.
+  --exact EXPR        The exact solution of --field, an expression of x, y, z
+                      and t, averaged over each cell (quadrature exact to degree
+                      6) at the snapshot's time.
+  --format text|json  text: sections and tables, with the units of every
+                      quantity; json: the same as one JSON object, for scripts.
+                      Default: text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard post convergence coarse medium fine          # every force, integral and probe
+  $ mallard post convergence coarse medium fine --quantity forces_cylinder:F_x
+  $ mallard post convergence n32 n64 n128 --average 10:20 --quantity F_x,F_y
+  $ mallard post convergence n16 n32 n64 --field RHO --exact '1 + 0.2 * sin(2 * pi * (x - t))'
+  $ mallard post convergence coarse fine --order 2 --format json
+
+Exit status:
+  0  no errors (there may be warnings: oscillating, two runs, an order far from the design's)
+  1  a quantity diverges, a run cannot be read, or the runs are not of one case
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-convergence
 ```
 
 ### mallard test

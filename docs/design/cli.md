@@ -33,7 +33,7 @@ Maintain  mallard test | completion | --version
 | `post derive` | Post | planned ([#511](https://github.com/MatthewBonanni/mallard/issues/511)) |
 | `post average` | Post | planned ([#512](https://github.com/MatthewBonanni/mallard/issues/512)) |
 | Reacting-flow analysis | Post | planned ([#513](https://github.com/MatthewBonanni/mallard/issues/513)) |
-| `post convergence` | Post | planned ([#514](https://github.com/MatthewBonanni/mallard/issues/514)) |
+| `post convergence` | Post | available (scalars and `--exact` norms); norms against the finest run planned |
 | `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
 | `pack` | Share | planned |
 | `test`, `completion`, `--version` | Maintain | available |

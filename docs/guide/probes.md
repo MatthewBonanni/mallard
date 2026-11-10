@@ -495,4 +495,5 @@ molecular, SGS and numerical dissipation.
 - [Input reference: `[[probes]]`](../input.md#probes), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals)
 - [Geometry](geometry.md): probe types, sample placement, reading probe files
 - [Statistics](statistics.md): time averages, spectra and phase averages
+- [Grid convergence](convergence.md): the order, extrapolated value and GCI of forces, integrals and probes over runs at several resolutions
 - [Output](output.md): snapshots, the run record (which repeats the latest forces and integrals at each progress row), units and file formats
