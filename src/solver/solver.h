@@ -293,6 +293,8 @@ class Solver {
         void record_stage_time(rtype c);
         /** @brief Inside a captured step: the step's dt on the device. */
         const rtype * step_dt_device() const;
+        /** @brief The step's start time on the device, inside a step graph. */
+        const rtype * step_time_device() const;
         /** @brief bc.data[0] of each average-pressure outlet: its target p (of t, from timed_fields) less the mean p. */
         void update_average_pressure_outlets(StateView solution);
         /** @brief stage_time = t_stage, or inside a captured step t_n + c dt (record_stage_time). */
@@ -634,7 +636,7 @@ class Solver {
         void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
-        void update_inflow(rtype t_eval);
+        void update_inflow(rtype t_eval, rtype c = 0.0_r);
         /** @brief The faces' own conditions and dirichlet states that depend on t, on the device at the stage time. */
         void update_boundary_fields(rtype t_eval, rtype c);
         /** @brief The faces' own conditions and dirichlet states that depend on t, at the time in stage_time. */
@@ -1027,6 +1029,7 @@ class Solver {
 
         bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
         rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from
+        Kokkos::View<rtype> characteristic_time;  // device: t + dt, the time of the inlet targets at the step end
         bool characteristic_state_set = false;   // char_state holds the faces' state (from a step or a restart)
         // Synthetic turbulence of inlets, and the time of the targets in char_target
         std::vector<std::unique_ptr<SyntheticInflow>> inflows;

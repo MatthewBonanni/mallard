@@ -546,20 +546,24 @@ TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
     expect_matches_serial(mixture_input(hybrid + "double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"));
 }
 
-TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
+TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerialWithAndWithoutStepGraphs) {
     // The transverse terms read the cells of neighboring boundary faces, which
-    // may be halo cells
+    // may be halo cells; the incoming waves advance over the device's dt, and
+    // an inlet velocity of t is evaluated at the device's stage and step-end times
     const std::string sponge = "[[sponges]]\nstrength = \"x > 0.7 ? 5 * (x - 0.7) : 0\"\nu = [0.3, 0.0]\np = 1.0\n"
                                "T = 1.0\n";
     for (const std::string & recon : {std::string("type = \"MUSCL\"\n"), std::string("type = \"TENO\"\norder = 5\n")}) {
-        expect_matches_serial(box_input("cartesian_tri", recon, NS,
-                                        bcs("type = \"inlet_state\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n"
-                                            "nscbc.sigma_T = 1.0\nnscbc.sigma_t = 1.0\n",
-                                            "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n",
-                                            "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\nnscbc.sigma = 2.0\nnscbc.beta = 0.5\n",
-                                            "type = \"wall_adiabatic\"\n"),
-                                        20) +
-                              sponge);
+        for (const std::string & u : {std::string("[0.3, 0.0]"), std::string("[\"0.3 + 0.05 * sin(40 * t)\", \"0.0\"]")}) {
+            expect_matches_serial_with_and_without_step_graphs(
+                box_input("cartesian_tri", recon, NS,
+                          bcs(("type = \"inlet_state\"\nu = " + u + "\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n"
+                               "nscbc.sigma_T = 1.0\nnscbc.sigma_t = 1.0\n").c_str(),
+                              "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n",
+                              "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\nnscbc.sigma = 2.0\nnscbc.beta = 0.5\n",
+                              "type = \"wall_adiabatic\"\n"),
+                          20) +
+                sponge);
+        }
     }
 }
 

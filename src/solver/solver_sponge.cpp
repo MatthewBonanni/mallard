@@ -11,6 +11,8 @@
 
 #include "solver.h"
 
+#include <limits>
+
 #include <Kokkos_Core.hpp>
 
 #include "characteristic.h"
@@ -152,7 +154,19 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
         Kokkos::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), transverse);
     }
     // Inlet targets at the end of the step, whose change enters the incoming wave
-    timed_inlets.fill(double(t + dt), boundary_data.char_target_next);
+    if (!timed_inlets.empty()) {
+        if (!characteristic_time.is_allocated()) characteristic_time = Kokkos::View<rtype>("characteristic_time");
+        const Kokkos::View<rtype> t_next = characteristic_time;
+        if (recording_step) {
+            const rtype * s = step_dt_device();
+            const rtype * t_step = step_time_device();
+            Kokkos::parallel_for("characteristic_time", 1, KOKKOS_LAMBDA(const int) { t_next() = *t_step + *s; });
+        } else {
+            const rtype t_end = t + dt;
+            Kokkos::parallel_for("characteristic_time", 1, KOKKOS_LAMBDA(const int) { t_next() = t_end; });
+        }
+        timed_inlets.fill(t_next, boundary_data.char_target_next);
+    }
     for (auto & inflow : inflows) inflow->fill(double(t + dt), boundary_data.char_target_next);
     const CharacteristicStateFunctor state{boundary_data,
                                            mesh->face_normals,
@@ -161,7 +175,8 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
                                            face_reconstruction->quadrature_face.weights,
                                            face_reconstruction->face_quad_weights,
                                            dt,
-                                           !characteristic_state_set};
+                                           !characteristic_state_set,
+                                           recording_step ? step_dt_device() : nullptr};
     Kokkos::parallel_for("characteristic_state", boundary_data.char_faces.extent(0), state);
     t_characteristic = t_stage;
     characteristic_state_set = true;
