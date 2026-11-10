@@ -55,11 +55,12 @@ struct Estimate {
 /**
  * @brief The estimate from three grids, finest first (h[0] < h[1] < h[2]): Celik et al. (2008), eqs. (3)-(7).
  *        The order solves p = |ln|e32 / e21| + q(p)| / ln r21, q(p) = ln((r21^p - s) / (r32^p - s)),
- *        s = sign(e32 / e21), by fixed-point iteration from q = 0.
+ *        s = sign(e32 / e21), by fixed-point iteration from q = 0. Changes at most round_off of the largest
+ *        value are round-off.
  * @throws std::invalid_argument if the sizes are not increasing and positive
  */
 Estimate three_grids(const std::array<double, 3> & h, const std::array<double, 3> & phi,
-                     double safety = SAFETY_THREE_GRIDS);
+                     double safety = SAFETY_THREE_GRIDS, double round_off = ROUND_OFF);
 
 /**
  * @brief The estimate from two grids, finest first, with the order p assumed (Roache: factor of safety 3).

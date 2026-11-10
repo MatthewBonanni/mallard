@@ -112,6 +112,9 @@ The ratio $R = \varepsilon_{21}/\varepsilon_{32}$ classifies the quantity:
 | `assumed` | two runs: the order is assumed, not observed, and $F_s = 3$ | WARN |
 
 Changes smaller than $10^{-10}$ times the largest value count as round-off.
+When any of the runs was made in single precision (`build.precision` in its run
+record), this threshold and the $10^{-12}$ of `zero` are both 100 machine epsilons
+of single precision instead, $1.2 \times 10^{-5}$.
 A converging quantity also gets a warning when its order is more than 1 away from
 the design order, or when more than three runs give orders that are not yet
 steady. The design order is that of the runs' reconstruction (`FO` 1, `MUSCL` 2,

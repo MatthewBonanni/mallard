@@ -54,6 +54,9 @@ constexpr uint32_t EXACT_DEGREE = 6;
 /** @brief A quantity at most this fraction of its table's largest column on every run is zero to round-off. */
 constexpr double ZERO = 1e-12;
 
+/** @brief Round-off of runs in single precision: this many machine epsilons, where it exceeds ZERO or ROUND_OFF. */
+constexpr double SINGLE_EPSILONS = 100.0;
+
 /** @brief Observed orders further than this from the design order are a warning. */
 constexpr double ORDER_SLACK = 1.0;
 
@@ -595,6 +598,8 @@ struct Study {
     double design = convergence::NaN;
     std::string design_from;
     double safety = convergence::NaN;  ///< --safety-factor; NaN: Roache's
+    double zero = ZERO;                         ///< of the coarsest precision of the runs
+    double round_off = convergence::ROUND_OFF;  ///< of the coarsest precision of the runs
     std::vector<QuantityResult> quantities;
     std::string field, exact;
     std::vector<NormResult> norms;
@@ -622,7 +627,8 @@ void estimate(QuantityResult & q, const Study & study) {
         q.triplets.push_back(convergence::two_grids({h[0], h[1]}, {phi[0], phi[1]}, study.design, fs2));
     } else {
         for (size_t i = 0; i + 2 < n; i++) {
-            q.triplets.push_back(convergence::three_grids({h[i], h[i + 1], h[i + 2]}, {phi[i], phi[i + 1], phi[i + 2]}, fs3));
+            q.triplets.push_back(convergence::three_grids({h[i], h[i + 1], h[i + 2]}, {phi[i], phi[i + 1], phi[i + 2]}, fs3,
+                                                          study.round_off));
         }
     }
     const convergence::Estimate & e = q.triplets[0];
@@ -906,6 +912,12 @@ int convergence_study(const cli::Args & args) {
         r.h = sizes.empty() ? std::pow(1.0 / static_cast<double>(r.cells), 1.0 / r.dim) : sizes[i];
     }
     std::stable_sort(study.runs.begin(), study.runs.end(), [](const Run & a, const Run & b) { return a.h > b.h; });
+    auto single = [](const Run & r) { return string_at(r.block, {"build", "precision"}) == "single"; };
+    if (std::any_of(study.runs.begin(), study.runs.end(), single)) {
+        const double epsilons = SINGLE_EPSILONS * std::numeric_limits<float>::epsilon();
+        study.zero = std::max(ZERO, epsilons);
+        study.round_off = std::max(convergence::ROUND_OFF, epsilons);
+    }
     for (size_t i = 1; i < study.runs.size(); i++) {
         if (study.runs[i].h == study.runs[i - 1].h) {
             throw std::runtime_error(study.runs[i - 1].arg + " and " + study.runs[i].arg + " have the same " +
@@ -996,7 +1008,7 @@ int convergence_study(const cli::Args & args) {
                 }
                 q.values.push_back(it->second.v);
                 q.times.push_back(it->second.t);
-                q.zero = (i == 0 || q.zero) && std::abs(it->second.v) <= ZERO * it->second.scale;
+                q.zero = (i == 0 || q.zero) && std::abs(it->second.v) <= study.zero * it->second.scale;
             }
             if (!everywhere) {
                 missing.push_back(name);
@@ -1005,7 +1017,8 @@ int convergence_study(const cli::Args & args) {
             if (q.zero) {
                 q.triplets.push_back({});
                 q.triplets[0].behavior = Behavior::unchanged;
-                q.verdict = format("zero to round-off: below %g of the largest column of its table on every run", ZERO);
+                q.verdict = format("zero to round-off: below %g of the largest column of its table on every run",
+                                   study.zero);
             } else {
                 estimate(q, study);
             }

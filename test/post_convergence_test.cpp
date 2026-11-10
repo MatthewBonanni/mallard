@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -242,7 +243,7 @@ TEST(PostConvergenceTest, RunsInAnyOrderGiveTheirTablesAndTheSchemesOrder) {
     const std::string dirs[] = {coarse, medium, fine};
     for (size_t i = 0; i < 3; i++) {
         EXPECT_DOUBLE_EQ(q["values"].array[i].number, last_value(dirs[i] + "/integrals.csv", "density_squared"));
-        EXPECT_NEAR(q["t"].array[i].number, T_STOP, 1e-12);
+        EXPECT_NEAR(q["t"].array[i].number, T_STOP, 4 * std::numeric_limits<rtype>::epsilon() * T_STOP);
     }
     EXPECT_NE(q["estimate"]["behavior"].string, "divergent");
 

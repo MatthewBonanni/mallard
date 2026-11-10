@@ -46,14 +46,15 @@ void extrapolate(Estimate & e, const double phi1, const double phi2) {
 
 } // namespace
 
-Estimate three_grids(const std::array<double, 3> & h, const std::array<double, 3> & phi, const double safety) {
+Estimate three_grids(const std::array<double, 3> & h, const std::array<double, 3> & phi, const double safety,
+                     const double round_off) {
     check_sizes(h.data(), 3);
     Estimate e;
     e.safety = safety;
     e.r21 = h[1] / h[0];
     e.r32 = h[2] / h[1];
     const double e21 = phi[1] - phi[0], e32 = phi[2] - phi[1];
-    const double noise = ROUND_OFF * std::max({std::abs(phi[0]), std::abs(phi[1]), std::abs(phi[2])});
+    const double noise = round_off * std::max({std::abs(phi[0]), std::abs(phi[1]), std::abs(phi[2])});
     if (std::abs(e21) <= noise) {
         e.behavior = std::abs(e32) <= noise ? Behavior::unchanged : Behavior::indeterminate;
         if (e.behavior == Behavior::unchanged) {
