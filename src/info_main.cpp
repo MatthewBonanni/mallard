@@ -30,6 +30,7 @@
 #include "mesh_quality.h"
 #include "output_reader.h"
 #include "provenance.h"
+#include "run_page.h"
 #include "snapshot_block.h"
 
 namespace fs = std::filesystem;
@@ -542,7 +543,23 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
     return problems;
 }
 
+/** @brief Writes DIR/report.html from DIR/mallard.jsonl. */
+int run_report(const std::string & dir) {
+    const fs::path log = fs::path(dir) / "mallard.jsonl";
+    if (!fs::exists(log)) {
+        std::cerr << "mallard info: " << dir << " has no mallard.jsonl, which --html builds the run report from "
+                  << "([output] run_log = \"\" writes none; the run's own report.html, [output] report, does not "
+                     "need it).\n";
+        return 1;
+    }
+    const std::string page = (fs::path(dir) / "report.html").string();
+    run_page::write(page, run_page::from_file(log.string()).html());
+    std::cout << "Wrote " << page << "\n";
+    return 0;
+}
+
 int run_directory(const std::string & dir, const cli::Args & args) {
+    if (args.has("--html")) return run_report(dir);
     const Record record = run_record(dir);
     if (args.has("--input")) return print_input(run_block(dir, record), dir);
     std::vector<output::Contents> files;
@@ -753,6 +770,9 @@ int info_main(const cli::Args & args) {
         }
         if (mesh_file) return mesh_info(path, args, argc, argv);
         if (fs::is_directory(path, error)) return run_directory(path, args);
+        if (args.has("--html")) {
+            return cli::usage_error(*cli::command("info"), "--html takes a run directory, not " + path);
+        }
         output::Contents c = output::open(path);
         if (args.has("--input")) return print_input(parsed_run(c), path);
         if (!c.snapshots.empty() && !c.fields.empty()) output::read_ranges(c, c.snapshots.size() - 1);

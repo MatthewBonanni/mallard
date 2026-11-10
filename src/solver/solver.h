@@ -920,7 +920,7 @@ class Solver {
         uint64_t step_last_check = 0;
         uint64_t n_progress_rows = 0;
         bool input_from_file = false;  // init(file) has recorded the input's provenance
-        bool run_log_on = false;       // [output] run_log is set
+        bool run_log_on = false;       // the run's records are built: [output] run_log or report is set
 
         // Numerics and physics
         std::shared_ptr<Mesh> mesh;

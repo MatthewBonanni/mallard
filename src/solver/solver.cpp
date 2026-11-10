@@ -1668,12 +1668,13 @@ void Solver::init_output(region::Regions & regions) {
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
-    run_log_on = !run_log_file.empty() && output_files_enabled();
+    const std::string report_file = find_value_or<std::string>(input, "output", "report", "report.html");
+    run_log_on = (!run_log_file.empty() || !report_file.empty()) && output_files_enabled();
     divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
     if (run_log_on) {
         const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                             std::filesystem::exists(run_log_file);
-        run_log::open(run_log_file, resume);
+        run_log::open(run_log_file, resume, report_file);
     } else {
         run_log::close();
     }

@@ -25,6 +25,7 @@ add_library(MallardCore STATIC
     common/run_control.cpp
     common/run_health.cpp
     common/run_log.cpp
+    common/run_page.cpp
     common/run_status.cpp
     common/input_upgrade.cpp
     mesh/cell_order.cpp
@@ -196,6 +197,10 @@ string(STRIP "${Mallard_CXX_FLAGS}" Mallard_CXX_FLAGS)
 string(REPLACE "\\" "\\\\" Mallard_CXX_FLAGS "${Mallard_CXX_FLAGS}")
 string(REPLACE "\"" "\\\"" Mallard_CXX_FLAGS "${Mallard_CXX_FLAGS}")
 configure_file(common/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h @ONLY)
+# The run report's plotting script, inlined into every report.html
+file(READ common/run_page_plot.js run_page_plot_js)
+configure_file(common/run_page_plot.inc.in ${CMAKE_CURRENT_BINARY_DIR}/generated/run_page_plot.inc @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS common/run_page_plot.js)
 # The git state for provenance, refreshed at every build rather than at configure time
 set(git_version_command ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
     -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/generated/git_version.h -P ${CMAKE_SOURCE_DIR}/cmake/git_version.cmake)

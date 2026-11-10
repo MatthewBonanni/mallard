@@ -12,6 +12,7 @@ its progress on the terminal and in a machine-readable run record.
 | Restart files | `PREFIX_<step>.restart` | `[[write_data]]` with `format = "restart"` | [Initialization and restarts](initialization.md#restarts) |
 | Terminal output | standard output (errors: standard error) | always; `[output] check_interval` sets the progress rows | [Terminal output](#terminal-output) |
 | Run record | `mallard.jsonl` | on by default; `[output] run_log` | [Run record](#run-record-mallardjsonl) |
+| Run report | `report.html` | on by default; `[output] report` | [Run report](#run-report-reporthtml) |
 | Divergence report | `divergence_report.txt`, `.json`, `divergence_report_neighborhood_<step>.vtkhdf` | a run that diverges; `[output] divergence_report` | [The divergence report](running.md#the-divergence-report) |
 | Run health | the run record's `health` and the terminal output's **Health** section | on by default; `[output] health` | [Run health](#run-health) |
 | Probes | `probe_<name>.csv` (or `.h5`, `.vtkhdf`, `.pvd`), `probe_<name>_reductions.csv` | `[[probes]]` | [Probes and monitors](probes.md#probes-probes) |
@@ -494,6 +495,64 @@ file damaged (HDF5 files are not safe against it) or ending in a partial
 row; the step's missing `output` record says that step was not completely
 written. Their records give the size after each step and no SHA-256, which
 would rehash the whole file at every step.
+
+### Run report: `report.html`
+
+Every run also writes `report.html`, one page to open after a run (or during
+one) in any browser: the first thing to look at. It shows
+
+- the **outcome**: how and where the run ended (finished, stopped, a signal,
+  the wall-time limit, diverged, an error), its last snapshot and restart file,
+  or that it has no end record yet (still running, or killed);
+- the **run**: its run id, the run it restarted from, the Mallard version and
+  build, where and on how many ranks it ran, the input file and mesh with their
+  SHA-256, and each run of a record continued by restarts;
+- the **configuration**: physics, mesh, numerics, time step and stop
+  conditions, the boundaries, and the whole resolved input;
+- its **health**: the lowest density, pressure and temperature and where they
+  occurred, the numerics' activity, the numerical repairs, the conservation
+  ledger, and the warnings and errors;
+- plots of the **monitors** over the run: the time step and CFL number, the
+  progress row's minima and maxima, throughput and memory, the `[integrals]`,
+  each `[[forces]]` zone, and the conservation ledger, with a table of each
+  quantity's last, least and largest value;
+- the **cost**: wall time by phase, throughput, memory;
+- the **output index**: what each writer wrote, from the run record;
+- the [divergence report](running.md#the-divergence-report) of a run that
+  diverged: its likely causes with their evidence and fix.
+
+```toml
+[output]
+report = "report.html"   # the default; "" writes none
+```
+
+The page is built from the run's records alone, the ones
+[`mallard.jsonl`](#run-record-mallardjsonl) holds, never from the terminal
+output or by reading output files back. Rank 0 keeps them in memory as the run
+writes them and writes the page at the first progress row, after each restart
+file and at the end, also of a run that stops, diverges or fails; a run killed
+outright keeps the page of its last restart file, the point it restarts from.
+It is written as `report.html.partial` and renamed once complete. A run
+started from a restart file reads its run record once, at setup, so the page
+covers the whole record. `[output] run_log = ""` does not turn the page off.
+
+`mallard info RUN_DIR --html` builds the same page from `RUN_DIR/mallard.jsonl`
+into `RUN_DIR/report.html`, byte for byte what the run would have written: for
+a run that is still going, was killed, or ran with `report = ""`
+([Command line](cli.md#mallard-info)).
+
+The page is self-contained: no network, no files beside it, so it can be
+mailed or archived with the run. It follows the browser's light or dark
+setting and prints. The plots are drawn in the browser by a small script
+inlined in the page; without JavaScript, every table, the last values
+included, still shows. Its size does not grow with the run: each plotted
+quantity keeps at most 512 points, a long run's progress rows combined in
+pairs as they come, each point the last value of its rows with a band between
+their least and largest, so a spike is never lost. At most 48 quantities are
+plotted (the others are in the table), and the warnings and events shown are
+the first and last 20 (all are in `mallard.jsonl`). A page is typically a few
+hundred kB, under 2 MB whatever the run's length, and costs milliseconds to
+write.
 
 ## Run health
 
