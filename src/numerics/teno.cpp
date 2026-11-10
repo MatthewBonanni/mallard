@@ -3062,7 +3062,8 @@ struct TENOFunctor {
         rtype theta = 1.0;
         if (bound_preserving) {
             // Scale the high-order deviation so density and pressure at every face
-            // point stay within the range of the cell and its face neighbors
+            // point stay within the range of the cell and its face neighbors,
+            // widened by teno::BOUND_SLACK of the cell's value
             constexpr uint8_t P = N_DIM + 1;
             rtype lo[2] = {W0[0], W0[P]}, hi[2] = {W0[0], W0[P]};
             for (uint8_t k = 0; k < n_faces; k++) {
@@ -3074,6 +3075,11 @@ struct TENOFunctor {
                 hi[0] = Kokkos::fmax(hi[0], W(nb, 0));
                 lo[1] = Kokkos::fmin(lo[1], W(nb, P));
                 hi[1] = Kokkos::fmax(hi[1], W(nb, P));
+            }
+            for (uint8_t v = 0; v < 2; v++) {
+                const rtype slack = teno::BOUND_SLACK * Kokkos::fabs(v == 0 ? W0[0] : W0[P]);
+                lo[v] -= slack;
+                hi[v] += slack;
             }
             for (uint8_t k = 0; k < n_faces; k++) {
                 const uint32_t f = faces_of_cell(f_begin + k);
