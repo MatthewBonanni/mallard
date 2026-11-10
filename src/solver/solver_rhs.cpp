@@ -373,7 +373,7 @@ void Solver::ledger_stage(const State & state, const ViscousFluxFunctor * viscou
         }
         Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), scratch.flow, 0.0_r);
         Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), scratch.species, 0.0_r);
-        source_terms->add(state, scratch, stage_time);
+        source_terms->add(state, scratch, stage_time, recording_step);
         ledger.add_sources(LedgerSourceTerms{scratch.flow}, mesh->n_owned());
     }
     if (sponge_cells.extent(0) > 0) {
