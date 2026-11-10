@@ -55,6 +55,7 @@ add_library(MallardCore STATIC
     numerics/teno_setup.cpp
     numerics/time_integrator.cpp
     numerics/step_control.cpp
+    numerics/stencils.cpp
     physics/mixture.cpp
     physics/les.cpp
     physics/pasr.cpp
@@ -73,6 +74,7 @@ add_library(MallardCore STATIC
     solver/probes.cpp
     solver/solver.cpp
     solver/solver_check.cpp
+    solver/solver_mesh_fields.cpp
     solver/check_report.cpp
     solver/run_report.cpp
     solver/solver_resolution.cpp

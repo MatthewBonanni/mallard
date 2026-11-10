@@ -41,6 +41,7 @@ constexpr const char * CHEMISTRY = "chemistry";
 constexpr const char * LES = "LES";
 constexpr const char * SURFACE = "surface probes";
 constexpr const char * QUALITY = "mesh quality";
+constexpr const char * STENCILS = "stencils";
 constexpr const char * WALLS = "[[probes]] on a wall zone";
 constexpr const char * SURFACES = "[[probes]] on a surface or boundary zone";
 
@@ -97,15 +98,21 @@ const Entry NAMED[] = {
     {"WALL_MODEL_U", dim::velocity, "wall model exchange-point tangential speed", SURFACE, WALLS},
     {"WALL_MODEL_T", dim::temperature, "wall model exchange-point temperature", SURFACE, WALLS},
     {"WALL_MODEL_H", dim::length, "wall model exchange-point height", SURFACE, WALLS},
-    {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", QUALITY,
-     "mallard check or info --quality", "degree"},
-    {"SKEWNESS", dim::none, "largest face skewness", QUALITY, "mallard check or info --quality"},
-    {"ASPECT_RATIO", dim::none, "cell aspect ratio", QUALITY, "mallard check or info --quality"},
-    {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor", QUALITY, "mallard check or info --quality"},
+    {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", QUALITY, "", "degree"},
+    {"SKEWNESS", dim::none, "largest face skewness", QUALITY, ""},
+    {"ASPECT_RATIO", dim::none, "cell aspect ratio", QUALITY, ""},
+    {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor", QUALITY, ""},
     {"DELTA_OVER_ETA", dim::none, "cell size over the estimated Kolmogorov length", QUALITY,
-     "mallard check --quality (resolution estimates)"},
+     "mallard check --mesh-fields (resolution estimates)"},
     {"CELLS_PER_DELTA_L", dim::none, "cells across the laminar flame thickness", QUALITY,
-     "mallard check --quality (resolution estimates) with [les.combustion] (TFLES)"},
+     "mallard check --mesh-fields (resolution estimates) with [les.combustion] (TFLES)"},
+    {"STENCIL_SIZE", dim::none, "cells in the central stencil", STENCILS, ""},
+    {"STENCIL_SECTORS", dim::none, "sector stencils kept (TENO)", STENCILS, ""},
+    {"STENCIL_DEGREE", dim::none, "degree of the central reconstruction polynomial", STENCILS, ""},
+    {"STENCIL_CONDITION", dim::none, "condition number of the central least-squares fit (TENO)", STENCILS, ""},
+    {"STENCIL_WALL", dim::none, "1 where a stencil reaches a wall", STENCILS, ""},
+    {"STENCIL_SEAM", dim::none, "1 where a stencil reaches across a periodic seam", STENCILS, ""},
+    {"STENCIL_PARTITION", dim::none, "1 where a stencil reaches cells of another rank", STENCILS, ""},
     {"DIVERGED", dim::none, "1 in the cells that became invalid", DERIVED,
      "a run that diverges, whose divergence report snapshot writes it"},
 };
@@ -169,6 +176,10 @@ namespace field_units {
 
 std::optional<FieldDescription> find(const std::string & name) {
     if (auto base = find_base(name)) return base;
+    if (starts_with(name, "STENCIL_") && name.size() > 8 &&
+        name.find_first_not_of("0123456789", 8) == std::string::npos) {
+        return FieldDescription{dim::none, "membership in the stencils of cell " + name.substr(8), "", ""};
+    }
     if (starts_with(name, "SOURCE_")) {
         auto of = find_base(name.substr(7));
         if (!of) return std::nullopt;
@@ -209,7 +220,7 @@ std::optional<FieldDescription> find(const std::string & name) {
 
 size_t group_rank(const std::string & group) {
     const char * order[] = {CONSERVATIVE, PRIMITIVE, DERIVED, TRANSPORT, MIXTURE, CHEMISTRY, LES,
-                            "sources", "statistics", SURFACE, QUALITY};
+                            "sources", "statistics", SURFACE, QUALITY, STENCILS};
     for (size_t i = 0; i < std::size(order); i++) {
         if (group == order[i]) return i;
     }
@@ -230,6 +241,7 @@ std::string group(const std::string & name) {
         if (starts_with(name, e.name) && name.size() > std::string(e.name).size()) return e.group;
     }
     if (starts_with(name, "SOURCE_")) return "sources";
+    if (starts_with(name, "STENCIL_")) return STENCILS;
     for (const char * prefix : {"MEAN_", "COV_", "PHASE_"}) {
         if (starts_with(name, prefix)) return "statistics";
     }
@@ -252,10 +264,11 @@ std::vector<CatalogField> catalog() {
         {"MEAN_<A>", dim::none, "", "statistics", "[statistics] fields with A, or [[probes]] averaging A"},
         {"COV_<A>_<B>", dim::none, "", "statistics", "[statistics] products with A*B"},
         {"PHASE_<bin>_<A>", dim::none, "", "statistics", "[statistics.phase]"},
+        {"STENCIL_<id>", dim::none, "", STENCILS, "mallard check --mesh-fields with --cells or --region"},
     };
     const char * long_names[] = {"source of A, per second", "time average of A", "covariance of A and B",
-                                 "phase average of A in a bin"};
-    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's"};
+                                 "phase average of A in a bin", "membership in the stencils of cell id"};
+    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "1"};
     for (size_t i = 0; i < std::size(derived); i++) {
         out.push_back({derived[i].name, units[i], long_names[i], derived[i].group, derived[i].needs});
     }

@@ -224,7 +224,8 @@ void quality_section(report::Text & text, const CheckReport & r) {
         for (size_t i = 0; i < N_DIM; i++) header.push_back(std::string(1, "xyz"[i]) + " [m]");
         text.table(header, worst, false);
     }
-    if (!r.quality_file.empty()) text.line("Quality fields: " + r.quality_file);
+    if (!r.mesh_fields_file.empty()) text.line("Mesh and stencil fields: " + r.mesh_fields_file);
+    if (!r.stencil_file.empty()) text.line("Stencils: " + r.stencil_file);
 }
 
 void time_step_section(report::Text & text, const CheckReport & r) {
@@ -536,7 +537,8 @@ std::string check_json(const CheckReport & r) {
                                               .str());
         }
         o.raw("mesh_quality", q.str());
-        o.raw("quality_file", r.quality_file.empty() ? "null" : json::quote(r.quality_file));
+        o.raw("mesh_fields_file", r.mesh_fields_file.empty() ? "null" : json::quote(r.mesh_fields_file));
+        o.raw("stencil_file", r.stencil_file.empty() ? "null" : json::quote(r.stencil_file));
     } else {
         o.raw("mesh_quality", "null");
     }

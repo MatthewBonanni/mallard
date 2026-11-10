@@ -247,6 +247,7 @@ void Solver::setup_from_input() {
         used_regions = std::make_unique<region::Regions>(input, *mesh);
         init_sources(*used_regions);
         init_sponges(*used_regions);
+        init_mesh_fields();
         register_data();
         init_output(*used_regions);
     });
@@ -391,6 +392,8 @@ logging::Items describe_mesh(const Mesh & mesh) {
     };
 }
 
+} // namespace
+
 bool writes_variable(const Input & input, const std::string & name) {
     if (!input.contains("write_data")) return false;
     const auto outputs = find_value<std::vector<Input>>(input, "write_data");
@@ -401,8 +404,6 @@ bool writes_variable(const Input & input, const std::string & name) {
     }
     return false;
 }
-
-} // namespace
 
 void Solver::init_mesh() {
     const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
@@ -2047,6 +2048,9 @@ void Solver::register_data() {
         data.push_back(Data(derived::NAMES[f], Kokkos::subview(h_derived_fields, Kokkos::ALL(),
                                                                static_cast<uint32_t>(derived_selection.column[f]))));
     }
+    for (size_t k = 0; k < mesh_field_names.size(); k++) {
+        data.push_back(Data(mesh_field_names[k], Kokkos::subview(h_mesh_fields, Kokkos::ALL(), k)));
+    }
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         // Troubled-cell indicator: TENO stencil selection is active where it exceeds the threshold
         h_teno_sigma = Kokkos::create_mirror_view(teno->troubled);
@@ -2059,6 +2063,8 @@ std::vector<std::string> Solver::output_fields() const {
     for (const auto & d : data) names.push_back(d.name());
     std::vector<std::string> on_request = {"P_MAX"};
     for (const char * name : derived::NAMES) on_request.emplace_back(name);
+    for (const char * name : MeshQuality::FIELDS) on_request.emplace_back(name);
+    for (const char * name : stencils::FIELDS) on_request.emplace_back(name);
     if constexpr (N_DIM == 2) {
         on_request.emplace_back("VORTICITY");
     } else {
