@@ -165,7 +165,7 @@ TEST(MPITest, GasMixtureMatchesSerialWithAndWithoutStepGraphs) {
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
                                                    "navier_stokes"},
-                                                  {"double_flux = true\ntime_integrator = \"RDPK3Sp35\"\n"
+                                                  {"time_integrator = \"RDPK3Sp35\"\n"
                                                    "[numerics.error_control]\ntolerance = 1e-4\n",
                                                    "type = \"MUSCL\"\n", "", "navier_stokes"}};
     // Without chemistry, the steps also run in the CUDA graph

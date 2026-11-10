@@ -399,7 +399,7 @@ class Solver {
          *        frozen one gives.
          */
         void freeze_thermodynamics();
-        void reset_energy(const rtype * accepted = nullptr);
+        void reset_energy();
         /** @brief Over owned cells and all ranks: min rho, min p, -max Ma, min T, -max T, -max |sum Y - 1|. */
         std::array<rtype, 6> mixture_diagnostics();
         /**

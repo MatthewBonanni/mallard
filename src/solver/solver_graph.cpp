@@ -121,7 +121,7 @@ void Solver::record_step() {
     }
     if (double_flux) {
         cells_frozen = false;
-        reset_energy(controlled ? control.data() + StepController::ACCEPTED : nullptr);
+        reset_energy();
     }
 }
 

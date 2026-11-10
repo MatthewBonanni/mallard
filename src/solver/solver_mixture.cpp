@@ -108,7 +108,6 @@ struct ResetEnergyFunctor {
     Kokkos::View<rtype *[2]> frozen;
     Kokkos::View<rtype *> volume;      // repair audit: the change of rho E V and the changed cells, else empty
     Kokkos::View<uint8_t *> touched;
-    const rtype * accepted = nullptr;  // a step graph's controller verdict: a rejected step keeps its energy
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c, double & change, uint64_t & changed) const {
@@ -124,7 +123,6 @@ struct ResetEnergyFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
-        if (accepted && *accepted == 0.0_r) return;
         constexpr uint8_t E = N_DIM + 1;
         const double rho = static_cast<double>(U(c, 0));
         double rhou2 = 0.0;
@@ -437,8 +435,8 @@ void Solver::freeze_thermodynamics() {
                          FreezeFunctor{mixture, conservatives, species, T_seed, frozen_thermo});
 }
 
-void Solver::reset_energy(const rtype * accepted) {
-    ResetEnergyFunctor functor{mixture, conservatives, species, frozen_thermo, {}, {}, accepted};
+void Solver::reset_energy() {
+    ResetEnergyFunctor functor{mixture, conservatives, species, frozen_thermo, {}, {}};
     if (run_health.reset_site == HealthState::NONE) {
         Kokkos::parallel_for("reset_energy", mesh->n_owned(), functor);
         return;
