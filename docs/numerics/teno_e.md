@@ -463,8 +463,14 @@ $$
 
 over the face points $q$ and $v \in \{\rho, p\}$, where $m_v$ and $M_v$ are
 the extrema of $v$ over the cell and its face neighbors (boundary faces add
-none). The scaled values are checked again, and an inadmissible cell still
-falls back to first order.
+none), widened by $10^{-3}\,|v_i|$ (`teno::BOUND_SLACK`). A smooth extremum
+overshoots its neighbors' averages; where a quantity barely varies, such as
+the pressure of a low-Mach flame (ripples of $10^{-4}\,p$), that overshoot is
+small against the quantity but not against its range, and without the
+widening $\theta$ fell to 0 in such cells: first order in the flame made it
+4-6% too fast. The overshoot at a shock is a fraction of the jump, which the
+widening leaves limited. The scaled values are checked again, and an
+inadmissible cell still falls back to first order.
 
 Admissible face values do not make the cell update admissible, since a
 troubled cell's face values come from different stencils and do not average

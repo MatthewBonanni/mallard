@@ -38,6 +38,14 @@ constexpr uint8_t MAX_FACES = (N_DIM == 2) ? 4 : 6;
 constexpr uint8_t MAX_FACE_QUAD = (N_DIM == 2) ? 4 : 9;
 
 /**
+ * @brief Relative widening of the neighbor range in bound-preserving scaling:
+ *        a smooth extremum overshoots its neighbors' averages, and where a
+ *        quantity barely varies (the pressure of a low-Mach flame) that
+ *        overshoot is far below the quantity but not below its range.
+ */
+constexpr rtype BOUND_SLACK = 1.0e-3_r;
+
+/**
  * @brief Stencil entries reached across a periodic rotation. The face field
  *        of a stencil slot holds the mirror face (or -1) of an entry whose
  *        cell and mirror face do not turn. Otherwise it holds
