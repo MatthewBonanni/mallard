@@ -252,6 +252,18 @@ std::string duct_boundaries(const std::string & left, const std::string & right)
 
 std::string zero_velocity() { return N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]"; }
 
+/** @brief Setup of input stops with an error containing message (and not some other error). */
+void expect_error(const std::string & input, const std::string & message) {
+    Solver solver;
+    try {
+        solver.init(parse_toml(input));
+        ADD_FAILURE() << "no error, expected \"" << message << "\" for\n" << input;
+    } catch (const std::runtime_error & e) {
+        EXPECT_NE(std::string(e.what()).find(message), std::string::npos) << "expected \"" << message << "\", got\n"
+                                                                          << e.what();
+    }
+}
+
 } // namespace
 
 TEST(StagnationInletTest, OneSpeciesMixtureMatchesThePerfectGas) {
@@ -351,17 +363,18 @@ TEST(StagnationInletTest, ThermallyPerfectDuctReachesTheIsentropicExitState) {
 TEST(StagnationInletTest, InvalidInputIsRejected) {
     const std::string head =
         "[run]\nn_steps = 1\ncfl = 0.4\n" + mesh_block("cartesian", 8, 2, 1.0, 0.25) +
-        "[initialize]\ntype = \"constant\"\nrho = 1.0\np = 1.0\nu = " + zero_velocity() +
+        "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = " + zero_velocity() +
         "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-        "[output]\ncheck_interval = 1000000\n";
+        "[output]\ncheck_interval = 1000000\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n";
     const std::string outlet = "type = \"outlet_pressure\"\np = 1.0\n";
     const std::string wrong_way = N_DIM == 2 ? "direction = [-1.0, 0.0]\n" : "direction = [-1.0, 0.0, 0.0]\n";
-    for (const std::string & left : {std::string("type = \"inlet_stagnation\"\nT0 = 1.0\n"),
-                                     std::string("type = \"inlet_stagnation\"\np0 = 1.0\nT0 = -1.0\n"),
-                                     "type = \"inlet_stagnation\"\np0 = 1.0\nT0 = 1.0\n" + wrong_way,
-                                     std::string("type = \"inlet_stagnation\"\np0 = 1.0\nT0 = 1.0\ndirection = [0.0]\n")}) {
-        Solver solver;
-        EXPECT_THROW(solver.init(parse_toml(head + duct_boundaries(left, outlet))), std::runtime_error) << left;
+    const std::string inlet = "type = \"inlet_stagnation\"\n";
+    for (const auto & [left, message] : std::vector<std::pair<std::string, std::string>>{
+             {inlet + "T0 = 1.0\n", ".p0: missing"},
+             {inlet + "p0 = 1.0\nT0 = -1.0\n", ".T0 must be positive"},
+             {inlet + "p0 = 1.0\nT0 = 1.0\n" + wrong_way, ".direction: points out of the domain"},
+             {inlet + "p0 = 1.0\nT0 = 1.0\ndirection = [0.0]\n", ".direction: must be a nonzero vector"}}) {
+        expect_error(head + duct_boundaries(left, outlet), message);
     }
 }
 
@@ -798,22 +811,23 @@ TEST(MassFlowInletTest, HeatedDuctMatchesRayleighFlow) {
 TEST(MassFlowInletTest, InvalidInputIsRejected) {
     const std::string head =
         "[run]\nn_steps = 1\ncfl = 0.4\n" + mesh_block("cartesian", 8, 2, 1.0, 0.25) +
-        "[initialize]\ntype = \"constant\"\nrho = 1.0\np = 1.0\nu = " + zero_velocity() +
+        "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = " + zero_velocity() +
         "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-        "[output]\ncheck_interval = 1000000\n";
+        "[output]\ncheck_interval = 1000000\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n";
     const std::string outlet = "type = \"outlet_pressure\"\np = 1.0\n";
-    for (const std::string & left : {std::string("type = \"inlet_mass_flow\"\nT = 1.0\n"),
-                                     std::string("type = \"inlet_mass_flow\"\nmass_flux = 1.0\n"),
-                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = 1.0\nmdot = 1.0\n"),
-                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = -1.0\n"),
-                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = \"y - 0.5\"\n"),
-                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = 1.0\nprofile = \"y\"\n"),
-                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = 1.0\nprofile = \"0 * y\"\n"),
-                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = \"1 + t\"\n"),
-                                     std::string("type = \"inlet_mass_flow\"\nT = 1.0\nmass_flux = 1.0\ndirection = ") +
-                                         (N_DIM == 2 ? "[-1.0, 0.0]" : "[-1.0, 0.0, 0.0]") + "\n"}) {
-        Solver solver;
-        EXPECT_THROW(solver.init(parse_toml(head + duct_boundaries(left, outlet))), std::runtime_error) << left;
+    const std::string inlet = "type = \"inlet_mass_flow\"\n";
+    const std::string wrong_way = N_DIM == 2 ? "direction = [-1.0, 0.0]\n" : "direction = [-1.0, 0.0, 0.0]\n";
+    for (const auto & [left, message] : std::vector<std::pair<std::string, std::string>>{
+             {inlet + "T = 1.0\n", ".mass_flux: missing"},
+             {inlet + "mass_flux = 1.0\n", ".T: missing"},
+             {inlet + "T = 1.0\nmass_flux = 1.0\nmdot = 1.0\n", ".mdot: given together with `mass_flux`"},
+             {inlet + "T = 1.0\nmass_flux = -1.0\n", ".mass_flux must be positive"},
+             {inlet + "T = 1.0\nmass_flux = \"y - 0.5\"\n", ".mass_flux must be positive"},
+             {inlet + "T = 1.0\nmass_flux = 1.0\nprofile = \"y\"\n", ".profile: goes with mdot"},
+             {inlet + "T = 1.0\nmdot = 1.0\nprofile = \"0 * y\"\n", ".profile integrates to zero"},
+             {inlet + "T = 1.0\nmdot = 1.0\nprofile = \"y - 0.1\"\n", ".profile must be non-negative"},
+             {inlet + "T = 1.0\nmass_flux = 1.0\n" + wrong_way, ".direction: points out of the domain"}}) {
+        expect_error(head + duct_boundaries(left, outlet), message);
     }
 }
 
