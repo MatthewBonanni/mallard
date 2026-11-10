@@ -1636,17 +1636,25 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
             return entries;
         };
 
-        // Least-squares system rows: mean of psi_l over each stencil entry
+        // Least-squares system rows: mean of psi_l over each stencil entry, for
+        // the monomials of the axes the cell's neighbors span (flat, set below)
+        uint8_t flat = 0;
         auto build_pinv = [&](const std::vector<Entry> & stencil, uint8_t deg, std::vector<double> & P) {
             const uint8_t n = teno::n_dof(deg);
+            const teno_setup::FitColumns fit = teno_setup::fit_columns(flat, n);
+            const size_t nf = size_t(fit.n);
             const size_t m = stencil.size();
-            std::vector<double> A(m * n);
+            std::vector<double> A(m * nf);
             std::vector<double> means;
             for (size_t s = 0; s < m; s++) {
                 monomial_means(stencil[s], deg, means);
-                for (uint8_t l = 0; l < n; l++) A[s * n + l] = means[l] - mean0[l];
+                for (size_t j = 0; j < nf; j++) A[s * nf + j] = means[fit.col[j]] - mean0[fit.col[j]];
             }
-            return pseudo_inverse(A, m, n, P, double(max_condition));
+            std::vector<double> P_fit;
+            if (!pseudo_inverse(A, m, nf, P_fit, double(max_condition))) return false;
+            P.assign(size_t(n) * m, 0.0);
+            for (size_t j = 0; j < nf; j++) std::copy_n(&P_fit[j * m], m, &P[size_t(fit.col[j]) * m]);
+            return true;
         };
 
         // The map from cell i's frame to that of face f (its cell 0's)
@@ -1690,6 +1698,13 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         // rank (anisotropic cells can have too few distinct rows/columns) and
         // is well conditioned
         std::vector<Entry> candidates = gather(ns_max, 64);
+        std::vector<const Entry *> neighbors;
+        for (const Entry & e : candidates) {
+            if (e.face < 0) neighbors.push_back(&e);
+        }
+        flat = teno_setup::flat_axes(uint32_t(neighbors.size()), [&](const uint32_t j, const int d) {
+            return (d == 0 ? neighbors[j]->x - x0 : neighbors[j]->y - y0) / h;
+        });
         std::vector<double> P;
         bool ok = false;
         // Never split a group of equidistant candidates: keeps stencils
@@ -1709,6 +1724,10 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                 r_fit = curved_wall_degree;
                 n_start = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(r_fit)));
             }
+        }
+        // Sized for the monomials of the spanned axes
+        if (flat != 0) {
+            n_start = static_cast<uint16_t>(std::ceil(stencil_factor * teno_setup::fit_columns(flat, teno::n_dof(r_fit)).n));
         }
         // The smallest stencil within MAX_LEBESGUE_2D, else the best conditioned one
         uint16_t n_used = n_start;
@@ -1892,6 +1911,7 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
     options.curved_mirrors = curved_mirrors;
     options.curved_wall_degree = curved_wall_degree;
     options.wall_ns = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(curved_wall_degree)));
+    options.stencil_factor = double(stencil_factor);
     teno_setup::Setup3DHandle setup(*mesh, boundaries, face_quad_points, face_quad_weights, options);
 
     // Cells per batch: whole slices of the packed stencils
@@ -3454,7 +3474,7 @@ namespace {
 // each 3D cell's moments in place of its smoothness-indicator matrix; version 11 ranks 2D candidates
 // in the mesh-spacing metric and mirrors them only across the boundary faces beneath them (#382);
 // version 12 weights the 2D smoothness-indicator matrices so that they do not depend on the axes (#436)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-12";
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-13";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {

@@ -45,6 +45,70 @@ constexpr double MAX_LEBESGUE_3D = 4.0;
 // often the largest stencil, and markedly less accurate
 constexpr double LEBESGUE_SLACK = 1.25;
 
+/**
+ * @brief Coordinate axes along which a cell's neighbors (offset(j, d), in
+ *        cell sizes, for j < n) all lie level with it: bit d for axis d. A
+ *        mesh one cell thick across an axis (a strip, slab or pencil) has no
+ *        neighbors across it, mirror images aside, so no stencil there
+ *        resolves a polynomial's variation along that axis.
+ * @return 0 when every axis is spanned, or no neighbor is given.
+ */
+template <typename F>
+KOKKOS_INLINE_FUNCTION uint8_t flat_axes(const uint32_t n, F && offset) {
+    constexpr uint8_t all = static_cast<uint8_t>((1u << N_DIM) - 1u);
+    uint8_t flat = all;
+    for (uint32_t j = 0; j < n && flat != 0; j++) {
+        for (int d = 0; d < N_DIM; d++) {
+            if (Kokkos::fabs(offset(j, d)) > GEOMETRY_TOL) flat = static_cast<uint8_t>(flat & ~(1u << d));
+        }
+    }
+    return flat == all ? uint8_t(0) : flat;
+}
+
+/** @brief The monomials a least-squares fit takes, in increasing order. */
+struct FitColumns {
+    int n = 0;
+    uint8_t col[teno::MAX_NK] = {};
+};
+
+/** @brief Monomials l < n_max of no flat axis (flat_axes): the basis of the polynomials that the stencils resolve. */
+KOKKOS_INLINE_FUNCTION FitColumns fit_columns(const uint8_t flat, const int n_max) {
+    FitColumns fit;
+    for (int l = 0; l < n_max; l++) {
+        uint8_t e[3] = {0, 0, 0};
+        if constexpr (N_DIM == 2) {
+            teno::exponents(static_cast<uint8_t>(l), e[0], e[1]);
+        } else {
+            teno::exponents(static_cast<uint8_t>(l), e[0], e[1], e[2]);
+        }
+        bool kept = true;
+        for (int d = 0; d < N_DIM; d++) kept = kept && !(((flat >> d) & 1u) != 0 && e[d] > 0);
+        if (kept) fit.col[fit.n++] = static_cast<uint8_t>(l);
+    }
+    return fit;
+}
+
+/**
+ * @brief Spread a least-squares solution X (m rows of fit.n columns) over
+ *        rows of n columns, the fit's columns at their monomials and zero in
+ *        the others, in place.
+ */
+template <typename L>
+KOKKOS_INLINE_FUNCTION void widen(const L & X, const int m, const FitColumns & fit, const int n) {
+    if (fit.n == n) return;
+    for (int s = m - 1; s >= 0; s--) {
+        int k = fit.n - 1;
+        for (int l = n - 1; l >= 0; l--) {
+            if (k >= 0 && fit.col[k] == l) {
+                X[s * n + l] = X[s * fit.n + k];
+                k--;
+            } else {
+                X[s * n + l] = 0.0;
+            }
+        }
+    }
+}
+
 /** @brief Element k of one cell's array in a batch: interleaved across cells on GPUs. */
 template <typename T>
 struct Lane {
@@ -164,6 +228,7 @@ struct Options {
     bool curved_mirrors = false;  // mirror images across curved wall and symmetry faces (their planes) too
     uint8_t curved_wall_degree = 3;  // largest central degree of stencils reaching a curved wall without mirrors
     uint16_t wall_ns = 0;            // central stencil size to start from at that degree
+    double stencil_factor = 2.0;     // central stencil size per fitted monomial
 };
 
 /** @brief Timings of the last setup, in seconds. */
