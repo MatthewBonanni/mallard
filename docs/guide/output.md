@@ -613,17 +613,19 @@ nearest a time (`--time T`) as the files record them:
 
 ```
 $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.restart
-== mallard diff ========================================================================= ✓
-  A                  serial/solut/restart_000020.restart (restart)
-  B                  mpi/solut/restart_000020.restart (restart)
-  Compared           cell by cell, in the mesh's global cell order (768 cells)
-  Tolerance          0 (values must be equal); on max |B - A| / max |A| per field
-  Result             ✓ identical: the same state, bit for bit
+== Diff ================================================================================= ok
+  Result: ok, identical, the same state bit for bit (exit status 0)
+  A: serial/solut/restart_000020.restart (restart)
+  B: mpi/solut/restart_000020.restart (restart)
+  Compared: cell by cell, in the mesh's global cell order (768 cells)
+  Tolerance: 0 (values must be equal); on max |B - A| / max |A| per field
 ...
-== Fields ========================================== |B - A| per cell, in the field's units
-     field   units       differing cells  L1  L2  Linf
-  ✓  RHO     kg m-3      0 of 768         0   0   0
-  ✓  RHOU_X  kg m-2 s-1  0 of 768         0   0   0
+== Fields =============================================================================== ok
+  |B - A| per cell, in the field's units: L1, L2, Linf are its mean, root mean square and
+  max over the cells, not weighted by volume; differing: values not bitwise equal.
+  status  field   units       differing cells  L1  L2  Linf
+  ok      RHO     kg m-3      0 of 768         0   0   0
+  ok      RHOU_X  kg m-2 s-1  0 of 768         0   0   0
 ...
 ```
 
@@ -636,16 +638,18 @@ $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.rest
   only is an infinite difference.
 - **Restart files** are also compared in the rest of their state, bit for bit:
   scalar attributes, named arrays (statistics weights) and the face records of
-  characteristic boundaries. The provenance is not compared: it records when
-  and where each run ran.
+  characteristic boundaries. The [run block](#run-block) and snapshot blocks
+  are not compared: they record when and where each run ran.
 - **Tolerance and exit status.** A field passes if its max |B - A| / max |A|
   is at most `--tol` (default 0: any difference in value fails), and so does t,
   relative to the larger |t|; `--tol 1e-12,P=1e-6` sets one field apart. Steps
-  that differ, or fields only one file holds, are warnings. The status column
-  and the first and last lines read ✓ identical, ⚠ within tolerance or
-  ✗ beyond it; the exit status is 0, 0 and 1, and 3 when the files cannot be
+  that differ, or fields only one file holds, are warnings. As in
+  [`mallard check`](cli.md#mallard-check), the status column, each section's
+  heading and the first and last lines read `ok` (identical), `WARN` (within
+  tolerance) or `ERROR` (beyond it); the exit status is 0, 0 and 1, and 3 when the files cannot be
   compared, so `mallard diff a b --tol 1e-10 || exit 1` gates a CI job.
-  `--format json` prints the same as one object.
+  `--format json` prints the same as one object, its statuses `ok`, `warning`
+  and `error`.
 - **Cells are matched by their global index**, which restart files and VTKHDF
   or XDMF snapshots of the whole mesh keep whatever the ranks that wrote them;
   a restart file against a snapshot compares the fields both hold (RHO). VTU
@@ -663,13 +667,18 @@ $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.rest
 ```
 $ mallard diff coarse/solut/restart_000020.restart fine/solut/restart_000020.restart --remap --tol 1e-2
 ...
-== Remap ================================================== conservative, degree 2, limited
+== Remap ============================================================================== WARN
+  Conservative, degree 2, limited. Remapped results differ from A by the remap's own error
+  too, so a remap is never identical. A cells outside B's mesh take the nearest B cell's
+  value.
   B cells  A cells  integrals kept to  A cells partly covered  A cells outside B
   3,072    768      1.2e-15            0                       0
 ...
-== Relative differences ===================== dimensionless: a norm of B - A over that of A
-     field   L1           L2           Linf         tolerance on Linf
-  ⚠  RHO     0.000213803  0.000262748  0.000440052  0.01
+== Relative differences =============================================================== WARN
+  A norm of B - A over the same norm of A; a field passes if its Linf is at most its
+  tolerance.
+  status  field   units          L1           L2           Linf         tolerance on Linf
+  WARN    RHO     dimensionless  0.000213803  0.000262748  0.000440052  0.01
 ...
 ```
 

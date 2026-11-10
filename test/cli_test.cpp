@@ -585,19 +585,6 @@ Result diff_case(const std::string & dir, uint32_t n, const std::string & rho, i
     return run({"-i", dir + "/input.toml", "--kokkos-num-threads=1"}, true);
 }
 
-/** @brief The column at which a line holding text has it, or npos. */
-size_t column_of(const std::string & out, const std::string & text) {
-    std::istringstream in(out);
-    for (std::string line; std::getline(in, line);) {
-        const size_t at = line.find(text);
-        if (at == std::string::npos) continue;
-        size_t columns = 0;
-        for (size_t i = 0; i < at; i++) columns += (static_cast<unsigned char>(line[i]) & 0xC0) != 0x80;
-        return columns;
-    }
-    return std::string::npos;
-}
-
 } // namespace
 
 TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
@@ -606,15 +593,14 @@ TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
     const std::string first = dir + "v0.8.0/gas_000000.restart", later = dir + "v0.8.0/gas_000002.restart";
     const Result same = run({"diff", later, dir + "v0.7.0/gas_000002.restart"}, true);
     EXPECT_EQ(same.status, 0) << same.err;
-    EXPECT_TRUE(has_row(same.out, {"Result", "✓ identical: the same state, bit for bit"})) << same.out;
-    EXPECT_TRUE(has_row(same.out, {"✓", "RHOE", "kg m-1 s-2", "0 of 30", "0", "0", "0"})) << same.out;
-    EXPECT_EQ(column_of(same.out, "field   units"), column_of(same.out, "RHOE    kg m-1 s-2")) << same.out;
+    EXPECT_TRUE(contains(same.out, "Result: ok, identical, the same state bit for bit (exit status 0)")) << same.out;
+    EXPECT_TRUE(has_row(same.out, {"ok", "RHOE", "kg m-1 s-2", "0 of 30", "0", "0", "0"})) << same.out;
 
     const Result differ = run({"diff", first, later, "--format", "json"}, true);
     EXPECT_EQ(differ.status, 1) << differ.err;
     const json::Value v = json::parse(differ.out);
-    EXPECT_EQ(v["result"].string, "beyond_tolerance");
-    EXPECT_EQ(v["time"]["status"].string, "beyond_tolerance");
+    EXPECT_EQ(v["result"].string, "error");
+    EXPECT_EQ(v["time"]["status"].string, "error");
     ASSERT_EQ(v["fields"].array.size(), 4u);
     for (const json::Value & f : v["fields"].array) {
         SCOPED_TRACE(f["name"].string);
@@ -622,11 +608,12 @@ TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
         EXPECT_GT(linf, 0.0);
         EXPECT_DOUBLE_EQ(f["absolute"]["linf"].number, linf);
         EXPECT_EQ(f["max_at"]["index"].number, static_cast<double>(cell));
-        EXPECT_EQ(f["status"].string, "beyond_tolerance");
+        EXPECT_EQ(f["status"].string, "error");
     }
     const Result loose = run({"diff", first, later, "--tol", "1"}, true);
     EXPECT_EQ(loose.status, 0) << loose.err;
-    EXPECT_TRUE(has_row(loose.out, {"Result", "⚠ within tolerance: differences, none beyond it"})) << loose.out;
+    EXPECT_TRUE(contains(loose.out, "Result: WARN, within tolerance, differences but none beyond it (exit status 0)"))
+        << loose.out;
     EXPECT_EQ(run({"diff", first, later, "--tol", "1,RHOE=1e-6"}, true).status, 1);
     EXPECT_EQ(run({"diff", first, later, "--tol", "small"}, true).status, 2);
 
@@ -635,10 +622,11 @@ TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
     EXPECT_EQ(faces.status, 0) << faces.err;
     const json::Value f = json::parse(faces.out)["restart"]["faces"];
     EXPECT_EQ(f["values"].number, static_cast<double>(output::open(nscbc).restart.n_faces));
-    EXPECT_EQ(f["status"].string, "identical");
+    EXPECT_EQ(f["status"].string, "ok");
     const Result no_faces = run({"diff", dir + "v0.8.0/nscbc_000000.restart", nscbc}, true);
     EXPECT_EQ(no_faces.status, 1);
-    EXPECT_TRUE(has_row(no_faces.out, {"✗", "face records", "0 faces in A, 10 in B"})) << no_faces.out;
+    EXPECT_TRUE(has_row(no_faces.out, {"ERROR", "face records", "0 faces in A, 10 in B"})) << no_faces.out;
+    EXPECT_TRUE(contains(no_faces.out, "Result: ERROR, beyond tolerance: RHO, RHOU_X, RHOU_Y, RHOE (exit status 1)")) << no_faces.out;
 
     const Result mesh = run({"diff", dir + "annulus.msh", later}, true);
     EXPECT_EQ(mesh.status, 3);
