@@ -91,6 +91,12 @@ const Entry NAMED[] = {
     {"Q_W", dim::heat_flux, "wall heat flux into the fluid", SURFACE, WALLS},
     {"U_TAU", dim::velocity, "friction velocity", SURFACE, WALLS},
     {"Y_PLUS", dim::none, "first-cell y+", SURFACE, WALLS},
+    {"ENERGY_DIFFUSIVE_FLUX", dim::heat_flux, "normal diffusive energy flux (conduction, viscous work, species enthalpy)",
+     SURFACE, SURFACES},
+    {"ENERGY_TOTAL_FLUX", dim::heat_flux, "normal total energy flux (convective and diffusive)", SURFACE, SURFACES},
+    {"WALL_MODEL_U", dim::velocity, "wall model exchange-point tangential speed", SURFACE, WALLS},
+    {"WALL_MODEL_T", dim::temperature, "wall model exchange-point temperature", SURFACE, WALLS},
+    {"WALL_MODEL_H", dim::length, "wall model exchange-point height", SURFACE, WALLS},
     {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", QUALITY,
      "mallard check or info --quality", "degree"},
     {"SKEWNESS", dim::none, "largest face skewness", QUALITY, "mallard check or info --quality"},
@@ -114,6 +120,10 @@ const Entry SPECIES[] = {
      "a mixture with navier_stokes and soret = true"},
     {"OMEGA_", dim::mass_source, "net production rate of ", CHEMISTRY, "a mixture with [chemistry]"},
     {"SPECIES_FLUX_", dim::mass_flux, "normal mass flux of ", SURFACE,
+     "a mixture; [[probes]] on a surface or boundary zone"},
+    {"SPECIES_DIFFUSIVE_FLUX_", dim::mass_flux, "normal diffusive mass flux of ", SURFACE,
+     "a mixture; [[probes]] on a surface or boundary zone"},
+    {"SPECIES_TOTAL_FLUX_", dim::mass_flux, "normal total mass flux of ", SURFACE,
      "a mixture; [[probes]] on a surface or boundary zone"},
 };
 
