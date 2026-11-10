@@ -2595,7 +2595,7 @@ void Solver::check_fields() {
         return;
     }
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
-    if (!n_nonfinite.is_allocated()) n_nonfinite = Kokkos::View<int64_t *>("check_nan", 1);
+    if (!n_nonfinite.is_allocated()) n_nonfinite = Kokkos::View<int64_t *>("step_nonfinite", 1);
     const StateView U = conservatives;
     const SpeciesView Y = species;
     const uint32_t n_species = species.span() > 0 ? static_cast<uint32_t>(Y.extent(1)) : 0;
