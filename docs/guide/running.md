@@ -42,7 +42,7 @@ statistics once the flow has developed.
 [[probes]]
 name = "outlet"
 point = [0.9, 0.5]
-variables = ["T"]
+fields = ["T"]
 interval = 1
 
 [[triggers]]

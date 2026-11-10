@@ -33,13 +33,13 @@ Mallard's readers take step, time and run from what the files record.
 [[write_data]]
 prefix = "solut/flow"         # directories are created
 time_interval = 0.01          # or interval = 100 (steps)
-variables = ["RHO", "U", "P", "T", "VORTICITY"]
+fields = ["RHO", "U", "P", "T", "VORTICITY"]
 
 [[write_data]]                # several entries write independently
 prefix = "solut/wall"
 interval = 50
 region = "cylinder"           # a boundary zone, a slice, a volume: any region (below)
-variables = ["P", "T"]
+fields = ["P", "T"]
 ```
 
 *Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
@@ -50,14 +50,14 @@ variables = ["P", "T"]
 | `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, with a `.vtkhdf.series` index), `vtu` (ParaView, with a `.pvd` time series), `xdmf` (XDMF indexes over HDF5 files) or `restart`; see [which format](#which-format). Builds without HDF5 write `vtu`, with a warning |
 | `series` | `false` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf` |
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
-| `variables` | required (all but `restart`) | Variables to write, below; `Y_*` selects every variable with that prefix |
+| `fields` | required (all but `restart`) | Fields to write, below (`mallard list fields input.toml` lists those of a case); `Y_*` selects every field with that prefix |
 | `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (removed in 0.10.0; `mallard input upgrade` rewrites it) |
 | `regions` | none | Instead of `region`: a list of regions, each written as its own series, `PREFIX_<name>` (inline ones: `PREFIX_<place in the list>`) |
 | `compression` | `"none"` | `"zlib"`: lossless compression of `vtkhdf`, `vtu`, `xdmf` and `restart` files (below) |
 | `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `xdmf` with `compression = "zlib"`: lossy, each cell value within this relative error |
 | `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
 
-**Variables:** `mallard list fields input.toml` lists exactly those of a case, and
+**Fields:** `mallard list fields input.toml` lists exactly those of a case, and
 `mallard list fields` all of them with their units and what each needs
 ([Command line](cli.md#mallard-list-fields)).
 
@@ -84,7 +84,7 @@ in steps that write none:
 [[write_data]]
 prefix = "solut/jet"
 interval = 500
-variables = ["RHO", "U", "P", "MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN"]
+fields = ["RHO", "U", "P", "MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN"]
 ```
 
 | Name | Units | Definition |
@@ -160,7 +160,7 @@ io_threads = 8              # async = true is the default
 [[write_data]]
 prefix = "solut/flow"
 interval = 500
-variables = ["RHO", "U", "P", "T"]
+fields = ["RHO", "U", "P", "T"]
 compression = "zlib"       # lossless; readable by any ParaView
 relative_error = 1e-4       # optional: lossy, |x' - x| <= 1e-4 |x| per value
 ```
@@ -189,19 +189,19 @@ x3 = {type = "cut_plane", point = [0.04, 0, 0], normal = [1, 0, 0]}
 prefix = "solut/near"
 time_interval = 1e-4
 region = "near_field"
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 
 [[write_data]]                # three slices: solut/x_x1.vtkhdf, solut/x_x2.vtkhdf, solut/x_x3.vtkhdf
 prefix = "solut/x"
 time_interval = 2e-5
 regions = ["x1", "x2", "x3"]
-variables = ["U", "P", "MASS_FLUX"]
+fields = ["U", "P", "MASS_FLUX"]
 
 [[write_data]]                # a boundary zone, by its name
 prefix = "solut/wall"
 interval = 50
 region = "cylinder"
-variables = ["P", "T"]
+fields = ["P", "T"]
 ```
 
 ![A disk's cells with their REGION_FRACTION, and their pressure with three slices across the field, on a triangle mesh](../images/guide/region_snapshots-light.svg#gh-light-mode-only)
@@ -222,7 +222,7 @@ A volume is written by every rank in global order, like the whole mesh;
 zone, cut plane, surface, curve or points is written as a probe writes it, by
 the same code: `vtkhdf` writes one PolyData file `PREFIX.vtkhdf` of every
 snapshot (`series` is always on), `vtu` one VTK PolyData file per snapshot,
-`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `variables` are sampled
+`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `fields` are sampled
 as [`[[probes]]`](probes.md) sample them (`U` writes `U_X`, `U_Y`, `U_Z`);
 any other variable of a snapshot (`HRR`, `P_MAX`, `MEAN_P`, ...) takes the value
 of the cell holding each sample. Either kind is

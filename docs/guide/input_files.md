@@ -63,7 +63,7 @@ order = 5
 [[write_data]]                  # snapshots for ParaView (VTKHDF)
 prefix = "solut/sod"
 time_interval = 0.02
-variables = ["RHO", "U_X", "P", "T"]
+fields = ["RHO", "U_X", "P", "T"]
 ```
 
 | Table | Required | Topic |
@@ -268,6 +268,7 @@ Keys and options changed so far:
 | `[[mesh.curved]]` `shape` | `type`: the zone lies on a [surface region](geometry.md#regions); `"sphere"` and `"cylinder"` (3D) get `filled = false`, their surface | 0.9.0 | 0.10.0 |
 | `[[write_data]]` `geometry = "<zone>"` | `region = "<zone>"`, and `geometry = "all"` becomes `region = "domain"` ([any region](output.md#snapshots-of-regions)) | 0.9.0 | 0.10.0 |
 | `[mesh]` `periodic = ["x", "z"]` | `[[periodic]]` `zones = ["left", "right"]` and `zones = ["back", "front"]` (`y`: `bottom`/`top`, `theta`: `start`/`end`); `[initialize.mesh]` `periodic` likewise becomes `[[initialize.periodic]]` | 0.9.0 | 0.10.0 |
+| `[[write_data]]` `variables`, `[[probes]]` `variables` | `fields`, as `[statistics]` names them ([`mallard list fields`](cli.md#mallard-list-fields)) | 0.10.0 | 0.11.0 |
 
 Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
 of a key or option that a release shipped appears in this table and in `src/common/input_upgrade.cpp`, which is the
@@ -593,6 +594,16 @@ tutorial, in 2D and 3D, into
 [`docs/input-keys.json`](../input-keys.json), which the website's input builder
 reads; CI checks that it is up to date, and `tools/dev/input_catalog.py docs`
 that the defaults this reference states match it.
+
+`mallard list keys` shows that catalog as tables, one per input table, with
+each key's type, units, default and accepted values; `mallard list keys
+input.toml` shows the catalog of one case (what `--catalog` writes, with
+whether the input sets each key), and a section keeps one table or key path:
+
+```bash
+mallard list keys numerics                  # every [numerics] key there is
+mallard list keys write_data input.toml     # the [[write_data]] keys this case reads
+```
 
 ## The resolved input
 

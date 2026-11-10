@@ -111,7 +111,7 @@ def main():
                         'type = "symmetry"\n\n[[boundaries]]\nname = "top"\ntype = "symmetry"\n')
     fuel = "CH4" if "Y_CH4" in open(args.full).readline() else "H2"
     variables = ["RHO", "U", "P", "T", "HRR", "Y_" + fuel, "Y_O2"] + (["QRAD"] if args.radiation else [])
-    text = re.sub(r"variables = \[.*\]", "variables = [" + ", ".join(f'"{v}"' for v in variables) + "]", text)
+    text = re.sub(r"fields = \[.*\]", "fields = [" + ", ".join(f'"{v}"' for v in variables) + "]", text)
     dx = delta / args.cells
     nx = int(re.search(r"Nx = (\d+)", text).group(1))
     ny = H_cells

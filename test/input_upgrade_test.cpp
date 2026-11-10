@@ -322,6 +322,23 @@ TEST(InputUpgradeTest, OldBoundaryTypesBecomeTypesWithOptions) {
     EXPECT_TRUE(bare.at("boundaries").at(0).at("nscbc").is_table());
 }
 
+TEST(InputUpgradeTest, OutputQuantitiesAreFieldsInWriteDataAndProbes) {
+    const std::string text = "[[write_data]]\nprefix = \"f\"\nvariables = [\"RHO\"]  # kept\n"
+                             "[[probes]]\nname = \"p\"\nvariables = [\"P\"]\n";
+    Input input = parse_input_string(text);
+    const std::vector<Finding> deprecated = input_upgrade::apply(input);
+    ASSERT_EQ(deprecated.size(), 2u);
+    for (const Finding & f : deprecated) EXPECT_FALSE(f.removed) << f.key;
+    EXPECT_EQ(input.at("write_data").at(0).at("fields").at(0).as_string(), "RHO");
+    EXPECT_EQ(input.at("probes").at(0).at("fields").at(0).as_string(), "P");
+
+    std::vector<Finding> findings;
+    bool reformatted = false;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted),
+              "[[write_data]]\nprefix = \"f\"\nfields = [\"RHO\"]  # kept\n[[probes]]\nname = \"p\"\nfields = [\"P\"]\n");
+    EXPECT_FALSE(reformatted);
+}
+
 // The names deprecated in 0.9.0 are rejected by this source, before its
 // version reaches 0.10.0, with the replacement and the command that rewrites
 // them. Fails if a run reads one again.

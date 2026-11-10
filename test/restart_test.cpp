@@ -49,7 +49,7 @@ std::string restart_input(const std::string & dir, const std::string & init, uin
       << "[output]\ncheck_interval = 1000000\n"
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 20\n"
       << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ntime_interval = 0.005\n"
-      << "variables = [\"RHO\"]\n"
+      << "fields = [\"RHO\"]\n"
       << "[[forces]]\nzone = \"bottom\"\ninterval = 5\nfile = \"" << dir << "/forces.csv\"\n";
     return s.str();
 }
@@ -262,7 +262,7 @@ TEST(RestartTest, PeakPressureIsARunningMaximumThatSurvivesRestarts) {
     const std::string dir = (scratch_dir() / "mallard_restart_p_max").string();
     auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
         std::string s = restart_input(dir + sub, init, n_steps);
-        s.replace(s.find("variables = [\"RHO\"]"), 19, "variables = [\"RHO\", \"P_MAX\"]");
+        s.replace(s.find("fields = [\"RHO\"]"), 19, "fields = [\"RHO\", \"P_MAX\"]");
         return parse_toml(s);
     };
 

@@ -223,7 +223,7 @@ TEST(RunControlTest, ProbeIntervalsChangeOnlyInTheirOwnKind) {
     clear_requests();
     Solver solver;
     solver.init(parse_toml(case_input(dir, "n_steps = 5\ncfl = 0.25\n", 1000) +
-                           "[[probes]]\nname = \"mid\"\nvariables = [\"P\"]\npoint = [0.5, 0.5]\n"
+                           "[[probes]]\nname = \"mid\"\nfields = [\"P\"]\npoint = [0.5, 0.5]\n"
                            "time_interval = 0.1\nfile = \"" + dir + "/mid.csv\"\n"));
     EXPECT_FALSE(solver.apply_setting("probes.mid.interval", "3").first);
     EXPECT_FALSE(solver.apply_setting("probes.other.time_interval", "0.05").first);

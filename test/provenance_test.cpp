@@ -62,13 +62,13 @@ std::string box(const std::string & dir, uint32_t n_steps, const std::string & i
       << "[output]\ncheck_interval = 2\nrun_log = \"" << dir << "/run.jsonl\"\n"
       << "[integrals]\ninterval = 2\nfile = \"" << dir << "/integrals.csv\"\n"
       << "[[probes]]\nname = \"p\"\nfile = \"" << dir << "/probe.csv\"\ninterval = 2\n"
-      << "point = " << (N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]") << "\nvariables = [\"RHO\"]\n"
+      << "point = " << (N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]") << "\nfields = [\"RHO\"]\n"
       << "[[probes]]\nname = \"line\"\nformat = \"vtp\"\nfile = \"" << dir << "/line.pvd\"\ninterval = 2\n"
       << "start = " << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
-      << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 5\nvariables = [\"RHO\"]\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 4\nvariables = [\"RHO\"]\n"
+      << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 5\nfields = [\"RHO\"]\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 4\nfields = [\"RHO\"]\n"
       << "[[write_data]]\nprefix = \"" << dir << "/r\"\nformat = \"restart\"\ninterval = 4\n";
-    if (hdf5) s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"xdmf\"\ninterval = 4\nvariables = [\"RHO\"]\n";
+    if (hdf5) s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"xdmf\"\ninterval = 4\nfields = [\"RHO\"]\n";
     return s.str();
 }
 
@@ -255,7 +255,7 @@ TEST(ProvenanceTest, Hdf5ProbeFilesCarryTheRunsProvenance) {
     const std::string point = N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]";
     std::string input = box(dir, 2, UNIFORM, false);
     input = input.substr(0, input.find("[[write_data]]")) + "[[probes]]\nname = \"ph\"\nformat = \"hdf5\"\nfile = \"" +
-            dir + "/probe.h5\"\ninterval = 2\npoint = " + point + "\nvariables = [\"RHO\"]\n";
+            dir + "/probe.h5\"\ninterval = 2\npoint = " + point + "\nfields = [\"RHO\"]\n";
     Solver solver;
     solver.init(parse_toml(input));
     solver.run();

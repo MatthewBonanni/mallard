@@ -31,6 +31,9 @@ int list_fields_main(const cli::Args & args);
 /** @brief `mallard list species INPUT`: the species of a case. */
 int list_species_main(const cli::Args & args);
 
+/** @brief `mallard list keys [SECTION] [INPUT]`: the input keys there are, or those of a case. */
+int list_keys_main(const cli::Args & args);
+
 /** @brief `mallard list templates`: the case templates of mallard new. */
 int list_templates_main(const cli::Args & args);
 

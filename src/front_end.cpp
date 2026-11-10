@@ -211,6 +211,11 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
             if (file.empty()) return dimension_free();
             return {input_dimension(file), file};
         }
+        case cli::Case::input_file:
+            for (const std::string & a : parsed.positional) {
+                if (a.ends_with(".toml") || fs::is_regular_file(a)) return {input_dimension(a), a};
+            }
+            return dimension_free();
         case cli::Case::template_name: {
             if (first.empty() || parsed.has("--list")) return dimension_free();
             try {

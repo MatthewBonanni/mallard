@@ -331,7 +331,7 @@ Result small_run() {
         << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.3 * x\"\n"
         << (three ? "u = [\"0.3\", \"0.0\", \"0.0\"]\n" : "u = [\"0.3\", \"0.0\"]\n")
         << "p = \"1.0\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-        << "[[write_data]]\nprefix = \"case/flow\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\", \"U\"]\n"
+        << "[[write_data]]\nprefix = \"case/flow\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"RHO\", \"U\"]\n"
         << "[[write_data]]\nprefix = \"case/restart\"\nformat = \"restart\"\ninterval = 2\n";
     return run({"-i", "small.toml", "--kokkos-num-threads=1"}, true);
 }
@@ -584,6 +584,35 @@ TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
     EXPECT_EQ(broken.status, 1);
 }
 
+TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
+    SKIP_UNDER_MPI();
+    const Result numerics = run({"list", "keys", "numerics"}, true);
+    ASSERT_EQ(numerics.status, 0) << numerics.err;
+    EXPECT_TRUE(contains(numerics.out, "== Keys: [numerics]")) << numerics.out;
+    EXPECT_TRUE(has_row(numerics.out, {"key", "type", "units", "default", "values"})) << numerics.out;
+    EXPECT_TRUE(has_row(numerics.out, {"numerics.riemann_solver", "string", "\"HLLC\"", "HLL, HLLC, RHLL, Roe, Rusanov"}))
+        << numerics.out;
+    EXPECT_FALSE(contains(numerics.out, "mesh.Nx")) << numerics.out;
+    const Result typo = run({"list", "keys", "numerix"}, true);
+    EXPECT_EQ(typo.status, 2);
+    EXPECT_TRUE(contains(typo.err, "did you mean \"numerics\"")) << typo.err;
+
+    ASSERT_EQ(small_run().status, 0);
+    const Result text = run({"list", "keys", "[write_data]", "small.toml"}, true);
+    ASSERT_EQ(text.status, 0) << text.err;
+    EXPECT_TRUE(has_row(text.out, {"key", "set", "type", "units", "default", "values"})) << text.out;
+    EXPECT_TRUE(has_row(text.out, {"write_data.fields", "yes", "array"})) << text.out;
+    EXPECT_FALSE(contains(text.out, "physics.gamma")) << text.out;
+    // The same keys mallard check --catalog writes
+    ASSERT_EQ(run({"check", "small.toml", "--catalog", "keys.json"}, true).status, 0);
+    const Result listed = run({"list", "keys", "small.toml", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value keys = json::parse(listed.out)["keys"];
+    EXPECT_EQ(keys.keys(), json::parse(read_file("keys.json")).keys());
+    EXPECT_TRUE(keys["physics.gamma"]["set"].boolean);
+    EXPECT_FALSE(keys["numerics.riemann_solver"]["set"].boolean);
+}
+
 TEST(CliTest, ListTemplatesIsWhatNewListShowedWhichStillWorks) {
     SKIP_UNDER_MPI();
     const Result listed = run({"list", "templates"});
@@ -619,7 +648,7 @@ Result diff_case(const std::string & dir, uint32_t n, const std::string & rho, i
         << "[initialize]\ntype = \"analytical\"\nrho = \"" << rho << "\"\n"
         << (three ? "u = [\"0.3\", \"0.0\", \"0.0\"]\n" : "u = [\"0.3\", \"0.0\"]\n")
         << "p = \"1.0\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-        << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\", \"U\"]\n"
+        << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"RHO\", \"U\"]\n"
         << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
     return run({"-i", dir + "/input.toml", "--kokkos-num-threads=1"}, true);
 }

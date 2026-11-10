@@ -64,4 +64,4 @@ time_interval = 2.0e-6
 prefix = "./wall_2d/bottom"
 region = "bottom"
 time_interval = 6.0e-6
-variables = ["P_MAX"]
+fields = ["P_MAX"]

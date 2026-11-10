@@ -307,12 +307,12 @@ prefix = "./solut/plane"
 region = "sym_z"
 format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = {t_stop / args.outputs:.10g}
-variables = ["RHO", "U", "P", "T", "HRR", "Y_*"]
+fields = ["RHO", "U", "P", "T", "HRR", "Y_*"]
 
 [[write_data]]
 prefix = "./solut/volume"
 time_interval = {t_stop:.10g}
-variables = ["U", "T", "HRR", "Y_H2", "Y_O2", "Y_OH", "Y_H2O"]
+fields = ["U", "T", "HRR", "Y_H2", "Y_O2", "Y_OH", "Y_H2O"]
 
 [[write_data]]
 prefix = "./restart/counterflow"
