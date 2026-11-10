@@ -914,7 +914,7 @@ int convergence_study(const cli::Args & args) {
     std::stable_sort(study.runs.begin(), study.runs.end(), [](const Run & a, const Run & b) { return a.h > b.h; });
     auto single = [](const Run & r) { return string_at(r.block, {"build", "precision"}) == "single"; };
     if (std::any_of(study.runs.begin(), study.runs.end(), single)) {
-        const double epsilons = SINGLE_EPSILONS * std::numeric_limits<float>::epsilon();
+        const double epsilons = SINGLE_EPSILONS * static_cast<double>(std::numeric_limits<float>::epsilon());
         study.zero = std::max(ZERO, epsilons);
         study.round_off = std::max(convergence::ROUND_OFF, epsilons);
     }
