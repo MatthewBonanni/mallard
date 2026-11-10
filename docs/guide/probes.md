@@ -226,6 +226,9 @@ wall keeps its ends.
   and the file records it as `clipped` (`volume_fraction`, or
   `area_fraction` in planar 2D). One that misses the mesh is an error.
 
+![Volume fractions of a disk partly outside a square triangle mesh, its part outside the domain hatched, under the warning the run prints with the share outside](../images/guide/region-outside-light.svg#gh-light-mode-only)
+![Volume fractions of a disk partly outside a square triangle mesh, its part outside the domain hatched, under the warning the run prints with the share outside](../images/guide/region-outside-dark.svg#gh-dark-mode-only)
+
 ### Time averages
 
 `[statistics]` keeps time averages per cell. A probe reads them: `MEAN_P`,
@@ -400,6 +403,9 @@ file and is written to `mallard.jsonl` as a `probe` record:
 On a mesh with [curved boundaries](meshes.md#curved-boundaries), both follow
 the curved walls: the fractions `f` of the cells at a curved wall are of their
 curved shapes, and the surface's part on the wall is the curved faces'.
+
+![Volume fractions of a disk across the curved outer wall of a coarse annulus mesh, the cells drawn with their curved faces, the disk's part in the domain outlined, and its recorded area and perimeter against the closed form](../images/guide/region-curved-wall-light.svg#gh-light-mode-only)
+![Volume fractions of a disk across the curved outer wall of a coarse annulus mesh, the cells drawn with their curved faces, the disk's part in the domain outlined, and its recorded area and perimeter against the closed form](../images/guide/region-curved-wall-dark.svg#gh-dark-mode-only)
 
 Give the region by name to measure exactly where a source or sponge acts:
 

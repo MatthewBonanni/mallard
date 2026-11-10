@@ -27,7 +27,7 @@ from figstyle import bare, label
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtu import probe_sampling, read_vtu_cells  # noqa: E402
 
 PHYSICS = '[physics]\ntype = "euler"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n'
 
@@ -579,6 +579,307 @@ def orientation(P, args):
     return fig
 
 
+# ------------------------------------------------- measures in the domain
+
+R_IN, R_OUT = 1.0, 1.384
+WALL_DISK = (1.384, 0.0, 0.3)
+
+
+def annulus_mesh(path, n_r=3, n_t=32, seed=5):
+    """Gmsh 2.2 file of the annulus R_IN <= r <= R_OUT: n_r rings of n_t quadrilaterals with jittered interior
+    nodes, boundary zones "inner" and "outer" (straight lines, bent onto the circles by [[mesh.curved]])."""
+    rng = np.random.default_rng(seed)
+    nodes, idx = [], {}
+    for j in range(n_r + 1):
+        for i in range(n_t):
+            jr, jt = rng.uniform(-0.15, 0.15, 2) if 0 < j < n_r else (0.0, 0.0)
+            r = R_IN + (R_OUT - R_IN) * (j + jr) / n_r
+            nodes.append((r * np.cos(2 * np.pi * (i + jt) / n_t), r * np.sin(2 * np.pi * (i + jt) / n_t)))
+            idx[i, j] = len(nodes)
+    c = lambda i, j: idx[i % n_t, j]  # noqa: E731
+    elements = [f"1 2 {z} {z} {c(i, j)} {c(i + 1, j)}" for i in range(n_t) for z, j in ((1, 0), (2, n_r))]
+    elements += [f"3 2 0 3 {c(i, j)} {c(i + 1, j)} {c(i + 1, j + 1)} {c(i, j + 1)}"
+                 for j in range(n_r) for i in range(n_t)]
+    lines = ["$MeshFormat", "2.2 0 8", "$EndMeshFormat", "$PhysicalNames", "2", '1 1 "inner"', '1 2 "outer"',
+             "$EndPhysicalNames", "$Nodes", str(len(nodes))]
+    lines += [f"{k + 1} {x:.17g} {y:.17g} 0" for k, (x, y) in enumerate(nodes)]
+    lines += ["$EndNodes", "$Elements", str(len(elements))] + [f"{k + 1} {e}" for k, e in enumerate(elements)]
+    path.write_text("\n".join(lines + ["$EndElements"]) + "\n")
+
+
+def measured_run(binary, work, toml, view=False):
+    """Run the case (and with view its check's case view); the cells, each one's SOURCE_RHOE (the fraction of the
+    region of [[sources]]), the probe sampling block of disk.csv, the last row of surface.csv if any, and the
+    warnings printed."""
+    (work / "case.toml").write_text(toml)
+    run = subprocess.run([str(binary), "-i", "case.toml", "--kokkos-num-threads=2"], cwd=work, check=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if view:
+        subprocess.run([str(binary), "check", "case.toml", "--view", "view", "--kokkos-num-threads=2"], cwd=work,
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    pts, conn, offs, _, data = read_vtu_cells(str(work / "f_000000.vtu"))
+    cells = [conn[a:b] for a, b in zip(np.concatenate([[0], offs[:-1]]), offs)]
+    surface = None
+    if (work / "surface.csv").exists():
+        rows = [r for r in (work / "surface.csv").read_text().splitlines() if r and not r.startswith(("#", "step"))]
+        header = (work / "surface.csv").read_text().splitlines()[0].split(",")
+        surface = dict(zip(header, map(float, rows[-1].split(","))))
+    warnings = [w for w in run.stderr.splitlines() if w.startswith("warning:")]
+    return pts, cells, data["SOURCE_RHOE"], probe_sampling(str(work / "disk.csv")), surface, warnings
+
+
+def lens(R, d, rho):
+    """Area and perimeter of the part of a disk (radius rho, center at distance d) inside the circle of radius R."""
+    alpha = np.arccos((d * d + R * R - rho * rho) / (2 * d * R))
+    beta = np.arccos((d * d + rho * rho - R * R) / (2 * d * rho))
+    area = R * R * alpha + rho * rho * beta - 0.5 * np.sqrt((-d + R + rho) * (d + R - rho) * (d - R + rho)
+                                                            * (d + R + rho))
+    return area, 2 * R * alpha + 2 * rho * beta
+
+
+@functools.cache
+def data_curved_wall(mallard):
+    """A disk across the outer wall of a coarse curved annulus, in a uniform expansion u = 0.1 (x, y): its cell
+    fractions, measures and the net mass flow out of its part in the domain, and the case view of that part's
+    surface."""
+    import h5py
+    work = Path(tempfile.mkdtemp())
+    annulus_mesh(work / "annulus.msh")
+    cx, cy, rho = WALL_DISK
+    curved = "".join(f'[[mesh.curved]]\nzone = "{z}"\ntype = "circle"\ncenter = [0.0, 0.0]\nradius = {r}\n'
+                     for z, r in (("inner", R_IN), ("outer", R_OUT)))
+    walls = "".join(f'[[boundaries]]\nname = "{z}"\ntype = "symmetry"\n' for z in ("inner", "outer"))
+    toml = f"""[run]
+n_steps = 1
+dt = 1e-9
+[mesh]
+type = "file"
+filename = "annulus.msh"
+{curved}[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["0.1 * x", "0.1 * y"]
+p = "1 / 1.4"
+{walls}[numerics.face_reconstruction]
+type = "TENO"
+order = 4
+troubled_threshold = 1.0
+[regions]
+disk = {{type = "disk", center = [{cx}, {cy}], radius = {rho}}}
+[[sources]]
+rhoE = 1
+region = "disk"
+[[probes]]
+name = "disk"
+region = "disk"
+variables = ["RHO"]
+reductions = ["integral"]
+reductions_file = "disk.csv"
+[[probes]]
+name = "surface"
+region = {{type = "boundary", of = {{type = "intersection", regions = ["domain", "disk"]}}}}
+variables = ["MASS_FLUX"]
+sampling = "point"
+reductions = ["integral"]
+reductions_file = "surface.csv"
+[output]
+check_interval = 1000000
+[[write_data]]
+prefix = "f"
+format = "vtu"
+interval = 1
+variables = ["SOURCE_RHOE"]
+{PHYSICS}"""
+    pts, cells, f, sampling, surface, _ = measured_run(mallard, work, toml, view=True)
+    with h5py.File(work / "view" / "case.vtkhdf") as h:
+        b = h["VTKHDF"]['probes[name = "surface"].region']
+        p, conn, offs = b["Points"][:, :2], b["Connectivity"][:], b["Offsets"][:]
+        segs = np.array([p[conn[offs[k]:offs[k + 1]]] for k in range(len(offs) - 1)])
+        normals = b["CellData"]["normal"][:, :2]
+    return pts, cells, f, sampling, surface, segs, normals
+
+
+def curved_polygons(pts, cells):
+    """Each cell's outline with its faces on the walls bent onto them, as [[mesh.curved]] does."""
+    polys = []
+    for c in cells:
+        q = pts[c, :2]
+        out = []
+        for a, b in zip(q, np.roll(q, -1, axis=0)):
+            ra, rb = np.hypot(*a), np.hypot(*b)
+            r = next((w for w in (R_IN, R_OUT) if abs(ra - w) < 1e-9 and abs(rb - w) < 1e-9), None)
+            if r is None:
+                out.append(a)
+                continue
+            ta, tb = np.arctan2(a[1], a[0]), np.arctan2(b[1], b[0])
+            tb = ta + (tb - ta + np.pi) % (2 * np.pi) - np.pi
+            t = np.linspace(ta, tb, 12, endpoint=False)
+            out.extend(np.column_stack([r * np.cos(t), r * np.sin(t)]))
+        polys.append(np.array(out))
+    return polys
+
+
+def wall_view(ax, P, pts, cells, f=None):
+    polys = curved_polygons(pts, cells)
+    colors = "none"
+    if f is not None:
+        colors = plt.get_cmap(P["cmap"])(f)
+        colors[f <= 0.0] = (0, 0, 0, 0)
+    ax.add_collection(PolyCollection(polys, facecolors=colors, edgecolors=P["mesh"], linewidths=0.6))
+    t = np.linspace(-0.5, 0.5, 200)
+    ax.plot(R_OUT * np.cos(t), R_OUT * np.sin(t), color=P["fg"], lw=2.0)
+    bare(ax)
+    ax.set_xlim(0.98, 1.78)
+    ax.set_ylim(-0.42, 0.42)
+
+
+def lens_outline(cx, cy, rho):
+    """The part of the disk inside r = R_OUT, closed: its arc of the disk, then the wall's arc inside the disk."""
+    t = np.linspace(0, 2 * np.pi, 721)
+    x, y = cx + rho * np.cos(t), cy + rho * np.sin(t)
+    inside = np.hypot(x, y) <= R_OUT
+    start = np.argmin(inside) if inside[0] else 0
+    x, y, inside = np.roll(x, -start), np.roll(y, -start), np.roll(inside, -start)
+    x, y = x[inside], y[inside]
+    a, b = np.arctan2(y[-1], x[-1]), np.arctan2(y[0], x[0])
+    w = np.linspace(a, b, 100)
+    return np.concatenate([x, R_OUT * np.cos(w)]), np.concatenate([y, R_OUT * np.sin(w)])
+
+
+def region_curved_wall(P, args):
+    """A disk across a curved wall: the fraction of each curved cell it covers, its part in the domain, and the
+    measures the probe records against the closed form."""
+    pts, cells, f, sampling, _, _, _ = data_curved_wall(args.mallard)
+    cx, cy, rho = WALL_DISK
+    fig, ax = plt.subplots(figsize=(6.4, 5.6))
+    wall_view(ax, P, pts, cells, f)
+    t = np.linspace(0, 2 * np.pi, 400)
+    ax.plot(cx + rho * np.cos(t), cy + rho * np.sin(t), color=P["muted"], lw=1.2, ls=(0, (4, 3)))
+    ax.plot(*lens_outline(cx, cy, rho), color=P["flame"], lw=2.0)
+    label(ax, 1.42, 0.37, "outer wall (mesh.curved)", P, size=10, ha="left", box=True)
+    label(ax, 1.63, -0.3, "the disk", P, size=10, color=P["muted"], box=True)
+    label(ax, 1.2, -0.3, "its part in the domain", P, size=10, color=P["flame"], box=True)
+    area, perimeter = lens(R_OUT, np.hypot(cx, cy), rho)
+    m = sampling["measures"]["in_domain"]
+    text = (f"in the domain       recorded      closed form\n"
+            f"area                {m['area']:.7f}     {area:.7f}\n"
+            f"perimeter           {m['perimeter']:.7f}     {perimeter:.7f}\n"
+            f"outside: {100 * sampling['clipped']['area_fraction']:.3g}% of its area")
+    ax.text(0.0, -0.02, text, fontsize=9, family="monospace", color=P["fg"], va="top", ha="left",
+            transform=ax.transAxes)
+    sm = plt.cm.ScalarMappable(cmap=P["cmap"], norm=plt.Normalize(0, 1))
+    cb = fig.colorbar(sm, ax=ax, shrink=0.7, pad=0.02)
+    cb.set_label("cell volume fraction")
+    cb.outline.set_edgecolor(P["muted"])
+    return fig
+
+
+def region_control_surface(P, args):
+    """The surface of a disk's part in the domain, as the check's case view writes it (its faces on the wall bent
+    onto it): the disk's arc inside the domain and the wall's inside the disk, with the outward normals, and the
+    net mass flow out of it."""
+    pts, cells, _, sampling, surface, segs, normals = data_curved_wall(args.mallard)
+    fig, ax = plt.subplots(figsize=(5.4, 5.6))
+    wall_view(ax, P, pts, cells)
+    mid = segs.mean(axis=1)
+    on_wall = np.all(np.abs(np.hypot(segs[:, :, 0], segs[:, :, 1]) - R_OUT) < 1e-9, axis=1)
+    for part, color in ((~on_wall, P["blue"]), (on_wall, P["flame"])):
+        for s in segs[part]:
+            if part is on_wall:
+                t = np.arctan2(s[:, 1], s[:, 0])
+                t = np.linspace(t[0], t[1], 20)
+                s = R_OUT * np.column_stack([np.cos(t), np.sin(t)])
+                mid[np.argmin(np.hypot(*(mid - s[10]).T))] = s[10]
+            ax.plot(s[:, 0], s[:, 1], color=color, lw=2.2, solid_capstyle="round")
+        ax.quiver(mid[part, 0], mid[part, 1], normals[part, 0], normals[part, 1], color=color, angles="xy",
+                  scale_units="xy", scale=14.0, width=0.005)
+    label(ax, 1.55, 0.3, "the wall\ninside the disk", P, size=10, color=P["flame"], box=True)
+    label(ax, 1.17, -0.33, "the disk's edge in the domain", P, size=10, color=P["blue"], box=True)
+    area = sampling["measures"]["in_domain"]["area"]
+    text = (f"u = 0.1 (x, y), div u = 0.2\n"
+            f"net mass outflow    {surface['integral_MASS_FLUX']:.7f} kg/(m s)\n"
+            f"0.2 x area inside   {0.2 * area:.7f}\n"
+            f"perimeter           {surface['length']:.7f} m")
+    ax.text(0.0, -0.02, text, fontsize=9, family="monospace", color=P["fg"], va="top", ha="left",
+            transform=ax.transAxes)
+    return fig
+
+
+OUTSIDE_DISK = (0.72, 0.8, 0.32)
+
+
+@functools.cache
+def data_outside(mallard):
+    work = Path(tempfile.mkdtemp())
+    triangle_mesh(work / "square.msh")
+    cx, cy, rho = OUTSIDE_DISK
+    toml = f"""[run]
+n_steps = 1
+dt = 1e-9
+[mesh]
+type = "file"
+filename = "square.msh"
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0
+T = 1.0
+[[boundaries]]
+name = "wall"
+type = "symmetry"
+[regions]
+disk = {{type = "disk", center = [{cx}, {cy}], radius = {rho}}}
+[[sources]]
+rhoE = 1
+region = "disk"
+[[probes]]
+name = "disk"
+region = "disk"
+variables = ["RHO"]
+reductions = ["mean"]
+reductions_file = "disk.csv"
+[output]
+check_interval = 1000000
+[[write_data]]
+prefix = "f"
+format = "vtu"
+interval = 1
+variables = ["SOURCE_RHOE"]
+{PHYSICS}"""
+    pts, cells, f, sampling, _, warnings = measured_run(mallard, work, toml)
+    return pts, cells, f, sampling, warnings
+
+
+def region_outside(P, args):
+    """A disk partly outside a square domain: the cells' fractions of its part inside, its part outside shaded,
+    and the warning the run prints."""
+    pts, cells, f, sampling, warnings = data_outside(args.mallard)
+    cx, cy, rho = OUTSIDE_DISK
+    fig, ax = plt.subplots(figsize=(6.0, 5.2))
+    g = np.linspace(-0.1, 1.15, 600)
+    X, Y = np.meshgrid(g, g)
+    out = (np.hypot(X - cx, Y - cy) < rho) & ((X > 1) | (Y > 1))
+    ax.contourf(X, Y, out.astype(float), levels=[0.5, 1.5], colors=[P["faint"]], hatches=["///"])
+    colors = plt.get_cmap(P["cmap"])(f)
+    colors[f <= 0.0] = (0, 0, 0, 0)
+    ax.add_collection(PolyCollection([pts[c, :2] for c in cells], facecolors=colors, edgecolors=P["mesh"],
+                                     linewidths=0.5))
+    ax.plot([0, 1, 1, 0, 0], [0, 0, 1, 1, 0], color=P["fg"], lw=1.6)
+    t = np.linspace(0, 2 * np.pi, 400)
+    ax.plot(cx + rho * np.cos(t), cy + rho * np.sin(t), color=P["flame"], lw=1.6)
+    share = 100 * sampling["clipped"]["area_fraction"]
+    label(ax, 0.98, 1.1, f"outside the domain:\n{share:.3g}% of the disk's area", P, size=10, box=True, ha="left")
+    label(ax, 0.3, 0.3, "domain", P, size=11, color=P["muted"])
+    bare(ax)
+    ax.set_xlim(-0.02, 1.2)
+    ax.set_ylim(-0.02, 1.2)
+    warning = warnings[0].replace("warning: ", "")
+    head, tail = warning.split(": ", 1)
+    ax.set_title(f"warning: {head}:\n{tail.replace(', and', ',\nand')}", fontsize=8.5, family="monospace",
+                 loc="left")
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -591,7 +892,8 @@ class Args(tuple):
 
 FIGURES = {"region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
            "region_mesh_regions": mesh_regions, "region_orientation": orientation, "regions_3d": regions_3d,
-           "initial_layers": initial_layers}
+           "initial_layers": initial_layers, "region_curved_wall": region_curved_wall,
+           "region_control_surface": region_control_surface, "region_outside": region_outside}
 
 
 def figures(mallard, mallard3d=None, names=()):

@@ -370,6 +370,9 @@ follows the curved walls:
   cones from the cell's vertex average to each face, each curved face in 8
   (3D: 4 x 4) flat pieces.
 
+![The closed surface of a disk's part inside a curved wall, as mallard check --view writes it: the disk's edge in the domain and the wall inside the disk with their outward normals, and the net mass outflow of a uniform expansion against 0.2 times the area inside](../images/guide/region-control-surface-light.svg#gh-light-mode-only)
+![The closed surface of a disk's part inside a curved wall, as mallard check --view writes it: the disk's edge in the domain and the wall inside the disk with their outward normals, and the net mass outflow of a uniform expansion against 0.2 times the area inside](../images/guide/region-control-surface-dark.svg#gh-dark-mode-only)
+
 ### Checking regions
 
 `mallard check` lists every region a case uses, and the mesh's own, with its
@@ -377,8 +380,9 @@ kind, measure and cells; surfaces and curves say whether they are exact
 or extracted. Filled regions of the case also get their own volume and
 surface area (2D: area and perimeter), independent of the mesh, against those
 of their part in the domain, and the share outside it, as
-[region probes](probes.md#region-probes) record them. A region that covers no cell is an error (`E-REGION-OUTSIDE` or
-`E-REGION-EMPTY`) naming it with its extent and the domain's:
+[region probes](probes.md#region-probes) record them. A region that covers no
+cell is an error (`E-REGION-OUTSIDE` or `E-REGION-EMPTY`) naming it with its
+extent and the domain's:
 
 ```
 == Regions =========================================================================== ERROR
