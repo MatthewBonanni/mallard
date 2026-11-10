@@ -111,6 +111,18 @@ struct DivergedError : std::exception {
 /** @brief Exit status of a run stopped on request (signal, `mallard ctl stop`, STOP file) after writing a restart. */
 constexpr int EXIT_STOPPED = 3;
 
+/** @brief How a run ended, as its end record gives it. */
+struct RunEnd {
+    std::string outcome;  // finished, stopped, signal, wall_time_limit, diverged or error; empty while running
+    std::string cause;    // finished: n_steps or t_stop; stopped: stop_file, mallard_ctl or trigger; signal: its name
+    std::string reason;   // in words
+    std::string trigger;  // the trigger that stopped the run
+    RunEnd() = default;
+    RunEnd(std::string outcome_, std::string cause_, std::string reason_, std::string trigger_ = {})
+        : outcome(std::move(outcome_)), cause(std::move(cause_)), reason(std::move(reason_)), trigger(std::move(trigger_)) {}
+    bool empty() const { return outcome.empty(); }
+};
+
 struct ViscousFluxFunctor;
 template <typename T_riemann_solver>
 struct ConvectiveFluxFunctor;
@@ -336,6 +348,7 @@ class Solver {
         void restore_last_good();
         std::string describe_invalid_cells();
         [[noreturn]] void diverged();
+        int run_loop();  // run() but for the end record of an error
         /**
          * @brief The divergence report's evidence (collective): what failed in each local cell of the failing
          *        state, then, with the last valid state in place (if has_valid), its neighborhood.
@@ -632,12 +645,14 @@ class Solver {
         void allocate_time_stepping();  // Stages and face buffers of the right-hand side
         void register_data();
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
-        std::string stop_reason() const;  // Empty while no stop condition holds
+        RunEnd stop_reason() const;       // Empty while no stop condition holds
         bool state_needed() const;        // Whether output, checks or the end of the run read the state now
         double progress() const;          // Fraction of the run done, by the first stop condition to hit
         void print_setup(const ResolvedInput & resolved) const;
         void print_progress();
-        void print_summary(const std::string & stop) const;
+        void print_summary(const RunEnd & end) const;
+        /** @brief The run log's end record: how the run ended, its last snapshot and restart, its timings. */
+        void write_end_record(const RunEnd & end);
         /** @brief The status at this step, throughput since the last progress row; no diagnostics or memory. */
         RunStatus run_status() const;
         void record_mesh_provenance() const;
@@ -702,7 +717,9 @@ class Solver {
         int control_contributed = 0;             // this rank's requests in the last time-step reduction
         int control_reduced = 0;                 // every rank's
         bool checkpoint_requested = false;
-        std::string control_stop;                // why a request stopped the run, else empty
+        RunEnd control_stop;                     // a request that stopped the run, else empty
+        bool wall_time_reached = false;          // on some rank, so on every rank at the same step
+        bool end_recorded = false;
         std::string stop_file_note;
         std::vector<run_control::Command> checkpoint_replies, stop_replies;
         std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
@@ -1013,7 +1030,7 @@ class Solver {
         Statistics statistics;
         Probes probes;
         Triggers triggers;
-        std::string trigger_stop;  // why a trigger stopped the run, else empty
+        RunEnd trigger_stop;  // a trigger that stopped the run, else empty
         HealthState run_health;
 };
 

@@ -435,15 +435,18 @@ TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {
     const Result r = run({"info", "."}, true);
     EXPECT_EQ(r.status, 0) << r.err;
     const std::vector<std::vector<std::string>> rows = {
-        {"Ended", "n_steps = 2 reached"},
+        {"Ended", "finished: n_steps = 2 reached"},
         {"Last step", "2"},
+        {"Last snapshot", "case/flow_000002.vtu, step 2, t = 0.002 s"},
+        {"Last restart", "case/restart_000002.restart, step 2, t = 0.002 s"},
         {"Simulated time", "t = 0.002 s at the end"},
         {"file", "kind", "times", "first t [s]", "last t [s]", "last step", "fields", "format"},
         {"case/flow.pvd", "snapshot", "2", "0", printed_time(2.0e-3), "2", "2", "PVD series index (VTU snapshots)"},
         {"case/restart_000002.restart", "restart", "1", printed_time(2.0e-3), printed_time(2.0e-3), "2", Mallard_DIM == 3 ? "5" : "4", "restart"},
     };
     for (const auto & row : rows) EXPECT_TRUE(has_row(r.out, row)) << row[0] << "\n" << r.out;
-    EXPECT_FALSE(contains(r.out, "flow_000002.vtu")) << r.out;
+    // A series is listed by its index, not its snapshots
+    EXPECT_FALSE(has_row(r.out, {"case/flow_000002.vtu"})) << r.out;
     EXPECT_EQ(run({"info", "--input", "."}, true).out, run({"input", "resolve", "small.toml"}, true).out);
 }
 

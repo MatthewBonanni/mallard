@@ -543,6 +543,12 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         o.add("directory", dir);
         o.raw("start", record.start.type == json::Value::Type::OBJECT ? "true" : "false");
         o.raw("end", record.end.type == json::Value::Type::OBJECT ? "true" : "false");
+        const json::Value * outcome = record.end.find("outcome");
+        if (outcome) {
+            o.add("outcome", outcome->string);
+        } else {
+            o.raw("outcome", "null");
+        }
         std::string list = "[";
         for (const auto & c : files) list += (list.size() > 1 ? "," : "") + contents_json(c);
         o.raw("files", list + "]");
@@ -574,12 +580,19 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         if (record.end.type == json::Value::Type::OBJECT) {
             const json::Value & e = record.end;
             const json::Value * wall = e.find("wall");
-            item("Ended", text(e.find("reason")));
+            // Run logs before 0.10 give only the reason
+            const json::Value * outcome = e.find("outcome");
+            item("Ended", (outcome ? outcome->string + ": " : "") + text(e.find("reason")));
             item("Last step", text(e.find("step")));
+            for (const auto & [key, name] : {std::pair{"last_snapshot", "Last snapshot"}, {"last_restart", "Last restart"}}) {
+                if (const json::Value * f = e.find(key)) {
+                    item(name, text(f->find("path")) + ", step " + text(f->find("step")) + ", t = " + text(f->find("t")) + " s");
+                }
+            }
             item("Simulated time", "t = " + text(e.find("t")) + " s at the end");
             item("Wall time", logging::duration(wall ? wall->number : 0.0) + ", the whole run");
         } else {
-            item("Ended", "no end record: still running, or stopped without one");
+            item("Ended", "no end record: still running, or killed (SIGKILL, a lost node)");
             item("Last step", text(record.last.find("step")) + ", of the last record");
         }
     }

@@ -28,7 +28,7 @@ stopped at step 12415, t = 0.82239; restart: restart_012415.restart
 
 Restarts on request go to the `[[write_data]]` restart writers, or to `restart_<step>.restart` in the working directory if there is none. `mallard ctl` talks to rank 0 through the Unix-domain socket `mallard.sock` in the directory the run was started from, readable and writable by its owner only, so it must run on rank 0's node (in Kubernetes: `kubectl exec`). `[run] control_socket = false` turns the socket off.
 
-Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`, a [trigger](#triggers)), 1 on errors (including divergence) and 3 when stopped on request.
+Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`, a [trigger](#triggers)), 1 on errors (including divergence) and 3 when stopped on request. The run record's [end record](output.md#run-record-mallardjsonl) says which, as its `outcome`, with the last snapshot and restart file written; `mallard info <run-dir>` shows it. `t_wall_stop` is reached on whichever rank gets there first, and every rank stops after the same next step.
 
 ## Triggers
 

@@ -115,7 +115,8 @@ TEST(RunReport, WrittenFilesAreCountedByKindUntilTheNextRow) {
 // Guards the summary's and the health section's tables, units and what they leave out
 TEST(RunReport, SummaryAndHealthMatchTheGolden) {
     if (N_DIM != 2) GTEST_SKIP() << "the golden is of a 2D run (points with two coordinates)";
-    RunSummary s{.stop = "t_stop = 0.2 reached",
+    RunSummary s{.outcome = "finished",
+                 .stop = "t_stop = 0.2 reached",
                  .step = 1822,
                  .steps = 1822,
                  .t = 0.2,

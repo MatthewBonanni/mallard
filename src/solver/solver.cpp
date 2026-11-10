@@ -2113,6 +2113,17 @@ constexpr int HEADER_EVERY = 25;
 } // namespace
 
 int Solver::run() {
+    end_recorded = false;
+    try {
+        return run_loop();
+    } catch (const std::exception & e) {
+        // An error on rank 0, which writes the log; one on another rank alone ends the job without it
+        if (!end_recorded) write_end_record({"error", "", e.what()});
+        throw;
+    }
+}
+
+int Solver::run_loop() {
     logging::section("Run");
     step_run_start = step;
     progress_history.clear();
@@ -2130,11 +2141,12 @@ int Solver::run() {
     } accepting(control_enabled);
     run_control::Server server;
     publishing = control_enabled && control_socket && comm::is_root() && server.start();
-    control_stop.clear();
-    trigger_stop.clear();
+    control_stop = {};
+    trigger_stop = {};
+    wall_time_reached = false;
     checkpoint_requested = false;
 
-    std::string stop;
+    RunEnd stop;
     try {
         calc_dt();
         // Output before the progress row, which reports the monitors' values and counts the files
@@ -2154,6 +2166,8 @@ int Solver::run() {
         defer_chemistry = reacting && fuse_chemistry;
         use_step_graph = step_graph_unsupported().empty();
         while ((stop = stop_reason()).empty()) {
+            // Acted on by every rank after the next step, whose time-step reduction carries it
+            if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) run_control::request(run_control::WALL_TIME);
             Kokkos::Timer step_timer;
             // The first step runs kernel by kernel, which also sets up what the
             // kernels allocate on first use
@@ -2221,6 +2235,7 @@ int Solver::run() {
     if (checkpoint_writer) checkpoint_writer->finish();
     t_wall_output += output_timer.seconds();
     print_summary(stop);
+    write_end_record(stop);
     for (auto & command : stop_replies) {
         run_control::reply(command, "stopped at step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
                                         "; restart: " + restart_file);
@@ -2229,18 +2244,18 @@ int Solver::run() {
     return control_stop.empty() ? 0 : EXIT_STOPPED;
 }
 
-std::string Solver::stop_reason() const {
+RunEnd Solver::stop_reason() const {
     if (!control_stop.empty()) return control_stop;
     if (!trigger_stop.empty()) return trigger_stop;
-    if (n_steps > 0 && step >= n_steps) return "n_steps = " + logging::count(n_steps) + " reached";
+    if (n_steps > 0 && step >= n_steps) return {"finished", "n_steps", "n_steps = " + logging::count(n_steps) + " reached"};
     // Within round-off: an output time n * time_interval that rounds just below t_stop lands there
     if (t_stop > 0 && t >= t_stop - precision_tol(1e-9, 1e-5) * t_stop) {
-        return "t_stop = " + logging::real(double(t_stop)) + " reached";
+        return {"finished", "t_stop", "t_stop = " + logging::real(double(t_stop)) + " reached"};
     }
-    if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) {
-        return "t_wall_stop = " + logging::duration(double(t_wall_stop)) + " reached";
+    if (wall_time_reached) {
+        return {"wall_time_limit", "", "t_wall_stop = " + logging::duration(double(t_wall_stop)) + " reached"};
     }
-    return "";
+    return {};
 }
 
 bool Solver::state_needed() const {
@@ -2473,11 +2488,12 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     logging::items(triggers.summary());
 }
 
-void Solver::print_summary(const std::string & stop) const {
+void Solver::print_summary(const RunEnd & end) const {
     using logging::duration;
     const double total = timer.seconds();
     const uint64_t steps = step - step_run_start;
-    RunSummary s{.stop = stop,
+    RunSummary s{.outcome = end.outcome,
+                 .stop = end.reason,
                  .step = step,
                  .steps = steps,
                  .t = double(t),
@@ -2524,13 +2540,31 @@ void Solver::print_summary(const std::string & stop) const {
     if (run_health.on) health_section(text, run_health.last);
     logging::line();
     text.print();
+}
 
+void Solver::write_end_record(const RunEnd & how) {
+    end_recorded = true;
+    const double total = timer.seconds();
+    const uint64_t steps = step - step_run_start;
+    std::optional<DataWriter::Recorded> snapshot, restart;
+    auto latest = [](std::optional<DataWriter::Recorded> & last, const DataWriter::Recorded & r) {
+        if (!last || r.step >= last->step) last = r;
+    };
+    for (const auto & writer : data_writers) {
+        if (const auto & r = writer->last_recorded()) latest(r->kind == "restart" ? restart : snapshot, *r);
+    }
+    if (checkpoint_writer && checkpoint_writer->last_recorded()) latest(restart, *checkpoint_writer->last_recorded());
+    auto file = [](const DataWriter::Recorded & r) {
+        return json::Object().add("step", r.step).add("t", r.t).add("path", r.path).str();
+    };
     json::Object end;
-    end.add("type", "end")
-        .add("reason", stop)
-        .add("step", step)
-        .add("t", double(t))
-        .add("steps", steps)
+    end.add("type", "end").add("outcome", how.outcome);
+    if (!how.cause.empty()) end.add("cause", how.cause);
+    if (!how.trigger.empty()) end.add("trigger", how.trigger);
+    end.add("reason", how.reason).add("step", step).add("t", double(t));
+    if (snapshot) end.raw("last_snapshot", file(*snapshot));
+    if (restart) end.raw("last_restart", file(*restart));
+    end.add("steps", steps)
         .add("wall", total)
         .add("wall_setup", t_wall_setup)
         .add("wall_stepping", t_wall_stepping)

@@ -25,11 +25,14 @@
 
 namespace run_control {
 
-/** @brief Requests, as bits: write a restart and continue, write one and stop, commands queued. */
-enum Request : int { CHECKPOINT = 1, STOP = 2, COMMAND = 4 };
+/**
+ * @brief Requests, as bits: write a restart and continue, write one and stop, commands queued, the wall time
+ *        limit reached (on any rank: every rank then stops after the same step).
+ */
+enum Request : int { CHECKPOINT = 1, STOP = 2, COMMAND = 4, WALL_TIME = 8 };
 
 /** @brief Number of request bits, each carried by one value of the time-step reduction. */
-constexpr int N_REQUESTS = 3;
+constexpr int N_REQUESTS = 4;
 
 /** @brief Name of the control socket in the run directory. */
 inline constexpr const char * SOCKET_NAME = "mallard.sock";

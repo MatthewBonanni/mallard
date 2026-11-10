@@ -402,7 +402,7 @@ Stopping after the current step (Ctrl-C again to stop now)
           364  6.5280e-02  1.70e-04   32.6        126    9.18e+05    0:01:29   1.397e+00   9.904e-01    3.331      2.46  1 vtu, 1 restart
 
 == Summary ================================================================================
-  Stopped: stop requested by mallard ctl, at step 364, t = 0.0652797
+  Ended (stopped): stop requested by mallard ctl, at step 364, t = 0.0652797
   phase          wall time [s]  of the total [%]
   setup          10.63          19.8
   time stepping  42.92          80.0
@@ -467,7 +467,7 @@ exit 0
 ```
 
 ```text
-  Stopped: t_stop = 0.2 reached, at step 1,167, t = 0.2
+  Ended (finished): t_stop = 0.2 reached, at step 1,167, t = 0.2
   phase          wall time [s]  of the total [%]
   setup          12.23          10.9
   time stepping  99.69          88.9

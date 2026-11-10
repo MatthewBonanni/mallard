@@ -140,7 +140,10 @@ TEST(TriggersTest, ProbeThresholdStopsAtTheFirstStepPastItOnEveryRank) {
     EXPECT_NE(text.find("\"kind\":\"trigger\""), std::string::npos);
     EXPECT_NE(text.find("\"name\":\"pressure_rise\",\"firing\":1,\"values\":{"), std::string::npos);
     EXPECT_NE(text.find("\"gauge_P\":"), std::string::npos);
-    EXPECT_NE(text.find("\"reason\":\"trigger pressure_rise"), std::string::npos);
+    EXPECT_NE(text.find("\"outcome\":\"stopped\",\"cause\":\"trigger\",\"trigger\":\"pressure_rise\",\"reason\":"
+                        "\"trigger pressure_rise"),
+              std::string::npos)
+        << text;
 }
 
 TEST(TriggersTest, OnceFiresOnTheFirstStepAndRepeatOnEveryRisingEdge) {
