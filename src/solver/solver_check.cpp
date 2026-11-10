@@ -607,7 +607,7 @@ std::vector<case_view::Block> periodic_blocks(const Mesh & mesh) {
     return blocks;
 }
 
-/** @brief The type of a boundary type's condition as the view labels it: "inlet_mass_flow, mdot = 0.2 kg/s". */
+/** @brief Boundary entry i as the view labels it: its type and the keys the input sets, "inlet_mass_flow, mdot = 0.2 kg/s". */
 std::string condition_text(const ResolvedInput & resolved, const size_t i, const CheckBoundary & b) {
     const std::string prefix = "boundaries[" + std::to_string(i) + "].";
     std::string text = b.condition;
