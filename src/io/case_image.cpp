@@ -22,7 +22,6 @@
 
 #include "common_typedef.h"
 #include "log.h"
-#include "mesh.h"
 #include "units.h"
 
 namespace case_image {
@@ -108,18 +107,22 @@ Style style_of(const Block & b, const Palette & P, const size_t zone) {
     return {cycle[zone % 7], "", 2.6, 0.1, ""};
 }
 
-/** @brief Ids of points by their exact coordinates, which the cells of a block share. */
+/** @brief Ids of points by their coordinates, rounded to a tolerance, which the cells of a block share. */
 class Points {
     public:
+        explicit Points(const double tolerance_in = 1e-12) : tolerance(tolerance_in) {}
         uint32_t id(const V3 & x) {
-            const auto [it, added] = ids.emplace(x, uint32_t(xs.size()));
+            const std::array<int64_t, 3> key = {std::llround(x[0] / tolerance), std::llround(x[1] / tolerance),
+                                                std::llround(x[2] / tolerance)};
+            const auto [it, added] = ids.emplace(key, uint32_t(xs.size()));
             if (added) xs.push_back(x);
             return it->second;
         }
         std::vector<V3> xs;
 
     private:
-        std::map<V3, uint32_t> ids;
+        double tolerance;
+        std::map<std::array<int64_t, 3>, uint32_t> ids;
 };
 
 using Edge = std::pair<uint32_t, uint32_t>;
@@ -225,77 +228,59 @@ const Block::Field * find_field(const Block & b, const std::string & name) {
     return nullptr;
 }
 
-/** @brief Filled cells of a block: those at least half inside (else any part), or all of them. */
-std::vector<size_t> filled_cells(const Block & b) {
-    std::vector<size_t> out;
-    const Block::Field * f = find_field(b, "fraction");
-    for (const double least : {0.5, std::numeric_limits<double>::min()}) {
-        for (size_t c = 0; c < b.n_cells(); c++) {
-            const bool filled = b.types[c] != case_view::VERTEX && b.types[c] != case_view::LINE &&
-                                (b.types[c] != case_view::POLYGON || N_DIM == 2);
-            if (filled && (!f || f->values[c] >= least)) out.push_back(c);
-        }
-        if (!out.empty() || !f) break;
+/** @brief A length below which two points of a block are one: its points' coordinates, merged where patches meet. */
+double tolerance(const Block & b) {
+    double size = 0.0;
+    for (const Block * part : {&b, b.outline.empty() ? &b : &b.outline[0]}) {
+        for (const V3 & x : part->points) size = std::max({size, std::abs(x[0]), std::abs(x[1]), std::abs(x[2])});
     }
-    return out;
+    return size > 0.0 ? 1e-9 * size : 1.0;
 }
 
-Shape shape_of(const Block & b) {
-    Shape s;
-    if (b.kind == Kind::MESH && (N_DIM == 3 || b.n_cells() > MESH_EDGE_CELLS)) return s;
-    // Filled cells: 2D their outline (edges of one cell) and its area; 3D the faces of one cell
-    Points points;
-    std::map<Edge, int> count;
-    std::vector<std::vector<V3>> faces;
-    std::map<std::vector<uint32_t>, std::pair<int, size_t>> seen;  // per face: cells, and its first
-    for (const size_t c : filled_cells(b)) {
-        const std::vector<V3> v = cell_points(b, c);
-        if constexpr (N_DIM == 2) {
-            for (size_t k = 0; k < v.size(); k++) count[edge(points.id(v[k]), points.id(v[(k + 1) % v.size()]))]++;
-        } else {
-            for (const auto & local : cell_local_faces(uint32_t(v.size()))) {
-                std::vector<V3> face;
-                std::vector<uint32_t> key;
-                for (const uint8_t k : local) {
-                    face.push_back(v[k]);
-                    key.push_back(points.id(v[k]));
-                }
-                std::sort(key.begin(), key.end());
-                seen.try_emplace(key, 0, faces.size()).first->second.first++;
-                faces.push_back(std::move(face));
-            }
-        }
-    }
-    std::vector<Edge> outline;
-    for (const auto & [e, n] : count) {
-        if (b.kind == Kind::MESH || n == 1) outline.push_back(e);
-    }
-    for (const Edge & e : outline) s.segments.push_back({points.xs[e.first], points.xs[e.second]});
-    if (b.kind != Kind::MESH) {
-        for (const auto & loop : chains(outline, points.xs.size())) {
-            std::vector<V3> area;
-            for (const uint32_t i : loop) area.push_back(points.xs[i]);
-            s.areas.push_back(std::move(area));
-        }
-    }
-    std::vector<size_t> once;
-    for (const auto & [key, entry] : seen) {
-        if (entry.first == 1) once.push_back(entry.second);
-    }
-    std::sort(once.begin(), once.end());
-    for (const size_t k : once) s.surface.add(faces[k]);
-    const Block::Field * normal = find_field(b, "normal");
-    std::vector<size_t> lines;
+/** @brief A block's points, curves and (3D) surfaces into s; 2D curves of a filled region also as its areas. */
+void add_cells(Shape & s, const Block & b, const bool areas) {
+    Points & points = s.surface.points;
+    std::vector<Edge> segments;
     for (size_t c = 0; c < b.n_cells(); c++) {
         const std::vector<V3> v = cell_points(b, c);
         if (b.types[c] == case_view::VERTEX) {
             s.points.push_back(v[0]);
         } else if (b.types[c] == case_view::LINE) {
             s.segments.push_back({v.front(), v.back()});
-            lines.push_back(c);
+            if (areas) segments.push_back(edge(points.id(v.front()), points.id(v.back())));
         } else if (b.types[c] == case_view::POLYGON && N_DIM == 3) {
             s.surface.add(v);
         }
+    }
+    for (const auto & loop : chains(segments, points.xs.size())) {
+        std::vector<V3> area;
+        for (const uint32_t i : loop) area.push_back(points.xs[i]);
+        s.areas.push_back(std::move(area));
+    }
+}
+
+Shape shape_of(const Block & b) {
+    Shape s;
+    if (b.kind == Kind::MESH) {
+        // 2D: the edges of every cell, up to MESH_EDGE_CELLS cells
+        if (N_DIM == 3 || b.n_cells() > MESH_EDGE_CELLS) return s;
+        Points points(tolerance(b));
+        std::map<Edge, int> edges;
+        for (size_t c = 0; c < b.n_cells(); c++) {
+            const std::vector<V3> v = cell_points(b, c);
+            for (size_t k = 0; k < v.size(); k++) edges[edge(points.id(v[k]), points.id(v[(k + 1) % v.size()]))]++;
+        }
+        for (const auto & [e, n] : edges) s.segments.push_back({points.xs[e.first], points.xs[e.second]});
+        return s;
+    }
+    s.surface.points = Points(tolerance(b));
+    // Filled regions: their boundary (exact where their shapes give it, else extracted below the cell size)
+    if (!b.outline.empty()) add_cells(s, b.outline[0], true);
+    add_cells(s, b, false);
+    const Block::Field * normal = find_field(b, "normal");
+    std::vector<size_t> lines;
+    for (size_t c = 0; c < b.n_cells(); c++) {
+        if (b.types[c] == case_view::LINE) lines.push_back(c);
     }
     if (N_DIM == 2 && normal && !lines.empty() && b.kind != Kind::BOUNDARY && b.kind != Kind::PERIODIC) {
         constexpr size_t ARROWS = 12;
@@ -476,6 +461,9 @@ double panel(std::ostringstream & out, const std::vector<Item> & items, const Vi
     // Lines: curves, outlines, and the surfaces' borders, feature edges and silhouettes
     const double feature = std::cos(30.0 * std::numbers::pi / 180.0);
     for (const Item & it : items) {
+        if (it.shape.empty()) continue;
+        // One group per block, named by its title (its label)
+        out << "<g>\n<title>" << xml_text(it.label) << "</title>\n";
         std::string d;
         for (const Segment & s : it.shape.segments) d += "M" + point(s[0]) + " L" + point(s[1]);
         const Surface & s = it.shape.surface;
@@ -509,6 +497,7 @@ double panel(std::ostringstream & out, const std::vector<Item> & items, const Vi
             out << "<path d=\"" << arrows << "\" fill=\"none\" stroke=\"" << it.style.color
                 << "\" stroke-width=\"1.2\" stroke-linecap=\"round\"/>\n";
         }
+        out << "</g>\n";
     }
     auto text = [&](const double x, const double y, const std::string & t, const char * anchor = "middle",
                     const char * color = nullptr, const std::string & extra = "") {
@@ -520,17 +509,18 @@ double panel(std::ostringstream & out, const std::vector<Item> & items, const Vi
         const double l = px + (domain[0][0] - lo[0]) * scale, r = px + (domain[1][0] - lo[0]) * scale;
         const double b = py + (hi[1] - domain[0][1]) * scale, t = py + (hi[1] - domain[1][1]) * scale;
         const double yb = py + ph + 18.0, xl = px - 18.0;
-        out << "<path d=\"M" << num(l) << " " << num(yb - 4) << " L" << num(l) << " " << num(yb + 4) << " M" << num(l)
-            << " " << num(yb) << " L" << num(r) << " " << num(yb) << " M" << num(r) << " " << num(yb - 4) << " L"
-            << num(r) << " " << num(yb + 4) << " M" << num(xl - 4) << " " << num(b) << " L" << num(xl + 4) << " "
-            << num(b) << " M" << num(xl) << " " << num(b) << " L" << num(xl) << " " << num(t) << " M" << num(xl - 4)
-            << " " << num(t) << " L" << num(xl + 4) << " " << num(t) << "\" stroke=\"" << P.muted
-            << "\" stroke-width=\"1\" fill=\"none\"/>\n";
-        text((l + r) / 2, yb + 14, length_text(domain[1][0] - domain[0][0]), "middle", P.fg);
+        const std::string lx = length_text(domain[1][0] - domain[0][0]), ly = length_text(domain[1][1] - domain[0][1]);
+        out << "<g stroke=\"" << P.muted << "\" stroke-width=\"1\" fill=\"none\">\n<title>domain extent: " << xml_text(lx)
+            << " by " << xml_text(ly) << "</title>\n<path d=\"M" << num(l) << " " << num(yb) << " L" << num(r) << " "
+            << num(yb) << "\"/>\n<path d=\"M" << num(xl) << " " << num(b) << " L" << num(xl) << " " << num(t)
+            << "\"/>\n<path d=\"M" << num(l) << " " << num(yb - 4) << " L" << num(l) << " " << num(yb + 4) << " M"
+            << num(r) << " " << num(yb - 4) << " L" << num(r) << " " << num(yb + 4) << " M" << num(xl - 4) << " "
+            << num(b) << " L" << num(xl + 4) << " " << num(b) << " M" << num(xl - 4) << " " << num(t) << " L"
+            << num(xl + 4) << " " << num(t) << "\"/>\n</g>\n";
+        text((l + r) / 2, yb + 14, lx, "middle", P.fg);
         // Off the middle, where the leaders of the zones on that side usually cross
         const double yt = b - (b - t) / 4;
-        text(xl - 6, yt, length_text(domain[1][1] - domain[0][1]), "middle", P.fg,
-             " transform=\"rotate(-90 " + num(xl - 6) + " " + num(yt) + ")\"");
+        text(xl - 6, yt, ly, "middle", P.fg, " transform=\"rotate(-90 " + num(xl - 6) + " " + num(yt) + ")\"");
     }
     // Axes, bottom left of the plot
     {
@@ -550,9 +540,10 @@ double panel(std::ostringstream & out, const std::vector<Item> & items, const Vi
     {
         const double length = nice_length(0.25 * ex);
         const double bar = length * scale, xr = px + pw, yb = py + ph + (dims ? 40.0 : 22.0);
-        out << "<path d=\"M" << num(xr - bar) << " " << num(yb - 4) << " L" << num(xr - bar) << " " << num(yb) << " L"
-            << num(xr) << " " << num(yb) << " L" << num(xr) << " " << num(yb - 4) << "\" stroke=\"" << P.fg
-            << "\" stroke-width=\"1.4\" fill=\"none\"/>\n";
+        out << "<g>\n<title>scale bar: " << xml_text(length_text(length)) << "</title>\n<path d=\"M" << num(xr - bar)
+            << " " << num(yb) << " L" << num(xr) << " " << num(yb) << " M" << num(xr - bar) << " " << num(yb - 4) << " L"
+            << num(xr - bar) << " " << num(yb) << " M" << num(xr) << " " << num(yb - 4) << " L" << num(xr) << " "
+            << num(yb) << "\" stroke=\"" << P.fg << "\" stroke-width=\"1.4\" fill=\"none\"/>\n</g>\n";
         text(xr - bar / 2, yb + 13, length_text(length));
     }
     if (!view.caption.empty()) text(px + pw / 2, y0 + pad - 4, view.caption, "middle", P.muted);
@@ -671,11 +662,12 @@ std::string svg(const std::vector<Block> & blocks, const bool dark, const std::s
             x = 16.0;
             y += LINE + 4;
         }
-        body << "<path d=\"M" << num(x) << " " << num(y) << " L" << num(x + 26) << " " << num(y) << "\" stroke=\""
+        body << "<g>\n<title>legend: " << xml_text(s->legend) << "</title>\n<path d=\"M" << num(x) << " " << num(y)
+             << " L" << num(x + 26) << " " << num(y) << "\" stroke=\""
              << s->color << "\" stroke-width=\"" << logging::real(s->width) << "\""
              << (s->dash.empty() ? "" : " stroke-dasharray=\"" + s->dash + "\"") << "/>\n";
         body << "<text x=\"" << num(x + 32) << "\" y=\"" << num(y + 4) << "\" fill=\"" << P.fg << "\">"
-             << xml_text(s->legend) << "</text>\n";
+             << xml_text(s->legend) << "</text>\n</g>\n";
         x += w;
     }
     y += 16.0;

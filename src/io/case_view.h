@@ -34,6 +34,7 @@ struct Block {
     Kind kind = Kind::REGION;
     std::string label;      // in the images, e.g. "inlet: inlet_mass_flow, mdot = 0.2 kg/s"; empty: the name
     std::string condition;  // boundary zones: the type of their condition, or empty
+    std::vector<Block> outline;  // filled regions: their boundary on the mesh (one block), which the images draw
     std::vector<std::array<double, 3>> points;
     std::vector<int64_t> offsets{0};
     std::vector<int64_t> connectivity;

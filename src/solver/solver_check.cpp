@@ -473,7 +473,20 @@ struct OnMesh {
     case_view::Block block;
 };
 
-OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name) {
+/** @brief The elements of a surface, curve or points as cells of the block, with their direction and measure. */
+void add_elements(case_view::Block & block, const region::Elements & e) {
+    block.field(N_DIM == 3 && e.dimension == 1 ? "tangent" : "normal", 3);
+    block.field(e.dimension == 2 ? "area" : e.dimension == 1 ? "length" : "count", 1);
+    for (size_t k = 0; k < e.size(); k++) {
+        const std::vector<std::array<double, 3>> v(e.vertices.begin() + e.offsets[k], e.vertices.begin() + e.offsets[k + 1]);
+        block.add_cell(v.size() == 1 ? case_view::VERTEX : v.size() == 2 ? case_view::LINE : case_view::POLYGON, v);
+        block.fields[0].values.insert(block.fields[0].values.end(), e.direction[k].begin(), e.direction[k].end());
+        block.fields[1].values.push_back(e.measure[k]);
+    }
+}
+
+/** @brief A region on the mesh; with outline, a filled region's block also gets its boundary's elements. */
+OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name, const bool outline) {
     OnMesh m;
     m.block.name = name;
     const bool distributed = mesh.n_global_cells > 0;
@@ -505,24 +518,19 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
             m.block.add_cell(type, nodes);
             fraction.values.push_back(f[c]);
         }
+        if (outline) {
+            m.block.outline.push_back({});
+            add_elements(m.block.outline[0], region::elements(mesh, region::boundary(region)));
+        }
     } else {
         const region::Elements e = region::elements(mesh, region);
         m.exact = e.exact;
         std::vector<uint32_t> cells(e.cell);
         std::sort(cells.begin(), cells.end());
         m.cells = static_cast<uint64_t>(std::unique(cells.begin(), cells.end()) - cells.begin());
-        m.block.field(N_DIM == 3 && e.dimension == 1 ? "tangent" : "normal", 3);
-        m.block.field(e.dimension == 2 ? "area" : e.dimension == 1 ? "length" : "count", 1);
-        auto & direction = m.block.fields[0];
-        auto & measure = m.block.fields[1];
-        for (size_t k = 0; k < e.size(); k++) {
-            m.measure += e.measure[k];
-            const std::vector<std::array<double, 3>> v(e.vertices.begin() + e.offsets[k], e.vertices.begin() + e.offsets[k + 1]);
-            for (const auto & x : v) extend(x);
-            m.block.add_cell(v.size() == 1 ? case_view::VERTEX : v.size() == 2 ? case_view::LINE : case_view::POLYGON, v);
-            direction.values.insert(direction.values.end(), e.direction[k].begin(), e.direction[k].end());
-            measure.values.push_back(e.measure[k]);
-        }
+        add_elements(m.block, e);
+        for (size_t k = 0; k < e.size(); k++) m.measure += e.measure[k];
+        for (const auto & x : m.block.points) extend(x);
     }
     if (distributed) {
         m.measure = comm::allreduce(m.measure, comm::Op::SUM);
@@ -630,12 +638,12 @@ std::string condition_text(const ResolvedInput & resolved, const size_t i, const
 
 } // namespace
 
-MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic) {
+MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, const bool outlines) {
     MeshView v;
     for (const std::string & name : automatic.names()) {
         const Input value = parse_input_string("r = \"" + name + "\"").at("r");
         const region::Region region = region::read(value, name, nullptr, &automatic);
-        OnMesh m = on_mesh(mesh, region, block_name(name));
+        OnMesh m = on_mesh(mesh, region, block_name(name), outlines && name != "domain");
         if (name == "domain") v.domain = m.box;
         const bool zone = std::binary_search(automatic.boundary_zones.begin(), automatic.boundary_zones.end(), name);
         m.block.kind = name == "domain" ? case_view::Kind::MESH : zone ? case_view::Kind::BOUNDARY : case_view::Kind::CELL_ZONE;
@@ -650,7 +658,8 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     if (!used_regions) return;
     // The mesh's own regions: the domain, its boundary zones and cell zones; its periodic pairs
     const region::MeshRegions & automatic = used_regions->automatic();
-    MeshView view = mesh_view(*mesh, automatic);
+    const bool drawn = !options.view_dir.empty();
+    MeshView view = mesh_view(*mesh, automatic, drawn);
     r.regions = view.regions;
     std::vector<case_view::Block> & blocks = view.blocks;
     const Box & domain = view.domain;
@@ -668,7 +677,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     const std::vector<std::string> mesh_names = automatic.names();
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
-        OnMesh m = on_mesh(*mesh, *region, block_name(label));
+        OnMesh m = on_mesh(*mesh, *region, block_name(label), drawn);
         m.block.kind = label.starts_with("probes[") ? case_view::Kind::PROBE
                        : label.starts_with("write_data[") ? case_view::Kind::SNAPSHOT
                                                           : case_view::Kind::REGION;

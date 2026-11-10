@@ -785,28 +785,112 @@ TEST(CaseView, PeriodicFacesAndTheirImagesLieOnThePairsZones) {
     }
 }
 
-// The 2D image, byte for byte. After a deliberate change of the drawing, MALLARD_UPDATE_GOLDEN=1 rewrites it
-// (then look at it, light and dark, and review its diff).
-TEST(CaseView, TheImageMatchesTheGoldenImage) {
-    if (N_DIM != 2 || sizeof(rtype) != 8 || comm::size() > 1) {
-        GTEST_SKIP() << "the golden image is of a serial 2D double-precision check";
+namespace {
+
+/** @brief The titled groups of an SVG image (each block, legend entry, scale bar and extent): title -> contents. */
+std::vector<std::pair<std::string, std::string>> svg_groups(const std::string & svg) {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (size_t at = svg.find("<g"); at != std::string::npos; at = svg.find("<g", at + 1)) {
+        const size_t open = svg.find("<title>", at), end = svg.find("</g>", at);
+        if (open == std::string::npos || end == std::string::npos || open > end) continue;
+        const size_t close = svg.find("</title>", open);
+        out.emplace_back(svg.substr(open + 7, close - open - 7), svg.substr(at, end - at));
     }
-    const std::filesystem::path dir = scratch_dir() / "mallard_check_view_golden";
-    std::filesystem::remove_all(dir);
+    return out;
+}
+
+std::string group(const std::vector<std::pair<std::string, std::string>> & groups, const std::string & prefix) {
+    for (const auto & [title, body] : groups) {
+        if (title.starts_with(prefix)) return body;
+    }
+    return "";
+}
+
+/** @brief The first stroke color in a group. */
+std::string stroke(const std::string & body) {
+    const size_t at = body.find("stroke=\"");
+    return at == std::string::npos ? "" : body.substr(at + 8, body.find('"', at + 8) - at - 8);
+}
+
+/** @brief The numbers of the k-th path of a group: x0 y0 x1 y1 ... */
+std::vector<double> path_numbers(const std::string & body, const size_t k = 0) {
+    size_t at = body.find("<path d=\"");
+    for (size_t i = 0; i < k && at != std::string::npos; i++) at = body.find("<path d=\"", at + 1);
+    std::vector<double> out;
+    if (at == std::string::npos) return out;
+    std::string d = body.substr(at + 9, body.find('"', at + 9) - at - 9);
+    for (char & c : d) {
+        if (c == 'M' || c == 'L' || c == 'Z') c = ' ';
+    }
+    std::istringstream in(d);
+    for (double v; in >> v;) out.push_back(v);
+    return out;
+}
+
+} // namespace
+
+// What the images must show, whatever their palette and layout: every block drawn in its condition's legend
+// color, a scale bar and an extent drawn to the plot's scale, and a filled region's own boundary
+TEST(CaseView, TheImagesDrawEveryBlockInItsLegendColorAndToScale) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_view_images";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
     CheckOptions options;
     options.view_dir = dir.string();
-    options.input_file = "input.toml";
     const CheckReport r = check(view_case(), options);
     ASSERT_TRUE(r.ok()) << (first_error(r));
-    const std::filesystem::path golden = std::filesystem::path(source_dir()) / "test" / "data" / "check";
+    comm::barrier();
+    if (!comm::is_root()) return;
+    std::map<std::string, std::string> wall_color;
     for (const std::string theme : {"light", "dark"}) {
-        const std::string svg = read_file(dir / ("case-" + theme + ".svg"));
-        const std::filesystem::path expected = golden / ("case_view_2d-" + theme + ".svg");
-        if (const char * update = std::getenv("MALLARD_UPDATE_GOLDEN"); update && std::string(update) == "1") {
-            std::ofstream(expected) << svg;
+        const auto groups = svg_groups(read_file(dir / ("case-" + theme + ".svg")));
+        auto legend = [&](const std::string & name) { return stroke(group(groups, "legend: " + name)); };
+        const std::map<std::string, std::string> expected = {
+            {"left: ", "inlet"},   {"right: ", "outlet"}, {"bottom: ", "wall"},
+            {"top: ", "wall"},     {"heater", "region"},  {"probes[name = \"s\"].region", "probe"},
+            {"probes[name = \"wake\"]", "probe"}, {"probes[name = \"tap\"]", "probe"}};
+        for (const auto & [block, entry] : expected) {
+            const std::string body = group(groups, case_image::xml_text(block));
+            ASSERT_FALSE(body.empty()) << block << " is not drawn in the " << theme << " image";
+            EXPECT_TRUE(body.find("<path") != std::string::npos || body.find("<circle") != std::string::npos) << block;
+            EXPECT_FALSE(legend(entry).empty()) << "no legend entry " << entry;
+            const std::string color = block == "probes[name = \"tap\"]" ? body.substr(body.find("fill=\"") + 6, 7)
+                                                                          : stroke(body);
+            EXPECT_EQ(color, legend(entry)) << block << " in the " << theme << " image";
         }
-        EXPECT_EQ(svg, read_file(expected)) << "the image differs from " << expected << "; MALLARD_UPDATE_GOLDEN=1 updates it";
+        EXPECT_NE(legend("wall"), legend("inlet"));
+        EXPECT_NE(legend("inlet"), legend("outlet"));
+        wall_color[theme] = legend("wall");
+        // A scale bar in every view, its length that of its label at the plot's scale
+        size_t bars = 0;
+        double px_per_m = 0.0;
+        for (const auto & [title, body] : groups) {
+            if (!title.starts_with("scale bar: ")) continue;
+            bars++;
+            const double length = std::stod(title.substr(11));
+            const std::vector<double> bar = path_numbers(body);
+            ASSERT_GE(bar.size(), 4u);
+            if (bars == 1) px_per_m = (bar[2] - bar[0]) / length;
+        }
+        EXPECT_EQ(bars, N_DIM == 2 ? 1u : 4u);
+        if constexpr (N_DIM == 2) {
+            // The extent's dimension lines: 2 m and 1 m at the scale bar's scale
+            const std::string extent = group(groups, "domain extent: 2 m by 1 m");
+            const std::vector<double> x = path_numbers(extent, 0), y = path_numbers(extent, 1);
+            ASSERT_EQ(x.size(), 4u);
+            ASSERT_EQ(y.size(), 4u);
+            EXPECT_NEAR(x[2] - x[0], 2.0 * px_per_m, 0.2);
+            EXPECT_NEAR(y[1] - y[3], 1.0 * px_per_m, 0.2);
+            // The heater, a disk of radius 0.2 about (0.5, 0.5): its boundary, not its cells' outline
+            const std::vector<double> heater = path_numbers(group(groups, "heater"));
+            ASSERT_GT(heater.size(), 40u);
+            for (size_t k = 0; k + 1 < heater.size(); k += 2) {
+                const double wx = (heater[k] - x[0]) / px_per_m, wy = (y[1] - heater[k + 1]) / px_per_m;
+                EXPECT_NEAR(std::hypot(wx - 0.5, wy - 0.5), 0.2, 2e-3) << "at (" << wx << ", " << wy << ")";
+            }
+        }
     }
+    EXPECT_NE(wall_color["light"], wall_color["dark"]);
 }
 
 namespace {

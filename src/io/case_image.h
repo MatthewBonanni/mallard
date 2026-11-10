@@ -33,9 +33,11 @@ std::string xml_text(const std::string & text);
  *        orthographic ones (x-y, x-z, z-y), surfaces as their outlines, feature
  *        edges and silhouettes over translucent faces. Boundary zones are colored
  *        by the type of their condition, and every block with something to draw
- *        is labeled (the 3D isometric view) by its label, or its name; a legend,
+ *        is labeled (the 3D isometric view) by its label, or its name, which also
+ *        titles its group of paths (a tooltip in browsers); a legend,
  *        axes, a scale bar and the domain's extent with its units complete it.
- *        Filled regions show the outline of their cells at least half inside.
+ *        Filled regions show their boundary (case_view::Block::outline): exact
+ *        where their shapes give it, else extracted below the cell size.
  *        The same blocks give the same text.
  */
 std::string svg(const std::vector<case_view::Block> & blocks, bool dark, const std::string & title);

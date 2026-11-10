@@ -631,10 +631,10 @@ mallard info mesh.msh --view view   # the mesh alone: its cells, zones and perio
 
 Pitfalls:
 
-- Filled regions show the outline of the cells at least half inside them,
-  which is what the run acts on: a region thinner than the cells shows the
-  cells it touches, and one that touches none is not drawn (and is
-  `E-REGION-EMPTY` or `E-REGION-OUTSIDE`).
+- Filled regions show their own boundary clipped to the domain: exact for
+  shapes, else extracted below the cell size. The run acts on the fraction of
+  each cell inside, so a region thinner than the cells still acts on the cells
+  it crosses; one that crosses none is `E-REGION-EMPTY` or `E-REGION-OUTSIDE`.
 - A zone split by `where` between conditions is labeled with each of them and
   colored by the first.
 - Values given as expressions are shown as written, with the units they are

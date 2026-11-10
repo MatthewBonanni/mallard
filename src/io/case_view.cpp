@@ -56,6 +56,7 @@ namespace {
 Block gather(const Block & local) {
     if (comm::size() == 1) return local;
     Block all;
+    for (const Block & o : local.outline) all.outline.push_back(gather(o));
     all.name = local.name;
     all.kind = local.kind;
     all.label = local.label;

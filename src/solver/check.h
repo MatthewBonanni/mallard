@@ -237,8 +237,9 @@ struct MeshView {
     std::array<std::array<double, 3>, 2> domain{};  // its box
 };
 
-/** @brief The case view of the mesh and of its regions (automatic). Collective. */
-MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic);
+/** @brief The case view of the mesh and of its regions (automatic); with outlines, the cell zones' boundaries
+ *         for the images. Collective. */
+MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, bool outlines = true);
 
 /**
  * @brief The peak of Kokkos allocations predicted for a rank of local_cells owned and halo cells: the largest
