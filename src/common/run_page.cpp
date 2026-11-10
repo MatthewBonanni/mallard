@@ -717,7 +717,9 @@ std::string Page::html() const {
             for (size_t i = 0; i < a->names.size(); i++) {
                 const json::Value & s = a->members[i];
                 h += "<tr>" + cell(a->names[i]);
-                for (const char * k : {"all", "min", "max"}) h += num(format("%.2f", 100.0 * number_of(s.find(k))));
+                for (const char * k : {"all", "rank_min", "rank_max"}) {
+                    h += num(format("%.2f", 100.0 * number_of(s.find(k))));
+                }
                 h += "</tr>";
             }
             h += TABLE_END;

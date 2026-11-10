@@ -209,3 +209,18 @@ TEST(RunPageTest, ARewoundRestartDropsTheRowsAfterIt) {
     EXPECT_EQ(steps, (std::vector<double>{10, 20, 30, 40, 50, 60}));
     EXPECT_EQ(values, (std::vector<double>{1, 2, 3, 4, 5, 0.25}));
 }
+
+TEST(RunPageTest, ActivityShowsTheShareOfAllRanksAndOfTheLeastAndMostActiveRank) {
+    run_page::Page page;
+    page.add(json::parse(R"({"type":"start","run_id":"a"})"));
+    page.add(json::parse(R"({"type":"progress","step":10,"t":1,"dt":1,"health":{"activity":{)"
+                         R"("troubled_cells":{"all":0.5,"rank_min":0.25,"rank_max":0.75},)"
+                         R"("limited_cells":{"all":1,"rank_min":1,"rank_max":1}}}})"));
+    const std::string html = page.html();
+    const auto row = [](const char * name, const char * all, const char * least, const char * most) {
+        return "<tr><td>" + std::string(name) + "</td><td class=\"num\">" + all + "</td><td class=\"num\">" + least +
+               "</td><td class=\"num\">" + most + "</td></tr>";
+    };
+    EXPECT_NE(html.find(row("troubled_cells", "50.00", "25.00", "75.00")), std::string::npos) << html;
+    EXPECT_NE(html.find(row("limited_cells", "100.00", "100.00", "100.00")), std::string::npos) << html;
+}
