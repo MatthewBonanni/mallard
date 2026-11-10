@@ -714,7 +714,7 @@ TEST(MassFlowInletTest, ProfileOfTimeNegativeAtSomeTimeStopsTheRun) {
         "[run]\nn_steps = 20\ncfl = 0.4\n" + mesh_block("cartesian", 8, 4, 1.0, 0.25) +
         "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = " + zero_velocity() +
         "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-        "[output]\ncheck_interval = 1\n" +
+        "[output]\ncheck_interval = 1\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n" +
         duct_boundaries("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = 0.1\nprofile = \"1 + y - 1000 * t\"\n",
                         "type = \"outlet_pressure\"\np = 1.0\n");
     Solver solver;
