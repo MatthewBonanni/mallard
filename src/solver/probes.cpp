@@ -1720,13 +1720,6 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         const region::Region & r = *region;
         const uint32_t n_evaluated = static_cast<uint32_t>(h_codes.size());
         if (r.dimension() == N_DIM && r.moving()) {
-            if (p.average) {
-                throw InputError(Diagnostic{.key = key + ".average",
-                                            .line = line_of(entry, "average"),
-                                            .message = "is not supported yet for moving regions",
-                                            .fix = "Average the probe's reductions instead, or give it a fixed region",
-                                            .docs = "docs/guide/geometry.md#moving-regions"});
-            }
             // Every owned cell, weighed by f V at each write
             std::vector<double> weights(mesh.n_owned(), 0.0);
             auto motion = std::make_shared<Probe::Motion>();
@@ -2240,10 +2233,14 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
         sampled_quad.clear();
-        if (p.motion) p.move(double(t));
-        if (!p.average) p.sample(fields, sampled_nodes, sampled_quad);
+        if (p.motion && p.average) {
+            p.mean_fields(sampled_quad);
+        } else {
+            if (p.motion) p.move(double(t));
+            if (!p.average) p.sample(fields, sampled_nodes, sampled_quad);
+        }
         const std::vector<double> & nodes = p.average ? p.mean_nodes : sampled_nodes;
-        const std::vector<double> & quad = p.average ? p.mean_quadrature : sampled_quad;
+        const std::vector<double> & quad = p.average && !p.motion ? p.mean_quadrature : sampled_quad;
         // Rank 0 writes; spectra histories are kept like the averages, on every rank that runs alone
         const bool keep = comm::is_root() || !distributed;
         if (keep) {
@@ -2407,11 +2404,19 @@ void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields)
         const double w = static_cast<double>(t) - p.average_t_last;
         if (!(w > 0.0)) continue;
         std::vector<double> nodes, quad;
+        if (p.motion) p.move(static_cast<double>(t));
         p.sample(fields, nodes, quad);
         p.average_weight += w;
         p.average_t_last = static_cast<double>(t);
         p.average_samples++;
         if (distributed && !comm::is_root()) continue;
+        if (p.motion) {
+            const size_t n_cols = p.n_evaluated();
+            for (size_t i = 0; i < p.geometry.quad_weights.size(); i++) {
+                for (size_t v = 0; v < n_cols; v++) quad[i * n_cols + v] *= p.geometry.quad_weights[i];
+            }
+            accumulate(p.mean_weights, p.geometry.quad_weights, w / p.average_weight);
+        }
         accumulate(p.mean_nodes, nodes, w / p.average_weight);
         accumulate(p.mean_quadrature, quad, w / p.average_weight);
     }
@@ -2425,6 +2430,7 @@ void Probes::start_averages(rtype t) {
         p->average_samples = 0;
         p->mean_nodes.clear();
         p->mean_quadrature.clear();
+        p->mean_weights.clear();
     }
 }
 
@@ -2442,15 +2448,19 @@ void Probes::restore_averages(const RestartData & restart, const std::string & f
         // Every rank reads them (arrays of no values are not written)
         const std::vector<double> * nodes = restart.array(name + "_NODES");
         const std::vector<double> * quad = restart.array(name + "_QUADRATURE");
+        const std::vector<double> * weights = restart.array(name + "_WEIGHTS");
         const uint64_t n_nodes = p.samples_nodes() ? p.nodes.n_global * p.n_evaluated() : 0;
         const uint64_t n_quad = p.samples_quadrature() ? p.quadrature.n_global * p.n_evaluated() : 0;
-        if ((nodes ? nodes->size() : 0) != n_nodes || (quad ? quad->size() : 0) != n_quad) {
+        const uint64_t n_weights = p.motion ? p.quadrature.n_global : 0;
+        if ((nodes ? nodes->size() : 0) != n_nodes || (quad ? quad->size() : 0) != n_quad ||
+            (weights ? weights->size() : 0) != n_weights) {
             throw InputError("probes[name = \"" + p.name + "\"]: restart file " + file +
                              " holds the averages of other samples or variables; set statistics.reset = true "
                              "to start them afresh.");
         }
         if (nodes) p.mean_nodes = *nodes;
         if (quad) p.mean_quadrature = *quad;
+        if (weights) p.mean_weights = *weights;
         p.average_weight = *w;
         p.average_t_last = *t_last;
         p.average_samples = static_cast<uint64_t>(*n);
@@ -2493,6 +2503,7 @@ RestartArrays Probes::arrays() const {
         if (!p->average) continue;
         add(AVERAGE_PREFIX + p->name + "_NODES", p->mean_nodes);
         add(AVERAGE_PREFIX + p->name + "_QUADRATURE", p->mean_quadrature);
+        add(AVERAGE_PREFIX + p->name + "_WEIGHTS", p->mean_weights);
     }
     for (const auto & p : probes) {
         if (!p->spectra) continue;
@@ -2719,6 +2730,16 @@ void Probes::Probe::move(const double t) {
     }
 }
 
+void Probes::Probe::mean_fields(std::vector<double> & quad) {
+    geometry.quad_weights = mean_weights;
+    const size_t n_cols = n_evaluated();
+    quad.assign(mean_quadrature.size(), 0.0);
+    for (size_t i = 0; i < mean_weights.size(); i++) {
+        if (!(mean_weights[i] > 0.0)) continue;
+        for (size_t v = 0; v < n_cols; v++) quad[i * n_cols + v] = mean_quadrature[i * n_cols + v] / mean_weights[i];
+    }
+}
+
 void Probes::Probe::reduce(const std::vector<double> & node_values, const std::vector<double> & quad) {
     // Point sets and boundaries reduce their samples; curves their quadrature points
     const bool points = quadrature.n_global == 0;
@@ -2781,6 +2802,7 @@ void Probes::Probe::reduce(const std::vector<double> & node_values, const std::v
                 case Reduction::MAX: {
                     double lo = std::numeric_limits<double>::infinity(), hi = -lo;
                     for (size_t i = 0; i < n_q; i++) {
+                        if (motion && !(weights[i] > 0.0)) continue;
                         lo = std::min(lo, value(i));
                         hi = std::max(hi, value(i));
                     }

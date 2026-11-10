@@ -1933,6 +1933,39 @@ TEST(ProbesTest, RejectsSpectraOfUnevenSamplesAndOfUnknownVariables) {
               std::string::npos);
 }
 
+TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMeasures) {
+    // A disk (sphere) sweeping x at 1e5 over four steps of 1e-6, where the
+    // flow barely changes: rho = 1 + 0.5 x averages to its value at the mean
+    // center, x = 0.55, a constant to itself, and the extremes are those of
+    // the cells it covered
+    const std::string dir = fresh_dir("region_moving_average");
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             (N_DIM == 2 ? "[\"0.3 + 1e5 * t\", 0.5]" : "[\"0.3 + 1e5 * t\", 0.5, 0.5]") +
+                             ", radius = 0.15}";
+    auto probe = [&](const std::string & name) {
+        return "[[probes]]\nname = \"" + name + "\"\nregion = " + disk + "\nvariables = [\"RHO\", \"P\"]\n"
+               "average = true\ninterval = 4\nreductions = [\"integral\", \"mean\", \"max\"]\n"
+               "reductions_file = \"" + dir + "/" + name + ".csv\"\n";
+    };
+    Solver solver;
+    solver.init(parse_toml(box_case(32, "1.0 + 0.5 * x", "type = \"MUSCL\"\n",
+                                    "[statistics]\ninterval = 1\n" + probe("disk"), "n_steps = 4\ndt = 1.0e-6\n")));
+    run(solver);
+    if (comm::is_root()) {
+        const auto rows = read_csv(dir + "/disk.csv");
+        ASSERT_EQ(rows.size(), 1u);
+        const auto & row = rows.at(0);
+        const char * volume = N_DIM == 2 ? "area" : "volume";
+        EXPECT_NEAR(row.at("mean_MEAN_P"), 1.0, 1e-9);
+        EXPECT_NEAR(row.at("integral_MEAN_P"), row.at(volume), 1e-9 * row.at(volume));
+        EXPECT_NEAR(row.at("integral_MEAN_RHO"), row.at("mean_MEAN_RHO") * row.at(volume), 1e-12);
+        EXPECT_NEAR(row.at("mean_MEAN_RHO"), 1.0 + 0.5 * 0.55, 2e-3);
+        EXPECT_LT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.15) + 1e-2);
+        EXPECT_GT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.1));
+    }
+    comm::barrier();
+}
+
 TEST(ProbesTest, MovingRegionsMeasureWhereTheyAreAtEachWriteAndCopiesReportEach) {
     // Two disks (spheres) moving across the periodic boundary at x = 1: each
     // copy's probe measures its part in the domain where it is at each write

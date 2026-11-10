@@ -416,6 +416,10 @@ fractions, and so the third column, are those of that time, the region's part
 in the domain as it enters or leaves it. Its own measures are recorded while it
 only translates and rotates (`null` once it changes shape), and its part in
 the domain is the third column of each row (`in_domain` is `null`). With
+`average = true` its reductions are those of the time averages over the cells
+it sweeps, each cell weighed by its mean `f V`: the integral is the mean of
+the integrals, the mean that integral over the mean measure in the domain
+(the third column), and the extremes those of the cells it has covered. With
 `copies = "each"`, a region with [`repeat`](geometry.md#arrays-of-copies) gives
 one probe per copy, `<name>_copy<k>`, each with its own reductions file.
 

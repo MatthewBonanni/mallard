@@ -327,10 +327,10 @@ class Probes {
             std::vector<std::pair<std::string, std::array<uint32_t, N_DIM>>> moment_vectors;
             bool average = false;                // writes the time averages of its samples
             // Averages: total weight, time of the last sample, samples, and (rank 0) the means of the
-            // gathered node and quadrature values
+            // gathered node and quadrature values; moving regions: the means of f V q and of their weights f V
             double average_weight = 0.0, average_t_last = 0.0;
             uint64_t average_samples = 0;
-            std::vector<double> mean_nodes, mean_quadrature;
+            std::vector<double> mean_nodes, mean_quadrature, mean_weights;
             ProbeReference reference;
             probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
             bool from_region = false;
@@ -366,6 +366,8 @@ class Probes {
             std::shared_ptr<Motion> motion;
             /** @brief The quadrature weights f V of a moving region at time t (collective). */
             void move(double t);
+            /** @brief Rank 0 of a time-averaged moving region: its weights and values, mean f V q / mean f V. */
+            void mean_fields(std::vector<double> & quad);
 
             bool due(uint64_t step, rtype t) const;
             /** @brief With a time interval: due once t is at least this. */
