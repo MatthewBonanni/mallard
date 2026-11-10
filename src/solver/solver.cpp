@@ -1664,6 +1664,7 @@ void Solver::init_output(region::Regions & regions) {
             }
         }
     }
+    probes.set_reconstruction(face_reconstruction.get());
     probes.init(input, *mesh, regions, species_names,
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);

@@ -60,7 +60,12 @@ std::string strings_json(const std::vector<std::string> & list) {
     return out + "]";
 }
 
-std::string average_json(const Average & a) {
+Average parse_average(const json::Value & v);
+
+} // namespace
+
+std::string Average::json() const {
+    const Average & a = *this;
     json::Object o;
     o.add("kind", a.kind).raw("of", strings_json(a.of)).add("weighting", a.weighting);
     o.raw("start", number_or_null(a.start)).raw("end", number_or_null(a.end)).add("samples", a.samples);
@@ -75,6 +80,12 @@ std::string average_json(const Average & a) {
     }
     return o.str();
 }
+
+std::string Reconstruction::json() const {
+    return json::Object().add("method", method).add("order", order).raw("fallback", strings_json(fallback)).str();
+}
+
+namespace {
 
 Average parse_average(const json::Value & v) {
     Average a;
@@ -127,11 +138,7 @@ std::string Block::json() const {
                                 .str());
     }
     if (!reconstruction.method.empty()) {
-        b.raw("reconstruction", json::Object()
-                                    .add("method", reconstruction.method)
-                                    .add("order", reconstruction.order)
-                                    .raw("fallback", strings_json(reconstruction.fallback))
-                                    .str());
+        b.raw("reconstruction", reconstruction.json());
     }
     std::string list = "[";
     bool any_average = false, any_phase = false;
@@ -140,7 +147,7 @@ std::string Block::json() const {
         o.add("name", f.name).add("units", f.units).add("long_name", f.long_name).add("stored", f.stored);
         if (!f.value.empty()) o.add("value", f.value);
         if (!f.average.kind.empty()) {
-            o.raw("average", average_json(f.average));
+            o.raw("average", f.average.json());
             any_average = true;
             any_phase = any_phase || f.average.kind == "phase";
         }

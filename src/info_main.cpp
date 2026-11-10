@@ -211,6 +211,61 @@ void print_snapshot_block(const output::Contents & c) {
     }
 }
 
+/** @brief The probe sampling block of a probe file: how its values are read, and where each located sample is. */
+void print_probe_sampling(const output::Contents & c) {
+    if (c.sampling.empty()) return;
+    json::Value b;
+    try {
+        b = json::parse(c.sampling);
+    } catch (const std::exception &) {
+        return;
+    }
+    logging::section("Probe sampling", "where the samples are read");
+    const json::Value * r = b.find("reconstruction");
+    if (r && r->type == json::Value::Type::OBJECT) {
+        std::string fallback;
+        for (const json::Value & m : (*r)["fallback"].array) fallback += (fallback.empty() ? "" : ", then ") + m.string;
+        item("Sampling", "point: " + (*r)["method"].string + ", order " +
+                             std::to_string(static_cast<int>((*r)["order"].number)) +
+                             (fallback.empty() ? "" : "; falling back to " + fallback));
+    } else {
+        item("Sampling", "cell: the value of the cell holding each sample");
+    }
+    std::string values;
+    for (const json::Value & v : b["variables"].array) {
+        values += (values.empty() ? "" : ", ") + v["name"].string + " " + v["value"].string;
+    }
+    item("Values", values.empty() ? "-" : values);
+    const json::Value * points = b.find("points");
+    if (!points || points->type != json::Value::Type::OBJECT) {
+        item("Locations", "at the faces, cut cells or elements the probe is made of");
+        return;
+    }
+    const json::Value & p = *points;
+    const uint64_t n = static_cast<uint64_t>(p["n"].number), outside = static_cast<uint64_t>(p["outside"].number);
+    item("Located samples", count(n) + (outside ? ", " + count(outside) + " outside the domain (the nearest cell's value)"
+                                                : ", all inside the domain"));
+    item("Distance", "requested point to where it is read: max " + format("%.6g", p["max_distance"].number) +
+                         " m, mean " + format("%.6g", p["mean_distance"].number) + " m");
+    auto xyz = [](const json::Value & x) {
+        std::string out;
+        for (const json::Value & d : x.array) out += (out.empty() ? "" : ", ") + format("%.6g", d.number);
+        return "(" + out + ")";
+    };
+    constexpr uint64_t ROWS = 12;
+    std::vector<std::vector<std::string>> rows;
+    for (uint64_t i = 0; i < n; i++) {
+        if (n > ROWS && i == ROWS / 2) {
+            rows.push_back({"...", count(n - ROWS) + " more; --format json lists every one"});
+            i = n - ROWS / 2;
+        }
+        rows.push_back({std::to_string(i), xyz(p["requested"].array[i]), format("%.0f", p["cell"].array[i].number),
+                        xyz(p["centroid"].array[i]), format("%.6g", p["distance"].array[i].number),
+                        p["inside"].array[i].boolean ? "yes" : "no"});
+    }
+    logging::table({"point", "requested [m]", "cell", "cell centroid [m]", "distance [m]", "inside"}, rows);
+}
+
 /** @brief "t = 0.002 s, step 2", or the range of several times. */
 std::string time_text(const output::Contents & c) {
     const output::Snapshot & first = c.snapshots.front();
@@ -399,6 +454,7 @@ void print_contents(const output::Contents & c) {
     const json::Value p = parsed_run(c);
     if (!p.is_null()) print_run(p);
     print_snapshot_block(c);
+    print_probe_sampling(c);
 }
 
 std::string zones_json(const std::vector<std::pair<std::string, uint64_t>> & list) {
@@ -462,6 +518,13 @@ std::string contents_json(const output::Contents & c) {
                              .str());
     }
     o.raw("run", parsed_run(c).is_null() ? "null" : c.run);
+    bool sampling = !c.sampling.empty();
+    try {
+        if (sampling) json::parse(c.sampling);
+    } catch (const std::exception &) {
+        sampling = false;
+    }
+    o.raw("sampling", sampling ? c.sampling : "null");
     o.raw("notes", strings_json(c.notes));
     return o.str();
 }

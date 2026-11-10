@@ -231,6 +231,16 @@ class Probes {
         /** @brief Columns of the values filled on the host with a cell field's value in each sample's cell. */
         using CellColumns = std::vector<std::pair<uint32_t, const Data *>>;
 
+        /** @brief Where a located sample is read: its cell (global id), the cell's centroid, and whether it holds it. */
+        struct Location {
+            uint64_t cell = 0;
+            probe::Point centroid{};
+            bool inside = false;
+        };
+
+        /** @brief How point values are evaluated (before init): the face reconstruction's, or linear least squares. */
+        void set_reconstruction(const FaceReconstruction * r);
+
         /** @brief This rank's share of a set of samples, and their values on the device. */
         struct Samples {
             uint64_t n_global = 0;
@@ -245,6 +255,8 @@ class Probes {
             Kokkos::View<rtype *[N_DIM]> normals;
             Kokkos::View<uint32_t *> faces;
             Kokkos::View<rtype *> distance;
+            bool located = false;                   // by locate: points of the geometry
+            std::vector<uint8_t> host_inside;       // located: whether a cell holds each local sample
             Kokkos::View<uint32_t *> inside;        // local samples inside their cell (point values)
             Kokkos::View<uint32_t *> inside_cells;
             Kokkos::View<rtype *[N_DIM]> inside_offsets;  // from the cell centroid
@@ -268,6 +280,8 @@ class Probes {
                           const ProbeReference & reference, bool gradients, bool diffusive = false);
             /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
             void gather(std::vector<double> & out, const CellColumns & columns = {}) const;
+            /** @brief Rank 0: the location of every located sample in global order (collective); empty elsewhere. */
+            std::vector<Location> locations(const Mesh & mesh) const;
 
             private:
                 // Reused across writes: fresh pages for every write cost page faults
@@ -291,7 +305,10 @@ class Probes {
             std::vector<Reduction> reductions;
             std::vector<std::string> variables;  // written
             std::vector<std::string> value_kinds; // snapshot_block::value of each written variable
-            snapshot_block::Reconstruction reconstruction;  // of the point values, set at each write
+            snapshot_block::Reconstruction reconstruction;  // of the point values
+            std::vector<Location> locations;     // rank 0: of each located sample (node), in sample order
+            /** @brief The probe sampling block: method, variables, and where each located sample is read. */
+            std::string sampling_json() const;
             uint32_t rho_column = 0;             // of RHO among the evaluated variables (favre)
             Kokkos::View<int32_t *> codes;       // evaluated: the written ones, then RHO if favre needs it
             bool gradients = false;              // some variable needs velocity or temperature gradients
@@ -378,6 +395,7 @@ class Probes {
                                     bool per_cell);
 
         std::vector<std::unique_ptr<Probe>> probes;
+        snapshot_block::Reconstruction reconstruction{"linear_least_squares", 2, {"cell_average"}};
         std::vector<std::string> statistics_variables;
         uint64_t average_interval = 1;
         rtype average_start = 0.0;

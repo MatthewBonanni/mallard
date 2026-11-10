@@ -13,6 +13,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -28,6 +29,8 @@
 
 #include "comm.h"
 #include "data_paths.h"
+#include "json.h"
+#include "output_reader.h"
 #include "gmsh_fixtures.h"
 #include "file_format.h"
 #include "input.h"
@@ -222,6 +225,63 @@ TEST(ProbesTest, CurvesHaveTheirLengthsAndFollowTheirTransforms) {
     EXPECT_NEAR(axes.nodes[0][1], 2.0, 1e-14);
     EXPECT_NEAR(axes.nodes[0][2], 0.5, 1e-14);
 #endif
+}
+
+TEST(ProbesTest, ProbeFilesRecordWhereEachPointIsRead) {
+    // One point off its cell's centroid and one outside the domain, read from the nearest cell, on 8 cells per side
+    const std::string dir = fresh_dir("sampling");
+    const std::vector<std::array<double, 3>> requested = {{0.3, 0.4, 0.6}, {1.3, 0.4, 0.6}};
+    const std::vector<std::array<double, 3>> centroid = {{0.3125, 0.4375, 0.625}, {0.9375, 0.4375, 0.625}};
+    std::vector<std::pair<std::string, std::string>> files = {{"csv", "cell"}, {"vtp", "point"}};
+    if (have_hdf5()) files.insert(files.end(), {{"hdf5", "point"}, {"vtkhdf", "cell"}});
+    std::string extra;
+    for (const auto & [format, sampling] : files) {
+        extra += "[[probes]]\nname = \"" + format + "\"\nformat = \"" + format + "\"\nsampling = \"" + sampling +
+                 "\"\nfile = \"" + dir + "/" + format + "." + (format == "vtp" ? "pvd" : format == "hdf5" ? "h5" : format) +
+                 "\"\ntype = \"points\"\npoints = [" + numbers3("0.3", "0.4", "0.6") + ", " + numbers3("1.3", "0.4", "0.6") +
+                 "]\nvariables = [\"RHO\", \"P\"]\n";
+    }
+    Solver solver;
+    solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"TENO\"\norder = 3\n", extra)));
+    run(solver);
+    double cell = -1.0;
+    for (const auto & [format, sampling] : files) {
+        const std::string path = dir + "/" + format + "." + (format == "vtp" ? "pvd" : format == "hdf5" ? "h5" : format);
+        SCOPED_TRACE(path);
+        const output::Contents file = output::open(path);
+        ASSERT_FALSE(file.sampling.empty());
+        const json::Value b = json::parse(file.sampling);
+        EXPECT_EQ(b["schema"].string, "mallard-probe-sampling");
+        EXPECT_EQ(b["sampling"].string, sampling);
+        const bool point = sampling == "point";
+        if (point) {
+            EXPECT_EQ(b["reconstruction"]["method"].string, "TENO");
+            EXPECT_EQ(b["reconstruction"]["order"].number, 3);
+        } else {
+            EXPECT_TRUE(b["reconstruction"].is_null());
+        }
+        const auto & variables = b["variables"].array;
+        ASSERT_EQ(variables.size(), 2u);
+        EXPECT_EQ(variables[0]["value"].string, point ? "point_value" : "cell_average");
+        EXPECT_EQ(variables[1]["value"].string, point ? "point_value" : "cell_state");
+        const json::Value & p = b["points"];
+        ASSERT_EQ(p["n"].number, 2);
+        EXPECT_EQ(p["outside"].number, 1);
+        for (size_t i = 0; i < 2; i++) {
+            double d2 = 0.0;
+            for (size_t d = 0; d < N_DIM; d++) {
+                EXPECT_DOUBLE_EQ(p["requested"].array[i].array[d].number, requested[i][d]) << i;
+                EXPECT_DOUBLE_EQ(p["centroid"].array[i].array[d].number, centroid[i][d]) << i;
+                d2 += (requested[i][d] - centroid[i][d]) * (requested[i][d] - centroid[i][d]);
+            }
+            EXPECT_EQ(p["inside"].array[i].boolean, i == 0);
+            // Point values are read at the requested point inside the domain, cell values at the centroid
+            const double expected = point && i == 0 ? 0.0 : std::sqrt(d2);
+            EXPECT_NEAR(p["distance"].array[i].number, expected, 1e-14) << i;
+        }
+        if (cell < 0.0) cell = p["cell"].array[0].number;
+        EXPECT_EQ(p["cell"].array[0].number, cell);
+    }
 }
 
 TEST(ProbesTest, PointFilesSkipHeadersAndComments) {

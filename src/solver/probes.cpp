@@ -317,8 +317,9 @@ std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
  *        vertices (points), polyline points (curves) or polygons (3D
  *        surfaces of mesh faces), with one array per variable.
  */
-void write_vtp_file(const std::string & file, const snapshot_block::Block & block, const probe::Geometry & g,
-                    const std::vector<std::string> & names, const std::vector<double> & values, size_t n_columns) {
+void write_vtp_file(const std::string & file, const snapshot_block::Block & block, const std::string & sampling,
+                    const probe::Geometry & g, const std::vector<std::string> & names,
+                    const std::vector<double> & values, size_t n_columns) {
     struct Array {
         std::string name, type;
         int components;
@@ -368,7 +369,8 @@ void write_vtp_file(const std::string & file, const snapshot_block::Block & bloc
     }
     // Field data belongs to the data set, before the piece, for VTK to read it
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n"
-        << provenance::xml_comment(snapshot_block::NAME, block.json())
+        << provenance::xml_comment(snapshot_block::NAME, block.json()) << "\n"
+        << provenance::xml_comment(snapshot_block::PROBE_SAMPLING, sampling)
         << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
            "header_type=\"UInt64\">\n  <PolyData>\n";
     out << "    <FieldData>\n      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
@@ -646,13 +648,16 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
                              const std::vector<probe::Point> & point_normals) {
     n_global = points.size();
     std::vector<uint8_t> contained;
-    const std::vector<int32_t> located = locate_points(mesh, points, &contained);
+    const std::vector<int32_t> cell_of = locate_points(mesh, points, &contained);
     ids.clear();
+    located = true;
+    host_inside.clear();
     std::vector<uint32_t> h_cells, h_inside;
     std::vector<rtype> h_offsets;
     for (uint64_t p = 0; p < points.size(); p++) {
-        if (located[p] < 0) continue;
-        const uint32_t c = static_cast<uint32_t>(located[p]);
+        if (cell_of[p] < 0) continue;
+        const uint32_t c = static_cast<uint32_t>(cell_of[p]);
+        host_inside.push_back(contained[p]);
         if (contained[p]) {
             h_inside.push_back(static_cast<uint32_t>(ids.size()));
             for (size_t d = 0; d < N_DIM; d++) {
@@ -669,6 +674,102 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
         set_normals(local);
     }
     order(mesh);
+}
+
+void Probes::set_reconstruction(const FaceReconstruction * r) { reconstruction = point_reconstruction(r); }
+
+std::string Probes::Probe::sampling_json() const {
+    const bool point = sampling == Sampling::POINT;
+    json::Object b;
+    b.add("schema", snapshot_block::PROBE_SAMPLING).add("version", snapshot_block::PROBE_SAMPLING_VERSION);
+    b.add("probe", name).add("sampling", point ? "point" : "cell");
+    b.raw("reconstruction", point ? reconstruction.json() : "null");
+    std::string list = "[";
+    const double window_start = average_t_last - average_weight;
+    for (size_t v = 0; v < variables.size(); v++) {
+        json::Object o;
+        o.add("name", variables[v]).add("value", value_kinds[v]);
+        if (average) {
+            o.raw("average", json::Object()
+                                 .add("kind", "reynolds")
+                                 .raw("of", "[" + json::quote(variables[v].substr(5)) + "]")
+                                 .add("weighting", "time")
+                                 .raw("start", json::number(window_start))
+                                 .str());
+        }
+        list += (list.size() > 1 ? "," : "") + o.str();
+    }
+    b.raw("variables", list + "]");
+    if (locations.empty()) {
+        b.raw("points", "null");
+    } else {
+        std::string requested = "[", cell = "[", centroid = "[", inside = "[", distance = "[";
+        auto point_json = [](const probe::Point & x) {
+            std::string out = "[";
+            for (size_t d = 0; d < N_DIM; d++) out += (d ? "," : "") + json::number(x[d]);
+            return out + "]";
+        };
+        size_t outside = 0;
+        double max_distance = 0.0, sum = 0.0;
+        for (size_t i = 0; i < locations.size(); i++) {
+            const Location & l = locations[i];
+            const probe::Point & x = geometry.nodes[i];
+            double d2 = 0.0;
+            for (size_t d = 0; d < N_DIM; d++) d2 += (x[d] - l.centroid[d]) * (x[d] - l.centroid[d]);
+            const double r = point && l.inside ? 0.0 : std::sqrt(d2);
+            const char * sep = i ? "," : "";
+            requested += sep + point_json(x);
+            cell += sep + std::to_string(l.cell);
+            centroid += sep + point_json(l.centroid);
+            inside += sep + std::string(l.inside ? "true" : "false");
+            distance += sep + json::number(r);
+            outside += l.inside ? 0 : 1;
+            max_distance = std::max(max_distance, r);
+            sum += r;
+        }
+        b.raw("points", json::Object()
+                            .add("n", locations.size())
+                            .add("outside", outside)
+                            .add("max_distance", max_distance)
+                            .add("mean_distance", sum / static_cast<double>(locations.size()))
+                            .raw("requested", requested + "]")
+                            .raw("cell", cell + "]")
+                            .raw("centroid", centroid + "]")
+                            .raw("inside", inside + "]")
+                            .raw("distance", distance + "]")
+                            .str());
+    }
+    json::Object units;
+    if (!locations.empty()) {
+        for (const char * k : {"points.requested", "points.centroid", "points.distance", "points.max_distance",
+                               "points.mean_distance"}) {
+            units.add(k, "m");
+        }
+    }
+    if (average) units.add("variables.average.start", "s");
+    b.raw("units", units.str());
+    return b.str();
+}
+
+std::vector<Probes::Location> Probes::Samples::locations(const Mesh & mesh) const {
+    // Per local sample: global cell, inside, centroid
+    constexpr size_t WIDTH = N_DIM + 2;
+    std::vector<double> local;
+    for (size_t i = 0; i < host_cells.size(); i++) {
+        local.push_back(static_cast<double>(mesh.h_global_cell(host_cells[i])));
+        local.push_back(host_inside[i]);
+        for (size_t d = 0; d < N_DIM; d++) local.push_back(static_cast<double>(mesh.h_cell_coords(host_cells[i], d)));
+    }
+    const std::vector<double> all = distributed ? comm::gatherv(local) : local;
+    if (distributed && !comm::is_root()) return {};
+    std::vector<Location> out(n_global);
+    for (uint64_t p = 0; p < n_global; p++) {
+        const double * row = all.data() + gathered_row[p] * WIDTH;
+        out[p].cell = static_cast<uint64_t>(row[0]);
+        out[p].inside = row[1] != 0.0;
+        for (size_t d = 0; d < N_DIM; d++) out[p].centroid[d] = row[2 + d];
+    }
+    return out;
 }
 
 void Probes::Samples::select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables) {
@@ -1540,6 +1641,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                                    static_cast<double>(p.time_interval), sampled, reduction_columns,
                                                    p.geometry.nodes.size(), point_label);
     }
+    p.reconstruction = reconstruction;
+    if (p.nodes.located) p.locations = p.nodes.locations(mesh);
     on_root(distributed, [&] {
         if (p.write_samples && p.format == Format::CSV) {
             std::vector<std::pair<std::string, Dimension>> columns = {
@@ -1892,7 +1995,6 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
             } else if (p.format == Format::HDF5) {
                 p.write_hdf5(step, t, nodes);
             } else {
-                p.reconstruction = point_reconstruction(fields.reconstruction);
                 const snapshot_block::Block block =
                     p.snapshot_of(step, t, p.snapshot ? snapshot_block::current_reason(force) : snapshot_block::reason::INTERVAL,
                                   average_interval);
@@ -2199,12 +2301,14 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     if (k == 0) {
         make_parent(file);
         const std::string & provenance = provenance::json();
+        const std::string located = sampling_json();
         h5::Handle fapl(H5Pcreate(H5P_FILE_ACCESS), H5Pclose, "H5Pcreate");
-        h5::Handle fcpl(h5::file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
+        h5::Handle fcpl(h5::file_creation(fapl, std::max(provenance.size(), located.size())), H5Pclose, "H5Pcreate");
         h5::Handle created(H5Fcreate(file.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + file);
         {
             h5::Handle root(H5Gopen2(created, "/", H5P_DEFAULT), H5Gclose, "opening /");
             h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
+            h5::write_strings_attribute(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE, {located});
             h5::write_int_attribute(root, "version", static_cast<int>(file_format::PROBE_OUTPUT.version));
         }
         h5::Handle top(H5Gcreate2(created, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "VTKHDF");
@@ -2252,6 +2356,10 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
             if (H5Aexists(root, attribute) > 0) h5::check(H5Adelete(root, attribute), "H5Adelete");
         }
         h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance::json()});
+        if (H5Aexists(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE) > 0) {
+            h5::check(H5Adelete(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE), "H5Adelete");
+        }
+        h5::write_strings_attribute(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE, {sampling_json()});
     }
     vtkhdf_run_written = true;
     {
@@ -2306,7 +2414,7 @@ void Probes::Probe::write_vtp(const snapshot_block::Block & block, const std::ve
     std::ostringstream piece;
     piece << pvd.stem().string() << "_" << std::setw(6) << std::setfill('0') << block.step << ".vtp";
     last_file = (pvd.parent_path() / piece.str()).string();
-    write_vtp_file(last_file, block, geometry, variables, values, n_evaluated());
+    write_vtp_file(last_file, block, sampling_json(), geometry, variables, values, n_evaluated());
     series.push_back({block.time, block.step, piece.str()});
     write_pvd_file(file, series);
 }
@@ -2444,7 +2552,10 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
 void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t step) {
     if (!comm::is_root() || !output_files_enabled()) return;
     for (auto & p : probes) {
-        if (p->out) *p->out << csv_line << std::flush;
+        if (p->out) {
+            *p->out << csv_line << "# " << snapshot_block::PROBE_SAMPLING << " " << p->sampling_json() << "\n"
+                    << std::flush;
+        }
         if (p->out_reductions) *p->out_reductions << csv_line << std::flush;
         if (p->out_spectra) *p->out_spectra << csv_line << std::flush;
         if (p->out_reduction_spectra) *p->out_reduction_spectra << csv_line << std::flush;
@@ -2457,6 +2568,10 @@ void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t st
                 if (H5Aexists(root, name) > 0) h5::check(H5Adelete(root, name), "H5Adelete");
             }
             h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance::json()});
+            if (H5Aexists(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE) > 0) {
+                h5::check(H5Adelete(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE), "H5Adelete");
+            }
+            h5::write_strings_attribute(root, snapshot_block::PROBE_SAMPLING_ATTRIBUTE, {p->sampling_json()});
             // Each run that wrote the file, with its first row and step
             constexpr const char * RUNS = "mallard_runs";
             std::vector<std::string> runs;

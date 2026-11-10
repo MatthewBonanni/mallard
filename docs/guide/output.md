@@ -799,6 +799,44 @@ to their `cell_methods` (`area: mean time: mean` for `MEAN_RHO`). `mallard
 info FILE` tabulates them under **This snapshot**, and `field_averages(path)`
 of `tools/mallard/vtu.py` returns them.
 
+### Probe sampling
+
+A probe file says where each of its samples is read, so it stands alone
+without the input or the mesh. Its probe sampling block (`schema`
+`mallard-probe-sampling`, version 1) is the line `# mallard-probe-sampling
+{...}` after each run's `# mallard-run` line of a CSV file, the root
+attribute `mallard_sampling` of an HDF5 or VTKHDF file, and an XML comment
+of each VTP file:
+
+| Key | Contents |
+|---|---|
+| `probe`, `sampling` | The probe's name and `cell` or `point` |
+| `reconstruction` | For `sampling = "point"`, the method, order and fallbacks the values are read with (as in [Cell averages and point values](#cell-averages-and-point-values)); `null` for `cell` |
+| `variables` | Each column's `name` and `value` kind, and with `average = true` its `average` (`kind`, `of`, `weighting`, window `start`) |
+| `points` | For probes of points and curves: `n` samples, how many lie `outside` every cell, `max_distance` and `mean_distance`, and per sample, in sample order, the `requested` point, the owning `cell` (global id), its `centroid`, whether the cell holds the point (`inside`) and the `distance` from the requested point to where the value is read; `null` for probes of a region's cells or a boundary's faces |
+| `units` | Units of the dimensional keys (m, s) |
+
+The distance is zero for a point value inside the mesh and the distance to
+the centroid of the cell read otherwise: of a cell sample, or of a point
+outside the mesh, which takes its nearest cell's average.
+
+```json
+{"schema": "mallard-probe-sampling", "version": 1, "probe": "wake",
+ "sampling": "point",
+ "reconstruction": {"method": "TENO", "order": 3, "fallback": ["linear_least_squares", "cell_average"]},
+ "variables": [{"name": "RHO", "value": "point_value"}, {"name": "P", "value": "point_value"}],
+ "points": {"n": 2, "outside": 1, "max_distance": 0.3653, "mean_distance": 0.1826,
+            "requested": [[0.3, 0.4, 0.6], [1.3, 0.4, 0.6]], "cell": [5, 7],
+            "centroid": [[0.3125, 0.4375, 0.625], [0.9375, 0.4375, 0.625]],
+            "inside": [true, false], "distance": [0.0, 0.3653]},
+ "units": {"points.requested": "m", "points.centroid": "m", "points.distance": "m",
+           "points.max_distance": "m", "points.mean_distance": "m"}}
+```
+
+`mallard info FILE` prints it under **Probe sampling** (with `--json`, as
+`sampling`), and `probe_sampling(path)` of `tools/mallard/vtu.py` returns it
+for any probe file. Files written before 0.10 record none.
+
 ### Formats and compatibility
 
 Every file Mallard writes carries a format version. **The promise:** a release

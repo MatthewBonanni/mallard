@@ -171,7 +171,8 @@ the sample, so a probe converges at the scheme's order (fifth order for
 centroids. The [Sod comparison](numerics.md#reconstruction) on the Numerics
 page was read from a line probe. The full key list is in the [input reference](../input.md#probes);
 each type, where its samples go and how to read the files, with figures:
-[Geometry](geometry.md#points-and-curves).
+[Geometry](geometry.md#points-and-curves). Each probe file records where every sample is read (owning
+cell, centroid, distance) and how: [Probe sampling](output.md#probe-sampling).
 
 Pitfalls:
 

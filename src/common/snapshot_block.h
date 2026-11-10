@@ -32,6 +32,14 @@ inline constexpr const char * NAME = "mallard-snapshot";
 /** @brief The HDF5 dataset (root group) of fixed-length strings holding one block per snapshot of the file. */
 inline constexpr const char * DATASET = "mallard_snapshot";
 
+/**
+ * @brief The probe sampling block of a probe file: how and where its samples are read. Its schema and comment name
+ *        in CSV and VTP files, and its HDF5 root attribute (probe HDF5 and VTKHDF files).
+ */
+inline constexpr const char * PROBE_SAMPLING = "mallard-probe-sampling";
+constexpr int PROBE_SAMPLING_VERSION = 1;
+inline constexpr const char * PROBE_SAMPLING_ATTRIBUTE = "mallard_sampling";
+
 /** @brief Why a snapshot was written: its interval, the run's start or end, a run-control request, a divergence, a trigger. */
 namespace reason {
 inline constexpr const char * INTERVAL = "interval";
@@ -72,6 +80,9 @@ struct Average {
     double bin_weight = std::numeric_limits<double>::quiet_NaN();  ///< phase: s of samples in the bin
     double period = std::numeric_limits<double>::quiet_NaN();      ///< phase: s, of a fixed period
     std::string trigger;         ///< phase: the variable whose crossings set the period, else empty
+
+    /** @brief As one JSON object. */
+    std::string json() const;
 };
 
 /** @brief A field of a snapshot. */
@@ -90,6 +101,9 @@ struct Reconstruction {
     std::string method;                 ///< "TENO", "linear_least_squares"; empty: no point values
     int order = 0;
     std::vector<std::string> fallback;  ///< in order: "linear_least_squares", "cell_average"
+
+    /** @brief As one JSON object. */
+    std::string json() const;
 };
 
 /** @brief The block of one snapshot. */

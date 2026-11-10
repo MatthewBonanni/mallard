@@ -394,6 +394,24 @@ def field_averages(path):
     return {f["name"]: f["average"] for f in blocks[-1]["fields"] if "average" in f}
 
 
+def probe_sampling(path):
+    """The probe sampling block of a probe file (.csv, .h5, .vtkhdf, .vtp, or
+    the last member of its .pvd): sampling ("cell", "point"), reconstruction,
+    each variable's value kind (and average), and for located samples their
+    requested point, cell, cell centroid, inside, and distance (m) from the
+    requested point to where it is read (docs/guide/output.md#probe-sampling).
+    None for files before Mallard 0.10."""
+    if path.endswith(".h5") or path.endswith(".vtkhdf"):
+        from .h5 import probe_sampling as h5_sampling
+        return h5_sampling(path)
+    if path.endswith(".pvd"):
+        members = re.findall(r'file="([^"]+)"', open(path).read())
+        return probe_sampling(os.path.join(os.path.dirname(path), members[-1])) if members else None
+    text = open(path, "rb").read(1 << 26).decode("utf-8", "replace")
+    found = re.findall(r"(?:<!-- |^# )mallard-probe-sampling (\{.*?\})(?: -->|$)", text, re.M | re.S)
+    return json.loads(found[-1]) if found else None
+
+
 def resolved_input(path):
     """The input with every key explicit (TOML text) that made a Mallard output
     file: its provenance's input.resolved. None for a file without provenance, or
