@@ -23,7 +23,7 @@ on:
         default: false
       only:
         description: >-
-          Run only these jobs, comma-separated (backend names, tutorials, device, fuzz;
+          Run only these jobs, comma-separated (backend names, tutorials, device, spack, fuzz;
           any other name fails the run), e.g. after resolving a conflict that can affect
           only them; empty runs all
         type: string
@@ -143,6 +143,7 @@ jobs:
           if [ "$CODE" = true ]; then
             if want tutorials; then names="tutorials"; fi
             if want fuzz; then names="$names fuzz-2d"; fi
+            if want spack; then names="$names ubi8-spack ubi9-spack"; fi
           fi
           if { [ "$CHANGED" = true ] || [ "$GITHUB_REF" = refs/heads/main ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
             names="$names cuda-13.5-2d cuda-13.5-3d cuda-13.4-2d cuda-13.4-3d cuda-13.5-arm64-2d cuda-13.5-arm64-3d"
@@ -615,6 +616,98 @@ jobs:
           STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
         run: sh tools/dev/ci_status.sh ${{ job.status }}
 
+  # spack install of this checkout on Red Hat's Universal Base Images 8 and 9, as a user of
+  # a RHEL-based cluster (TOSS 4 and 5) would: Spack builds GCC 15 with the system's GCC,
+  # then Open MPI, HDF5 and Mallard's other dependencies with GCC 15, then Mallard with its
+  # tests, and the 2D and 3D suites run. The Spack installs are cached across runs, so a
+  # run with the cache builds only Mallard.
+  spack:
+    needs: [changelog, device]
+    if: needs.device.outputs.code == 'true' && (!inputs.only || contains(format(',{0},', inputs.only), ',spack,'))
+    runs-on: ubuntu-26.04
+    container: registry.access.redhat.com/${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: ubi8-spack, image: ubi8/ubi:latest}
+          - {name: ubi9-spack, image: ubi9/ubi:latest}
+    name: ${{ matrix.name }}
+    timeout-minutes: 360
+    env:
+      SPACK_VERSION: v1.2.2
+      SPACK_PACKAGES_VERSION: v2026.10.1
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+    steps:
+      - name: Install the system's build tools
+        run: >
+          dnf install -y -q git gcc gcc-c++ gcc-gfortran make patch bzip2 xz unzip file
+          python3 which findutils tar diffutils gzip
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Report the job as running
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_ID: ${{ job.check_run_id }}
+          STATUS_NAME: ${{ matrix.name }}
+        run: sh tools/dev/ci_status.sh running
+      - name: Install Spack
+        run: |
+          git clone -q --depth 1 -b "$SPACK_VERSION" https://github.com/spack/spack /opt/spack
+          git clone -q --depth 1 -b "$SPACK_PACKAGES_VERSION" https://github.com/spack/spack-packages /opt/spack-packages
+          echo /opt/spack/bin >> "$GITHUB_PATH"
+          export PATH=/opt/spack/bin:$PATH
+          spack repo set --destination /opt/spack-packages builtin
+          spack repo add "$GITHUB_WORKSPACE/spack/spack_repo/mallard"
+          spack config add config:install_tree:root:/opt/spack-opt
+          spack config add "config:build_jobs:$(nproc)"
+          spack compiler find
+      # A change to the package restores the latest tree, and Spack reuses what still fits
+      - name: Restore the Spack installs
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /opt/spack-opt
+          key: spack-${{ matrix.name }}-${{ env.SPACK_VERSION }}-${{ env.SPACK_PACKAGES_VERSION }}-${{ hashFiles('spack/spack_repo/mallard/packages/mallard/package.py') }}
+          restore-keys: spack-${{ matrix.name }}-${{ env.SPACK_VERSION }}-${{ env.SPACK_PACKAGES_VERSION }}-
+      # As in docs/installation.md: GCC 15 first, then Mallard with it
+      - name: Install GCC 15 and Mallard's dependencies
+        run: |
+          spack install --fail-fast gcc@15
+          mkdir -p /opt/env
+          cat > /opt/env/spack.yaml << EOF
+          spack:
+            specs: ["mallard@main %gcc@15"]
+            view: false
+            develop:
+              mallard: {spec: mallard@=main, path: $GITHUB_WORKSPACE}
+          EOF
+          spack -e /opt/env concretize
+          spack -e /opt/env install --fail-fast --only dependencies
+      - name: Save the Spack installs
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /opt/spack-opt
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: Install Mallard
+        run: spack -e /opt/env install --fail-fast --test=root mallard
+      - name: Test (2D and 3D)
+        env:
+          OMP_NUM_THREADS: 2
+        run: |
+          spack -e /opt/env test run mallard
+          for dim in 2 3; do "$GITHUB_WORKSPACE/spack-build-${dim}d/src/mallard" test --gtest_brief=1; done
+      - name: Report the job's result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_ID: ${{ job.check_run_id }}
+          STATUS_NAME: ${{ matrix.name }}
+        run: sh tools/dev/ci_status.sh ${{ job.status }}
+
   # Each libFuzzer harness for a minute (2D); fuzz.yml also runs nightly, longer
   fuzz:
     needs: [changelog, device]
@@ -630,7 +723,7 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [changelog, device, matrix, build-and-test, tutorials, cuda, portability, fuzz]
+    needs: [changelog, device, matrix, build-and-test, tutorials, cuda, portability, spack, fuzz]
     runs-on: ubuntu-26.04
     steps:
       - env:

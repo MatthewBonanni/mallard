@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails if the `only` input of a ci.yml dispatch names a job it doesn't know, so a
 typo or a job's display name (cuda-2d) fails the run instead of silently skipping
-jobs. The valid names are the backends of the matrix job, tutorials, device and fuzz.
+jobs. The valid names are the backends of the matrix job, tutorials, device, spack and fuzz.
 Used by the first job of ci.yml.
 
     python3 tools/dev/check_ci_only.py ONLY [WORKFLOW]
@@ -13,8 +13,8 @@ import yaml
 
 from check_support_matrix import from_json_names
 
-OTHERS = ["tutorials", "device", "fuzz"]
-HINTS = {"cuda": "device", "hip": "device", "sycl": "device", "fuzz": "fuzz"}
+OTHERS = ["tutorials", "device", "spack", "fuzz"]
+HINTS = {"cuda": "device", "hip": "device", "sycl": "device", "fuzz": "fuzz", "ubi8": "spack", "ubi9": "spack"}
 
 
 def valid_names(workflow):
