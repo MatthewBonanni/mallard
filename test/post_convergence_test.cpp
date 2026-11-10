@@ -148,7 +148,7 @@ std::string fresh_dir(const std::string & name) {
 constexpr double T_STOP = 0.05;
 
 /** @brief Cells across the 3D box: refined with the others, so that the refinement is uniform. */
-uint32_t layers(const uint32_t n) { return std::max(2u, n / 8); }
+uint32_t layers(const uint32_t n) { return std::max(3u, n / 4); }
 
 double cells(const uint32_t n) { return double(n) * n * (N_DIM == 3 ? layers(n) : 1); }
 
