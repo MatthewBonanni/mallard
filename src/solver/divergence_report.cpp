@@ -185,7 +185,7 @@ Cause mesh(const Evidence & e) {
     ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
     std::string list;
     for (size_t k = 0; k < std::min<size_t>(ids.size(), 6); k++) list += (k ? ", " : "") + ids[k];
-    c.fix = "improve cells " + list + " (mallard check input.toml --quality quality writes the metrics for ParaView)" +
+    c.fix = "improve cells " + list + " (mallard check input.toml --mesh-fields mesh writes the metrics for ParaView)" +
             (local_cfl ? ", or lower the time step to suit them" : "");
     return c;
 }

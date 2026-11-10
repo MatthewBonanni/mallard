@@ -123,13 +123,13 @@ Triangles around a duck silhouette (a periodic spline), refined linearly from `-
 
 ### `plot_mesh_quality.py`: mesh quality
 
-The quality fields that `mallard check --quality PREFIX` writes for a 2D
+The quality fields that `mallard check --mesh-fields PREFIX` writes for a 2D
 mesh (non-orthogonality, skewness, aspect ratio, volume ratio), with the worst
 cells circled; readable on light and dark backgrounds. Use it before a long run
 to find the cells that limit the time step or the accuracy.
 
 ```bash
-mallard check input.toml --quality quality
+mallard check input.toml --mesh-fields quality
 python tools/mesh/plot_mesh_quality.py quality_000000.vtkhdf quality.png --fields NON_ORTHOGONALITY SKEWNESS --worst 10
 ```
 
@@ -276,7 +276,7 @@ rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] i
 pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtkhdf")  # 2D or 3D cells
 ```
 
-`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "xdmf"` output (`"hdf5"` before 0.10): the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, `resolved_input(path)` the [resolved input](../docs/guide/input_files.md#the-resolved-input) that made it (`None` for files of 0.9), and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
+`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "xdmf"` output (`"hdf5"` before 0.10): the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, `resolved_input(path)` the [resolved input](../docs/guide/input_files.md#the-resolved-input) that made it (`None` for files of 0.9), and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units. `mallard.stencils` (needs h5py) reads the [stencil file](../docs/guide/output.md#mesh-and-stencil-fields) of `mallard check --mesh-fields`: `read_stencils(path).stencil(cell)` gives a cell's stencil members (global ids) with their stencil, role and boundary face, and its degree, sizes, condition number and reach.
 
 ### `plot_vtu.py`: one field of a snapshot
 

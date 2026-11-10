@@ -71,7 +71,8 @@ constexpr Option CHECK_OPTIONS[] = {
      "and each as a field STENCIL_<id> (1 central, 2 sector, 3 both, 4 the cell itself). Default: none."},
     {"--region", "", "NAME|{TABLE}",
      "With --mesh-fields: as --cells, for the cells of a region: a name of [regions] or of the mesh, or an "
-     "inline table ({type = \"box\", lo = [0, 0], hi = [0.1, 0.1]}); fields for the first 64. Default: none."},
+     "inline table ({type = \"rectangle\", center = [0, 0], size = [0.1, 0.1]}); STENCIL_<id> fields for the "
+     "first 64 cells. Default: none."},
     {"--weights", "", "",
      "With --stencils, --cells or --region: add the least-squares pseudo-inverse rows of TENO's stencils to "
      "PREFIX_stencils.h5. Default: none."},

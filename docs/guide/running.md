@@ -180,8 +180,8 @@ and a cell squeezed to a sliver, at a fixed `dt` that suits the rest of the mesh
      - cell 135 at (0.439063, 0.53125), which became invalid, has volume ratio 39 (questionable above 10; the
        mesh's worst is 39)
      - only 6 cells exceeded the stable CFL number: the time step suits the rest of the mesh
-     Try: improve cells 119, 134, 135, 136, 151 (mallard check input.toml --quality quality writes the metrics
-     for ParaView), or lower the time step to suit them
+     Try: improve cells 119, 134, 135, 136, 151 (mallard check input.toml --mesh-fields mesh writes the
+     metrics for ParaView), or lower the time step to suit them
   2. time step too large (0.55)
      - the failing step ran at CFL 3.08, above 1.2, the largest stable value of SSPRK3 for smooth flow
      - 6 of 256 cells (2%) were above it: the excess is local, so look at those cells first
