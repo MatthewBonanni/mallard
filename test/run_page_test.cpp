@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -294,4 +295,72 @@ TEST(RunPageTest, ARunRecordsTheCheckAtSetupAsMallardCheckMeasuresIt) {
     const std::string html = page.html();
     EXPECT_NE(html.find("<section id=\"check\"><h2>Check at setup <span class=\"status warning\">"), std::string::npos);
     EXPECT_NE(html.find("<td>aspect ratio</td>"), std::string::npos);
+}
+
+TEST(RunPageTest, ProbeValuesArePlottedFromTheProgressRecordsWithTheirUnitsUpToTheCap) {
+    const std::string dir = fresh_dir("report_probes");
+    const std::string z = N_DIM == 3 ? ", 0.125" : "";
+    // A one-point probe (2 values), then two lines of 6 reductions of 7 values (2D) or 9 (3D) each: more than
+    // the run record keeps, so the last is cut
+    std::string probes = "[[probes]]\nname = \"point\"\npoint = [0.7, 0.5" + z + "]\nvariables = [\"RHO\", \"P\"]\n"
+                         "interval = 2\nfile = \"" + dir + "/probe_point.csv\"\n";
+    for (const char * name : {"a", "b"}) {
+        probes += std::string("[[probes]]\nname = \"") + name + "\"\nstart = [0.1, 0.5" + z + "]\nend = [0.9, 0.5" +
+                  z + "]\nn_points = 9\nvariables = [\"RHO\", \"RHOU\", \"U\", \"P\", \"T\"]\nsamples = false\n"
+                  "reductions = [\"integral\", \"mean\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_file = \"" +
+                  dir + "/probe_" + name + "_reductions.csv\"\n";
+    }
+    Solver solver;
+    solver.init(parse_toml(case_input(dir, "n_steps = 4\ncfl = 0.25\n", logged(dir)) + probes));
+    EXPECT_EQ(solver.run(), 0);
+    if (!comm::is_root()) return;
+    const std::string log = dir + "/mallard.jsonl";
+
+    const json::Value units = last_record(log, "start")["units"]["probes"];
+    EXPECT_EQ(units["point"]["P"].string, "kg m-1 s-2");
+    EXPECT_EQ(units["a"]["integral_RHO"].string, "kg m-2");  // density times the line's length
+    EXPECT_EQ(units["a"]["mean_RHO"].string, "kg m-3");
+
+    const json::Value progress = last_record(log, "progress");
+    const json::Value & recorded = progress["probes"];
+    size_t n_values = 0;
+    for (size_t i = 0; i < recorded.names.size(); i++) {
+        const json::Value & probe = recorded.members[i];
+        for (const std::string & name : probe.names) {
+            if (name == "step" || name == "t") continue;
+            n_values++;
+            EXPECT_FALSE(units[recorded.names[i]][name].string.empty()) << recorded.names[i] << " " << name;
+        }
+    }
+    EXPECT_EQ(n_values, Probes::RECORDED);
+    const size_t per_line = 6 * (3 + 2 * size_t(N_DIM));
+    EXPECT_EQ(recorded["b"].names.size(), 2 + Probes::RECORDED - 2 - per_line);
+
+    // The point's values are those of its file's last row
+    std::ifstream csv(dir + "/probe_point.csv");
+    std::string header, line, row;
+    std::getline(csv, header);
+    while (std::getline(csv, line)) {
+        if (!line.empty() && std::isdigit(static_cast<unsigned char>(line[0]))) row = line;
+    }
+    std::vector<std::string> names, values;
+    for (std::stringstream h(header); std::getline(h, line, ',');) names.push_back(line);
+    for (std::stringstream r(row); std::getline(r, line, ',');) values.push_back(line);
+    const size_t p = size_t(std::find(names.begin(), names.end(), "P") - names.begin());
+    ASSERT_LT(p, values.size());
+    EXPECT_EQ(recorded["point"]["step"].number, std::stod(values[0]));
+    EXPECT_NEAR(recorded["point"]["P"].number, std::stod(values[p]), 1e-6 * std::fabs(std::stod(values[p])));
+
+    const std::string page = read_file(dir + "/report.html");
+    EXPECT_EQ(run_page::from_file(log).html(), page);
+    const json::Value data = embedded_series(page);
+    const json::Value * pressure = nullptr;
+    for (const json::Value & g : data["groups"].array) {
+        if (g["title"].string != "Probe point") continue;
+        for (const json::Value & s : g["series"].array) {
+            if (s["name"].string == "P") pressure = &s;
+        }
+    }
+    ASSERT_NE(pressure, nullptr);
+    EXPECT_EQ((*pressure)["label"].string, "P [kg m-1 s-2]");
 }

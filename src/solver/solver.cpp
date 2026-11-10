@@ -1839,6 +1839,9 @@ std::string Solver::progress_units() const {
     u.raw("margins", object({{"rho", dim::density}, {"p", dim::pressure}, {"T", dim::temperature}}));
     if (integral_monitor.interval > 0) u.raw("integrals", object(integral_columns()));
     for (const auto & monitor : force_monitors) u.raw("forces_" + monitor.zone, object(force_columns(monitor.modeled)));
+    json::Object by_probe;
+    for (const auto & [name, columns] : probes.recorded_columns()) by_probe.raw(name, object(columns));
+    if (!by_probe.empty()) u.raw("probes", by_probe.str());
     return u.str();
 }
 
@@ -2499,6 +2502,7 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
         }
         if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
         for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
+        status.probes = probes.recorded();
         run_log::write(status.record());
     }
 
