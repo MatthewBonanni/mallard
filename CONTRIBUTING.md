@@ -112,7 +112,9 @@ that adds or changes behavior includes:
    regression: prefer checks against an exact solution, a design order of
    accuracy, conservation, symmetry or an independent reference (an exact
    Riemann solver, Cantera) over restating the implementation. If you cannot name
-   the bug a test would catch, it is not worth keeping.
+   the bug a test would catch, it is not worth keeping. A test that runs a
+   combination of features lists them in [test/features.toml](test/features.toml)
+   for the [feature matrix](docs/guide/features.md).
 3. **Documentation**, following [docs/design/documentation.md](docs/design/documentation.md):
    - the user-facing explanation (when to use it, a minimal TOML snippet, keys with
      defaults, pitfalls) in the topic's page of `docs/guide/`;

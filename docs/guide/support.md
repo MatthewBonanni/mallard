@@ -2,7 +2,8 @@
 
 What Mallard's CI builds and runs, and how often. **Run** means the test suite (or
 the named checks) runs on that build; **compile** means every source is built with
-warnings as errors, but nothing runs; anything not listed is untested. Every
+warnings as errors, but nothing runs; anything not listed is untested. Which
+features are tested together is in the [feature matrix](features.md). Every
 GitHub-hosted job runs on x86-64 Ubuntu 24.04 unless the table says otherwise.
 
 When a job runs:

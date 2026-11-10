@@ -80,6 +80,8 @@ jobs:
         run: python3 tools/dev/check_doc_toml.py
       - name: Check the "Used in" lines of the user guide
         run: python3 tools/docs/used_in.py --check
+      - name: Check the feature matrix
+        run: python3 tools/docs/feature_matrix.py --check
       - name: Check for a changelog fragment
         env:
           GH_TOKEN: ${{ github.token }}
