@@ -1420,6 +1420,23 @@ void Solver::init_numerics() {
     }
     hybrid_threshold = find_real_or(hybrid_input, "sensor_threshold", dim::none, 0.65_r);
     hybrid_floor = find_real_or(hybrid_input, "upwind_floor", dim::none, 0.0_r);
+    static const std::map<std::string, CentralFlux> central_fluxes = {
+        {"reconstructed", CentralFlux::RECONSTRUCTED},
+        {"cell_averages", CentralFlux::CELL_AVERAGES},
+        {"ke_stable", CentralFlux::KE_STABLE},
+        {"ke_conservative", CentralFlux::KE_CONSERVATIVE}};
+    const std::string central = find_value_or<std::string>(hybrid_input, "central", "reconstructed");
+    if (!central_fluxes.contains(central)) {
+        throw not_accepted(hybrid_input, "numerics.hybrid.central", central,
+                           {"cell_averages", "ke_conservative", "ke_stable", "reconstructed"});
+    }
+    hybrid_central = central_fluxes.at(central);
+    if (hybrid_central != CentralFlux::RECONSTRUCTED && is_mixture()) {
+        throw InputError({.key = "numerics.hybrid.central",
+                          .line = line_of(hybrid_input, "central"),
+                          .message = "\"" + central + "\" is not available for mixtures yet",
+                          .fix = "Use central = \"reconstructed\" (the default) with a mixture"});
+    }
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError({.key = "numerics.hybrid",
                           .line = line_of(hybrid_input),

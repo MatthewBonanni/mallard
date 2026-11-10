@@ -649,6 +649,46 @@ Alternatives considered:
   the budget would have to separate.
 - **Implicit LES** (no model, rely on TENO/Riemann dissipation): a non-goal.
 
+### 4.4 Central flux for TENO (#689)
+
+Section 8.1 found TENO-E with the hybrid flux unstable ($\varepsilon_\mathrm{num} = -0.22$ at
+32³), and #660 (section 3.1) found TENO5 + HLLC limited by the scheme from 64³ on. The cause
+is KEEP's means: its kinetic-energy identity holds for the two cells' values, and on
+reconstructed states each face produces kinetic energy
+$e_f = \Delta u \cdot F_m - \Delta(|u|^2/2) F_\rho - \bar{p}\, \Delta u \cdot n A$ (cell
+values $u_0, u_1$, $\Delta u = u_1 - u_0$) of either sign, whose size grows with the
+correction the reconstruction adds to the mean of the cells. `[numerics.hybrid] central`
+(experimental; the default `reconstructed` is unchanged) selects:
+
+- **`cell_averages`**: KEEP on the two cells' values, the Riemann part on the reconstructed
+  states (as for the low-dissipation unstructured schemes of
+  [Subbareddy & Candler 2009](../references.md#subbareddy-candler-2009) and
+  [Modesti & Pirozzoli 2017](../references.md#modesti-pirozzoli-2017)). Every interior face
+  changes the kinetic energy by exactly the pressure work, on any mesh, but the central part is
+  second order: in smooth flow TENO sets only the dissipation near shocks.
+- **`ke_stable`**: KEEP on the reconstructed states, then per interior face a momentum
+  diffusion $-\alpha \Delta u$, with its work $-\alpha \Delta u \cdot \bar{u}$ in the energy
+  flux, $\alpha = \max(0, e_f) / |\Delta u|^2$: no face produces kinetic energy beyond the
+  pressure work, faces that remove it keep doing so, and both cells receive the removed energy
+  as heat, $\alpha |\Delta u|^2 / 2$ each (total energy stays conserved). Faces with
+  $|\Delta u|^2$ at round-off relative to $|u_0|^2 + |u_1|^2$ are left alone.
+- **`ke_conservative`**: the same with $\alpha = e_f / |\Delta u|^2$, so every face changes the
+  kinetic energy by exactly the pressure work (anti-diffusive where $e_f < 0$); for tests and
+  comparison.
+
+The correction is the kinetic-energy form of the entropy correction of
+[Abgrall 2018](../references.md#abgrall-2018), which
+[Abgrall, Öffner & Ranocha 2022](../references.md#abgrall-offner-ranocha-2022) extend to kinetic
+energy for residual distribution and DG schemes; here it is applied per finite-volume face to
+the reconstructed states. Tests: `HybridFlux.*` in `test/les_test.cpp` (exact pressure work for
+`cell_averages` and `ke_conservative` with TENO states on simplices, the stable flux's sign, the
+correction's heating of both cells, conservation over steps). Single gas only for now.
+
+Evaluation (results below as they come): inviscid Taylor-Green at 32³ (bounded to $t = 20$,
+kinetic energy), Sod and Shu-Osher (shocks still captured by the sensor), then CBC at 64³ and
+128³ against MUSCL + hybrid and TENO5 + HLLC with the metrics of section 3.1, and Taylor-Green
+at Re = 1600 against the DNS.
+
 ## 5. Implementation: SGS fluxes in the solver
 
 - Input `[les]`: `model` (`sigma`, `wale`, `vreman`, `smagorinsky`),

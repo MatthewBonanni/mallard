@@ -1,0 +1,1 @@
+- `[numerics.hybrid] central` selects the states of the hybrid flux's central part: `reconstructed` (the default, unchanged), `cell_averages` (exactly kinetic-energy-preserving on interior faces), and `ke_stable` / `ke_conservative` (reconstructed states with a per-face kinetic-energy correction). Experimental, for TENO LES (#689).

@@ -29,6 +29,16 @@ enum class RiemannSolverType {
     RHLL,
 };
 
+/**
+ * @brief Central part of the hybrid convective flux (docs/design/les.md,
+ *        section 4.3): KEEP on the reconstructed states, on the two cells'
+ *        values (exactly kinetic-energy-preserving on interior faces, second
+ *        order), or on the reconstructed states with the per-face correction
+ *        of ke_correct, stable (no face produces kinetic energy beyond the
+ *        pressure work) or conservative (none departs from it).
+ */
+enum class CentralFlux : uint8_t { RECONSTRUCTED, CELL_AVERAGES, KE_STABLE, KE_CONSERVATIVE };
+
 static const std::unordered_map<std::string, RiemannSolverType> RIEMANN_SOLVER_TYPES = {
     {"Rusanov", RiemannSolverType::RUSANOV},
     {"HLL", RiemannSolverType::HLL},
