@@ -17,6 +17,7 @@
 #include <sstream>
 
 #include "input.h"
+#include "synthetic_inflow.h"
 
 namespace {
 
@@ -55,6 +56,79 @@ double BoundaryValue::at(const Point & x, const double t) const {
     return (*program)(vars);
 }
 
+DirectionKey::DirectionKey(const Input & entry, const std::string & where_) : where(where_) {
+    if (!is_expression(entry)) {
+        const std::vector<rtype> d = find_real_vector(entry, "direction", dim::none);
+        double norm = 0.0;
+        for (const rtype c : d) norm += double(c) * double(c);
+        norm = std::sqrt(norm);
+        if (d.size() != N_DIM || !(norm > 0.0)) {
+            throw InputError(where + ".direction must be a nonzero vector of " + std::to_string(N_DIM) + " components.");
+        }
+        FOR_I_DIM value[i] = double(d[i]) / norm;
+        return;
+    }
+    if (const auto * t = input_detail::table_of(entry)) {
+        t->record_use("direction", input_detail::real_use("array", dim::none, "", true));
+    }
+    const auto & items = entry.at("direction").as_array();
+    if (items.size() != N_DIM) {
+        throw InputError(where + ".direction must have " + std::to_string(N_DIM) +
+                         " components, numbers or expressions of x, y, z, t.");
+    }
+    for (size_t i = 0; i < N_DIM; i++) {
+        components.emplace_back(items[i], where + ".direction[" + std::to_string(i) + "]", dim::none);
+    }
+}
+
+bool DirectionKey::is_expression(const Input & entry) {
+    if (!entry.contains("direction") || !entry.at("direction").is_array()) return false;
+    for (const Input & c : entry.at("direction").as_array()) {
+        if (BoundaryValue::is_expression(c)) return true;
+    }
+    return false;
+}
+
+bool DirectionKey::depends_on_time() const {
+    for (const BoundaryValue & c : components) {
+        if (c.depends_on_time()) return true;
+    }
+    return false;
+}
+
+Point DirectionKey::at(const Point & x, const double t) const {
+    if (constant()) return value;
+    Point d{};
+    double norm = 0.0;
+    FOR_I_DIM {
+        d[i] = components[i].at(x, t);
+        norm += d[i] * d[i];
+    }
+    norm = std::sqrt(norm);
+    if (!(norm > 0.0)) {
+        std::string at;
+        for (size_t i = 0; i < N_DIM; i++) at += (i ? ", " : "") + real(x[i]);
+        throw InputError(where + ".direction is zero at the face at (" + at + "), t = " + real(t) +
+                         ": give a nonzero vector at every face and time.");
+    }
+    FOR_I_DIM d[i] /= norm;
+    return d;
+}
+
+Point DirectionKey::inward(const Point & x, const double t, const Point & n_in) const {
+    const Point d = at(x, t);
+    double into = 0.0;
+    FOR_I_DIM into += d[i] * n_in[i];
+    if (!(into > 0.0)) {
+        std::string at_x;
+        for (size_t i = 0; i < N_DIM; i++) at_x += (i ? ", " : "") + real(x[i]);
+        throw InputError(where + ".direction points out of the domain at the face at (" + at_x + "), t = " + real(t) +
+                         " (" + real(into) + " along the inward normal): make it point into the domain at every "
+                         "face and time.");
+    }
+    return d;
+}
+
 VectorKey::VectorKey(const Input & entry, const std::string & key, const std::string & where) {
     if (!entry.contains(key)) return;
     const Input & v = entry.at(key);
@@ -73,15 +147,7 @@ VectorKey::VectorKey(const Input & entry, const std::string & key, const std::st
         }
         for (const Input & c : v.as_array()) items.push_back(c);
     }
-    if (!directed) return;
-    const std::vector<rtype> d = find_real_vector(entry, "direction", dim::none);
-    double norm = 0.0;
-    for (const rtype c : d) norm += double(c) * double(c);
-    norm = std::sqrt(norm);
-    if (d.size() != N_DIM || !(norm > 0.0)) {
-        throw InputError(where + ".direction must be a nonzero vector of " + std::to_string(N_DIM) + " components.");
-    }
-    FOR_I_DIM direction[i] = double(d[i]) / norm;
+    if (directed) direction = DirectionKey(entry, where);
 }
 
 BoundaryFields::BoundaryFields(const Input & input, const BoundaryCondition & bc, const std::string & where_)
@@ -139,6 +205,11 @@ BoundaryFields::BoundaryFields(const Input & input, const BoundaryCondition & bc
         default:
             break;
     }
+    if ((type == BoundaryType::INLET_STAGNATION || type == BoundaryType::INLET_MASS_FLOW) &&
+        vector != Vector::COMPONENTS && DirectionKey::is_expression(input)) {
+        directed = true;
+        direction = DirectionKey(input, where);
+    }
 }
 
 std::vector<const BoundaryValue *> BoundaryFields::values() const {
@@ -149,6 +220,7 @@ std::vector<const BoundaryValue *> BoundaryFields::values() const {
 }
 
 bool BoundaryFields::varies() const {
+    if (directed && !direction.constant()) return true;
     for (const BoundaryValue * v : values()) {
         if (v->varies()) return true;
     }
@@ -156,6 +228,7 @@ bool BoundaryFields::varies() const {
 }
 
 bool BoundaryFields::depends_on_time() const {
+    if (directed && direction.depends_on_time()) return true;
     for (const BoundaryValue * v : values()) {
         if (v->depends_on_time()) return true;
     }
@@ -189,6 +262,13 @@ void BoundaryFields::apply(BoundaryCondition & bc, const Point & x, const double
         }
         return value;
     };
+    const bool inlet = type == BoundaryType::INLET_STATE || type == BoundaryType::INLET_STAGNATION ||
+                       type == BoundaryType::INLET_MASS_FLOW;
+    // The flow direction of stagnation and mass-flow inlets, per face when it varies
+    if (directed && !direction.constant() && !numbers_only && u.empty()) {
+        const Point d = direction.inward(x, t, n_in);
+        FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(d[i]);
+    }
     bool u_varies = false;
     for (const BoundaryValue & v : u) u_varies = u_varies || v.varies();
     // A speed along the normal differs by face: the condition before the split has none
@@ -209,7 +289,8 @@ void BoundaryFields::apply(BoundaryCondition & bc, const Point & x, const double
         if (!numbers_only) bc.data[E] = static_cast<rtype>(G);
     } else if (u_now && vector == Vector::SPEED) {
         const double speed = u[0].at(x, t);
-        const Point d = directed ? direction : n_in;
+        const Point d = !directed ? n_in : inlet && !direction.constant() ? direction.inward(x, t, n_in)
+                                                                          : direction.at(x, t);
         FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(speed * d[i]);
     } else if (u_now) {
         FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(u[i].at(x, t));
@@ -306,13 +387,17 @@ void TimedBoundaryFields::finish() {
         h_set(k) = faces_host[k].set;
         for (size_t d = 0; d < 3; d++) h_x(k, d) = d < N_DIM ? faces_host[k].x[d] : 0.0;
         const BoundaryFields & fields = *sets[faces_host[k].set];
-        const bool normal = fields.get_type() == BoundaryType::INLET_MASS_FLOW || !fields.is_directed();
-        FOR_I_DIM h_direction(k, i) = normal ? faces_host[k].n_in[i] : fields.get_direction()[i];
+        const bool normal = fields.get_type() == BoundaryType::INLET_MASS_FLOW || !fields.is_directed() ||
+                            fields.get_direction().depends_on_time();
+        const Point d = normal ? faces_host[k].n_in : fields.speed_direction(faces_host[k].x, 0.0, faces_host[k].n_in);
+        FOR_I_DIM h_direction(k, i) = d[i];
     }
     std::vector<const kexpr::Program *> all;
     set_type = Kokkos::View<uint8_t *[2]>("timed_set_type", n_sets);
     set_slot = Kokkos::View<int32_t *[BoundaryFields::N_SLOTS]>("timed_set_slot", n_sets);
     set_composition = Kokkos::View<int32_t *[4]>("timed_set_composition", n_sets);
+    set_direction = Kokkos::View<int32_t *[N_DIM]>("timed_set_direction", n_sets);
+    auto h_set_direction = Kokkos::create_mirror_view(set_direction);
     auto h_type = Kokkos::create_mirror_view(set_type);
     auto h_slot = Kokkos::create_mirror_view(set_slot);
     auto h_comp = Kokkos::create_mirror_view(set_composition);
@@ -324,6 +409,12 @@ void TimedBoundaryFields::finish() {
             const BoundaryValue * v = sets[s]->slot(k);
             h_slot(s, k) = v ? static_cast<int32_t>(all.size()) : -1;
             if (v) all.push_back(v->compiled().get());
+        }
+        const DirectionKey & direction = sets[s]->get_direction();
+        const bool timed_direction = sets[s]->is_directed() && direction.depends_on_time();
+        FOR_I_DIM {
+            h_set_direction(s, i) = timed_direction ? static_cast<int32_t>(all.size()) : -1;
+            if (timed_direction) all.push_back(direction.programs()[i].compiled().get());
         }
         const CompositionPrograms * c = compositions[s].get();
         h_comp(s, 0) = static_cast<int32_t>(species.size());
@@ -351,6 +442,7 @@ void TimedBoundaryFields::finish() {
     Kokkos::deep_copy(set_type, h_type);
     Kokkos::deep_copy(set_slot, h_slot);
     Kokkos::deep_copy(set_composition, h_comp);
+    Kokkos::deep_copy(set_direction, h_set_direction);
     Kokkos::deep_copy(composition_species, h_species);
     Kokkos::deep_copy(composition_program, h_program);
     finish_profiles(all);
@@ -432,6 +524,7 @@ struct TimedFieldsFunctor {
     Kokkos::View<uint8_t *[2]> set_type;
     Kokkos::View<int32_t *[BoundaryFields::N_SLOTS]> set_slot;
     Kokkos::View<int32_t *[4]> set_composition;
+    Kokkos::View<int32_t *[N_DIM]> set_direction;
     Kokkos::View<uint32_t *> composition_species;
     Kokkos::View<uint32_t *> composition_program;
     kexpr::ProgramTable<> programs;
@@ -465,6 +558,26 @@ struct TimedFieldsFunctor {
         BoundaryCondition & bc = bcs(i_bc);
         const BoundaryType type = static_cast<BoundaryType>(set_type(s, 0));
         const auto vector = static_cast<BoundaryFields::Vector>(set_type(s, 1));
+        const bool inlet = type == BoundaryType::INLET_STATE || type == BoundaryType::INLET_STAGNATION ||
+                           type == BoundaryType::INLET_MASS_FLOW;
+        // A direction of t, normalized, into the domain at inlets (face_direction is then the inward normal)
+        double direction[N_DIM];
+        FOR_I_DIM direction[i] = face_direction(k, i);
+        if (set_direction(s, 0) >= 0) {
+            double norm = 0.0, into = 0.0;
+            FOR_I_DIM {
+                direction[i] = programs(static_cast<uint32_t>(set_direction(s, i)), variables);
+                norm += direction[i] * direction[i];
+            }
+            norm = Kokkos::sqrt(norm);
+            if (!(norm > 0.0)) fail(k, BoundaryFields::N_SLOTS + 1, t, norm);
+            FOR_I_DIM {
+                direction[i] = norm > 0.0 ? direction[i] / norm : 0.0;
+                into += direction[i] * face_direction(k, i);
+            }
+            if (inlet && !(into > 0.0)) fail(k, BoundaryFields::N_SLOTS + 1, t, into);
+            if (vector == BoundaryFields::Vector::NONE) FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(direction[i]);
+        }
         if (vector == BoundaryFields::Vector::COMPONENTS && type == BoundaryType::INLET_MASS_FLOW) {
             double norm = 0.0, G = 0.0;
             FOR_I_DIM {
@@ -476,7 +589,7 @@ struct TimedFieldsFunctor {
             FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(value[i] / norm);
             bc.data[E] = static_cast<rtype>(G);
         } else if (vector == BoundaryFields::Vector::SPEED) {
-            FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(value[BoundaryFields::SLOT_U] * face_direction(k, i));
+            FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(value[BoundaryFields::SLOT_U] * direction[i]);
         } else if (vector == BoundaryFields::Vector::COMPONENTS) {
             FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(value[BoundaryFields::SLOT_U + i]);
         }
@@ -545,8 +658,6 @@ struct TimedFieldsFunctor {
                 bc.data[E] = static_cast<rtype>(value[BoundaryFields::SLOT_FLUX]);
             }
         }
-        const bool inlet = type == BoundaryType::INLET_STATE || type == BoundaryType::INLET_STAGNATION ||
-                           type == BoundaryType::INLET_MASS_FLOW;
         if (!gas.mixture || !inlet || !has[BoundaryFields::SLOT_T]) return;
         const BoundaryComposition y{gas.bc_Y, static_cast<int32_t>(i_bc)};
         const double T = value[BoundaryFields::SLOT_T];
@@ -569,15 +680,37 @@ struct InletTargetsFunctor {
     Kokkos::View<int32_t *> chars;
     Kokkos::View<double *[3]> x;
     Kokkos::View<uint32_t *[N_DIM]> slots;
+    Kokkos::View<int32_t *[N_DIM]> direction;
     Kokkos::View<double *[N_DIM]> scale;
     kexpr::ProgramTable<> programs;
     Kokkos::View<rtype *[N_DIM]> target;
+    Kokkos::View<int32_t> error_face;
+    Kokkos::View<double[2]> error;
     double t;
 
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k) const {
         const double vars[4] = {x(k, 0), x(k, 1), x(k, 2), t};
+        const kexpr::ArrayVariables variables{vars};
+        double factor[N_DIM];
+        FOR_I_DIM factor[i] = scale(k, i);
+        if (direction(k, 0) >= 0) {
+            double norm = 0.0, into = 0.0;
+            FOR_I_DIM {
+                factor[i] = programs(static_cast<uint32_t>(direction(k, i)), variables);
+                norm += factor[i] * factor[i];
+            }
+            norm = Kokkos::sqrt(norm);
+            FOR_I_DIM {
+                factor[i] = norm > 0.0 ? factor[i] / norm : 0.0;
+                into += factor[i] * scale(k, i);
+            }
+            if (!(into > 0.0) && Kokkos::atomic_compare_exchange(&error_face(), 0, static_cast<int32_t>(k) + 1) == 0) {
+                error(0) = t;
+                error(1) = into;
+            }
+        }
         for (uint8_t d = 0; d < N_DIM; d++) {
-            target(chars(k), d) = static_cast<rtype>(programs(slots(k, d), kexpr::ArrayVariables{vars}) * scale(k, d));
+            target(chars(k), d) = static_cast<rtype>(programs(slots(k, d), variables) * factor[d]);
         }
     }
 };
@@ -704,8 +837,8 @@ void TimedBoundaryFields::check_profiles() const {
 void TimedBoundaryFields::apply(const Kokkos::View<rtype> & time, const Kokkos::View<BoundaryCondition *> & bcs,
                                 const Gas & gas) const {
     const TimedFieldsFunctor functor{face_bc,  face_set, face_x, face_direction, set_type, set_slot, set_composition,
-                                     composition_species, composition_program, programs, time, bcs, gas,
-                                     error_face, error};
+                                     set_direction, composition_species, composition_program, programs, time, bcs,
+                                     gas, error_face, error};
     if (!faces_host.empty()) {
         Kokkos::parallel_for("timed_boundary_fields", static_cast<uint32_t>(faces_host.size()), functor);
     }
@@ -734,6 +867,11 @@ void TimedBoundaryFields::check() const {
     }
     if (slot == BoundaryFields::N_SLOTS) {
         throw InputError(fields.get_where() + ": the composition is zero" + at + ".");
+    }
+    if (slot == BoundaryFields::N_SLOTS + 1) {
+        throw InputError(fields.get_where() + ".direction is zero or points out of the domain (" + real(h_error(1)) +
+                         " along the inward normal" + at + "): make it a nonzero vector into the domain at every "
+                         "face and time.");
     }
     if (slot < BoundaryFields::SLOT_P) {
         throw InputError(fields.get_where() + ".mass_flux must point into the domain (" + real(h_error(1)) +
@@ -817,6 +955,7 @@ void DirichletStates::check() const {
 
 bool TimedInletTargets::depends_on_time(const Input & entry, const std::string & where) {
     const VectorKey u(entry, "u", where);
+    if (u.speed && u.directed && u.direction.depends_on_time()) return true;
     for (size_t d = 0; d < u.items.size(); d++) {
         const Input & v = u.items[d];
         if (!BoundaryValue::is_expression(v)) continue;
@@ -835,16 +974,22 @@ void TimedInletTargets::add(const Input & entry, const std::string & where, cons
         const std::string key = where + ".u" + (u.speed ? "" : "[" + std::to_string(i) + "]");
         host_programs.push_back(BoundaryValue(u.items[i], key, dim::velocity).compiled());
     }
+    const bool timed_direction = u.speed && u.directed && u.direction.depends_on_time();
+    std::array<int32_t, N_DIM> direction_slot{};
+    FOR_I_DIM {
+        direction_slot[i] = timed_direction ? static_cast<int32_t>(host_programs.size()) : -1;
+        if (timed_direction) host_programs.push_back(u.direction.programs()[i].compiled());
+    }
+    if (u.speed) slot.fill(slot[0]);
     for (size_t k = 0; k < chars_in.size(); k++) {
         host_chars.push_back(chars_in[k]);
         host_x.push_back(x_in[k]);
+        host_where.push_back(where);
         Point factor;
         factor.fill(1.0);
-        if (u.speed) {
-            factor = u.direction_at(n_in[k]);
-            slot.fill(slot[0]);
-        }
+        if (u.speed) factor = timed_direction ? n_in[k] : u.direction_at(x_in[k], 0.0, n_in[k]);
         host_slots.push_back(slot);
+        host_direction.push_back(direction_slot);
         host_scale.push_back(factor);
     }
 }
@@ -854,8 +999,12 @@ void TimedInletTargets::finish() {
     chars = Kokkos::View<int32_t *>("timed_inlet_chars", n);
     x = Kokkos::View<double *[3]>("timed_inlet_x", n);
     slots = Kokkos::View<uint32_t *[N_DIM]>("timed_inlet_slots", n);
+    direction = Kokkos::View<int32_t *[N_DIM]>("timed_inlet_direction", n);
     scale = Kokkos::View<double *[N_DIM]>("timed_inlet_scale", n);
+    error_face = Kokkos::View<int32_t>("timed_inlet_error_face");
+    error = Kokkos::View<double[2]>("timed_inlet_error");
     auto h_scale = Kokkos::create_mirror_view(scale);
+    auto h_direction = Kokkos::create_mirror_view(direction);
     auto h_chars = Kokkos::create_mirror_view(chars);
     auto h_x = Kokkos::create_mirror_view(x);
     auto h_slots = Kokkos::create_mirror_view(slots);
@@ -864,12 +1013,14 @@ void TimedInletTargets::finish() {
         for (size_t d = 0; d < 3; d++) h_x(k, d) = d < N_DIM ? host_x[k][d] : 0.0;
         FOR_I_DIM {
             h_slots(k, i) = host_slots[k][i];
+            h_direction(k, i) = host_direction[k][i];
             h_scale(k, i) = host_scale[k][i];
         }
     }
     Kokkos::deep_copy(chars, h_chars);
     Kokkos::deep_copy(x, h_x);
     Kokkos::deep_copy(slots, h_slots);
+    Kokkos::deep_copy(direction, h_direction);
     Kokkos::deep_copy(scale, h_scale);
     std::vector<const kexpr::Program *> all;
     for (const auto & p : host_programs) all.push_back(p.get());
@@ -881,10 +1032,20 @@ void TimedInletTargets::check() const {
     if (const uint32_t stopped = programs.stopped(); stopped > 0) {
         throw InputError(host_programs[stopped - 1]->runaway_error());
     }
+    int32_t face = 0;
+    Kokkos::deep_copy(face, error_face);
+    if (face == 0) return;
+    auto h_error = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), error);
+    const size_t k = static_cast<size_t>(face - 1);
+    std::string at;
+    for (size_t d = 0; d < N_DIM; d++) at += (d ? ", " : "") + real(host_x[k][d]);
+    throw InputError(host_where[k] + ".direction is zero or points out of the domain at the face at (" + at +
+                     "), t = " + real(h_error(0)) + " (" + real(h_error(1)) + " along the inward normal): make it a "
+                     "nonzero vector into the domain at every face and time.");
 }
 
 void TimedInletTargets::fill(const double t, const Kokkos::View<rtype *[N_DIM]> & target) const {
     if (host_chars.empty()) return;
     Kokkos::parallel_for("timed_inlet_targets", static_cast<uint32_t>(host_chars.size()),
-                         InletTargetsFunctor{chars, x, slots, scale, programs, target, t});
+                         InletTargetsFunctor{chars, x, slots, direction, scale, programs, target, error_face, error, t});
 }

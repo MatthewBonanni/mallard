@@ -360,6 +360,13 @@ TEST(StagnationInletTest, ThermallyPerfectDuctReachesTheIsentropicExitState) {
     }
 }
 
+namespace {
+
+/** @brief A vector [x, 0(, 0)]. */
+std::string vec_of(const std::string & x) { return "[" + x + (N_DIM == 3 ? ", 0.0, 0.0]" : ", 0.0]"); }
+
+} // namespace
+
 TEST(StagnationInletTest, InvalidInputIsRejected) {
     const std::string head =
         "[run]\nn_steps = 1\ncfl = 0.4\n" + mesh_block("cartesian", 8, 2, 1.0, 0.25) +
@@ -373,7 +380,15 @@ TEST(StagnationInletTest, InvalidInputIsRejected) {
              {inlet + "T0 = 1.0\n", ".p0: missing"},
              {inlet + "p0 = 1.0\nT0 = -1.0\n", ".T0 must be positive"},
              {inlet + "p0 = 1.0\nT0 = 1.0\n" + wrong_way, ".direction: points out of the domain"},
-             {inlet + "p0 = 1.0\nT0 = 1.0\ndirection = [0.0]\n", ".direction: must be a nonzero vector"}}) {
+             {inlet + "p0 = 1.0\nT0 = 1.0\ndirection = [0.0]\n", ".direction: must be a nonzero vector"},
+             {inlet + "p0 = 1.0\nT0 = 1.0\ndirection = [\"y\"]\n",
+              ".direction must have " + std::to_string(N_DIM) + " components"},
+             {inlet + "p0 = 1.0\nT0 = 1.0\ndirection = " + vec_of("\"y - 1\"") + "\n",
+              ".direction: points out of the domain at the face at"},
+             {inlet + "p0 = 1.0\nT0 = 1.0\ndirection = " + vec_of("\"0 * y\"") + "\n", ".direction: is zero at the face at"},
+             {"type = \"inlet_state\"\nu = 1.0\np = 1.0\nT = 1.0\ndirection = " + vec_of("\"y - 1\"") + "\n",
+              ".direction: points out of the domain at the face at"},
+             {"type = \"wall_adiabatic\"\ndirection = " + vec_of("\"y\"") + "\n", ".direction: goes with a wall speed u"}}) {
         expect_error(head + duct_boundaries(left, outlet), message);
     }
 }
@@ -760,6 +775,32 @@ TEST(MassFlowInletTest, ProfileOrMdotOfTimeNegativeAtSomeTimeStopsTheRun) {
     }
 }
 
+// A direction of t that turns out of the domain after the first steps stops
+// the run with the face and time, from the face conditions and from the
+// nscbc targets. Fails if a direction of t goes unchecked on the device.
+TEST(InletTest, DirectionOfTThatTurnsOutwardStopsTheRun) {
+    const std::string head =
+        "[run]\nn_steps = 20\ncfl = 0.4\n" + mesh_block("cartesian", 8, 4, 1.0, 0.25) +
+        "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = " + zero_velocity() +
+        "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n";
+    const std::string turning = "direction = " + vec_of("\"1 - 1000 * t\"") + "\n";
+    for (const std::string & left : {"type = \"inlet_stagnation\"\np0 = 1.1\nT0 = 1.0\n" + turning,
+                                     "type = \"inlet_state\"\nu = 0.3\np = 1.0\nT = 1.0\n" + turning,
+                                     "type = \"inlet_state\"\nu = 0.3\np = 1.0\nT = 1.0\nnscbc = { L = 2.0 }\n" + turning}) {
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(head + duct_boundaries(left, "type = \"outlet_pressure\"\np = 1.0\n")));
+        try {
+            solver.run();
+            ADD_FAILURE() << left;
+        } catch (const std::runtime_error & e) {
+            EXPECT_NE(std::string(e.what()).find(".direction is zero or points out of the domain"), std::string::npos)
+                << e.what();
+        }
+    }
+}
+
 namespace {
 
 /** @brief Inlet pressure and exit state [p1, u2, T2] of Rayleigh flow: mass flux G at T1, heat Q per unit area, exit at p2. */
@@ -848,7 +889,11 @@ TEST(MassFlowInletTest, InvalidInputIsRejected) {
              {inlet + "T = 1.0\nmdot = \"1 + y\"\n", ".mdot is the total mass flow through the inlet"},
              {inlet + "T = 1.0\nmdot = \"t - 1\"\n", ".mdot must be non-negative (at t = 0)"},
              {inlet + "T = 1.0\nmdot = -1.0\n", ".mdot must be positive"},
-             {inlet + "T = 1.0\nmass_flux = 1.0\n" + wrong_way, ".direction: points out of the domain"}}) {
+             {inlet + "T = 1.0\nmass_flux = 1.0\n" + wrong_way, ".direction: points out of the domain"},
+             {inlet + "T = 1.0\nmass_flux = 1.0\ndirection = " + vec_of("\"y - 1\"") + "\n",
+              ".direction: points out of the domain at the face at"},
+             {inlet + "T = 1.0\nmass_flux = " + vec_of("1.0") + "\ndirection = " + vec_of("\"y\"") + "\n",
+              ".direction: doesn't go with a mass_flux vector"}}) {
         expect_error(head + duct_boundaries(left, outlet), message);
     }
 }

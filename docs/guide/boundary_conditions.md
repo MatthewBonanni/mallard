@@ -170,6 +170,24 @@ A vector together with `direction` is an error. A wall speed needs its
 takes a vector only. A `mass_flux` vector `m` flows along `m / |m|` with the
 flux `m . n_in` at each face; `mdot` stays a scalar total.
 
+`direction` (of a speed `u`, and the flow direction of `inlet_stagnation`
+and `inlet_mass_flow`) may have expressions of `x`, `y`, `z`, `t` among its
+components. It is normalized at each face, and at inlets it must point into
+the domain at every face and time: at setup the run stops with the first
+face where it does not, and a direction of `t` that turns outward or to zero
+later stops the run at the next progress check with the face, time and
+value. A swirling inflow about the axis of a circular inlet in the x = 0
+plane, with a swirl angle of 30°:
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "inlet_mass_flow"
+mass_flux = 50.0
+T = 300.0
+direction = [1.0, "-0.577 * z / sqrt(y * y + z * z + 1e-12)", "0.577 * y / sqrt(y * y + z * z + 1e-12)"]
+```
+
 ### Time-dependent conditions
 
 Expressions of `x`, `y`, `z` are evaluated once at each face center, so each
@@ -251,7 +269,7 @@ the three types differ in what they impose on the energy equation.
 | Key | Default | Meaning |
 |---|---|---|
 | `u` | at rest | Wall velocity [m/s]: a vector, or a speed along `direction`; numbers or expressions of x, y, z, t (a rotating wall: `u = ["-omega * y", "omega * x"]`) |
-| `direction` | — | With a speed `u`: the direction the wall moves in |
+| `direction` | — | With a speed `u`: the direction the wall moves in (numbers or expressions of x, y, z, t) |
 | `wall_model` | none | A [wall model](#wall-models-wall_model) for this wall, with its own model and parameters |
 
 A wall moving along its own normal (blowing, suction) is not supported yet:
@@ -398,7 +416,7 @@ sees the Riemann flux against the prescribed state; it is not an outlet.
 | Key | Default | Meaning |
 |---|---|---|
 | `u` | required | Velocity [m/s]: a vector, or a speed along `direction` |
-| `direction` | inward normal | With a speed `u` |
+| `direction` | inward normal | With a speed `u`: numbers or expressions of x, y, z, t, into the domain at every face and time |
 | `p`, `T` | required | Pressure and temperature |
 | `X` / `Y`, `balance` | required for mixtures | Composition |
 | `nscbc` | none | [Non-reflecting treatment](#nscbc-characteristic-boundaries) |
@@ -446,7 +464,7 @@ Mixtures use their own `h(T)` and `s(T, p)`, not a constant `gamma`.
 | Key | Default | Meaning |
 |---|---|---|
 | `p0`, `T0` | required | Stagnation pressure and temperature |
-| `direction` | inward normal | Flow direction; must point into the domain at every face |
+| `direction` | inward normal | Flow direction (numbers or expressions of x, y, z, t); must point into the domain at every face and time |
 | `X` / `Y`, `balance` | required for mixtures | Composition |
 
 ![Nozzle: Mach number, pressure and stagnation pressure against the quasi-one-dimensional solution](../images/guide/nozzle_validation-light.svg#gh-light-mode-only)
@@ -507,7 +525,7 @@ fixes the velocity instead, and its mass flow drifts with the inlet density).
 | `mass_flux` or `mdot` | one required | Mass flux `rho u . n_in` [kg/(m^2 s)] (a number or expression of x, y, z, t, or a vector, which gives the direction too), or the total mass flow through the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs] (a number or expression of t, non-negative) |
 | `profile` | uniform | With `mdot`: the shape of the mass flux along the inlet (an expression of x, y, z, t, non-negative), scaled to `mdot` at every stage |
 | `T` | required | Inflow temperature |
-| `direction` | inward normal | Flow direction; must point into the domain at every face; not with a `mass_flux` vector |
+| `direction` | inward normal | Flow direction (numbers or expressions of x, y, z, t); must point into the domain at every face and time; not with a `mass_flux` vector |
 | `X` / `Y`, `balance` | required for mixtures | Composition |
 
 ![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while inlet_state's drifts](../images/guide/mass_flow_held-light.svg#gh-light-mode-only)

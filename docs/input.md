@@ -585,8 +585,8 @@ type that takes them; which options each type takes is the guide's
 | `wall_isothermal` | Wall at temperature `T` | `T`, `u` and `wall_model` (optional, as `wall_adiabatic`) |
 | `wall_heat_flux` | Wall with heat flux `q` [W/m^2] into the fluid | `q`, `u` and `wall_model` (optional, as `wall_adiabatic`) |
 | `inlet_state` | The full inflow state: exact for supersonic inflow; for subsonic inflow it also fixes `p` and reflects acoustic waves, unless `nscbc` | `u` (a vector, or a speed along `direction`, default the inward normal), `p`, `T`; `X` or `Y` for mixtures (numbers or expressions, with an optional `balance` species as in `[initialize]`); options `nscbc` (below) and, with it, `turbulence` (below) |
-| `inlet_stagnation` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `inlet_state`) |
-| `inlet_mass_flow` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)]: a number or expression, or a vector `m`, which flows along `m / |m|` with `m . n_in` at each face) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]: a number or an expression of `t`, non-negative) with an optional `profile` (expression of `x`, `y`, `z`, `t`, non-negative, default uniform) shaping it along the inlet, rescaled to `mdot` at every stage; `direction` (default the inward normal of each face; not with a `mass_flux` vector); `X` or `Y` for mixtures (as `inlet_state`) |
+| `inlet_stagnation` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction: numbers or expressions of `x`, `y`, `z`, `t`, into the domain at every face and time; default the inward normal of each face), `X` or `Y` for mixtures (as `inlet_state`) |
+| `inlet_mass_flow` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)]: a number or expression, or a vector `m`, which flows along `m / |m|` with `m . n_in` at each face) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]: a number or an expression of `t`, non-negative) with an optional `profile` (expression of `x`, `y`, `z`, `t`, non-negative, default uniform) shaping it along the inlet, rescaled to `mdot` at every stage; `direction` (numbers or expressions of `x`, `y`, `z`, `t`, into the domain at every face and time; default the inward normal of each face; not with a `mass_flux` vector); `X` or `Y` for mixtures (as `inlet_state`) |
 | `outlet_pressure` | Outlet: imposes `p` on subsonic faces, keeping the interior temperature and velocity; supersonic faces take the interior state | `p`; options `average` (`true`: on subsonic faces, shift the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile, for mixed subsonic/supersonic outflow; `p` then may depend on `t` only; default `false`; not with mixtures) or `nscbc` (below) |
 | `outlet_extrapolation` | Transmissive: the exterior state is the solution translated from inside the domain | |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike (single gases) | `u` (a vector), `p`, `T` (free stream) |
@@ -622,7 +622,7 @@ depend on `t`, these and `dirichlet` states alike, are evaluated once and
 cost nothing per stage; those that do are evaluated on the device at the
 stage time, inside the step's CUDA graph.
 A number of `t` that leaves its range (`p`, `T`, `p0`, `T0`, a wall `T` not
-positive, `mass_flux` negative, a `mass_flux` vector out of the domain) stops
+positive, `mass_flux` negative, a `mass_flux` vector or an inlet `direction` out of the domain) stops
 the run at the next progress check with the face, time and value. Guide:
 [values](guide/boundary_conditions.md#values-numbers-expressions-and-vectors).
 
@@ -630,7 +630,10 @@ A vector (`u` of `inlet_state`, walls and `farfield`; `mass_flux`) is either
 `N_DIM` components (each a number or an expression), or one number or
 expression, a magnitude along `direction` (normalized; default the inward
 normal of each face). A vector together with `direction` is an error; a wall
-speed needs its `direction`, and `farfield` takes a vector only.
+speed needs its `direction`, and `farfield` takes a vector only. `direction`
+(also the flow direction of `inlet_stagnation` and `inlet_mass_flow`) is
+`N_DIM` numbers or expressions of `x`, `y`, `z`, `t`, normalized at each
+face; at inlets it must point into the domain at every face and time.
 
 ### Characteristic boundaries (`nscbc`)
 

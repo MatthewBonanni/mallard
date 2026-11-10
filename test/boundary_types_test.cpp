@@ -187,6 +187,79 @@ TEST(BoundaryTypesTest, WallSpeedAlongADirectionIsTheVector) {
               1e-6);
 }
 
+// A direction of x, y, z is the direction of each face: a speed along a swirl
+// is the vector field it stands for (also as nscbc targets), and a direction
+// split by y is the two entries split by where, for stagnation and mass-flow
+// inlets and walls. Fails if the direction is read once for the zone,
+// evaluated at the wrong face, or left unnormalized.
+TEST(BoundaryTypesTest, DirectionOfXIsTheDirectionOfEachFace) {
+    const std::string norm = "sqrt(1 + (y - 0.5) * (y - 0.5))";
+    const std::string nscbc = "nscbc = { L = 2.0 }\n";
+    for (const std::string & extra : {std::string(), nscbc}) {
+        const auto vector = final_state(channel("type = \"inlet_state\"\nu = " +
+                                                    vec("\"0.5 / " + norm + "\"", "\"0.5 * (y - 0.5) / " + norm + "\"") +
+                                                    "\n" + STATE + extra,
+                                                OUTLET, WALL, WALL));
+        const auto speed = final_state(channel("type = \"inlet_state\"\nu = 0.5\ndirection = " +
+                                                   vec("1.0", "\"y - 0.5\"") + "\n" + STATE + extra,
+                                               OUTLET, WALL, WALL));
+        EXPECT_LT(max_difference(vector, speed), roundoff(1e-14)) << extra;
+    }
+    const std::string split = "\"y < 0.5 ? 0.3 : -0.3\"";
+    for (const std::string & inlet : {std::string("type = \"inlet_stagnation\"\np0 = 1.1\nT0 = 1.0\n"),
+                                      std::string("type = \"inlet_mass_flow\"\nmass_flux = 0.3\nT = 1.0\n")}) {
+        const auto expression = final_state(channel(inlet + "direction = " + vec("1.0", split) + "\n", OUTLET, WALL, WALL));
+        const auto where = final_state(channel(inlet + "direction = " + vec("1.0", "0.3") + "\nwhere = \"y < 0.5\"\n"
+                                               "[[boundaries]]\nname = \"left\"\n" + inlet + "direction = " +
+                                               vec("1.0", "-0.3") + "\nwhere = \"y >= 0.5\"\n", OUTLET, WALL, WALL));
+        const auto fixed = final_state(channel(inlet + "direction = " + vec("1.0", "0.3") + "\n", OUTLET, WALL, WALL));
+        EXPECT_LT(max_difference(expression, where), roundoff(1e-14)) << inlet;
+        EXPECT_GT(max_difference(expression, fixed), 1e-6) << inlet;
+    }
+    const std::string ns = "navier_stokes", top = "type = \"wall_isothermal\"\nT = 1.0\nu = 0.2\n";
+    const auto expression =
+        final_state(channel(WALL, WALL, WALL, top + "direction = " + vec("\"x < 1 ? 1 : -1\"", "0.0") + "\n", ns));
+    const auto where = final_state(channel(WALL, WALL, WALL, top + "direction = " + vec("1.0", "0.0") +
+                                           "\nwhere = \"x < 1\"\n[[boundaries]]\nname = \"top\"\n" + top +
+                                           "direction = " + vec("-1.0", "0.0") + "\nwhere = \"x >= 1\"\n", ns));
+    EXPECT_EQ(expression, where);
+}
+
+// A direction of t turns the flow at every stage: a speed along it is the
+// vector of t it stands for (also as nscbc targets), a mass flux along it the
+// mass flux vector of t, and a direction of t that stays put is the fixed
+// one, at inlets and walls. Fails if the direction of t is evaluated once, at
+// the wrong time, or left unnormalized on the device.
+TEST(BoundaryTypesTest, DirectionOfTFollowsAtEveryStage) {
+    const std::string a = "0.5 * sin(20 * t)", norm = "sqrt(1 + (" + a + ") * (" + a + "))";
+    const std::string nscbc = "nscbc = { L = 2.0 }\n";
+    for (const std::string & extra : {std::string(), nscbc}) {
+        const auto vector = final_state(channel("type = \"inlet_state\"\nu = " +
+                                                    vec("\"0.5 / " + norm + "\"", "\"0.5 * " + a + " / " + norm + "\"") +
+                                                    "\n" + STATE + extra,
+                                                OUTLET, WALL, WALL));
+        const auto speed = final_state(channel("type = \"inlet_state\"\nu = 0.5\ndirection = " +
+                                                   vec("1.0", "\"" + a + "\"") + "\n" + STATE + extra,
+                                               OUTLET, WALL, WALL));
+        const auto fixed = final_state(channel("type = \"inlet_state\"\nu = 0.5\n" + STATE + extra, OUTLET, WALL, WALL));
+        EXPECT_LT(max_difference(vector, speed), roundoff(1e-14)) << extra;
+        EXPECT_GT(max_difference(speed, fixed), 1e-4) << extra;
+    }
+    const auto scalar = final_state(channel("type = \"inlet_mass_flow\"\nmass_flux = 0.3\nT = 1.0\ndirection = " +
+                                            vec("1.0", "\"" + a + "\"") + "\n", OUTLET, WALL, WALL));
+    const auto vector = final_state(channel("type = \"inlet_mass_flow\"\nmass_flux = " +
+                                            vec("0.3", "\"0.3 * " + a + "\"") + "\nT = 1.0\n", OUTLET, WALL, WALL));
+    EXPECT_LT(max_difference(scalar, vector), roundoff(1e-13));
+    const std::string stagnation = "type = \"inlet_stagnation\"\np0 = 1.1\nT0 = 1.0\ndirection = ";
+    EXPECT_LT(max_difference(final_state(channel(stagnation + vec("1.0", "\"0.3 + 0 * t\"") + "\n", OUTLET, WALL, WALL)),
+                             final_state(channel(stagnation + vec("1.0", "0.3") + "\n", OUTLET, WALL, WALL))),
+              roundoff(1e-14));
+    const std::string ns = "navier_stokes", top = "type = \"wall_isothermal\"\nT = 1.0\nu = 0.2\ndirection = ";
+    EXPECT_LT(max_difference(final_state(channel(WALL, WALL, WALL, top + vec("\"1 + 0 * t\"", "0.0") + "\n", ns)),
+                             final_state(channel(WALL, WALL, WALL, top + vec("1.0", "0.0") + "\n", ns))),
+              roundoff(1e-14));
+}
+
 // A mass flux vector m flows along m / |m| with m . n_in at each face: along
 // the normal it is the scalar mass flux. Fails if the vector's normal
 // component, its direction or its per-face split is lost.
