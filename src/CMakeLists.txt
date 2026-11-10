@@ -7,6 +7,7 @@ add_library(MallardCore STATIC
     common/region_input.cpp
     common/region_mesh.cpp
     io/case_view.cpp
+    io/case_image.cpp
     common/tabulated.cpp
     common/common_io.cpp
     common/input.cpp

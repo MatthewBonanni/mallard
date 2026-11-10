@@ -11,6 +11,7 @@ the site's backgrounds there, for review.
 import argparse
 import sys
 
+import case_view
 import domains
 import effective_resolution
 import geometry
@@ -42,6 +43,7 @@ def main():
         sys.argv = [sys.argv[0], "--mallard", args.mallard] + (["--mallard3d", args.mallard3d] if args.mallard3d else [])
         probes.main()
         regions.figures(args.mallard, args.mallard3d)
+        case_view.figures(args.mallard, args.mallard3d)
 
 
 if __name__ == "__main__":

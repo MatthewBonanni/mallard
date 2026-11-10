@@ -24,6 +24,7 @@
 #include "mesh_block.h"
 #include "data_paths.h"
 #include "test_fixtures.h"
+#include "case_image.h"
 #include "check.h"
 #include "comm.h"
 #include "common_io.h"
@@ -31,6 +32,7 @@
 #include "mesh_block.h"
 #include "mesh_quality.h"
 #include "partition.h"
+#include "region_input.h"
 #include "report.h"
 #include "scratch.h"
 #include "solver.h"
@@ -686,29 +688,126 @@ TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
         << (first_error(r));
 }
 
-#ifdef Mallard_HAS_HDF5
-TEST(CheckRegions, TheCaseViewHoldsEveryRegionAndZone) {
+namespace {
+
+std::string read_file(const std::filesystem::path & path) {
+    std::ifstream file(path);
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+/** @brief A box with an inlet, an outlet and walls, a named region, a line and a point probe, and one on a curve. */
+std::string view_case() {
+    const std::string two = N_DIM == 2 ? "" : ", 0.125";
+    const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
+                                           : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
+    const std::string heater = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.2}"
+                                          : "{type = \"sphere\", center = [0.5, 0.5, 0.125], radius = 0.1}";
+    std::string zones = N_DIM == 2 ? "" : "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                                          "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
+    zones += "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.2\n"
+             "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n[regions]\nheater = " + heater + "\n"
+             "[[sources]]\nregion = \"heater\"\nrhoE = 1.0\n"
+             "[[probes]]\nname = \"s\"\nvariables = [\"P\"]\nregion = " + surface + "\n"
+             "[[probes]]\nname = \"wake\"\nvariables = [\"P\"]\nstart = [1.5, 0.1" + two + "]\nend = [1.5, 0.9" + two + "]\n"
+             "n_points = 5\n[[probes]]\nname = \"tap\"\nvariables = [\"P\"]\npoint = [0.25, 0.75" + two + "]\n";
+    std::string input = box("1.0", "t_stop = 0.5\ncfl = 0.8\n", zones, {"none"});
+    const std::string none = "[[boundaries]]\nname = \"none\"\ntype = \"symmetry\"\n";
+    input.replace(input.find(none), none.size(),
+                  "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [1.0, 0.0" + std::string(N_DIM == 3 ? ", 0.0" : "") +
+                      "]\np = 1.0\nT = 1.0\n[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 1.0\n");
+    return input;
+}
+
+} // namespace
+
+TEST(CheckRegions, TheCaseViewHoldsEveryRegionZoneAndProbeAndLabelsThem) {
     const std::filesystem::path dir = scratch_dir() / "mallard_check_view";
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     CheckOptions options;
     options.view_dir = dir.string();
-    const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
-                                           : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
-    const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
-                                    "[[probes]]\nname = \"s\"\nvariables = [\"P\"]\nregion = " + surface + "\n"),
-                                options);
+    const CheckReport r = check(view_case(), options);
     ASSERT_TRUE(r.ok()) << (first_error(r));
-    EXPECT_EQ(r.view_file, (dir / "case.vtkhdf").string());
+    ASSERT_EQ(r.view_images.size(), 2u);
     comm::barrier();
     if (!comm::is_root()) return;
+    std::vector<std::string> blocks = {"domain", "left", "right", "bottom", "top", "heater",
+                                       "probes[name = \"s\"].region", "probes[name = \"wake\"]", "probes[name = \"tap\"]"};
+    if (N_DIM == 3) blocks.insert(blocks.end(), {"back", "front"});
+#ifdef Mallard_HAS_HDF5
+    EXPECT_EQ(r.view_file, (dir / "case.vtkhdf").string());
     const auto datasets = h5_all_datasets(r.view_file);
-    for (const std::string block : {"left", "right", "bottom", "top", "probes[name = \"s\"].region"}) {
-        EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/Connectivity")) << block;
-        EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/CellData/normal")) << block;
+    for (const std::string & block : blocks) EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/Connectivity")) << block;
+    EXPECT_TRUE(datasets.count("VTKHDF/probes[name = \"s\"].region/CellData/normal"));
+#else
+    EXPECT_EQ(r.view_file, (dir / "case.vtm").string());
+    const std::string vtm = read_file(r.view_file);
+    for (const std::string & block : blocks) {
+        EXPECT_NE(vtm.find("name=\"" + case_image::xml_text(block) + "\""), std::string::npos) << block;
+    }
+#endif
+    // Every block but the mesh labeled in both images; the zones with their conditions and values in units
+    for (const std::string & image : r.view_images) {
+        const std::string svg = read_file(image);
+        for (size_t k = 1; k < blocks.size(); k++) {
+            EXPECT_NE(svg.find(">" + case_image::xml_text(blocks[k])), std::string::npos) << blocks[k] << " in " << image;
+        }
+        EXPECT_NE(svg.find(">left: inlet_state, T = 1.0 K, p = 1.0 Pa, u = [1.0, 0.0"), std::string::npos) << image;
+        EXPECT_NE(svg.find(">bottom: wall_isothermal, T = 1.2 K<"), std::string::npos) << image;
+        EXPECT_NE(svg.find(">right: outlet_pressure, p = 1.0 Pa<"), std::string::npos) << image;
     }
 }
-#endif
+
+TEST(CaseView, PeriodicFacesAndTheirImagesLieOnThePairsZones) {
+    Mesh mesh;
+    mesh.init(parse_input_string("[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 3\nLx = 2.0\nLy = 1.0\n" +
+                                 std::string(N_DIM == 3 ? "Nz = 2\nLz = 0.5\n" : "") +
+                                 "[[periodic]]\nzones = [\"left\", \"right\"]\n"));
+    const MeshView view = mesh_view(mesh, region::MeshRegions(mesh));
+    std::vector<const case_view::Block *> periodic;
+    for (const case_view::Block & b : view.blocks) {
+        if (b.kind == case_view::Kind::PERIODIC) periodic.push_back(&b);
+        EXPECT_TRUE(b.name != "left" && b.name != "right") << b.name;
+    }
+    ASSERT_EQ(periodic.size(), 1u);
+    const case_view::Block & b = *periodic[0];
+    EXPECT_EQ(b.label, N_DIM == 2 ? "periodic left / right: translation (2, 0) m"
+                                  : "periodic left / right: translation (2, 0, 0) m");
+    const size_t faces = N_DIM == 2 ? 3 : 6;
+    ASSERT_EQ(b.n_cells(), 2 * faces);
+    for (size_t c = 0; c < b.n_cells(); c += 2) {
+        // The face on one zone, its image on the other
+        const double x_face = b.points[size_t(b.connectivity[size_t(b.offsets[c])])][0];
+        const double x_image = b.points[size_t(b.connectivity[size_t(b.offsets[c + 1])])][0];
+        EXPECT_NEAR(std::abs(x_face - x_image), 2.0, 1e-12);
+        EXPECT_EQ(b.fields[0].values[c], 0.0);
+        EXPECT_EQ(b.fields[0].values[c + 1], 1.0);
+    }
+}
+
+// The 2D image, byte for byte. After a deliberate change of the drawing, MALLARD_UPDATE_GOLDEN=1 rewrites it
+// (then look at it, light and dark, and review its diff).
+TEST(CaseView, TheImageMatchesTheGoldenImage) {
+    if (N_DIM != 2 || sizeof(rtype) != 8 || comm::size() > 1) {
+        GTEST_SKIP() << "the golden image is of a serial 2D double-precision check";
+    }
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_view_golden";
+    std::filesystem::remove_all(dir);
+    CheckOptions options;
+    options.view_dir = dir.string();
+    options.input_file = "input.toml";
+    const CheckReport r = check(view_case(), options);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    const std::filesystem::path golden = std::filesystem::path(source_dir()) / "test" / "data" / "check";
+    for (const std::string theme : {"light", "dark"}) {
+        const std::string svg = read_file(dir / ("case-" + theme + ".svg"));
+        const std::filesystem::path expected = golden / ("case_view_2d-" + theme + ".svg");
+        if (const char * update = std::getenv("MALLARD_UPDATE_GOLDEN"); update && std::string(update) == "1") {
+            std::ofstream(expected) << svg;
+        }
+        EXPECT_EQ(svg, read_file(expected)) << "the image differs from " << expected << "; MALLARD_UPDATE_GOLDEN=1 updates it";
+    }
+}
 
 namespace {
 

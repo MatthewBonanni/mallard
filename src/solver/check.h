@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "case_view.h"
 #include "input.h"
 #include "log.h"
 #include "memory_tracker.h"
@@ -132,7 +133,8 @@ struct CheckReport {
 
     std::vector<CheckBoundary> boundaries;
     std::vector<CheckRegion> regions;
-    std::string view_file;     // the case view written, or empty
+    std::string view_file;     // the case view's ParaView file written, or empty
+    std::vector<std::string> view_images;  // and its images
     std::string quality_file;  // the quality fields written, or empty
 
     bool has_quality = false;
@@ -222,6 +224,21 @@ struct CheckReport {
  *        (a100-40, a100-80, h100-80, h200, mi250x, mi300x). Returns an error, or empty.
  */
 std::string set_memory_target(const std::string & text, CheckOptions & options);
+
+class Mesh;
+namespace region {
+struct MeshRegions;
+}
+
+/** @brief The case view of a mesh alone, and the check's entries of its own regions (the domain's first). */
+struct MeshView {
+    std::vector<case_view::Block> blocks;  // the domain's cells, the boundary zones, cell zones and periodic pairs
+    std::vector<CheckRegion> regions;
+    std::array<std::array<double, 3>, 2> domain{};  // its box
+};
+
+/** @brief The case view of the mesh and of its regions (automatic). Collective. */
+MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic);
 
 /**
  * @brief The peak of Kokkos allocations predicted for a rank of local_cells owned and halo cells: the largest

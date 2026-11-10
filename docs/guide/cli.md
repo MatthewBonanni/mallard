@@ -398,12 +398,19 @@ Options:
   --catalog KEYS.json       Write every key the setup looked up, with its type,
                             unit, default and accepted values, as JSON. Default:
                             none.
-  --view DIR                Write the case view to DIR/case.vtkhdf for ParaView:
-                            every region the case uses (filled regions as their
-                            cells with their fractions, surfaces and curves with
-                            their normals or tangents and measures) and every
-                            boundary zone, one block each (builds without HDF5:
-                            DIR/case.vtm). Default: none.
+  --view DIR                Write the case view, without running the case:
+                            DIR/case.vtkhdf for ParaView (builds without HDF5:
+                            DIR/case.vtm), one block each for the mesh, every
+                            boundary zone, region the case uses (filled regions
+                            as their cells with their fractions, surfaces and
+                            curves with their normals or tangents and measures),
+                            probe and periodic pair; and DIR/case-light.svg and
+                            DIR/case-dark.svg, the annotated image (3D: an
+                            isometric view over three orthographic ones) with
+                            every boundary labeled by its name and condition and
+                            every region and probe by its name, a legend, axes,
+                            a scale bar and the domain's extent in its units.
+                            Default: none.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).
@@ -413,7 +420,7 @@ Examples:
   $ mallard check input.toml
   $ mallard check input.toml --ranks 64 --throughput 5e7
   $ mpirun -n 4 mallard check input.toml --quality quality
-  $ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView
+  $ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView
 
 Exit status:
   0  no errors (there may be warnings)
@@ -426,7 +433,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ### mallard info
 
 ```text
-Usage: mallard info FILE [--format text|json] [--input] [--quality PREFIX]
+Usage: mallard info FILE [--format text|json] [--input] [--quality PREFIX] [--view DIR]
        mallard info RUN_DIR [--format text|json] [--input] [--verify]
 
 Reports what a file Mallard writes or reads holds, without an input file: its
@@ -468,6 +475,11 @@ Options:
   --quality PREFIX    Mesh files: write the mesh-quality fields to
                       PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without
                       HDF5), as mallard check --quality does. Default: none.
+  --view DIR          Mesh files: write the case view of the mesh alone (its
+                      cells, boundary and cell zones and periodic pairs) to DIR,
+                      as mallard check --view does: DIR/case.vtkhdf
+                      (DIR/case.vtm without HDF5), DIR/case-light.svg and
+                      DIR/case-dark.svg. Default: none.
   --verify            Run directories: also check each file's contents against
                       the SHA-256 its output record holds, not only its size;
                       reads every file once. Default: sizes only.
@@ -481,6 +493,7 @@ Examples:
   $ mallard info solut/restart_001000.restart --format json
   $ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it
   $ mallard info wing.msh --quality quality
+  $ mallard info wing.msh --view view   # view/case-light.svg: the zones, labeled
   $ mallard info runs/cylinder
 
 Exit status:
