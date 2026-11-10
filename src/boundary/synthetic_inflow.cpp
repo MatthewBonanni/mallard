@@ -24,6 +24,7 @@
 #include "input.h"
 #include "log.h"
 #include "mesh.h"
+#include "provenance.h"
 
 namespace {
 
@@ -218,6 +219,7 @@ void InletProfile::read_table(const Input & turbulence, const std::string & wher
     const std::string file = find_value<std::string>(turbulence, "profile");
     std::ifstream in(file);
     if (!in.good()) throw InputError(key + ": cannot open " + file + ".");
+    provenance::read_file("inflow_profile", file);
     std::string line;
     std::getline(in, line);
     std::vector<std::string> header;

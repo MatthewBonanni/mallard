@@ -106,6 +106,7 @@ void Solver::init_solution_restart() {
                           .docs = "docs/input.md#type--remap"});
     }
     apply_restart(restart, file, true);
+    provenance::read_start_file("restart", file, restart.provenance, restart.step, restart.t);
     provenance::set_restart_of(provenance::find_string(restart.provenance, "run", "run_id"), file, step);
     initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t));
     // The mesh file's hash is known on rank 0 only

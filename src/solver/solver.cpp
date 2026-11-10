@@ -202,6 +202,7 @@ int Solver::init(const Input & input_in) {
     provenance::set_preset(preset.name, preset_settings);
     print_setup(resolved);
     provenance::set_placement();
+    provenance::set_read_files();
     provenance::share();
     write_provenance();
     return 0;

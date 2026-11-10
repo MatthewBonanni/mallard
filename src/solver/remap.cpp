@@ -28,6 +28,7 @@
 #include "mesh.h"
 #include "mesh_block.h"
 #include "partition.h"
+#include "provenance.h"
 
 namespace remap {
 
@@ -632,6 +633,10 @@ RestartData remap_restart(const Input & input, const Mesh & target, bool axisymm
     std::vector<uint64_t> cells(source->n_cells);
     for (uint32_t c = 0; c < source->n_cells; c++) cells[c] = source->h_global_cell(c);
     RestartData data = read_restart(file, &cells);
+    provenance::read_start_file("remap_source", file, data.provenance, data.step, data.t);
+    if (find_value_or<std::string>(source_input, "mesh", "type", "file") == "file") {
+        provenance::read_large_file("remap_mesh", find_value_or<std::string>(source_input, "mesh", "filename", "mesh.msh"));
+    }
     const uint64_t n_source = source->n_global_cells > 0 ? source->n_global_cells : source->n_cells;
     if (data.n_cells != n_source) {
         throw InputError("initialize: restart file " + file + " has " + std::to_string(data.n_cells) +
