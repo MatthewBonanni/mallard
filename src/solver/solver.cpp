@@ -199,7 +199,7 @@ int Solver::init(const Input & input_in) {
         const KeyRecord * record = resolved.find(s.key);
         preset_settings.emplace_back(s.key, record ? record->value : "", s.from_preset);
     }
-    provenance::set_preset(preset.name, preset_settings);
+    provenance::set_preset(preset.name, preset.is_default, preset_settings);
     print_setup(resolved);
     provenance::set_placement();
     provenance::set_read_files();

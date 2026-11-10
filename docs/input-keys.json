@@ -3390,10 +3390,11 @@
    "examples/detonation_1d/input.toml"
   ],
   "values": [
-   "accurate",
+   "first_order",
+   "high_order",
    "les",
    "reacting",
-   "robust"
+   "second_order"
   ]
  },
  "numerics.riemann_solver": {

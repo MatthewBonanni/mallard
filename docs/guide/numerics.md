@@ -12,50 +12,64 @@ the options; [Numerical methods](../numerics/overview.md) has the formulation.
 t_stop = 0.2       # no cfl needed: the preset sets it
 
 [numerics]
-preset = "accurate"
+preset = "high_order"   # the default: without this line, too
 ```
 
 *Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d).
 
 A preset picks a validated combination of every scheme choice on this page,
-so most inputs need one line.
+so most inputs need one line, or none: an input that sets neither `preset`
+nor `[numerics.face_reconstruction]` runs `high_order`.
 
-| Preset | Reconstruction | Flux | Time integrator | `cfl` | For |
-|---|---|---|---|---|---|
-| `robust` | MUSCL, Venkatakrishnan limiter | RHLL | SSPRK3 | 0.5 | First runs, complex geometry, strong shocks and blasts |
-| `accurate` | TENO-E, order 5 | HLLC | SSPRK3 | 1.0 | Smooth flow, acoustics, vortices, moderate shocks |
-| `les` | MUSCL, no limiter | hybrid (KEEP central, HLLC at shocks) | SSPRK3 | 0.8 | Turbulence: LES and DNS |
-| `reacting` | MUSCL, Venkatakrishnan limiter | HLLC | SSPRK3 | 0.35 | Flames and detonations with `[chemistry]` |
+| Preset | Order | Reconstruction | Flux | Time integrator | `cfl` | For |
+|---|---|---|---|---|---|---|
+| `high_order` (default) | 5 (TENO-E) | TENO-E, order 5 | HLLC | SSPRK3 | 1.0 | Smooth flow, acoustics, vortices, moderate shocks: the least error for the cost ([why high order](#why-high-order)) |
+| `second_order` | 2 (MUSCL) | MUSCL, Venkatakrishnan limiter | RHLL | SSPRK3 | 0.5 | Complex geometry, strong shocks and blasts |
+| `first_order` | 1 | none (cell averages) | HLL | SSPRK3 | 0.5 | Debugging, start-up transients, the last fallback: low order and very dissipative |
+| `les` | 2 (MUSCL) | MUSCL, no limiter | hybrid (KEEP central, HLLC at shocks) | SSPRK3 | 0.8 | Turbulence: LES and DNS |
+| `reacting` | 2 (MUSCL) | MUSCL, Venkatakrishnan limiter | HLLC | SSPRK3 | 0.35 | Flames and detonations with `[chemistry]` |
 
 Why each, and what it passes (each check runs in the test suite,
 `PresetValidation.*`, with the preset alone):
 
-- **`robust`** never needs a stencil setup, works on every cell type and
-  physics, and has the fewest ways to fail. RHLL does not grow carbuncles at
-  strong shocks on blunt bodies or grid-aligned faces. `cfl = 0.5` is the
-  first-order positivity bound of the explicit update in Mallard's CFL
-  convention: the Noh implosion (`examples/noh_axisymmetric`, an
-  infinite-strength shock into gas at `p = 1e-6`) keeps a positive pressure
-  at 0.5 on 40², 60² and 200² cells, but not at 0.8 on 200² (`accurate` goes to
-  negative pressure on it); on 60² the plateau density is within 7% of 64.
-  On Sod's problem the L1 density error is 0.0029 at 200 cells.
-- **`accurate`** is fifth order where the flow is smooth (4.9 measured on a
+- **`high_order`** is fifth order where the flow is smooth (4.9 measured on a
   convected density wave on triangles, 16² to 32² cells, at its own `cfl`)
   and ENO at discontinuities: the examples `sod`, `riemann_2d`,
   `explosion_3d`, `taylor_green_3d` and `isotropic_turbulence` use exactly
   these keys ([verification](https://matthewbonanni.github.io/mallard/validation/#accuracy)).
   It costs a stencil setup (seconds per million cells on a GPU, minutes on
   CPUs) and memory, and is not bound preserving: add
-  `bound_preserving = true` and a smaller `cfl` for blasts.
-- **`les`** leaves the dissipation to the viscosity and the SGS model: on a
+  `bound_preserving = true` and a smaller `cfl` for blasts, or use
+  `second_order`.
+- **`second_order`** never needs a stencil setup, works on every cell type and
+  physics, and has the fewest ways to fail of the second-order schemes. RHLL does not grow carbuncles at
+  strong shocks on blunt bodies or grid-aligned faces. `cfl = 0.5` is the
+  first-order positivity bound of the explicit update in Mallard's CFL
+  convention: the Noh implosion (`examples/noh_axisymmetric`, an
+  infinite-strength shock into gas at `p = 1e-6`) keeps a positive pressure
+  at 0.5 on 40², 60² and 200² cells, but not at 0.8 on 200² (`high_order` goes to
+  negative pressure on it); on 60² the plateau density is within 7% of 64.
+  On Sod's problem the L1 density error is 0.0029 at 200 cells.
+- **`first_order`** is first order everywhere: it smears every wave over
+  many cells, and its error falls only in proportion to the cell size. It
+  is for debugging an input, for the first steps of a violent transient
+  (restart from it with a higher order), and as the last fallback when
+  nothing else stays positive. HLL, with Einfeldt's wave speeds, is the flux
+  that keeps the first-order update positive ([Einfeldt et al. 1991](../references.md#einfeldt-1991)), here at
+  `cfl = 0.5`, the bound above, and the most dissipative at contacts and shear
+  layers, so it grows no carbuncles. On the Noh implosion at 60² cells it
+  keeps a positive pressure, with a plateau density of 52 against 64: the
+  price of its dissipation. It is not the scheme to judge a mesh or a result
+  by.
+- **`les`** (second order) leaves the dissipation to the viscosity and the SGS model: on a
   viscous 2D Taylor–Green vortex at Mach 0.1 (16² cells) the kinetic energy
   decays at the exact viscous rate to 0.02%, against 8% too fast with
-  `robust`. TENO with the central flux feeds energy into the resolved field,
+  `second_order`. TENO with the central flux feeds energy into the resolved field,
   hence the unlimited MUSCL states
   ([LES design](../design/les.md#81-decaying-isotropic-turbulence-comte-bellot-corrsin-1971)).
   These are the keys of `cbc_les` and `channel_les`, within 0.7–1.6% of the
   DNS ([benchmark](https://matthewbonanni.github.io/mallard/validation/#les)).
-- **`reacting`**: the scheme of the validated flames and detonations
+- **`reacting`** (second order): the scheme of the validated flames and detonations
   ([benchmark](https://matthewbonanni.github.io/mallard/validation/#reacting-flow)).
   `cfl = 0.35` keeps the Strang splitting error of a CJ detonation's
   induction length within 5% (25% at 1.0). A stoichiometric H2/air flame at
@@ -69,7 +83,7 @@ point:
 
 ```toml
 [numerics]
-preset = "accurate"
+preset = "high_order"
 riemann_solver = "RHLL"     # grid-aligned strong shocks
 
 [numerics.face_reconstruction]
@@ -77,21 +91,73 @@ order = 3                   # TENO-E 3 instead of 5
 ```
 
 Reconstruction options (`order`, `limiter`) apply only when the
-reconstruction type is the preset's: `type = "MUSCL"` under `accurate` gets
+reconstruction type is the preset's: `type = "MUSCL"` under `high_order` gets
 MUSCL's own defaults, not `order = 5`. The preset's `cfl` applies only when
-`[run]` sets neither `cfl` nor `dt`. Without a preset the defaults below
-apply, unchanged (first order). The terminal output names the preset and every key the
+`[run]` sets neither `cfl` nor `dt`. An input with `[numerics.face_reconstruction]`
+and no preset gets no preset: the defaults below apply to every key it leaves
+out (`type = "FO"`, first order, when the table leaves out `type`). The terminal output names the preset, whether it is the default, and every key the
 input overrides, and its Numerics section lists what is used:
 
 ```
 == Numerics ===========================
-  Preset             accurate (the input sets numerics.riemann_solver = "RHLL")
+  Preset             high_order (the input sets numerics.riemann_solver = "RHLL")
   Reconstruction     TENO, order 5 (degree 4), 3 face quadrature points
   Riemann solver     RHLL
 ```
 
 Each example's closest preset runs in the test suite
 (`Examples/ExampleUnderPreset.*`).
+
+### Why high order
+
+Refining the mesh (smaller h) and raising the order (larger p) both reduce
+the error, but at different rates: the error of an order-p scheme on smooth
+flow falls like h<sup>p</sup>, while the cost of a 2D run grows like
+h<sup>-3</sup> (cells times time steps) whatever the order. A higher order
+costs more per cell, and on any but the coarsest meshes that is repaid many
+times over:
+
+![L2 density error of the isentropic vortex on irregular triangles against cell count and CPU time, for FO, MUSCL, TENO-E 3 and TENO-E 5](../images/guide/high_order_cost-light.svg#gh-light-mode-only)
+![L2 density error of the isentropic vortex on irregular triangles against cell count and CPU time, for FO, MUSCL, TENO-E 3 and TENO-E 5](../images/guide/high_order_cost-dark.svg#gh-dark-mode-only)
+
+*The isentropic vortex of [Shu (1998)](../references.md#shu-1998), strength
+5, convected 2 units across a periodic 10 × 10 box of irregular triangles
+(nodes jittered by up to a quarter cell), with HLLC, SSPRK3 and `cfl = 1.0`
+for every scheme (MUSCL unlimited). Error: the L2 norm of the density cell
+averages at t = 2 against the exact solution. Cost: the CPU time of the
+whole run, setup and output included, on 2 threads of an Apple Silicon
+laptop shared with other jobs (hence CPU rather than wall time, also
+recorded). Script and data: `tools/docs/high_order_cost.py`.*
+
+Read off the curves (interpolated between the measured meshes):
+
+| Error | FO | MUSCL | TENO-E 3 | TENO-E 5 |
+|---|---|---|---|---|
+| 10<sup>-3</sup> | not reached (1.7 × 10<sup>-3</sup> on 524,288 cells, 395 s) | 5,800 cells, 0.57 s | 2,700 cells, 0.54 s | 1,100 cells, 0.66 s |
+| 10<sup>-4</sup> | not reached | 64,500 cells, 20.8 s | 13,000 cells, 3.8 s | 3,600 cells, 2.8 s |
+| Measured order (two finest meshes) | 0.97 | 1.89 (1.23 from 131,072 to 524,288 cells) | 3.00 | 4.87 |
+
+- **At an error of 10<sup>-4</sup>** TENO-E 5 needs 18 times fewer cells than
+  MUSCL and 7.4 times less CPU time; FO would need, at its measured first
+  order, about 300 times the cells of its finest run (some 150 million).
+- **FO's finest run** (524,288 cells, 395 s) has an error of 1.7 × 10<sup>-3</sup>;
+  TENO-E 5 has 3.8 × 10<sup>-4</sup> on 2,048 cells in 1.4 s.
+- **The crossover:** above an error of about 8 × 10<sup>-4</sup> (here,
+  meshes under about 5,000 cells, some 7 cells per core radius of the
+  vortex) MUSCL is as cheap as TENO-E 5 or cheaper: at 10<sup>-3</sup> it
+  costs 0.87 times TENO-E 5's time. Below it the gap widens with every refinement, since each halving of
+  h divides TENO-E 5's error by about 29 and MUSCL's by about 4. TENO-E 3 is
+  cheapest down to about 2.5 × 10<sup>-4</sup>, then TENO-E 5.
+
+The advantage is for **smooth flow**. At shocks and contacts TENO-E falls
+back to its ENO sector stencils and every scheme is first order there, so on
+a flow dominated by discontinuities the gain shrinks to the smooth regions
+between them; for the strongest shocks and blasts, `second_order` (no stencil
+setup, fewer ways to fail) or, as a last resort, `first_order` is the right
+tool. TENO-E also has a one-time stencil setup, included in the times above:
+for TENO-E 5 it is 27% of the run on 2,048 cells and 11% on 32,768 (it grows
+with the cells, the time stepping with cells times steps; seconds per
+million cells on a GPU, minutes on CPUs), and it holds more memory per cell.
 
 ## Time step and stopping
 
@@ -143,15 +209,17 @@ Rules of thumb:
 
 ```toml
 [numerics.face_reconstruction]
-type = "TENO"      # "FO", "MUSCL" or "TENO"; the default is "FO"
+type = "TENO"      # "FO", "MUSCL" or "TENO"; without a preset, the default is "FO"
 order = 5          # TENO: 3 to 6
 ```
 
 *Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 46 more.
 
-!!! warning "The default is first order"
-    Without a [preset](#presets) or `[numerics.face_reconstruction]` Mallard
-    runs first order. Every example sets a preset or the reconstruction.
+!!! note "Defaults"
+    Without a [preset](#presets) or this table Mallard runs the `high_order`
+    preset (TENO-E 5). With this table and no preset, `type` defaults to
+    `"FO"`: set it. Before Mallard 0.10 the default without either was first
+    order; `mallard input upgrade` [keeps old inputs first order](input_files.md#inputs-from-older-releases).
 
 ![Density of the Sod shock tube at t = 0.2 with first order, MUSCL, TENO-E 3 and TENO-E 5 against the exact solution](../images/guide/sod_schemes-light.svg#gh-light-mode-only)
 ![Density of the Sod shock tube at t = 0.2 with first order, MUSCL, TENO-E 3 and TENO-E 5 against the exact solution](../images/guide/sod_schemes-dark.svg#gh-dark-mode-only)

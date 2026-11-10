@@ -70,11 +70,25 @@ struct ArrayRule {
     std::vector<std::string> (*convert)(const std::string & item, const std::string & context) = nullptr;
 };
 
+/**
+ * @brief A default that changed: a file that has the table `with` and none of
+ *        `unless` gets `key = value` in `table`, the old default, so that it
+ *        runs as before. Only `mallard input upgrade` applies it: a run takes
+ *        the new default without a warning, since the input sets nothing old.
+ */
+struct DefaultRule {
+    std::vector<std::string> unless;  ///< Dotted keys or tables, any of which the file sets
+    std::string with;                 ///< A table every input it applies to has, e.g. "run"
+    std::string table, key, value;    ///< Dotted table, key, and the value's TOML text
+    std::string since, note;
+};
+
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */
 struct Rules {
     std::vector<KeyRule> keys;
     std::vector<OptionRule> options;
     std::vector<ArrayRule> arrays;
+    std::vector<DefaultRule> defaults = {};
 };
 const Rules & rules();
 

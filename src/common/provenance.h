@@ -91,8 +91,13 @@ void set_read_files();
 /** @brief The input with every key explicit, as setup used it (ResolvedInput::toml). */
 void set_resolved(const std::string & toml);
 
-/** @brief The numerics preset (empty name: none) and each key it covers: value, and whether the preset set it. */
-void set_preset(const std::string & name, const std::vector<std::tuple<std::string, std::string, bool>> & settings);
+/**
+ * @brief The numerics preset (empty name: none), whether it applies as the
+ *        default (the input names none), and each key it covers: value, and
+ *        whether the preset set it.
+ */
+void set_preset(const std::string & name, bool is_default,
+                const std::vector<std::tuple<std::string, std::string, bool>> & settings);
 
 /** @brief Every rank takes rank 0's block and run id (collective). */
 void share();

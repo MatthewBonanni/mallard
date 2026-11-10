@@ -105,12 +105,19 @@ const Rules & rules() {
              "a sphere is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
             {"mesh.curved[].shape", "cylinder", "cylinder", "0.9.0", "0.10.0",
              "a cylinder is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
+            {"numerics.preset", "robust", "second_order", "0.10.0", "0.11.0", "presets are named by their order"},
+            {"numerics.preset", "accurate", "high_order", "0.10.0", "0.11.0", "presets are named by their order"},
         },
         {
             {"mesh.periodic", "periodic", "zones", "type", "0.9.0", "0.10.0",
              "one syntax for the periodic zones of generated meshes and mesh files", periodic_zones},
             {"initialize.mesh.periodic", "initialize.periodic", "zones", "type", "0.9.0", "0.10.0",
              "one syntax for the periodic zones of generated meshes and mesh files", periodic_zones},
+        },
+        {
+            {{"numerics.preset", "numerics.face_reconstruction"}, "run", "numerics.face_reconstruction", "type",
+             "\"FO\"", "0.10.0",
+             "first order, the default before Mallard 0.10.0; without it the run takes the high_order preset"},
         },
     };
     return table;
@@ -364,6 +371,23 @@ Concrete plain_path(const std::string & dotted_path) {
     return key;
 }
 
+template <typename V>
+bool default_applies(V & root, const DefaultRule & rule) {
+    if (at(root, plain_path(rule.with)) == nullptr) return false;
+    for (const std::string & key : rule.unless) {
+        if (at(root, plain_path(key)) != nullptr) return false;
+    }
+    return true;
+}
+
+Finding default_finding(const DefaultRule & rule) {
+    Finding f;
+    f.key = rule.table + "." + rule.key;
+    f.suggestion = f.key + " = " + rule.value;
+    f.message = f.suggestion + " added (" + rule.note + ")";
+    return f;
+}
+
 /**
  * @brief Whether the rule applies to a run of dimension dim (0: unknown). Throws
  *        if it depends on the dimension, which is unknown, and the input has its option.
@@ -462,6 +486,15 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
                 array.as_array().push_back(V(element));
             }
             entries_of(*at(root, parent(key))).erase(key.back().first);
+        }
+    }
+    if (!setup) {
+        for (const DefaultRule & rule : table.defaults) {
+            if (!default_applies(root, rule)) continue;
+            findings.push_back(default_finding(rule));
+            V * holder = at(root, plain_path(rule.table), true);
+            if (holder == nullptr || !holder->is_table()) throw InputError("cannot set " + findings.back().key + ".");
+            entries_of(*holder)[rule.key] = toml::parse_str<typename V::config_type>("x = " + rule.value).at("x");
         }
     }
     return findings;
@@ -724,6 +757,17 @@ bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule,
     return true;
 }
 
+/** @brief A default rule's key added after its parent table's keys (or at the end), or false if it has none to add. */
+bool rewrite_default(std::vector<std::string> & lines, const DefaultRule & rule) {
+    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    if (!default_applies(root, rule)) return false;
+    const std::vector<std::string> block = {"", "[" + rule.table + "]",
+                                            rule.key + " = " + rule.value + "  # " + rule.note};
+    const auto end = end_of_table(lines, parent(plain_path(rule.table)));
+    lines.insert(end ? lines.begin() + static_cast<long>(*end) : lines.end(), block.begin(), block.end());
+    return true;
+}
+
 } // namespace
 
 std::string advice(const Finding & finding) {
@@ -766,6 +810,9 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     }
     for (const ArrayRule & rule : table.arrays) {
         for (int guard = 0; guard < 100000 && !impossible && rewrite_one_array(lines, rule, impossible); guard++) {}
+    }
+    for (const DefaultRule & rule : table.defaults) {
+        if (!impossible) rewrite_default(lines, rule);
     }
     if (!impossible) {
         try {

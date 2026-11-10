@@ -269,6 +269,14 @@ Keys and options changed so far:
 | `[[write_data]]` `geometry = "<zone>"` | `region = "<zone>"`, and `geometry = "all"` becomes `region = "domain"` ([any region](output.md#snapshots-of-regions)) | 0.9.0 | 0.10.0 |
 | `[mesh]` `periodic = ["x", "z"]` | `[[periodic]]` `zones = ["left", "right"]` and `zones = ["back", "front"]` (`y`: `bottom`/`top`, `theta`: `start`/`end`); `[initialize.mesh]` `periodic` likewise becomes `[[initialize.periodic]]` | 0.9.0 | 0.10.0 |
 | `[[write_data]]` `variables`, `[[probes]]` `variables` | `fields`, as `[statistics]` names them ([`mallard list fields`](cli.md#mallard-list-fields)) | 0.10.0 | 0.11.0 |
+| `[numerics]` `preset = "robust"`, `"accurate"` | `"second_order"`, `"high_order"`: presets are named by their order ([presets](numerics.md#presets)) | 0.10.0 | 0.11.0 |
+| No `[numerics] preset` and no `[numerics.face_reconstruction]` (first order) | The default became the `high_order` preset; `mallard input upgrade` adds `[numerics.face_reconstruction]` `type = "FO"`, which keeps such an input first order, as before | 0.10.0 | none: the default changed |
+
+A changed default is not a deprecated key: a run takes the new default
+without a warning, since the input sets nothing old, and only `mallard input
+upgrade` writes the old default into the file. It cannot tell the release a
+file was written for, so it also pins a new input that relies on the new
+default: remove the line it adds (the change it lists) to keep the new one.
 
 Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
 of a key or option that a release shipped appears in this table and in `src/common/input_upgrade.cpp`, which is the

@@ -471,13 +471,14 @@ TEST(RunLogTest, ResumedRunsAppendAndMarkRewinds) {
 TEST(ProvenanceTest, RecordsTheResolvedNumericsPreset) {
     const std::string dir = (scratch_dir() / "mallard_provenance_preset").string();
     std::string input = box(dir, 1, UNIFORM, false);
-    input.replace(input.find("[numerics]\n"), 11, "[numerics]\npreset = \"robust\"\n");
+    input.replace(input.find("[numerics]\n"), 11, "[numerics]\npreset = \"second_order\"\n");
     Solver solver;
     solver.init(parse_toml(input));
     const Value p = json::parse(provenance::json());
     const auto & resolved = solver.get_numerics_preset();
     const ResolvedInput records = resolve_input(solver.resolved_input());
-    EXPECT_EQ(p["preset"]["name"].string, "robust");
+    EXPECT_EQ(p["preset"]["name"].string, "second_order");
+    EXPECT_FALSE(p["preset"]["default"].boolean);
     ASSERT_EQ(p["preset"]["settings"].array.size(), resolved.settings.size());
     bool overridden = false;
     for (size_t i = 0; i < resolved.settings.size(); i++) {
@@ -493,6 +494,17 @@ TEST(ProvenanceTest, RecordsTheResolvedNumericsPreset) {
         }
     }
     EXPECT_TRUE(overridden);
+
+    // Without a preset or a reconstruction, the default, marked as such
+    std::string bare = box(dir, 1, UNIFORM, false);
+    const size_t recon = bare.find("[numerics.face_reconstruction]");
+    ASSERT_NE(recon, std::string::npos);
+    bare.erase(recon, bare.find("[", recon + 1) - recon);
+    Solver by_default;
+    by_default.init(parse_toml(bare));
+    const Value q = json::parse(provenance::json());
+    EXPECT_EQ(q["preset"]["name"].string, "high_order");
+    EXPECT_TRUE(q["preset"]["default"].boolean);
     if (comm::is_root()) std::filesystem::remove_all(dir);
 }
 
