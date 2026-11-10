@@ -80,6 +80,8 @@ void Solver::allocate_chemistry() {
     h_chem_cost = Kokkos::create_mirror_view(chem_cost);
     hrr = Kokkos::View<rtype *>("hrr", mesh->n_cells);
     chem_failures = Kokkos::View<int64_t *>("chem_failures", 1);
+    chem_dt = Kokkos::View<double>("chem_dt");
+    chem_io = Kokkos::View<double *, Kokkos::SharedHostPinnedSpace>("chem_io", 2);
     h_hrr = Kokkos::create_mirror_view(hrr);
     production = Kokkos::View<rtype **, Kokkos::LayoutRight>("production", mesh->n_cells, mixture.n_species);
     h_production = Kokkos::create_mirror_view(production);
@@ -95,40 +97,62 @@ void Solver::allocate_chemistry() {
     if (chemistry_load_balance && is_distributed()) cell_chemistry.balance_across_ranks(0.05, halo.uses_nccl());
 }
 
-void Solver::advance_chemistry(const double dt_chem) {
+void Solver::set_chemistry_dt(const double dt_chem) {
+    const Kokkos::View<double> d = chem_dt;
+    Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { d() = dt_chem; });
+}
+
+void Solver::run_chemistry(const ChemistryForcing * forcing) {
     const bool audit = run_health.clip_site != HealthState::NONE;
     const Kokkos::View<double *> clipped =
         audit ? run_health.repairs.recorder(run_health.clip_site).change : Kokkos::View<double *>();
-    if (audit) run_health.ledger.chemistry_begin(species, clipped);
-    const double start = timer.seconds();
-    const CellChemistry::Statistics stats =
-        cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(), dt_chem,
-                               tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>());
-    check_chemistry(stats);
-    t_wall_chemistry += timer.seconds() - start;
+    // SIMPLER's chemistry moves every cell, so the ledger has no element balance of it
+    const bool ledger = audit && !forcing;
+    if (ledger) run_health.ledger.chemistry_begin(species, clipped);
+    mark_chemistry_time(true);
+    cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(), chem_dt,
+                           tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>(), forcing);
+    mark_chemistry_time(false);
+    if (ledger) run_health.ledger.chemistry_end(species, clipped);
     if (audit) {
-        run_health.ledger.chemistry_end(species, clipped);
         run_health.repairs.touch(run_health.clip_site, run_health.clip_flags);
-        Kokkos::deep_copy(run_health.clip_flags, uint8_t(0));
+        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), run_health.clip_flags, uint8_t(0));
     }
 }
 
-void Solver::check_chemistry(const CellChemistry::Statistics & stats) {
-    Kokkos::fence();
-    chem_active_cells = stats.active;
-    chem_cells_integrated += static_cast<double>(stats.active);
-    chem_cells_sent += static_cast<double>(stats.sent);
-    int64_t failures = static_cast<int64_t>(stats.failures);
-    if (is_distributed()) {
-        Kokkos::deep_copy(chem_failures, failures);
-        comm::allreduce_device(chem_failures, comm::Op::SUM, halo.uses_nccl());
-        Kokkos::deep_copy(failures, Kokkos::subview(chem_failures, 0));
-    }
-    if (failures > 0) {
-        throw std::runtime_error("the chemistry integrator failed in " + std::to_string(failures) +
-                                 " cells at step " + std::to_string(step) + " (more than chemistry.max_steps "
-                                 "sub-steps or a vanishing sub-step); try a smaller time step or larger max_steps.");
-    }
+void Solver::advance_chemistry(const double dt_chem) {
+    const double start = timer.seconds();
+    set_chemistry_dt(dt_chem);
+    run_chemistry(nullptr);
+    check_chemistry();
+    t_wall_chemistry += timer.seconds() - start;
+}
+
+void Solver::reduce_chemistry_failures() {
+    const Kokkos::View<uint64_t *> tally = cell_chemistry.tallies();
+    const Kokkos::View<int64_t *> f = chem_failures;
+    Kokkos::parallel_for("chemistry_failures_total", 1, KOKKOS_LAMBDA(const int) {
+        f(0) = static_cast<int64_t>(tally(CellChemistry::FAILURES));
+    });
+    if (is_distributed()) comm::allreduce_device(chem_failures, comm::Op::SUM, halo.uses_nccl());
+    const Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> io = chem_io;
+    Kokkos::parallel_for("chemistry_failures_out", 1, KOKKOS_LAMBDA(const int) { io(1) = static_cast<double>(f(0)); });
+}
+
+void Solver::check_chemistry() {
+    reduce_chemistry_failures();
+    Kokkos::fence("check_chemistry");
+    check_chemistry_failures();
+}
+
+void Solver::check_chemistry_failures() {
+    const uint64_t total = static_cast<uint64_t>(chem_io(1));
+    if (total <= chem_failures_seen) return;
+    const uint64_t failures = total - chem_failures_seen;
+    chem_failures_seen = total;
+    throw std::runtime_error("the chemistry integrator failed in " + std::to_string(failures) +
+                             " cells at step " + std::to_string(step) + " (more than chemistry.max_steps "
+                             "sub-steps or a vanishing sub-step); try a smaller time step or larger max_steps.");
 }
 
 void Solver::update_heat_release_rate() {
@@ -143,6 +167,13 @@ void Solver::update_heat_release_rate() {
     });
 }
 
+RHSFunction Solver::simpler_transport_rhs() {
+    return [this](State solution, State rhs, rtype t_stage, rtype c) {
+        calc_rhs(solution, rhs, t_stage, c);
+        subtract_transport_rate(rhs);
+    };
+}
+
 void Solver::take_simpler_step() {
     Kokkos::deep_copy(chem_cost, 0.0_r);
     // The transport tendency at U^n (the halo is current from calc_dt), the
@@ -151,23 +182,13 @@ void Solver::take_simpler_step() {
     calc_rhs(state(), transport_rate, t);
     const double start = timer.seconds();
     const ChemistryForcing forcing{transport_rate, rhs_vec[0]};
-    const CellChemistry::Statistics stats =
-        cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(),
-                               static_cast<double>(dt), tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>(),
-                               &forcing);
-    check_chemistry(stats);
+    set_chemistry_dt(static_cast<double>(dt));
+    run_chemistry(&forcing);
+    check_chemistry();
     t_wall_chemistry += timer.seconds() - start;
-    if (run_health.clip_site != HealthState::NONE) {
-        run_health.repairs.touch(run_health.clip_site, run_health.clip_flags);
-        Kokkos::deep_copy(run_health.clip_flags, uint8_t(0));
-    }
     halo_current = false;
-    const RHSFunction corrected = [this](State solution, State rhs, rtype t_stage, rtype) {
-        calc_rhs(solution, rhs, t_stage);
-        subtract_transport_rate(rhs);
-    };
     const rtype half_dt = 0.5_r * dt;
-    time_integrator->take_step(t + half_dt, half_dt, solution_vec, rhs_vec, corrected);
+    time_integrator->take_step(t + half_dt, half_dt, solution_vec, rhs_vec, simpler_transport_rhs());
 }
 
 void Solver::subtract_transport_rate(const State & rhs) {
@@ -183,6 +204,6 @@ void Solver::subtract_transport_rate(const State & rhs) {
 std::pair<uint64_t, double> Solver::chemistry_statistics() {
     rtype max_cost = 0.0_r;
     Kokkos::parallel_reduce("chemistry_cost", mesh->n_owned(), MaxCostFunctor{chem_cost}, Kokkos::Max<rtype>(max_cost));
-    return {comm::allreduce(chem_active_cells, comm::Op::SUM),
+    return {comm::allreduce(cell_chemistry.statistics().last_active, comm::Op::SUM),
             static_cast<double>(comm::allreduce(max_cost, comm::Op::MAX))};
 }

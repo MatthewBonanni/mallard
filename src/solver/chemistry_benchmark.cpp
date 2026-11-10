@@ -152,7 +152,9 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     result.shared_bytes = cells.shared_bytes();
     result.cells = n_cells;
     result.igniting = n_igniting;
+    const Kokkos::View<double> dt_device("chemistry_benchmark_dt");
     for (const double dt : dts) {
+        Kokkos::deep_copy(dt_device, dt);
         double best = 1e300, mean_steps = 0.0, max_steps = 0.0;
         uint64_t active = 0;
         // Cells per bin of sub-steps (accepted and rejected): 0 (skipped), 1, 2, 3-4, 5-8, ..., more than 2^13
@@ -164,15 +166,17 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
             Kokkos::deep_copy(rhoY, h_rhoY);
             Kokkos::deep_copy(T_seed, h_T);
             Kokkos::deep_copy(chem_cost, 0.0_r);
+            const uint64_t failed = cells.statistics().failures;
             Kokkos::fence();
             const auto start = std::chrono::steady_clock::now();
-            const CellChemistry::Statistics stats = cells.advance(U, rhoY, T_seed, chem_h, chem_cost, n_cells, dt);
+            cells.advance(U, rhoY, T_seed, chem_h, chem_cost, n_cells, dt_device);
             Kokkos::fence();
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-            if (stats.failures > 0) throw std::runtime_error("benchmark: the integrator failed in some cells.");
+            const CellChemistry::Statistics stats = cells.statistics();
+            if (stats.failures > failed) throw std::runtime_error("benchmark: the integrator failed in some cells.");
             if (r == 0) continue;
             best = std::min(best, seconds);
-            active = stats.active;
+            active = stats.last_active;
             auto h_cost = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), chem_cost);
             double sum = 0.0, largest = 0.0;
             std::fill(histogram.begin(), histogram.end(), 0);

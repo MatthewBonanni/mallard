@@ -16,8 +16,6 @@
 #include <string>
 #include <type_traits>
 
-#include <Kokkos_Sort.hpp>
-
 #include "chemistry_balance.h"
 #include "launch_bounds.h"
 #include "memory_tracker.h"
@@ -28,6 +26,8 @@ namespace cell_chemistry_kernels {
 
 // Teams per cell: cells whose last call took at least WIDE_TEAM_COST sub-steps get several warps
 constexpr float WIDE_TEAM_COST = 16.0f;
+// The most cells of a call integrated by wide teams: the most expensive ones
+constexpr uint32_t WIDE_CELLS = 2048;
 
 template <bool Sparse>
 struct TeamTag {};
@@ -89,11 +89,14 @@ struct ActivityFunctor {
     Kokkos::View<double **, Kokkos::LayoutRight> work;
     Kokkos::View<uint32_t *> active;
     uint32_t first;
-    double dt, T_frozen, threshold;
+    Kokkos::View<double> dt;
+    double T_frozen, threshold;
     Kokkos::View<rtype *> time_scale;  // per cell multiplier of dt (rates scaled by a combustion model), else empty
 
     KOKKOS_INLINE_FUNCTION
-    double cell_dt(const uint32_t c) const { return time_scale.extent(0) > 0 ? dt * static_cast<double>(time_scale(c)) : dt; }
+    double cell_dt(const uint32_t c) const {
+        return time_scale.extent(0) > 0 ? dt() * static_cast<double>(time_scale(c)) : dt();
+    }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i) const {
@@ -164,23 +167,44 @@ struct ActivityFunctor {
     bool keep = false;  // leave the cells already flagged active (a second state of the same cells)
 };
 
-/** @brief Compacts the flagged cells of a chunk into a queue; the total is the queue length. */
+/** @brief Compacts the flagged cells [0, n) into a queue; its length goes to range(2) on the device. */
 struct QueueFunctor {
     Kokkos::View<uint32_t *> active;
     Kokkos::View<uint32_t *> queue;
     Kokkos::View<float *> cost;
     Kokkos::View<float *> previous_cost;
-    uint32_t first;
+    Kokkos::View<uint32_t *> range;
+    uint32_t n;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i, uint32_t & offset, const bool final) const {
         if (final && active(i)) {
-            queue(offset) = first + i;
-            cost(offset) = -previous_cost(first + i);  // most expensive first
+            queue(offset) = i;
+            cost(offset) = -previous_cost(i);  // most expensive first
         }
         offset += active(i);
+        if (final && i + 1 == n) range(2) = offset;
     }
 };
+
+/**
+ * @brief Cost classes of the queue's binning, most expensive first: four per
+ *        octave of the last cost from 1 up, then the cells of cost below 1. The
+ *        classes from WIDE_TEAM_COST up come first, those of the wide teams.
+ */
+constexpr uint32_t N_COST_BINS = 81, WIDE_BINS = 64;
+static_assert(WIDE_TEAM_COST == 16.0f, "the wide teams' cost classes start at 2^4");
+
+KOKKOS_INLINE_FUNCTION
+uint32_t cost_bin(const float key) {
+    const float v = -key;
+    if (!(v >= 1.0f)) return N_COST_BINS - 1;
+    const uint32_t u = v < float(1u << 20) ? static_cast<uint32_t>(v) : (1u << 20) - 1u;
+    uint32_t e = 0;
+    while ((u >> (e + 1)) != 0) e++;
+    const uint32_t quarter = ((u << 2) >> e) - 4;
+    return N_COST_BINS - 2 - (4 * e + quarter);
+}
 
 /**
  * @brief Advances the cells of a queue over dt, writes their partial
@@ -201,9 +225,9 @@ struct AdvanceFunctor {
     Kokkos::View<double **, Kokkos::LayoutRight> work;
     Kokkos::View<uint32_t **, Kokkos::LayoutRight> pivot;
     Kokkos::View<uint32_t *> queue;
-    uint32_t offset;  // teams: the first queued cell of the launch
+    uint32_t offset;  // the queue position of the launch's first cell
     chemistry::ReactorOptions options;
-    double dt;
+    Kokkos::View<double> dt;
     uint32_t lanes;
     chemistry::SparseLUPattern<> pattern;
     bool sparse;
@@ -219,6 +243,12 @@ struct AdvanceFunctor {
     Kokkos::View<rtype *> volume{};
     Kokkos::View<uint8_t *> repaired{};
     Kokkos::View<uint64_t[2]> counters{};
+    // The queue positions [*begin, *end) of the cells to integrate, on the device
+    const uint32_t * begin = nullptr;
+    const uint32_t * end = nullptr;
+
+    KOKKOS_INLINE_FUNCTION
+    bool skipped(const uint32_t slot) const { return offset + slot < *begin || offset + slot >= *end; }
 
     /**
      * @brief Adds the mass a clipping changed: species k of cell c, at the
@@ -252,7 +282,9 @@ struct AdvanceFunctor {
     }
 
     KOKKOS_INLINE_FUNCTION
-    double cell_dt(const uint32_t c) const { return time_scale.extent(0) > 0 ? dt * static_cast<double>(time_scale(c)) : dt; }
+    double cell_dt(const uint32_t c) const {
+        return time_scale.extent(0) > 0 ? dt() * static_cast<double>(time_scale(c)) : dt();
+    }
 
     /**
      * @brief Entry k of the reactor's forcing of cell c (g_k, or g_e for
@@ -268,12 +300,15 @@ struct AdvanceFunctor {
         double m2 = 0.0;
         FOR_I_DIM m2 += static_cast<double>(U_end(c, 1 + i)) * static_cast<double>(U_end(c, 1 + i));
         const double rho_e_end = static_cast<double>(U_end(c, N_DIM + 1)) - 0.5 * m2 / rho_end;
-        return (rho_e_end - rho * e) / (dt * rho * s);
+        return (rho_e_end - rho * e) / (dt() * rho * s);
     }
 
     /** @brief One thread per cell, with its work memory in the global work array. */
     KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t i, uint32_t & failures) const { advance_cell(i, &work(i, 0), &pivot(i, 0), failures); }
+    void operator()(const uint32_t i, uint32_t & failures) const {
+        if (skipped(i)) return;
+        advance_cell(i, &work(i, 0), &pivot(i, 0), failures);
+    }
 
     /**
      * @brief One thread per cell, with its work memory (at most N doubles) on
@@ -282,6 +317,7 @@ struct AdvanceFunctor {
      */
     template <uint32_t N>
     KOKKOS_INLINE_FUNCTION void operator()(LocalWork<N>, const uint32_t i, uint32_t & failures) const {
+        if (skipped(i)) return;
         double buffer[N];
         uint32_t pivots[LocalWork<N>::PIVOTS];
         advance_cell(i, buffer, pivots, failures);
@@ -329,7 +365,9 @@ struct AdvanceFunctor {
     /** @brief All threads and lanes of a team per cell. */
     template <bool Sparse>
     KOKKOS_INLINE_FUNCTION void operator()(TeamTag<Sparse>, const Member & member, uint32_t & failures) const {
-        const uint32_t slot = offset + static_cast<uint32_t>(member.league_rank()), c = queue(slot), ns = gas.n_species;
+        const uint32_t slot = static_cast<uint32_t>(member.league_rank());
+        if (skipped(slot)) return;
+        const uint32_t c = queue(slot), ns = gas.n_species;
         const chemistry::TeamLanes<Member> team(member, lanes * static_cast<uint32_t>(member.team_size()));
         double * fast =
             fast_size > 0 ? static_cast<double *>(member.team_scratch(0).get_shmem(fast_size * sizeof(double))) : nullptr;
@@ -372,13 +410,6 @@ struct AdvanceFunctor {
     }
 };
 
-/** @brief Counts the queued cells at least as expensive as a cost (the sorted queue holds minus the costs). */
-struct WideCountFunctor {
-    Kokkos::View<float *> cost;
-    float threshold;  // minus the cost
-
-    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t i, uint32_t & count) const { count += cost(i) <= threshold ? 1u : 0u; }
-};
 
 /**
  * @brief Integrates queued cells [functor.offset, functor.offset + league) by teams of
@@ -403,18 +434,6 @@ inline void launch_teams(const Space & space, const AdvanceFunctor & functor, co
     }
 }
 
-/** @brief Sorts queued cells [0, n) by their keys (minus the last cost: the most expensive first). */
-inline void sort_queue(const Kokkos::View<uint32_t *> & queue, const Kokkos::View<float *> & cost, const uint32_t n) {
-    const auto queued = Kokkos::make_pair(0u, n);
-    Kokkos::Experimental::sort_by_key(Kokkos::DefaultExecutionSpace(), Kokkos::subview(cost, queued),
-                                      Kokkos::subview(queue, queued));
-}
-
-inline uint32_t read_failures(const Kokkos::View<uint32_t> & failures) {
-    uint32_t n = 0;
-    Kokkos::deep_copy(n, failures);
-    return n;
-}
 
 /**
  * @brief Heat release rate -sum_k h_k omega_k [W/m^3] and mass production
@@ -528,14 +547,19 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
     queue = Kokkos::View<uint32_t *>("chem_queue", n_cells);
     cost = Kokkos::View<float *>("chem_queue_cost", n_cells);
     previous_cost = Kokkos::View<float *>("chem_previous_cost", n_cells);
+    local_range = Kokkos::View<uint32_t *>("chem_queue_range", 3);
+    tally = Kokkos::View<uint64_t *>("chem_tally", N_TALLIES);
+    if (bin_by_cost) {
+        bins = Kokkos::View<uint32_t *>("chem_bins", 2 * N_COST_BINS);
+        bin_queue_out = Kokkos::View<uint32_t *>("chem_bin_queue", n_cells);
+        bin_cost_out = Kokkos::View<float *>("chem_bin_cost", n_cells);
+    }
 }
 
-CellChemistry::Statistics CellChemistry::advance(const StateView & U, const SpeciesView & rhoY,
-                                                 const Kokkos::View<rtype *> & T_seed,
-                                                 const Kokkos::View<rtype *> & chem_h,
-                                                 const Kokkos::View<rtype *> & chem_cost, const uint32_t n,
-                                                 const double dt, const Kokkos::View<rtype *> & time_scale,
-                                                 const ChemistryForcing * forcing) {
+void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
+                            const Kokkos::View<rtype *> & chem_h, const Kokkos::View<rtype *> & chem_cost,
+                            const uint32_t n, const Kokkos::View<double> & dt, const Kokkos::View<rtype *> & time_scale,
+                            const ChemistryForcing * forcing) {
     if (forcing && forcing_offset == 0) {
         throw std::logic_error("CellChemistry::advance: a forcing needs options.forced.");
     }
@@ -547,13 +571,13 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
         const StateView F = forcing->rate.flow;
         const SpeciesView F_Y = forcing->rate.species;
         const uint32_t ns = gas.n_species;
-        const rtype h = static_cast<rtype>(dt);
+        const Kokkos::View<double> h_dt = dt;
         Kokkos::parallel_for("chemistry_forced_end", n, KOKKOS_LAMBDA(const uint32_t c) {
+            const rtype h = static_cast<rtype>(h_dt());
             FOR_I_CONSERVATIVE U_end(c, i) = U(c, i) + h * F(c, i);
             for (uint32_t k = 0; k < ns; k++) rhoY_end(c, k) = rhoY(c, k) + h * F_Y(c, k);
         });
     }
-    Statistics stats;
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
     for (uint32_t first = 0; first < n; first += chunk) {
         const uint32_t m = std::min(chunk, n - first);
@@ -578,21 +602,30 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
             flag();
         }
     }
-    uint32_t n_active = 0;
-    Kokkos::parallel_scan("chemistry_queue", n, QueueFunctor{active, queue, cost, previous_cost, 0}, n_active);
-    stats.active = n_active;
-    if (bin_by_cost && n_active > 0) sort_queue(queue, cost, n_active);
+    const Kokkos::View<uint32_t *> range = local_range;
+    const Kokkos::View<uint64_t *> t = tally;
+    Kokkos::parallel_for("chemistry_queue_start", 1, KOKKOS_LAMBDA(const int) {
+        range(0) = 0;
+        range(1) = 0;
+        range(2) = 0;
+    });
+    if (n > 0) Kokkos::parallel_scan("chemistry_queue", n, QueueFunctor{active, queue, cost, previous_cost, range, n});
+    Kokkos::parallel_for("chemistry_tally", 1, KOKKOS_LAMBDA(const int) {
+        t(LAST_ACTIVE) = range(2);
+        t(ACTIVE) += range(2);
+    });
+    if (bin_by_cost) bin_queue(queue, cost, n, range);
     const ChemistryCells cells{U,      rhoY,     T_seed,      chem_h,        chem_cost,
                                previous_cost, time_scale, forcing ? forcing->rate.species : SpeciesView(),
                                U_end,  rhoY_end, cell_volume, cell_repaired};
-    const uint32_t kept = balance ? balance->send(cells, queue, n_active) : n_active;
-    stats.sent = n_active - kept;
-    stats.failures = integrate(cells, queue, cost, kept, dt);
+    if (balance) balance->send(cells, queue, range, tally, SENT);
+    integrate(cells, queue, n, range, dt);
     if (balance) {
-        stats.failures += balance->receive(cells, queue, [&](const ChemistryCells & guests, const Kokkos::View<uint32_t *> & q,
-                                                             const Kokkos::View<float *> & c, const uint32_t m) {
-            if (bin_by_cost && m > 0) sort_queue(q, c, m);
-            return integrate(guests, q, c, m, dt);
+        balance->receive(cells, queue, [&](const ChemistryCells & guests, const Kokkos::View<uint32_t *> & q,
+                                           const Kokkos::View<float *> & c, const uint32_t m,
+                                           const Kokkos::View<uint32_t *> & r) {
+            if (bin_by_cost) bin_queue(q, c, m, r);
+            integrate(guests, q, m, r, dt);
         });
     }
     if (forcing) {
@@ -604,7 +637,50 @@ CellChemistry::Statistics CellChemistry::advance(const StateView & U, const Spec
             for (uint32_t k = 0; k < ns; k++) rhoY_out(c, k) = rhoY_end(c, k);
         });
     }
-    return stats;
+}
+
+void CellChemistry::bin_queue(const Kokkos::View<uint32_t *> & queued, const Kokkos::View<float *> & queued_cost,
+                              const uint32_t n, const Kokkos::View<uint32_t *> & range) {
+    // A counting sort by cost class: the order within a class does not matter, as no cell's result depends on it
+    if (bin_queue_out.extent(0) < n) {
+        throw std::logic_error("CellChemistry::bin_queue: more cells than its scratch holds.");
+    }
+    const Kokkos::View<uint32_t *> count = bins, r = range, q = queued, q_out = bin_queue_out;
+    const Kokkos::View<float *> key = queued_cost, key_out = bin_cost_out;
+    const uint32_t wide_max = n_wide_threads > 0 ? WIDE_CELLS : 0u;
+    Kokkos::parallel_for("chemistry_bins_clear", 2 * N_COST_BINS, KOKKOS_LAMBDA(const uint32_t b) { count(b) = 0; });
+    Kokkos::parallel_for("chemistry_bins_count", n, KOKKOS_LAMBDA(const uint32_t i) {
+        if (i < r(2)) Kokkos::atomic_inc(&count(cost_bin(key(i))));
+    });
+    Kokkos::parallel_for("chemistry_bins_offsets", 1, KOKKOS_LAMBDA(const int) {
+        uint32_t at = 0;
+        for (uint32_t b = 0; b < N_COST_BINS; b++) {
+            count(N_COST_BINS + b) = at;
+            at += count(b);
+            if (b + 1 == WIDE_BINS) r(1) = Kokkos::min(at, wide_max);
+        }
+    });
+    Kokkos::parallel_for("chemistry_bins_scatter", n, KOKKOS_LAMBDA(const uint32_t i) {
+        if (i >= r(2)) return;
+        const uint32_t at = Kokkos::atomic_fetch_inc(&count(N_COST_BINS + cost_bin(key(i))));
+        q_out(at) = q(i);
+        key_out(at) = key(i);
+    });
+    Kokkos::parallel_for("chemistry_bins_copy", n, KOKKOS_LAMBDA(const uint32_t i) {
+        if (i >= r(2)) return;
+        q(i) = q_out(i);
+        key(i) = key_out(i);
+    });
+}
+
+void CellChemistry::add_failures(const Kokkos::View<uint32_t> & failures) const {
+    const Kokkos::View<uint64_t *> t = tally;
+    Kokkos::parallel_for("chemistry_failures", 1, KOKKOS_LAMBDA(const int) { t(FAILURES) += failures(); });
+}
+
+CellChemistry::Statistics CellChemistry::statistics() const {
+    const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), tally);
+    return {h(LAST_ACTIVE), h(ACTIVE), h(FAILURES), h(SENT)};
 }
 
 void CellChemistry::audit(const RepairRecorder & recorder, const Kokkos::View<rtype *> & volume,
@@ -628,22 +704,33 @@ void CellChemistry::balance_across_ranks(const double threshold, const bool use_
     balance = std::make_shared<ChemistryBalance>(gas.n_species, threshold, use_nccl);
 }
 
-uint32_t CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued,
-                                  const Kokkos::View<float *> & queued_cost, const uint32_t n, const double dt) {
+void CellChemistry::begin_step() {
+    if (balance) balance->begin_step();
+}
+
+bool CellChemistry::adapt_balance() {
+    if (!balance || !balance->adapt()) return false;
+    // Guests are binned in the same scratch as the queue
+    const size_t m = std::max<size_t>(queue.extent(0), balance->guests_capacity());
+    if (bin_queue_out.extent(0) < m) {
+        bin_queue_out = Kokkos::View<uint32_t *>("chem_bin_queue", m);
+        bin_cost_out = Kokkos::View<float *>("chem_bin_cost", m);
+    }
+    return true;
+}
+
+void CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued, const uint32_t n,
+                              const Kokkos::View<uint32_t *> & range, const Kokkos::View<double> & dt) {
+    // Launches over every slot [0, n): the cells to integrate, range [0, range(2)), are known on the device only
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
-    uint32_t failures = 0;
+    const uint32_t * all = range.data(), * wide_end = range.data() + 1, * end = range.data() + 2;
     for (uint32_t first = 0; first < n; first += chunk) {
         const uint32_t m = std::min(chunk, n - first);
         const auto batch = Kokkos::make_pair(first, first + m);
         const Kokkos::View<uint32_t *> q = Kokkos::subview(queued, batch);
-        uint32_t n_wide = 0;
-        if (n_wide_threads > 0) {
-            Kokkos::parallel_reduce("chemistry_wide_cells", m,
-                                    WideCountFunctor{Kokkos::subview(queued_cost, batch), -WIDE_TEAM_COST}, n_wide);
-        }
         AdvanceFunctor functor{gas,     kinetics,           cells.U,      cells.rhoY,
                                cells.T_seed, cells.chem_h,  cells.chem_cost, cells.previous_cost,
-                               work,    pivot,              q,            0u,
+                               work,    pivot,              q,            first,
                                options.reactor, dt,         n_lanes,      pattern,
                                sparse,  static_cast<uint32_t>(fast_bytes / sizeof(double)), cells.time_scale};
         if (clip_recorder.active() && cells.volume.extent(0) > 0) {
@@ -658,36 +745,43 @@ uint32_t CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::Vi
             functor.U_end = cells.U_end;
             functor.rhoY_end = cells.rhoY_end;
         }
+        functor.begin = all;
+        functor.end = end;
+        using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
         if (n_lanes == 1) {
-            uint32_t f = 0;
+            const Kokkos::Sum<uint32_t, DeviceMemory> f(team_failures[0]);
             const size_t size = work.extent(1);
             if (ON_GPU && size <= LOCAL_SMALL) {
-                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_SMALL>>(0, m), functor,
-                                        Kokkos::Sum<uint32_t>(f));
+                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_SMALL>>(0, m), functor, f);
             } else if (ON_GPU && size <= LOCAL_LARGE) {
-                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_LARGE>>(0, m), functor,
-                                        Kokkos::Sum<uint32_t>(f));
+                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_LARGE>>(0, m), functor, f);
             } else {
-                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<>(0, m), functor, Kokkos::Sum<uint32_t>(f));
+                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<>(0, m), functor, f);
             }
-            failures += f;
-        } else if (n_wide == 0) {
+            add_failures(team_failures[0]);
+        } else if (n_wide_threads == 0 || first >= WIDE_CELLS) {
+            if (n_wide_threads > 0) functor.begin = wide_end;
             launch_teams(Kokkos::DefaultExecutionSpace(), functor, m, n_threads, n_lanes, sparse, fast_bytes,
                          team_failures[0]);
-            failures += read_failures(team_failures[0]);
+            add_failures(team_failures[0]);
         } else {
-            // The expensive cells' wide teams and the others' narrow ones run concurrently
+            // The expensive cells' wide teams [0, range(1)) and the others' narrow ones run concurrently
             AdvanceFunctor wide = functor;
             wide.fast_size = 0;
-            launch_teams(wide_space, wide, n_wide, n_wide_threads, n_lanes, sparse, 0, team_failures[1]);
-            functor.offset = n_wide;
-            if (m > n_wide) {
-                launch_teams(narrow_space, functor, m - n_wide, n_threads, n_lanes, sparse, fast_bytes, team_failures[0]);
-            }
-            failures += read_failures(team_failures[1]) + (m > n_wide ? read_failures(team_failures[0]) : 0u);
+            wide.end = wide_end;
+            functor.begin = wide_end;
+            const Kokkos::DefaultExecutionSpace main;
+            comm::enqueue_wait(wide_space, main);
+            comm::enqueue_wait(narrow_space, main);
+            launch_teams(wide_space, wide, std::min(m, WIDE_CELLS - first), n_wide_threads, n_lanes, sparse, 0,
+                         team_failures[1]);
+            launch_teams(narrow_space, functor, m, n_threads, n_lanes, sparse, fast_bytes, team_failures[0]);
+            comm::enqueue_wait(main, wide_space);
+            comm::enqueue_wait(main, narrow_space);
+            add_failures(team_failures[1]);
+            add_failures(team_failures[0]);
         }
     }
-    return failures;
 }
 
 void CellChemistry::heat_release(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,

@@ -168,21 +168,17 @@ TEST(MPITest, GasMixtureMatchesSerialWithAndWithoutStepGraphs) {
                                                   {"time_integrator = \"RDPK3Sp35\"\n"
                                                    "[numerics.error_control]\ntolerance = 1e-4\n",
                                                    "type = \"MUSCL\"\n", "", "navier_stokes"}};
-    // Without chemistry, the steps also run in the CUDA graph
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
-        if (chemistry.empty()) {
-            expect_matches_serial_with_and_without_step_graphs(mixture_input(extra, reconstruction, chemistry, type));
-        } else {
-            expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
-        }
+        expect_matches_serial_with_and_without_step_graphs(mixture_input(extra, reconstruction, chemistry, type));
     }
 }
 
-TEST(MPITest, ChemistryLoadBalancingMatchesSerial) {
+TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
     // The hot half of the channel reacts and the cold half does not, so ranks
     // integrate each other's cells; each cell's reactor gives the same bits
     // wherever it runs, also with fused half steps, the thickened flame's
-    // multiplier of dt and SIMPLER's forcing
+    // multiplier of dt and SIMPLER's forcing. The capacities grow after the
+    // first step, which records the step graph again
     const std::string balanced = "[chemistry]\nload_balance = true\n";
     const std::string tfles = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
                               "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
@@ -195,7 +191,7 @@ TEST(MPITest, ChemistryLoadBalancingMatchesSerial) {
                                   mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
                                                 "navier_stokes") + tfles};
     for (const std::string & input : inputs) {
-        expect_matches_serial(input, [](const Solver & s) {
+        expect_matches_serial_with_and_without_step_graphs(input, [](const Solver & s) {
             if (s.is_distributed()) {
                 EXPECT_GT(s.chemistry_cells_sent(), 0.0);
             }

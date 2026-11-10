@@ -109,10 +109,15 @@ class CellChemistry {
                   const chemistry::KineticsTable<> & kinetics, const CellChemistryOptions & options,
                   uint32_t n_cells);
 
+        /** @brief Slots of tallies(): cells of the last call that needed chemistry, then totals of every call. */
+        enum Tally : int { LAST_ACTIVE, ACTIVE, FAILURES, SENT, N_TALLIES };
+
+        /** @brief Totals over every call so far (reads the device). */
         struct Statistics {
-            uint64_t active = 0;    // cells that needed chemistry
-            uint32_t failures = 0;  // cells whose integration here failed (sent cells: where they ran)
-            uint64_t sent = 0;      // active cells integrated by another rank
+            uint64_t last_active = 0;  // cells of the last call that needed chemistry
+            uint64_t active = 0;       // cells that needed chemistry
+            uint64_t failures = 0;     // cells whose integration here failed (sent cells: where they ran)
+            uint64_t sent = 0;         // active cells integrated by another rank
         };
 
         /**
@@ -136,10 +141,26 @@ class CellChemistry {
          *        active at U or at U + dt rate; its internal energy per
          *        volume is taken linear in time between the two.
          */
-        Statistics advance(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
-                           const Kokkos::View<rtype *> & chem_h, const Kokkos::View<rtype *> & chem_cost, uint32_t n,
-                           double dt, const Kokkos::View<rtype *> & time_scale = {},
-                           const ChemistryForcing * forcing = nullptr);
+        void advance(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
+                     const Kokkos::View<rtype *> & chem_h, const Kokkos::View<rtype *> & chem_cost, uint32_t n,
+                     const Kokkos::View<double> & dt, const Kokkos::View<rtype *> & time_scale = {},
+                     const ChemistryForcing * forcing = nullptr);
+
+        /** @brief The tallies on the device (Tally slots), which advance updates without the host. */
+        Kokkos::View<uint64_t *> tallies() const { return tally; }
+
+        /** @brief The tallies, read from the device. */
+        Statistics statistics() const;
+
+        /** @brief Starts a step (see ChemistryBalance::begin_step). */
+        void begin_step();
+
+        /**
+         * @brief Between steps, after a fence: adapts the balancing's
+         *        capacities to the last calls. Returns whether the calls' work
+         *        changed (a step graph must be recorded again).
+         */
+        bool adapt_balance();
 
         /** @brief Heat release rate and mass production rates W_k omega_k of cells [0, n). */
         void heat_release(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
@@ -178,11 +199,19 @@ class CellChemistry {
 
     private:
         /**
-         * @brief Integrates queued cells [0, n) of `cells` in batches of the work memory, with
-         *        their forcing if any; returns failures.
+         * @brief Integrates the queued cells [range(0), range(2)) of `cells`, of the slots [0, n), in
+         *        batches of the work memory, with their forcing if any; adds the failures to the tallies.
          */
-        uint32_t integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued,
-                           const Kokkos::View<float *> & queued_cost, uint32_t n, double dt);
+        void integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued, uint32_t n,
+                       const Kokkos::View<uint32_t *> & range, const Kokkos::View<double> & dt);
+
+    public:
+        // Public because nvcc rejects device lambdas in non-public member functions
+        void bin_queue(const Kokkos::View<uint32_t *> & queued, const Kokkos::View<float *> & queued_cost, uint32_t n,
+                       const Kokkos::View<uint32_t *> & range);
+        void add_failures(const Kokkos::View<uint32_t> & failures) const;
+
+    private:
 
         std::shared_ptr<ChemistryBalance> balance;
         Mixture gas;
@@ -202,6 +231,11 @@ class CellChemistry {
         Kokkos::View<uint32_t **, Kokkos::LayoutRight> pivot;
         Kokkos::View<uint32_t *> active, queue;  // (cell): flags, then the cells that need chemistry
         Kokkos::View<float *> cost;  // binning: minus the last cost of each queued cell
+        // The queue's ranges on the device, [0, wide teams, end): local cells, then guests from other ranks
+        Kokkos::View<uint32_t *> local_range, guest_range;
+        Kokkos::View<uint32_t *> bins, bin_queue_out;  // binning: cells per cost class and their offsets; scratch queue
+        Kokkos::View<float *> bin_cost_out;
+        Kokkos::View<uint64_t *> tally;
         Kokkos::View<float *> previous_cost;  // (cell)
         RepairRecorder clip_recorder;
         Kokkos::View<rtype *> cell_volume;
