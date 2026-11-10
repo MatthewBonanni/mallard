@@ -43,6 +43,12 @@ int extract_main(const cli::Args & args);
 /** @brief The work of `mallard post extract`, with MPI and Kokkos started (tests call it). */
 int post_extract(const cli::Args & args);
 
+/** @brief `mallard post derive FILE...`: snapshots of derived fields of existing output. */
+int derive_main(const cli::Args & args);
+
+/** @brief The work of `mallard post derive`, with MPI and Kokkos started (tests call it). */
+int post_derive(const cli::Args & args);
+
 /** @brief `mallard mesh convert INPUT OUTPUT.h5`. */
 int mesh_convert_main(const cli::Args & args);
 

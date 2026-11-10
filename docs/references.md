@@ -320,6 +320,12 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the `Q_CRITERION` output field (`src/solver/derived_fields.h`).
 - <a id="jeong-hussain-1995"></a>J. Jeong and F. Hussain, On the identification of a vortex, *J. Fluid Mech.* 285, 69–94 (1995). [doi:10.1017/S0022112095000462](https://doi.org/10.1017/S0022112095000462)
   Used in: the `LAMBDA2` output field, the middle eigenvalue of S² + Ω² by Jacobi rotations (`src/solver/derived_fields.h`).
+- <a id="bilger-starner-kee-1990"></a>R. W. Bilger, S. H. Stårner and R. J. Kee, On reduced mechanisms for methane-air combustion in nonpremixed flames, *Combust. Flame* 80, 135–149 (1990). [doi:10.1016/0010-2180(90)90122-8](https://doi.org/10.1016/0010-2180%2890%2990122-8)
+  Used in: the `MIXTURE_FRACTION` output field, Bilger's element-based mixture fraction (`src/solver/derived_fields.cpp`).
+- <a id="yamashita-shimada-takeno-1996"></a>H. Yamashita, M. Shimada and T. Takeno, A numerical study on flame stability at the transition point of jet diffusion flames, *Proc. Combust. Inst.* 26, 27–34 (1996). [doi:10.1016/S0082-0784(96)80196-2](https://doi.org/10.1016/S0082-0784%2896%2980196-2)
+  Used in: the `FLAME_INDEX` output field, Takeno's flame index normalized to [-1, 1] (`src/solver/derived_fields.h`).
+- <a id="peters-2000"></a>N. Peters, *Turbulent Combustion*, Cambridge University Press (2000). [doi:10.1017/CBO9780511612701](https://doi.org/10.1017/CBO9780511612701)
+  Used in: the `SCALAR_DISSIPATION` output field, χ = 2 D \|∇Z\|² of the mixture fraction (`src/solver/derived_fields.cpp`).
 
 ## Validation cases and reference data
 

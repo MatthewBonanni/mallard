@@ -35,11 +35,11 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
 | Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
-| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
+| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
-| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`; `boundaries.p0`; `physics.p_ref` |
-| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries and `probes.reference` |
-| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`, `output.reference`; `boundaries.p0`; `physics.p_ref` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference` |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
 | Acceleration (m/s^2) | `source.gravity` |
 | Rate (1/s) | `sponges.strength` |
@@ -1044,7 +1044,7 @@ ranks. A probe that is not due costs nothing.
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
-| `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
+| `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP`. Default: `[output] reference` |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
@@ -1634,6 +1634,17 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the run block; `false` skips reading it again for very large meshes. Default `true` |
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
+| `reference` | `{rho, u = [...], p}`: the free stream of the [derived field](guide/output.md#derived-fields) `CP`, and the default `reference` of every `[[probes]]` entry's `CF` and `CP` (a probe's own replaces it). Default none: `CP` is then an error that asks for it |
+
+### `[output.mixture]`
+
+Gas mixtures: what the [mixture fields](guide/output.md#mixture-fields) `MIXTURE_FRACTION`, `PROGRESS_VARIABLE`, `FLAME_INDEX` and `SCALAR_DISSIPATION` are relative to. Every key is optional; a field whose input is missing is an error that names the key.
+
+| Key | Description |
+|---|---|
+| `fuel`, `oxidizer` | The two streams of Bilger's mixture fraction, both or neither: a composition (`{X = {CH4 = 1}}`, `{Y = {...}}`, numbers) or the name of a `[[boundaries]]` entry whose uniform `X` or `Y` they take (`"fuel_inlet"`) |
+| `fuel_species`, `oxidizer_species` | The species of the flame index. Default: with the streams, the most abundant species of the fuel stream with C or H, and of the oxidizer stream with O and neither C nor H (`CH4` and `O2` of methane and air) |
+| `progress` | `{species = [...], burnt = ...}`: c = the sum of the species' mass fractions divided by `burnt` (default 1: the raw sum); or `{T_unburnt = ..., T_burnt = ...}`: c = (T - T_unburnt) / (T_burnt - T_unburnt) |
 
 The run's summary reports the size of the files written and the time spent writing them (in the background with `async`); `output` in its wall time is what the run waited for.
 

@@ -31,7 +31,7 @@ Maintain  mallard test | completion | --version
 | `mesh convert` | Mesh | available |
 | `mesh extrude` | Mesh | planned |
 | `post extract` | Post | available; on the [output reader](output_reader.md#mallard-post-extract) |
-| `post derive` | Post | planned ([#511](https://github.com/MatthewBonanni/mallard/issues/511)) |
+| `post derive` | Post | available; on `post extract`'s case setup, with the in-run [derived fields](../guide/output.md#derived-fields) |
 | `post average` | Post | planned ([#512](https://github.com/MatthewBonanni/mallard/issues/512)) |
 | Reacting-flow analysis | Post | planned ([#513](https://github.com/MatthewBonanni/mallard/issues/513)) |
 | `post convergence` | Post | planned ([#514](https://github.com/MatthewBonanni/mallard/issues/514)) |

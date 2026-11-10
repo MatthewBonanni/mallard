@@ -8,6 +8,7 @@
 #include "field_units.h"
 
 #include "common_typedef.h"
+#include "derived_catalog.h"
 
 #include <algorithm>
 #include <cctype>
@@ -62,10 +63,6 @@ const Entry NAMED[] = {
     {"T", dim::temperature, "temperature", PRIMITIVE, ""},
     {"H", dim::velocity_squared, "specific enthalpy", PRIMITIVE, ""},
     {"CFL", dim::none, "local CFL number", DERIVED, ""},
-    {"MACH", dim::none, "Mach number", DERIVED, ""},
-    {"Q_CRITERION", dim::rate.times(dim::rate), "Q-criterion", DERIVED, ""},
-    {"LAMBDA2", dim::rate.times(dim::rate), "lambda2 vortex criterion", DERIVED, ""},
-    {"SCHLIEREN", dim::of(1, -4, 0), "density gradient magnitude", DERIVED, ""},
     {"P_MAX", dim::pressure, "largest pressure seen", DERIVED, ""},
     {"TENO_SIGMA", dim::none, "TENO troubled-cell indicator", DERIVED, "face_reconstruction type = \"TENO\""},
     {"MU", dim::dynamic_viscosity, "dynamic viscosity", TRANSPORT, "a mixture with navier_stokes"},
@@ -87,7 +84,6 @@ const Entry NAMED[] = {
     {"ENTHALPY_FLUX", dim::heat_flux, "normal total enthalpy flux", SURFACE, SURFACES},
     {"TAU_W", dim::pressure, "wall shear stress magnitude", SURFACE, WALLS},
     {"CF", dim::none, "skin friction coefficient", SURFACE, WALLS},
-    {"CP", dim::none, "pressure coefficient", SURFACE, WALLS},
     {"Q_W", dim::heat_flux, "wall heat flux into the fluid", SURFACE, WALLS},
     {"U_TAU", dim::velocity, "friction velocity", SURFACE, WALLS},
     {"Y_PLUS", dim::none, "first-cell y+", SURFACE, WALLS},
@@ -130,6 +126,9 @@ const Entry SPECIES[] = {
 bool starts_with(const std::string & s, const std::string & prefix) { return s.rfind(prefix, 0) == 0; }
 
 std::optional<FieldDescription> find_base(const std::string & name) {
+    for (const auto & d : derived::FIELDS) {
+        if (name == d.name) return FieldDescription{d.dimension, d.long_name, "", ""};
+    }
     for (const auto & e : NAMED) {
         if (name == e.name) return FieldDescription{e.dimension, e.long_name, "", e.non_si_units};
     }
@@ -217,6 +216,9 @@ size_t group_rank(const std::string & group) {
 }
 
 std::string group(const std::string & name) {
+    for (const auto & d : derived::FIELDS) {
+        if (name == d.name) return d.group;
+    }
     for (const auto & e : NAMED) {
         if (name == e.name) return e.group;
     }
@@ -242,6 +244,7 @@ std::vector<CatalogField> catalog() {
         const std::string units = e.non_si_units[0] ? e.non_si_units : e.dimension.udunits();
         out.push_back({name, units, long_name, e.group, e.needs});
     };
+    for (const auto & d : derived::FIELDS) out.push_back({d.name, d.dimension.udunits(), d.long_name, d.group, d.needs_text});
     for (const auto & e : NAMED) add(e.name, e, e.long_name);
     for (const auto & e : VECTORS) {
         if (find_base(e.name)->long_name == e.long_name) add(e.name, e, e.long_name + std::string(" (vector)"));
