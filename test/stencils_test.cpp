@@ -33,7 +33,8 @@ constexpr double LX = 1.5, LY = 1.0, LZ = 0.75;
 constexpr int NX = 12, NY = 8;
 
 /** @brief A box periodic in x (and z), with a wall at the bottom and a symmetry plane on top. */
-std::string box(const std::string & recon, const std::string & extra = "") {
+std::string box(const std::string & recon, const std::string & extra = "",
+                const std::string & top = "type = \"symmetry\"\n") {
     std::ostringstream s;
     s << "[run]\nn_steps = 1\ncfl = 0.5\n"
       << "[mesh]\ntype = \"cartesian\"\nNx = " << NX << "\nNy = " << NY << "\nLx = " << LX << "\nLy = " << LY << "\n"
@@ -44,7 +45,7 @@ std::string box(const std::string & recon, const std::string & extra = "") {
       << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n" << recon
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
-      << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n";
+      << "[[boundaries]]\nname = \"top\"\n" << top;
     s << extra;
     return s.str();
 }
@@ -164,8 +165,60 @@ TEST(Stencils, SecondAndFirstOrderStencilsAreTheFaceNeighbors) {
             // The cell and one neighbor or ghost per face (MUSCL); the cell alone (first order)
             EXPECT_EQ(size[c], muscl ? 1.0 + 2.0 * N_DIM : 1.0) << recon << " cell " << c;
             EXPECT_EQ(degree[c], muscl ? 1.0 : 0.0);
-            EXPECT_EQ(condition[c], 0.0);
+            // MUSCL: the face fit on cubes of equal sides, ghosts mirrored, weighs every direction alike
+            if (muscl) {
+                EXPECT_NEAR(condition[c], 1.0, 1e-9) << "cell " << c;
+            } else {
+                EXPECT_EQ(condition[c], 0.0);
+            }
         }
+    }
+}
+
+TEST(Stencils, MUSCLWeightsDifferentiateLinearFieldsExactly) {
+    // The face fit everywhere, then the vertex fit of the cells on a characteristic outlet
+    const std::string outlet = "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n";
+    for (const std::string & top : {std::string("type = \"symmetry\"\n"), outlet}) {
+        const std::string prefix = scratch("mallard_stencils_muscl_weights");
+        CheckOptions options;
+        options.all_stencils = true;
+        options.stencil_weights = true;
+        const CheckReport r = check_fields(box("type = \"MUSCL\"\n", "", top), options, prefix);
+        ASSERT_TRUE(r.ok()) << r.errors().front();
+        if (!comm::is_root()) continue;
+        const auto x = centroids(r.mesh_fields_file);
+        const auto condition = h5_values<double>(r.mesh_fields_file, "VTKHDF/CellData/STENCIL_CONDITION");
+        const auto cells = h5_values<uint64_t>(r.stencil_file, "stencils/cells");
+        const auto offsets = h5_values<uint64_t>(r.stencil_file, "stencils/offsets");
+        const auto member = h5_values<uint64_t>(r.stencil_file, "stencils/members/cell");
+        const auto role = h5_values<uint8_t>(r.stencil_file, "stencils/members/role");
+        const auto weights = h5_values<double>(r.stencil_file, "stencils/members/weights");
+        ASSERT_EQ(weights.size(), member.size() * N_DIM);
+        size_t n_vertex_fit = 0;
+        for (size_t t = 0; t < cells.size(); t++) {
+            const auto & xt = x[cells[t]];
+            // sum_s w_s (x_s - x_t) is the identity: x_s where the fit places member s
+            double J[N_DIM][N_DIM] = {};
+            for (uint64_t m = offsets[t]; m < offsets[t + 1]; m++) {
+                std::array<double, 3> dx{};
+                for (size_t d = 0; d < 3; d++) dx[d] = x[member[m]][d] - xt[d];
+                if (role[m] & stencils::MIRROR) dx[1] = (xt[1] < 0.5 * LY ? -2.0 : 2.0) * (xt[1] < 0.5 * LY ? xt[1] : LY - xt[1]);
+                const double L[3] = {LX, 0.0, LZ};
+                for (const size_t d : {size_t(0), size_t(2)}) {
+                    if (L[d] > 0.0 && std::abs(dx[d]) > 0.5 * L[d]) dx[d] -= std::copysign(L[d], dx[d]);
+                }
+                for (size_t a = 0; a < N_DIM; a++) {
+                    for (size_t b = 0; b < N_DIM; b++) J[a][b] += weights[m * N_DIM + a] * dx[b];
+                }
+            }
+            for (size_t a = 0; a < N_DIM; a++) {
+                for (size_t b = 0; b < N_DIM; b++) EXPECT_NEAR(J[a][b], a == b ? 1.0 : 0.0, 1e-9) << "cell " << cells[t];
+            }
+            EXPECT_GE(condition[cells[t]], 1.0 - 1e-9);
+            n_vertex_fit += offsets[t + 1] - offsets[t] > 1 + 2 * N_DIM;
+        }
+        // The outlet's cells take the vertex fit, whose stencils are wider
+        EXPECT_EQ(n_vertex_fit > 0, top == outlet);
     }
 }
 

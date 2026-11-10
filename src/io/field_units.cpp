@@ -109,7 +109,7 @@ const Entry NAMED[] = {
     {"STENCIL_SIZE", dim::none, "cells in the central stencil", STENCILS, ""},
     {"STENCIL_SECTORS", dim::none, "sector stencils kept (TENO)", STENCILS, ""},
     {"STENCIL_DEGREE", dim::none, "degree of the central reconstruction polynomial", STENCILS, ""},
-    {"STENCIL_CONDITION", dim::none, "condition number of the central least-squares fit (TENO)", STENCILS, ""},
+    {"STENCIL_CONDITION", dim::none, "condition number of the central least-squares fit", STENCILS, ""},
     {"STENCIL_WALL", dim::none, "1 where a stencil reaches a wall", STENCILS, ""},
     {"STENCIL_SEAM", dim::none, "1 where a stencil reaches across a periodic seam", STENCILS, ""},
     {"STENCIL_PARTITION", dim::none, "1 where a stencil reaches cells of another rank", STENCILS, ""},

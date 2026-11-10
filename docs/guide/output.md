@@ -295,7 +295,7 @@ variables = ["RHO", "P", "NON_ORTHOGONALITY", "STENCIL_CONDITION"]
 | `STENCIL_SIZE` | `1` | Members of the central stencil: the cell itself, its mirror and periodic images included |
 | `STENCIL_SECTORS` | `1` | Sector stencils kept (TENO; 0 otherwise) |
 | `STENCIL_DEGREE` | `1` | Degree of the central reconstruction polynomial: the scheme's, lower where `curved_wall_degree` reduces it; 1 with MUSCL, 0 first order |
-| `STENCIL_CONDITION` | `1` | 2-norm condition number of the central least-squares fit (TENO; 0 otherwise): how much the fit amplifies rounding and noise in the cell values |
+| `STENCIL_CONDITION` | `1` | 2-norm condition number of the central least-squares fit (TENO) or of the gradient fit (MUSCL): how much the fit amplifies rounding and noise in the cell values. 0 at first order, which fits nothing |
 | `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION` | `1` | 1 where a stencil reaches a wall, a periodic image, or a cell of another rank |
 
 ![Non-orthogonality, the condition number of the central fit, and the central stencil of one triangle next to a symmetry boundary (with its five mirror images, hatched) on a mesh of quadrilaterals and triangles, from mallard check --mesh-fields](../images/guide/mesh_fields-light.svg#gh-light-mode-only)
@@ -319,7 +319,7 @@ stencils' members, compressed-row style: target `t`'s members are rows
 | `/stencils/members/stencil` | member | 0 the central stencil, 1 + k the sector stencil of face k (TENO) |
 | `/stencils/members/role` | member | Bits: 1 a mirror image across a boundary face (MUSCL: the boundary's ghost or image value), 2 a periodic image |
 | `/stencils/members/face_cell`, `face` | member | The boundary face of a mirror image: the global id of its cell (-1 for none) and its place among that cell's faces (255 for none) |
-| `/stencils/members/weights` | member × coefficients | With `--weights` (TENO): the member's row of the central or sector fit's pseudo-inverse, its contribution to each polynomial coefficient |
+| `/stencils/members/weights` | member × coefficients | With `--weights`: the member's row of the central or sector fit's pseudo-inverse (TENO), its contribution to each polynomial coefficient, or its weight in each gradient component (MUSCL), each times the member's value minus the cell's (a mirror's: its ghost or image value). First order has none |
 | `/partition/rank`, `member_rank` | target, member | The rank that owns each target and member |
 
 Root attributes: `format` (`"mallard-stencils"`), `version` (1), `dimension`,
@@ -342,8 +342,7 @@ Pitfalls: a member's `cell` is the cell its value comes from, so a mirror
 image or a periodic image has the id of a cell already in the stencil, or far
 from it; `role` and `face_cell` say which. The file of every cell is large:
 about 1.5 kB per cell in 2D at fifth order, 8 kB with `--weights`, and more in 3D; select cells
-with `--cells` or `--region` on large meshes. MUSCL computes its weights on
-the fly, so `--weights` adds none for it. `STENCIL_PARTITION` and `/partition`
+with `--cells` or `--region` on large meshes. `STENCIL_PARTITION` and `/partition`
 show the partition of the check's or run's ranks: `mpirun -n 8 mallard check
 input.toml --mesh-fields mesh` shows that of 8 ranks.
 

@@ -74,8 +74,8 @@ constexpr Option CHECK_OPTIONS[] = {
      "inline table ({type = \"rectangle\", center = [0, 0], size = [0.1, 0.1]}); STENCIL_<id> fields for the "
      "first 64 cells. Default: none."},
     {"--weights", "", "",
-     "With --stencils, --cells or --region: add the least-squares pseudo-inverse rows of TENO's stencils to "
-     "PREFIX_stencils.h5. Default: none."},
+     "With --stencils, --cells or --region: add each member's weights to PREFIX_stencils.h5: TENO's "
+     "pseudo-inverse rows, MUSCL's gradient weights. Default: none."},
     {"--quality", "", "PREFIX", "Deprecated: --mesh-fields PREFIX."},
     {"--catalog", "", "KEYS.json",
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "

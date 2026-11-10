@@ -265,18 +265,32 @@ void build_teno(const TENO & teno, const Mesh & mesh, Builder & b) {
     }, true);
 }
 
-/** @brief MUSCL: the cells its gradient fit reads (LSQGradientFunctor, or the vertex fit). */
+/**
+ * @brief MUSCL: the cells its gradient fit reads (LSQGradientFunctor, or the
+ *        vertex fit), with the fit's own weights of each.
+ */
 void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & boundaries, Builder & b) {
     // Per face: 1 its ghost enters the vertex fit, 2 the vertex fit leaves it out, 4 an image cell stands in
     Kokkos::View<uint8_t *> flags("stencil_face_flags", mesh.n_faces);
+    // Ghost offsets do not depend on the states, so any admissible ones do
+    Kokkos::View<rtype *[N_CONSERVATIVE]> unit_states("stencil_unit_states", mesh.n_cells);
+    Kokkos::deep_copy(unit_states, 1.0_r);
     LSQVertexGradientFunctor g = muscl.gradient;
-    g.faces = make_gradient(mesh, boundaries, {}, muscl.gradients);
+    g.faces = make_gradient(mesh, boundaries, unit_states, muscl.gradients);
     Kokkos::parallel_for("stencil_face_flags", mesh.n_faces, KOKKOS_LAMBDA(const uint32_t f) {
         if (g.faces.cells_of_face(f, 1) >= 0) return;
         flags(f) = static_cast<uint8_t>((g.ghost_face(f) ? 1 : 0) | (g.faces.one_sided(f) ? 2 : 0) |
                                         (g.faces.boundaries.image_stencil(f) ? 4 : 0));
     });
+    Kokkos::View<rtype *[N_DIM]> face_fit("stencil_face_fit_weights", mesh.faces_of_cell.extent(0));
+    Kokkos::parallel_for("stencil_face_fit_weights", mesh.n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+        g.faces.weights(c, face_fit);
+    });
     auto h_flags = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), flags);
+    auto h_face_fit = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_fit);
+    auto w_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.cells);
+    auto w_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.faces);
+    auto w_images = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.images);
     auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.offsets_cells_of_cell);
     auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell);
     auto neighbor_shift = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell_shift);
@@ -285,38 +299,47 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
     auto face_image = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_image);
     auto lattice_of = [&](const uint8_t s) { return !zero_lattice({mesh.shift_lattice[s][0], mesh.shift_lattice[s][1],
                                                                    mesh.shift_lattice[s][2]}); };
+    const rtype no_weight[N_DIM] = {};
+    std::vector<rtype> P;  // The members' weights, (member, N_DIM)
     for (uint32_t c = 0; c < mesh.n_owned(); c++) {
         b.begin(c);
-        b.add(c, 0, 0, -1, nullptr);
+        P.assign(N_DIM, rtype(0));
+        b.add(c, 0, 0, -1, no_weight);
+        auto add = [&](const uint32_t cell, const uint8_t role, const int32_t face, const rtype * w) {
+            P.insert(P.end(), w, w + N_DIM);
+            b.add(cell, 0, role, face, w);
+        };
         const uint32_t f0 = mesh.h_offsets_faces_of_cell(c), f1 = mesh.h_offsets_faces_of_cell(c + 1);
         bool vertex_fit = N_DIM == 3 && f1 - f0 == 4;
         for (uint32_t k = f0; k < f1; k++) vertex_fit = vertex_fit || (h_flags(mesh.h_faces_of_cell(k)) & 2);
         if (vertex_fit) {
             for (uint32_t k = offsets(c); k < offsets(c + 1); k++) {
-                b.add(neighbors(k), 0, lattice_of(neighbor_shift(k)) ? PERIODIC : 0, -1, nullptr);
+                add(neighbors(k), lattice_of(neighbor_shift(k)) ? PERIODIC : 0, -1, &w_cells(k, 0));
             }
             if (image_offsets.extent(0) > 0) {
-                for (uint32_t k = image_offsets(c); k < image_offsets(c + 1); k++) b.add(images(k), 0, MIRROR, -1, nullptr);
+                for (uint32_t k = image_offsets(c); k < image_offsets(c + 1); k++) add(images(k), MIRROR, -1, &w_images(k, 0));
             }
             for (uint32_t k = f0; k < f1; k++) {
                 const uint32_t f = mesh.h_faces_of_cell(k);
-                if (h_flags(f) & 1) b.add(c, 0, MIRROR, static_cast<int32_t>(f), nullptr);
+                if (h_flags(f) & 1) add(c, MIRROR, static_cast<int32_t>(f), &w_faces(k, 0));
             }
         } else {
             for (uint32_t k = f0; k < f1; k++) {
                 const uint32_t f = mesh.h_faces_of_cell(k);
                 const int32_t c0 = mesh.h_cells_of_face(f, 0), c1 = mesh.h_cells_of_face(f, 1);
+                const rtype * w = &h_face_fit(k, 0);
                 if (c1 >= 0) {
                     const uint32_t j = static_cast<uint32_t>(c0 == static_cast<int32_t>(c) ? c1 : c0);
-                    b.add(j, 0, lattice_of(mesh.h_face_shift(f)) ? PERIODIC : 0, -1, nullptr);
+                    add(j, lattice_of(mesh.h_face_shift(f)) ? PERIODIC : 0, -1, w);
                 } else if (h_flags(f) & 4) {
-                    b.add(static_cast<uint32_t>(face_image(f)), 0, MIRROR, static_cast<int32_t>(f), nullptr);
+                    add(static_cast<uint32_t>(face_image(f)), MIRROR, static_cast<int32_t>(f), w);
                 } else {
-                    b.add(c, 0, MIRROR, static_cast<int32_t>(f), nullptr);
+                    add(c, MIRROR, static_cast<int32_t>(f), w);
                 }
             }
         }
         b.table.summary[c].degree = 1;
+        b.table.summary[c].condition = condition(P, P.size() / N_DIM, N_DIM);
         b.end();
     }
 }
@@ -349,11 +372,13 @@ Table build(const FaceReconstruction & reconstruction, const Mesh & mesh, const 
     Table table;
     table.scheme = FACE_RECONSTRUCTION_NAMES.at(reconstruction.get_type());
     const auto * teno = dynamic_cast<const TENO *>(&reconstruction);
+    const auto * muscl = dynamic_cast<const MUSCL *>(&reconstruction);
     if (weights && teno) table.width = teno->n_dof_large;
+    if (weights && muscl) table.width = N_DIM;
     Builder b(mesh, boundaries, owner, table, targets);
     if (teno) {
         build_teno(*teno, mesh, b);
-    } else if (const auto * muscl = dynamic_cast<const MUSCL *>(&reconstruction)) {
+    } else if (muscl) {
         build_muscl(*muscl, mesh, boundaries, b);
     } else {
         for (uint32_t c = 0; c < mesh.n_owned(); c++) {

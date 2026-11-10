@@ -48,7 +48,7 @@ enum Reach : uint8_t { WALL = 1, SEAM = 2, PARTITION = 4 };
 struct Summary {
     uint8_t degree = 0;                     // of the central polynomial (TENO), 1 (MUSCL), 0 (first order)
     std::array<uint16_t, N_STENCILS> sizes{};  // members of the central stencil, then of each face's sector stencil
-    double condition = 0.0;  // 2-norm condition number of the central least-squares fit (TENO), 0 without one
+    double condition = 0.0;  // 2-norm condition number of the central least-squares fit, 0 without one
     uint8_t reach = 0;       // Reach bits
 };
 
@@ -66,7 +66,8 @@ struct Table {
     std::vector<uint8_t> stencil;     // 0 central, 1 + k the sector stencil of the target's face k
     std::vector<uint8_t> role;        // Role bits
     std::vector<int32_t> face;        // local boundary face of a MIRROR member, -1 if none or unknown
-    std::vector<double> weights;      // (member, width): coefficient l of the fit is sum_s w_sl (u_s - u_target)
+    std::vector<double> weights;      // (member, width): coefficient l of the fit (MUSCL: the gradient's
+                                      // component l) is sum_s w_sl (u_s - u_target)
 
     /** @brief The STENCIL_* fields of the owned cells, in FIELDS' order. */
     std::vector<std::pair<std::string, std::vector<double>>> summary_fields() const;
@@ -77,7 +78,7 @@ struct Table {
  *        for none of it: every rank its own owned cells).
  * @param owner Rank owning each local cell.
  * @param targets Owned cells whose members to keep (increasing); the summaries cover every owned cell.
- * @param weights Keep the pseudo-inverse rows of the members (TENO; other schemes have none).
+ * @param weights Keep the members' weights: TENO's pseudo-inverse rows, MUSCL's gradient weights (first order has none).
  */
 Table build(const FaceReconstruction & reconstruction, const Mesh & mesh, const BoundaryData & boundaries,
             const std::vector<int> & owner, const std::vector<uint32_t> & targets, bool weights);
