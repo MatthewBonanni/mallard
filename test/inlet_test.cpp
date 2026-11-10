@@ -622,6 +622,9 @@ TEST(MassFlowInletTest, ClosedHeatedDuctGainsExactlyTheInflow) {
     const std::string flux = "type = \"inlet_mass_flow\"\nT = 300.0\nmass_flux = 20.0\n";
     const std::string total = "type = \"inlet_mass_flow\"\nT = 300.0\nmdot = " + std::to_string(G * A) +
                               "\nprofile = \"1 + 4 * y\"\n";
+    // A shape that sweeps across the inlet during the run: renormalized at every stage
+    const std::string pulsating = "type = \"inlet_mass_flow\"\nT = 300.0\nmdot = " + std::to_string(G * A) +
+                                  "\nprofile = \"1 + 40 * y * (1 + sin(3000 * t))\"\n";
     const std::string muscl = "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n";
     // TENO has no full-rank stencils in a 3D duct two cells across
     const std::string teno = std::string("[numerics]\nriemann_solver = \"Roe\"\n[numerics.face_reconstruction]\n") +
@@ -631,7 +634,9 @@ TEST(MassFlowInletTest, ClosedHeatedDuctGainsExactlyTheInflow) {
     for (const auto & [inlet, scheme, gas] : {std::array<std::string, 3>{flux, muscl, PERFECT_GAS_AIR},
                                              std::array<std::string, 3>{total, teno, PERFECT_GAS_AIR},
                                              std::array<std::string, 3>{flux + X, double_flux, mixture},
-                                             std::array<std::string, 3>{total + X, muscl, mixture}}) {
+                                             std::array<std::string, 3>{total + X, muscl, mixture},
+                                             std::array<std::string, 3>{pulsating, muscl, PERFECT_GAS_AIR},
+                                             std::array<std::string, 3>{pulsating + X, muscl, mixture}}) {
         const ClosedDuct r = closed_heated_duct(inlet, scheme, gas, G * A);
         EXPECT_NEAR(r.added, r.expected, tol(1e-11, 1e-4) * r.expected) << inlet << scheme << gas;
     }
@@ -642,6 +647,85 @@ TEST(MassFlowInletTest, ClosedHeatedDuctGainsExactlyTheInflow) {
             "\np = 1.0e5\nT = 300.0\n",
         muscl, PERFECT_GAS_AIR, G * A);
     EXPECT_GT(std::abs(fixed.added / fixed.expected - 1.0), 1e-2);
+}
+
+TEST(MassFlowInletTest, ProfileOfTimeCarriesMdotAtEveryStage) {
+    // Every rank integrates the profile over every face of the inlet in one
+    // order: the fluxes do not depend on which faces a rank holds, and their
+    // integral in that order is mdot at every time, however the shape moves
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml(mesh_block("cartesian", 2, N_DIM == 2 ? 600 : 24, 0.1, 1.0)));
+    FaceZone * zone = mesh->get_face_zone("left");
+    const uint32_t n = zone->n_faces();
+    const double mdot = 0.7;
+    const std::string shape = "1 + 3 * y * (1 + sin(40 * t)) + z * z";
+    MassFlowProfile profile{"inlet", std::make_shared<const kexpr::Program>("inlet.profile", shape, BoundaryValue::variables()),
+                            mdot, {}, {}};
+    std::vector<Point> x(n);
+    for (uint32_t k = 0; k < n; k++) {
+        FOR_I_DIM x[k][i] = double(mesh->h_face_coords(zone->h_faces(k), i));
+        profile.x.push_back(x[k]);
+        profile.measure.push_back(double(mesh->h_face_measure(zone->h_faces(k))));
+    }
+    // One rank with all faces, and three ranks holding every third face, in reverse order
+    TimedBoundaryFields whole, ranks[3];
+    std::vector<uint32_t> all(n);
+    for (uint32_t k = 0; k < n; k++) all[k] = k;
+    whole.add(profile, all, x);
+    whole.finish();
+    for (uint32_t r = 0; r < 3; r++) {
+        std::vector<uint32_t> own;
+        std::vector<Point> own_x;
+        for (uint32_t k = n; k-- > 0;) {
+            if (k % 3 != r) continue;
+            own.push_back(k);
+            own_x.push_back(x[k]);
+        }
+        ranks[r].add(profile, own, own_x);
+        ranks[r].finish();
+    }
+    Kokkos::View<rtype> time("time");
+    Kokkos::View<BoundaryCondition *> bcs("bcs", n), split("split", n);
+    const TimedBoundaryFields::Gas gas{};
+    for (const double t : {0.0, 0.013, 0.05, 0.11}) {
+        Kokkos::deep_copy(time, static_cast<rtype>(t));
+        whole.apply(time, bcs, gas);
+        for (const TimedBoundaryFields & r : ranks) r.apply(time, split, gas);
+        whole.check();
+        auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bcs);
+        auto h_split = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), split);
+        double flow = 0.0, ratio_min = 1e300, ratio_max = 0.0;
+        for (uint32_t k = 0; k < n; k++) {
+            const double G = double(h_bcs(k).data[N_DIM + 1]);
+            EXPECT_EQ(h_split(k).data[N_DIM + 1], h_bcs(k).data[N_DIM + 1]) << k;
+            flow += G * profile.measure[k];
+            const double vars[4] = {x[k][0], x[k][1], N_DIM == 3 ? x[k][2] : 0.0, t};
+            const double ratio = G / (*profile.shape)(vars);
+            ratio_min = std::min(ratio_min, ratio);
+            ratio_max = std::max(ratio_max, ratio);
+        }
+        EXPECT_NEAR(flow, mdot, tol(1e-14, 1e-6) * mdot) << t;
+        EXPECT_NEAR(ratio_max / ratio_min, 1.0, tol(1e-14, 1e-6)) << t;
+    }
+}
+
+TEST(MassFlowInletTest, ProfileOfTimeNegativeAtSomeTimeStopsTheRun) {
+    const std::string input =
+        "[run]\nn_steps = 20\ncfl = 0.4\n" + mesh_block("cartesian", 8, 4, 1.0, 0.25) +
+        "[initialize]\ntype = \"constant\"\np = 1.0\nT = 1.0\nu = " + zero_velocity() +
+        "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1\n" +
+        duct_boundaries("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = 0.1\nprofile = \"1 + y - 1000 * t\"\n",
+                        "type = \"outlet_pressure\"\np = 1.0\n");
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input));
+    try {
+        solver.run();
+        ADD_FAILURE() << "the profile turns negative at t = 1e-3";
+    } catch (const std::runtime_error & e) {
+        EXPECT_NE(std::string(e.what()).find("profile must be non-negative"), std::string::npos) << e.what();
+    }
 }
 
 namespace {

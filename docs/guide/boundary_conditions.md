@@ -505,7 +505,7 @@ fixes the velocity instead, and its mass flow drifts with the inlet density).
 | Key | Default | Meaning |
 |---|---|---|
 | `mass_flux` or `mdot` | one required | Mass flux `rho u . n_in` [kg/(m^2 s)] (a number or expression of x, y, z, t, or a vector, which gives the direction too), or the total mass flow through the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs] |
-| `profile` | uniform | With `mdot`: the shape of the mass flux along the inlet (an expression of x, y, z, non-negative), scaled to `mdot` |
+| `profile` | uniform | With `mdot`: the shape of the mass flux along the inlet (an expression of x, y, z, t, non-negative), scaled to `mdot` at every stage |
 | `T` | required | Inflow temperature |
 | `direction` | inward normal | Flow direction; must point into the domain at every face; not with a `mass_flux` vector |
 | `X` / `Y`, `balance` | required for mixtures | Composition |
@@ -529,12 +529,33 @@ within 1e-6.*
 
 **Use** for combustors, jets and any inflow whose mass flow is given.
 
+**A profile that depends on `t`.** The shape is evaluated on the device at
+every Runge-Kutta stage and scaled so that the faces carry exactly `mdot`,
+the same on any number of ranks. A pulsating jet whose peak sweeps across the
+inlet while the total holds:
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "inlet_mass_flow"
+mdot = 0.02                                             # kg/s, at every instant
+profile = "1 + 0.8 * sin(2 * pi * 200 * t) * y / 0.05"  # tilts back and forth at 200 Hz
+T = 300.0
+```
+
+The profile must stay non-negative at every face and time: a run whose
+profile turns negative stops at the next progress check, with the face, time
+and value.
+
 Pitfalls:
 
 - The inlet is for subsonic inflow: it takes the pressure from the
   interior. For supersonic inflow use `inlet_state`.
 - `mdot` is divided among the entry's faces by their areas (times `profile`);
   in 2D it is per unit depth.
+- A `profile` of `t` moves the flow across the inlet, not its total: the
+  total stays `mdot`, renormalized at every stage. For a total that changes
+  in time, give `mass_flux` as an expression of `t` instead.
 - Like `inlet_state`, it reflects acoustic waves (it holds the mass flux, not
   the velocity or the pressure); pair it with an `nscbc` outlet or a sponge
   where reflections matter.

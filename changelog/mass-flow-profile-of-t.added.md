@@ -1,0 +1,1 @@
+- `inlet_mass_flow`: a `profile` may depend on `t`. It is evaluated on the device at every stage and renormalized so that the faces carry exactly `mdot`, identically on any rank count; a profile that turns negative stops the run with the face, time and value (#601).

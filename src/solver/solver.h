@@ -633,9 +633,10 @@ class Solver {
          * @brief Mass fluxes of the faces of an inlet_mass_flow entry: per
          *        face for a mass_flux expression or an mdot with a profile,
          *        else empty (an mdot without profile sets bc's uniform flux).
+         *        A profile of t gives the fluxes at t = 0 and fills `timed`.
          */
         std::vector<double> mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
-                                                   BoundaryCondition & bc) const;
+                                                   BoundaryCondition & bc, MassFlowProfile & timed) const;
         void init_sources(region::Regions & regions);
         void init_sponges(region::Regions & regions);
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
