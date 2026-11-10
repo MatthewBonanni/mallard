@@ -714,10 +714,10 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence-turbulence).
 
 | Key | Description |
 |---|---|
-| `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z`, positive semidefinite |
+| `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z` (not `t`, even when `u` depends on `t`), positive semidefinite |
 | `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/post/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
-| `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed) |
+| `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed); with a `u` of `t`, that of `t = 0`, so set it when the mean starts at rest or varies widely |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
 | `zero_net_flux` | `true` (default) removes the area mean of the normal fluctuation over the inlet at every instant, which would otherwise drive a plane acoustic wave; it also removes about `4 L_y L_z / A` of the normal Reynolds stress for an inlet of area `A` |
 | `points_per_length` | Resolution of the generator's grid on the inlet: points per smallest integral length (default 6, at least 2) |

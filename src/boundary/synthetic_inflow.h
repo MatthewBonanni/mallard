@@ -111,7 +111,10 @@ class SyntheticInflow {
         SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream, const Mesh & mesh,
                         const std::vector<uint32_t> & faces, const std::vector<int32_t> & char_index);
 
-        /** @brief Write the target velocity (mean plus fluctuation) of the inlet's faces at time t into target(k). */
+        /**
+         * @brief Write the target velocity (mean plus fluctuation) of the inlet's faces at time t into target(k).
+         *        A mean of t is the one already in target, written there by TimedInletTargets at t.
+         */
         void fill(double t, const Kokkos::View<rtype *[N_DIM]> & target);
 
         /** @brief One-line description for the run log. */
@@ -149,6 +152,7 @@ class SyntheticInflow {
         double dt_plane = 0.0;      // time between planes
         double U_c = 0.0;           // convection velocity of Taylor's hypothesis
         bool zero_net_flux = true;
+        bool timed_mean = false;    // the mean depends on t: superposed on the target, not face_mean
         double area = 0.0;          // of the whole inlet
         // Filters: (component, direction: transverse ones, then time), half widths and kernels
         int32_t half_width[N_DIM][N_DIM] = {};

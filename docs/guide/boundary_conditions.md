@@ -239,7 +239,6 @@ Pitfalls:
 - With `nscbc`, the boundary point advances once per step, so its forcing
   converges at first order in `dt`; the other inlets at the integrator's
   order.
-- Synthetic turbulence takes a mean velocity of `x`, `y`, `z` only.
 - With `average = true`, `p` is one target for the whole outlet: it may
   depend on `t`, not on `x`, `y`, `z`.
 
@@ -838,10 +837,34 @@ bitwise the same on any number of ranks and across restarts.
 | `reynolds_stress` | required (or `profile`) | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions |
 | `profile` | — | Instead of `u` and `reynolds_stress`: a CSV of plane averages from a precursor run (`tools/post/plane_average.py`) |
 | `length_scale` | required | Integral length: one number, one per direction, or one list per component |
-| `convection_velocity` | mean inflow speed | `U_c` of Taylor's hypothesis |
+| `convection_velocity` | mean inflow speed (at `t = 0`) | `U_c` of Taylor's hypothesis |
 | `seed` | 1 | Random seed |
 | `zero_net_flux` | `true` | Remove the area mean of the normal fluctuation (no plane acoustic wave) |
 | `points_per_length` | 6 | Generator grid points per smallest integral length |
+
+**A mean that depends on `t`.** `u` may be an expression of `t`: the
+fluctuations are added on the device, at every stage, to the mean evaluated
+there, like any other inlet of `t`. The Reynolds stresses and length scales
+are those of the fluctuations alone, set at setup in `x`, `y`, `z`; they do
+not follow the mean. The convection velocity of Taylor's hypothesis sets the
+time between the generator's planes, so it stays fixed: by default the mean
+inflow speed at `t = 0`. Set `convection_velocity` when the mean starts at
+rest or changes widely. A ramped inlet with turbulence:
+
+```toml
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = ["10 * min(t / 0.01, 1)", 0.0, 0.0]   # from rest to 10 m/s over 10 ms
+p = 1.0e5
+T = 300.0
+nscbc = { L = 1.0 }
+
+[boundaries.turbulence]
+reynolds_stress = [1.0, 0.5, 0.5, 0.0, 0.0, 0.0]   # (1 m/s)^2 streamwise from the start
+length_scale = 0.01
+convection_velocity = 10.0   # the mean at t = 0 is 0, so give it
+```
 
 The inlet must be planar and normal to a coordinate axis. Examples:
 `turbulent_inflow_duct`, `channel_inflow_retau180` (statistics from the
