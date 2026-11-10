@@ -11,6 +11,7 @@
 #include <fstream>
 #include <optional>
 #include <stdexcept>
+#include <vector>
 
 #include "comm.h"
 #include "common_io.h"
@@ -21,6 +22,8 @@ namespace {
 
 std::ofstream out;
 std::optional<uint64_t> recorded_step;
+bool holding = false;
+std::vector<std::string> held;
 
 /** @brief The step of the last record that has one (its first "step" is the record's own). */
 std::optional<uint64_t> last_step_in(const std::string & file) {
@@ -54,10 +57,29 @@ bool is_open() { return out.is_open(); }
 
 std::optional<uint64_t> last_step() { return recorded_step; }
 
-void write(const json::Object & record) {
+void write(const json::Object & record, bool held_record) {
+    if (holding && held_record) {
+        held.push_back(record.str());
+        return;
+    }
     if (!out.is_open()) return;
     out << record.str() << '\n';
     out.flush();
+}
+
+void hold() {
+    held.clear();
+    holding = comm::is_root();
+}
+
+void release(const json::Object & start) {
+    holding = false;
+    write(start);
+    if (out.is_open()) {
+        for (const std::string & line : held) out << line << '\n';
+        out.flush();
+    }
+    held.clear();
 }
 
 } // namespace run_log

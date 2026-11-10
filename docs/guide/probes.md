@@ -178,7 +178,8 @@ Pitfalls:
 
 - Point values fall back to the linear least-squares reconstruction in cells
   the TENO indicator flags troubled (shocks, and coarse meshes of smooth
-  fields), and to the cell average outside the domain. VTP and VTKHDF
+  fields), and to the cell average where neither gives a positive density
+  and energy. VTP and VTKHDF
   probe files record the method and each variable's kind of value
   ([Cell averages and point values](output.md#cell-averages-and-point-values)).
 - Mass fractions are cell averages in both modes; `T` and `H` follow the
@@ -196,6 +197,28 @@ Pitfalls:
   carry no species flux, outflows without an image face none at all.
 - Reductions of points weigh each point 1 (`integral` is a sum); curves
   integrate with three Gauss points per element between samples.
+
+### Samples outside the domain
+
+Every sample a probe writes lies in the mesh. A point on a boundary face, to
+round-off relative to the cell size, counts as inside, so a line from wall to
+wall keeps its ends.
+
+- `point` and `points` probes: a point outside the domain is an input error
+  at setup (in a run, `mallard check` and `mallard post extract` alike) that
+  names the probe, how many points are outside, and for the first few the
+  point's index, its coordinates and its distance to the nearest boundary
+  zone.
+- Curves (`line`, `polyline`, `arc`, `circle`, `curve`) and resampled
+  surfaces: the samples outside the domain are dropped, and a warning names
+  the probe, how many samples and what share of the length or area were
+  dropped, and where (the runs of dropped samples). The warning is printed and
+  written to `mallard.jsonl`, and the file records it as `clipped` in its
+  [probe sampling block](output.md#probe-sampling). A curve or surface
+  entirely outside the domain is an error. A line drawn past a curved wall is
+  clipped at the wall's faceted surface.
+- Cut planes and region probes sample the cells they cut or cover, so they
+  are always clipped to the mesh; one that misses the mesh is an error.
 
 ### Time averages
 

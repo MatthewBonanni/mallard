@@ -294,14 +294,11 @@ TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
 }
 
 TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
-    // Points on faces between cells take the cell with the lowest id, points
-    // outside the domain the nearest centroid; the values are the cell's, bitwise
+    // Points on faces between cells take the cell with the lowest id; the values are the cell's, bitwise
     const std::string dir = (scratch_dir() / "mallard_probe_test").string();
     const std::string probes =
         "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/line.csv\"\nfields = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
-        "start = " + numbers3("0", "0.5", "0.5") + "\nend = " + numbers3("1", "0.5", "0.5") + "\nn_points = 11\n"
-        "[[probes]]\nname = \"out\"\nfile = \"" + dir + "/out.csv\"\nfields = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
-        "point = " + numbers3("1.3", "0.27", "0.62") + "\n";
+        "start = " + numbers3("0", "0.5", "0.5") + "\nend = " + numbers3("1", "0.5", "0.5") + "\nn_points = 11\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(blob_input(6, BLOB, probes)));
@@ -324,20 +321,11 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
             }
             if (inside) return c;
         }
-        uint32_t best = 0;
-        double d_best = std::numeric_limits<double>::max();
-        for (uint32_t c : mesh.cells_by_global_id()) {
-            double d2 = 0.0;
-            for (size_t d = 0; d < N_DIM; d++) d2 += std::pow(x[d] - double(mesh.h_cell_coords(c, d)), 2);
-            if (d2 < d_best) {
-                d_best = d2;
-                best = c;
-            }
-        }
-        return best;
+        ADD_FAILURE() << "no cell holds the point";
+        return 0u;
     };
     size_t n_checked = 0;
-    for (const char * name : {"line", "out"}) {
+    for (const char * name : {"line"}) {
         for (const auto & row : csv_rows(dir + "/" + name + ".csv")) {
             if (std::stoull(row[0]) != solver.get_step()) continue;
             std::vector<double> x;
@@ -351,5 +339,5 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
             n_checked++;
         }
     }
-    EXPECT_EQ(n_checked, 12u);
+    EXPECT_EQ(n_checked, 11u);
 }

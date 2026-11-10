@@ -231,11 +231,10 @@ class Probes {
         /** @brief Columns of the values filled on the host with a cell field's value in each sample's cell. */
         using CellColumns = std::vector<std::pair<uint32_t, const Data *>>;
 
-        /** @brief Where a located sample is read: its cell (global id), the cell's centroid, and whether it holds it. */
+        /** @brief Where a located sample is read: its cell (global id) and the cell's centroid. */
         struct Location {
             uint64_t cell = 0;
             probe::Point centroid{};
-            bool inside = false;
         };
 
         /** @brief How point values are evaluated (before init): the face reconstruction's, or linear least squares. */
@@ -256,7 +255,6 @@ class Probes {
             Kokkos::View<uint32_t *> faces;
             Kokkos::View<rtype *> distance;
             bool located = false;                   // by locate: points of the geometry
-            std::vector<uint8_t> host_inside;       // located: whether a cell holds each local sample
             Kokkos::View<uint32_t *> inside;        // local samples inside their cell (point values)
             Kokkos::View<uint32_t *> inside_cells;
             Kokkos::View<rtype *[N_DIM]> inside_offsets;  // from the cell centroid
@@ -291,6 +289,13 @@ class Probes {
         };
 
     private:
+        /**
+         * @brief Drop the samples of g outside the mesh, with a warning, and
+         *        return what was dropped as JSON ("" if none); throws if g is
+         *        point or points probes with any outside, or nothing is left.
+         */
+        static std::string clip_to_mesh(probe::Geometry & g, const Mesh & mesh, const std::string & key, size_t line);
+
         struct Probe {
             std::string name;
             std::string file;
@@ -307,6 +312,7 @@ class Probes {
             std::vector<std::string> value_kinds; // snapshot_block::value of each written variable
             snapshot_block::Reconstruction reconstruction;  // of the point values
             std::vector<Location> locations;     // rank 0: of each located sample (node), in sample order
+            std::string clipped;                 // JSON of the samples dropped outside the mesh, or empty
             /** @brief The probe sampling block: method, variables, and where each located sample is read. */
             std::string sampling_json() const;
             uint32_t rho_column = 0;             // of RHO among the evaluated variables (favre)

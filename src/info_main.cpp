@@ -236,15 +236,26 @@ void print_probe_sampling(const output::Contents & c) {
         values += (values.empty() ? "" : ", ") + v["name"].string + " " + v["value"].string;
     }
     item("Values", values.empty() ? "-" : values);
+    const json::Value * clipped = b.find("clipped");
+    std::string dropped;
+    if (clipped && clipped->type == json::Value::Type::OBJECT) {
+        dropped = count(static_cast<uint64_t>((*clipped)["dropped"].number)) + " of " +
+                  count(static_cast<uint64_t>((*clipped)["of"].number)) + " samples outside the mesh dropped";
+        for (const char * m : {"length", "area", "volume"}) {
+            if (const json::Value * f = clipped->find(std::string(m) + "_fraction")) {
+                dropped += " (" + format("%.3g", 100.0 * f->number) + "% of the " + m + ")";
+            }
+        }
+    }
     const json::Value * points = b.find("points");
     if (!points || points->type != json::Value::Type::OBJECT) {
         item("Locations", "at the faces, cut cells or elements the probe is made of");
+        if (!dropped.empty()) item("Clipped", dropped);
         return;
     }
     const json::Value & p = *points;
-    const uint64_t n = static_cast<uint64_t>(p["n"].number), outside = static_cast<uint64_t>(p["outside"].number);
-    item("Located samples", count(n) + (outside ? ", " + count(outside) + " outside the domain (the nearest cell's value)"
-                                                : ", all inside the domain"));
+    const uint64_t n = static_cast<uint64_t>(p["n"].number);
+    item("Located samples", count(n) + (dropped.empty() ? "" : "; " + dropped));
     item("Distance", "requested point to where it is read: max " + format("%.6g", p["max_distance"].number) +
                          " m, mean " + format("%.6g", p["mean_distance"].number) + " m");
     auto xyz = [](const json::Value & x) {
@@ -260,10 +271,9 @@ void print_probe_sampling(const output::Contents & c) {
             i = n - ROWS / 2;
         }
         rows.push_back({std::to_string(i), xyz(p["requested"].array[i]), format("%.0f", p["cell"].array[i].number),
-                        xyz(p["centroid"].array[i]), format("%.6g", p["distance"].array[i].number),
-                        p["inside"].array[i].boolean ? "yes" : "no"});
+                        xyz(p["centroid"].array[i]), format("%.6g", p["distance"].array[i].number)});
     }
-    logging::table({"point", "requested [m]", "cell", "cell centroid [m]", "distance [m]", "inside"}, rows);
+    logging::table({"sample", "requested [m]", "cell", "cell centroid [m]", "distance [m]"}, rows);
 }
 
 /** @brief "t = 0.002 s, step 2", or the range of several times. */

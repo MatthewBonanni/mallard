@@ -398,8 +398,9 @@ def probe_sampling(path):
     """The probe sampling block of a probe file (.csv, .h5, .vtkhdf, .vtp, or
     the last member of its .pvd): sampling ("cell", "point"), reconstruction,
     each variable's value kind (and average), and for located samples their
-    requested point, cell, cell centroid, inside, and distance (m) from the
-    requested point to where it is read (docs/guide/output.md#probe-sampling).
+    requested point, cell, cell centroid and distance (m) from the requested
+    point to where it is read, and what clipping to the mesh dropped
+    (docs/guide/output.md#probe-sampling).
     None for files before Mallard 0.10."""
     if path.endswith(".h5") or path.endswith(".vtkhdf"):
         from .h5 import probe_sampling as h5_sampling
