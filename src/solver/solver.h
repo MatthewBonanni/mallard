@@ -117,6 +117,9 @@ struct RunEnd {
     std::string cause;    // finished: n_steps or t_stop; stopped: stop_file, mallard_ctl or trigger; signal: its name
     std::string reason;   // in words
     std::string trigger;  // the trigger that stopped the run
+    RunEnd() = default;
+    RunEnd(std::string outcome_, std::string cause_, std::string reason_, std::string trigger_ = {})
+        : outcome(std::move(outcome_)), cause(std::move(cause_)), reason(std::move(reason_)), trigger(std::move(trigger_)) {}
     bool empty() const { return outcome.empty(); }
 };
 
