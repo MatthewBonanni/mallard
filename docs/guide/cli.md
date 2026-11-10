@@ -493,12 +493,14 @@ Output files are read by any build, of any dimension and precision; a mesh file
 by the solver of its dimension, which also reports its quality as mallard check
 does.
 
-RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and
-every output file in it and one level down, one table row each (the snapshots of
-a series as their index). Each file the run log records as written is checked
-against its record: missing, or a size (with --verify, a SHA-256) other than the
-one recorded, is reported. A file still named NAME.partial is one whose write
-did not finish. With --html, writes the run report instead: a page of the run's
+RUN_DIR is a directory a run wrote to: its start from mallard.jsonl and, from
+the same records as its report.html, its outcome, health (lowest values,
+repairs, conservation), cost and warnings, each with a status; then every output
+file in it and one level down, one table row each (the snapshots of a series as
+their index). Each file the run log records as written is checked against its
+record: missing, or a size (with --verify, a SHA-256) other than the one
+recorded, is reported. A file still named NAME.partial is one whose write did
+not finish. With --html, writes the run report instead: a page of the run's
 outcome, identity, configuration, health, monitors, cost and output, built from
 mallard.jsonl alone.
 

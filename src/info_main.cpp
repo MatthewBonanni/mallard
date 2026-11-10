@@ -611,24 +611,9 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         if (const json::Value * restart = s.find("restart"); restart && !s.find("restart_of")) {
             item("Restarted from", text(restart->find("file")) + ", step " + text(restart->find("step")));
         }
-        if (record.end.type == json::Value::Type::OBJECT) {
-            const json::Value & e = record.end;
-            const json::Value * wall = e.find("wall");
-            // Run logs before 0.10 give only the reason
-            const json::Value * outcome = e.find("outcome");
-            item("Ended", (outcome ? outcome->string + ": " : "") + text(e.find("reason")));
-            item("Last step", text(e.find("step")));
-            for (const auto & [key, name] : {std::pair{"last_snapshot", "Last snapshot"}, {"last_restart", "Last restart"}}) {
-                if (const json::Value * f = e.find(key)) {
-                    item(name, text(f->find("path")) + ", step " + text(f->find("step")) + ", t = " + text(f->find("t")) + " s");
-                }
-            }
-            item("Simulated time", "t = " + text(e.find("t")) + " s at the end");
-            item("Wall time", logging::duration(wall ? wall->number : 0.0) + ", the whole run");
-        } else {
-            item("Ended", "no end record: still running, or killed (SIGKILL, a lost node)");
-            item("Last step", text(record.last.find("step")) + ", of the last record");
-        }
+    }
+    if (record.found) {
+        std::cout << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
     }
     logging::section("Output files", count(files.size()) + " files");
     std::vector<std::vector<std::string>> rows;

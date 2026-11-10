@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "json.h"
+#include "report.h"
 
 namespace run_page {
 
@@ -79,11 +80,19 @@ class Page {
         void add(const json::Value & record);
         /** @brief The page, from the records added so far: the same records give the same page. */
         std::string html() const;
+        /**
+         * @brief The run's summary as text, from the same records as the page: its outcome, health, cost,
+         *        warnings and divergence, in mallard check's sections, statuses and units.
+         * @param color ANSI styles
+         */
+        std::string text(bool color) const;
         /** @brief Whether a record has been added. */
         bool empty() const { return n_records == 0; }
 
     private:
         void progress(const json::Value & r);
+        /** @brief The run's status: by its outcome (none without an end record), a warning with warnings. */
+        report::Status status() const;
         Series & series(const std::string & group, const std::string & name, const std::string & unit);
 
         uint64_t n_records = 0;

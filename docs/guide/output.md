@@ -536,7 +536,9 @@ It is written as `report.html.partial` and renamed once complete. A run
 started from a restart file reads its run record once, at setup, so the page
 covers the whole record. `[output] run_log = ""` does not turn the page off.
 
-`mallard info RUN_DIR --html` builds the same page from `RUN_DIR/mallard.jsonl`
+`mallard info RUN_DIR` prints the page's outcome, health, cost and warnings
+as text, from the same records, each section with its status (ok, WARN,
+ERROR) as `mallard check` gives them. `mallard info RUN_DIR --html` builds the same page from `RUN_DIR/mallard.jsonl`
 into `RUN_DIR/report.html`, byte for byte what the run would have written: for
 a run that is still going, was killed, or ran with `report = ""`
 ([Command line](cli.md#mallard-info)).

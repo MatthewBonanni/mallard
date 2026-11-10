@@ -403,6 +403,166 @@ void Page::add(const json::Value & r) {
     }
 }
 
+report::Status Page::status() const {
+    using report::Status;
+    const std::string outcome = str(end.find("outcome"));
+    const Status s = outcome.empty()                                        ? Status::NONE
+                     : outcome == "finished" || outcome == "stopped"        ? Status::OK
+                     : outcome == "signal" || outcome == "wall_time_limit" ? Status::WARNING
+                                                                            : Status::ERROR;
+    return s == Status::OK && (warnings.n || errors.n) ? Status::WARNING : s;
+}
+
+std::string Page::text(const bool color) const {
+    using report::Column;
+    using report::Row;
+    using report::Status;
+    using Kind = Column::Kind;
+    report::Text text(color);
+    auto with_unit = [&](const json::Value * t) { return text_of(t) + (nondimensional ? "" : " s"); };
+
+    text.section("Outcome", status());
+    if (end.type == Type::OBJECT) {
+        const std::string reason = str(end.find("reason"));
+        text.line("Ended (" + str(end.find("outcome")) + "): " + (reason.empty() ? std::string() : reason + ", ") +
+                  "at step " + text_of(end.find("step")) + ", t = " + with_unit(end.find("t")));
+        for (const auto & [key, name] :
+             {std::pair{"last_snapshot", "Last snapshot"}, {"last_restart", "Last restart"}}) {
+            if (const json::Value * f = end.find(key)) {
+                text.line(std::string(name) + ": " + str(f->find("path")) + ", step " + text_of(f->find("step")) +
+                          ", t = " + with_unit(f->find("t")));
+            }
+        }
+    } else {
+        text.line("No end record: still running, or killed (SIGKILL, a lost node, a time limit without warning)");
+        if (last_progress.type == Type::OBJECT) {
+            text.line("Last progress at step " + text_of(last_progress.find("step")) + ", t = " +
+                      with_unit(last_progress.find("t")) + ", " +
+                      format("%.1f", 100.0 * number_of(last_progress.find("progress"))) + "% of the run");
+        }
+    }
+
+    const json::Value * health = last_progress.find("health");
+    std::vector<Row> repairs;
+    if (const json::Value * rep = health ? health->find("repairs_run") : nullptr; rep && rep->type == Type::OBJECT) {
+        for (size_t i = 0; i < rep->names.size(); i++) {
+            const json::Value & r = rep->members[i];
+            if (number_of(r.find("activations")) <= 0.0) continue;
+            repairs.push_back(
+                {Status::WARNING, {rep->names[i], text_of(r.find("activations")), text_of(r.find("cells"))}});
+        }
+    }
+    Status health_status = health ? (repairs.empty() ? Status::OK : Status::WARNING) : Status::NONE;
+    if (divergence.type == Type::OBJECT) health_status = Status::ERROR;
+    text.section("Health", health_status);
+    if (!health) {
+        text.note("No health record: no progress row yet, or [output] health = false.");
+    } else {
+        if (const json::Value * m = health->find("margins_run"); m && m->type == Type::OBJECT && !m->names.empty()) {
+            std::vector<Row> rows;
+            for (size_t i = 0; i < m->names.size(); i++) {
+                const json::Value & e = m->members[i];
+                if (is_false(e.find("valid"))) continue;
+                const std::string unit = unit_of(m->names[i], nondimensional);
+                rows.push_back({Status::NONE, {m->names[i], format("%.4g", number_of(e.find("value"))),
+                                               unit.empty() ? "-" : unit, text_of(e.find("step")),
+                                               text_of(e.find("x"))}});
+            }
+            text.note("Lowest values at the progress rows, over the cells:");
+            text.table({"quantity", {"value", Kind::VALUE}, {"units", Kind::UNITS}, "step", "at"}, rows, false);
+        }
+        text.blank();
+        if (repairs.empty()) {
+            text.line("Numerical repairs: none");
+        } else {
+            text.note("Numerical repairs since the run started, each a change of the solution to keep it admissible:");
+            text.table({"repair", "times", "distinct cells"}, repairs);
+        }
+        if (const json::Value * b = health->find("balance_run"); b && b->type == Type::OBJECT && !b->names.empty()) {
+            std::vector<Row> rows;
+            for (size_t i = 0; i < b->names.size(); i++) {
+                const json::Value & e = b->members[i];
+                const bool ok = !is_false(e.find("checked"));
+                rows.push_back({Status::NONE, {b->names[i], ok ? format("%.1e", number_of(e.find("relative"))) : "-",
+                                               ok ? "-" : "", str(e.find("note"))}});
+            }
+            text.blank();
+            text.note("Conservation: the change of each total that the boundaries, sources and repairs do not "
+                      "explain, relative to the total's scale:");
+            text.table({"total", {"unexplained change", Kind::VALUE}, {"units", Kind::UNITS}, "note"}, rows, false);
+        }
+    }
+
+    text.section("Cost");
+    std::vector<Row> cost;
+    auto quantity = [&](const std::string & name, const std::string & value, const std::string & unit,
+                        const std::string & basis = "") {
+        cost.push_back({Status::NONE, {name, value, unit, "", basis}});
+    };
+    if (end.type == Type::OBJECT) {
+        const double wall = number_of(end.find("wall"));
+        quantity("wall time", format("%.4g", wall), "s", "the whole run");
+        for (const auto & [key, name] : {std::pair{"wall_setup", "setup"}, {"wall_stepping", "time stepping"},
+                                         {"wall_chemistry", "chemistry"}, {"wall_diagnostics", "diagnostics"},
+                                         {"wall_output", "output"}}) {
+            if (const json::Value * v = end.find(key)) {
+                quantity(name, format("%.4g", number_of(v)), "s",
+                         wall > 0.0 ? format("%.1f%% of the wall time", 100.0 * number_of(v) / wall) : "");
+            }
+        }
+        quantity("steps", text_of(end.find("steps")), "steps", "this run's");
+        if (const json::Value * r = end.find("rejected_steps")) quantity("rejected steps", text_of(r), "steps");
+        if (const json::Value * c = end.find("cells_per_second"); c && c->type == Type::NUMBER) {
+            quantity("throughput", format("%.3g", c->number), "cells/s", "time stepping");
+        }
+    } else if (last_progress.type == Type::OBJECT) {
+        quantity("wall time so far", format("%.4g", number_of(last_progress.find("wall"))), "s");
+        if (const json::Value * eta = last_progress.find("eta"); eta && eta->type == Type::NUMBER) {
+            quantity("remaining", format("%.4g", eta->number), "s", "estimate");
+        }
+    }
+    if (const json::Value * peak = last_progress.find("memory_host_peak"); peak && peak->type == Type::NUMBER) {
+        quantity("host memory, peak", format("%.3g", peak->number / 1e6), "MB", "the largest rank");
+    }
+    if (const json::Value * used = last_progress.find("memory_device"); used && used->type == Type::NUMBER) {
+        quantity("device memory in use", format("%.3g", used->number / 1e6), "MB", "the fullest device");
+    }
+    if (cost.empty()) {
+        text.note("No progress row yet.");
+    } else {
+        text.quantities(cost, false);
+    }
+
+    auto messages = [&](const Kept & kept, const char * title, const std::string & noun, Status bad) {
+        text.section(title, kept.n ? bad : Status::OK);
+        if (!kept.n) {
+            text.line("none");
+            return;
+        }
+        const bool cut = kept.n > kept.first.size() + kept.last.size();
+        text.line(logging::count(kept.n) + " " + noun + (kept.n == 1 ? "" : "s") +
+                  (cut ? ", the first and last " + std::to_string(KEPT) + " (all in mallard.jsonl):" : ":"));
+        for (const auto * list : {&kept.first, &kept.last}) {
+            for (const json::Value & w : *list) text.line("- " + str(w.find("message")));
+        }
+    };
+    messages(warnings, "Warnings", "warning", Status::WARNING);
+    if (errors.n) messages(errors, "Errors", "error", Status::ERROR);
+
+    if (divergence.type == Type::OBJECT) {
+        text.section("Divergence", Status::ERROR);
+        text.line("At step " + text_of(divergence.find("step")) + ", t = " + with_unit(divergence.find("t")) + ": " +
+                  text_of(divergence.find("invalid_cells")) + " invalid cells");
+        const json::Value * causes = divergence.find("causes");
+        if (causes && causes->type == Type::ARRAY && !causes->array.empty()) {
+            const json::Value & c = causes->array.front();
+            text.line("Most likely cause: " + str(c.find("title")));
+            if (const std::string fix = text_of(c.find("fix")); fix != "-") text.line("Fix: " + fix);
+        }
+    }
+    return text.str();
+}
+
 std::string Page::html() const {
     std::string h;
     h.reserve(1 << 18);
@@ -425,11 +585,7 @@ std::string Page::html() const {
 
     // Outcome
     const std::string outcome = str(end.find("outcome"));
-    const char * status = outcome.empty()                                      ? "none"
-                          : outcome == "finished" || outcome == "stopped"      ? "ok"
-                          : outcome == "signal" || outcome == "wall_time_limit" ? "warning"
-                                                                               : "error";
-    if (std::string(status) == "ok" && (warnings.n || errors.n)) status = "warning";
+    const char * status = report::status_name(this->status());
     h += "<section id=\"outcome\"><div class=\"banner " + std::string(status) + "\">";
     if (end.type == Type::OBJECT) {
         std::string what = outcome;
