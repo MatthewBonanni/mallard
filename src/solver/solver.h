@@ -327,7 +327,10 @@ class Solver {
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
         void apply_sponges(const State & solution, const State & rhs);
         void calc_dt();
-        rtype reduce_dt(rtype local);
+        /** @brief step_reduce(0), where calc_dt_cfl1 reduces this rank's time step (allocated at the first call). */
+        Kokkos::View<rtype> dt_reduce_slot();
+        /** @brief The time step and run-control requests in step_reduce, reduced over the ranks. */
+        rtype reduce_dt();
         /**
          * @brief Error-controlled steps: whether step_controller accepts the
          *        step just taken (else the solution is back at U^n).
@@ -470,10 +473,10 @@ class Solver {
         /** @brief SIMPLER: rhs -= T(U^n) on the owned cells. */
         void subtract_transport_rate(const State & rhs);
         /**
-         * @brief Counts the active cells of a chemistry call begun at `start` (timer), adds its rank
-         *        times to the imbalance sums; throws if any cell failed on any rank.
+         * @brief Counts the active and sent cells of a chemistry call; throws if any cell failed on
+         *        any rank.
          */
-        void check_chemistry(const CellChemistry::Statistics & stats, double start);
+        void check_chemistry(const CellChemistry::Statistics & stats);
         void update_heat_release_rate();
         /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
         std::pair<uint64_t, double> chemistry_statistics();
@@ -525,7 +528,7 @@ class Solver {
         bool is_distributed() const { return distribute && comm::size() > 1; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
-        double chemistry_cells_sent() const { return chem_cells_sent; }
+        double chemistry_cells_sent() const { return comm::allreduce(chem_cells_sent, comm::Op::SUM); }
         const Distribution & get_distribution() const { return distribution; }
 
         /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
@@ -920,9 +923,11 @@ class Solver {
         std::array<Kokkos::View<rtype *[3]>, 2> tfles_test;  // dynamic efficiency: [c, |grad c|, .] and their test filter
         Kokkos::View<rtype *> tfles_test_width2;       // (owned cell): squared width of one test filter pass
         Kokkos::View<double *[4]> tfles_dynamic_terms; // (owned cell): DynamicEfficiencyFunctor's terms
+        ExactSums<4> tfles_dynamic_sums;               // of tfles_dynamic_terms over the ranks
         uint32_t tfles_test_passes = 0;
         State dynamic_halo;                            // [rho, u] as flow, d u_i / d x_j as species, owners' values
         Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)
+        ExactSums<2> dynamic_sums;                     // of dynamic_terms over the ranks
         Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
         double dynamic_ratio = 0.0;
         KineticEnergyBudget budget;
@@ -970,10 +975,9 @@ class Solver {
         uint32_t chemistry_lanes = 0;     // vector lanes per cell, 0: automatic
         CellChemistry cell_chemistry;
         uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
-        double t_wall_chemistry = 0.0;
-        double t_chemistry_slowest = 0.0;  // sums over chemistry calls of the slowest rank's time
-        double t_chemistry_mean = 0.0;     // and of the mean of the ranks' times
-        double chem_cells_integrated = 0.0, chem_cells_sent = 0.0;  // over calls and ranks; sent: load balancing
+        double t_wall_chemistry = 0.0;    // this rank's
+        double chem_cells_integrated = 0.0, chem_cells_sent = 0.0;  // over calls, this rank's; sent: load balancing
+        Kokkos::View<int64_t *> chem_failures;  // [failures] of a chemistry call, reduced over the ranks
         bool chemistry_load_balance = false;
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
         bool simpler = false;             // SIMPLER balanced splitting instead of Strang
@@ -1022,6 +1026,7 @@ class Solver {
         // Checks
         uint32_t check_interval;
         bool check_nan;
+        Kokkos::View<int64_t *> n_nonfinite;  // check_fields: [values that are not finite], over the ranks
 
         // Outputs
         std::vector<Data> data;

@@ -78,6 +78,38 @@ template void allreduce_device<double>(const Kokkos::View<double *> &, Op, bool)
 template void allreduce_device<float>(const Kokkos::View<float *> &, Op, bool);
 template void allreduce_device<int64_t>(const Kokkos::View<int64_t *> &, Op, bool);
 
+template <typename T>
+void allgather_device(const Kokkos::View<T *> & values, const Kokkos::View<T *> & all, [[maybe_unused]] const bool use_nccl) {
+#ifdef Mallard_HAS_NCCL
+    if (use_nccl) {
+        if (ncclAllGather(values.data(), all.data(), values.extent(0), ncclDouble, nccl(),
+                          Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
+            throw std::runtime_error("NCCL: gather failed");
+        }
+        return;
+    }
+#endif
+    const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
+    const std::vector<T> gathered = allgatherv(std::vector<T>(host.data(), host.data() + host.extent(0)));
+    Kokkos::deep_copy(all, Kokkos::View<const T *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(gathered.data(),
+                                                                                               gathered.size()));
+}
+
+template void allgather_device<double>(const Kokkos::View<double *> &, const Kokkos::View<double *> &, bool);
+
+void send_receive_device([[maybe_unused]] const std::vector<DeviceMessage> & sends,
+                         [[maybe_unused]] const std::vector<DeviceMessage> & receives) {
+#ifdef Mallard_HAS_NCCL
+    const cudaStream_t stream = Kokkos::DefaultExecutionSpace().cuda_stream();
+    ncclGroupStart();
+    for (const DeviceMessage & m : receives) ncclRecv(m.data, m.bytes, ncclChar, m.rank, nccl(), stream);
+    for (const DeviceMessage & m : sends) ncclSend(m.data, m.bytes, ncclChar, m.rank, nccl(), stream);
+    if (ncclGroupEnd() != ncclSuccess) throw std::runtime_error("NCCL: send and receive failed");
+#else
+    throw std::logic_error("comm::send_receive_device: built without NCCL");
+#endif
+}
+
 void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::DefaultExecutionSpace & done) {
 #ifdef KOKKOS_ENABLE_CUDA
     // A stream waits for the event's state when cudaStreamWaitEvent is called,

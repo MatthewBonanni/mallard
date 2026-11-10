@@ -62,10 +62,8 @@ void Solver::check_rejections(const int tries) const {
 bool Solver::accept_controlled_step() {
     step_controller.estimate(solution_vec.back(), state(), rhs_vec.back(), mesh->n_owned());
     if (is_distributed()) {
-        const Kokkos::View<rtype, Kokkos::MemoryTraits<Kokkos::Unmanaged>> error(step_controller.error_device());
-        rtype local;
-        Kokkos::deep_copy(local, error);
-        Kokkos::deep_copy(error, comm::allreduce(local, comm::Op::MAX));
+        comm::allreduce_device(Kokkos::View<rtype *>(step_controller.error_device(), 1), comm::Op::MAX,
+                               halo.uses_nccl());
     }
     step_controller.update(dt, nullptr, state(), solution_vec.back());
     return step_controller.accepted();

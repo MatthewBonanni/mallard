@@ -78,7 +78,7 @@ class PhaseAverage {
     public:
         /** @brief Read [statistics.phase] (table), sampling every interval steps from t_start. */
         void init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
-                  uint32_t n_cells, uint64_t interval, rtype t_start);
+                  uint32_t n_cells, uint64_t interval, rtype t_start, bool use_nccl);
 
         bool enabled() const { return !fields.empty(); }
         /** @brief Triggered phases follow the signal before t_start too. */
@@ -117,6 +117,8 @@ class PhaseAverage {
         int32_t trigger_cell = NO_TRIGGER;  // owned cell of this rank, -1 if another rank's
         int32_t trigger_code = 0;
         bool distributed = false;
+        bool use_nccl = false;
+        Kokkos::View<double *> signal;  // [the trigger's signal], summed over the ranks
 
         Kokkos::View<int32_t *> codes;
         Kokkos::View<rtype **, Kokkos::LayoutLeft> mean;
@@ -149,7 +151,8 @@ class PhaseAverage {
 class Statistics {
     public:
         /** @brief Read [statistics] (if any) and allocate the mesh's cells. */
-        void init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh);
+        void init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
+                  bool use_nccl = false);
 
         bool enabled() const { return means_enabled() || spectra.enabled() || phase.enabled(); }
         bool means_enabled() const { return !fields.empty(); }

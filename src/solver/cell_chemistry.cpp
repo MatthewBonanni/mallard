@@ -624,8 +624,8 @@ std::array<uint64_t, 2> CellChemistry::substeps() const {
     return out;
 }
 
-void CellChemistry::balance_across_ranks(const double threshold) {
-    balance = std::make_shared<ChemistryBalance>(gas.n_species, threshold);
+void CellChemistry::balance_across_ranks(const double threshold, const bool use_nccl) {
+    balance = std::make_shared<ChemistryBalance>(gas.n_species, threshold, use_nccl);
 }
 
 uint32_t CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued,

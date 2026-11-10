@@ -1300,7 +1300,8 @@ Navier-Stokes with fused half steps, the thickened flame's multiplier of
 `dt`, SIMPLER with and without it) and that cells did move. Restarts are unaffected: the plan uses only
 the last call's costs, which are not restarted, and changes only where cells
 are integrated. The summary reports, for every distributed reacting run,
-the sum over calls of the slowest rank's chemistry time against the mean,
+the chemistry time of the slowest rank against the mean over the ranks (each
+rank sums its own calls; the ranks reduce once, for the summary),
 and with balancing the share of integrations done elsewhere.
 
 **Measurements** (A100-80GB, CUDA-aware Open MPI; 4 GPUs: three on one node

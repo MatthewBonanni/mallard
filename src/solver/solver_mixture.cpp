@@ -658,9 +658,9 @@ rtype Solver::calc_dt_cfl1_mixture() {
                                    cell_scalars, cfl_local, mixture.n_species, cell_transport,
                                    axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data,
                                    mesh->periodic_maps(), mesh->face_shift};
-    rtype dt_min = std::numeric_limits<rtype>::max();
-    Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
-    return reduce_dt(dt_min);
+    Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor,
+                            Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(dt_reduce_slot()));
+    return reduce_dt();
 }
 
 void Solver::update_primitives_mixture() {

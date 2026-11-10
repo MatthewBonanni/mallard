@@ -13,6 +13,8 @@
 #ifndef DEVICE_COMM_H
 #define DEVICE_COMM_H
 
+#include <vector>
+
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
@@ -48,6 +50,30 @@ void finalize_nccl();
  */
 template <typename T>
 void allreduce_device(const Kokkos::View<T *> & values, Op op, bool use_nccl);
+
+/**
+ * @brief Gather every rank's values into all, in rank order (all holds size()
+ *        times values), after the work enqueued so far on the default
+ *        execution space: with NCCL on its stream, else through the host with
+ *        MPI. Defined for double.
+ */
+template <typename T>
+void allgather_device(const Kokkos::View<T *> & values, const Kokkos::View<T *> & all, bool use_nccl);
+
+/** @brief A message of device memory to or from another rank. */
+struct DeviceMessage {
+    int rank;
+    void * data;
+    size_t bytes;
+};
+
+/**
+ * @brief Send and receive the messages with NCCL on the default execution
+ *        space's stream, after the work enqueued so far, without blocking the
+ *        host; every rank calls it with messages matching its peers'. NCCL
+ *        builds only: callers exchange with MPI otherwise.
+ */
+void send_receive_device(const std::vector<DeviceMessage> & sends, const std::vector<DeviceMessage> & receives);
 
 /**
  * @brief Make the work enqueued later on waiter wait for the work enqueued so

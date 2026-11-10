@@ -22,6 +22,7 @@
 
 #include "cell_chemistry.h"
 #include "comm.h"
+#include "device_comm.h"
 
 /**
  * @brief Moves the integration of queued cells from ranks with more chemistry
@@ -46,7 +47,8 @@ class ChemistryBalance {
         using Integrate = std::function<uint32_t(const ChemistryCells &, const Kokkos::View<uint32_t *> &,
                                                  const Kokkos::View<float *> &, uint32_t)>;
 
-        ChemistryBalance(uint32_t n_species, double threshold);
+        /** @param use_nccl Whether to gather the loads and move the cells with NCCL (else MPI). */
+        ChemistryBalance(uint32_t n_species, double threshold, bool use_nccl);
 
         /**
          * @brief Plans the call (collective) and sends the states of the cells
@@ -71,8 +73,20 @@ class ChemistryBalance {
 
         void reserve_guests(uint32_t n);
 
+        /** @brief Whether MPI messages go through host copies of the buffers. */
+        bool staged() const;
+        rtype * send_ptr() const;
+        rtype * guest_ptr() const;
+        /** @brief The messages of transfers in data, stride values per cell, from cell slot offset. */
+        std::vector<comm::DeviceMessage> messages(const std::vector<Transfer> & transfers, rtype * data, uint32_t stride,
+                                                  uint32_t offset) const;
+        /** @brief Sends out and receives in with NCCL, or posts them with MPI into requests. */
+        void transfer(const std::vector<comm::DeviceMessage> & out, const std::vector<comm::DeviceMessage> & in, int tag);
+
         uint32_t n_species;
         double threshold;
+        bool use_nccl;
+        Kokkos::View<double *> load, loads;  // [load, queued] of this rank, of every rank
         uint32_t state_stride = 0, result_stride;  // rtype values per cell in the messages
         uint32_t kept = 0, n_sent = 0, n_guests = 0;
         std::vector<Transfer> sends, receives;

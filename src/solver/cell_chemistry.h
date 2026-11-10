@@ -119,7 +119,7 @@ class CellChemistry {
          * @brief Balances the integration across ranks from now on (collective:
          *        every rank of the run, every call): see ChemistryBalance.
          */
-        void balance_across_ranks(double threshold);
+        void balance_across_ranks(double threshold, bool use_nccl);
 
         /**
          * @brief Advance cells [0, n) over dt. Partial densities change;

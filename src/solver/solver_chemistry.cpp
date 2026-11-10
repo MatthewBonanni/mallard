@@ -79,6 +79,7 @@ void Solver::allocate_chemistry() {
     chem_cost = Kokkos::View<rtype *>("chem_cost", mesh->n_cells);
     h_chem_cost = Kokkos::create_mirror_view(chem_cost);
     hrr = Kokkos::View<rtype *>("hrr", mesh->n_cells);
+    chem_failures = Kokkos::View<int64_t *>("chem_failures", 1);
     h_hrr = Kokkos::create_mirror_view(hrr);
     production = Kokkos::View<rtype **, Kokkos::LayoutRight>("production", mesh->n_cells, mixture.n_species);
     h_production = Kokkos::create_mirror_view(production);
@@ -91,7 +92,7 @@ void Solver::allocate_chemistry() {
     if (simpler) transport_rate = State("transport_rate", mesh->n_cells, mixture.n_species);
     cell_chemistry.init(mixture, mixture_model->mechanism(), kinetics, options, mesh->n_cells);
     // Balance when the slowest rank's chemistry work exceeds the mean by 5%
-    if (chemistry_load_balance && is_distributed()) cell_chemistry.balance_across_ranks(0.05);
+    if (chemistry_load_balance && is_distributed()) cell_chemistry.balance_across_ranks(0.05, halo.uses_nccl());
 }
 
 void Solver::advance_chemistry(const double dt_chem) {
@@ -103,7 +104,7 @@ void Solver::advance_chemistry(const double dt_chem) {
     const CellChemistry::Statistics stats =
         cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(), dt_chem,
                                tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>());
-    check_chemistry(stats, start);
+    check_chemistry(stats);
     t_wall_chemistry += timer.seconds() - start;
     if (audit) {
         run_health.ledger.chemistry_end(species, clipped);
@@ -112,20 +113,16 @@ void Solver::advance_chemistry(const double dt_chem) {
     }
 }
 
-void Solver::check_chemistry(const CellChemistry::Statistics & stats, const double start) {
-    chem_active_cells = stats.active;
+void Solver::check_chemistry(const CellChemistry::Statistics & stats) {
     Kokkos::fence();
-    const double local = timer.seconds() - start;
-    const auto sums = comm::allreduce(std::array<double, 4>{static_cast<double>(stats.failures), local,
-                                                            static_cast<double>(stats.active),
-                                                            static_cast<double>(stats.sent)},
-                                      comm::Op::SUM);
-    const uint64_t failures = static_cast<uint64_t>(sums[0]);
-    if (comm::size() > 1) {
-        t_chemistry_slowest += comm::allreduce(local, comm::Op::MAX);
-        t_chemistry_mean += sums[1] / comm::size();
-        chem_cells_integrated += sums[2];
-        chem_cells_sent += sums[3];
+    chem_active_cells = stats.active;
+    chem_cells_integrated += static_cast<double>(stats.active);
+    chem_cells_sent += static_cast<double>(stats.sent);
+    int64_t failures = static_cast<int64_t>(stats.failures);
+    if (is_distributed()) {
+        Kokkos::deep_copy(chem_failures, failures);
+        comm::allreduce_device(chem_failures, comm::Op::SUM, halo.uses_nccl());
+        Kokkos::deep_copy(failures, Kokkos::subview(chem_failures, 0));
     }
     if (failures > 0) {
         throw std::runtime_error("the chemistry integrator failed in " + std::to_string(failures) +
@@ -158,7 +155,7 @@ void Solver::take_simpler_step() {
         cell_chemistry.advance(conservatives, species, T_seed, chem_h, chem_cost, mesh->n_owned(),
                                static_cast<double>(dt), tfles_on || pasr_on ? chem_time_scale : Kokkos::View<rtype *>(),
                                &forcing);
-    check_chemistry(stats, start);
+    check_chemistry(stats);
     t_wall_chemistry += timer.seconds() - start;
     if (run_health.clip_site != HealthState::NONE) {
         run_health.repairs.touch(run_health.clip_site, run_health.clip_flags);

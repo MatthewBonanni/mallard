@@ -362,6 +362,42 @@ TEST(MPITest, OutletAndSourceAveragesMatchSerialWithAndWithoutStepGraphs) {
     }
 }
 
+TEST(MPITest, StepReductionsKernelByKernelMatchSerial) {
+    // Steps without the CUDA graph reduce over the ranks with NCCL (or MPI) on
+    // the device: the time step and the run-control requests, the step error,
+    // the dynamic LES constant, the dynamic TFLES efficiency, the chemistry
+    // loads and failures, and check_nan's count
+    auto graphs_off = [](std::string text) { return text.insert(text.find("[run]\n") + 6, "cuda_graphs = false\n"); };
+    std::string controlled = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                       bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                           "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"),
+                                       25);
+    const std::string ssprk3 = "time_integrator = \"SSPRK3\"\n";
+    controlled.replace(controlled.find(ssprk3), ssprk3.size(),
+                       "time_integrator = \"RDPK3Sp35\"\ncheck_nan = true\n[numerics.error_control]\ntolerance = 1e-4\n");
+    std::string dynamic = box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                    bcs("type = \"outlet_extrapolation\"\n", "type = \"outlet_pressure\"\np = 1.0\n",
+                                        "type = \"wall_isothermal\"\nT = 1.2\n", "type = \"wall_adiabatic\"\n"),
+                                    25);
+    const std::string u = "u = [\"0.3\", \"-0.1\"]\n";
+    dynamic.replace(dynamic.find(u), u.size(), "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * x + 2 * y)\"]\n");
+    dynamic += "[les]\nmodel = \"smagorinsky\"\ndynamic = true\n";
+    const std::string combustion = "[les]\nmodel = \"vreman\"\n[les.combustion]\n";
+    const std::string tfles = combustion + "model = \"tfles\"\ndelta_L = 2e-3\ns_L = 2.0\nT_unburnt = 300.0\n"
+                                           "T_burnt = 2400.0\n";
+    const std::string chemistry = "[chemistry]\nload_balance = true\n";
+    expect_matches_serial(graphs_off(controlled));
+    expect_matches_serial(graphs_off(dynamic), [](const Solver & s) { EXPECT_NE(s.les_dynamic_ratio(), 0.0); });
+    expect_matches_serial(graphs_off(mixture_input("", "type = \"MUSCL\"\n", chemistry, "navier_stokes") + tfles),
+                          [](const Solver & s) { EXPECT_GT(s.tfles_beta(), 0.0); });
+    expect_matches_serial(graphs_off(mixture_input("", "type = \"MUSCL\"\n", chemistry, "navier_stokes") + combustion +
+                                     "model = \"pasr\"\n"));
+    expect_matches_serial(graphs_off(mixture_input("", "type = \"MUSCL\"\n", chemistry, "euler")),
+                          [](const Solver & s) {
+                              if (s.is_distributed()) EXPECT_GT(s.chemistry_cells_sent(), 0.0);
+                          });
+}
+
 TEST(MPITest, IntegralsOfAnUndistributedSolverAreThoseOfItsOwnMesh) {
     // A serial reference on every rank integrates its whole mesh once, not once per rank
     const std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
