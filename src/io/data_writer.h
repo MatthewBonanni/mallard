@@ -18,7 +18,6 @@
 #include <iosfwd>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -441,7 +440,7 @@ class DataWriter {
             std::future<void> hashed;
             double seconds = 0.0;
         };
-        std::optional<InFlight> in_flight;                // being written
+        std::unique_ptr<InFlight> in_flight;              // being written
         std::deque<std::unique_ptr<InFlight>> recording;  // written, being hashed, recorded in order
         double t_blocking = 0.0, t_writing = 0.0, t_hashing = 0.0, t_hash_queue = 0.0;
         uint64_t n_bytes = 0;

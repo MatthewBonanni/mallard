@@ -429,7 +429,7 @@ bool DataWriter::run(std::function<void()> job, bool allow_async) {
 
 void DataWriter::start_record(uint64_t step, double t, const std::string & kind, const std::string & path,
                               const std::string & reason) {
-    in_flight.emplace();
+    in_flight = std::make_unique<InFlight>();
     in_flight->step = step;
     in_flight->t = t;
     in_flight->kind = kind;
@@ -439,8 +439,7 @@ void DataWriter::start_record(uint64_t step, double t, const std::string & kind,
 
 void DataWriter::hash_written() {
     if (!in_flight) return;
-    auto w = std::make_unique<InFlight>(std::move(*in_flight));
-    in_flight.reset();
+    auto w = std::move(in_flight);
     if (!w->hash.empty()) {
         // The record waits for its hashes, and only a full queue holds up the run
         const auto start = std::chrono::steady_clock::now();
