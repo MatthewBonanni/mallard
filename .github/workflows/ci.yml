@@ -193,6 +193,7 @@ jobs:
             {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true},
             {"name": "macos", "flags": "-DKokkos_ENABLE_THREADS=ON", "os": "macos-latest"},
             {"name": "macos-3d", "flags": "-DKokkos_ENABLE_THREADS=ON -DMallard_DIM=3", "os": "macos-latest"},
+            {"name": "macos-gcc", "flags": "-DKokkos_ENABLE_THREADS=ON -DCMAKE_C_COMPILER=gcc-16 -DCMAKE_CXX_COMPILER=g++-16", "os": "macos-latest", "packages": "gcc"},
             {"name": "arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "hdf5": true, "os": "ubuntu-24.04-arm"},
             {"name": "gcc-15", "flags": "-DKokkos_ENABLE_OPENMP=ON", "os": "ubuntu-26.04"},
             {"name": "gcc-11", "flags": "-DKokkos_ENABLE_SERIAL=ON -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11", "os": "ubuntu-22.04", "packages": "g++-11", "cmake": "3.22.1"},
@@ -248,7 +249,7 @@ jobs:
       - name: Install ccache (macOS)
         timeout-minutes: 15
         if: runner.os == 'macOS'
-        run: brew install ccache
+        run: brew install ccache ${{ matrix.backend.packages }}
       # The oldest CMake that Mallard supports (cmake_minimum_required)
       - name: Install CMake ${{ matrix.backend.cmake }}
         if: matrix.backend.cmake

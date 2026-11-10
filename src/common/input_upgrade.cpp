@@ -115,6 +115,16 @@ const Rules & rules() {
 
 namespace {
 
+/**
+ * @brief Parses TOML text. Not toml::parse_str: its default std::source_location
+ *        argument points at another object when GCC builds for macOS (#692).
+ */
+template <typename TC>
+toml::basic_value<TC> parse_toml(const std::string & text) {
+    std::istringstream stream(text);
+    return toml::parse<TC>(stream, "input");
+}
+
 // ---------------------------------------------------------------- paths
 
 struct Step {
@@ -396,7 +406,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
             option_findings.push_back(option_finding(rule, key, line_of(value), version));
             if (rule.from != rule.to && !(setup && rule.kept && !option_findings.back().removed)) value = rule.to;
             if (!rule.add.empty()) {
-                const auto added = toml::parse_str<typename V::config_type>(rule.add);
+                const auto added = parse_toml<typename V::config_type>(rule.add);
                 auto & beside = entries_of(*at(root, parent(key)));
                 for (const auto & [name, v] : entries_of(added)) {
                     if (!beside.contains(name)) beside[name] = v;
@@ -416,7 +426,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
                 }
                 if (rule.convert) {
                     const std::string text = rule.convert(bare_text(value));
-                    value = toml::parse_str<typename V::config_type>("x = " + text).at("x");
+                    value = parse_toml<typename V::config_type>("x = " + text).at("x");
                 }
                 V * new_parent = at(root, parent(to), true);
                 if (new_parent == nullptr || !new_parent->is_table()) {
@@ -565,7 +575,7 @@ using OrderedValue = toml::ordered_value;
 
 /** @brief One textual change for the first match of a rule, or false if the rule has none left. */
 bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, bool & impossible) {
-    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    OrderedValue root = parse_toml<toml::ordered_type_config>(join_lines(lines));
     const std::vector<Concrete> found = matches(root, rule.from);
     if (found.empty()) return false;
     const Concrete & key = found.front();
@@ -644,7 +654,7 @@ bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, boo
 }
 
 bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rule, bool & impossible) {
-    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    OrderedValue root = parse_toml<toml::ordered_type_config>(join_lines(lines));
     for (const Concrete & key : matches(root, rule.key)) {
         const OrderedValue & value = *at(root, key);
         if (!value.is_string() || value.as_string() != rule.from || added_already(root, rule, key)) continue;
@@ -673,7 +683,7 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
 
 /** @brief The line of the first match of an array rule removed and its elements inserted, or false if none is left. */
 bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule, bool & impossible) {
-    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    OrderedValue root = parse_toml<toml::ordered_type_config>(join_lines(lines));
     const std::vector<Concrete> found = matches(root, rule.from);
     if (found.empty()) return false;
     const Concrete & key = found.front();
@@ -761,7 +771,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
         }
     }
     reformatted = true;
-    OrderedValue ordered = toml::parse_str<toml::ordered_type_config>(text);
+    OrderedValue ordered = parse_toml<toml::ordered_type_config>(text);
     transform(ordered, table, this_release(), dim);
     return toml::format(ordered);
 }
