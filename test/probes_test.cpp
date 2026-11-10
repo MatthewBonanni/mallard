@@ -374,8 +374,8 @@ TEST(ProbesTest, RegionReductionsAreTheSameOnAnyNumberOfRanks) {
     serial.set_distributed(false);
     serial.init(parse_toml(input("serial.csv")));
     run(serial);
-    const std::string a = without_provenance(read_all(dir + "/distributed.csv"));
-    EXPECT_EQ(a, without_provenance(read_all(dir + "/serial.csv"))) << "on " << comm::size() << " ranks";
+    const std::string a = without_run_metadata(read_all(dir + "/distributed.csv"));
+    EXPECT_EQ(a, without_run_metadata(read_all(dir + "/serial.csv"))) << "on " << comm::size() << " ranks";
     EXPECT_EQ(read_csv(dir + "/serial.csv").size(), 5u);
 }
 
@@ -412,7 +412,7 @@ TEST(ProbesTest, RegionsOfTheMeshAreTheSameOnAnyNumberOfRanks) {
     run(serial);
     for (const char * name : {"half", "inside", "cut"}) {
         const std::string file = dir + "/" + name;
-        EXPECT_EQ(without_provenance(read_all(file + "_distributed.csv")), without_provenance(read_all(file + "_serial.csv")))
+        EXPECT_EQ(without_run_metadata(read_all(file + "_distributed.csv")), without_run_metadata(read_all(file + "_serial.csv")))
             << name << " on " << comm::size() << " ranks";
     }
     const auto & mesh_s = *serial.get_mesh();
@@ -448,7 +448,7 @@ TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
     for (const std::string name : {"shell", "ring"}) {
         if (name == "ring" && N_DIM == 2) continue;
         const std::string file = dir + "/" + name;
-        EXPECT_EQ(without_provenance(read_all(file + "_distributed.csv")), without_provenance(read_all(file + "_serial.csv")))
+        EXPECT_EQ(without_run_metadata(read_all(file + "_distributed.csv")), without_run_metadata(read_all(file + "_serial.csv")))
             << name << " on " << comm::size() << " ranks";
         const auto rows = read_csv(file + "_serial.csv");
         const double exact = name == "ring" ? 2.0 * std::numbers::pi * 0.25
@@ -525,8 +525,8 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
     size_t n_sets = 0;
     for (size_t at = pvd.find("<DataSet"); at != std::string::npos; at = pvd.find("<DataSet", at + 1)) n_sets++;
     EXPECT_EQ(n_sets, 4u);
-    EXPECT_EQ(without_provenance(pvd), without_provenance(read_all(dir + "/a/v.pvd")));
-    EXPECT_EQ(without_provenance(read_all(dir + "/b/v_000006.vtp")), without_provenance(read_all(dir + "/a/v_000006.vtp")));
+    EXPECT_EQ(without_run_metadata(pvd), without_run_metadata(read_all(dir + "/a/v.pvd")));
+    EXPECT_EQ(without_run_metadata(read_all(dir + "/b/v_000006.vtp")), without_run_metadata(read_all(dir + "/a/v_000006.vtp")));
     const std::string vtp = read_all(dir + "/a/v_000006.vtp");
     EXPECT_NE(vtp.find("NumberOfPoints=\"12\""), std::string::npos);
     EXPECT_NE(vtp.find("NumberOfLines=\"1\""), std::string::npos);

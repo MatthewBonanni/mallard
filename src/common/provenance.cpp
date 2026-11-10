@@ -13,6 +13,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <type_traits>
 #include <vector>
 
@@ -254,6 +255,8 @@ std::string code_block() {
 
 struct State {
     std::string run;    // JSON object, or empty
+    std::string run_id;
+    std::string restart_of = "null";  // JSON object or null
     bool has_input = false;
     std::string input_file, input_text, resolved;
     std::string mesh;   // JSON object, or empty
@@ -276,7 +279,11 @@ void rebuild() {
     static const std::string dependencies = dependencies_block();
     p.add("schema", SCHEMA).add("version", VERSION).raw("mallard", code).raw("build", build)
         .raw("dependencies", dependencies);
-    if (!s.run.empty()) p.raw("run", s.run);
+    if (!s.run.empty()) {
+        std::string run = s.run;
+        run.pop_back();
+        p.raw("run", run + ",\"restart_of\":" + s.restart_of + "}");
+    }
     if (s.has_input) {
         json::Object i;
         if (s.input_file.empty()) {
@@ -293,10 +300,30 @@ void rebuild() {
     s.text = p.str();
 }
 
-constexpr std::string_view XML_OPEN = "<!-- provenance ";
+constexpr std::string_view NAME = "mallard-run";
+constexpr std::string_view LEGACY_NAME = "provenance";
 constexpr std::string_view XML_CLOSE = " -->";
-constexpr std::string_view CSV_OPEN = "# provenance ";
 constexpr std::string_view DASH = "-\\u002d";
+
+/** @brief A version 4 UUID from the system's random device. */
+std::string random_uuid() {
+    std::random_device device;
+    std::array<uint8_t, 16> bytes{};
+    for (size_t i = 0; i < bytes.size(); i += 4) {
+        const uint32_t word = device();
+        for (size_t k = 0; k < 4; k++) bytes[i + k] = static_cast<uint8_t>(word >> (8 * k));
+    }
+    bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0f) | 0x40);
+    bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3f) | 0x80);
+    const char * digits = "0123456789abcdef";
+    std::string out;
+    for (size_t i = 0; i < bytes.size(); i++) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) out += '-';
+        out += digits[bytes[i] >> 4];
+        out += digits[bytes[i] & 0xf];
+    }
+    return out;
+}
 
 } // namespace
 
@@ -337,7 +364,9 @@ void start_run() {
     std::strftime(started, sizeof(started), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
     std::error_code error;
     const std::string directory = std::filesystem::current_path(error).string();
+    s.run_id = random_uuid();
     s.run = json::Object()
+                .add("run_id", s.run_id)
                 .add("start_time", started)
                 .add("ranks", comm::size())
                 .add("host", host)
@@ -381,6 +410,21 @@ void set_placement() {
 
 const std::string & placement() { return state().placement; }
 
+const std::string & run_id() { return state().run_id; }
+
+void set_restart_of(const std::string & id, const std::string & file, uint64_t step) {
+    json::Object r;
+    if (id.empty()) {
+        r.raw("run_id", "null");
+    } else {
+        r.add("run_id", id);
+    }
+    state().restart_of = r.add("file", file).add("step", step).str();
+    rebuild();
+}
+
+const std::string & restart_of() { return state().restart_of; }
+
 void set_input(const std::string & file, const std::string & text) {
     State & s = state();
     s.has_input = true;
@@ -420,6 +464,8 @@ void set_preset(const std::string & name, const std::vector<std::tuple<std::stri
 void share() {
     State & s = state();
     s.text = comm::broadcast(s.text);
+    s.run_id = comm::broadcast(s.run_id);
+    s.restart_of = comm::broadcast(s.restart_of);
 }
 
 const std::string & json() {
@@ -428,13 +474,16 @@ const std::string & json() {
     return s.text;
 }
 
-std::string csv_comment() {
-    return std::string(CSV_OPEN) + json();
+std::string csv_comment(std::string_view name, std::string_view text) {
+    return "# " + std::string(name) + " " + std::string(text);
 }
 
-std::string xml_comment() {
-    const std::string & text = json();
-    std::string out(XML_OPEN);
+std::string csv_comment() { return csv_comment(NAME, json()); }
+
+std::string xml_comment() { return xml_comment(NAME, json()); }
+
+std::string xml_comment(std::string_view name, std::string_view text) {
+    std::string out = "<!-- " + std::string(name) + " ";
     out.reserve(text.size() + 32);
     for (size_t i = 0; i < text.size(); i++) {
         if (text[i] == '-' && i + 1 < text.size() && text[i + 1] == '-') {
@@ -447,21 +496,39 @@ std::string xml_comment() {
     return out + std::string(XML_CLOSE);
 }
 
-std::string parse_comment(std::string_view text) {
-    size_t a = text.find(XML_OPEN);
+std::string parse_comment(std::string_view text, std::string_view name) {
+    const std::string xml_open = "<!-- " + std::string(name) + " ";
+    size_t a = text.find(xml_open);
     if (a != std::string_view::npos) {
-        a += XML_OPEN.size();
+        a += xml_open.size();
         const size_t b = text.find(XML_CLOSE, a);
         if (b == std::string_view::npos) return "";
         std::string out(text.substr(a, b - a));
         for (size_t at = 0; (at = out.find(DASH, at)) != std::string::npos; at += 2) out.replace(at, DASH.size(), "--");
         return out;
     }
-    a = text.find(CSV_OPEN);
-    if (a == std::string_view::npos) return "";
-    a += CSV_OPEN.size();
-    const size_t b = text.find('\n', a);
-    return std::string(text.substr(a, b == std::string_view::npos ? std::string_view::npos : b - a));
+    const std::vector<std::string> lines = parse_comments(text, name);
+    return lines.empty() ? "" : lines.front();
+}
+
+std::vector<std::string> parse_comments(std::string_view text, std::string_view name) {
+    const std::string open = "# " + std::string(name) + " ";
+    std::vector<std::string> out;
+    for (size_t a = text.find(open); a != std::string_view::npos; a = text.find(open, a)) {
+        const bool line_start = a == 0 || text[a - 1] == '\n';
+        a += open.size();
+        if (!line_start) continue;
+        const size_t b = text.find('\n', a);
+        std::string line(text.substr(a, b == std::string_view::npos ? std::string_view::npos : b - a));
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        out.push_back(std::move(line));
+    }
+    return out;
+}
+
+std::string parse_comment(std::string_view text) {
+    const std::string out = parse_comment(text, NAME);
+    return out.empty() ? parse_comment(text, LEGACY_NAME) : out;
 }
 
 std::string find_string(std::string_view block, std::string_view object, std::string_view key) {

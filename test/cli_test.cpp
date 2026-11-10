@@ -348,7 +348,9 @@ TEST(CliTest, InfoOfAPastReleasesRestartFileSaysWhatIsInIt) {
         {"Format", "restart, version 2"},
         {"Values", "2D, double precision"},
         {"Simulated time", "t = 0.0288616582 s, step 2"},
-        {"Note", "no provenance: written before Mallard 0.9, or not by Mallard"},
+        {"Note", "no run block: written before Mallard 0.9, or not by Mallard"},
+        {"Note", "no snapshot block (written before Mallard 0.10): step and time are the format's own records; "
+                 "reason, run and stored precision are unknown"},
         {"cells"},
         {"30"},
         {"field", "units", "components", "min", "max", "description"},
@@ -358,7 +360,8 @@ TEST(CliTest, InfoOfAPastReleasesRestartFileSaysWhatIsInIt) {
     for (const auto & row : rows) EXPECT_TRUE(has_row(r.out, row)) << row[0] << "\n" << r.out;
     const Result input = run({"info", "--input", file}, true);
     EXPECT_EQ(input.status, 1);
-    EXPECT_TRUE(contains(input.err, "has no provenance block")) << input.err;
+    EXPECT_TRUE(contains(input.err, "has no run block")) << input.err;
+    EXPECT_FALSE(contains(r.out, "This snapshot")) << r.out;
 }
 
 TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
@@ -376,17 +379,29 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
     ASSERT_EQ(text.status, 0) << text.err;
     const std::vector<std::vector<std::string>> rows = {
         {"Kind", "snapshot"},
-        {"Simulated time", "t = " + printed_time(2.0e-3) + " s"},
+        {"Simulated time", "t = " + printed_time(2.0e-3) + " s, step 2"},
         {"cells", "points"},
         {Mallard_DIM == 3 ? "36" : "12"},
         {"axis", "min [m]", "max [m]"},
         {"x", "0", "1"},
+        {"field", "units", "components", "min", "max", "stored", "description"},
         {"RHO", "kg m-3", "1"},
         {"U", "m s-1", "3"},
         {"Input file", "small.toml"},
         {"Input recorded", "resolved; mallard info --input prints it"},
+        {"Restarted from", "no: a fresh start"},
+        {"Step", "2"},
+        {"Time", printed_time(2.0e-3) + " s"},
+        {"Reason", "interval"},
+        {"Format", "vtu, version 1"},
     };
     for (const auto & row : rows) EXPECT_TRUE(has_row(text.out, row)) << row[0] << "\n" << text.out;
+    // The run's block and this snapshot's, in that order, each its own section
+    const size_t run_section = text.out.find("Run ="), snapshot_section = text.out.find("This snapshot =");
+    ASSERT_NE(run_section, std::string::npos) << text.out;
+    ASSERT_NE(snapshot_section, std::string::npos) << text.out;
+    EXPECT_LT(run_section, snapshot_section);
+    EXPECT_TRUE(contains(text.out, "same for every file of the run")) << text.out;
     EXPECT_TRUE(contains(text.out, "ranges at t = " + printed_time(2.0e-3) + " s")) << text.out;
     EXPECT_EQ(run({"info", "--format", "yaml", "case/flow_000002.vtu"}, true).status, 2);
 
@@ -405,7 +420,13 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
     EXPECT_EQ(fields[1]["name"].string, "U");
     EXPECT_EQ(fields[1]["components"].number, 3);
     EXPECT_NEAR(fields[0]["min"].number, 1.0, 0.1);
-    EXPECT_EQ(v["provenance"]["input"]["file"].string, "small.toml");
+    EXPECT_EQ(v["run"]["input"]["file"].string, "small.toml");
+    const json::Value & snapshot = v["snapshots"].array.at(0);
+    EXPECT_EQ(snapshot["step"].number, 2);
+    EXPECT_EQ(snapshot["snapshot"]["step"].number, 2);
+    EXPECT_EQ(snapshot["snapshot"]["reason"].string, "interval");
+    EXPECT_EQ(snapshot["run_id"].string, v["run"]["run"]["run_id"].string);
+    EXPECT_EQ(snapshot["snapshot"]["run_id"].string, v["run"]["run"]["run_id"].string);
 }
 
 TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {
@@ -418,7 +439,7 @@ TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {
         {"Last step", "2"},
         {"Simulated time", "t = 0.002 s at the end"},
         {"file", "kind", "times", "first t [s]", "last t [s]", "last step", "fields", "format"},
-        {"case/flow.pvd", "snapshot", "2", "0", printed_time(2.0e-3), "-", "2", "PVD series index (VTU snapshots)"},
+        {"case/flow.pvd", "snapshot", "2", "0", printed_time(2.0e-3), "2", "2", "PVD series index (VTU snapshots)"},
         {"case/restart_000002.restart", "restart", "1", printed_time(2.0e-3), printed_time(2.0e-3), "2", Mallard_DIM == 3 ? "5" : "4", "restart"},
     };
     for (const auto & row : rows) EXPECT_TRUE(has_row(r.out, row)) << row[0] << "\n" << r.out;
