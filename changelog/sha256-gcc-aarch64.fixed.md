@@ -1,0 +1,1 @@
+- Mallard builds with GCC 11 and 12 on 64-bit Arm Linux again; the hardware SHA-256 used for output records failed to compile there.

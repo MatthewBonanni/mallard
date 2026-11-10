@@ -44,7 +44,7 @@ alignas(16) constexpr uint32_t K[64] = {
 #ifdef __clang__
 #define MALLARD_SHA256_TARGET __attribute__((target("sha2")))
 #else
-#define MALLARD_SHA256_TARGET __attribute__((target("+sha2")))
+#define MALLARD_SHA256_TARGET __attribute__((target("+crypto")))
 #endif
 
 #ifdef __APPLE__
