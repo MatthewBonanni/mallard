@@ -33,6 +33,7 @@
 #include "physics.h"
 #include "boundary.h"
 #include "probe_geometry.h"
+#include "probe_spectra.h"
 #include "probe_surface.h"
 #include "data.h"
 #include "statistics.h"
@@ -111,6 +112,8 @@ RegionValue classify_region(const Input & input, region::Regions & regions, cons
  *        files do not depend on the number of ranks. A probe with `average`
  *        samples on the [statistics] schedule instead and writes the running
  *        time averages of its samples, accumulated on rank 0 in that order.
+ *        A probe with `spectra` keeps a history of its samples (or reductions)
+ *        on rank 0 and writes their time spectra (ProbeSpectra).
  */
 class Probes {
     public:
@@ -155,9 +158,15 @@ class Probes {
         void start_averages(rtype t);
         /** @brief Continue the time averages of a restart file, or start them afresh if it holds none (or with reset). */
         void restore_averages(const RestartData & restart, const std::string & file, rtype t, bool reset);
+        /** @brief Continue the spectra histories of a restart file, or start them afresh (none, or reset). */
+        void restore_spectra(const RestartData & restart, const std::string & file, bool reset);
         RestartAttributes attributes() const;
-        /** @brief The running time averages, from rank 0 (collective). */
+        /** @brief The running time averages and spectra histories, from rank 0 (collective). */
         RestartArrays arrays() const;
+        /** @brief At the end of a run: writes the spectra of full histories with samples not yet written. */
+        void finish(uint64_t step, rtype t);
+        /** @brief The peaks of the spectra last written, for the run log. */
+        std::vector<MonitorValues> spectra_peaks() const;
         /** @brief Whether a probe due now reads [statistics] outputs, which must then be on the host. */
         bool statistics_due(uint64_t step, rtype t) const;
 
@@ -294,6 +303,8 @@ class Probes {
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
+            std::unique_ptr<ProbeSpectra> spectra;
+            std::shared_ptr<std::ofstream> out_spectra, out_reduction_spectra;
             struct SeriesEntry {
                 double t = 0.0;
                 int64_t step = -1;  // -1 where an older .pvd records none
@@ -328,6 +339,7 @@ class Probes {
             std::vector<std::string> reduction_names() const;
             /** @brief Writes a row of the reductions in last. */
             void write_reductions(uint64_t step, rtype t) const;
+            void write_spectra(uint64_t step, rtype t);
         };
         void add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,

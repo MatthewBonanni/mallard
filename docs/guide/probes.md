@@ -68,6 +68,7 @@ reductions = ["mean", "rms"]
 | `format` | `csv` | `csv`, `hdf5` (one extensible file), `vtkhdf` (one VTKHDF file of every output, which ParaView opens as a time series) or `vtp` (one file per output and a `.pvd` series) |
 | `reductions` | none (`region`: `integral`, `mean`, `min`, `max`) | `integral`, `mean`, `favre`, `min`, `max`, `rms` over the geometry; boundaries also `moment` (about `moment_center`, default the origin) |
 | `samples` | `true` | `false` writes only the reductions |
+| `spectra` | none | Time spectra of the samples or reductions ([below](#time-spectra)) |
 | `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
 
 ### Cut planes and surfaces
@@ -224,6 +225,84 @@ means in sample order, so they are the same on any number of ranks, and
 restart files carry them: a restarted run continues them bit for bit.
 `statistics.reset = true` starts them afresh. An averaging probe evaluates
 its samples at every sampling step, not only at its outputs.
+
+### Time spectra
+
+A probe with `spectra` computes, during the run, the power spectral density
+of its samples in time: the shedding frequency of a wake, the tones of a
+cavity, the band of a combustion instability, without post-processing the
+probe file.
+
+```toml
+[[probes]]
+name = "wake"
+type = "point"
+point = [3.0, 0.5]
+variables = ["U_Y", "P"]
+sampling = "point"
+time_interval = 0.5      # the sampling interval of the spectra
+
+[probes.spectra]
+variables = ["U_Y"]
+t_start = 60.0           # once the flow is periodic
+length = 140.0           # the last 140 time units: bin width 1 / 140
+strouhal = {length = 1.0, velocity = 0.2}   # St = f D / U
+```
+
+Each output of the probe from `t_start` on adds a sample to a history of the
+last `length / time_interval` samples. Once the history is full, the probe
+writes the one-sided PSD of every listed variable at every sample point to
+`probe_<name>_spectra.csv`, with columns `step, t, point, f, St, PSD_U_Y`
+(units in the second line: `PSD_U_Y` in `m2 s-1`, velocity squared per
+frequency), at the end of the run and, with `time_interval`, at its
+multiples. Reductions are signals too: `variables = ["integral_TRACTION_PRESSURE_Y"]`
+on a wall probe gives the spectrum of the lift, written to
+`probe_<name>_reductions_spectra.csv` (`step, t, f, St, PSD_...`). At each
+write the run's log reports the peak of each spectrum, and the run record
+(`mallard.jsonl`) carries it as the monitor `probe_<name>_spectra`
+(`f_peak_<variable>`, `St_peak_<variable>`):
+
+```text
+   85208 2.0000e+02  spectra  probe wake: U_Y peaks at f = 0.032942 (St = 0.1647) (bin width 0.00714)
+```
+
+The spectrum is Welch's: the history is cut into `segments` (default 1)
+segments overlapping by half, the last ending at the latest sample; each has
+its mean removed and is windowed (`window = "hann"`, the default, or
+`"rectangular"`), and their periodograms are averaged, normalized as a
+density (`scipy.signal.welch` with `scaling = "density"` gives the same
+values): the PSD summed over the bins times the bin width is the variance of
+the windowed signal. A sine of amplitude A at a bin center puts `A^2 / 2` of
+power in its bin without a window, and over three bins (`A^2 / (3 df)` at its
+own, `A^2 / (12 df)` at each neighbor) with the Hann window. The peak frequency
+is refined by a parabola through the logarithms of the largest bin and its
+neighbors, so it is found to a fraction of the bin width.
+
+Restart files carry the history, so a restarted run continues it bit for bit
+(rank 0 keeps it in sample order, the same on any number of ranks);
+`statistics.reset = true` starts it afresh.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `variables` | required | Variables of the probe (`U` for its components), and reduction columns (`mean_P`, `integral_MASS_FLUX`) |
+| `length` | required | Time spanned by the history; the bin width is `(segments + 1) / (2 length)` |
+| `t_start` | `0` | First sample |
+| `segments` | `1` | Welch segments, overlapping by half: more average out noise, at a coarser bin width |
+| `window` | `hann` | `hann` or `rectangular` |
+| `time_interval` | none | Also write at its multiples, once the history is full |
+| `strouhal` | none | `{length, velocity}`: adds `St = f length / velocity` |
+| `file`, `reductions_file` | `probe_<name>_spectra.csv`, `probe_<name>_reductions_spectra.csv` | Output files |
+
+Pitfalls:
+
+- The probe needs a `time_interval` (equally spaced samples), and its
+  Nyquist frequency is `1 / (2 time_interval)`: sample at least a few times
+  per period of the fastest motion of interest, or it aliases.
+- The bin width is the resolution: four periods in the history put the peak
+  4 bins from zero. The parabola locates a clean peak well within a bin, but
+  close tones need a longer `length`.
+- A spectrum is not written before the history is full: a run shorter than
+  `t_start + length` writes none.
 
 ### Region probes
 

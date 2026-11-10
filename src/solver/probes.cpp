@@ -1474,10 +1474,47 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     if (p.average) {
         for (auto & v : p.variables) v = "MEAN_" + v;
     }
+    const Dimension measure = geometry_field("measure", p.geometry).dimension;
+    std::vector<std::pair<std::string, Dimension>> reduction_columns;
+    for (const Reduction r : p.reductions) {
+        if (r == Reduction::MOMENT) {
+            // About moment_center: the z component in 2D
+            for (const auto & vector : p.moment_vectors) {
+                const Dimension d = field_units::describe(vector.first).dimension.times(measure).times(dim::length);
+                for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) {
+                    reduction_columns.emplace_back("moment_" + vector.first + "_" + AXES[a], d);
+                }
+            }
+            continue;
+        }
+        for (const auto & v : p.variables) {
+            const Dimension d = field_units::describe(v).dimension;
+            // Integrals take the units of the measure (sums over points)
+            reduction_columns.emplace_back(reduction_name(r) + "_" + v, r == Reduction::INTEGRAL ? d.times(measure) : d);
+        }
+    }
+    const char * point_label = boundary ? "face" : cut ? "cell" : "point";
+    if (!snapshot && entry.contains("spectra")) {
+        if (p.average) {
+            throw InputError(Diagnostic{.key = key + ".spectra",
+                                        .line = line_of(entry, "spectra"),
+                                        .message = "is for the instantaneous samples, but average = true writes "
+                                                   "their time averages",
+                                        .fix = "Give the spectra to a probe without average",
+                                        .docs = "docs/guide/probes.md#time-spectra"});
+        }
+        std::vector<std::pair<std::string, Dimension>> sampled;
+        if (!p.from_region || p.resampled) {
+            for (const auto & v : p.variables) sampled.emplace_back(v, field_units::describe(v).dimension);
+        }
+        p.spectra = std::make_unique<ProbeSpectra>(entry.at("spectra"), key + ".spectra", p.name,
+                                                   static_cast<double>(p.time_interval), sampled, reduction_columns,
+                                                   p.geometry.nodes.size(), point_label);
+    }
     on_root(distributed, [&] {
         if (p.write_samples && p.format == Format::CSV) {
             std::vector<std::pair<std::string, Dimension>> columns = {
-                {"step", dim::none}, {"t", dim::time}, {boundary ? "face" : cut ? "cell" : "point", dim::none}};
+                {"step", dim::none}, {"t", dim::time}, {point_label, dim::none}};
             for (size_t d = 0; d < N_DIM; d++) columns.emplace_back(std::string(1, "xyz"[d]), dim::length);
             if (!p.geometry.node_weights.empty()) {
                 if (!p.geometry.arc_length.empty()) columns.emplace_back("s", dim::length);
@@ -1488,28 +1525,16 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             p.out = open_csv(p.file, resume, columns);
         }
         if (!p.reductions.empty()) {
-            const Dimension measure = geometry_field("measure", p.geometry).dimension;
             std::vector<std::pair<std::string, Dimension>> columns = {
                 {"step", dim::none}, {"t", dim::time}, {measure_name(p.geometry), measure}};
-            for (const Reduction r : p.reductions) {
-                if (r == Reduction::MOMENT) {
-                    // About moment_center: the z component in 2D
-                    for (const auto & vector : p.moment_vectors) {
-                        const Dimension d = field_units::describe(vector.first).dimension.times(measure).times(dim::length);
-                        for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) {
-                            columns.emplace_back("moment_" + vector.first + "_" + AXES[a], d);
-                        }
-                    }
-                    continue;
-                }
-                for (const auto & v : p.variables) {
-                    const Dimension d = field_units::describe(v).dimension;
-                    // Integrals take the units of the measure (sums over points)
-                    columns.emplace_back(reduction_name(r) + "_" + v,
-                                         r == Reduction::INTEGRAL ? d.times(measure) : d);
-                }
-            }
+            columns.insert(columns.end(), reduction_columns.begin(), reduction_columns.end());
             p.out_reductions = open_csv(p.reductions_file, resume, columns);
+        }
+        if (p.spectra && p.spectra->needs_samples()) {
+            p.out_spectra = open_csv(p.spectra->samples_file(), resume, p.spectra->sample_columns());
+        }
+        if (p.spectra && p.spectra->needs_reductions()) {
+            p.out_reduction_spectra = open_csv(p.spectra->reductions_file(), resume, p.spectra->reduction_columns());
         }
 #ifdef Mallard_HAS_HDF5
         if (p.write_samples && p.format == Format::HDF5 && output_files_enabled() &&
@@ -1617,6 +1642,7 @@ std::string Probes::set_time_interval(const std::string & name, rtype value, rty
         if (p->name != name || p->snapshot != snapshot) continue;
         if (p->interval > 0) return "is written every interval steps; set that instead";
         if (!(value > 0.0_r)) return "time_interval must be positive";
+        if (p->spectra) return "keeps its time_interval: its spectra need equally spaced samples";
         p->time_interval = value;
         p->n_written = static_cast<uint64_t>(std::floor(t / value + precision_tol(1e-9, 1e-5))) + 1;
         return "";
@@ -1778,11 +1804,19 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         if (!p.average) p.sample(fields, sampled_nodes, sampled_quad);
         const std::vector<double> & nodes = p.average ? p.mean_nodes : sampled_nodes;
         const std::vector<double> & quad = p.average ? p.mean_quadrature : sampled_quad;
-        if (comm::is_root() || !distributed) {
+        // Rank 0 writes; spectra histories are kept like the averages, on every rank that runs alone
+        const bool keep = comm::is_root() || !distributed;
+        if (keep) {
             p.last.clear();
             if (!p.reductions.empty()) p.reduce(nodes, quad);
             if (p.point_value) {
                 for (size_t v = 0; v < p.variables.size(); v++) p.last.push_back(nodes[v]);
+            }
+        }
+        if (p.spectra && p.spectra->takes(double(t))) {
+            const auto reduced_end = p.last.begin() + static_cast<std::ptrdiff_t>(keep ? p.reduction_names().size() : 0);
+            if (p.spectra->add(double(t), keep, nodes, p.n_evaluated(), std::vector<double>(p.last.begin(), reduced_end))) {
+                p.write_spectra(step, t);
             }
         }
         if (!comm::is_root()) continue;
@@ -1852,12 +1886,33 @@ std::vector<double> Probes::values() const {
         }
     }
     return values;
+
+}
+
+void Probes::Probe::write_spectra(uint64_t step, rtype t) {
+    const std::string report = spectra->write(step, double(t), out_spectra.get(), out_reduction_spectra.get());
+    if (!report.empty()) logging::event(step, double(t), "spectra", report);
+}
+
+void Probes::finish(uint64_t step, rtype t) {
+    for (auto & p : probes) {
+        if (p->spectra && p->spectra->unwritten()) p->write_spectra(step, t);
+    }
+}
+
+std::vector<MonitorValues> Probes::spectra_peaks() const {
+    std::vector<MonitorValues> all;
+    for (const auto & p : probes) {
+        if (p->spectra && !p->spectra->peaks().name.empty()) all.push_back(p->spectra->peaks());
+    }
+    return all;
 }
 
 bool Probes::Probe::samples_nodes() const {
     const bool extrema = std::any_of(reductions.begin(), reductions.end(),
                                      [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
-    return (!from_region || resampled) && (write_samples || extrema || quadrature.n_global == 0);
+    return (!from_region || resampled) &&
+           (write_samples || extrema || quadrature.n_global == 0 || (spectra && spectra->needs_samples()));
 }
 
 bool Probes::Probe::samples_quadrature() const { return !reductions.empty() && quadrature.n_global > 0; }
@@ -1961,8 +2016,20 @@ void Probes::restore_averages(const RestartData & restart, const std::string & f
     }
 }
 
+void Probes::restore_spectra(const RestartData & restart, const std::string & file, bool reset) {
+    for (auto & p : probes) {
+        if (!p->spectra) continue;
+        p->spectra->start();
+        if (!reset) p->spectra->restore(restart, file, "probes[name = \"" + p->name + "\"].spectra");
+    }
+}
+
 RestartAttributes Probes::attributes() const {
     RestartAttributes all;
+    for (const auto & p : probes) {
+        if (!p->spectra) continue;
+        for (const auto & a : p->spectra->attributes()) all.push_back(a);
+    }
     for (const auto & p : probes) {
         if (!p->average) continue;
         const std::string name = AVERAGE_PREFIX + p->name;
@@ -1985,6 +2052,10 @@ RestartArrays Probes::arrays() const {
         if (!p->average) continue;
         add(AVERAGE_PREFIX + p->name + "_NODES", p->mean_nodes);
         add(AVERAGE_PREFIX + p->name + "_QUADRATURE", p->mean_quadrature);
+    }
+    for (const auto & p : probes) {
+        if (!p->spectra) continue;
+        for (auto && a : p->spectra->arrays(distributed)) all.push_back(std::move(a));
     }
     return all;
 }
@@ -2282,6 +2353,11 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
             for (const Reduction r : p.reductions) reds += (reds.empty() ? "" : ", ") + reduction_name(r);
             text += "; " + reds + (p.write_samples ? " to " + p.reductions_file : "");
         }
+        if (p.spectra) {
+            text += "; " + p.spectra->summary() + " to ";
+            const std::string & a = p.spectra->samples_file(), & b = p.spectra->reductions_file();
+            text += a + (!a.empty() && !b.empty() ? " and " : "") + b;
+        }
         items.emplace_back(p.snapshot ? (p.format == Format::VTKHDF ? "vtkhdf" : "vtu") : "probe " + p.name, text);
     }
     return items;
@@ -2292,6 +2368,8 @@ void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t st
     for (auto & p : probes) {
         if (p->out) *p->out << csv_line << std::flush;
         if (p->out_reductions) *p->out_reductions << csv_line << std::flush;
+        if (p->out_spectra) *p->out_spectra << csv_line << std::flush;
+        if (p->out_reduction_spectra) *p->out_reduction_spectra << csv_line << std::flush;
 #ifdef Mallard_HAS_HDF5
         if (p->write_samples && p->format == Format::HDF5 && std::filesystem::exists(p->file)) {
             const std::lock_guard<std::mutex> lock(h5::mutex());
@@ -2325,6 +2403,8 @@ std::vector<std::string> Probes::files() const {
     for (const auto & p : probes) {
         if (p->write_samples) files.push_back(p->file);
         if (!p->reductions.empty()) files.push_back(p->reductions_file);
+        if (p->spectra && p->spectra->needs_samples()) files.push_back(p->spectra->samples_file());
+        if (p->spectra && p->spectra->needs_reductions()) files.push_back(p->spectra->reductions_file());
     }
     return files;
 }

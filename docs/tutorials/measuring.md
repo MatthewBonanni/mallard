@@ -9,7 +9,7 @@ everything while it runs, into small CSV files. It takes 85,000 steps on 13,000 
 
 You will use: named regions shared by several probes, a region probe (integrals and density-weighted
 means over a box), cut planes with flux variables, boundary probes of the wall's tractions and pressure
-coefficient, a point probe as a time series, time and phase averages (`[statistics]`,
+coefficient, a point probe as a time series and its spectrum computed during the run, time and phase averages (`[statistics]`,
 `[statistics.phase]`), and a snapshot of just the box's cells. Files:
 [`tutorials/measuring/`](../../tutorials/measuring). Setup: [Tutorials](index.md).
 
@@ -58,11 +58,26 @@ Each `[[probes]]` entry samples or reduces the solution every `interval` steps (
 | `wall` | `boundary = "cylinder"` | `TRACTION_PRESSURE`, `TRACTION_VISCOUS`: `integral` | `probe_wall_reductions.csv` |
 | `box` | `region = "box"` | `RHO`, `RHOU`, `RHOE`: `integral` | `probe_box_reductions.csv` |
 | `west`, `east`, `south`, `north` | `region = "<side>"` | `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`: `integral` | `probe_<side>_reductions.csv` |
-| `wake` | a point at (3, 0.5) | `U_Y`, `P` every 0.5 time units | `probe_wake.csv` |
+| `wake` | a point at (3, 0.5) | `U_Y`, `P` every 0.5 time units; the spectrum of `U_Y` | `probe_wake.csv`, `probe_wake_spectra.csv` |
 
 The `integral`s of `RHO`, `RHOU` and `RHOE` over the box are its mass, momentum and total energy. The flux variables of a cut plane are along its normal: `MASS_FLUX` is ρu·n,
 `MOMENTUM_FLUX` ρu(u·n) + pn (pressure included), `ENTHALPY_FLUX` ρu·n(h + |u|²/2). The wall's traction
 integrals are the force of `[[forces]]`.
+
+The wake probe also computes the spectrum of its `U_Y` while the run goes
+([time spectra](../guide/probes.md#time-spectra)):
+
+```toml
+[probes.spectra]
+variables = ["U_Y"]
+t_start = 60.0
+length = 140.0
+strouhal = {length = 1.0, velocity = 0.2}
+```
+
+It keeps the last 140 time units of samples from t = 60 (280 samples, 0.5 apart) and at the end of the
+run writes their power spectral density (Hann window) to `probe_wake_spectra.csv`, with the frequency and
+its Strouhal number St = f D / U, and reports the peak in the log.
 
 The startup lists each one with the cells or samples it found (the other sides are like `west`):
 
@@ -71,7 +86,7 @@ The startup lists each one with the cells or samples it found (the other sides a
   probe wall         probe_wall_reductions.csv, boundary cylinder of 96 points every 20 steps: TRACTION_PRESSURE_X, TRACTION_PRESSURE_Y, TRACTION_VISCOUS_X, TRACTION_VISCOUS_Y; integral
   probe box          probe_box_reductions.csv, region box = rectangle over 5,036 cells every 20 steps: RHO, RHOU_X, RHOU_Y, RHOE; integral
   probe west         probe_west_reductions.csv, cut_plane of 50 points every 20 steps (point values): MASS_FLUX, MOMENTUM_FLUX_X, MOMENTUM_FLUX_Y, ENTHALPY_FLUX; integral
-  probe wake         probe_wake.csv, point of 1 point every 0.5 of simulated time (point values): U_Y, P
+  probe wake         probe_wake.csv, point of 1 point every 0.5 of simulated time (point values): U_Y, P; spectra of U_Y over the last 280 samples (1 segment, Hann window, bin width 0.00714) from t = 60 and at the end to probe_wake_spectra.csv
 ```
 
 ## 4. Time and phase averages
@@ -123,7 +138,7 @@ wall:     mean Cd 1.3691 ([[forces]]), 1.3691 (wall probe); largest difference 2
 mass:     box 23.0665, inflow 0.73687 per unit time, residual d/dt + net outflow: RMS 6.17e-05 (8.4e-05 of the inflow)
 energy:   residual d/dt + net enthalpy outflow: RMS 1.71e-04 (9.2e-05 of the inflow), net outflow alone 8.5e-04
 momentum: mean Cd 1.3658 from the box against 1.3691 on the wall; Cl amplitude 0.3715 against 0.3336
-Strouhal: 0.1654 from the lift's crossings, 0.1651 from the wake spectrum
+Strouhal: 0.1654 from the lift's crossings, 0.1647 from the run's wake spectrum (bin width 0.0357), 0.1651 from the wake samples' spectrum
 ```
 
 **The wall.** The integral of the wall probe's tractions agrees with the force of `[[forces]]` to round-off (2e-11 in C_D). The wall probe's samples also give the force's distribution around the
@@ -150,12 +165,19 @@ steps apart, is the noisy term.
 ![The mass residual of the box over the mass flow into it, and the drag coefficient from the wall and from the box's momentum balance](../images/tutorials/measuring_balance-light.svg#gh-light-mode-only)
 ![The mass residual of the box over the mass flow into it, and the drag coefficient from the wall and from the box's momentum balance](../images/tutorials/measuring_balance-dark.svg#gh-dark-mode-only)
 
-**The shedding frequency.** The upward zero crossings of the lift after t = 60 give St = 0.1654, and the
-peak of the spectrum of U_Y at the wake point gives 0.1651. The spectrum is of a probe's time series
-(Hann window, peak located by a parabola through the three highest values): with four and a half periods
-its resolution is 0.036 in St, so the parabola does the locating. Its harmonics, at 2, 3, 4 and 5 times
-the shedding frequency, are the wake's departure from a pure sine. `[statistics.spectra]` computes
-spectra in space, along the periodic directions of a generated mesh, which this wake has none of.
+**The shedding frequency.** The upward zero crossings of the lift after t = 60 give St = 0.1654. The
+run itself computed the spectrum of U_Y at the wake point and reported its peak at the end:
+
+```text
+   85208 2.0000e+02  spectra  probe wake: U_Y peaks at f = 0.032942 (St = 0.1647) (bin width 0.00714)
+```
+
+With four and a half periods in the 140 time units, the bins are 0.036 apart in St, so the parabola
+through the logarithms of the three highest bins does the locating. The plot script's own spectrum of the
+probe's samples (Hann window, zero-padded eightfold) gives 0.1651, 0.0004 from the run's, a hundredth of
+a bin. Its harmonics, at 2, 3, 4 and 5 times the shedding frequency, are the wake's departure from a pure
+sine. `[statistics.spectra]` computes spectra in space, along the periodic directions of a generated
+mesh, which this wake has none of.
 
 ![Power spectrum of the cross-stream velocity at a point of the wake, peaking at the Strouhal number](../images/tutorials/measuring_spectrum-light.svg#gh-light-mode-only)
 ![Power spectrum of the cross-stream velocity at a point of the wake, peaking at the Strouhal number](../images/tutorials/measuring_spectrum-dark.svg#gh-dark-mode-only)
