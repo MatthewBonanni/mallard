@@ -506,7 +506,7 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
     EXPECT_EQ(v["dim"].number, Mallard_DIM);
     std::vector<std::string> names;
     for (const auto & f : v["fields"].array) names.push_back(f["name"].string);
-    for (const char * name : {"RHO", "U_X", "P", "Q", "P_MAX"}) {
+    for (const char * name : {"RHO", "U_X", "P", "Q_CRITERION", "MACH", "LAMBDA2", "SCHLIEREN", "P_MAX"}) {
         EXPECT_NE(std::find(names.begin(), names.end(), name), names.end()) << name;
     }
     EXPECT_EQ(std::count(names.begin(), names.end(), "U_Z"), Mallard_DIM == 3 ? 1 : 0);

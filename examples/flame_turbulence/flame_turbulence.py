@@ -519,7 +519,7 @@ def main():
     a = sub.add_parser("extract")
     a.add_argument("run")
     a.add_argument("out_dir")
-    a.add_argument("--fields", default="T,Y_H2,Q,HRR,OMEGA_H2,TF_E,TF_F")
+    a.add_argument("--fields", default="T,Y_H2,Q_CRITERION,HRR,OMEGA_H2,TF_E,TF_F")
     a.add_argument("--skip-existing", action="store_true")
     a = sub.add_parser("figure")
     a.add_argument("series", nargs="+", help="LABEL=series.csv")

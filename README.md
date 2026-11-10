@@ -53,7 +53,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - `mallard check` before a run, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file, `mallard diff` between two solutions; tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
-- VTKHDF output for ParaView
+- VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields): Mach number, Q-criterion, λ₂ and numerical schlieren
 - Probes on points, curves, surfaces, boundaries and regions; statistics, spectra and phase averages
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))

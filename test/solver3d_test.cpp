@@ -484,7 +484,7 @@ TEST(Solver3DValidation, FlowStatisticsOfDensityAndTemperature) {
     EXPECT_NEAR(s[4], 0.0, roundoff(1e-14));
 }
 
-TEST(Solver3DValidation, QAndVorticityOutputOfALinearVelocityField) {
+TEST(Solver3DValidation, QCriterionAndVorticityOutputOfALinearVelocityField) {
     // u = (x + 2y - z, 3z - 2x, 5x + y): Q = -(d u_k / d x_i d u_i / d x_k) / 2
     // = 5.5 and omega = (-2, -6, -4) in every cell, exact for least squares
     Case3D c;
@@ -494,13 +494,15 @@ TEST(Solver3DValidation, QAndVorticityOutputOfALinearVelocityField) {
     c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
     c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
     c.extra = "[[write_data]]\nprefix = \"" + (scratch_dir() / "mallard_vortex").string() +
-              "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"Q\", \"VORTICITY\"]\n";
+              "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"Q_CRITERION\", \"VORTICITY\"]\n";
     auto solver = init_case(c);
     solver->copy_device_to_host();
-    const double expected[4] = {5.5, -2.0, -6.0, -4.0};
+    const double omega[3] = {-2.0, -6.0, -4.0};
+    const auto q = static_cast<uint32_t>(solver->derived_selection.column[derived::Q_CRITERION]);
     for (uint32_t i = 0; i < solver->get_mesh()->n_owned(); i++) {
-        for (int k = 0; k < 4; k++) {
-            EXPECT_NEAR(solver->h_vortex_fields(i, k), expected[k], roundoff(1e-10)) << "cell " << i << ", field " << k;
+        EXPECT_NEAR(solver->h_derived_fields(i, q), 5.5, roundoff(1e-10)) << "cell " << i;
+        for (uint32_t k = 0; k < 3; k++) {
+            EXPECT_NEAR(solver->h_vortex_fields(i, k), omega[k], roundoff(1e-10)) << "cell " << i << ", component " << k;
         }
     }
 }
