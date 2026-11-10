@@ -114,9 +114,9 @@ void Solver::record_step() {
         run_chemistry(&forcing);
         halo_current = false;
         Kokkos::parallel_for("simpler_half_step", 1, KOKKOS_LAMBDA(const int) {
-            const rtype half = 0.5_r * s(STEP_DT);
-            s(T_HALF) = s(T) + half;
-            dt_scales(half, &s(HALF_SCALES));
+            const rtype step_half = 0.5_r * s(STEP_DT);
+            s(T_HALF) = s(T) + step_half;
+            dt_scales(step_half, &s(HALF_SCALES));
         });
         simpler_half_step = true;
         const rtype half_dt = 0.5_r * dt;
