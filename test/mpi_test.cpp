@@ -374,6 +374,13 @@ TEST(MPITest, InletsMatchSerial) {
                                         "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n"),
                                     25));
+    // Directions of x, y and t, per face and per stage, at an inlet and a moving wall
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                    bcs("type = \"inlet_stagnation\"\np0 = 1.5\nT0 = 1.1\n"
+                                        "direction = [1.0, \"0.3 * y * (1 + sin(30 * t))\"]\n",
+                                        "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\nu = 0.2\ndirection = [\"cos(10 * t)\", \"0\"]\n"),
+                                    25));
 }
 
 TEST(MPITest, LargeEddySimulationMatchesSerial) {

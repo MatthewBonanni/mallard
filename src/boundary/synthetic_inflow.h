@@ -23,15 +23,13 @@
 #include "input.h"
 
 #include "common.h"
+#include "boundary_fields.h"
 #include "expression.h"
 
 class Mesh;
 
 /** @brief Independent components of a symmetric tensor: 2D [xx, yy, xy], 3D [xx, yy, zz, xy, xz, yz]. */
 constexpr uint8_t N_STRESS = N_DIM * (N_DIM + 1) / 2;
-
-/** @brief Point in space. */
-using Point = std::array<double, N_DIM>;
 
 /**
  * @brief Mean velocity and Reynolds stress of an `inlet_state` with `nscbc` at
@@ -68,7 +66,7 @@ class InletProfile {
         bool uniform_ = true;
         std::vector<Field> u;       // per component, or the speed alone
         bool speed = false, directed = false;
-        Point direction{};
+        DirectionKey direction;
         std::vector<Field> stress;  // per N_STRESS component, empty without turbulence
         // Profile table: coordinate axis, sorted coordinates, and N_DIM mean + N_STRESS stress columns
         int axis = -1;

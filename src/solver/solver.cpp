@@ -864,6 +864,11 @@ void Solver::init_boundaries() {
         const bool directed = (bcs.back().type == BoundaryType::INLET_STAGNATION ||
                                bcs.back().type == BoundaryType::INLET_MASS_FLOW) &&
                               dot<N_DIM>(direction, direction) > 0.0_r;
+        // A direction of x, y, z (and t) is checked at every face, at t = 0 (later times on the device)
+        const bool directed_field = (bcs.back().type == BoundaryType::INLET_STATE ||
+                                     bcs.back().type == BoundaryType::INLET_STAGNATION ||
+                                     bcs.back().type == BoundaryType::INLET_MASS_FLOW) &&
+                                    fields->is_directed() && !fields->get_direction().constant();
         uint32_t n_selected = 0;
         uint64_t n_owned_selected = 0;
         std::string twice, outward;
@@ -899,6 +904,26 @@ void Solver::init_boundaries() {
                     }
                 }
             }
+            if (directed_field && outward.empty()) {
+                Point x{}, n_in{};
+                std::string at;
+                for (uint8_t d = 0; d < N_DIM; d++) {
+                    x[d] = double(mesh->h_face_coords(i_face, d));
+                    n_in[d] = -double(mesh->h_face_normals(i_face, d)) / double(mesh->h_face_area(i_face));
+                    at += (d ? ", " : "(") + logging::real(x[d]);
+                }
+                try {
+                    const Point d = fields->get_direction().at(x, 0.0);
+                    double into = 0.0;
+                    for (size_t j = 0; j < N_DIM; j++) into += d[j] * n_in[j];
+                    if (!(into > 0.0)) {
+                        outward = "points out of the domain at the face at " + at + "), t = 0 (" +
+                                  logging::real(into) + " along the inward normal)";
+                    }
+                } catch (const InputError &) {
+                    outward = "is zero at the face at " + at + "), t = 0";
+                }
+            }
 
             dirichlet.faces.push_back(i_face);
             n_selected++;
@@ -917,7 +942,7 @@ void Solver::init_boundaries() {
             throw InputError({.key = where_name + ".direction",
                               .line = line_of(bound, "direction"),
                               .message = message,
-                              .fix = "Give a direction into the domain at every face of the zone, or "
+                              .fix = "Give a nonzero direction into the domain at every face of the zone, or "
                                      "remove it to use each face's inward normal",
                               .docs = "docs/guide/boundary_conditions.md#" + BOUNDARY_NAMES.at(bcs.back().type)});
         }

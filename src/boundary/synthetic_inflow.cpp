@@ -185,7 +185,7 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     speed = u_in.speed;
     directed = u_in.directed;
     direction = u_in.direction;
-    bool varies = speed && !directed;
+    bool varies = speed && (!directed || !direction.constant());
     for (size_t i = 0; i < u_in.items.size(); i++) {
         u.push_back(field(u_in.items[i], where + ".u" + (speed ? "" : "[" + std::to_string(i) + "]"), dim::velocity,
                           varies));
@@ -291,7 +291,8 @@ std::array<double, N_DIM> InletProfile::velocity(const Point & x, const Point & 
     std::array<double, N_DIM> v{};
     if (axis < 0 && speed) {
         const double s = u[0].at(x);
-        FOR_I_DIM v[i] = s * (directed ? direction[i] : n_in[i]);
+        const Point d = directed ? direction.at(x, 0.0) : n_in;
+        FOR_I_DIM v[i] = s * d[i];
         return v;
     }
     FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[static_cast<size_t>(axis)]) : u[i].at(x);
