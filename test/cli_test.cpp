@@ -584,6 +584,32 @@ TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
     EXPECT_EQ(broken.status, 1);
 }
 
+TEST(CliTest, CheckWithoutAnInputChecksTheEnvironment) {
+    SKIP_UNDER_MPI();
+    const Result text = run({"check", "--kokkos-num-threads=1"}, true);
+    ASSERT_EQ(text.status, 0) << text.err;
+    EXPECT_TRUE(contains(text.out, "== Environment")) << text.out;
+    EXPECT_FALSE(contains(text.out, "== Input")) << text.out;
+    for (const char * check : {"Kokkos", "MPI", "GPU-aware MPI", "NCCL", "HDF5", "CGNS", "zlib", "KaMinPar"}) {
+        EXPECT_TRUE(has_row(text.out, {"ok", check})) << check << "\n" << text.out;
+    }
+    EXPECT_TRUE(has_row(text.out, {"rank", "host", "device", "GPU", "CPUs", "threads", "binding"})) << text.out;
+    EXPECT_TRUE(has_row(text.out, {"0"})) << text.out;
+    EXPECT_EQ(run({"check", "--ranks", "4"}, true).status, 2);
+
+    // One source for the build: the run block of every output file
+    ASSERT_EQ(small_run().status, 0);
+    const Result listed = run({"check", "small.toml", "--format", "json", "--kokkos-num-threads=1"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value environment = json::parse(listed.out)["environment"];
+    const json::Value file = json::parse(run({"info", "--format", "json", "case/flow_000002.vtu"}, true).out);
+    EXPECT_EQ(environment["build"].keys(), file["run"]["build"].keys());
+    EXPECT_EQ(environment["build"]["dim"].number, file["run"]["build"]["dim"].number);
+    EXPECT_EQ(environment["dependencies"]["mpi"].string, file["run"]["dependencies"]["mpi"].string);
+    EXPECT_EQ(environment["placement"].array.size(), 1u);
+    EXPECT_EQ(environment["placement"].array[0]["threads"].number, 1);
+}
+
 TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
     SKIP_UNDER_MPI();
     const Result numerics = run({"list", "keys", "numerics"}, true);

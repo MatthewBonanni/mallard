@@ -152,6 +152,12 @@ Warnings follow the table when the placement wastes hardware:
 
 A warning that holds on several nodes is printed once, with the number of other nodes.
 
+`mallard check` without an input makes the same checks before a run, under
+the job's launcher (`srun mallard check`, `mpirun -n 8 mallard check`), as
+`W-ENV-PLACEMENT` warnings, and adds what the build and the MPI library give
+the run: GPU-aware MPI, NCCL, unbound OpenMP threads
+([Checking an input](input_files.md#checking-an-input)).
+
 ## Multi-GPU scaling
 
 The [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/#scaling) plots the efficiencies below.

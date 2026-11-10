@@ -98,7 +98,7 @@ Commands:
                             explicit, defaults and preset included
   Inspect
     mallard check           Set up a case without running it and report on it:
-                            keys, mesh, time step, memory, cost
+                            keys, mesh, time step, memory, cost, environment
     mallard info            What a mesh, snapshot, restart, probe or CSV file,
                             or a run directory, holds
     mallard list fields     The output fields there are, or exactly those of one
@@ -355,6 +355,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 
 ```text
 Usage: mallard check input.toml [options]
+       mallard check [--format text|json]
 
 Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial
 solution) without time stepping and without writing any file, then reports:
@@ -366,6 +367,16 @@ explain it. It lists every region the case uses and the mesh's own (domain,
 boundary zones, cell zones) with its dimension, measure and cells, and whether a
 surface or curve is exact or extracted; a region that covers no cell is an
 error. Under mpirun -n N it checks the run on N ranks.
+
+Without an input, checks the environment only; with one, the report ends with
+the same Environment section: the build (dimension, precision, the solvers
+installed), Kokkos and its execution spaces, every rank's host, device and
+memory, CPUs and threads, MPI (library, ranks per host), GPU-aware MPI and NCCL
+(built, and whether the run uses them), HDF5 (serial or parallel), CGNS, zlib
+and KaMinPar. Each problem is a diagnostic with its fix: ranks sharing a GPU or
+cores, OpenMP threads free to migrate, a GPU-aware build on an MPI that cannot
+read device memory (an error), device halos staged through host memory. Run it
+under the job's launcher (srun, mpirun) to check its nodes.
 
 Options:
   -i FILE                   The input file, instead of the argument.
@@ -413,13 +424,14 @@ Options:
 
 Examples:
   $ mallard check input.toml
+  $ srun -N 2 --ntasks-per-node 4 mallard check   # the environment of a job
   $ mallard check input.toml --ranks 64 --throughput 5e7
   $ mpirun -n 4 mallard check input.toml --quality quality
   $ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView
 
 Exit status:
   0  no errors (there may be warnings)
-  1  errors: in the input, the mesh or the setup
+  1  errors: in the input, the mesh, the setup or the environment
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-check
