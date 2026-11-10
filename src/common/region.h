@@ -165,6 +165,10 @@ class Region {
          */
         Region surface_in_domain() const;
 
+        /** @brief Every node of its filled parts, and the polygons' vertices. */
+        const std::vector<Node> & nodes() const { return m_nodes; }
+        const std::vector<double> & vertices() const { return m_vertices; }
+
         /** @brief The compiled functions of implicit regions, by index. */
         const std::vector<kexpr::Program> & programs() const { return m_programs; }
 
@@ -185,6 +189,12 @@ class Region {
         /** @brief A filled region's whole filled part before it wraps across periodic boundaries (root() if it does not). */
         uint32_t own() const { return m_own; }
 
+        /** @brief Whether it moves without changing shape: only translations and rotations of t. */
+        bool rigid() const;
+
+        /** @brief The region where it is at time t, which does not move. */
+        Region at(double t) const;
+
         /** @brief The region with root i, of its filled parts, with the copies cs. */
         Region with_root(uint32_t i, std::vector<Copy> cs = {}) const;
 
@@ -199,6 +209,7 @@ class Region {
         std::vector<kexpr::Program> m_times;
         std::vector<Copy> m_copies;
         bool m_moving = false;
+        double m_time = 0.0;  // of implicit shapes
         uint32_t m_own = 0;
         uint32_t m_root = 0;
         RegionView<Kokkos::HostSpace> m_host;

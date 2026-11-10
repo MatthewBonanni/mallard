@@ -6,6 +6,7 @@ add_library(MallardCore STATIC
     common/region.cpp
     common/region_input.cpp
     common/region_mesh.cpp
+    common/region_motion.cpp
     io/case_view.cpp
     common/tabulated.cpp
     common/common_io.cpp
@@ -112,6 +113,7 @@ add_library(MallardCore STATIC
     parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
+    parallel/device_sums.cpp
     parallel/distribution.cpp
     parallel/distributed_mesh.cpp
     parallel/global_order.cpp

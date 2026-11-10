@@ -93,6 +93,36 @@ Region Region::with_root(const uint32_t i, std::vector<Copy> cs) const {
     return Region(std::move(d));
 }
 
+bool Region::rigid() const {
+    if (std::any_of(m_programs.begin(), m_programs.end(), [](const kexpr::Program & p) { return p.uses(3); })) return false;
+    for (const Motion & m : m_motions) {
+        for (const int32_t p : m.program) {
+            if (p >= 0) return false;
+        }
+        for (uint32_t i = 0; i < m.count; i++) {
+            if (m_steps[m.first + i].kind == Step::Kind::SCALE && !m_steps[m.first + i].fixed()) return false;
+        }
+    }
+    return true;
+}
+
+Region Region::at(const double t) const {
+    Region r = with_root(m_root, m_copies);
+    r.m_own = m_own;
+    for (const Motion & m : m_motions) {
+        move(m, m_steps.data(), [&](const uint32_t p) { return m_times[p](&t); }, r.m_nodes[m.node]);
+    }
+    r.m_motions.clear();
+    r.m_steps.clear();
+    r.m_moving = false;
+    r.m_time = t;
+    if (r.analytic()) {
+        r.m_host = r.host(r.m_filled[r.m_root]);
+        r.m_host.edge = m_host.edge;
+    }
+    return r;
+}
+
 Region Region::copy(const uint32_t k) const {
     const Copy & c = m_copies.at(k);
     const std::string summary = m_summary + ", copy " + std::to_string(k);
@@ -196,6 +226,7 @@ RegionView<Kokkos::HostSpace> Region::host(const Filled & shapes) const {
     std::vector<const kexpr::Program *> programs;
     for (const auto & p : m_programs) programs.push_back(&p);
     r.programs = kexpr::ProgramTable<Kokkos::HostSpace>(programs);
+    r.time = m_time;
     return r;
 }
 
@@ -215,6 +246,7 @@ RegionView<> Region::device() const {
     r.vertices = vertices;
     r.programs = kexpr::ProgramTable<>(programs);
     r.edge = m_host.edge;
+    r.time = m_time;
     return r;
 }
 
