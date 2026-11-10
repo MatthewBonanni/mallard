@@ -992,7 +992,11 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
     for (const char * key : {"mesh", "periodic", "regions"}) {
         if (input.contains(key)) setup.as_table()[key] = input.at(key);
     }
-    std::shared_ptr<Mesh> mesh;
+    // Centers and weights of the owned cells, and their global ids; faces only for --region and curved cells
+    std::vector<uint64_t> global;
+    std::vector<std::array<double, N_DIM>> centers;
+    std::vector<double> weights;
+    uint64_t n_global = 0;
     {
         std::ostringstream quiet;
         std::streambuf * const out = std::cout.rdbuf(quiet.rdbuf());
@@ -1000,9 +1004,26 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
             std::streambuf * out;
             ~Restore() { std::cout.rdbuf(out); }
         } restore{out};
-        mesh = remap::source_mesh(setup, 1);
+        const MeshBlock block = read_mesh_block(setup);
+        const bool curved = comm::allreduce(uint32_t(!block.face_high_order_offsets.empty()), comm::Op::MAX) > 0;
+        if (args.has("--region") || curved) {
+            const std::shared_ptr<Mesh> mesh = remap::source_mesh(setup, 1);
+            n_global = mesh->n_global_cells > 0 ? mesh->n_global_cells : mesh->n_cells;
+            for (uint32_t i = 0; i < mesh->n_owned(); i++) global.push_back(mesh->h_global_cell(i));
+            centers = cell_centers(*mesh);
+            weights = cell_weights(args, input, *mesh);
+        } else {
+            n_global = comm::allreduce(block.n_cells(), comm::Op::SUM);
+            for (const CellGeometry & g : block_cell_geometry(block)) {
+                global.push_back(block.first_cell + global.size());
+                std::array<double, N_DIM> x;
+                FOR_I_DIM x[i] = double(g.centroid[i]);
+                centers.push_back(x);
+                weights.push_back(double(g.volume));
+            }
+        }
     }
-    const uint64_t n_global = mesh->n_global_cells > 0 ? mesh->n_global_cells : mesh->n_cells;
+    const uint32_t n_owned = static_cast<uint32_t>(global.size());
     std::vector<homogeneous::Column> columns;
     const auto index = [&](const std::string & name) {
         for (size_t j = 0; j < columns.size(); j++) {
@@ -1023,9 +1044,9 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
                 homogeneous::Column col;
                 col.name = f.components == 1 ? f.name : f.name + "_" + "XYZ"[d];
                 col.favre = prefix.starts_with("FAVRE_");
-                col.values.resize(mesh->n_owned());
-                for (uint32_t i = 0; i < mesh->n_owned(); i++) {
-                    col.values[i] = values[mesh->h_global_cell(i) * f.components + d];
+                col.values.resize(n_owned);
+                for (uint32_t i = 0; i < n_owned; i++) {
+                    col.values[i] = values[global[i] * f.components + d];
                 }
                 columns.push_back(std::move(col));
             }
@@ -1056,7 +1077,7 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
         if (rho < 0) throw std::runtime_error(c.path + " holds Favre averages but not MEAN_RHO, which weighs them");
         density = columns[static_cast<size_t>(rho)].values;
     }
-    homogeneous::Profile profile = homogeneous::average(cell_centers(*mesh), cell_weights(args, input, *mesh), density,
+    homogeneous::Profile profile = homogeneous::average(centers, weights, density,
                                                         columns, a.homogeneous, a.rtol);
     add_rms(profile);
     const std::string path = write_profile(profile, args, dir);

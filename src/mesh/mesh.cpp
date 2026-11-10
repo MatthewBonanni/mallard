@@ -360,32 +360,6 @@ void Mesh::h_neighbors_of_cell(uint32_t i_cell, uint8_t n_order, std::vector<uin
     neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
 }
 
-void Mesh::compute_cell_centroids() {
-    // Area centroid of the polygon (the vertex average is only correct for
-    // triangles and parallelograms), relative to the cell's first node: in
-    // absolute coordinates the cross products cancel, leaving errors of
-    // eps |x|^2 / h, which break the equidistance of mirror-equivalent
-    // stencil entries on fine meshes away from the origin
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        const uint32_t n = h_n_nodes_of_cell(i_cell);
-        const uint32_t o = h_node_of_cell(i_cell, 0);
-        const rtype x0 = h_node_coords(o, 0), y0 = h_node_coords(o, 1);
-        rtype A = 0.0, Cx = 0.0, Cy = 0.0;
-        for (uint32_t k = 0; k < n; ++k) {
-            const uint32_t a = h_node_of_cell(i_cell, k);
-            const uint32_t b = h_node_of_cell(i_cell, (k + 1) % n);
-            const rtype xa = h_node_coords(a, 0) - x0, ya = h_node_coords(a, 1) - y0;
-            const rtype xb = h_node_coords(b, 0) - x0, yb = h_node_coords(b, 1) - y0;
-            const rtype cross = xa * yb - xb * ya;
-            A += 0.5_r * cross;
-            Cx += (xa + xb) * cross;
-            Cy += (ya + yb) * cross;
-        }
-        h_cell_coords(i_cell, 0) = x0 + Cx / (6.0_r * A);
-        h_cell_coords(i_cell, 1) = y0 + Cy / (6.0_r * A);
-    }
-}
-
 void Mesh::make_axisymmetric() {
     if constexpr (N_DIM != 2) {
         throw std::runtime_error("Axisymmetric flows need the 2D solver.");
@@ -457,43 +431,6 @@ void Mesh::make_axisymmetric() {
             h_face_measure(f) = h_face_area(f) * std::max(h_face_coords(f, 1), rtype(0));
         }
         axisymmetric = true;
-    }
-}
-
-void Mesh::compute_cell_volumes() {
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        switch (h_cell_type(i_cell)) {
-            case CellType::TRIANGLE: {
-                uint32_t i_node_0 = h_node_of_cell(i_cell, 0);
-                uint32_t i_node_1 = h_node_of_cell(i_cell, 1);
-                uint32_t i_node_2 = h_node_of_cell(i_cell, 2);
-
-                const NVector coords_0 = {h_node_coords(i_node_0, 0), h_node_coords(i_node_0, 1)};
-                const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
-                const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
-
-                h_cell_volume(i_cell) = triangle_area<2>(coords_0.data(), coords_1.data(), coords_2.data());
-                break;
-            }
-            case CellType::QUAD: {
-                uint32_t i_node_0 = h_node_of_cell(i_cell, 0);
-                uint32_t i_node_1 = h_node_of_cell(i_cell, 1);
-                uint32_t i_node_2 = h_node_of_cell(i_cell, 2);
-                uint32_t i_node_3 = h_node_of_cell(i_cell, 3);
-
-                const NVector coords_0 = {h_node_coords(i_node_0, 0), h_node_coords(i_node_0, 1)};
-                const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
-                const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
-                const NVector coords_3 = {h_node_coords(i_node_3, 0), h_node_coords(i_node_3, 1)};
-
-                rtype a1 = triangle_area<2>(coords_0.data(), coords_1.data(), coords_2.data());
-                rtype a2 = triangle_area<2>(coords_0.data(), coords_2.data(), coords_3.data());
-                h_cell_volume(i_cell) = a1 + a2;
-                break;
-            }
-            default:
-                throw std::runtime_error("Unknown cell type.");
-        }
     }
 }
 

@@ -140,6 +140,18 @@ const std::vector<std::vector<uint8_t>> & cell_local_faces(uint32_t n_nodes);
 void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
                      std::vector<std::array<std::array<double, 3>, 4>> & tets);
 
+struct CellGeometry {
+    rtype volume;
+    std::array<rtype, N_DIM> centroid;
+};
+
+/**
+ * @brief Volume (area in 2D) and centroid of a straight-sided cell of these
+ *        node coordinates (Gmsh/VTK order, either orientation), bit for bit
+ *        as the mesh computes them.
+ */
+CellGeometry cell_geometry(const std::vector<std::array<rtype, N_DIM>> & cell_nodes);
+
 
 struct MeshBlock;
 struct PeriodicNodes;
@@ -273,15 +285,8 @@ class Mesh {
                                  uint8_t n_order,
                                  std::vector<uint32_t> & neighbors) const;
 
-        /**
-         * @brief Compute cell centroids.
-         */
-        void compute_cell_centroids();
-
-        /**
-         * @brief Compute cell volumes.
-         */
-        void compute_cell_volumes();
+        /** @brief Cell volumes and centroids (cell_geometry). */
+        void compute_cell_volumes_and_centroids();
 
         /**
          * @brief Compute face areas.
