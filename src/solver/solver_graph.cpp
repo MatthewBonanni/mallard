@@ -53,7 +53,6 @@ std::string Solver::step_graph_unsupported() const {
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
     if (is_distributed() && !halo.uses_nccl() && !uncaptured_step_graphs) return "halo exchanged with MPI";
     if (is_mixture()) return "gas mixture";
-    if (!inflows.empty()) return "synthetic inflow turbulence";
     return "";
 }
 

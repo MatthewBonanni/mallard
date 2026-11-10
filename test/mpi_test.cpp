@@ -84,40 +84,6 @@ std::string mixture_input(const std::string & extra, const std::string & reconst
            "[output]\ncheck_interval = 1000000\n" + chemistry;
 }
 
-/**
- * @brief Each run of input, with step graphs on and off, matches the serial run (NCCL and MPI exchanges in NCCL
- *        builds). In CUDA builds the runs with graphs on take their steps in the graph, but over MPI's exchanges;
- *        on every backend the code their capture records issues no fence, allocation or host copy.
- */
-void expect_matches_serial_with_and_without_step_graphs(const std::string & input) {
-    for (const bool graphs : {true, false}) {
-        std::string text = input;
-        text.insert(text.find("[run]\n") + 6, std::string("cuda_graphs = ") + (graphs ? "true" : "false") + "\n");
-        SCOPED_TRACE(text);
-        const StepGraphGuard guard;
-        expect_matches_serial(
-            text,
-            [&](const Solver & s) {
-                const std::string why = s.step_graph_unsupported();
-                if (graphs) {
-                    EXPECT_TRUE(why.empty() || why == "halo exchanged with MPI") << why;
-                }
-#ifdef KOKKOS_ENABLE_CUDA
-                EXPECT_EQ(s.get_graph_steps() > 0, graphs && why.empty()) << why;
-#else
-                EXPECT_EQ(s.get_graph_steps(), 0u);
-#endif
-            },
-            graphs);
-        if (graphs) {
-            EXPECT_GT(guard.captures(), 0u);
-        } else {
-            EXPECT_EQ(guard.captures(), 0u);
-        }
-        for (const std::string & v : guard.violations()) ADD_FAILURE() << "in a step graph's capture: " << v;
-    }
-}
-
 const std::string EULER = "type = \"euler\"\n";
 const std::string NS = "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n";
 
@@ -631,6 +597,21 @@ TEST(MPITest, SyntheticTurbulenceMatchesSerial) {
                           "[initialize.turbulence]\nspectrum = \"passot_pouquet\"\nintensity = 0.1\nlength_scale = 0.15\n"
                           "[[initialize.regions]]\nregion = {type = \"disk\", center = [0.4, 0.4], radius = 0.25, edge = 0.05}\n"
                           "turbulence = {intensity = 0.05, length_scale = 0.1, kolmogorov_scale = 0.01, seed = 2}\n");
+}
+
+TEST(MPITest, SyntheticTurbulenceInletMatchesSerialWithAndWithoutStepGraphs) {
+    // A step graph picks and filters the inflow planes at the device's stage and
+    // step-end times; planes enter and leave the cache within the run
+    const std::string inlet = "type = \"inlet_state\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n"
+                              "[boundaries.turbulence]\nreynolds_stress = [0.004, 0.002, -0.001]\nlength_scale = 0.2\n"
+                              "convection_velocity = 2.0\n";
+    for (const std::string & flux : {std::string(""), std::string("zero_net_flux = false\n")}) {
+        expect_matches_serial_with_and_without_step_graphs(
+            box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                      bcs((inlet + flux).c_str(), "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n",
+                          "type = \"symmetry\"\n", "type = \"symmetry\"\n"),
+                      20));
+    }
 }
 
 TEST(MPITest, AxisymmetricRunsMatchSerial) {

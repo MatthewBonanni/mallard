@@ -154,7 +154,7 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
         Kokkos::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), transverse);
     }
     // Inlet targets at the end of the step, whose change enters the incoming wave
-    if (!timed_inlets.empty()) {
+    if (!inflows.empty() || !timed_inlets.empty()) {
         if (!characteristic_time.is_allocated()) characteristic_time = Kokkos::View<rtype>("char_target_time");
         const Kokkos::View<rtype> t_next = characteristic_time;
         if (recording_step) {
@@ -166,8 +166,8 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
             Kokkos::parallel_for("characteristic_time", 1, KOKKOS_LAMBDA(const int) { t_next() = t_end; });
         }
         timed_inlets.fill(t_next, boundary_data.char_target_next);
+        for (auto & inflow : inflows) inflow->fill(t_next, boundary_data.char_target_next);
     }
-    for (auto & inflow : inflows) inflow->fill(double(t + dt), boundary_data.char_target_next);
     const CharacteristicStateFunctor state{boundary_data,
                                            mesh->face_normals,
                                            face_solution,
