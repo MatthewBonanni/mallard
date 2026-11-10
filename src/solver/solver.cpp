@@ -183,7 +183,7 @@ int Solver::init(const Input & input_in) {
         if (misspelled.empty() || check_only) throw;
         throw InputError(std::string(e.what()) + "\npossibly misspelled:" + misspelled);
     }
-    if (!check_only) {
+    if (!check_only && !state_reader) {
         const std::vector<Diagnostic> unused = unused_keys(input);
         if (!unused.empty()) {
             std::string list;
@@ -239,6 +239,8 @@ void Solver::setup_from_input() {
     setup.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
+        // Output of states read from files takes no steps
+        if (!state_reader) allocate_time_stepping();
         init_les();
         statistics.init(input, species_names, *mesh);
         init_rhs_split();
@@ -1796,12 +1798,7 @@ void Solver::allocate_memory() {
     species = SpeciesView("species", mesh->n_cells, n_species);
     primitives = Kokkos::View<rtype *[N_PRIMITIVE]>("primitives", mesh->n_cells);
     W_cells = Kokkos::View<rtype *[N_CONSERVATIVE]>("W_cells", mesh->n_cells);
-    face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("face_solution",
-                                                              mesh->n_faces,
-                                                              face_reconstruction->n_face_quadrature_points());
-    face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
     cfl_local = Kokkos::View<rtype *>("cfl_local", mesh->n_cells);
-    if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
     if (writes_variable(input, "P_MAX")) {
         p_max = Kokkos::View<rtype *>("p_max", mesh->n_cells);
         h_p_max = Kokkos::create_mirror_view(p_max);
@@ -1846,17 +1843,10 @@ void Solver::allocate_memory() {
         h_D = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("D", mesh->n_cells, n_diffusion);
     }
     if (is_mixture()) {
-        const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
         cell_scalars = ScalarView("cell_scalars", mesh->n_cells, n_species + 2);
         T_seed = Kokkos::View<rtype *>("T_seed", mesh->n_cells);
         h_T_seed = Kokkos::create_mirror_view(T_seed);
-        face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", mesh->n_faces, n_quad);
-        face_mdot = Kokkos::View<rtype **>("face_mdot", mesh->n_faces, n_quad);
-        species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>("species_slots", mesh->n_faces, 2, n_species);
-        if (double_flux) {
-            frozen_thermo = Kokkos::View<rtype *[2]>("frozen_thermo", mesh->n_cells);
-            face_energy_1 = Kokkos::View<rtype *>("face_energy_1", mesh->n_faces);
-        }
+        if (double_flux) frozen_thermo = Kokkos::View<rtype *[2]>("frozen_thermo", mesh->n_cells);
         if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
             cell_molar_mass = Kokkos::View<rtype *>("cell_molar_mass", mesh->n_cells);
             teno->set_mixture(Kokkos::subview(cell_scalars, Kokkos::ALL(), n_species), cell_molar_mass);
@@ -1870,7 +1860,20 @@ void Solver::allocate_memory() {
     h_species = Kokkos::create_mirror_view(species);
     h_primitives = Kokkos::create_mirror_view(primitives);
     h_cfl_local = Kokkos::create_mirror_view(cfl_local);
+}
 
+void Solver::allocate_time_stepping() {
+    const uint32_t n_species = static_cast<uint32_t>(species_names.size());
+    const uint32_t n_quad = face_reconstruction->n_face_quadrature_points();
+    face_solution = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("face_solution", mesh->n_faces, n_quad);
+    face_flux = Kokkos::View<rtype *[N_CONSERVATIVE]>("face_flux", mesh->n_faces);
+    if (keep_last_good) last_good = State("last_good", mesh->n_cells, n_species);
+    if (is_mixture()) {
+        face_thermo = Kokkos::View<rtype **[2][2]>("face_thermo", mesh->n_faces, n_quad);
+        face_mdot = Kokkos::View<rtype **>("face_mdot", mesh->n_faces, n_quad);
+        species_slots = Kokkos::View<rtype ***, Kokkos::LayoutRight>("species_slots", mesh->n_faces, 2, n_species);
+        if (double_flux) face_energy_1 = Kokkos::View<rtype *>("face_energy_1", mesh->n_faces);
+    }
     solution_vec.clear();
     rhs_vec.clear();
     solution_vec.push_back(state());
@@ -2612,6 +2615,13 @@ void Solver::write_data(bool force) {
         ProbeFluxes fluxes;
         probes.write(step, t, probe_fields(fluxes), true, force);
     }
+}
+
+void Solver::write_output_of_state(bool next) {
+    if (next) apply_output_state(state_reader(*mesh));
+    write_data(true);
+    write_probes();
+    for (auto & writer : data_writers) writer->finish();
 }
 
 void Solver::write_probes() {

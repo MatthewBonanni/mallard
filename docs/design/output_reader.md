@@ -104,9 +104,10 @@ and times for every format a run writes.
   files) or `RHO`, `U`, `P` and the species (snapshots). Version 1 blocks hold
   the input as written (`input.text`), which a run of the same release
   resolves the same way.
-- **Partial reads.** `read()` loads a whole field. Reading only a rank's
-  cells (as `read_restart` does for its `cells`) is added with the first
-  MPI-parallel command, behind the same interface.
+- **Partial reads.** `read()` loads a whole field, and `post extract` takes
+  each rank's cells from it: memory per rank of one field of the whole mesh.
+  Reading only a rank's cells (as `read_restart` does for its `cells`) goes
+  behind the same interface when a mesh needs it.
 
 ## `mallard info`
 
@@ -139,3 +140,44 @@ mesh file relative to `run.directory` and checked against `mesh.sha256`) with
 `remap::source_mesh`, and `remap::Source` maps B onto A's cells. It runs on
 one rank: reading is whole-field (see Partial reads), and the remap is only
 collective over ranks that each hold part of both meshes.
+
+## `mallard post extract`
+
+`post extract` writes the probes of a run on the state of its output, so that
+a probe added after the run, or a region given on the command line, means what
+it would have meant during the run. It does not reimplement sampling: it sets
+the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
+`[[write_data]]` writers write at each snapshot.
+
+- **The case.** The input is `-i`'s, else the resolved input of the file's
+  run block. The command rewrites it before the setup: it keeps the probes
+  chosen (`--probe`) and adds the `--region` probe, every one written each
+  time (`interval = 1`) to the output directory under the file names the
+  input gives; it replaces `[[write_data]]` by the `--snapshot` writer and
+  drops `[[forces]]`, `[integrals]`, `[statistics]`, the run log and
+  `[initialize]`. Keys the rewrite leaves unread (a named region only a
+  dropped writer used) are not an error.
+- **The state.** `Solver::set_state_reader` gives `init` a function that
+  reads each snapshot on the local cells instead of `[initialize]`: a restart
+  file through `read_restart`, as a restart does; a snapshot through `read()`,
+  mapped by global cell id (`Contents::global_order`). The solver takes the
+  conservative variables where the file holds them, else computes them from
+  `RHO` or `P` and `T`, `U` and the mass fractions with its own gas model.
+  `write_output_of_state` then loads the next snapshot and writes, so the
+  mesh, regions, probe geometry and sample locations are set up once for a
+  whole series.
+- **Memory.** With a state reader the setup allocates no time stepping:
+  `allocate_time_stepping()` (face states and fluxes, the integrator's stages
+  and right-hand sides, the last good state) is the one call it skips, and the
+  rewrite turns off `[output] health`, whose ledger follows steps. The
+  reconstruction stays the run's, because point samples, gradients and
+  `Q`/`VORTICITY` read its polynomials.
+- **Steps.** Each snapshot's step and time are those the reader finds
+  recorded (`Snapshot::step` and `t`: the snapshot block, a restart file's
+  header), never the file name; only the snapshots of files written before
+  0.10 that record no step are numbered by position, as the report says.
+- **Same values.** A probe's samples are evaluated and gathered as in the run,
+  so restart files give the run's probe rows bit for bit on any number of
+  ranks (`PostExtractTest`); snapshots of primitives agree to rounding.
+- **The front end** runs it on the solver of `-i`'s dimension, else of the
+  file's (restart files) or its run block's build (`Case::output_case`).

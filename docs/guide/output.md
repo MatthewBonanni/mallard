@@ -667,6 +667,10 @@ $ mallard info solut/flow.vtkhdf.series
 
 `--format json` prints the same as one JSON object, for scripts.
 
+`mallard post extract` evaluates probes, region integrals and snapshots of
+chosen fields on the state of restart files and snapshots after the run, as
+the run would have written them ([Probes of existing output](probes.md#probes-of-existing-output)).
+
 ### Comparing two solutions: `mallard diff`
 
 `mallard diff A B` tells whether two files hold the same solution and, if not,

@@ -614,6 +614,7 @@ void Mesh::compute_cell_neighbors() {
     // Neighbors as (cell << 8 | shift row)
     std::vector<uint32_t> offsets(n_cells + 1, 0);
     std::vector<uint64_t> flat, nb;
+    std::vector<uint64_t> seen(n_cells, ~uint64_t(0));  // the last (cell << 8 | shift) each neighbor entered for
     for (uint32_t c = 0; c < n_cells; c++) {
         nb.clear();
         for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
@@ -621,7 +622,7 @@ void Mesh::compute_cell_neighbors() {
             for (uint32_t i = key_offsets[key(a)]; i < key_offsets[key(a) + 1]; i++) {
                 const auto [other, b] = key_cells[i];
                 uint8_t shift = 0;
-                if (periodic) {
+                if (periodic && a != b) {
                     std::array<int8_t, 3> lattice;
                     for (size_t j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
                     shift = shift_index(lattice);
@@ -631,14 +632,21 @@ void Mesh::compute_cell_neighbors() {
                     throw std::runtime_error("Mesh: a cell touches itself across a periodic boundary; periodic "
                                              "directions need at least 3 cells.");
                 }
+                const uint64_t entry = uint64_t(c) << 8 | shift;
+                if (seen[other] == entry) continue;
+                seen[other] = entry;
                 nb.push_back(uint64_t(other) << 8 | shift);
             }
         }
-        // By global id, so that neighbor order does not depend on the local numbering
-        std::sort(nb.begin(), nb.end(), [&](uint64_t a, uint64_t b) {
-            return std::make_pair(h_global_cell(static_cast<uint32_t>(a >> 8)), a & 0xff) < std::make_pair(h_global_cell(static_cast<uint32_t>(b >> 8)), b & 0xff);
-        });
+        std::sort(nb.begin(), nb.end());
         nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
+        // By global id, so that neighbor order does not depend on the local numbering
+        if (!h_global_cell_id.empty()) {
+            std::sort(nb.begin(), nb.end(), [&](uint64_t a, uint64_t b) {
+                return std::make_pair(h_global_cell(static_cast<uint32_t>(a >> 8)), a & 0xff) <
+                       std::make_pair(h_global_cell(static_cast<uint32_t>(b >> 8)), b & 0xff);
+            });
+        }
         for (size_t i = 1; i < nb.size(); i++) {
             if (nb[i] >> 8 == nb[i - 1] >> 8) {
                 throw std::runtime_error("Mesh: two cells touch both directly and across a periodic boundary; "
