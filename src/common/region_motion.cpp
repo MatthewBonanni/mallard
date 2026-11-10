@@ -259,9 +259,11 @@ MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const
     }
     Kokkos::deep_copy(d_coefficients, h_c);
     coefficients = d_coefficients;
-    node_coords = mesh.node_coords;
-    nodes_of_cell = mesh.nodes_of_cell;
-    offsets_nodes_of_cell = mesh.offsets_nodes_of_cell;
+    // Its own: the mesh drops its device node lists after setup
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    node_coords = Kokkos::create_mirror_view_and_copy(DeviceMemory(), mesh.h_node_coords);
+    nodes_of_cell = Kokkos::create_mirror_view_and_copy(DeviceMemory(), mesh.h_nodes_of_cell);
+    offsets_nodes_of_cell = Kokkos::create_mirror_view_and_copy(DeviceMemory(), mesh.h_offsets_nodes_of_cell);
     host_time = Kokkos::View<rtype>("region_moving_time");
     m_fractions = Kokkos::View<double *>("region_moving_fractions", n_cells);
 }

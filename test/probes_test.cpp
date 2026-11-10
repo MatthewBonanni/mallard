@@ -1932,3 +1932,39 @@ TEST(ProbesTest, RejectsSpectraOfUnevenSamplesAndOfUnknownVariables) {
     EXPECT_NE(message("time_interval = 0.1\nspectra = {fields = [\"P\"], length = 0.2}\n").find("at least 4"),
               std::string::npos);
 }
+
+TEST(ProbesTest, MovingRegionsMeasureWhereTheyAreAtEachWriteAndCopiesReportEach) {
+    // Two disks (spheres) moving across the periodic boundary at x = 1: each
+    // copy's probe measures its part in the domain where it is at each write
+    const std::string dir = fresh_dir("region_moving");
+    const std::string disks = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                              (N_DIM == 2 ? "[\"0.7 + 2 * t\", 0.3]" : "[\"0.7 + 2 * t\", 0.3, 0.5]") +
+                              ", radius = 0.15, repeat = {count = 2, translate = " +
+                              (N_DIM == 2 ? "[0, 0.4]" : "[0, 0.4, 0]") + "}}";
+    const std::string probes = "[[probes]]\nname = \"disks\"\nregion = " + disks + "\nvariables = [\"RHO\"]\n"
+                               "copies = \"each\"\nreductions_file = \"" + dir + "/disks.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(box_case(16, "1.0", "type = \"MUSCL\"\n", probes, "n_steps = 4\ndt = 0.05\n")));
+    const Mesh & mesh = *solver.get_mesh();
+    const region::MeshRegions automatic(mesh);
+    const region::Region array = region::read(parse_toml("r = " + disks).at("r"), "r", nullptr, &automatic);
+    run(solver);
+    const char * volume = N_DIM == 2 ? "area" : "volume";
+    for (uint32_t k = 0; k < 2; k++) {
+        const std::string file = dir + "/disks_copy" + std::to_string(k) + ".csv";
+        const auto rows = read_csv(file);
+        ASSERT_EQ(rows.size(), 5u) << file;
+        const region::Region copy = array.copy(k);
+        for (const auto & row : rows) {
+            const std::vector<double> f = region::cell_fractions(mesh, copy.at(row.at("t")));
+            double expected = 0.0;
+            for (uint32_t c = 0; c < mesh.n_owned(); c++) expected += f[c] * double(mesh.h_cell_measure(c));
+            if (mesh.n_global_cells > 0) expected = comm::allreduce(expected, comm::Op::SUM);
+            EXPECT_NEAR(row.at(volume), expected, 1e-13 * expected) << file << " t " << row.at("t");
+            EXPECT_NEAR(row.at("mean_RHO"), 1.0, 1e-12) << file;
+        }
+        // It keeps its shape, so its own measures are those of where it starts
+        const json::Value b = json::parse(output::open(file).sampling);
+        EXPECT_EQ(b["measures"]["region"][volume].number, region::measures(copy.at(0.0), false).volume);
+    }
+}
