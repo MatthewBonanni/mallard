@@ -1485,11 +1485,14 @@ struct CellSetup {
             return n < n_list && Kokkos::fabs(key(w, n) - key(w, n - 1)) < tie;
         };
         uint32_t n_means = 0;
-        const uint8_t flat = flat_axes(end[depth_large] - 1, [&](const uint32_t j, const int d) {
+        FlatAxes spanned;
+        for (uint32_t j = 0; j + 1 < end[depth_large] && spanned.flat != 0; j++) {
             double xc[3];
             g.centroid(w.visit_cell[j + 1], w.visit_lattice[j + 1], xc);
-            return (xc[d] - x0[d]) / h;
-        });
+            for (int d = 0; d < N_DIM; d++) xc[d] = (xc[d] - x0[d]) / h;
+            spanned.add(xc);
+        }
+        const uint8_t flat = spanned.axes();
         // Stencils reaching a curved wall without mirror images fit a lower degree
         const bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < ns ? uint32_t(n_entries) : ns);
         const FitColumns fit = fit_columns(flat, at_wall ? wall_nk : nk);
@@ -2635,11 +2638,14 @@ struct CellTeam {
         double * A_used = A;
         uint8_t flat = 0;
         Kokkos::single(Kokkos::PerTeam(tm), [&](uint8_t & axes) {
-            axes = flat_axes(end[depth_large] - 1, [&](const uint32_t j, const int d) {
+            FlatAxes spanned;
+            for (uint32_t j = 0; j + 1 < end[depth_large] && spanned.flat != 0; j++) {
                 double xc[3];
                 c.g.centroid(w.visit_cell[j + 1], w.visit_lattice[j + 1], xc);
-                return (xc[d] - x0[d]) / h;
-            });
+                for (int d = 0; d < N_DIM; d++) xc[d] = (xc[d] - x0[d]) / h;
+                spanned.add(xc);
+            }
+            axes = spanned.axes();
         }, flat);
         // Stencils reaching a curved wall without mirror images fit a lower degree
         bool at_wall = false;

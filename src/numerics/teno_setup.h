@@ -46,24 +46,23 @@ constexpr double MAX_LEBESGUE_3D = 4.0;
 constexpr double LEBESGUE_SLACK = 1.25;
 
 /**
- * @brief Coordinate axes along which a cell's neighbors (offset(j, d), in
- *        cell sizes, for j < n) all lie level with it: bit d for axis d. A
- *        mesh one cell thick across an axis (a strip, slab or pencil) has no
- *        neighbors across it, mirror images aside, so no stencil there
- *        resolves a polynomial's variation along that axis.
- * @return 0 when every axis is spanned, or no neighbor is given.
+ * @brief Coordinate axes along which a cell's neighbors all lie level with
+ *        it: bit d for axis d. A mesh one cell thick across an axis (a
+ *        strip, slab or pencil) has no neighbors across it, mirror images
+ *        aside, so no stencil there resolves a polynomial's variation along
+ *        that axis. Give each neighbor's offset (in cell sizes) to add().
  */
-template <typename F>
-KOKKOS_INLINE_FUNCTION uint8_t flat_axes(const uint32_t n, F && offset) {
-    constexpr uint8_t all = static_cast<uint8_t>((1u << N_DIM) - 1u);
-    uint8_t flat = all;
-    for (uint32_t j = 0; j < n && flat != 0; j++) {
+struct FlatAxes {
+    static constexpr uint8_t ALL = static_cast<uint8_t>((1u << N_DIM) - 1u);
+    uint8_t flat = ALL;
+    KOKKOS_INLINE_FUNCTION void add(const double * offset) {
         for (int d = 0; d < N_DIM; d++) {
-            if (Kokkos::fabs(offset(j, d)) > GEOMETRY_TOL) flat = static_cast<uint8_t>(flat & ~(1u << d));
+            if (Kokkos::fabs(offset[d]) > GEOMETRY_TOL) flat = static_cast<uint8_t>(flat & ~(1u << d));
         }
     }
-    return flat == all ? uint8_t(0) : flat;
-}
+    /** @return 0 when every axis is spanned, or no neighbor was added. */
+    KOKKOS_INLINE_FUNCTION uint8_t axes() const { return flat == ALL ? uint8_t(0) : flat; }
+};
 
 /** @brief The monomials a least-squares fit takes, in increasing order. */
 struct FitColumns {
@@ -71,7 +70,7 @@ struct FitColumns {
     uint8_t col[teno::MAX_NK] = {};
 };
 
-/** @brief Monomials l < n_max of no flat axis (flat_axes): the basis of the polynomials that the stencils resolve. */
+/** @brief Monomials l < n_max of no flat axis (FlatAxes): the basis of the polynomials that the stencils resolve. */
 KOKKOS_INLINE_FUNCTION FitColumns fit_columns(const uint8_t flat, const int n_max) {
     FitColumns fit;
     for (int l = 0; l < n_max; l++) {

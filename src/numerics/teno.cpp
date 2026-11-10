@@ -1702,9 +1702,12 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         for (const Entry & e : candidates) {
             if (e.face < 0) neighbors.push_back(&e);
         }
-        flat = teno_setup::flat_axes(uint32_t(neighbors.size()), [&](const uint32_t j, const int d) {
-            return (d == 0 ? neighbors[j]->x - x0 : neighbors[j]->y - y0) / h;
-        });
+        teno_setup::FlatAxes spanned;
+        for (const Entry * e : neighbors) {
+            const double offset[3] = {(e->x - x0) / h, (e->y - y0) / h, 0.0};
+            spanned.add(offset);
+        }
+        flat = spanned.axes();
         std::vector<double> P;
         bool ok = false;
         // Never split a group of equidistant candidates: keeps stencils
@@ -1727,7 +1730,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         }
         // Sized for the monomials of the spanned axes
         if (flat != 0) {
-            n_start = static_cast<uint16_t>(std::ceil(stencil_factor * teno_setup::fit_columns(flat, teno::n_dof(r_fit)).n));
+            n_start = static_cast<uint16_t>(std::ceil(stencil_factor * rtype(teno_setup::fit_columns(flat, teno::n_dof(r_fit)).n)));
         }
         // The smallest stencil within MAX_LEBESGUE_2D, else the best conditioned one
         uint16_t n_used = n_start;
