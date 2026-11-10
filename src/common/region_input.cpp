@@ -44,27 +44,34 @@ std::string dimension_name(int d) {
     return names[static_cast<size_t>(d)];
 }
 
-/** @brief The affine map local = M x + d from world to a region's coordinates, and its distance scale. */
+/**
+ * @brief The affine map local = M x + d from world to a region's coordinates,
+ *        and its distance scale, at t = 0; and the steps that make it, for
+ *        frames that move.
+ */
 struct Frame {
     std::array<double, 9> M = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     Vec d = {0.0, 0.0, 0.0};
     double k = 1.0;
+    std::vector<Step> steps;
+    bool moving = false;
+
+    /** @brief The frame followed by step, whose programs have the values at t = 0 values[p]. */
+    Frame then(const Step & step, const std::vector<double> & values = {}) const {
+        Frame f = *this;
+        apply(step, [&](const uint32_t p) { return values[p]; }, f.M.data(), f.d.data(), f.k);
+        f.steps.push_back(step);
+        f.moving = moving || !step.fixed();
+        return f;
+    }
 
     /** @brief The frame of local' = L (local - o), distances scaled by s. */
     Frame then(const std::array<double, 9> & L, const Vec & o, const double s = 1.0) const {
-        Frame f;
-        for (size_t i = 0; i < 3; i++) {
-            for (size_t j = 0; j < 3; j++) {
-                double v = 0.0;
-                for (size_t l = 0; l < 3; l++) v += L[3 * i + l] * M[3 * l + j];
-                f.M[3 * i + j] = v;
-            }
-            double v = 0.0;
-            for (size_t l = 0; l < 3; l++) v += L[3 * i + l] * (d[l] - o[l]);
-            f.d[i] = v;
-        }
-        f.k = k * s;
-        return f;
+        Step step;
+        std::copy(L.begin(), L.end(), step.L);
+        std::copy(o.begin(), o.end(), step.o);
+        step.s = s;
+        return then(step);
     }
 };
 
@@ -82,7 +89,7 @@ std::array<double, 9> basis_along(Vec a) {
 
 bool is_identity(const Frame & f) {
     const Frame I;
-    return f.M == I.M && f.d == I.d && f.k == I.k;
+    return !f.moving && f.M == I.M && f.d == I.d && f.k == I.k;
 }
 
 std::string join(const std::vector<std::string> & names) {
@@ -109,7 +116,18 @@ struct Parsed {
     bool flat = false;        // a flat surface (3D), which filled = false turns into its edge
     int32_t bounds = -1;      // the boundary of this filled region, which interior gives back
     std::string text;
+    std::vector<Motion> motions;  // of nodes, by their index in nodes
+    std::vector<Copy> copies;     // of its repeat: nodes (filled) or pieces [first, first + count)
 };
+
+/** @brief Appends the nodes of b, with their motions, to a. */
+void append(Parsed & a, const Parsed & b) {
+    for (Motion m : b.motions) {
+        m.node += static_cast<uint32_t>(a.nodes.size());
+        a.motions.push_back(m);
+    }
+    a.nodes.insert(a.nodes.end(), b.nodes.begin(), b.nodes.end());
+}
 
 /** @brief Whether a piece is the faces of boundary zones, unclipped. */
 bool zone_faces(const Piece & p) {
@@ -138,6 +156,10 @@ class Parser {
         std::vector<double> vertices;
         std::vector<kexpr::Program> programs;
         std::vector<Filled> filled;
+        std::vector<Step> steps;
+        std::vector<Motion> motions;
+        std::vector<kexpr::Program> times;  // programs of t
+        std::vector<double> time_values;    // their values at t = 0
         bool bounded = true;
         int max_depth = 0;
 
@@ -147,6 +169,123 @@ class Parser {
         }
 
         Parsed parse_table(const Input & t, const std::string & where, const Frame & parent) {
+            if (!t.is_table() || !t.contains("repeat")) return parse_body(t, where, parent);
+            const std::vector<std::vector<Step>> chains = copies(t.at("repeat"), where + ".repeat");
+            std::vector<Parsed> parts;
+            for (const auto & chain : chains) {
+                Frame f = parent;
+                for (const Step & s : chain) f = f.then(s, time_values);
+                parts.push_back(parse_body(t, where, f));
+            }
+            Parsed out = union_of(parts, where + ".repeat", line_of(t, "repeat"), "repeat copies");
+            out.text = "repeat(" + std::to_string(chains.size()) + ", " + parts[0].text + ")";
+            return out;
+        }
+
+        /**
+         * @brief The union of the parts, which are of shapes alone (what: what
+         *        unites them, for errors), with each part a copy, or the copies
+         *        of a part that has them.
+         */
+        Parsed union_of(std::vector<Parsed> & parts, const std::string & where, const std::size_t line,
+                        const std::string & what) {
+            Parsed out;
+            out.dimension = parts[0].dimension;
+            out.closed = true;
+            Node join;
+            join.kind = Kind::UNION;
+            for (size_t k = 0; k < parts.size(); k++) {
+                Parsed & p = parts[k];
+                const bool mesh_parts = p.filled >= 0 || std::any_of(p.pieces.begin(), p.pieces.end(), [](const Piece & q) {
+                    return !q.zones.empty() || q.cells >= 0;
+                });
+                if (mesh_parts) {
+                    fail(where, line, what + " of regions of primitives, and this one uses regions of the mesh, which "
+                                     "do not move", "", "docs/guide/geometry.md#regions-of-the-mesh");
+                }
+                const uint32_t base = static_cast<uint32_t>(out.dimension == N_DIM ? out.nodes.size() : out.pieces.size());
+                const uint32_t n = static_cast<uint32_t>(out.dimension == N_DIM ? p.nodes.size() : p.pieces.size());
+                if (p.copies.empty()) {
+                    out.copies.push_back({0, 0, base, n});
+                } else {
+                    for (const Copy & c : p.copies) out.copies.push_back({0, 0, base + c.first, c.count});
+                }
+                if (out.dimension == N_DIM) {
+                    append(out, p);
+                    if (k >= 1) out.nodes.push_back(join);
+                } else {
+                    out.closed = out.closed && closed(p);
+                    out.pieces.insert(out.pieces.end(), p.pieces.begin(), p.pieces.end());
+                }
+            }
+            return out;
+        }
+
+        /** @brief The steps of every copy of a repeat, from the world's frame (copy k: the innermost repeat fastest). */
+        std::vector<std::vector<Step>> copies(const Input & r, const std::string & where) {
+            std::vector<const Input *> levels;
+            if (r.is_array()) {
+                for (const auto & l : r.as_array()) levels.push_back(&l);
+            } else {
+                levels.push_back(&r);
+            }
+            if (levels.empty()) throw InputError(where + " must be a table {count, translate or rotate}, or a list of them.");
+            std::vector<std::vector<Step>> chains = {{}};
+            for (size_t i = 0; i < levels.size(); i++) {
+                const Input & l = *levels[i];
+                const std::string key = r.is_array() ? where + "[" + std::to_string(i) + "]" : where;
+                if (!l.is_table() || !l.contains("count") || l.contains("translate") == l.contains("rotate")) {
+                    fail(key, line_of(l), "must give count and one of translate or rotate",
+                         "e.g. {count = 12, rotate = " + std::string(N_DIM == 2 ? "30" : "{axis = [0, 0, 1], angle = 30}") +
+                             "} or {count = 4, translate = [0.1, 0, 0]}",
+                         "docs/guide/geometry.md#arrays-of-copies");
+                }
+                const int64_t count = find_value<int64_t>(l, "count");
+                if (count < 1) fail(key + ".count", line_of(l, "count"), "must be at least 1", "", "docs/guide/geometry.md#arrays-of-copies");
+                Step one;
+                Vec pivot = {0.0, 0.0, 0.0};
+                if (l.contains("translate")) {
+                    if (l.contains("pivot")) fail(key + ".pivot", line_of(l, "pivot"), "applies to rotate", "Remove pivot", "docs/guide/geometry.md#arrays-of-copies");
+                    const Vec v = vec(l.at("translate"), key + ".translate");
+                    std::copy(v.begin(), v.end(), one.o);
+                } else {
+                    pivot = vec(l, "pivot", key, Vec{0.0, 0.0, 0.0});
+                    one = rotation(l.at("rotate"), key + ".rotate", pivot);
+                    if (one.kind != Step::Kind::ROTATE || !one.fixed()) {
+                        fail(key + ".rotate", line_of(l, "rotate"), "must be an angle about an axis, in degrees",
+                             N_DIM == 2 ? "e.g. rotate = 30" : "e.g. rotate = {axis = [0, 0, 1], angle = 30}",
+                             "docs/guide/geometry.md#arrays-of-copies");
+                    }
+                }
+                // Copy j of this level: its transform j times, outside the copies of the levels before it (those fastest)
+                std::vector<std::vector<Step>> next;
+                for (int64_t j = 0; j < count; j++) {
+                    std::vector<Step> mine;
+                    if (j > 0) {
+                        Step s = one;
+                        if (s.kind == Step::Kind::ROTATE) {
+                            s.c[0] *= static_cast<double>(j);
+                            mine.push_back(s);
+                            Step back;
+                            for (size_t a = 0; a < 3; a++) back.o[a] = -pivot[a];
+                            mine.push_back(back);
+                        } else {
+                            for (size_t a = 0; a < 3; a++) s.o[a] *= static_cast<double>(j);
+                            mine.push_back(s);
+                        }
+                    }
+                    for (const auto & inner : chains) {
+                        std::vector<Step> c = mine;
+                        c.insert(c.end(), inner.begin(), inner.end());
+                        next.push_back(std::move(c));
+                    }
+                }
+                chains = std::move(next);
+            }
+            return chains;
+        }
+
+        Parsed parse_body(const Input & t, const std::string & where, const Frame & parent) {
             if (!t.is_table()) {
                 throw InputError(where + " must be a table, e.g. {type = \"sphere\", ...}, or the name of one in "
                                  "[regions] or of the mesh.");
@@ -211,11 +350,102 @@ class Parser {
             Filled f;
             f.first = static_cast<uint32_t>(nodes.size());
             f.count = static_cast<uint32_t>(p.nodes.size());
+            for (Motion m : p.motions) {
+                m.node += f.first;
+                motions.push_back(m);
+            }
             nodes.insert(nodes.end(), p.nodes.begin(), p.nodes.end());
             filled.push_back(f);
+            const uint32_t whole = static_cast<uint32_t>(filled.size() - 1);
+            // Each copy of a repeat is a filled region too, its nodes a run of the whole's
+            for (Copy & c : p.copies) {
+                Filled part;
+                part.first = f.first + c.first;
+                part.count = c.count;
+                filled.push_back(part);
+                c.filled = c.own = static_cast<uint32_t>(filled.size() - 1);
+            }
             p.nodes.clear();
-            p.filled = static_cast<int32_t>(filled.size() - 1);
-            return static_cast<uint32_t>(p.filled);
+            p.motions.clear();
+            p.filled = static_cast<int32_t>(whole);
+            return whole;
+        }
+
+        /** @brief A value of the key that may be an expression of t (program set, else -1). */
+        double scalar(const Input & v, const std::string & key, const Dimension & dimension, int32_t & program) {
+            program = -1;
+            if (!v.is_string() || has_unit(v.as_string())) return as_double(v, key, dimension);
+            kexpr::Program p(key, quantity_or_expression(v, key, dimension), {"t"}, expression_unit_hint);
+            const double t0 = 0.0;
+            const double value = p(&t0);
+            if (p.uses(0)) {
+                program = static_cast<int32_t>(times.size());
+                times.push_back(std::move(p));
+                time_values.push_back(value);
+            }
+            return value;
+        }
+
+        /** @brief A point or vector whose components may be expressions of t. */
+        Vec moving_vec(const Input & v, const std::string & key, int32_t program[3],
+                       const Dimension & dimension = dim::length) {
+            if (!v.is_array()) throw InputError(key + " must be an array of numbers (or expressions of t).");
+            const auto & a = v.as_array();
+            if (a.size() != 3 && !(N_DIM == 2 && a.size() == 2)) {
+                throw InputError(key + " must have " + std::string(N_DIM == 2 ? "2 or 3" : "3") + " components.");
+            }
+            Vec r = {0.0, 0.0, 0.0};
+            for (size_t i = 0; i < 3; i++) program[i] = -1;
+            for (size_t i = 0; i < a.size(); i++) r[i] = scalar(a[i], key, dimension, program[i]);
+            return r;
+        }
+
+        /** @brief frame followed by local' = L (local - o) with o the point at key, which may move. */
+        Frame moved(const Frame & frame, const std::array<double, 9> & L, const Input & t, const std::string & key,
+                    const std::string & where, const std::optional<Vec> & fallback = std::nullopt) {
+            Step step;
+            std::copy(L.begin(), L.end(), step.L);
+            if (t.contains(key)) {
+                const Vec o = moving_vec(t.at(key), where + "." + key, step.program);
+                std::copy(o.begin(), o.end(), step.o);
+            } else if (fallback) {
+                std::copy(fallback->begin(), fallback->end(), step.o);
+            } else {
+                throw InputError(where + " needs " + key + ".");
+            }
+            return frame.then(step, time_values);
+        }
+
+        /** @brief A size of the primitive at key, parameter i of motion times factor, which may be of t. */
+        double size(const Input & t, const std::string & key, const std::string & where, Motion & motion, const int i,
+                    const double factor = 1.0) {
+            if (!t.contains(key)) throw InputError(where + " needs " + key + ".");
+            int32_t program = -1;
+            const double v = scalar(t.at(key), where + "." + key, dim::length, program);
+            if (program >= 0) {
+                motion.program[i] = program;
+                motion.factor[i] = factor;
+            }
+            return v;
+        }
+
+        /** @brief A node of a primitive in its frame, with its motion if it moves. */
+        Parsed node_of(Node n, const Frame & frame, Motion motion = {}) {
+            std::copy(frame.M.begin(), frame.M.end(), n.m);
+            std::copy(frame.d.begin(), frame.d.end(), n.d);
+            n.scale = frame.k;
+            Parsed p;
+            p.nodes = {n};
+            const bool sizes = std::any_of(std::begin(motion.program), std::end(motion.program),
+                                           [](const int32_t k) { return k >= 0; });
+            if (frame.moving || sizes) {
+                motion.node = 0;
+                motion.first = static_cast<uint32_t>(steps.size());
+                motion.count = static_cast<uint32_t>(frame.steps.size());
+                steps.insert(steps.end(), frame.steps.begin(), frame.steps.end());
+                p.motions = {motion};
+            }
+            return p;
         }
 
     private:
@@ -440,37 +670,40 @@ class Parser {
         }
 
         /** @brief The frame inside t's transforms: scale, then rotate (both about pivot), then translate. */
-        static Frame transformed(const Input & t, const std::string & where, const Frame & parent) {
+        Frame transformed(const Input & t, const std::string & where, const Frame & parent) {
             Frame f = parent;
             const std::array<double, 9> I = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-            if (t.contains("translate")) f = f.then(I, vec(t.at("translate"), where + ".translate"));
+            if (t.contains("translate")) f = moved(f, I, t, "translate", where);
             const Vec pivot = vec(t, "pivot", where, Vec{0.0, 0.0, 0.0});
             const Vec minus_pivot = {-pivot[0], -pivot[1], -pivot[2]};
-            if (t.contains("rotate")) f = f.then(rotation(t.at("rotate"), where + ".rotate"), pivot).then(I, minus_pivot);
+            if (t.contains("rotate")) f = f.then(rotation(t.at("rotate"), where + ".rotate", pivot), time_values).then(I, minus_pivot);
             if (t.contains("scale")) {
                 const Input & s = t.at("scale");
+                Step step;
+                step.kind = Step::Kind::SCALE;
+                std::copy(pivot.begin(), pivot.end(), step.o);
                 Vec v;
                 if (s.is_array()) {
-                    v = vec(s, where + ".scale", dim::none);
+                    v = moving_vec(s, where + ".scale", step.program, dim::none);
                     if (N_DIM == 2 && s.as_array().size() == 2) v[2] = 1.0;
                 } else {
-                    const double a = as_double(s, where + ".scale", dim::none);
+                    const double a = scalar(s, where + ".scale", dim::none, step.program[0]);
+                    step.program[1] = step.program[2] = step.program[0];
                     v = {a, a, a};
                 }
                 for (const double c : v) {
                     if (!(c > 0.0) || !std::isfinite(c)) throw InputError(where + ".scale must be positive.");
                 }
-                const double s_min = N_DIM == 2 ? std::min(v[0], v[1]) : std::min({v[0], v[1], v[2]});
-                f = f.then({1.0 / v[0], 0.0, 0.0, 0.0, 1.0 / v[1], 0.0, 0.0, 0.0, 1.0 / v[2]}, pivot, s_min)
-                         .then(I, minus_pivot);
+                std::copy(v.begin(), v.end(), step.c);
+                f = f.then(step, time_values).then(I, minus_pivot);
             }
             return f;
         }
 
-        /** @brief Rows of the inverse rotation (world to rotated coordinates). */
-        static std::array<double, 9> rotation(const Input & r, const std::string & where) {
-            Vec axis = {0.0, 0.0, 1.0};
-            double angle = 0.0;
+        /** @brief The inverse rotation (world to rotated coordinates) about pivot. */
+        Step rotation(const Input & r, const std::string & where, const Vec & pivot) {
+            Step step;
+            std::copy(pivot.begin(), pivot.end(), step.o);
             if (r.is_table() && r.contains("axes")) {
                 const auto & rows = r.at("axes");
                 if (!rows.is_array() || rows.as_array().size() != size_t(N_DIM)) {
@@ -487,50 +720,38 @@ class Parser {
                     }
                 }
                 if (dot(cross(e[0], e[1]), e[2]) < 0.0) throw InputError(where + ".axes must be right-handed.");
-                return {e[0][0], e[0][1], e[0][2], e[1][0], e[1][1], e[1][2], e[2][0], e[2][1], e[2][2]};
+                for (size_t i = 0; i < 3; i++) {
+                    for (size_t j = 0; j < 3; j++) step.L[3 * i + j] = e[i][j];
+                }
+                return step;
             }
+            Vec axis = {0.0, 0.0, 1.0};
+            step.kind = Step::Kind::ROTATE;
             if (r.is_table()) {
                 if (N_DIM == 3 || r.contains("axis")) axis = vec(r, "axis", where, std::nullopt, dim::none);
-                angle = number(r, "angle", where, dim::angle_degrees);
+                if (!r.contains("angle")) throw InputError(where + " needs angle.");
+                step.c[0] = scalar(r.at("angle"), where + ".angle", dim::angle_degrees, step.program[0]);
             } else if (N_DIM == 2) {
-                angle = as_double(r, where, dim::angle_degrees);
+                step.c[0] = scalar(r, where, dim::angle_degrees, step.program[0]);
             } else {
                 throw InputError(where + " must be {axis = [...], angle = degrees} or {axes = [[...], [...], [...]]}.");
             }
             const double n = norm(axis);
             if (!(n > 0.0)) throw InputError(where + ".axis must be a nonzero vector.");
-            for (double & v : axis) v /= n;
-            // Rodrigues' rotation by -angle (the inverse), as rows
-            const double a = -angle * PI / 180.0, c = std::cos(a), s = std::sin(a), C = 1.0 - c;
-            const double x = axis[0], y = axis[1], z = axis[2];
-            return {c + x * x * C,     x * y * C - z * s, x * z * C + y * s,
-                    y * x * C + z * s, c + y * y * C,     y * z * C - x * s,
-                    z * x * C - y * s, z * y * C + x * s, c + z * z * C};
+            for (size_t i = 0; i < 3; i++) step.axis[i] = axis[i] / n;
+            return step;
         }
 
+        uint32_t place_node(Parsed p, const std::string & where) { return place(p, where); }
 
-        /** @brief A node of a primitive in its frame. */
-        static Node at(Node n, const Frame & frame) {
-            std::copy(frame.M.begin(), frame.M.end(), n.m);
-            std::copy(frame.d.begin(), frame.d.end(), n.d);
-            n.scale = frame.k;
-            return n;
-        }
-
-        uint32_t place(const Node & n, const std::string & where) {
-            Parsed p;
-            p.nodes = {n};
-            return place(p, where);
-        }
-
-        /** @brief Postfix nodes of the parts joined by op (difference: the first minus the others). */
-        static std::vector<Node> join_nodes(const std::vector<Parsed *> & parts, const Kind op) {
-            std::vector<Node> out;
+        /** @brief Postfix nodes of the parts joined by op (difference: the first minus the others), with their motions. */
+        static Parsed join_nodes(const std::vector<Parsed *> & parts, const Kind op) {
+            Parsed out;
             Node n;
             n.kind = op;
             for (size_t i = 0; i < parts.size(); i++) {
-                out.insert(out.end(), parts[i]->nodes.begin(), parts[i]->nodes.end());
-                if (i >= 1) out.push_back(n);
+                append(out, *parts[i]);
+                if (i >= 1) out.nodes.push_back(n);
             }
             return out;
         }
@@ -626,6 +847,7 @@ class Parser {
                 }
                 if (!zones.zones.empty()) out.pieces.insert(out.pieces.begin(), zones);
                 if (zones_of(out)) out.closed = closed(out);
+                if (ps.size() == 1) out.copies = ps[0].copies;
                 return out;
             }
             const Kind op = type == "union" ? Kind::UNION : (type == "intersection" ? Kind::INTERSECTION : Kind::DIFFERENCE);
@@ -636,7 +858,10 @@ class Parser {
             if (mesh_parts.empty() && ps[0].filled < 0) {
                 std::vector<Parsed *> all;
                 for (Parsed & p : ps) all.push_back(&p);
-                out.nodes = join_nodes(all, op);
+                Parsed joined = join_nodes(all, op);
+                out.nodes = std::move(joined.nodes);
+                out.motions = std::move(joined.motions);
+                if (ps.size() == 1) out.copies = ps[0].copies;
                 return out;
             }
             // Regions of the mesh take part: the shapes join into one filled part
@@ -645,8 +870,7 @@ class Parser {
                                        : (op == Kind::INTERSECTION ? Filled::Kind::INTERSECTION : Filled::Kind::DIFFERENCE);
             if (type == "difference") f.parts.push_back(place(ps[0], where));
             if (!shapes.empty()) {
-                Parsed joined;
-                joined.nodes = join_nodes(shapes, op == Kind::DIFFERENCE ? Kind::UNION : op);
+                Parsed joined = join_nodes(shapes, op == Kind::DIFFERENCE ? Kind::UNION : op);
                 f.parts.push_back(place(joined, where));
             }
             for (Parsed * p : mesh_parts) f.parts.push_back(place(*p, where));
@@ -690,7 +914,7 @@ class Parser {
                 f = plane_frame(t, where, frame, vec(t, "center", where), direction(t, "normal", where));
                 Node plane;
                 plane.kind = Kind::HALF_SPACE;
-                piece.carriers.push_back(place(at(plane, f), where));
+                piece.carriers.push_back(place_node(node_of(plane, f), where));
             } else {
                 f = frame.then({1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}, vec(t, "center", where));
             }
@@ -710,7 +934,7 @@ class Parser {
                 ring.p[2] = N_DIM == 2 ? 1.0 : INF;
                 ring.p[3] = std::min(ring.p[0], ring.p[1]);
             }
-            piece.carriers.push_back(place(at(ring, f), where));
+            piece.carriers.push_back(place_node(node_of(ring, f), where));
             if (N_DIM == 2) p.bounds = static_cast<int32_t>(piece.carriers[0]);
             p.pieces = {piece};
             return p;
@@ -784,8 +1008,8 @@ class Parser {
             Node plane;
             plane.kind = Kind::HALF_SPACE;
             Piece piece;
-            piece.carriers = {place(at(plane, f), where)};
-            piece.inside = {place(at(mask, f), where)};
+            piece.carriers = {place_node(node_of(plane, f), where)};
+            piece.inside = {place_node(node_of(mask, f), where)};
             Parsed p;
             p.dimension = 2;
             p.flat = true;
@@ -804,15 +1028,21 @@ class Parser {
                 return flat(t, where, type, frame);
             }
             Node n;
+            Motion motion;
             const Vec zero = {0.0, 0.0, 0.0};
             const std::array<double, 9> I = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+            auto positive_size = [&](const std::string & key, const int i, const double factor = 1.0) {
+                const double v = size(t, key, where, motion, i, factor);
+                if (!(v > 0.0)) throw InputError(where + "." + key + " must be positive.");
+                return factor * v;
+            };
             if (type == "sphere" || type == "disk") {
                 n.kind = Kind::SPHERE;
-                frame = frame.then(I, vec(t, "center", where));
-                n.p[0] = positive(t, "radius", where);
+                frame = moved(frame, I, t, "center", where);
+                n.p[0] = positive_size("radius", 0);
             } else if (type == "ellipsoid") {
                 n.kind = Kind::ELLIPSOID;
-                frame = frame.then(I, vec(t, "center", where));
+                frame = moved(frame, I, t, "center", where);
                 const Vec a = vec(t, "semi_axes", where);
                 const size_t n_axes = t.at("semi_axes").as_array().size();
                 for (size_t i = 0; i < 3; i++) n.p[i] = i < n_axes ? a[i] : 1.0;
@@ -823,44 +1053,60 @@ class Parser {
             } else if (type == "cylinder" || type == "annulus") {
                 n.kind = Kind::CYLINDER;
                 const Vec axis = type == "annulus" ? Vec{0.0, 0.0, 1.0} : direction(t, "axis", where, true);
-                frame = frame.then(basis_along(axis), vec(t, "center", where));
-                n.p[0] = positive(t, "radius", where);
-                n.p[1] = t.contains("inner_radius") ? number(t, "inner_radius", where) : 0.0;
+                frame = moved(frame, basis_along(axis), t, "center", where);
+                n.p[0] = positive_size("radius", 0);
+                n.p[1] = t.contains("inner_radius") ? size(t, "inner_radius", where, motion, 1) : 0.0;
                 if (type == "annulus" && !t.contains("inner_radius")) throw InputError(where + " needs inner_radius.");
                 if (n.p[1] < 0.0 || n.p[1] >= n.p[0]) {
                     throw InputError(where + ".inner_radius must be in [0, radius).");
                 }
-                n.p[2] = t.contains("length") ? 0.5 * positive(t, "length", where) : INF;
+                n.p[2] = t.contains("length") ? positive_size("length", 2, 0.5) : INF;
             } else if (type == "cone" || type == "frustum") {
                 n.kind = Kind::CONE;
                 const Vec axis = direction(t, "axis", where);
                 const double L = positive(t, "length", where);
-                Vec center = vec(t, "base", where);
-                for (size_t i = 0; i < 3; i++) center[i] += 0.5 * L * axis[i];
-                frame = frame.then(basis_along(axis), center);
+                if (!t.contains("base")) throw InputError(where + " needs base.");
+                Step base;
+                const Vec b = moving_vec(t.at("base"), where + ".base", base.program);
+                if (!base.fixed()) {
+                    // A moving base: to it, then along the axis to the middle
+                    std::copy(b.begin(), b.end(), base.o);
+                    frame = frame.then(base, time_values)
+                                .then(basis_along(axis), {0.5 * L * axis[0], 0.5 * L * axis[1], 0.5 * L * axis[2]});
+                } else {
+                    Vec center = b;
+                    for (size_t i = 0; i < 3; i++) center[i] += 0.5 * L * axis[i];
+                    frame = frame.then(basis_along(axis), center);
+                }
                 n.p[0] = 0.5 * L;
-                n.p[1] = number(t, "base_radius", where);
-                n.p[2] = t.contains("top_radius") ? number(t, "top_radius", where) : 0.0;
+                n.p[1] = size(t, "base_radius", where, motion, 1);
+                n.p[2] = t.contains("top_radius") ? size(t, "top_radius", where, motion, 2) : 0.0;
                 if (n.p[1] < 0.0 || n.p[2] < 0.0 || !(n.p[1] + n.p[2] > 0.0)) {
                     throw InputError(where + ": the radii must be non-negative, and not both zero.");
                 }
             } else if (type == "box" || type == "rectangle") {
                 n.kind = Kind::BOX;
-                frame = frame.then(I, vec(t, "center", where));
-                const Vec s = vec(t, "size", where);
+                frame = moved(frame, I, t, "center", where);
+                if (!t.contains("size")) throw InputError(where + " needs size.");
+                int32_t sizes[3];
+                const Vec s = moving_vec(t.at("size"), where + ".size", sizes);
                 const size_t n_sizes = t.at("size").as_array().size();
                 for (size_t i = 0; i < 3; i++) n.p[i] = i < n_sizes ? 0.5 * s[i] : INF;
                 for (size_t i = 0; i < n_sizes; i++) {
                     if (!(s[i] > 0.0)) throw InputError(where + ".size must be positive.");
+                    if (sizes[i] >= 0) {
+                        motion.program[i] = sizes[i];
+                        motion.factor[i] = 0.5;
+                    }
                 }
             } else if (type == "torus") {
                 n.kind = Kind::TORUS;
-                frame = frame.then(basis_along(direction(t, "axis", where, true)), vec(t, "center", where));
-                n.p[0] = positive(t, "major_radius", where);
-                n.p[1] = positive(t, "minor_radius", where);
+                frame = moved(frame, basis_along(direction(t, "axis", where, true)), t, "center", where);
+                n.p[0] = positive_size("major_radius", 0);
+                n.p[1] = positive_size("minor_radius", 1);
             } else if (type == "half_space") {
                 n.kind = Kind::HALF_SPACE;
-                frame = frame.then(basis_along(direction(t, "normal", where)), vec(t, "point", where, zero));
+                frame = moved(frame, basis_along(direction(t, "normal", where)), t, "point", where, zero);
             } else if (type == "polygon") {
                 n.kind = Kind::POLYGON;
                 if (!t.contains("vertices") || !t.at("vertices").is_array() || t.at("vertices").as_array().size() < 3) {
@@ -875,16 +1121,15 @@ class Parser {
                 n.count = static_cast<uint32_t>(t.at("vertices").as_array().size());
             } else if (type == "implicit") {
                 n.kind = Kind::IMPLICIT;
-                if (!t.contains("f")) throw InputError(where + " needs f, an expression in x, y, z (inside: f < 0).");
+                if (!t.contains("f")) throw InputError(where + " needs f, an expression in x, y, z, t (inside: f < 0).");
                 n.first = static_cast<uint32_t>(programs.size());
                 programs.emplace_back(where + ".f", find_value<std::string>(t, "f"),
-                                      std::vector<std::string>{"x", "y", "z"}, expression_unit_hint);
+                                      std::vector<std::string>{"x", "y", "z", "t"}, expression_unit_hint);
                 bounded = false;
             } else {
                 throw InputError(where + ".type = \"" + type + "\" is not one of: " + join(types()) + ".");
             }
-            Parsed p;
-            p.nodes = {at(n, frame)};
+            Parsed p = node_of(n, frame, motion);
             p.text = type;
             return p;
         }
@@ -932,6 +1177,29 @@ MeshRegions::MeshRegions(const Mesh & m) : mesh(&m) {
         }
         cell_zones.push_back(zone);
     }
+    std::array<double, 6> box = {-INF, -INF, -INF, -INF, -INF, -INF};  // -lo, hi
+    for (uint32_t c = 0; c < m.n_owned(); c++) {
+        for (uint32_t k = 0; k < m.h_n_nodes_of_cell(c); k++) {
+            const uint32_t node = m.h_node_of_cell(c, k);
+            for (size_t i = 0; i < N_DIM; i++) {
+                const double x = double(m.h_node_coords(node, i));
+                box[i] = std::max(box[i], -x);
+                box[3 + i] = std::max(box[3 + i], x);
+            }
+        }
+    }
+    for (size_t i = N_DIM; i < 3; i++) box[i] = box[3 + i] = 0.0;
+    if (m.n_global_cells > 0) box = comm::allreduce(box, comm::Op::MAX);
+    domain = {{{-box[0], -box[1], -box[2]}, {box[3], box[4], box[5]}}};
+    for (const auto & tr : m.periodic_translations) {
+        std::array<double, 3> v = {0.0, 0.0, 0.0};
+        for (size_t i = 0; i < N_DIM; i++) v[i] = double(tr[i]);
+        translations.push_back(v);
+    }
+    rotation = m.periodic_rotation.direction;
+    angle = m.periodic_rotation.angle * 180.0 / PI;
+    center = m.periodic_rotation.center;
+    axis = m.periodic_rotation.axis;
 }
 
 std::vector<std::string> MeshRegions::names() const {
@@ -973,27 +1241,231 @@ bool MeshRegions::closed(const std::vector<std::string> & zones) const {
     return !items.empty();
 }
 
-Definition parse(const Input & value, const std::string & where, const Input * names, const MeshRegions * mesh) {
-    Parser parser;
-    parser.names = names;
-    parser.mesh = mesh;
-    Parsed p = parser.parse(value, where, Frame(), true);
+namespace {
+
+/** @brief The definition of the parsed region p of parser. */
+Definition definition(Parser & parser, Parsed & p, const std::string & where, const MeshRegions * mesh) {
     Definition d;
-    if (value.is_string()) d.name = value.as_string();
     d.summary = p.text;
     d.dimension = p.dimension;
     if (p.dimension == N_DIM) {
-        d.root = parser.place(p, where);
+        d.root = d.own = parser.place(p, where);
     } else {
         const auto zones = zones_of(p);
         d.closed = zones && mesh ? mesh->closed(*zones) : p.closed;
         d.pieces = std::move(p.pieces);
     }
+    d.copies = p.copies;
     d.nodes = std::move(parser.nodes);
     d.vertices = std::move(parser.vertices);
     d.programs = std::move(parser.programs);
     d.filled = std::move(parser.filled);
+    d.steps = std::move(parser.steps);
+    d.motions = std::move(parser.motions);
+    d.times = std::move(parser.times);
     d.bounded = parser.bounded;
+    return d;
+}
+
+/**
+ * @brief The steps from the world's frame to each image of a region in the
+ *        periodic lattice of the mesh, the region itself first: the images
+ *        whose box meets the domain's (a moving region's: within a period of
+ *        it), along the directions in which the region's box is finite.
+ */
+std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array<Vec, 2> & box, const bool moving) {
+    const size_t n = mesh.translations.size();
+    std::vector<std::vector<Step>> out = {{}};
+    if (n == 0) return out;
+    auto finite = [&](const size_t i) { return std::isfinite(box[0][i]) && std::isfinite(box[1][i]); };
+    std::array<Vec, 2> reach = mesh.domain;
+    std::vector<int> range(n, 0), low(n, 0);
+    for (size_t l = 0; l < n; l++) {
+        const Vec & v = mesh.translations[l];
+        if (static_cast<int>(l) == mesh.rotation) {
+            bool across = true;
+            for (size_t i = 0; i < N_DIM; i++) across = across && (finite(i) || std::abs(mesh.axis[i]) == 1.0);
+            // Every other sector once: a half turn is reached one way only
+            const double turns = 360.0 / std::abs(mesh.angle);
+            range[l] = across ? std::min(32, static_cast<int>(std::floor(0.5 * turns + 1e-9))) : 0;
+            low[l] = -range[l] + (range[l] > 0 && std::abs(2.0 * range[l] - turns) < 1e-9 ? 1 : 0);
+            continue;
+        }
+        const double length = norm(v);
+        if (!(length > 0.0)) continue;
+        bool along = true;
+        double extent = 0.0;
+        for (size_t i = 0; i < N_DIM; i++) {
+            if (v[i] == 0.0) continue;
+            along = along && finite(i);
+            extent += std::abs(v[i] / length) * (std::max(box[1][i], mesh.domain[1][i]) - std::min(box[0][i], mesh.domain[0][i]));
+        }
+        if (!along) continue;
+        range[l] = std::min(16, std::max(moving ? 1 : 0, static_cast<int>(std::ceil(extent / length))));
+        low[l] = -range[l];
+        if (moving) {
+            for (size_t i = 0; i < 3; i++) {
+                reach[0][i] -= std::abs(v[i]);
+                reach[1][i] += std::abs(v[i]);
+            }
+        }
+    }
+    const double tol = 1e-9 * norm({mesh.domain[1][0] - mesh.domain[0][0], mesh.domain[1][1] - mesh.domain[0][1],
+                                    mesh.domain[1][2] - mesh.domain[0][2]});
+    std::vector<int> L(n);
+    for (size_t l = 0; l < n; l++) L[l] = low[l];
+    while (true) {
+        bool zero = true;
+        for (const int k : L) zero = zero && k == 0;
+        if (!zero) {
+            // The image: rotated, then translated
+            std::vector<Step> steps;
+            Vec shift = {0.0, 0.0, 0.0};
+            for (size_t l = 0; l < n; l++) {
+                if (static_cast<int>(l) == mesh.rotation) continue;
+                for (size_t i = 0; i < 3; i++) shift[i] += L[l] * mesh.translations[l][i];
+            }
+            Step translate;
+            std::copy(shift.begin(), shift.end(), translate.o);
+            steps.push_back(translate);
+            if (mesh.rotation >= 0 && L[static_cast<size_t>(mesh.rotation)] != 0) {
+                Step turn;
+                turn.kind = Step::Kind::ROTATE;
+                turn.c[0] = L[static_cast<size_t>(mesh.rotation)] * mesh.angle;
+                std::copy(mesh.axis.begin(), mesh.axis.end(), turn.axis);
+                std::copy(mesh.center.begin(), mesh.center.end(), turn.o);
+                steps.push_back(turn);
+                Step back;
+                for (size_t i = 0; i < 3; i++) back.o[i] = -mesh.center[i];
+                steps.push_back(back);
+            }
+            // Its box: the region's corners through the image's map (x -> M^-1 (x' - d) of the inverse frame)
+            double M[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}, d[3] = {0.0, 0.0, 0.0}, k = 1.0;
+            for (const Step & s : steps) apply(s, [](uint32_t) { return 0.0; }, M, d, k);
+            std::array<Vec, 2> b = {Vec{INF, INF, INF}, Vec{-INF, -INF, -INF}};
+            for (int c = 0; c < 8; c++) {
+                const Vec q = {((c & 1) ? box[1][0] : box[0][0]) - d[0], ((c & 2) ? box[1][1] : box[0][1]) - d[1],
+                               ((c & 4) ? box[1][2] : box[0][2]) - d[2]};
+                for (size_t i = 0; i < 3; i++) {
+                    // M is a rotation: its inverse is its transpose
+                    const double x = M[i] * q[0] + M[3 + i] * q[1] + M[6 + i] * q[2];
+                    b[0][i] = std::min(b[0][i], x);
+                    b[1][i] = std::max(b[1][i], x);
+                }
+            }
+            bool meets = true;
+            for (size_t i = 0; i < N_DIM; i++) meets = meets && b[0][i] <= reach[1][i] + tol && b[1][i] >= reach[0][i] - tol;
+            if (meets) out.push_back(std::move(steps));
+        }
+        size_t l = 0;
+        while (l < n && ++L[l] > range[l]) {
+            L[l] = low[l];
+            l++;
+        }
+        if (l == n) break;
+    }
+    return out;
+}
+
+} // namespace
+
+Definition parse(const Input & value, const std::string & where, const Input * names, const MeshRegions * mesh) {
+    Parser parser;
+    parser.names = names;
+    parser.mesh = mesh;
+    Parsed p = parser.parse(value, where, Frame(), true);
+    const bool own_mesh_parts = p.filled >= 0 || std::any_of(p.pieces.begin(), p.pieces.end(), [](const Piece & q) {
+        return !q.zones.empty() || q.cells >= 0;
+    });
+    Definition d = definition(parser, p, where, mesh);
+    // Across periodic boundaries: the union of its images, each copy with its own
+    std::vector<std::vector<Step>> wraps = {{}};
+    if (mesh && !mesh->translations.empty() && !own_mesh_parts) {
+        const Region unwrapped{Definition(d)};
+        wraps = images(*mesh, bounds(unwrapped), unwrapped.moving());
+    }
+    if (wraps.size() > 1) {
+        Parser again;
+        again.names = names;
+        again.mesh = mesh;
+        std::vector<Parsed> parts;
+        for (const auto & steps : wraps) {
+            Frame f;
+            for (const Step & s : steps) f = f.then(s);
+            parts.push_back(again.parse(value, where, f, true));
+        }
+        const size_t n_copies = std::max<size_t>(1, parts[0].copies.size());
+        auto run = [&](const Parsed & q, const size_t k) {
+            if (!q.copies.empty()) return std::pair<uint32_t, uint32_t>{q.copies[k].first, q.copies[k].count};
+            return std::pair<uint32_t, uint32_t>{0, static_cast<uint32_t>(p.dimension == N_DIM ? q.nodes.size() : q.pieces.size())};
+        };
+        Parsed out;
+        out.dimension = p.dimension;
+        out.closed = true;
+        out.text = p.text;
+        Node join;
+        join.kind = Kind::UNION;
+        std::vector<std::pair<uint32_t, uint32_t>> owns;
+        for (size_t k = 0; k < n_copies; k++) {
+            const uint32_t first = static_cast<uint32_t>(p.dimension == N_DIM ? out.nodes.size() : out.pieces.size());
+            for (size_t i = 0; i < parts.size(); i++) {
+                const auto [a, count] = run(parts[i], k);
+                if (p.dimension == N_DIM) {
+                    if (i == 0) owns.push_back({static_cast<uint32_t>(out.nodes.size()), count});
+                    Parsed piece;
+                    piece.nodes.assign(parts[i].nodes.begin() + a, parts[i].nodes.begin() + a + count);
+                    for (Motion m : parts[i].motions) {
+                        if (m.node < a || m.node >= a + count) continue;
+                        m.node -= a;
+                        piece.motions.push_back(m);
+                    }
+                    append(out, piece);
+                    if (i >= 1) out.nodes.push_back(join);
+                } else {
+                    out.pieces.insert(out.pieces.end(), parts[i].pieces.begin() + a, parts[i].pieces.begin() + a + count);
+                    out.closed = out.closed && parts[i].closed;
+                }
+            }
+            if (p.dimension == N_DIM && k >= 1) out.nodes.push_back(join);
+            const uint32_t end = static_cast<uint32_t>(p.dimension == N_DIM ? out.nodes.size() : out.pieces.size());
+            if (n_copies > 1) out.copies.push_back({0, 0, first, end - first - (p.dimension == N_DIM && k >= 1 ? 1u : 0u)});
+        }
+        // Its own, unwrapped: the region's own nodes once more
+        Parsed own;
+        if (p.dimension == N_DIM) append(own, parts[0]);
+        const Definition wrapped = definition(again, out, where, mesh);
+        d = wrapped;
+        if (p.dimension == N_DIM) {
+            Filled whole;
+            whole.first = static_cast<uint32_t>(d.nodes.size());
+            whole.count = static_cast<uint32_t>(own.nodes.size());
+            for (Motion m : own.motions) {
+                m.node += whole.first;
+                d.motions.push_back(m);
+            }
+            d.nodes.insert(d.nodes.end(), own.nodes.begin(), own.nodes.end());
+            d.filled.push_back(whole);
+            d.own = static_cast<uint32_t>(d.filled.size() - 1);
+            const uint32_t base = d.filled[d.root].first;
+            for (size_t k = 0; k < d.copies.size(); k++) {
+                Filled part;
+                part.first = base + owns[k].first;
+                part.count = owns[k].second;
+                d.filled.push_back(part);
+                d.copies[k].own = static_cast<uint32_t>(d.filled.size() - 1);
+            }
+        }
+        d.summary += ", wrapped across periodic boundaries (" + std::to_string(wraps.size()) + " images)";
+    }
+    if (value.is_string()) d.name = value.as_string();
+    if (d.dimension < N_DIM && Region(Definition(d)).moving()) {
+        throw InputError(Diagnostic{.key = where,
+                                    .line = line_of(value),
+                                    .message = "moves (it has expressions of t), and moving surfaces, curves and "
+                                               "points are not supported yet: only filled regions move",
+                                    .fix = "Give a fixed region, or a filled one",
+                                    .docs = "docs/guide/geometry.md#moving-regions"});
+    }
     const bool named = value.is_string() && names && names->as_table().entries().contains(value.as_string());
     const Input * table = value.is_table() ? &value : named ? &names->at(value.as_string()) : nullptr;
     const std::string key = named ? "regions." + value.as_string() : where;

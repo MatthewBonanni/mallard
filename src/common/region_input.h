@@ -13,6 +13,7 @@
 #ifndef REGION_INPUT_H
 #define REGION_INPUT_H
 
+#include <array>
 #include <map>
 #include <memory>
 #include <string>
@@ -32,6 +33,11 @@ struct MeshRegions {
     const Mesh * mesh = nullptr;
     std::vector<std::string> boundary_zones;  // every rank's, sorted
     std::vector<std::string> cell_zones;
+    std::array<std::array<double, 3>, 2> domain = {};  // a box around the owned cells of every rank
+    std::vector<std::array<double, 3>> translations;   // of the periodic lattice's directions (0 for the rotation's)
+    int rotation = -1;                                  // the direction that rotates, or -1
+    double angle = 0.0;                                 // its angle (degrees) about axis through center
+    std::array<double, 3> center = {0.0, 0.0, 0.0}, axis = {0.0, 0.0, 1.0};
 
     MeshRegions() = default;
     /** @brief The automatic regions of the mesh. Collective. */
