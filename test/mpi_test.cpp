@@ -84,6 +84,31 @@ std::string mixture_input(const std::string & extra, const std::string & reconst
            "[output]\ncheck_interval = 1000000\n" + chemistry;
 }
 
+/**
+ * @brief Each run of input, with step graphs on and off, matches the serial run (NCCL and MPI exchanges in NCCL
+ *        builds); in CUDA builds the runs with graphs on take their steps in the graph, but over MPI's exchanges.
+ */
+void expect_matches_serial_with_and_without_step_graphs(const std::string & input) {
+    for (const bool graphs : {true, false}) {
+        std::string text = input;
+        text.insert(text.find("[run]\n") + 6, std::string("cuda_graphs = ") + (graphs ? "true" : "false") + "\n");
+        SCOPED_TRACE(text);
+        expect_matches_serial(text, [&](const Solver & s) {
+#ifdef KOKKOS_ENABLE_CUDA
+            const std::string why = s.step_graph_unsupported();
+            if (graphs) {
+                EXPECT_TRUE(why.empty() || why == "halo exchanged with MPI") << why;
+                EXPECT_EQ(s.get_graph_steps() > 0, why.empty()) << why;
+            } else {
+                EXPECT_EQ(s.get_graph_steps(), 0u);
+            }
+#else
+            EXPECT_EQ(s.get_graph_steps(), 0u);
+#endif
+        });
+    }
+}
+
 const std::string EULER = "type = \"euler\"\n";
 const std::string NS = "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n";
 
@@ -340,26 +365,27 @@ TEST(MPITest, OutletAndSourceAveragesMatchSerialWithAndWithoutStepGraphs) {
                                           25) +
                                 "[[sources]]\nrhou = [\"(1 - mean_ke / mean_rho) * rho * u_x\", \"0\"]\n"
                                 "rhoE = \"(1 - mean_ke / mean_rho) * rho * u_x^2\"\n";
-    for (const bool graphs : {true, false}) {
-        for (const std::string & input : {outlet, forcing}) {
-            std::string text = input;
-            text.insert(text.find("[run]\n") + 6, std::string("cuda_graphs = ") + (graphs ? "true" : "false") + "\n");
-            SCOPED_TRACE(text);
-            expect_matches_serial(text, [&](const Solver & s) {
-#ifdef KOKKOS_ENABLE_CUDA
-                const std::string why = s.step_graph_unsupported();
-                if (graphs) {
-                    EXPECT_TRUE(why.empty() || why == "halo exchanged with MPI") << why;
-                    EXPECT_EQ(s.get_graph_steps() > 0, why.empty()) << why;
-                } else {
-                    EXPECT_EQ(s.get_graph_steps(), 0u);
-                }
-#else
-                EXPECT_EQ(s.get_graph_steps(), 0u);
-#endif
-            });
-        }
-    }
+    for (const std::string & input : {outlet, forcing}) expect_matches_serial_with_and_without_step_graphs(input);
+}
+
+TEST(MPITest, LargeEddySimulationMatchesSerialWithAndWithoutStepGraphs) {
+    // The eddy viscosity and the dynamic constant (an exact sum over the ranks) stay on the device, with the
+    // boundary states at the step's time: the step graph takes LES, with a time-dependent inlet too
+    std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                  bcs("type = \"dirichlet\"\nrho = \"1.0\"\nu = [\"0.3 + 0.1 * sin(30 * t)\", \"0.0\"]\n"
+                                      "p = \"1.0\"\n",
+                                      "type = \"outlet_pressure\"\np = 1.0\n", "type = \"wall_isothermal\"\nT = 1.2\n",
+                                      "type = \"wall_adiabatic\"\n"),
+                                  25);
+    const std::string u = "u = [\"0.3\", \"-0.1\"]\n";
+    input.replace(input.find(u), u.size(), "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * x + 2 * y)\"]\n");
+    expect_matches_serial_with_and_without_step_graphs(input + "[les]\nmodel = \"wale\"\n");
+    expect_matches_serial_with_and_without_step_graphs(input + "[les]\nmodel = \"smagorinsky\"\ndynamic = true\n");
+    std::string teno = input;
+    const std::string muscl = "type = \"MUSCL\"\n";
+    teno.replace(teno.find(muscl), muscl.size(), "type = \"TENO\"\norder = 3\n");
+    expect_matches_serial_with_and_without_step_graphs(teno + "[les]\nmodel = \"vreman\"\ndynamic = true\n"
+                                                              "gradients = \"reconstruction\"\n");
 }
 
 TEST(MPITest, StepReductionsKernelByKernelMatchSerial) {

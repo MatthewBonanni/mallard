@@ -53,7 +53,6 @@ std::string Solver::step_graph_unsupported() const {
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
     if (is_distributed() && !halo.uses_nccl()) return "halo exchanged with MPI";
     if (is_mixture()) return "gas mixture";
-    if (les_on) return "LES models (not verified under capture yet)";
     if (boundary_data.char_faces.extent(0) > 0) return "characteristic boundaries";
     if (!inflows.empty()) return "synthetic inflow turbulence";
     return "";
@@ -62,6 +61,8 @@ std::string Solver::step_graph_unsupported() const {
 
 void Solver::record_step() {
     const Kokkos::DefaultExecutionSpace exec;
+    // Stage times come from step_scalars from here on, also in calc_dt's boundary updates (LES)
+    recording_step = true;
     Kokkos::deep_copy(exec, Kokkos::subview(step_scalars, Kokkos::make_pair(0, 2)),
                       Kokkos::subview(step_io, Kokkos::make_pair(0, 2)));
     // The run-control requests ride along the time-step reduction
@@ -101,7 +102,6 @@ void Solver::record_step() {
         c(i) = s(STEP_DT) / c(i);
     });
     // take_step
-    recording_step = true;
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func, step_scalars.data() + DT_SCALES);
     recording_step = false;
     halo_current = false;

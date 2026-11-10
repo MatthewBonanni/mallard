@@ -1,0 +1,2 @@
+- LES runs take their steps in the CUDA graph (CUDA builds): the dynamic constant of `dynamic = true` and the dynamic thickened-flame efficiency are computed on the device, and calc_dt's boundary states use the step's time on the device.
+- In GPU builds the dynamic thickened-flame exponent `beta` is computed with the device's `log`: results of `efficiency = "dynamic"` runs on GPUs can differ from earlier versions in the last digits.
