@@ -736,7 +736,7 @@ void Spectra::write(uint64_t step, rtype t, const std::string & reason) const {
 
 void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const std::string & reason) const {
     create_parent_directories("the spectra file", name);
-    std::ofstream out(name);
+    std::ofstream out(partial_name(name));
     if (!out.good()) throw cannot_write("the spectra file", name);
     out << provenance::csv_comment() << "\n";
     snapshot_block::Block block = snapshot_block::make(step, double(t), reason, "spectra", -1, {});
@@ -745,7 +745,6 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const
     block.average_end = average ? double(t_last) : double(t);
     block.samples = average ? static_cast<int64_t>(n_samples) : 1;
     out << provenance::csv_comment(snapshot_block::NAME, block.json()) << "\n";
-    logging::written(step, double(t), "spectra", name, reason, file);
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     std::vector<size_t> inhomogeneous;
     for (size_t d = 0; d < N_DIM; d++) {
@@ -804,6 +803,10 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const
                 << pair_units[p] << "\n";
         }
     }
+    out.close();
+    if (!out) throw cannot_write("the spectra file", name);
+    publish_file("the spectra file", name);
+    logging::written(step, double(t), "spectra", name, reason, file);
 }
 
 std::string Spectra::summary() const {

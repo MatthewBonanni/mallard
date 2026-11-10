@@ -955,6 +955,50 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     EXPECT_NE(read(dir + "/f.pvd").find("f_000002.pvtu"), std::string::npos);
 }
 
+TEST(MPITest, OutputRecordsListEveryRanksPieceWithItsSizeAndHash) {
+    const std::string dir = io_dir() + "_records";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    Solver solver;
+    // run_log continues box_input's [output] table
+    solver.init(parse_toml(restart_case(2, "run_log = \"" + dir + "/run.jsonl\"\n[[write_data]]\nprefix = \"" + dir +
+                                                  "/f\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\"]\n")));
+    solver.run();
+    comm::barrier();
+    if (!comm::is_root()) return;
+    const bool pieces = comm::size() > 1;
+    std::ifstream in(dir + "/run.jsonl");
+    size_t records = 0;
+    for (std::string line; std::getline(in, line);) {
+        const json::Value r = json::parse(line);
+        if (r["type"].string != "output" || r["step"].number != 2.0) continue;
+        records++;
+        std::set<std::string> names;
+        std::set<double> piece_sizes;
+        for (const json::Value & f : r["files"].array) {
+            const std::string file = f["path"].string;
+            names.insert(std::filesystem::path(file).filename().string());
+            EXPECT_EQ(f["bytes"].number, double(std::filesystem::file_size(file))) << file;
+            EXPECT_EQ(f["sha256"].string, provenance::sha256_file(file)) << file;
+            if (file.ends_with(".vtu")) piece_sizes.insert(f["bytes"].number);
+        }
+        std::set<std::string> expected;
+        for (int rank = 0; rank < comm::size(); rank++) {
+            std::ostringstream piece;
+            piece << "f_000002";
+            if (pieces) piece << "_p" << std::setw(4) << std::setfill('0') << rank;
+            expected.insert(piece.str() + ".vtu");
+        }
+        if (pieces) expected.insert("f_000002.pvtu");
+        EXPECT_EQ(names, expected);
+        // Ranks' pieces of different sizes, each recorded with its own
+        if (comm::size() == 3) {
+            EXPECT_GT(piece_sizes.size(), 1u);
+        }
+    }
+    EXPECT_EQ(records, 1u);
+}
+
 TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     // Cells and nodes of every rank land at their global ids: triangles and
     // quads, vectors, statistics and species

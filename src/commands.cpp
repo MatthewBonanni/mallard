@@ -102,6 +102,9 @@ constexpr Option INFO_OPTIONS[] = {
     {"--quality", "", "PREFIX",
      "Mesh files: write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without "
      "HDF5), as mallard check --quality does. Default: none."},
+    {"--verify", "", "",
+     "Run directories: also check each file's contents against the SHA-256 its output record holds, not only "
+     "its size; reads every file once. Default: sizes only."},
     KOKKOS,
 };
 
@@ -452,7 +455,7 @@ constexpr Command COMMANDS[] = {
         .group = "Inspect",
         .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
         .synopsis = "mallard info FILE [--format text|json] [--input] [--quality PREFIX]\n"
-                    "mallard info RUN_DIR [--format text|json] [--input]",
+                    "mallard info RUN_DIR [--format text|json] [--input] [--verify]",
         .description =
             "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
             "version; the mesh (cells, points, cell types, bounds, boundary and cell zones); its times and steps; "
@@ -471,7 +474,10 @@ constexpr Command COMMANDS[] = {
             "of its dimension, which also reports its quality as mallard check does.\n"
             "\n"
             "RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and every output file "
-            "in it and one level down, one table row each (the snapshots of a series as their index).",
+            "in it and one level down, one table row each (the snapshots of a series as their index). Each file the "
+            "run log records as written is checked against its record: missing, or a size (with --verify, a "
+            "SHA-256) other than the one recorded, is reported. A file still named NAME.partial is one whose write "
+            "did not finish.",
         .options = INFO_OPTIONS,
         .arguments = FILE_ARGUMENTS,
         .examples = "$ mallard info solut/flow.vtkhdf.series\n"
@@ -480,7 +486,8 @@ constexpr Command COMMANDS[] = {
                     "$ mallard info wing.msh --quality quality\n"
                     "$ mallard info runs/cylinder",
         .exit_status = "0  the file was read\n"
-                       "1  a file cannot be read (missing, not Mallard's, newer), or --input finds no run block\n"
+                       "1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run "
+                       "directory's file differs from its output record, or --input finds no run block\n"
                        "2  usage error",
         .dim = Case::file,
         .run = info_main,

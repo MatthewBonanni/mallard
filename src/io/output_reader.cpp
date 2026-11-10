@@ -1350,6 +1350,10 @@ Contents open(const std::string & path) {
         return mesh_contents(path, read_mesh(path));
     }
     if (!fs::exists(path, error)) throw cannot_read("the file", path);
+    if (ends_with(path, PARTIAL)) {
+        fail(path, "its write did not finish: the run was stopped while writing it, or is still writing it. The file "
+                   "gets its name " + path.substr(0, path.size() - std::string(PARTIAL).size()) + " once complete.");
+    }
     Contents c;
     const std::string ext = extension(path);
     if (ends_with(path, ".vtkhdf.series")) {
@@ -1475,8 +1479,10 @@ std::vector<std::string> run_files(const std::string & dir) {
     static const std::set<std::string> OUTPUT = {".vtkhdf", ".series", ".pvd", ".xmf", ".vtu", ".pvtu", ".vtp",
                                                  ".h5", ".restart", ".csv"};
     for (const auto & f : files) {
-        if (!OUTPUT.count(extension(f)) || members.count(fs::path(f).lexically_normal().string())) continue;
-        if (ends_with(f, ".series") && !ends_with(f, ".vtkhdf.series")) continue;
+        // A file whose write did not finish is listed, and reported as such
+        const std::string name = ends_with(f, PARTIAL) ? f.substr(0, f.size() - std::string(PARTIAL).size()) : f;
+        if (!OUTPUT.count(extension(name)) || members.count(fs::path(f).lexically_normal().string())) continue;
+        if (ends_with(name, ".series") && !ends_with(name, ".vtkhdf.series")) continue;
         out.push_back(f);
     }
     return out;

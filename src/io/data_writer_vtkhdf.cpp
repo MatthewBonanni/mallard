@@ -38,7 +38,7 @@ bool kept_on_resume(double t_entry, rtype t) {
 } // namespace
 
 void DataWriter::write_vtkhdf_series(const Index & list) const {
-    std::ofstream out(prefix + ".vtkhdf.series");
+    std::ofstream out(partial_name(prefix + ".vtkhdf.series"));
     if (!out.good()) throw std::runtime_error("DataWriter: Could not open file: " + prefix + ".vtkhdf.series.");
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     out << "{\n  \"file-series-version\": \"1.0\",\n  \"files\": [\n";
@@ -49,6 +49,9 @@ void DataWriter::write_vtkhdf_series(const Index & list) const {
         out << "}" << (i + 1 < list.size() ? "," : "") << "\n";
     }
     out << "  ]\n}\n";
+    out.close();
+    if (!out) throw cannot_write("the VTKHDF series index", prefix + ".vtkhdf.series");
+    publish_file("the VTKHDF series index", prefix + ".vtkhdf.series");
 }
 
 void DataWriter::resume_vtkhdf(rtype t) {
@@ -379,7 +382,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
     const std::string & provenance = provenance::json();
     Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle file(append ? H5Fopen(filename.c_str(), H5F_ACC_RDWR, fapl)
-                       : H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl),
+                       : H5Fcreate(partial_name(filename).c_str(), H5F_ACC_TRUNC, fcpl, fapl),
                 H5Fclose, (append ? "opening " : "creating ") + filename);
     if (append && !vtkhdf_run_written) {
         // A series continued by another run carries that run's block; each step's snapshot block names its run

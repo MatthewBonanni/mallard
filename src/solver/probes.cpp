@@ -341,7 +341,7 @@ void write_vtp_file(const std::string & file, const snapshot_block::Block & bloc
     for (auto & a : sample_data) arrays.push_back(std::move(a));
 
     make_parent(file);
-    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    std::ofstream out(partial_name(file), std::ios::binary | std::ios::trunc);
     if (!out.good()) throw cannot_write("the probe file", file);
     uint64_t offset = 0;
     auto data_array = [&](const Array & a) {
@@ -388,12 +388,15 @@ void write_vtp_file(const std::string & file, const snapshot_block::Block & bloc
         out.write(a.bytes.data(), static_cast<std::streamsize>(a.bytes.size()));
     }
     out << "\n  </AppendedData>\n</VTKFile>\n";
+    out.close();
+    if (!out) throw cannot_write("the probe file", file);
+    publish_file("the probe file", file);
 }
 
 template <typename Series>
 void write_pvd_file(const std::string & file, const Series & series) {
     make_parent(file);
-    std::ofstream out(file, std::ios::trunc);
+    std::ofstream out(partial_name(file), std::ios::trunc);
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n<VTKFile type=\"Collection\" version=\"1.0\">\n  <Collection>\n";
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const auto & e : series) {
@@ -402,6 +405,9 @@ void write_pvd_file(const std::string & file, const Series & series) {
         out << " file=\"" << e.file << "\"/>\n";
     }
     out << "  </Collection>\n</VTKFile>\n";
+    out.close();
+    if (!out) throw cannot_write("the probe index", file);
+    publish_file("the probe index", file);
 }
 
 } // namespace

@@ -427,7 +427,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 
 ```text
 Usage: mallard info FILE [--format text|json] [--input] [--quality PREFIX]
-       mallard info RUN_DIR [--format text|json] [--input]
+       mallard info RUN_DIR [--format text|json] [--input] [--verify]
 
 Reports what a file Mallard writes or reads holds, without an input file: its
 kind, format and format version; the mesh (cells, points, cell types, bounds,
@@ -451,7 +451,10 @@ does.
 
 RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and
 every output file in it and one level down, one table row each (the snapshots of
-a series as their index).
+a series as their index). Each file the run log records as written is checked
+against its record: missing, or a size (with --verify, a SHA-256) other than the
+one recorded, is reported. A file still named NAME.partial is one whose write
+did not finish.
 
 Options:
   --format text|json  text: sections and tables, with the units of every
@@ -465,6 +468,9 @@ Options:
   --quality PREFIX    Mesh files: write the mesh-quality fields to
                       PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without
                       HDF5), as mallard check --quality does. Default: none.
+  --verify            Run directories: also check each file's contents against
+                      the SHA-256 its output record holds, not only its size;
+                      reads every file once. Default: sizes only.
   --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
                       rank) or --kokkos-device-id=1 (the GPU; by default each
                       rank gets its own).
@@ -479,7 +485,7 @@ Examples:
 
 Exit status:
   0  the file was read
-  1  a file cannot be read (missing, not Mallard's, newer), or --input finds no run block
+  1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run directory's file differs from its output record, or --input finds no run block
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-info

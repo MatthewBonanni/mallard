@@ -135,6 +135,8 @@ TEST(RunReport, SummaryAndHealthMatchTheGolden) {
                  .writers = true,
                  .bytes = 8.14e9,
                  .writing = 12.5,
+                 .hashing = 3.4,
+                 .hash_queue = 0.2,
                  .background = true,
                  .files = {{"vtkhdf", 11, "solut/dmr.vtkhdf.series"},
                            {"restart", 10, "last restart_001822.restart"},

@@ -16,6 +16,7 @@
   chemistry of the slowest rank  61.2      s        mean over the ranks 55 s
   integrations on other ranks    12.3      %        chemistry load balancing
   written                        8.14      GB       in 12.5 s of writing, in the background
+  hashed for the run log         3.4       s        off the main thread, the run waiting 0.2 s for it
 
   Files (-: one file, appended to as the run goes):
   kind     files  index, or file

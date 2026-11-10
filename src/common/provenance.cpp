@@ -40,6 +40,7 @@
 #include "git_version.h"
 #include "json.h"
 #include "log.h"
+#include "sha256_hw.h"
 #include "version.h"
 
 namespace provenance {
@@ -50,26 +51,31 @@ namespace {
 class Sha256 {
     public:
         void update(const char * data, size_t n) {
-            for (size_t i = 0; i < n; i++) {
-                block[fill++] = static_cast<uint8_t>(data[i]);
-                if (fill == 64) {
-                    compress();
-                    fill = 0;
-                }
-            }
+            const auto * bytes = reinterpret_cast<const uint8_t *>(data);
             length += n;
+            if (fill > 0) {
+                const size_t take = std::min(n, block.size() - fill);
+                std::copy_n(bytes, take, block.data() + fill);
+                fill += take;
+                bytes += take;
+                n -= take;
+                if (fill < block.size()) return;
+                compress(block.data(), 1);
+                fill = 0;
+            }
+            const size_t whole = n / 64;
+            if (whole > 0) compress(bytes, whole);
+            std::copy_n(bytes + 64 * whole, n % 64, block.data());
+            fill = n % 64;
         }
 
         std::string hex() {
             const uint64_t bits = length * 8;
-            const char pad = static_cast<char>(0x80);
-            update(&pad, 1);
-            const char zero = 0;
-            while (fill != 56) update(&zero, 1);
-            for (int i = 7; i >= 0; i--) {
-                const char byte = static_cast<char>((bits >> (8 * i)) & 0xff);
-                update(&byte, 1);
-            }
+            std::array<char, 72> tail{};
+            tail[0] = static_cast<char>(0x80);
+            const size_t pad = (fill < 56 ? 56 : 120) - fill;
+            for (size_t i = 0; i < 8; i++) tail[pad + i] = static_cast<char>((bits >> (56 - 8 * i)) & 0xff);
+            update(tail.data(), pad + 8);
             std::string out;
             const char * digits = "0123456789abcdef";
             for (const uint32_t word : h) {
@@ -81,7 +87,15 @@ class Sha256 {
     private:
         static uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
 
-        void compress() {
+        void compress(const uint8_t * data, size_t n) {
+            if (sha256_hw::enabled()) {
+                sha256_hw::blocks(h.data(), data, n);
+                return;
+            }
+            for (; n > 0; n--, data += 64) compress_portable(data);
+        }
+
+        void compress_portable(const uint8_t * data) {
             static constexpr std::array<uint32_t, 64> K = {
                 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
                 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -93,8 +107,8 @@ class Sha256 {
                 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
             std::array<uint32_t, 64> w{};
             for (size_t i = 0; i < 16; i++) {
-                w[i] = uint32_t(block[4 * i]) << 24 | uint32_t(block[4 * i + 1]) << 16 |
-                       uint32_t(block[4 * i + 2]) << 8 | uint32_t(block[4 * i + 3]);
+                w[i] = uint32_t(data[4 * i]) << 24 | uint32_t(data[4 * i + 1]) << 16 |
+                       uint32_t(data[4 * i + 2]) << 8 | uint32_t(data[4 * i + 3]);
             }
             for (size_t i = 16; i < 64; i++) {
                 const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);

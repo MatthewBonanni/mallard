@@ -25,6 +25,7 @@
 #include "provenance.h"
 #include "run_log.h"
 #include "scratch.h"
+#include "sha256_hw.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #ifdef Mallard_HAS_HDF5
@@ -100,14 +101,25 @@ std::set<std::string> key_set(const Value & v) {
 } // namespace
 
 TEST(ProvenanceTest, Sha256MatchesTheStandardDigests) {
-    // FIPS 180-4 examples, including messages that fill the last block past its length field
-    EXPECT_EQ(provenance::sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    EXPECT_EQ(provenance::sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    EXPECT_EQ(provenance::sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
-              "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
-    EXPECT_EQ(provenance::sha256(std::string(1000000, 'a')),
-              "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+    // FIPS 180-4 examples, including messages that fill the last block past its length field, on
+    // the CPU's SHA instructions where it has them and on the portable compression
+    const bool hardware = sha256_hw::enabled();
+    for (const bool on : {true, false}) {
+        sha256_hw::set_enabled(on);
+        SCOPED_TRACE(sha256_hw::enabled() ? "SHA instructions" : "portable");
+        EXPECT_EQ(provenance::sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        EXPECT_EQ(provenance::sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        EXPECT_EQ(provenance::sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+                  "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+        EXPECT_EQ(provenance::sha256("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmno"
+                                     "ijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"),
+                  "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1");
+        EXPECT_EQ(provenance::sha256(std::string(1000000, 'a')),
+                  "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+    }
+    sha256_hw::set_enabled(hardware);
 }
+
 
 TEST(ProvenanceTest, FileHashesCoverContentsAndDirectoryLayout) {
     if (!comm::is_root()) return;
@@ -192,12 +204,23 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
             EXPECT_EQ(r["cells_per_second"].type == Value::Type::NUMBER, timed);
             EXPECT_EQ(r["eta"].type == Value::Type::NUMBER, timed);
         } else if (type == "output") {
-            // The output index: every file written, by step, time, writer and reason
+            // The output index: every file completely written, by step, time, writer and reason, with its size and hash
             EXPECT_EQ(key_set(r), (std::set<std::string>{"type", "step", "t", "kind", "path", "reason", "writer",
-                                                         "run_id"}));
+                                                         "run_id", "complete", "bytes", "files"}));
             EXPECT_EQ(r["run_id"].string, provenance::run_id());
             EXPECT_EQ(r["reason"].string, r["step"].number == 0 ? "start" : "interval") << r["path"].string;
             EXPECT_TRUE(std::filesystem::exists(r["path"].string)) << r["path"].string;
+            EXPECT_TRUE(r["complete"].boolean);
+            ASSERT_FALSE(r["files"].array.empty()) << r["path"].string;
+            double bytes = 0.0;
+            for (const Value & f : r["files"].array) {
+                const std::string file = f["path"].string;
+                EXPECT_FALSE(std::filesystem::exists(file + ".partial")) << file;
+                EXPECT_EQ(f["bytes"].number, double(std::filesystem::file_size(file))) << file;
+                EXPECT_EQ(f["sha256"].string, provenance::sha256_file(file)) << file;
+                bytes += f["bytes"].number;
+            }
+            EXPECT_EQ(r["bytes"].number, bytes);
             outputs.insert({r["kind"].string, r["step"].number});
         }
     }
@@ -367,7 +390,8 @@ TEST(RunLogTest, ResumedRunsAppendAndMarkRewinds) {
         if (r["type"].string == "start") {
             starts.push_back(r);
             steps.emplace_back();
-        } else if (r.has("step")) {
+        } else if (r.has("step") && r["type"].string != "output") {
+            // Output records follow the completion of their write, not the step
             ASSERT_FALSE(steps.empty());
             steps.back().push_back(r["step"].number);
         }

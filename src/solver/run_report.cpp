@@ -179,6 +179,12 @@ void summary_section(report::Text & text, const RunSummary & s) {
         rows.push_back({Status::NONE, {"written", value, bytes_unit, "",
                                        "in " + format("%.3g", s.writing) + " s of writing" +
                                            (s.background ? ", in the background" : "")}});
+        // Waits under a millisecond are only the queue's locking
+        rows.push_back({Status::NONE, {"hashed for the run log", format("%.3g", s.hashing), "s", "",
+                                       "off the main thread" +
+                                           (s.hash_queue < 1e-3 ? std::string()
+                                                                : ", the run waiting " + format("%.3g", s.hash_queue) +
+                                                                      " s for it")}});
     }
     if (!rows.empty()) {
         text.blank();
