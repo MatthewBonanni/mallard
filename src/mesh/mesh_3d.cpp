@@ -94,7 +94,7 @@ void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
     }
 }
 
-CellGeometry cell_geometry(const std::vector<std::array<rtype, N_DIM>> & cell_nodes) {
+CellGeometry cell_geometry(const std::vector<std::array<rtype, N_DIM>> & cell_nodes, bool axisymmetric) {
     CellGeometry g{};
     if constexpr (N_DIM == 2) {
         // Counterclockwise, as Mesh::init_from_connectivity stores it
@@ -136,7 +136,15 @@ CellGeometry cell_geometry(const std::vector<std::array<rtype, N_DIM>> & cell_no
         }
         g.centroid[0] = x0 + Cx / (6.0_r * A);
         g.centroid[1] = y0 + Cy / (6.0_r * A);
+        g.measure = g.volume;
+        if (axisymmetric) {
+            const AxisymmetricCell a = axisymmetric_cell(nodes);
+            g.measure = rtype(a.measure);
+            g.centroid[0] = rtype(a.centroid[0]);
+            g.centroid[1] = rtype(a.centroid[1]);
+        }
     } else {
+        if (axisymmetric) throw std::runtime_error("Axisymmetric flows need the 2D solver.");
         thread_local std::vector<Vec3> p;
         thread_local std::vector<std::array<Vec3, 4>> tets;
         p.resize(cell_nodes.size());
@@ -163,6 +171,7 @@ CellGeometry cell_geometry(const std::vector<std::array<rtype, N_DIM>> & cell_no
             for (size_t k = 0; k < p.size(); k++) p[k] = q[r[k]];
         }
         g.volume = static_cast<rtype>(V);
+        g.measure = g.volume;
         FOR_I_DIM g.centroid[i] = static_cast<rtype>(x[i] / V);
     }
     return g;

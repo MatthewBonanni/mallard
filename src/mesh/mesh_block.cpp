@@ -496,7 +496,7 @@ MeshBlock read_mesh_block(const Input & input) {
     return cartesian_2d_block(Nx, Ny, Lx, Ly, type, comm::rank(), comm::size(), mesh_stretching(input));
 }
 
-std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block) {
+std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axisymmetric) {
     const size_t p = static_cast<size_t>(comm::size());
     const auto local = [&](uint64_t g) { return g >= block.first_node && g - block.first_node < block.n_nodes(); };
     // Nodes of other ranks' blocks, sorted, and their coordinates
@@ -545,7 +545,7 @@ std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block) {
                 FOR_I_DIM y[i] = static_cast<rtype>(x[i]);
                 nodes.push_back(y);
             }
-            out[c] = cell_geometry(nodes);
+            out[c] = cell_geometry(nodes, axisymmetric);
         });
     return out;
 }

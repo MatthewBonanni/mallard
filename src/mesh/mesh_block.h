@@ -143,9 +143,9 @@ MeshBlock read_mesh_block(const Input & input);
 /**
  * @brief Volume and centroid of each of the block's cells, as Mesh computes
  *        them, without building faces (collective: nodes of other ranks'
- *        blocks are fetched). Straight-sided cells.
+ *        blocks are fetched). Straight-sided cells; see cell_geometry.
  */
-std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block);
+std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axisymmetric = false);
 
 /**
  * @brief This rank's block of a mesh file other than HDF5 (see

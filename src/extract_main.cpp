@@ -890,7 +890,7 @@ Plan prepare_average(Input & input, const cli::Args & args, const std::string & 
 /** @brief Each owned cell's weight in averages over homogeneous directions: its volume, times its fraction of --region. */
 std::vector<double> cell_weights(const cli::Args & args, const Input & input, const Mesh & mesh) {
     std::vector<double> w(mesh.n_owned());
-    for (uint32_t c = 0; c < mesh.n_owned(); c++) w[c] = double(mesh.h_cell_volume(c));
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) w[c] = double(mesh.h_cell_measure(c));
     if (!args.has("--region")) return w;
     region::Regions regions(input, mesh);
     const Input value = region_value(args.value_or("--region", ""));
@@ -992,6 +992,7 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
     for (const char * key : {"mesh", "periodic", "regions"}) {
         if (input.contains(key)) setup.as_table()[key] = input.at(key);
     }
+    const bool axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
     // Centers and weights of the owned cells, and their global ids; faces only for --region and curved cells
     std::vector<uint64_t> global;
     std::vector<std::array<double, N_DIM>> centers;
@@ -1008,18 +1009,19 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
         const bool curved = comm::allreduce(uint32_t(!block.face_high_order_offsets.empty()), comm::Op::MAX) > 0;
         if (args.has("--region") || curved) {
             const std::shared_ptr<Mesh> mesh = remap::source_mesh(setup, 1);
+            if (axisymmetric) mesh->make_axisymmetric();
             n_global = mesh->n_global_cells > 0 ? mesh->n_global_cells : mesh->n_cells;
             for (uint32_t i = 0; i < mesh->n_owned(); i++) global.push_back(mesh->h_global_cell(i));
             centers = cell_centers(*mesh);
             weights = cell_weights(args, input, *mesh);
         } else {
             n_global = comm::allreduce(block.n_cells(), comm::Op::SUM);
-            for (const CellGeometry & g : block_cell_geometry(block)) {
+            for (const CellGeometry & g : block_cell_geometry(block, axisymmetric)) {
                 global.push_back(block.first_cell + global.size());
                 std::array<double, N_DIM> x;
                 FOR_I_DIM x[i] = double(g.centroid[i]);
                 centers.push_back(x);
-                weights.push_back(double(g.volume));
+                weights.push_back(double(g.measure));
             }
         }
     }

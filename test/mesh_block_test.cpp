@@ -170,31 +170,37 @@ TEST(MeshBlockTest, GeneratedBlocksNumberCellsAndNodesAsTheSerialMesh) {
 
 /**
  * @brief mallard post average weighs the cells of a block by their volumes
- *        and places them at their centroids without building faces; these
- *        are bit for bit the mesh's.
+ *        (of revolution, per radian, in an axisymmetric run) and places them
+ *        at their centroids without building faces; these are bit for bit
+ *        the mesh's, whatever the orientation of the block's cells.
  */
 TEST(MeshBlockTest, CellGeometryOfABlockIsTheMeshs) {
-    std::vector<std::string> meshes;
+    std::vector<std::pair<std::string, bool>> meshes;
     for (const std::string & type : generated_types()) {
-        meshes.push_back("[mesh]\ntype = \"" + type + "\"\nNx = 6\nNy = 5\nNz = 3\nLx = 1.5\nLy = 1.0\nLz = 0.7\n" +
-                         (N_DIM == 2 ? "stretching = [0.8, 1.7]\n" : "stretching = [0.8, 1.7, 0.0]\n"));
+        const std::string toml = "[mesh]\ntype = \"" + type + "\"\nNx = 6\nNy = 5\nNz = 3\nLx = 1.5\nLy = 1.0\nLz = 0.7\n" +
+                                 (N_DIM == 2 ? "stretching = [0.8, 1.7]\n" : "stretching = [0.8, 1.7, 0.0]\n");
+        meshes.emplace_back(toml, false);
+        if (N_DIM == 2 && type != "wedge") meshes.emplace_back(toml, true);
     }
     const std::string file = N_DIM == 2 ? write_temp_shared("block_geometry.msh", jittered_mixed_mesh(6))
                                         : write_temp_shared("block_geometry.msh", jittered_tetrahedral_mesh(3));
-    meshes.push_back("[mesh]\nfilename = \"" + file + "\"\n");
-    for (const std::string & toml : meshes) {
-        SCOPED_TRACE(toml);
+    meshes.emplace_back("[mesh]\nfilename = \"" + file + "\"\n", false);
+    if (N_DIM == 2) meshes.emplace_back("[mesh]\nfilename = \"" + file + "\"\n", true);
+    for (const auto & [toml, axisymmetric] : meshes) {
+        SCOPED_TRACE(toml + (axisymmetric ? "axisymmetric" : ""));
         const Input input = parse_toml(toml);
         Mesh serial;
         serial.init(input);
+        if (axisymmetric) serial.make_axisymmetric();
         std::vector<uint32_t> local(serial.n_cells);
         for (uint32_t c = 0; c < serial.n_cells; c++) local[serial.h_global_cell(c)] = c;
         const MeshBlock block = read_mesh_block(input);
-        const std::vector<CellGeometry> geometry = block_cell_geometry(block);
+        const std::vector<CellGeometry> geometry = block_cell_geometry(block, axisymmetric);
         ASSERT_EQ(geometry.size(), block.n_cells());
         for (uint64_t c = 0; c < block.n_cells(); c++) {
             const uint32_t s = local[block.first_cell + c];
             ASSERT_EQ(geometry[c].volume, serial.h_cell_volume(s)) << "cell " << block.first_cell + c;
+            ASSERT_EQ(geometry[c].measure, serial.h_cell_measure(s)) << "cell " << block.first_cell + c;
             FOR_I_DIM ASSERT_EQ(geometry[c].centroid[i], serial.h_cell_coords(s, i)) << "cell " << block.first_cell + c;
         }
     }

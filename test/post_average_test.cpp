@@ -48,16 +48,23 @@ const char * const PRODUCTS = "U_X*U_X,U_X*U_Y,RHO*U_X,P*MACH";
  * @brief A periodic box with [statistics] from t = 1e-2 every 2 steps, writing restart files and
  *        a VTU snapshot of the averages at those steps; the run of it, in dir.
  */
-void run_case(const std::string & dir) {
+void run_case(const std::string & dir, bool axisymmetric = false) {
     std::ostringstream s;
     s << "[run]\nn_steps = 6\ndt = 1.0e-2\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 8\nLx = 1.0\nLy = 1.0\n";
     if (N_DIM == 3) s << "Nz = 4\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
-    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n";
+    if (axisymmetric) {
+        s << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n";
+    } else {
+        s << "[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
+    }
+    s
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * sin(2 * pi * x) * sin(2 * pi * y)\"\np = \"1.0\"\n"
       << "u = " << vector_of("\"0.3 + 0.1 * sin(2 * pi * y)\"", "\"-0.1 + 0.1 * sin(2 * pi * x)\"", "\"0.0\"")
       << "\n[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
       << "[numerics.face_reconstruction]\ntype = \"TENO\"\n"
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << (axisymmetric ? "axisymmetric = true\n" : "")
       << "[statistics]\nfields = [\"RHO\", \"U_X\", \"U_Y\", \"P\", \"MACH\"]\n"
       << "products = [\"U_X*U_X\", \"U_X*U_Y\", \"RHO*U_X\", \"P*MACH\"]\nt_start = 1.0e-2\ninterval = 2\n"
       << "[output]\ncheck_interval = 1000000\nrun_log = \"\"\n"
@@ -257,6 +264,32 @@ TEST(PostAverageTest, HomogeneousAveragesOfStatesAndOfTheRunsStatisticsAgree) {
     }
     EXPECT_NEAR(profile_mean, domain_mean, 1e-14);
     EXPECT_NEAR(profile_second, domain_second, 1e-14);
+}
+
+TEST(PostAverageTest, AxisymmetricProfilesOfStatesAndOfTheRunsStatisticsAgree) {
+    if constexpr (N_DIM == 3) GTEST_SKIP() << "axisymmetric runs are 2D";
+    if (!have_hdf5()) GTEST_SKIP() << "--statistics reads VTKHDF snapshots, which need HDF5";
+    const std::string run = fresh_dir("axisymmetric_run");
+    run_case(run, true);
+    // Over x: rows at the centroids of the volumes of revolution; over y (the radius): weighted by those volumes
+    for (const char * direction : {"x", "y"}) {
+        SCOPED_TRACE(direction);
+        const std::string states = fresh_dir(std::string("axisymmetric_states_") + direction);
+        std::vector<std::string> words = restarts(run);
+        words.insert(words.end(), {"--fields", FIELDS, "--products", PRODUCTS, "--t-start", "1.0e-2", "--homogeneous",
+                                   direction, "-o", states});
+        ASSERT_EQ(average(words), 0);
+        const std::string stored = fresh_dir(std::string("axisymmetric_stored_") + direction);
+        ASSERT_EQ(average({stats_index(run), "--latest", "--statistics", "--homogeneous", direction, "-o", stored}), 0);
+        if (!comm::is_root()) continue;
+        const auto a = read_csv(states + "/average.csv"), b = read_csv(stored + "/average.csv");
+        const char * kept = direction[0] == 'x' ? "y" : "x";
+        ASSERT_EQ(a.at(kept).size(), 8u);
+        for (const char * name : {kept, "MEAN_RHO", "MEAN_U_X", "COV_U_X_U_X", "COV_P_MACH", "RMS_U_X"}) {
+            ASSERT_EQ(b.at(name).size(), a.at(name).size()) << name;
+            for (size_t r = 0; r < a.at(name).size(); r++) EXPECT_EQ(a.at(name)[r], b.at(name)[r]) << name << " row " << r;
+        }
+    }
 }
 
 TEST(PostAverageTest, ChoicesItCannotAverageAreUsageErrors) {

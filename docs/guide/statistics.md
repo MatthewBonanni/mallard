@@ -101,8 +101,9 @@ default.
 exactly, with no triple correlation left out. `RHO` is added to the fields.
 
 **Homogeneous directions.** `--homogeneous x,z` averages the per-cell
-results over x and z as functions of y, weighted by cell volume, on any mesh:
-cells whose centers agree in the kept directions (to `--rtol` of the mesh's
+results over x and z as functions of y, weighted by cell volume (per radian
+in an axisymmetric run, centers those of that volume), on any mesh: cells
+whose centers agree in the kept directions (to `--rtol` of the mesh's
 extent, 1e-6) form a row. A covariance becomes that over time and the
 averaged directions together,
 

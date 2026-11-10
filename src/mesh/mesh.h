@@ -142,15 +142,29 @@ void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
 
 struct CellGeometry {
     rtype volume;
-    std::array<rtype, N_DIM> centroid;
+    rtype measure;  // the volume, or per radian int y dA of an axisymmetric cell
+    std::array<rtype, N_DIM> centroid;  // of the measure
 };
 
 /**
- * @brief Volume (area in 2D) and centroid of a straight-sided cell of these
- *        node coordinates (Gmsh/VTK order, either orientation), bit for bit
- *        as the mesh computes them.
+ * @brief Volume (area in 2D), measure and centroid of a straight-sided cell
+ *        of these node coordinates (Gmsh/VTK order, either orientation), bit
+ *        for bit as the mesh computes them (after make_axisymmetric when
+ *        axisymmetric).
  */
-CellGeometry cell_geometry(const std::vector<std::array<rtype, N_DIM>> & cell_nodes);
+CellGeometry cell_geometry(const std::vector<std::array<rtype, N_DIM>> & cell_nodes, bool axisymmetric = false);
+
+struct AxisymmetricCell {
+    double measure;
+    std::array<double, 2> centroid;
+};
+
+/**
+ * @brief Per radian volume int y dA of a 2D cell about the x axis (y the
+ *        radius) and the centroid of that volume, from its nodes as the mesh
+ *        stores them.
+ */
+AxisymmetricCell axisymmetric_cell(const std::vector<std::array<rtype, N_DIM>> & nodes);
 
 
 struct MeshBlock;
