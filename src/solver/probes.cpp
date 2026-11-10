@@ -1894,7 +1894,8 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
             } else {
                 p.reconstruction = point_reconstruction(fields.reconstruction);
                 const snapshot_block::Block block =
-                    p.snapshot_of(step, t, p.snapshot ? snapshot_block::current_reason(force) : snapshot_block::reason::INTERVAL);
+                    p.snapshot_of(step, t, p.snapshot ? snapshot_block::current_reason(force) : snapshot_block::reason::INTERVAL,
+                                  average_interval);
                 if (p.format == Format::VTKHDF) {
                     p.write_vtkhdf(block, nodes);
                 } else {
@@ -2151,18 +2152,37 @@ void Probes::Probe::write_hdf5([[maybe_unused]] uint64_t step, [[maybe_unused]] 
 #endif
 }
 
-snapshot_block::Block Probes::Probe::snapshot_of(uint64_t step, rtype t, const std::string & reason) const {
+snapshot_block::Block Probes::Probe::snapshot_of(uint64_t step, rtype t, const std::string & reason,
+                                                 uint64_t sampled_every) const {
     std::vector<snapshot_block::Field> list;
     bool points = false;
+    const double window_start = average_t_last - average_weight;
     for (size_t i = 0; i < variables.size(); i++) {
         const FieldDescription d = field_units::describe(variables[i]);
-        list.push_back({variables[i], d.units(), d.long_name, "float64", 0.0, value_kinds[i]});
+        list.push_back({variables[i], d.units(), d.long_name, "float64", 0.0, value_kinds[i], {}});
         points = points || value_kinds[i] == snapshot_block::value::POINT_VALUE;
+        if (average) {
+            snapshot_block::Average & a = list.back().average;
+            a.kind = "reynolds";
+            a.of = {variables[i].substr(5)};
+            a.weighting = "time";
+            a.start = window_start;
+            a.end = average_t_last;
+            a.samples = static_cast<int64_t>(average_samples);
+            a.interval = static_cast<int64_t>(sampled_every);
+        }
     }
     snapshot_block::Block block = snapshot_block::make(step, double(t), reason,
                                                        format == Format::VTKHDF ? "vtkhdf" : "vtp",
                                                        file_format::PROBE_OUTPUT.version, std::move(list));
     if (points) block.reconstruction = reconstruction;
+    if (average) {
+        // The probe's own averages, not the [statistics] window
+        block.averaged = true;
+        block.average_start = window_start;
+        block.average_end = average_t_last;
+        block.samples = static_cast<int64_t>(average_samples);
+    }
     return block;
 }
 

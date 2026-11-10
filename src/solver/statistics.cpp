@@ -174,6 +174,29 @@ std::vector<std::string> Statistics::variables() const {
     return names;
 }
 
+std::vector<std::pair<std::string, snapshot_block::Average>> Statistics::field_averages() const {
+    const std::vector<std::string> names = variables();
+    std::vector<std::pair<std::string, snapshot_block::Average>> out;
+    auto average = [&](const char * kind, std::vector<std::string> of) {
+        snapshot_block::Average a;
+        a.kind = kind;
+        a.of = std::move(of);
+        a.weighting = "time";
+        a.start = average_start();
+        a.end = average_end();
+        a.samples = static_cast<int64_t>(n_samples);
+        a.interval = static_cast<int64_t>(interval);
+        return a;
+    };
+    for (size_t i = 0; i < fields.size(); i++) out.emplace_back(names[i], average("reynolds", {fields[i]}));
+    for (size_t p = 0; p < products.size(); p++) {
+        const auto [i, j] = products[p];
+        out.emplace_back(names[fields.size() + p], average("covariance", {fields[i], fields[j]}));
+    }
+    for (auto & entry : phase.field_averages()) out.push_back(std::move(entry));
+    return out;
+}
+
 void Statistics::register_data(std::vector<Data> & data) const {
     const std::vector<std::string> names = variables();
     for (size_t i = 0; i < fields.size(); i++) data.emplace_back(names[i], Kokkos::subview(h_mean, Kokkos::ALL(), i));
@@ -390,6 +413,37 @@ std::vector<std::string> PhaseAverage::variables() const {
         for (const auto & f : fields) names.push_back("PHASE_" + index + "_" + f);
     }
     return names;
+}
+
+std::vector<std::pair<std::string, snapshot_block::Average>> PhaseAverage::field_averages() const {
+    const std::vector<std::string> names = variables();
+    double total = 0.0;
+    for (const double w : weight) total += w;
+    std::vector<std::pair<std::string, snapshot_block::Average>> out;
+    for (uint32_t b = 0; b < bins; b++) {
+        for (size_t f = 0; f < fields.size(); f++) {
+            snapshot_block::Average a;
+            a.kind = "phase";
+            a.of = {fields[f]};
+            a.weighting = "time";
+            if (n_samples > 0) {
+                a.start = double(t_last) - total;
+                a.end = double(t_last);
+            }
+            a.samples = static_cast<int64_t>(n_samples);
+            a.interval = static_cast<int64_t>(interval);
+            a.bin = b;
+            a.bins = bins;
+            a.bin_weight = b < weight.size() ? weight[b] : 0.0;
+            if (trigger_variable.empty()) {
+                a.period = period;
+            } else {
+                a.trigger = trigger_variable;
+            }
+            out.emplace_back(names[b * fields.size() + f], std::move(a));
+        }
+    }
+    return out;
 }
 
 void PhaseAverage::register_data(std::vector<Data> & data) const {

@@ -36,6 +36,8 @@ Write them with `fields = ["MEAN_*", "COV_*"]`, sample them with
 homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of a
 channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)).
+Each snapshot records what each of these fields averages, over which window
+([Time-averaged fields](output.md#time-averaged-fields)).
 
 **Favre averages** are not computed directly. Favre means follow exactly from
 Reynolds statistics that include `RHO`: with `fields = ["RHO", "U_X", "U_Y", ...]`
