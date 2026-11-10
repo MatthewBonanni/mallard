@@ -771,6 +771,8 @@ void Solver::init_boundaries() {
     std::vector<double> profiled_flux;
     // Faces of each inlet_state with nscbc on this rank, by input boundary
     std::vector<std::pair<size_t, std::vector<uint32_t>>> inlets;
+    // Mass-flow inlets whose profile depends on t, by input boundary
+    std::vector<std::pair<size_t, MassFlowProfile>> mass_flow_profiles;
     boundary_fields.assign(input_boundaries.size(), nullptr);
     boundary_composition.assign(input_boundaries.size(), nullptr);
     field_faces.clear();
@@ -929,7 +931,9 @@ void Solver::init_boundaries() {
                                            : "Remove this entry, or check the zone in the mesh file",
                               .docs = "docs/guide/boundary_conditions.md"});
         }
-        const std::vector<double> flux = mass_flow_inlet_fluxes(bound, dirichlet.faces, bcs.back());
+        MassFlowProfile timed_profile;
+        const std::vector<double> flux = mass_flow_inlet_fluxes(bound, dirichlet.faces, bcs.back(), timed_profile);
+        if (timed_profile.shape) mass_flow_profiles.emplace_back(i_bc, std::move(timed_profile));
         for (size_t k = 0; k < dirichlet.faces.size(); k++) {
             if (!profiled && flux.empty()) break;
             profiled_faces.push_back({static_cast<uint32_t>(i_bc), dirichlet.faces[k]});
@@ -969,6 +973,7 @@ void Solver::init_boundaries() {
         if (where) detail("where " + find_value<std::string>(bound, "where"));
         if (composition) detail("varying composition");
         if (fields->varies()) detail(fields->depends_on_time() ? "time dependent" : "varying along it");
+        if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("mass flow of t");
         if (bcs.back().modeled) detail(wall_model_spec.summary());
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }
@@ -1057,6 +1062,18 @@ void Solver::init_boundaries() {
         if (outlet.fields->depends_on_time()) {
             timed_fields.add(static_cast<uint32_t>(outlet.i_bc), Point{}, Point{}, outlet.fields, nullptr, false);
         }
+    }
+    for (const auto & [base, profile] : mass_flow_profiles) {
+        std::vector<uint32_t> own;
+        std::vector<Point> x;
+        for (const auto & [b, i_face, i_bc] : field_faces) {
+            if (b != base) continue;
+            own.push_back(i_bc);
+            x.emplace_back();
+            FOR_I_DIM x.back()[i] = static_cast<double>(mesh->h_face_coords(i_face, i));
+        }
+        // Only ranks with faces of the inlet integrate its profile
+        if (!own.empty()) timed_fields.add(profile, own, x);
     }
     if (!timed_fields.empty()) timed_fields.finish();
     dirichlet_states = DirichletStates();

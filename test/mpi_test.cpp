@@ -366,6 +366,14 @@ TEST(MPITest, InletsMatchSerial) {
                                         "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n"),
                                     25));
+    // mdot and profile of t: every rank integrates the profile over all the inlet's faces at every stage
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"inlet_mass_flow\"\nmdot = \"0.5 * (1 + 0.3 * sin(60 * t))\"\n"
+                                        "profile = \"1 + y * (1 + sin(40 * t))\"\n"
+                                        "T = 1.0\n",
+                                        "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n"),
+                                    25));
 }
 
 TEST(MPITest, LargeEddySimulationMatchesSerial) {
