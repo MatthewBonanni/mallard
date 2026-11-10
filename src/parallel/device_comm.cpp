@@ -11,6 +11,7 @@
 
 #include "device_comm.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -96,6 +97,68 @@ void allgather_device(const Kokkos::View<T *> & values, const Kokkos::View<T *> 
 }
 
 template void allgather_device<double>(const Kokkos::View<double *> &, const Kokkos::View<double *> &, bool);
+
+template <typename T>
+void alltoallv_device(const Kokkos::View<T *> & send, const std::vector<uint64_t> & send_counts,
+                      const Kokkos::View<T *> & recv, const std::vector<uint64_t> & recv_counts, const bool use_nccl) {
+    if (use_nccl) {
+        std::vector<DeviceMessage> out, in;
+        uint64_t s = 0, r = 0;
+        for (size_t q = 0; q < send_counts.size(); q++) {
+            if (send_counts[q] > 0) out.push_back({static_cast<int>(q), send.data() + s, send_counts[q] * sizeof(T)});
+            if (recv_counts[q] > 0) in.push_back({static_cast<int>(q), recv.data() + r, recv_counts[q] * sizeof(T)});
+            s += send_counts[q];
+            r += recv_counts[q];
+        }
+        send_receive_device(out, in);
+        return;
+    }
+    const auto h_send = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), send);
+    std::vector<std::vector<T>> out(send_counts.size());
+    uint64_t at = 0;
+    for (size_t q = 0; q < out.size(); q++) {
+        out[q].assign(h_send.data() + at, h_send.data() + at + send_counts[q]);
+        at += send_counts[q];
+    }
+    const std::vector<std::vector<T>> in = alltoallv(out);
+    const auto h_recv = Kokkos::create_mirror_view(recv);
+    at = 0;
+    for (size_t q = 0; q < in.size(); q++) {
+        if (in[q].size() != recv_counts[q]) throw std::logic_error("comm::alltoallv_device: unexpected message size");
+        std::copy(in[q].begin(), in[q].end(), h_recv.data() + at);
+        at += recv_counts[q];
+    }
+    Kokkos::deep_copy(recv, h_recv);
+}
+
+template void alltoallv_device<double>(const Kokkos::View<double *> &, const std::vector<uint64_t> &,
+                                       const Kokkos::View<double *> &, const std::vector<uint64_t> &, bool);
+template void alltoallv_device<float>(const Kokkos::View<float *> &, const std::vector<uint64_t> &,
+                                      const Kokkos::View<float *> &, const std::vector<uint64_t> &, bool);
+
+template <typename T>
+void allgatherv_device(const Kokkos::View<T *> & values, const Kokkos::View<T *> & all,
+                       const std::vector<uint64_t> & counts, const bool use_nccl) {
+    if (use_nccl) {
+        std::vector<DeviceMessage> out, in;
+        const size_t me = static_cast<size_t>(rank());
+        uint64_t at = 0;
+        for (size_t q = 0; q < counts.size(); q++) {
+            if (counts[me] > 0) out.push_back({static_cast<int>(q), values.data(), counts[me] * sizeof(T)});
+            if (counts[q] > 0) in.push_back({static_cast<int>(q), all.data() + at, counts[q] * sizeof(T)});
+            at += counts[q];
+        }
+        send_receive_device(out, in);
+        return;
+    }
+    const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
+    const std::vector<T> gathered = allgatherv(std::vector<T>(host.data(), host.data() + host.extent(0)));
+    Kokkos::deep_copy(Kokkos::subview(all, Kokkos::make_pair(size_t(0), gathered.size())),
+                      Kokkos::View<const T *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(gathered.data(), gathered.size()));
+}
+
+template void allgatherv_device<double>(const Kokkos::View<double *> &, const Kokkos::View<double *> &,
+                                        const std::vector<uint64_t> &, bool);
 
 void send_receive_device([[maybe_unused]] const std::vector<DeviceMessage> & sends,
                          [[maybe_unused]] const std::vector<DeviceMessage> & receives) {
