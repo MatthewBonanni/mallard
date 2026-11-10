@@ -56,7 +56,9 @@ named `TABLE:COLUMN` (for example `integrals:kinetic_energy` or
 `forces_cylinder:F_x`). By default each run's last value is taken. That's right for
 a steady case even when the runs stopped at different times; the report notes when
 they did. For an unsteady case, pick one time with `--time T` or average over a
-window with `--average T0:T1`.
+window with `--average T0:T1`. A row is at `T` when its time is within $10^{-9}$ of
+it, relative, and in the window when it is within $10^{-12}$ of its ends; for runs
+in single precision, both are $1.2 \times 10^{-5}$ (see below).
 
 ## The method
 
@@ -113,8 +115,9 @@ The ratio $R = \varepsilon_{21}/\varepsilon_{32}$ classifies the quantity:
 
 Changes smaller than $10^{-10}$ times the largest value count as round-off.
 When any of the runs was made in single precision (`build.precision` in its run
-record), this threshold and the $10^{-12}$ of `zero` are both 100 machine epsilons
-of single precision instead, $1.2 \times 10^{-5}$.
+record), this threshold, the $10^{-12}$ of `zero` and the tolerances of `--time` and
+`--average` are all 100 machine epsilons of single precision instead,
+$1.2 \times 10^{-5}$.
 A converging quantity also gets a warning when its order is more than 1 away from
 the design order, or when more than three runs give orders that are not yet
 steady. The design order is that of the runs' reconstruction (`FO` 1, `MUSCL` 2,

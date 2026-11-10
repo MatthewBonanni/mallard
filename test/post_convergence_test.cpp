@@ -301,3 +301,74 @@ TEST(PostConvergenceTest, MisuseIsAUsageErrorAndOneRunTwiceAnError) {
     EXPECT_EQ(twice.status, 1);
     EXPECT_NE(twice.err.find("same"), std::string::npos) << twice.err;
 }
+
+namespace {
+
+void replace_file(const std::string & file, const std::string & text) {
+    std::ofstream(file, std::ios::trunc) << text;
+}
+
+std::string read_file(const std::string & file) {
+    std::ifstream in(file);
+    std::stringstream s;
+    s << in.rdbuf();
+    return s.str();
+}
+
+std::string single_precision(std::string text) {
+    const std::string from = "\"precision\":\"double\"", to = "\"precision\":\"single\"";
+    for (size_t at = text.find(from); at != std::string::npos; at = text.find(from, at)) text.replace(at, from.size(), to);
+    return text;
+}
+
+/** @brief A run as a single-precision build records it: its build, t_stop in float, and round-off of that size. */
+void as_single_precision(const std::string & dir, const double kinetic_noise, const double enstrophy) {
+    replace_file(dir + "/mallard.jsonl", single_precision(read_file(dir + "/mallard.jsonl")));
+    std::vector<std::string> lines;
+    std::istringstream in(single_precision(read_file(dir + "/integrals.csv")));
+    for (std::string line; std::getline(in, line);) lines.push_back(line);
+    std::vector<std::string> header, last;
+    for (const std::string & line : lines) {
+        if (line.empty() || line[0] == '#') continue;
+        (header.empty() ? header : last) = [&] {
+            std::vector<std::string> cells;
+            std::stringstream s(line);
+            for (std::string c; std::getline(s, c, ',');) cells.push_back(c);
+            return cells;
+        }();
+    }
+    for (size_t i = 0; i < header.size(); i++) {
+        std::ostringstream v;
+        v.precision(12);
+        if (header[i] == "t") v << static_cast<double>(static_cast<float>(T_STOP));
+        if (header[i] == "kinetic_energy") v << std::stod(last[i]) * (1.0 + kinetic_noise);
+        if (header[i] == "enstrophy") v << enstrophy;
+        if (!v.str().empty()) last[i] = v.str();
+    }
+    std::string row;
+    for (const std::string & c : last) row += (row.empty() ? "" : ",") + c;
+    lines.back() = row;
+    std::string text;
+    for (const std::string & line : lines) text += line + "\n";
+    replace_file(dir + "/integrals.csv", text);
+}
+
+} // namespace
+
+TEST(PostConvergenceTest, SinglePrecisionRunsGetSinglePrecisionRoundOff) {
+    if (comm::size() > 1) GTEST_SKIP() << "runs on one rank";
+    const std::string runs[] = {wave_run(12), wave_run(24), wave_run(48)};
+    // Changes that alternate in sign and a vanishing column that grows: oscillatory and divergent in double
+    as_single_precision(runs[0], 2e-7, 1e-13);
+    as_single_precision(runs[1], -2e-7, 1e-12);
+    as_single_precision(runs[2], 1e-7, 6e-12);
+    const Result r = convergence_cmd({runs[0], runs[1], runs[2], "--time", "0.05", "--quantity",
+                                      "kinetic_energy,enstrophy", "--format", "json"});
+    ASSERT_EQ(r.status, 0) << r.out << r.err;
+    const json::Value v = json::parse(r.out);
+    EXPECT_EQ(v["status"].string, "ok") << r.out;
+    ASSERT_EQ(v["quantities"].array.size(), 2u) << r.out;
+    for (const json::Value & q : v["quantities"].array) {
+        EXPECT_EQ(q["behavior"].string, q["name"].string == "integrals:enstrophy" ? "zero" : "unchanged") << r.out;
+    }
+}

@@ -54,7 +54,7 @@ constexpr uint32_t EXACT_DEGREE = 6;
 /** @brief A quantity at most this fraction of its table's largest column on every run is zero to round-off. */
 constexpr double ZERO = 1e-12;
 
-/** @brief Round-off of runs in single precision: this many machine epsilons, where it exceeds ZERO or ROUND_OFF. */
+/** @brief Round-off of runs in single precision: this many machine epsilons, where it exceeds the double thresholds. */
 constexpr double SINGLE_EPSILONS = 100.0;
 
 /** @brief Observed orders further than this from the design order are a warning. */
@@ -93,8 +93,8 @@ std::string order_text(const double p) { return std::isfinite(p) ? format("%.2f"
 std::string short_number(const double x) { return format("%g", x); }
 std::string percent(const double x) { return std::isfinite(x) ? format("%.3g%%", 100.0 * x) : "-"; }
 
-bool same_time(const double a, const double b) {
-    return a == b || std::abs(a - b) <= 1e-9 * std::max(std::abs(a), std::abs(b));
+bool same_time(const double a, const double b, const double tolerance) {
+    return a == b || std::abs(a - b) <= tolerance * std::max(std::abs(a), std::abs(b));
 }
 
 const json::Value * at(const json::Value & v, std::initializer_list<const char *> path) {
@@ -307,6 +307,8 @@ std::vector<std::string> differing_tables(const std::vector<Run> & runs) {
 struct Selection {
     enum class Kind { final, time, average } kind = Kind::final;
     double t = 0.0, t0 = 0.0, t1 = 0.0;
+    double same = 1e-9;     ///< times this fraction apart are one time
+    double window = 1e-12;  ///< rows this fraction outside the window of an average are in it
 };
 
 struct Value {
@@ -349,11 +351,11 @@ void table_values(const Run & run, const output::Contents & c, const std::string
         chosen = {rows.size() - 1};
     } else if (sel.kind == Selection::Kind::time) {
         for (size_t k = 0; k < rows.size(); k++) {
-            if (same_time(times[k], sel.t)) chosen = {k};
+            if (same_time(times[k], sel.t, sel.same)) chosen = {k};
         }
     } else {
         for (size_t k = 0; k < rows.size(); k++) {
-            if (times[k] >= sel.t0 - 1e-12 * std::abs(sel.t0) && times[k] <= sel.t1 + 1e-12 * std::abs(sel.t1)) {
+            if (times[k] >= sel.t0 - sel.window * std::abs(sel.t0) && times[k] <= sel.t1 + sel.window * std::abs(sel.t1)) {
                 chosen.push_back(k);
             }
         }
@@ -506,7 +508,7 @@ Norms exact_norms(const Run & run, const std::string & field_text, const Express
         for (size_t k = 0; k < c.snapshots.size(); k++) {
             const output::Snapshot & s = c.snapshots[k];
             if (!s.run_id.empty() && !run.run_ids.empty() && !run.run_ids.contains(s.run_id)) continue;
-            if (sel.kind == Selection::Kind::time && !same_time(s.t, sel.t)) continue;
+            if (sel.kind == Selection::Kind::time && !same_time(s.t, sel.t, sel.same)) continue;
             if (!found || s.t > best.snapshots[best_index].t) {
                 best = c;
                 best_index = k;
@@ -917,6 +919,8 @@ int convergence_study(const cli::Args & args) {
         const double epsilons = SINGLE_EPSILONS * static_cast<double>(std::numeric_limits<float>::epsilon());
         study.zero = std::max(ZERO, epsilons);
         study.round_off = std::max(convergence::ROUND_OFF, epsilons);
+        sel.same = std::max(sel.same, epsilons);
+        sel.window = std::max(sel.window, epsilons);
     }
     for (size_t i = 1; i < study.runs.size(); i++) {
         if (study.runs[i].h == study.runs[i - 1].h) {
@@ -1052,7 +1056,7 @@ int convergence_study(const cli::Args & args) {
                     hi = std::max(hi, t);
                 }
             }
-            if (!same_time(lo, hi)) {
+            if (!same_time(lo, hi, sel.same)) {
                 study.notes.push_back("the runs' last values are at different times (t = " + number(lo) + " to " +
                                       number(hi) + " s): right for a steady case; for an unsteady one, compare at "
                                       "one time with --time or over a window with --average");
