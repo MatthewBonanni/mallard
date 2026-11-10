@@ -276,10 +276,10 @@ TEST(SyntheticInflowTest, FluctuationsRideOnAMeanOfTime) {
     // generator on top of it: they are those of the steady inlet of the same
     // mean at t = 0 (and so the same convection velocity), whatever the mean
     const double A = 0.5, omega = 0.2, dt = 0.03;
-    const uint32_t n_t = 2000, n_window = 400;
+    const uint32_t n_t = N_DIM == 2 ? 2000 : 800, n_window = N_DIM == 2 ? 400 : 200;
     const std::string u_x = "\"1.0 + 0.5 * sin(0.2 * t)\"";
     auto mean_at = [&](double t) { return 1.0 + A * std::sin(omega * t); };
-    auto mesh = inlet_mesh(48, 4.0);
+    auto mesh = inlet_mesh(N_DIM == 2 ? 48 : 16, N_DIM == 2 ? 4.0 : 2.0);
     const std::vector<uint32_t> faces = zone_faces(*mesh, "left");
     const size_t n_f = faces.size();
     std::vector<int32_t> chars(n_f);
@@ -329,10 +329,10 @@ TEST(SyntheticInflowTest, FluctuationsRideOnAMeanOfTime) {
             // No net flux of the fluctuations: the inlet's area-averaged velocity is the mean exactly
             EXPECT_LT(max_area_error, precision_tol(1e-13, 1e-5));
         } else {
-            // The plane mode is noise about the mean (rms 0.04 here, 0.01 over 12 time scales of L / U_c): window
+            // The plane mode is noise about the mean (rms 0.04 in 2D, 0.01 over windows of 12 L / U_c): window
             // averages follow it
             EXPECT_GT(max_area_error, 1e-3);
-            EXPECT_LT(max_window_error, 0.04) << max_area_error;
+            EXPECT_LT(max_window_error, 0.04);
         }
     }
 }
