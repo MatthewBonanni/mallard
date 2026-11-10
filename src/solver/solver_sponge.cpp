@@ -155,7 +155,7 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
     }
     // Inlet targets at the end of the step, whose change enters the incoming wave
     if (!timed_inlets.empty()) {
-        if (!characteristic_time.is_allocated()) characteristic_time = Kokkos::View<rtype>("characteristic_time");
+        if (!characteristic_time.is_allocated()) characteristic_time = Kokkos::View<rtype>("char_target_time");
         const Kokkos::View<rtype> t_next = characteristic_time;
         if (recording_step) {
             const rtype * s = step_dt_device();
