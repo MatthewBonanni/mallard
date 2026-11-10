@@ -516,7 +516,7 @@ same arithmetic and are bitwise unchanged (restart files of sod, shu_osher,
 double_mach, riemann_2d, wedge, sedov_axisymmetric, viscous_shock_tube,
 poiseuille_pipe, reactive_shock_tube and flame_outflow identical to main's
 after 40 steps); SIMPLER runs are bitwise independent of the rank count
-and across restarts (`MPITest.GasMixtureMatchesSerial`,
+and across restarts (`MPITest.GasMixtureMatchesSerialWithAndWithoutStepGraphs`,
 `ThickenedFlameMatchesSerial`, `MixtureTest.RestartedRunMatchesUninterruptedRunExactly`).
 
 Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):

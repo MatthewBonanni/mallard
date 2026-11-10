@@ -391,7 +391,7 @@ class Solver {
         void add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu);
         void update_primitives_mixture();
         void init_temperature_seed();
-        rtype calc_dt_cfl1_mixture();
+        rtype calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device);
         /**
          * @brief Double flux: freeze each cell's [gamma, e0] from the true
          *        equation of state at the start of a step, and after the step
@@ -399,7 +399,7 @@ class Solver {
          *        frozen one gives.
          */
         void freeze_thermodynamics();
-        void reset_energy();
+        void reset_energy(const rtype * accepted = nullptr);
         /** @brief Over owned cells and all ranks: min rho, min p, -max Ma, min T, -max T, -max |sum Y - 1|. */
         std::array<rtype, 6> mixture_diagnostics();
         /**

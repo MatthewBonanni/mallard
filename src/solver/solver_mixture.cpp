@@ -108,6 +108,7 @@ struct ResetEnergyFunctor {
     Kokkos::View<rtype *[2]> frozen;
     Kokkos::View<rtype *> volume;      // repair audit: the change of rho E V and the changed cells, else empty
     Kokkos::View<uint8_t *> touched;
+    const rtype * accepted = nullptr;  // a step graph's controller verdict: a rejected step keeps its energy
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c, double & change, uint64_t & changed) const {
@@ -123,6 +124,7 @@ struct ResetEnergyFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
+        if (accepted && *accepted == 0.0_r) return;
         constexpr uint8_t E = N_DIM + 1;
         const double rho = static_cast<double>(U(c, 0));
         double rhou2 = 0.0;
@@ -435,8 +437,8 @@ void Solver::freeze_thermodynamics() {
                          FreezeFunctor{mixture, conservatives, species, T_seed, frozen_thermo});
 }
 
-void Solver::reset_energy() {
-    ResetEnergyFunctor functor{mixture, conservatives, species, frozen_thermo, {}, {}};
+void Solver::reset_energy(const rtype * accepted) {
+    ResetEnergyFunctor functor{mixture, conservatives, species, frozen_thermo, {}, {}, accepted};
     if (run_health.reset_site == HealthState::NONE) {
         Kokkos::parallel_for("reset_energy", mesh->n_owned(), functor);
         return;
@@ -632,7 +634,7 @@ void Solver::launch_double_flux_functor() {
     }
 }
 
-rtype Solver::calc_dt_cfl1_mixture() {
+rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
     if (les_on && les.dynamic) {
         eddy_viscosity_of_state(mesh->n_owned());
         update_dynamic_constant();
@@ -659,8 +661,9 @@ rtype Solver::calc_dt_cfl1_mixture() {
                                    axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data,
                                    mesh->periodic_maps(), mesh->face_shift};
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor,
-                            Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(dt_reduce_slot()));
-    return reduce_dt();
+                            Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(
+                                on_device.data() ? on_device : dt_reduce_slot()));
+    return on_device.data() ? 0.0_r : reduce_dt();
 }
 
 void Solver::update_primitives_mixture() {

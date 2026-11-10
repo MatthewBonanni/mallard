@@ -2962,7 +2962,7 @@ struct TimeStepFunctor {
 };
 
 rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
-    if (is_mixture()) return calc_dt_cfl1_mixture();
+    if (is_mixture()) return calc_dt_cfl1_mixture(on_device);
     TimeStepFunctor functor{mesh->offsets_faces_of_cell,
                             mesh->faces_of_cell,
                             mesh->cells_of_face,

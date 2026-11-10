@@ -52,7 +52,7 @@ std::string Solver::step_graph_unsupported() const {
 #endif
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
     if (is_distributed() && !halo.uses_nccl() && !uncaptured_step_graphs) return "halo exchanged with MPI";
-    if (is_mixture()) return "gas mixture";
+    if (reacting) return "chemistry";
     return "";
 }
 
@@ -97,7 +97,11 @@ void Solver::record_step() {
     Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
         c(i) = s(STEP_DT) / c(i);
     });
-    // take_step
+    // take_step; the halo is current from calc_dt for double flux's frozen halo cells
+    if (double_flux) {
+        freeze_thermodynamics();
+        cells_frozen = true;
+    }
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func, step_scalars.data() + DT_SCALES);
     recording_step = false;
     halo_current = false;
@@ -114,6 +118,10 @@ void Solver::record_step() {
         }
         step_controller.update(dt, step_scalars.data() + STEP_DT, state(), solution_vec.back());
         Kokkos::deep_copy(exec, Kokkos::subview(step_io, IO_ACCEPTED), Kokkos::subview(control, int(StepController::ACCEPTED)));
+    }
+    if (double_flux) {
+        cells_frozen = false;
+        reset_energy(controlled ? control.data() + StepController::ACCEPTED : nullptr);
     }
 }
 
