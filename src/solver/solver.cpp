@@ -1656,6 +1656,7 @@ void Solver::init_output(region::Regions & regions) {
         checkpoint_writer = std::make_unique<DataWriter>();
         checkpoint_writer->init(table, data, mesh, restart_variables());
     }
+    init_triggers();
 }
 
 void Solver::add_data_writers(const Input & output, region::Regions & regions, bool async_output,
@@ -2093,6 +2094,7 @@ int Solver::run() {
     run_control::Server server;
     publishing = control_enabled && control_socket && comm::is_root() && server.start();
     control_stop.clear();
+    trigger_stop.clear();
     checkpoint_requested = false;
 
     std::string stop;
@@ -2153,8 +2155,10 @@ int Solver::run() {
                 t_wall_checks += check_timer.seconds();
             }
             output_timer.reset();
-            write_data();
+            // Probes first, so that triggers read this step's values and restarts carry their state
             write_probes();
+            act_on_triggers();
+            write_data();
             if (checkpoint_requested) write_checkpoint();
             t_wall_output += output_timer.seconds();
             poll_control_files();
@@ -2174,7 +2178,8 @@ int Solver::run() {
     copy_device_to_host();
     write_data(true);
     const snapshot_block::Reason reason(snapshot_block::reason::STOP);
-    const std::string restart_file = control_stop.empty() ? std::string() : write_restarts();
+    const std::string restart_file =
+        control_stop.empty() && trigger_stop.empty() ? std::string() : write_restarts();
     for (auto & writer : data_writers) writer->finish();
     if (checkpoint_writer) checkpoint_writer->finish();
     t_wall_output += output_timer.seconds();
@@ -2189,6 +2194,7 @@ int Solver::run() {
 
 std::string Solver::stop_reason() const {
     if (!control_stop.empty()) return control_stop;
+    if (!trigger_stop.empty()) return trigger_stop;
     if (n_steps > 0 && step >= n_steps) return "n_steps = " + logging::count(n_steps) + " reached";
     // Within round-off: an output time n * time_interval that rounds just below t_stop lands there
     if (t_stop > 0 && t >= t_stop - precision_tol(1e-9, 1e-5) * t_stop) {
@@ -2407,6 +2413,7 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     }
     logging::items(statistics.summary());
     logging::items(probes.summary());
+    logging::items(triggers.summary());
 }
 
 void Solver::print_summary(const std::string & stop) const {
@@ -2526,6 +2533,7 @@ RestartAttributes Solver::restart_attributes() const {
         const std::string name = writer->snapshot_attribute();
         if (!name.empty()) attributes.emplace_back(name, static_cast<double>(writer->snapshots_written()));
     }
+    for (const auto & a : triggers.attributes()) attributes.push_back(a);
     return attributes;
 }
 

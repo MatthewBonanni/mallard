@@ -31,7 +31,7 @@ inline constexpr const char * NAME = "mallard-snapshot";
 /** @brief The HDF5 dataset (root group) of fixed-length strings holding one block per snapshot of the file. */
 inline constexpr const char * DATASET = "mallard_snapshot";
 
-/** @brief Why a snapshot was written: its interval, the run's start or end, a run-control request, a divergence. */
+/** @brief Why a snapshot was written: its interval, the run's start or end, a run-control request, a divergence, a trigger. */
 namespace reason {
 inline constexpr const char * INTERVAL = "interval";
 inline constexpr const char * START = "start";
@@ -39,6 +39,7 @@ inline constexpr const char * END = "end";
 inline constexpr const char * STOP = "stop";
 inline constexpr const char * CHECKPOINT = "checkpoint";
 inline constexpr const char * DIVERGENCE = "divergence";
+inline constexpr const char * TRIGGER = "trigger";
 } // namespace reason
 
 /** @brief A field of a snapshot. */

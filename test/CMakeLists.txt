@@ -64,6 +64,7 @@ if(Mallard_DIM EQUAL 2)
     viscous_test.cpp
     restart_test.cpp
     run_control_test.cpp
+    triggers_test.cpp
     step_control_test.cpp
     boundary_test.cpp
     boundary_types_test.cpp

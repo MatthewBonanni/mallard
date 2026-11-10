@@ -173,6 +173,11 @@ class Probes {
         /** @brief Changes the time interval of the probe of that name, the next output due after t. */
         std::string set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot = false);
 
+        /** @brief Names of the monitored values: <probe>_<reduction>_<variable>, and <probe>_<variable> of one-point probes. */
+        std::vector<std::string> value_names() const;
+        /** @brief The latest monitored values, as value_names(); NaN before a probe's first write. Rank 0 when distributed. */
+        std::vector<double> values() const;
+
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
         /**
@@ -225,9 +230,11 @@ class Probes {
             void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
                           const ProbeReference & reference, bool gradients);
             /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
-            std::vector<double> gather(const CellColumns & columns = {}) const;
+            void gather(std::vector<double> & out, const CellColumns & columns = {}) const;
 
             private:
+                // Reused across writes: fresh pages for every write cost page faults
+                mutable Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type host_values;
                 /** @brief Rank 0's row of each global sample, from the samples' ids. */
                 void order(const Mesh & mesh);
         };
@@ -273,6 +280,10 @@ class Probes {
             std::vector<SeriesEntry> series;  // vtp: the snapshots of the .pvd
             uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
             std::string last_file;                               // vtp, vtkhdf: the file written last
+            bool point_value = false;   // one sample, evaluated at every write: its values are monitored
+            std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
+            double measure = 0.0;      // of the samples, at the latest reduction
+            std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
 
             bool due(uint64_t step, rtype t) const;
             uint64_t n_evaluated() const { return codes.extent(0); }
@@ -286,8 +297,10 @@ class Probes {
             void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
             void write_vtkhdf(const snapshot_block::Block & block, const std::vector<double> & values);
             bool vtkhdf_run_written = false;  // this run's block is in the vtkhdf file
-            void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
-                                  const std::vector<double> & quad) const;
+            /** @brief Into last and measure: the reductions of the samples, by reduction then variable. */
+            void reduce(const std::vector<double> & nodes, const std::vector<double> & quad);
+            /** @brief Writes a row of the reductions in last. */
+            void write_reductions(uint64_t step, rtype t) const;
         };
         void add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,
