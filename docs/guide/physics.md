@@ -44,7 +44,8 @@ When to use which:
 
 Mallard is scale-free for a single gas: the reference state only fixes `R`,
 so the common nondimensionalization (free-stream density and sound speed 1,
-or `p_ref = T_ref = rho_ref = 1`) works as it is. The `cylinder` example, for
+or `p_ref = T_ref = rho_ref = 1`) works as it is, with `units = "nondimensional"`
+so that the output labels no number with an SI unit ([Units](input_files.md#units)). The `cylinder` example, for
 instance, takes the cylinder diameter and free-stream sound speed as units, so
 `U = M = 0.2` and `mu = U D / Re`.
 

@@ -197,9 +197,23 @@ in an expression that fails to parse is pointed out in the error.
 
 **Nondimensional runs.** Single gases are scale-free: the reference state
 (`p_ref`, `T_ref`, `rho_ref`) sets the gas constant, so nondimensional inputs
-(`p_ref = T_ref = rho_ref = 1`) work as plain numbers. Units then make no
-sense; write them only in dimensional inputs. Gas mixtures read real
-thermochemistry and are always dimensional.
+(`p_ref = T_ref = rho_ref = 1`) work as plain numbers. Say so with
+`units = "nondimensional"` in `[physics]`: the terminal output then states it
+and labels no number with an SI unit (the progress table's units row shows
+`-`), instead of calling a time of 0.2 "0.2 s". Units in the input make no
+sense then; write them only in dimensional inputs. Gas mixtures read real
+thermochemistry and are always dimensional, so `units = "nondimensional"` is
+an error with `gas = "mixture"`.
+
+```toml
+[physics]
+type = "euler"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+```
 
 ## Expressions
 
@@ -407,7 +421,7 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality
           most GPUs with halo < 10% of owned  4          GPUs                  doubling from the fewest
           wall time per unit simulated time   21.0       s                     on 4 GPUs at 50.0M cells/s each
 
-== Cost ====================================================================================
+== Cost ===================================================================================
   On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:
   ranks times wall hours.
   period                   simulated time [s]  steps   wall time  rank-hours

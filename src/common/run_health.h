@@ -88,8 +88,6 @@ struct Report {
     json::Object record() const;
 };
 
-/** @brief Lines of the end-of-run health summary (human log). */
-std::vector<std::pair<std::string, std::string>> summary(const Report & report);
 
 } // namespace health
 

@@ -120,4 +120,21 @@ bool has_unit(const std::string & text);
  */
 std::string expression_unit_hint(const std::string & expression);
 
+namespace units {
+
+/** @brief The units the case's numbers are in (physics.units): SI, or none for a nondimensional case. */
+enum class System { SI, NONDIMENSIONAL };
+
+/** @brief Sets the case's units, for everything printed after. SI until set. */
+void set_system(System s);
+System system();
+
+/** @brief The unit for a units row or column: si, or "-" in a nondimensional case. */
+std::string column(const std::string & si);
+
+/** @brief A number with its unit, for prose: "0.02 s", or "0.02" in a nondimensional case. */
+std::string with(const std::string & number, const std::string & si);
+
+} // namespace units
+
 #endif // UNITS_H

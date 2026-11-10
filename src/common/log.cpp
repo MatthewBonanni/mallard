@@ -7,6 +7,8 @@
 
 #include "log.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -19,6 +21,7 @@
 #include "json.h"
 #include "provenance.h"
 #include "run_log.h"
+#include "units.h"
 
 namespace logging {
 
@@ -70,6 +73,21 @@ size_t columns(std::string_view text) {
     size_t n = 0;
     for (const char c : text) n += (static_cast<unsigned char>(c) & 0xC0) != 0x80;
     return n;
+}
+
+/// The micro prefix: the micro sign in a UTF-8 locale (the first of LC_ALL, LC_CTYPE, LANG set), else "u".
+const char * micro() {
+    static const char * prefix = [] {
+        for (const char * name : {"LC_ALL", "LC_CTYPE", "LANG"}) {
+            const char * value = std::getenv(name);
+            if (value == nullptr || value[0] == '\0') continue;
+            std::string v(value);
+            std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+            return v.find("utf-8") != std::string::npos || v.find("utf8") != std::string::npos ? "\u00b5" : "u";
+        }
+        return "u";
+    }();
+    return prefix;
 }
 
 void close_phase() {
@@ -174,26 +192,37 @@ void end_phase(double seconds) {
     phase_open = false;
 }
 
+namespace {
+
+bool verbose = false;
+std::vector<std::pair<std::string, uint64_t>> written_since;
+
+void remark(const uint64_t step, const double t, std::string_view kind, std::string_view text) {
+    line("  " + style(">>", Style::CYAN) + " step " + count(step) + ", t = " + units::with(format("%.6g", t), "s") +
+         ": " + std::string(kind) + ": " + std::string(text));
+}
+
+void record(const uint64_t step, const double t, std::string_view kind, std::string_view text,
+            const std::vector<std::pair<std::string, std::string>> & fields = {}) {
+    json::Object event;
+    event.add("type", "event").add("step", step).add("t", t).add("kind", kind).add("text", text);
+    for (const auto & [key, value] : fields) event.raw(key, value);
+    run_log::write(event);
+}
+
+} // namespace
+
 void event(uint64_t step, double t, std::string_view kind, std::string_view text,
            const std::vector<std::pair<std::string, std::string>> & fields) {
     if (!comm::is_root()) return;
-    std::string padded(kind);
-    if (padded.size() < 8) padded.resize(8, ' ');
-    line(format("%8llu %10.4e  ", static_cast<unsigned long long>(step), t) + style(padded, Style::CYAN) + " " +
-         std::string(text));
-    json::Object record;
-    record.add("type", "event").add("step", step).add("t", t).add("kind", kind).add("text", text);
-    for (const auto & [key, value] : fields) record.raw(key, value);
-    run_log::write(record);
+    remark(step, t, kind, text);
+    record(step, t, kind, text, fields);
 }
 
-void output(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
-            std::string_view writer) {
+void written(uint64_t step, double t, std::string_view kind, std::string_view path, std::string_view reason,
+             std::string_view writer) {
     if (!comm::is_root()) return;
-    std::string padded(kind);
-    if (padded.size() < 8) padded.resize(8, ' ');
-    line(format("%8llu %10.4e  ", static_cast<unsigned long long>(step), t) + style(padded, Style::CYAN) + " " +
-         std::string(path));
+    if (verbose) remark(step, t, "wrote " + std::string(kind), path);
     run_log::write(json::Object()
                        .add("type", "output")
                        .add("step", step)
@@ -203,7 +232,24 @@ void output(uint64_t step, double t, std::string_view kind, std::string_view pat
                        .add("reason", reason)
                        .add("writer", writer)
                        .add("run_id", provenance::run_id()));
+    auto it = std::find_if(written_since.begin(), written_since.end(), [&](const auto & k) { return k.first == kind; });
+    if (it == written_since.end()) {
+        written_since.emplace_back(std::string(kind), 1);
+    } else {
+        it->second++;
+    }
 }
+
+std::string take_written() {
+    std::string out;
+    for (const auto & [kind, n] : written_since) out += (out.empty() ? "" : ", ") + count(n) + " " + kind;
+    written_since.clear();
+    return out;
+}
+
+bool written_pending() { return !written_since.empty(); }
+
+void set_verbose(const bool on) { verbose = on; }
 
 void warning(std::string_view message) {
     if (!comm::is_root()) return;
@@ -234,7 +280,7 @@ std::string count(uint64_t n) {
 
 std::string duration(double s) {
     if (!std::isfinite(s) || s < 0.0) return "--";
-    if (s < 0.9995e-3) return sig3(s * 1.0e6) + " us";
+    if (s < 0.9995e-3) return sig3(s * 1.0e6) + " " + micro() + "s";
     if (s < 0.9995) return sig3(s * 1.0e3) + " ms";
     if (s < 59.95) return sig3(s) + " s";
     const uint64_t total = static_cast<uint64_t>(std::llround(s));

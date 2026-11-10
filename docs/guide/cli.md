@@ -124,6 +124,10 @@ Options:
                          (of the run that started last, then of the highest
                          step), or [initialize] if there is none. Default: as
                          [initialize] says.
+  --verbose              A line for every file written, between the progress
+                         rows. Default: the progress table's written column
+                         counts them, and mallard.jsonl and the summary name
+                         them.
   --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
                          per rank) or --kokkos-device-id=1 (the GPU; by default
                          each rank gets its own).

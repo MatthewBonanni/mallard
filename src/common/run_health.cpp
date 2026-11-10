@@ -105,47 +105,4 @@ json::Object Report::record() const {
     return r;
 }
 
-std::vector<std::pair<std::string, std::string>> summary(const Report & report) {
-    using logging::format;
-    std::vector<std::pair<std::string, std::string>> lines;
-    std::string margins;
-    for (const auto & m : report.margins_run) {
-        if (!m.valid) continue;
-        margins += (margins.empty() ? "" : ", ") +
-                   format("%s %.3g (step %llu)", m.name.c_str(), m.value, static_cast<unsigned long long>(m.step));
-    }
-    if (!margins.empty()) lines.emplace_back("Lowest", margins);
-    std::string activity;
-    for (const auto & a : report.activity) {
-        activity += (activity.empty() ? "" : ", ") +
-                    format("%s %.2f%% (ranks %.2f-%.2f%%)", a.name.c_str(), 100.0 * a.all, 100.0 * a.min, 100.0 * a.max);
-    }
-    if (!activity.empty()) lines.emplace_back("Activity", activity + " at the last report");
-    std::string repairs;
-    for (const auto & r : report.repairs_run) {
-        if (r.activations == 0) continue;
-        repairs += (repairs.empty() ? "" : ", ") + format("%s %llu times in %llu cells", r.site.c_str(),
-                                                          static_cast<unsigned long long>(r.activations),
-                                                          static_cast<unsigned long long>(r.cells));
-    }
-    if (!report.repairs_run.empty()) lines.emplace_back("Repairs", repairs.empty() ? "none" : repairs);
-    std::string balance;
-    double worst = 0.0;
-    for (const auto & b : report.balance_run) {
-        if (!b.checked) continue;
-        worst = std::max(worst, std::fabs(b.relative()));
-        balance += (balance.empty() ? "" : ", ") + format("%s %.1e", b.name.c_str(), b.relative());
-    }
-    if (!balance.empty()) lines.emplace_back("Conservation", "unexplained change " + balance);
-    if (report.element_drift >= 0.0) {
-        lines.emplace_back("Elements", format("largest change over a chemistry call %.1e", report.element_drift));
-    }
-    std::string timing;
-    for (const auto & t : report.timing) {
-        timing += (timing.empty() ? "" : ", ") + format("%s %s", t.name.c_str(), logging::duration(t.max).c_str());
-    }
-    if (!timing.empty()) lines.emplace_back("Output", timing + " per step (slowest rank)");
-    return lines;
-}
-
 } // namespace health

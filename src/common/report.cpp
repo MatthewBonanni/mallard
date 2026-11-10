@@ -147,7 +147,7 @@ void Text::section(std::string_view title, const Status status) {
     if (!text.empty()) add("");
     const std::string word = status_word(status);
     const size_t used = 3 + title.size() + 1 + (word.empty() ? 0 : 1 + word.size());
-    const std::string fill(used + 3 < WIDTH ? WIDTH - used : 3, '=');
+    const std::string fill(used + 4 < WIDTH ? WIDTH - used - 1 : 3, '=');
     add(logging::style("== ", logging::Style::DIM, color) + logging::style(title, logging::Style::BOLD, color) + " " +
         logging::style(fill, logging::Style::DIM, color) + (word.empty() ? "" : " " + styled_status(status, 0)));
 }
@@ -207,7 +207,7 @@ void Text::table(const std::vector<Column> & columns, const std::vector<Row> & r
     for (const Row & row : rows) render(row.status, row.cells, false);
 }
 
-void Text::quantities(const std::vector<Row> & rows) {
+void Text::quantities(const std::vector<Row> & rows, const bool status_column) {
     using Kind = Column::Kind;
     const std::vector<Column> header = {"quantity", {"value", Kind::VALUE}, {"units", Kind::UNITS}, "target", "basis"};
     std::vector<bool> used(header.size(), false);
@@ -227,7 +227,52 @@ void Text::quantities(const std::vector<Row> & rows) {
         }
         kept.push_back(std::move(k));
     }
-    table(kept_header, kept);
+    table(kept_header, kept, status_column);
+}
+
+Stream::Stream(std::vector<Field> fields_in, const bool color_in) : fields(std::move(fields_in)), color(color_in) {
+    for (Field & f : fields) {
+        if (f.kind == Column::Kind::VALUE && f.units.empty()) {
+            throw std::logic_error("report: column " + f.name + " has values but no units (\"-\" when dimensionless)");
+        }
+        f.width = std::max({f.width, f.name.size(), f.units.size()});
+    }
+}
+
+std::string Stream::render(const std::vector<std::string> & cells) const {
+    std::string out(INDENT, ' ');
+    for (size_t c = 0; c < fields.size(); c++) {
+        const std::string & cell = cells[c];
+        const size_t pad = fields[c].width > cell.size() ? fields[c].width - cell.size() : 0;
+        if (c > 0) out += std::string(GAP, ' ');
+        if (fields[c].kind == Column::Kind::TEXT && c + 1 == fields.size()) {
+            out += cell;
+        } else {
+            out += std::string(pad, ' ') + cell;
+        }
+    }
+    return rtrim(out);
+}
+
+std::vector<std::string> Stream::header() const {
+    std::vector<std::string> names, units;
+    for (const Field & f : fields) {
+        names.push_back(f.name);
+        units.push_back(f.units);
+    }
+    return {logging::style(render(names), logging::Style::BOLD, color),
+            logging::style(render(units), logging::Style::DIM, color)};
+}
+
+std::string Stream::row(const std::vector<std::string> & cells) const {
+    if (cells.size() != fields.size()) throw std::logic_error("report: a row has one cell per column");
+    for (size_t c = 0; c < fields.size(); c++) {
+        if (fields[c].kind == Column::Kind::VALUE && !bare(cells[c])) {
+            throw std::logic_error("report: \"" + cells[c] + "\" in column " + fields[c].name +
+                                   " is not a bare value: its unit belongs in the units row");
+        }
+    }
+    return render(cells);
 }
 
 void Text::print() const {

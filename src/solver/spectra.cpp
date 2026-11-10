@@ -745,7 +745,7 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const
     block.average_end = average ? double(t_last) : double(t);
     block.samples = average ? static_cast<int64_t>(n_samples) : 1;
     out << provenance::csv_comment(snapshot_block::NAME, block.json()) << "\n";
-    logging::output(step, double(t), "spectra", name, reason, file);
+    logging::written(step, double(t), "spectra", name, reason, file);
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     std::vector<size_t> inhomogeneous;
     for (size_t d = 0; d < N_DIM; d++) {
@@ -808,7 +808,7 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const
 
 std::string Spectra::summary() const {
     std::string text = std::string(average ? "averaged" : "per sample") + " every " + logging::count(interval) +
-                       " steps from t = " + logging::real(double(t_start)) + " along ";
+                       " steps from t = " + units::with(logging::real(double(t_start)), "s") + " along ";
     for (size_t h = 0; h < directions.size(); h++) text += (h ? ", " : "") + std::string(1, AXES[directions[h]]);
     text += ": ";
     for (size_t p = 0; p < pairs.size(); p++) {

@@ -44,6 +44,7 @@ u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0"]
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 71.42857142857143
 T_ref = 1.0

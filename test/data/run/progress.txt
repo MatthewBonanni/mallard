@@ -1,0 +1,22 @@
+  done: of the run, by the stop that comes first; wall/step and throughput (cell updates per
+  second): time stepping since the previous row; ETA: wall time to the stop; min and max:
+  over the cells; troubled: cells where TENO selects stencils (shocks); sum Y-1: the largest
+  |sum of the mass fractions - 1|; reacting: cells whose chemistry is advanced; chem/cell:
+  most integrator steps of a cell; written: files since the previous row, named in
+  mallard.jsonl and the summary (--verbose: a line each).
+         step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled    min T    max T    sum Y-1  reacting  chem/cell  written
+            -           s         s      %         ms     cells/s    h:mm:ss      kg/m^3          Pa        -         %        K        K          -         %      steps  files
+            0  1.2300e-02  1.10e-05    0.0          -           -          -   8.120e-02   9.870e+04    1.879      7.34    298.4   2401.7   3.10e-15     21.50         37  -
+        1,200  1.2300e-02  1.10e-05   40.0       35.0    4.52e+05    1:02:06   8.120e-02   9.870e+04    1.879      7.34    298.4   2401.7   3.10e-15     21.50         37  7 vtkhdf, 1 restart
+
+  done: of the run, by the stop that comes first; wall/step and throughput (cell updates per
+  second): time stepping since the previous row; ETA: wall time to the stop; min and max:
+  over the cells; troubled: cells where TENO selects stencils (shocks); sum Y-1: the largest
+  |sum of the mass fractions - 1|; reacting: cells whose chemistry is advanced; chem/cell:
+  most integrator steps of a cell; written: files since the previous row, named in
+  mallard.jsonl and the summary (--verbose: a line each). Nondimensional case
+  (physics.units): no units.
+         step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled    min T    max T    sum Y-1  reacting  chem/cell  written
+            -           -         -      %         ms     cells/s    h:mm:ss           -           -        -         %        K        K          -         %      steps  files
+            0  1.2300e-02  1.10e-05    0.0          -           -          -   8.120e-02   9.870e+04    1.879      7.34    298.4   2401.7   3.10e-15     21.50         37  -
+        1,200  1.2300e-02  1.10e-05   40.0       35.0    4.52e+05    1:02:06   8.120e-02   9.870e+04    1.879      7.34    298.4   2401.7   3.10e-15     21.50         37  7 vtkhdf, 1 restart

@@ -84,7 +84,7 @@ class Text {
          * @brief A table of quantities: status, then quantity, value, units, target and basis cells, the columns
          *        empty in every row left out (units only with value).
          */
-        void quantities(const std::vector<Row> & rows);
+        void quantities(const std::vector<Row> & rows, bool status_column = true);
 
         /** @brief The text, a "\n" after every line. */
         const std::string & str() const { return text; }
@@ -98,6 +98,37 @@ class Text {
 
         bool color;
         std::string text;
+};
+
+/** @brief A column of a Stream: its name, its units ("-" when dimensionless) and the width of its values. */
+struct Field {
+    std::string name;
+    std::string units;
+    size_t width = 0;
+    Column::Kind kind = Column::Kind::VALUE;
+};
+
+/**
+ * @brief A table printed a row at a time, as a run goes: the column names over their units, then rows
+ *        that keep every column aligned. VALUE cells are bare (Text::table's rule). Cells are right-aligned,
+ *        but for a last TEXT column, which runs on unpadded.
+ */
+class Stream {
+    public:
+        /** @throws std::logic_error if a VALUE field has no units */
+        Stream(std::vector<Field> fields, bool color);
+
+        /** @brief The names line (bold) and the units line (dimmed). */
+        std::vector<std::string> header() const;
+
+        /** @throws std::logic_error if the cells are not one per field, or a VALUE cell is not bare */
+        std::string row(const std::vector<std::string> & cells) const;
+
+    private:
+        std::string render(const std::vector<std::string> & cells) const;
+
+        std::vector<Field> fields;
+        bool color;
 };
 
 } // namespace report
