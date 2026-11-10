@@ -121,12 +121,11 @@ FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG v1.18.0
-  ${MALLARD_THIRD_PARTY}
+  SYSTEM
 )
 # Test-only: `cmake --install` leaves GoogleTest out
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
-mallard_system_headers(gtest gmock)
 
 target_link_libraries(mallard-test PRIVATE gtest)
 

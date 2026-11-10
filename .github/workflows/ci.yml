@@ -44,7 +44,7 @@ jobs:
   # (changelog/, see docs/design/documentation.md#changelog) unless its pull
   # request is labeled no-changelog. The other jobs wait for it.
   changelog:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Report the run on the commit
         env:
@@ -102,7 +102,7 @@ jobs:
   # Whether the changes touch device code (tools/dev/device_changes.sh); the CUDA, HIP and SYCL
   # builds run only then (CUDA also on main)
   device:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       changed: ${{ steps.check.outputs.changed }}
       code: ${{ steps.check.outputs.code }}
@@ -145,7 +145,7 @@ jobs:
             if want fuzz; then names="$names fuzz-2d"; fi
           fi
           if { [ "$CHANGED" = true ] || [ "$GITHUB_REF" = refs/heads/main ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
-            names="$names cuda-2d cuda-3d"
+            names="$names cuda-13.5-2d cuda-13.5-3d cuda-13.4-2d cuda-13.4-3d cuda-13.5-arm64-2d cuda-13.5-arm64-3d"
           fi
           if { [ "$CHANGED" = true ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
             names="$names hip-2d hip-3d sycl-2d sycl-3d"
@@ -159,16 +159,16 @@ jobs:
           STATUS_NAME: device
         run: sh tools/dev/ci_status.sh ${{ job.status }}
 
-  # Branches run the full 2D suite (OpenMP, with CGNS), the full 3D suite and the
-  # multi-rank tests, the full single-precision suites in 2D and 3D (3D with CGNS), a
-  # Clang build (no tests) for the warnings GCC misses, the 2D and 3D suites on macOS
-  # (arm64, AppleClang, Threads backend), the 2D suite on arm64 Linux, and the suites
-  # built with the oldest supported compilers and CMake. main also runs the
-  # serial-backend and non-MPI 3D builds.
+  # Every supported Linux compiler (GCC 15 and 16, Clang 22 and 23) on x86-64 and arm64,
+  # each running its suite: the default GCC 15 runs the OpenMP, MPI, single-precision, 3D
+  # and (main only) serial builds on x86-64, and each backend variant also runs once on
+  # arm64 with one of the compilers. macOS runs the 2D and 3D suites with Apple Clang and
+  # the 2D suite with Homebrew's GCC. The GCC 16 jobs build with CMake 4.2.3, the oldest
+  # supported; the others with the runners' CMake.
   matrix:
     needs: [changelog, device]
     if: needs.device.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       backends: ${{ steps.pick.outputs.backends }}
       any: ${{ steps.pick.outputs.any }}
@@ -186,18 +186,21 @@ jobs:
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true},
             {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true},
             {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true},
-            {"name": "clang", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++", "hdf5": true, "build_only": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true, "main_only": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true, "main_only": true},
             {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true},
             {"name": "float-3d", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON", "cgns": true, "full": true},
-            {"name": "macos", "flags": "-DKokkos_ENABLE_THREADS=ON", "os": "macos-latest"},
-            {"name": "macos-3d", "flags": "-DKokkos_ENABLE_THREADS=ON -DMallard_DIM=3", "os": "macos-latest"},
-            {"name": "macos-gcc", "flags": "-DKokkos_ENABLE_THREADS=ON -DCMAKE_C_COMPILER=gcc-16 -DCMAKE_CXX_COMPILER=g++-16", "os": "macos-latest", "packages": "gcc"},
-            {"name": "arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "hdf5": true, "os": "ubuntu-24.04-arm"},
-            {"name": "gcc-15", "flags": "-DKokkos_ENABLE_OPENMP=ON", "os": "ubuntu-26.04"},
-            {"name": "gcc-11", "flags": "-DKokkos_ENABLE_SERIAL=ON -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11", "os": "ubuntu-22.04", "packages": "g++-11", "cmake": "3.22.1"},
-            {"name": "clang-16", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-16 -DCMAKE_CXX_COMPILER=clang++-16", "os": "ubuntu-24.04", "packages": "clang-16", "cmake": "3.22.1"}
+            {"name": "gcc-16", "flags": "-DKokkos_ENABLE_OPENMP=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "container": "gcc:16.2.0", "cmake": "4.2.3"},
+            {"name": "clang-22", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22", "hdf5": true},
+            {"name": "clang-23", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "llvm": "23"},
+            {"name": "gcc-15-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "os": "ubuntu-26.04-arm"},
+            {"name": "mpi-arm64", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "os": "ubuntu-26.04-arm"},
+            {"name": "gcc-16-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DCMAKE_C_COMPILER=/usr/local/bin/gcc -DCMAKE_CXX_COMPILER=/usr/local/bin/g++", "cgns": true, "container": "gcc:16.2.0", "cmake": "4.2.3", "os": "ubuntu-26.04-arm"},
+            {"name": "clang-22-arm64", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22", "packages": "libomp-22-dev", "concurrent": true, "os": "ubuntu-26.04-arm"},
+            {"name": "clang-23-arm64", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23", "hdf5": true, "llvm": "23", "os": "ubuntu-26.04-arm"},
+            {"name": "macos", "flags": "-DKokkos_ENABLE_THREADS=ON", "os": "macos-26"},
+            {"name": "macos-3d", "flags": "-DKokkos_ENABLE_THREADS=ON -DMallard_DIM=3", "os": "macos-26"},
+            {"name": "macos-gcc", "flags": "-DKokkos_ENABLE_THREADS=ON -DCMAKE_C_COMPILER=gcc-16 -DCMAKE_CXX_COMPILER=g++-16", "os": "macos-26", "packages": "gcc"}
           ]'
           if [ "$ALL" != true ]; then backends=$(jq -c 'map(select(.main_only | not))' <<< "$backends"); fi
           if [ -n "$ONLY" ]; then
@@ -210,7 +213,8 @@ jobs:
   build-and-test:
     needs: matrix
     if: needs.matrix.outputs.any == 'true'
-    runs-on: ${{ matrix.backend.os || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.backend.os || 'ubuntu-26.04' }}
+    container: ${{ matrix.backend.container || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -250,13 +254,24 @@ jobs:
         timeout-minutes: 15
         if: runner.os == 'macOS'
         run: brew install ccache ${{ matrix.backend.packages }}
-      # The oldest CMake that Mallard supports (cmake_minimum_required)
+      - name: Install Clang ${{ matrix.backend.llvm }} (apt.llvm.org)
+        if: matrix.backend.llvm
+        timeout-minutes: 25
+        env:
+          LLVM: ${{ matrix.backend.llvm }}
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/resolute/ llvm-toolchain-resolute-$LLVM main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sh tools/dev/apt_install.sh clang-$LLVM
+      # Kitware's build of the oldest CMake that Mallard supports (cmake_minimum_required)
       - name: Install CMake ${{ matrix.backend.cmake }}
         if: matrix.backend.cmake
+        env:
+          VERSION: ${{ matrix.backend.cmake }}
         run: |
-          python3 -m venv "$RUNNER_TEMP/cmake"
-          "$RUNNER_TEMP/cmake/bin/pip" install -q "cmake==${{ matrix.backend.cmake }}"
-          echo "$RUNNER_TEMP/cmake/bin" >> "$GITHUB_PATH"
+          curl -fsSL "https://github.com/Kitware/CMake/releases/download/v$VERSION/cmake-$VERSION-linux-$(uname -m).tar.gz" |
+            tar -xz -C /opt
+          echo "/opt/cmake-$VERSION-linux-$(uname -m)/bin" >> "$GITHUB_PATH"
       - name: Restore compiler cache
         uses: actions/cache/restore@v4
         with:
@@ -359,7 +374,7 @@ jobs:
   tutorials:
     needs: [changelog, device]
     if: needs.device.outputs.code == 'true' && (!inputs.only || contains(format(',{0},', inputs.only), ',tutorials,'))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -452,13 +467,17 @@ jobs:
     if: >-
       (needs.device.outputs.changed == 'true' || github.ref == 'refs/heads/main' || inputs.device)
       && (!inputs.only || contains(format(',{0},', inputs.only), ',device,'))
-    runs-on: ubuntu-24.04
-    container: nvidia/cuda:12.9.1-devel-ubuntu24.04
+    runs-on: ${{ matrix.toolchain.os }}
+    container: nvidia/cuda:${{ matrix.toolchain.cuda }}-devel-ubuntu26.04
     strategy:
       fail-fast: false
       matrix:
         dim: [2, 3]
-    name: cuda-${{ matrix.dim }}d
+        toolchain:
+          - {name: cuda-13.5, cuda: 13.5.0, os: ubuntu-26.04, arch: -DKokkos_ARCH_AMPERE80=ON}
+          - {name: cuda-13.4, cuda: 13.4.3, os: ubuntu-26.04, arch: -DKokkos_ARCH_AMPERE80=ON}
+          - {name: cuda-13.5-arm64, cuda: 13.5.0, os: ubuntu-26.04-arm, arch: -DKokkos_ARCH_HOPPER90=ON}
+    name: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
     # sccache caches the nvcc compiles in the GitHub Actions cache, per object, so branches
     # reuse what main compiled. Neither ccache nor sccache accepts Kokkos' nvcc_wrapper as a
     # compiler, so sccache wraps the nvcc that nvcc_wrapper runs (the first one on PATH)
@@ -480,7 +499,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
-          STATUS_NAME: cuda-${{ matrix.dim }}d
+          STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
         run: sh tools/dev/ci_status.sh running
       - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Put sccache in front of nvcc
@@ -492,7 +511,7 @@ jobs:
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF
-          -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DKokkos_ENABLE_OPENMP=ON
+          -DKokkos_ENABLE_CUDA=ON ${{ matrix.toolchain.arch }} -DKokkos_ENABLE_OPENMP=ON
           -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper
           -DCUDAToolkit_ROOT=/usr/local/cuda
           -DMallard_ENABLE_MPI=ON -DMallard_GPU_AWARE_MPI=ON -DMallard_WARNINGS_AS_ERRORS=ON
@@ -507,7 +526,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
-          STATUS_NAME: cuda-${{ matrix.dim }}d
+          STATUS_NAME: ${{ matrix.toolchain.name }}-${{ matrix.dim }}d
         run: sh tools/dev/ci_status.sh ${{ job.status }}
 
   # HIP and SYCL builds (no GPU; never run), when the changes touch device code or the
@@ -520,7 +539,7 @@ jobs:
     if: >-
       (needs.device.outputs.changed == 'true' || inputs.device)
       && (!inputs.only || contains(format(',{0},', inputs.only), ',device,'))
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     container: ${{ matrix.toolchain.image }}
     strategy:
       fail-fast: false
@@ -528,12 +547,13 @@ jobs:
         dim: [2, 3]
         toolchain:
           - name: hip
-            image: rocm/dev-ubuntu-24.04:7.2.4
+            image: rocm/dev-ubuntu-26.04:10.1.0-full
             flags: >-
               -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc -DCMAKE_PREFIX_PATH=/opt/rocm -DKokkos_ENABLE_HIP=ON
               -DKokkos_ARCH_AMD_GFX90A=ON -DKokkos_ENABLE_ROCTHRUST=OFF
           - name: sycl
-            image: intel/oneapi-basekit:2025.3.2-0-devel-ubuntu24.04
+            image: ubuntu:26.04
+            oneapi: '2026.2'
             flags: >-
               -DCMAKE_CXX_COMPILER=icpx -DKokkos_ENABLE_SYCL=ON
               -DKokkos_ARCH_INTEL_GEN=ON -DKokkos_ENABLE_ONEDPL=OFF
@@ -549,6 +569,22 @@ jobs:
         run: >
           sh tools/dev/apt_install.sh --no-install-recommends
           git cmake make curl libopenmpi-dev openmpi-bin ca-certificates
+      # The oneAPI image lags the releases: the compiler from Intel's apt repository
+      - name: Install oneAPI ${{ matrix.toolchain.oneapi }}
+        if: matrix.toolchain.oneapi
+        timeout-minutes: 25
+        shell: bash
+        env:
+          ONEAPI: ${{ matrix.toolchain.oneapi }}
+        run: |
+          sh tools/dev/apt_install.sh --no-install-recommends gpg
+          curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB |
+            gpg --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+            > /etc/apt/sources.list.d/oneAPI.list
+          sh tools/dev/apt_install.sh intel-oneapi-compiler-dpcpp-cpp-$ONEAPI
+          . /opt/intel/oneapi/setvars.sh > /dev/null
+          env | grep -E '^(PATH|LD_LIBRARY_PATH|LIBRARY_PATH|CPATH|CMPLR_ROOT|OCL_ICD_FILENAMES)=' >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -595,7 +631,7 @@ jobs:
     name: CI result
     if: always()
     needs: [changelog, device, matrix, build-and-test, tutorials, cuda, portability, fuzz]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - env:
           GH_TOKEN: ${{ github.token }}
