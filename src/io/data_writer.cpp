@@ -686,7 +686,7 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
     const char * stored = sizeof(rtype) == 8 ? "float64" : "float32";
     for (const auto & field : fields) {
         snapshot_block::Field f{field.name, field.description.units(), field.description.long_name, stored,
-                                relative_error};
+                                relative_error, ""};
         if (format == DataFormat::RESTART) {
             const auto d = field_units::find(field.name);
             f.units = d ? d->units() : "";
@@ -701,6 +701,14 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
                                                            : file_format::VTU_OUTPUT.version;
     return snapshot_block::make(step, double(t), snapshot_block::current_reason(force), FORMAT_NAMES.at(format),
                                 version, std::move(list));
+}
+
+std::string DataWriter::cell_methods(const std::string & name) const {
+    if (!snapshot_blocks) return "";
+    snapshot_block::Field f;
+    f.name = name;
+    f.value = snapshot_block::value_kind(name);
+    return snapshot_block::cell_methods(f);
 }
 
 std::string DataWriter::set_interval(uint64_t steps) {

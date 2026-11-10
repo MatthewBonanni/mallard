@@ -470,7 +470,10 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
             write_dataset(cell_data, name, m.n_cells, int(n_comp), m.first_cell, n_block, block.data(), dxpl, deflate,
                           serial, io_threads);
         }
-        if (!append) annotate(cell_data, fields[f].name, fields[f].description);
+        if (!append) {
+            annotate(cell_data, fields[f].name, fields[f].description);
+            h5::cell_methods(cell_data, fields[f].name, cell_methods(fields[f].name));
+        }
     }
     if (!one_file) return;
 

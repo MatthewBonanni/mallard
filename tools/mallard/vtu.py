@@ -372,6 +372,17 @@ def snapshot_blocks(path):
     return [json.loads(m) for m in re.findall(r"(?:<!-- |^# )mallard-snapshot (\{.*?\})(?: -->|$)", head, re.M | re.S)]
 
 
+def value_kinds(path):
+    """{field: value kind} of the last snapshot of a file: "cell_average" (the
+    cell's average), "cell_state" (computed from the cell's averaged state) or
+    "point_value" (the reconstruction's value at a point); empty for files
+    before Mallard 0.10 (docs/guide/output.md#cell-averages-and-point-values)."""
+    blocks = snapshot_blocks(path)
+    if not blocks:
+        return {}
+    return {f["name"]: f["value"] for f in blocks[-1]["fields"] if "value" in f}
+
+
 def resolved_input(path):
     """The input with every key explicit (TOML text) that made a Mallard output
     file: its provenance's input.resolved. None for a file without provenance, or

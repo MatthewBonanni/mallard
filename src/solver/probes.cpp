@@ -115,6 +115,14 @@ FieldDescription geometry_field(const std::string & name, const probe::Geometry 
     return field_units::describe(name);
 }
 
+/** @brief How point values are evaluated: the face reconstruction's polynomials, or linear least squares. */
+snapshot_block::Reconstruction point_reconstruction(const FaceReconstruction * r) {
+    if (r && r->get_type() == FaceReconstructionType::TENO) {
+        return {"TENO", static_cast<const TENO *>(r)->degree + 1, {"linear_least_squares", "cell_average"}};
+    }
+    return {"linear_least_squares", 2, {"cell_average"}};
+}
+
 std::string reduction_name(Reduction r) {
     for (const auto & [name, value] : REDUCTIONS) {
         if (value == r) return name;
@@ -1480,6 +1488,18 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         }
     }
 
+    for (size_t v = 0; v < p.variables.size(); v++) {
+        const int32_t k = h_codes[v];
+        const bool cell_column = std::any_of(p.cell_columns.begin(), p.cell_columns.end(),
+                                             [&](const auto & c) { return c.first == v; });
+        const bool species = k >= CellSampler::FIRST_SPECIES && k < code::FIRST;
+        if (cell_column || species || (p.sampling == Sampling::CELL && !boundary)) {
+            p.value_kinds.push_back(snapshot_block::value_kind(p.variables[v]));
+        } else {
+            p.value_kinds.push_back(p.sampling == Sampling::POINT ? snapshot_block::value::POINT_VALUE
+                                                             : snapshot_block::value::CELL_STATE);
+        }
+    }
     if (p.average) {
         for (auto & v : p.variables) v = "MEAN_" + v;
     }
@@ -1624,6 +1644,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             for (const auto & v : p.variables) {
                 extensible("fields/" + v, H5T_IEEE_F64LE, n);
                 h5::annotate(file, "fields/" + v, field_units::describe(v));
+            }
+            for (size_t v = 0; v < p.variables.size(); v++) {
+                h5::cell_methods(file, "fields/" + p.variables[v], snapshot_block::cell_methods(p.field_of(v)));
             }
         }
 #endif
@@ -1869,6 +1892,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
             } else if (p.format == Format::HDF5) {
                 p.write_hdf5(step, t, nodes);
             } else {
+                p.reconstruction = point_reconstruction(fields.reconstruction);
                 const snapshot_block::Block block =
                     p.snapshot_of(step, t, p.snapshot ? snapshot_block::current_reason(force) : snapshot_block::reason::INTERVAL);
                 if (p.format == Format::VTKHDF) {
@@ -2129,12 +2153,17 @@ void Probes::Probe::write_hdf5([[maybe_unused]] uint64_t step, [[maybe_unused]] 
 
 snapshot_block::Block Probes::Probe::snapshot_of(uint64_t step, rtype t, const std::string & reason) const {
     std::vector<snapshot_block::Field> list;
-    for (const auto & v : variables) {
-        const FieldDescription d = field_units::describe(v);
-        list.push_back({v, d.units(), d.long_name, "float64", 0.0});
+    bool points = false;
+    for (size_t i = 0; i < variables.size(); i++) {
+        const FieldDescription d = field_units::describe(variables[i]);
+        list.push_back({variables[i], d.units(), d.long_name, "float64", 0.0, value_kinds[i]});
+        points = points || value_kinds[i] == snapshot_block::value::POINT_VALUE;
     }
-    return snapshot_block::make(step, double(t), reason, format == Format::VTKHDF ? "vtkhdf" : "vtp",
-                                file_format::PROBE_OUTPUT.version, std::move(list));
+    snapshot_block::Block block = snapshot_block::make(step, double(t), reason,
+                                                       format == Format::VTKHDF ? "vtkhdf" : "vtp",
+                                                       file_format::PROBE_OUTPUT.version, std::move(list));
+    if (points) block.reconstruction = reconstruction;
+    return block;
 }
 
 void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & block,
@@ -2222,7 +2251,10 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     for (size_t v = 0; v < variables.size(); v++) {
         for (uint64_t i = 0; i < n; i++) column[i] = values[i * n_cols + v];
         h5::put_rows(samples, variables[v].c_str(), (k + 1) * n, 1, k * n, n, column.data(), H5P_DEFAULT);
-        if (k == 0) h5::annotate(samples, variables[v], field_units::describe(variables[v]));
+        if (k == 0) {
+            h5::annotate(samples, variables[v], field_units::describe(variables[v]));
+            h5::cell_methods(samples, variables[v], snapshot_block::cell_methods(field_of(v)));
+        }
     }
     // The geometry is the same at every snapshot: its offsets all stay 0
     h5::Handle steps(H5Gopen2(h5file, "VTKHDF/Steps", H5P_DEFAULT), H5Gclose, "opening Steps");

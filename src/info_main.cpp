@@ -179,6 +179,12 @@ void print_snapshot_block(const output::Contents & c) {
     }
     item("Format", b.format + (b.format_version >= 0 ? ", version " + std::to_string(b.format_version) : ""));
     item("Solver precision", b.solver_precision.empty() ? "-" : b.solver_precision);
+    if (!b.reconstruction.method.empty()) {
+        std::string fallback;
+        for (const std::string & m : b.reconstruction.fallback) fallback += (fallback.empty() ? "" : ", then ") + m;
+        item("Point values", b.reconstruction.method + ", order " + std::to_string(b.reconstruction.order) +
+                                 (fallback.empty() ? "" : "; falling back to " + fallback));
+    }
     if (b.averaged) {
         item("Averaged over", "t = " + seconds(b.average_start) + " to " + seconds(b.average_end) + " s, " +
                                   (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples)) : std::string("-")) +
@@ -311,16 +317,22 @@ void print_fields(const output::Contents & c) {
                                         range ? format("%.6g", f.min) : "-", range ? format("%.6g", f.max) : "-"};
         if (block) {
             const snapshot_block::Field * stored = block->field(f.name);
+            row.push_back(stored && !stored->value.empty() ? stored->value : "-");
             row.push_back(stored && !stored->stored.empty() ? stored->stored : "-");
         }
         row.push_back(f.long_name.empty() ? "-" : f.long_name);
         rows.push_back(std::move(row));
     }
-    logging::table(block ? std::vector<std::string>{"field", "units", "components", "min", "max", "stored", "description"}
+    logging::table(block ? std::vector<std::string>{"field", "units", "components", "min", "max", "value", "stored",
+                                                    "description"}
                          : std::vector<std::string>{"field", "units", "components", "min", "max", "description"},
                    rows);
     unrecorded_note(rows);
     if (vectors) logging::line("  min and max of fields with several components are of their magnitude.");
+    if (block) {
+        logging::line("  value: cell_average, the cell's average; cell_state, computed from the cell's averaged state; "
+                      "point_value, the reconstruction's value at the sample.");
+    }
 }
 
 void print_restart(const output::Contents & c) {

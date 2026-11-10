@@ -42,6 +42,18 @@ inline constexpr const char * DIVERGENCE = "divergence";
 inline constexpr const char * TRIGGER = "trigger";
 } // namespace reason
 
+/**
+ * @brief What a field's values are: the cell average of the quantity (the
+ *        solver's unknowns), computed pointwise from the cell's averaged
+ *        state (neither its cell average nor its centroid value at high
+ *        order), or the reconstruction's value at a point.
+ */
+namespace value {
+inline constexpr const char * CELL_AVERAGE = "cell_average";
+inline constexpr const char * CELL_STATE = "cell_state";
+inline constexpr const char * POINT_VALUE = "point_value";
+} // namespace value
+
 /** @brief A field of a snapshot. */
 struct Field {
     std::string name;
@@ -49,6 +61,14 @@ struct Field {
     std::string long_name;
     std::string stored;     ///< "float64", "float32"
     double relative_error = 0.0;  ///< of lossy compression; 0: stored exactly
+    std::string value;      ///< value::...; make() fills it from the name where empty
+};
+
+/** @brief How point values were evaluated: method, design order, and what replaces it where it cannot be used. */
+struct Reconstruction {
+    std::string method;                 ///< "TENO", "linear_least_squares"; empty: no point values
+    int order = 0;
+    std::vector<std::string> fallback;  ///< in order: "linear_least_squares", "cell_average"
 };
 
 /** @brief The block of one snapshot. */
@@ -69,6 +89,7 @@ struct Block {
     double average_start = std::numeric_limits<double>::quiet_NaN();  ///< s
     double average_end = std::numeric_limits<double>::quiet_NaN();    ///< s
     int64_t samples = -1;
+    Reconstruction reconstruction;    ///< of the point values among the fields
     std::vector<Field> fields;
 
     /** @brief The block as one line of JSON. */
@@ -96,6 +117,13 @@ class Reason {
 
 /** @brief The reason of a snapshot written now: its interval, or if forced the current Reason. */
 std::string current_reason(bool forced);
+
+/** @brief The value kind of a cell field: cell_average for RHO, RHOU, RHOE, RHOY_*, their means and phase means and
+ *         REGION_FRACTION; cell_state for every other. */
+std::string value_kind(const std::string & name);
+
+/** @brief The field's CF cell_methods attribute ("volume: mean"), or empty where no CF method fits (cell_state). */
+std::string cell_methods(const Field & field);
 
 /** @brief Whether a field holds time averages. */
 bool is_averaged(const std::string & name);
