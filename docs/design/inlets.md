@@ -173,12 +173,13 @@ exactly, with whatever measure the flux integral uses (per unit depth in
 own (an expression, or a profile) gets its own copy of the condition, as the
 faces of a composition that varies along `inlet_state` do.
 
-A `profile` of `t` is renormalized at every stage, on the device, inside the
-step's CUDA graph. At setup every rank holding faces of the inlet gathers all
+A `profile` or an `mdot` of `t` is renormalized at every stage, on the device,
+inside the step's CUDA graph (a constant `mdot` with a fixed profile keeps
+the setup-time division above). At setup every rank holding faces of the inlet gathers all
 its faces (centroid and measure) in the order of the area sum above. At each
 stage, such a rank evaluates the profile at all of them, sums `profile ×
 measure` in chunks of 256 faces, then the chunks in order, and gives its own
-faces `mdot / sum × profile`. Every rank does the same arithmetic in the same
+faces `mdot(t) / sum × profile`. Every rank does the same arithmetic in the same
 order, so the fluxes and their total are identical on any rank count, with no
 communication. The cost is O(global inlet faces) on each of those ranks: 32
 bytes per face on the device (as much on the host) and one expression
@@ -204,9 +205,12 @@ fixed velocity.
   holds for a single gas with MUSCL/HLLC and TENO/Roe, for mixtures with and
   without double flux, and for a uniform `mass_flux` as well as an `mdot`
   with a profile, fixed or of `t`. `inlet_state` at the same initial mass flux misses by more than 1%.
-- **Profile of `t`.** The faces' fluxes integrate to `mdot` at every time and
-  follow the profile's shape, bitwise the same whichever faces a rank holds;
-  a profile that turns negative stops the run.
+- **Profile of `t`.** The faces' fluxes integrate to `mdot(t)` at every time
+  and follow the profile's shape, bitwise the same whichever faces a rank
+  holds; a profile or an `mdot` that turns negative stops the run.
+- **`mdot` of `t`.** The closed duct fed by a cubic `mdot(t)`, with and
+  without a profile of `t`, gains its integral to 1e-11: SSPRK3's stages are
+  Simpson's rule, exact for a cubic.
 - **Rayleigh flow.** Steady flow through a heated duct to a pressure outlet
   matches Rayleigh flow to 1e-4: the inlet pressure the flow needs, and the
   exit velocity and temperature.

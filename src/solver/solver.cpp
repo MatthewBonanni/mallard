@@ -973,7 +973,7 @@ void Solver::init_boundaries() {
         if (where) detail("where " + find_value<std::string>(bound, "where"));
         if (composition) detail("varying composition");
         if (fields->varies()) detail(fields->depends_on_time() ? "time dependent" : "varying along it");
-        if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("profile of t");
+        if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("mass flow of t");
         if (bcs.back().modeled) detail(wall_model_spec.summary());
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
     }

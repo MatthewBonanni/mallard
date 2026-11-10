@@ -12,8 +12,10 @@
 #include "solver.h"
 
 #include <algorithm>
+#include <iomanip>
 #include <memory>
 #include <numeric>
+#include <sstream>
 #include <vector>
 
 #include "comm.h"
@@ -73,18 +75,40 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     const std::string where = "boundaries[name = \"" + name + "\"]";
     // An expression for mass_flux is BoundaryFields'
     if (!bound.contains("mdot")) return {};
+    // mdot: a number, or an expression of t, a total over the inlet
+    double mdot = 0.0;
+    std::shared_ptr<const kexpr::Program> mdot_program;
+    if (BoundaryValue::is_expression(bound.at("mdot"))) {
+        if (const auto * table = input_detail::table_of(bound)) {
+            table->record_use("mdot", input_detail::real_use("number", dim::mass_flow, "", true));
+        }
+        const BoundaryValue v(bound.at("mdot"), where + ".mdot", dim::mass_flow);
+        if (v.compiled()->uses(0) || v.compiled()->uses(1) || v.compiled()->uses(2)) {
+            throw InputError(where + ".mdot is the total mass flow through the inlet, so it may depend on t but not "
+                             "on x, y, z: give its shape across the inlet in profile, or the local flux in mass_flux.");
+        }
+        mdot = v.at(Point{}, 0.0);
+        if (v.depends_on_time()) mdot_program = v.compiled();
+    } else {
+        mdot = find_double(bound, "mdot", dim::mass_flow);
+    }
+    if (mdot_program ? !(mdot >= 0.0) : !(mdot > 0.0)) {
+        throw InputError(where + ".mdot must be " + (mdot_program ? "non-negative (at t = 0)" : "positive") + ".");
+    }
     std::unique_ptr<Expression> shape;
     if (bound.contains("profile")) {
         shape = std::make_unique<Expression>(
             where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none));
     }
-    const bool of_t = shape && shape->depends_on_time();
+    const bool profile_of_t = shape && shape->depends_on_time();
+    // Either of t: the faces' fluxes are recomputed on the device at every stage
+    const bool of_t = profile_of_t || mdot_program;
     std::vector<double> value = shape ? evaluate_at({shape.get()}, mesh->face_coords, faces)
                                       : std::vector<double>(faces.size(), 1.0);
     std::string error;
     for (size_t k = 0; shape && k < faces.size(); k++) {
         if (!(value[k] >= 0.0)) {
-            error = where + ".profile must be non-negative at every face" + (of_t ? " and time" : "") +
+            error = where + ".profile must be non-negative at every face" + (profile_of_t ? " and time" : "") +
                     ": it shapes the mass flux into the domain; shift or clip it, e.g. max(..., 0).";
         }
     }
@@ -119,25 +143,30 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     double area = 0.0;
     for (const size_t i : order) area += terms[i];
     if (!(area > 0.0)) {
-        throw InputError(where + ".profile integrates to zero over the boundary" + (of_t ? " at t = 0" : "") +
+        throw InputError(where + ".profile integrates to zero over the boundary" + (profile_of_t ? " at t = 0" : "") +
                          ", so mdot has no faces to go through: make the profile positive somewhere.");
     }
-    const double mdot = find_double(bound, "mdot", dim::mass_flow);
-    if (!(mdot > 0.0)) throw InputError(where + ".mdot must be positive.");
     const double scale = mdot / area;
     if (of_t) {
         // Every rank keeps every face of the inlet, so that each integrates the profile alike at every stage
-        timed = MassFlowProfile{where, std::make_shared<const kexpr::Program>(
-                                           where + ".profile",
-                                           quantity_or_expression(bound.at("profile"), where + ".profile", dim::none),
-                                           BoundaryValue::variables(), expression_unit_hint),
-                                mdot, std::vector<Point>(order.size()), std::vector<double>(order.size())};
+        const std::string profile =
+            shape ? quantity_or_expression(bound.at("profile"), where + ".profile", dim::none) : "1";
+        std::ostringstream mdot_text;
+        mdot_text << std::setprecision(17) << mdot;
+        timed = MassFlowProfile{
+            where,
+            std::make_shared<const kexpr::Program>(where + ".profile", profile, BoundaryValue::variables(),
+                                                   expression_unit_hint),
+            mdot_program ? mdot_program
+                         : std::make_shared<const kexpr::Program>(where + ".mdot", mdot_text.str(),
+                                                                  BoundaryValue::variables()),
+            std::vector<Point>(order.size()), std::vector<double>(order.size())};
         for (size_t j = 0; j < order.size(); j++) {
             for (size_t d = 0; d < N_DIM; d++) timed.x[j][d] = x[order[j] * N_DIM + d];
             timed.measure[j] = measure[order[j]];
         }
     }
-    if (!shape) {
+    if (!shape && !of_t) {
         bc.data[N_DIM + 1] = static_cast<rtype>(scale);
         return {};
     }

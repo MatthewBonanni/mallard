@@ -161,13 +161,14 @@ struct CompositionPrograms {
 };
 
 /**
- * @brief The `profile` of t of an inlet_mass_flow with `mdot`, and every face
- *        of the inlet on all ranks, in the order of its area integral.
+ * @brief The `profile` (1 if none) and `mdot` of an inlet_mass_flow, one of
+ *        them of t, and every face of the inlet on all ranks, in the order of
+ *        its area integral.
  */
 struct MassFlowProfile {
     std::string where;
     std::shared_ptr<const kexpr::Program> shape;
-    double mdot = 0.0;
+    std::shared_ptr<const kexpr::Program> mdot;  // of t only
     std::vector<Point> x;          // face centers
     std::vector<double> measure;   // face measures as the flux integral weighs them
 };
@@ -192,7 +193,7 @@ class TimedBoundaryFields {
                  const std::shared_ptr<const CompositionPrograms> & composition, bool at_face = true);
 
         /**
-         * @brief The mass flux of conditions `bcs` at x on this rank: mdot spread over the whole inlet by
+         * @brief The mass flux of conditions `bcs` at x on this rank: mdot(t) spread over the whole inlet by
          *        `profile`, at each stage. Every rank integrates the profile over every face in the same
          *        order, so the fluxes are the same on any rank count with no communication.
          */
@@ -202,6 +203,9 @@ class TimedBoundaryFields {
         void finish();
 
         bool empty() const { return faces_host.empty() && profiles.empty(); }
+
+        /** @brief The errors of mass-flow profiles found on the device. */
+        enum ProfileError { NEGATIVE_PROFILE, ZERO_INTEGRAL, NEGATIVE_MDOT };
 
         /** @brief The gas of the conditions: the gas constant R of a single gas, or the mixture's tables. */
         struct Gas {
@@ -257,7 +261,7 @@ class TimedBoundaryFields {
         std::vector<uint32_t> profile_of_host;
         std::vector<uint32_t> first;            // first inlet face of each profile, then the total
         Kokkos::View<uint32_t *> profile_program;
-        Kokkos::View<double *> profile_mdot;
+        Kokkos::View<uint32_t *> profile_mdot;    // program
         Kokkos::View<double *[3]> inlet_x;
         Kokkos::View<double *> inlet_measure;
         Kokkos::View<uint32_t *[3]> chunk_range;  // profile, first and end face
@@ -267,9 +271,8 @@ class TimedBoundaryFields {
         Kokkos::View<uint32_t *> profile_bc;
         Kokkos::View<uint32_t *> profile_of;
         Kokkos::View<double *[3]> profile_x;
-        Kokkos::View<int32_t> profile_error;      // 1 + the first inlet face of a negative value, -1 - a profile
-                                                  // integrating to zero, 0 if none
-        Kokkos::View<double[2]> profile_error_value;  // its time and value
+        Kokkos::View<int32_t> profile_error;          // 1 + the inlet face or profile of the first error, 0 if none
+        Kokkos::View<double[3]> profile_error_value;  // its time, value and ProfileError
 
         void finish_profiles(std::vector<const kexpr::Program *> & all);
         void apply_profiles(const Kokkos::View<rtype> & time, const Kokkos::View<BoundaryCondition *> & bcs) const;
