@@ -28,8 +28,11 @@
 #include "mesh.h"
 #include "state.h"
 
+class DeviceSums;
+
 namespace region {
 class Regions;
+class MovingFractions;
 }
 
 namespace sources {
@@ -38,7 +41,8 @@ namespace sources {
 enum Variable : uint16_t {
     X = 0, Y = 1, Z = 2, TIME = 3, RHO = 4, U_X = 5, U_Y = 6, U_Z = 7, P = 8, TEMPERATURE = 9,
     MEAN_RHO = 10, MEAN_RHOU_X = 11, MEAN_RHOU_Y = 12, MEAN_RHOU_Z = 13, MEAN_RHOE = 14, MEAN_KE = 15,
-    N_FIXED = 16,  // then Y_<k>, then X_<k>
+    COPY = 16,
+    N_FIXED = 17,  // then Y_<k>, then X_<k>
 };
 
 /** @brief Domain averages: rho, rho u, rho E, rho |u|^2 / 2. */
@@ -61,6 +65,7 @@ struct CellVariables {
     double t;
     const double * means;
     uint32_t n_species;
+    double copy = 0.0;
 
     KOKKOS_INLINE_FUNCTION double mixture_sum() const {
         double s = 0.0;
@@ -78,7 +83,8 @@ struct CellVariables {
             const double R = n_species > 0 ? f.R_universal * mixture_sum() : f.R;
             return double(f.W(c, N_DIM + 1)) / (double(f.W(c, 0)) * R);
         }
-        if (i < N_FIXED) return means[i - MEAN_RHO];
+        if (i < COPY) return means[i - MEAN_RHO];
+        if (i == COPY) return copy;
         const uint32_t k = i - N_FIXED;
         if (k < n_species) return double(f.Y(c, k));
         const uint32_t j = k - n_species;
@@ -92,6 +98,8 @@ struct Term {
     uint32_t column = 0;       // < N_CONSERVATIVE: flow; else species column - N_CONSERVATIVE
     int32_t weights = -1;      // row of the cell fractions, -1 for none
     double scale = 1.0;        // 1 / (integral of the fraction) for totals, else 1
+    int32_t integral = -1;     // totals over moving regions: their integral's index, which replaces scale
+    double copy = 0.0;         // the index of the region's copy
 };
 
 /**
@@ -124,8 +132,9 @@ class SourceTerms {
          *        cells (times their measure), species per unit volume.
          * @param solution The state the fields were computed from.
          * @param stage_time Device scalar holding the stage time.
+         * @param nccl Whether sums across ranks (of moving regions' totals) go through NCCL.
          */
-        void add(const State & solution, const State & rhs, const Kokkos::View<rtype> & stage_time);
+        void add(const State & solution, const State & rhs, const Kokkos::View<rtype> & stage_time, bool nccl = false);
 
         /** @brief Recompute the domain averages from the solution (a global sum). */
         void update_means(const State & solution);
@@ -140,7 +149,23 @@ class SourceTerms {
          */
         void check_loops() const;
 
+        SourceTerms(const SourceTerms &) = delete;
+        SourceTerms & operator=(const SourceTerms &) = delete;
+        ~SourceTerms();
+
     private:
+        /** @brief The weights of moving regions at the time on the device, and their integrals. */
+        void move(const Kokkos::View<rtype> & time, bool nccl);
+
+        struct Moving {
+            std::unique_ptr<region::MovingFractions> fractions;
+            uint32_t row = 0;
+            int32_t integral = -1;
+        };
+        std::vector<Moving> moving;
+        std::unique_ptr<DeviceSums> integral_sums;
+        Kokkos::View<double **, Kokkos::LayoutLeft> integrands;  // (cell, integral): fraction times measure
+
         std::shared_ptr<Mesh> mesh;
         CellFields fields;
         uint32_t n_species = 0;

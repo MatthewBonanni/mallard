@@ -74,6 +74,9 @@ Region read(const Input & value, const std::string & where, const Input * names 
 /** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
 void require_full_dimension(const Region & region, const Input & value, const std::string & where);
 
+/** @brief An error unless the region given at where is fixed: what, the key's use, does not follow moving regions. */
+void require_fixed(const Region & region, const Input & value, const std::string & where, const std::string & what);
+
 /**
  * @brief The regions that the region keys of a run give on its mesh. A named
  *        region is parsed, and its volume fractions computed, once for all

@@ -1520,6 +1520,12 @@ void require_full_dimension(const Region & region, const Input & value, const st
          fix, "docs/guide/geometry.md#who-uses-what");
 }
 
+void require_fixed(const Region & region, const Input & value, const std::string & where, const std::string & what) {
+    if (!region.moving()) return;
+    fail(where, line_of(value), "moves (it has expressions of t), and " + what + " of moving regions are not supported yet",
+         "Give a fixed region", "docs/guide/geometry.md#moving-regions");
+}
+
 Regions::Regions(const Input & input, const Mesh & mesh) :
     m_names(named_regions(input)), m_mesh(mesh), m_automatic(mesh) {
     if (!m_names) return;

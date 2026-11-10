@@ -43,6 +43,7 @@
 namespace region {
 class Region;
 class Regions;
+class MovingFractions;
 }
 struct ProbeFluxes;
 
@@ -353,6 +354,18 @@ class Probes {
             std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
             double measure = 0.0;      // of the samples, at the latest reduction
             std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
+            std::shared_ptr<region::Region> copy;  // copies = "each": the copy it covers
+            /** @brief A moving filled region: its fractions, and its cells (every owned one) with their measures. */
+            struct Motion {
+                std::shared_ptr<region::MovingFractions> fractions;
+                std::vector<uint32_t> cells;
+                std::vector<double> volumes;
+                std::vector<size_t> order;  // rank 0: the gathered weights in global cell order
+                bool distributed = false;
+            };
+            std::shared_ptr<Motion> motion;
+            /** @brief The quadrature weights f V of a moving region at time t (collective). */
+            void move(double t);
 
             bool due(uint64_t step, rtype t) const;
             /** @brief With a time interval: due once t is at least this. */
@@ -387,9 +400,10 @@ class Probes {
             void write_reductions(uint64_t step, rtype t) const;
             void write_spectra(uint64_t step, rtype t);
         };
+        /** @brief copy: with copies = "each", the index of the region's copy the probe covers (-1: all). */
         void add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,
-                 const Snapshot * snapshot, const std::vector<Data> * cell_data);
+                 const Snapshot * snapshot, const std::vector<Data> * cell_data, int32_t copy = -1);
         /** @brief A snapshot's samples of a region of lower dimension: one at each element's center. */
         static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables);
         /**
