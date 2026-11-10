@@ -11,10 +11,11 @@
 
 #include "device_comm.h"
 
+#include <cstdint>
+#include <span>
 #include <stdexcept>
 #include <string>
-
-#include "comm.h"
+#include <type_traits>
 
 namespace comm {
 
@@ -53,6 +54,29 @@ void finalize_nccl() {
 }
 
 #endif
+
+template <typename T>
+void allreduce_device(const Kokkos::View<T *> & values, const Op op, [[maybe_unused]] const bool use_nccl) {
+#ifdef Mallard_HAS_NCCL
+    if (use_nccl) {
+        const ncclDataType_t type =
+            std::is_same_v<T, double> ? ncclDouble : (std::is_same_v<T, float> ? ncclFloat : ncclInt64);
+        const ncclRedOp_t nccl_op = op == Op::SUM ? ncclSum : (op == Op::MIN ? ncclMin : ncclMax);
+        if (ncclAllReduce(values.data(), values.data(), values.extent(0), type, nccl_op, nccl(),
+                          Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
+            throw std::runtime_error("NCCL: reduction failed");
+        }
+        return;
+    }
+#endif
+    const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
+    allreduce(std::span<T>(host.data(), host.extent(0)), op);
+    Kokkos::deep_copy(values, host);
+}
+
+template void allreduce_device<double>(const Kokkos::View<double *> &, Op, bool);
+template void allreduce_device<float>(const Kokkos::View<float *> &, Op, bool);
+template void allreduce_device<int64_t>(const Kokkos::View<int64_t *> &, Op, bool);
 
 void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::DefaultExecutionSpace & done) {
 #ifdef KOKKOS_ENABLE_CUDA

@@ -16,7 +16,6 @@
 #include <sstream>
 
 #include "comm.h"
-#include "exact_sums.h"
 #include "input.h"
 #include "region_input.h"
 
@@ -137,7 +136,7 @@ struct Accumulate {
 
 SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh_,
                          const std::vector<std::string> & species, const CellFields & fields_,
-                         region::Regions & regions) :
+                         region::Regions & regions, const bool use_nccl) :
     mesh(mesh_), fields(fields_), n_species(static_cast<uint32_t>(species.size())) {
     std::vector<std::string> names(FIXED_NAMES.begin(), FIXED_NAMES.end());
     if constexpr (N_DIM == 2) names[U_Z] = names[MEAN_RHOU_Z] = "";
@@ -278,7 +277,10 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
     }
     Kokkos::deep_copy(weights, h_weights);
     means = Kokkos::View<double *>("source_means", N_MEANS);
-    if (m_means) mean_terms = Kokkos::View<double *[N_MEANS + 1]>("source_mean_terms", mesh->n_owned());
+    if (m_means) {
+        mean_terms = Kokkos::View<double *[N_MEANS + 1]>("source_mean_terms", mesh->n_owned());
+        mean_sums = ExactSums<N_MEANS + 1>(mesh->n_owned(), mesh->n_global_cells > 0, use_nccl);
+    }
     auto upload = [](const std::vector<Term> & terms, const std::string & label) {
         Kokkos::View<Term *> v(label, terms.size());
         Kokkos::deep_copy(v, Kokkos::View<const Term *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(terms.data(),
@@ -311,10 +313,11 @@ void SourceTerms::update_means(const State & solution) {
         terms(c, 5) = double(U(c, N_DIM + 1)) * v;
         terms(c, 6) = 0.5 * (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]) / rho * v;
     });
-    const auto sums = exact_sums(terms, mesh->n_owned(), mesh->n_global_cells > 0);
-    auto h_means = Kokkos::create_mirror_view(means);
-    for (int i = 0; i < N_MEANS; i++) h_means(i) = sums[size_t(i) + 1] / sums[0];
-    Kokkos::deep_copy(means, h_means);
+    mean_sums.sum(terms);
+    const Kokkos::View<double *> sums = mean_sums.sums(), m = means;
+    Kokkos::parallel_for("source_means", 1, KOKKOS_LAMBDA(const int) {
+        for (int i = 0; i < N_MEANS; i++) m(i) = sums(i + 1) / sums(0);
+    });
 }
 
 void SourceTerms::add(const State & solution, const State & rhs, const Kokkos::View<rtype> & stage_time) {

@@ -11,11 +11,9 @@
  * The step's kernels are captured once and replayed: dt then lives on the
  * device (computed there with the host's arithmetic), the halo exchanges and
  * the dt reduction are NCCL operations on the same stream, and the host waits
- * once per step, for dt. Steps whose host work depends on the time (boundary
- * expressions of t, characteristic boundaries, average-pressure outlets),
- * that sum over the domain on the host (sources of domain averages) or that
- * need host decisions inside the step (gas mixtures, chemistry) run kernel by
- * kernel as before.
+ * once per step, for dt. Steps whose host work depends on the time
+ * (characteristic boundaries, synthetic inflow turbulence) or that need host
+ * decisions inside the step (gas mixtures, chemistry) run kernel by kernel.
  *
  */
 
@@ -56,10 +54,8 @@ std::string Solver::step_graph_unsupported() const {
     if (is_distributed() && !halo.uses_nccl()) return "halo exchanged with MPI";
     if (is_mixture()) return "gas mixture";
     if (les_on) return "LES models (not verified under capture yet)";
-    if (!average_pressure_outlets.empty()) return "average-pressure outlets";
     if (boundary_data.char_faces.extent(0) > 0) return "characteristic boundaries";
     if (!inflows.empty()) return "synthetic inflow turbulence";
-    if (source_terms && source_terms->uses_means()) return "sources of domain averages";
     return "";
 #endif
 }
@@ -79,15 +75,7 @@ void Solver::record_step() {
         apply_boundary_fields();
     }
     calc_dt_cfl1(Kokkos::View<rtype>(step_reduce.data()));
-#ifdef Mallard_HAS_NCCL
-    if (is_distributed()) {
-        const ncclDataType_t type = sizeof(rtype) == sizeof(double) ? ncclDouble : ncclFloat;
-        if (ncclAllReduce(step_reduce.data(), step_reduce.data(), N_REDUCE, type, ncclMin, comm::nccl(),
-                          exec.cuda_stream()) != ncclSuccess) {
-            throw std::runtime_error("NCCL: time-step reduction failed");
-        }
-    }
-#endif
+    if (is_distributed()) comm::allreduce_device(step_reduce, comm::Op::MIN, halo.uses_nccl());
     const Kokkos::View<rtype *> r = step_reduce;
     const Kokkos::View<rtype *> s = step_scalars;
     const bool use_cfl_ = use_cfl;
@@ -122,15 +110,10 @@ void Solver::record_step() {
     if (controlled) {
         // accept_controlled_step on the device; a rejected step relaunches the graph
         step_controller.estimate(solution_vec.back(), state(), rhs_vec.back(), mesh->n_owned());
-#ifdef Mallard_HAS_NCCL
         if (is_distributed()) {
-            const ncclDataType_t type = sizeof(rtype) == sizeof(double) ? ncclDouble : ncclFloat;
-            if (ncclAllReduce(step_controller.error_device(), step_controller.error_device(), 1, type, ncclMax,
-                              comm::nccl(), exec.cuda_stream()) != ncclSuccess) {
-                throw std::runtime_error("NCCL: step error reduction failed");
-            }
+            comm::allreduce_device(Kokkos::View<rtype *>(step_controller.error_device(), 1), comm::Op::MAX,
+                                   halo.uses_nccl());
         }
-#endif
         step_controller.update(dt, step_scalars.data() + STEP_DT, state(), solution_vec.back());
         Kokkos::deep_copy(exec, Kokkos::subview(step_io, IO_ACCEPTED), Kokkos::subview(control, int(StepController::ACCEPTED)));
     }
