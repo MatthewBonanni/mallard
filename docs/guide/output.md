@@ -71,7 +71,7 @@ variables = ["P", "T"]
 | Chemistry, radiation | `HRR`, `OMEGA_<s>`, `CHEM_COST`, `QRAD` |
 | LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
-| [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
+| [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*`; from [`mallard post average`](statistics.md#averages-of-saved-snapshots-mallard-post-average) also `RMS_<A>`, `FAVRE_MEAN_<A>`, `FAVRE_COV_<A>_<B>` |
 
 ### Derived fields
 
@@ -576,8 +576,8 @@ columns, column_units = read_csv("forces_cylinder.csv")
 
 These are the attributes xarray and netCDF tools look for, readable as
 they are. Units are written in SI base units (`kg m-1 s-2`, not `Pa`), so that
-derived fields compose: `MEAN_<A>` and `PHASE_<bin>_<A>` have the units of
-`A`, `COV_<A>_<B>` their product (`COV_U_X_U_Y`: `m2 s-2`), and `SOURCE_<A>`
+derived fields compose: `MEAN_<A>`, `RMS_<A>`, `FAVRE_MEAN_<A>` and
+`PHASE_<bin>_<A>` have the units of `A`, `COV_<A>_<B>` and `FAVRE_COV_<A>_<B>` their product (`COV_U_X_U_Y`: `m2 s-2`), and `SOURCE_<A>`
 those of `A` per second.
 
 | Field | Units | Field | Units |
@@ -777,7 +777,10 @@ $ mallard info solut/flow.vtkhdf.series
 `mallard post extract` evaluates probes, region integrals and snapshots of
 chosen fields on the state of restart files and snapshots after the run, as
 the run would have written them ([Probes of existing output](probes.md#probes-of-existing-output)),
-and `mallard post derive` their [derived fields](#derived-fields-after-the-run).
+`mallard post derive` their [derived fields](#derived-fields-after-the-run), and
+`mallard post average` their means, RMS, Reynolds and Favre covariances over
+the series, per cell or over homogeneous directions, as `[statistics]` keeps
+them ([Averages of saved snapshots](statistics.md#averages-of-saved-snapshots-mallard-post-average)).
 
 ### Comparing two solutions: `mallard diff`
 
@@ -868,7 +871,6 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 | `mallard/vtu.py`, `mallard/vtkhdf.py`, `mallard/h5.py`, `mallard/tables.py` | Readers for VTKHDF, VTU, HDF5 and CSV output and the [units](#units) of each file, for your own scripts (`from mallard.vtu import read_vtu_cells` with `tools/` on `sys.path`) |
 | `post/plot_vtu.py`, `post/compare_png.py` | A field of one or several snapshots |
 | `post/animate.py` | MP4/GIF animation of a 2D series with numerical schlieren |
-| `post/plane_average.py` | Averages over homogeneous directions |
 | `post/insitu_statistics.py` | Plots `[statistics.spectra]` output; recomputes it, or phase-bins a probe series, to check the in-situ values |
 | `plot_<case>.py` | Each validation case against its reference |
 

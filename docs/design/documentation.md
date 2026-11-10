@@ -22,7 +22,7 @@ image pairs to its own. What a pull request must document is listed in
 ## Links
 
 - Between pages of `docs/`: relative links (`../input.md#chemistry`).
-- To other files of the repository: relative links (`../../tools/post/plane_average.py`);
+- To other files of the repository: relative links (`../../tools/post/plot_channel.py`);
   the site turns them into links to GitHub.
 - To pages that only the website has (validation, gallery, dashboard, examples):
   absolute links, `https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube`;

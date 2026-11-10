@@ -50,7 +50,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 **Input and output** ([guide](docs/guide/input_files.md))
 - TOML input with units (`p = "1 atm"`); every error names the key, line and fix
 - Initial states from expressions, layered regions, tables and divergence-free synthetic turbulence of a prescribed spectrum
-- `mallard check` before a run, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file, `mallard diff` between two solutions, `mallard post extract` for probes and region integrals of existing output, `mallard post derive` for its derived fields; tab completion for bash, zsh and fish
+- `mallard check` before a run, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file, `mallard diff` between two solutions, `mallard post extract` for probes and region integrals of existing output, `mallard post derive` for its derived fields, `mallard post average` for its means, RMS, Reynolds and Favre covariances and plane averages; tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields) in the run or after it (`mallard post derive`): Mach number, stagnation state, entropy, Q-criterion, λ₂, enstrophy, helicity, numerical schlieren, pressure coefficient, and for flames mixture fraction, progress variable, flame index and scalar dissipation

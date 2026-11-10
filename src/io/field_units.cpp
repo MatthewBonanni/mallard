@@ -152,11 +152,11 @@ std::optional<FieldDescription> find_base(const std::string & name) {
 
 /**
  * @brief A field that statistics and probes sample (a conservative, a primitive,
- *        Y_<species> or RHOY_<species>), or the vector U or RHOU.
+ *        Y_<species>, RHOY_<species> or a derived field), or the vector U or RHOU.
  */
 std::optional<FieldDescription> find_sampled(const std::string & name) {
     bool sampled = name == "U" || name == "RHOU" || (starts_with(name, "Y_") && name.size() > 2) ||
-                   (starts_with(name, "RHOY_") && name.size() > 5);
+                   (starts_with(name, "RHOY_") && name.size() > 5) || derived::find(name.c_str()) != derived::N_FIELDS;
     for (const auto & conservative : CONSERVATIVE_NAMES) sampled = sampled || name == conservative;
     for (const auto & primitive : PRIMITIVE_NAMES) sampled = sampled || name == primitive;
     return sampled ? find_base(name) : std::nullopt;
@@ -180,14 +180,26 @@ std::optional<FieldDescription> find(const std::string & name) {
         if (!of) return std::nullopt;
         return FieldDescription{of->dimension, "time average of " + of->long_name, "", ""};
     }
-    if (starts_with(name, "COV_")) {
+    if (starts_with(name, "FAVRE_MEAN_")) {
+        auto of = find_sampled(name.substr(11));
+        if (!of) return std::nullopt;
+        return FieldDescription{of->dimension, "Favre (density-weighted) time average of " + of->long_name, "", ""};
+    }
+    if (starts_with(name, "RMS_")) {
+        auto of = find_sampled(name.substr(4));
+        if (!of) return std::nullopt;
+        return FieldDescription{of->dimension, "root mean square fluctuation of " + of->long_name, "", ""};
+    }
+    for (const char * prefix : {"COV_", "FAVRE_COV_"}) {
+        if (!starts_with(name, prefix)) continue;
         // COV_<A>_<B>: the first split whose halves are both sampled fields (names hold underscores)
-        const std::string pair = name.substr(4);
+        const std::string pair = name.substr(std::string(prefix).size());
+        const std::string what = prefix[0] == 'F' ? "Favre covariance of " : "covariance of ";
         for (size_t at = pair.find('_'); at != std::string::npos; at = pair.find('_', at + 1)) {
             const auto a = find_sampled(pair.substr(0, at)), b = find_sampled(pair.substr(at + 1));
             if (a && b) {
-                return FieldDescription{a->dimension.times(b->dimension),
-                                        "covariance of " + a->long_name + " and " + b->long_name, "", ""};
+                return FieldDescription{a->dimension.times(b->dimension), what + a->long_name + " and " + b->long_name,
+                                        "", ""};
             }
         }
         return std::nullopt;
@@ -232,7 +244,7 @@ std::string group(const std::string & name) {
         if (starts_with(name, e.name) && name.size() > std::string(e.name).size()) return e.group;
     }
     if (starts_with(name, "SOURCE_")) return "sources";
-    for (const char * prefix : {"MEAN_", "COV_", "PHASE_"}) {
+    for (const char * prefix : {"MEAN_", "COV_", "PHASE_", "RMS_", "FAVRE_MEAN_", "FAVRE_COV_"}) {
         if (starts_with(name, prefix)) return "statistics";
     }
     return "";
@@ -255,10 +267,14 @@ std::vector<CatalogField> catalog() {
         {"MEAN_<A>", dim::none, "", "statistics", "[statistics] fields with A, or [[probes]] averaging A"},
         {"COV_<A>_<B>", dim::none, "", "statistics", "[statistics] products with A*B"},
         {"PHASE_<bin>_<A>", dim::none, "", "statistics", "[statistics.phase]"},
+        {"RMS_<A>", dim::none, "", "statistics", "mallard post average, of A with its variance"},
+        {"FAVRE_MEAN_<A>", dim::none, "", "statistics", "mallard post average --favre"},
+        {"FAVRE_COV_<A>_<B>", dim::none, "", "statistics", "mallard post average --favre, of A*B"},
     };
     const char * long_names[] = {"source of A, per second", "time average of A", "covariance of A and B",
-                                 "phase average of A in a bin"};
-    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's"};
+                                 "phase average of A in a bin", "root mean square fluctuation of A",
+                                 "Favre (density-weighted) time average of A", "Favre covariance of A and B"};
+    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "A's", "A's", "A's times B's"};
     for (size_t i = 0; i < std::size(derived); i++) {
         out.push_back({derived[i].name, units[i], long_names[i], derived[i].group, derived[i].needs});
     }

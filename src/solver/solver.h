@@ -177,6 +177,17 @@ class Solver {
         void write_output_of_state(bool next);
 
         /**
+         * @brief Post-processing (`mallard post average`): with next, takes the next state from the
+         *        reader; then adds it to the [statistics] means as a sample at its step and time (the
+         *        means start at statistics.t_start, not from the files'), updates their host copies,
+         *        and returns the cell values sampled.
+         */
+        CellSampler sample_statistics_of_state(bool next);
+
+        /** @brief Post-processing, set before init(): fields of the caller's own on the mesh's cells, for [[write_data]]. */
+        void set_output_data(std::function<void(const Mesh &, std::vector<Data> &)> add) { output_data = std::move(add); }
+
+        /**
          * @brief Run until a stop condition is reached.
          * @return Exit status.
          */
@@ -681,7 +692,9 @@ class Solver {
         void sample_probe_averages();
         /** @brief The named arrays of restart files: averaged spectra and probes (collective). */
         RestartArrays restart_arrays() const;
-        CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
+        CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives, derived_fields}; }
+        /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
+        void sample_statistics();
         /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
         ProbeFields probe_fields(ProbeFluxes & fluxes);
         /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
@@ -799,6 +812,7 @@ class Solver {
         Input input;
         bool check_only = false;  // within check()
         std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
+        std::function<void(const Mesh &, std::vector<Data> &)> output_data;  // post-processing: fields of its own
         numerics_preset::Resolution preset;
         std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 

@@ -242,7 +242,7 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) allocate_time_stepping();
         init_les();
-        statistics.init(input, species_names, *mesh);
+        statistics.init(input, species_names, *mesh, derived_selection);
         init_rhs_split();
         used_regions = std::make_unique<region::Regions>(input, *mesh);
         init_sources(*used_regions);
@@ -1819,6 +1819,10 @@ void Solver::allocate_memory() {
         derived_settings.require(field, input);
         derived_selection.add(field);
     }
+    for (const derived::Field field : Statistics::derived_fields(input)) {
+        derived_settings.require(field, input);
+        derived_selection.add(field);
+    }
     if (derived_selection.any()) {
         derived_fields = Kokkos::View<rtype **>("derived_fields", mesh->n_cells, derived_selection.n_columns);
         h_derived_fields = Kokkos::create_mirror_view(derived_fields);
@@ -2057,6 +2061,7 @@ void Solver::register_data() {
         h_teno_sigma = Kokkos::create_mirror_view(teno->troubled);
         data.push_back(Data("TENO_SIGMA", h_teno_sigma));
     }
+    if (output_data) output_data(*mesh, data);
 }
 
 std::vector<std::string> Solver::output_fields() const {
@@ -2192,10 +2197,7 @@ int Solver::run_loop() {
             }
             check_fields();
             if (p_max.is_allocated()) update_p_max();
-            if (statistics.due(step, t)) {
-                update_primitives();
-                statistics.sample(step, t, cell_sampler(), mesh->n_owned());
-            }
+            if (statistics.due(step, t)) sample_statistics();
             if (probes.averages_due(step, t)) sample_probe_averages();
             t_wall_stepping += step_timer.seconds();
             Kokkos::Timer output_timer;
@@ -2667,6 +2669,23 @@ void Solver::write_output_of_state(bool next) {
     write_data(true);
     write_probes();
     for (auto & writer : data_writers) writer->finish();
+}
+
+void Solver::sample_statistics() {
+    if (statistics.samples_derived()) {
+        update_velocity_gradients();
+        update_derived_fields();
+    } else {
+        update_primitives();
+    }
+    statistics.sample(step, t, cell_sampler(), mesh->n_owned());
+}
+
+CellSampler Solver::sample_statistics_of_state(bool next) {
+    if (next) apply_output_state(state_reader(*mesh));
+    sample_statistics();
+    statistics.copy_device_to_host();
+    return cell_sampler();
 }
 
 void Solver::write_probes() {

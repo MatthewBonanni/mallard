@@ -25,7 +25,7 @@ carried across restarts.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `fields` | none | `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T`, `H`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `Y_<s>`, `RHOY_<s>` |
+| `fields` | none | `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T`, `H`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `Y_<s>`, `RHOY_<s>`, and the [derived fields](output.md#derived-fields) (`MACH`, `P0`, `ENSTROPHY`, `MIXTURE_FRACTION`, ...: the derived and mixture groups of `mallard list fields`) |
 | `products` | none | Pairs `"A*B"` whose covariance to keep |
 | `t_start` | 0 | Start averaging after this time; or let a [trigger](running.md#triggers) start them (`do = "start statistics"`) once a condition holds |
 | `interval` | 1 | Sample every this many steps (weighted by the time since the last sample) |
@@ -33,9 +33,15 @@ carried across restarts.
 
 Write them with `variables = ["MEAN_*", "COV_*"]`, sample them with
 [probes](probes.md#time-averages) (`variables = ["MEAN_P"]`), and average further over
-homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of a
-channel, giving profiles in y; its CSV also feeds
+homogeneous directions with [`mallard post average --statistics`](#averages-of-saved-snapshots-mallard-post-average)
+(e.g. over x and z of a channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)).
+
+A derived field such as `MACH` is computed at each sample from the cell's
+state and its gradients, exactly as `[[write_data]]` writes it, so its mean is
+the mean of the field, not the field of the mean state; a field that needs
+input (the `reference` of `CP`, the streams of `MIXTURE_FRACTION`) takes it
+from `[output]` as when written. Sampling one costs a gradient evaluation.
 
 **Favre averages** are not computed directly. Favre means follow exactly from
 Reynolds statistics that include `RHO`: with `fields = ["RHO", "U_X", "U_Y", ...]`
@@ -49,7 +55,74 @@ Favre covariance  ũ''v'' = COV_U_X_U_Y - COV_RHO_U_X * COV_RHO_U_Y / MEAN_RHO^2
 The triple correlation `<ρ'u'v'>` is not kept, so a Favre covariance computed
 from these fields leaves it out. That is a good approximation where density
 fluctuations are small (low Mach number, no heat release), but not in flames
-or across strong shocks.
+or across strong shocks. `mallard post average --favre` computes Favre means
+and covariances exactly, the triple correlation included, from saved snapshots.
+
+## Averages of saved snapshots: `mallard post average`
+
+```sh
+mallard post average solut/restart_*.restart --t-start 40          # MEAN_, COV_, RMS_ per cell
+mallard post average solut/flow.vtkhdf.series --favre              # and FAVRE_MEAN_, FAVRE_COV_
+mallard post average solut/flow.vtkhdf.series --homogeneous x,z    # profiles in y: average/average.csv
+mallard post average stats/channel.vtkhdf.series --latest --statistics --homogeneous x,z
+```
+
+For a run without `[statistics]`, or with other fields than it averaged,
+`mallard post average` averages the states of saved restart files or
+snapshots in time, per cell, with `[statistics]`'s own code: the same
+`MEAN_<a>` and `COV_<a>_<b>`, `RMS_<a>` (the square root of a variance) and,
+with `--favre`, the Favre means `FAVRE_MEAN_<a>` and covariances
+`FAVRE_COV_<a>_<b>`. It reads one state at a time, so its memory does not grow
+with the series. The result is one snapshot at the last step,
+`average/average_<step>.vtkhdf`, with the averaging window in its
+[snapshot block](output.md#snapshot-metadata).
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--fields` | `RHO`, `U_X`, `U_Y`, `U_Z` (3D), `P`, `T` | What `[statistics]` `fields` takes, derived fields included |
+| `--products` | each field's variance, and the velocity covariances | Pairs `A*B`, or `none` |
+| `--favre` | off | Favre means and covariances of the fields and products other than `RHO` |
+| `--t-start` | as long before the first snapshot as the second is after it | Where the first snapshot's weight starts |
+| `--homogeneous` | none | Also average over these directions (`x,z`): a CSV profile instead of a snapshot |
+| `--statistics` | off | Average over `--homogeneous` the `[statistics]` fields one snapshot holds |
+| `--region` | the whole mesh | Average over a region only: as `[[write_data]]` `region`; with `--homogeneous`, a filled region, cells weighted by their fraction in it |
+| `--reference`, `--mixture` | the input's | `[output]` `reference` and `mixture` of derived fields, as for [`post derive`](output.md#derived-fields-after-the-run) |
+
+The full list is under `mallard post average --help` and in the
+[CLI reference](cli.md). Each snapshot weighs the time since the previous
+one, as a run's samples do: restart files of the steps a run sampled, with
+`--t-start` at its `t_start`, give its `[statistics]` bit for bit. Snapshots
+are identified by the steps and times they record, never by their names, and
+must come in increasing time. Evenly spaced snapshots weigh the same by
+default.
+
+**Favre averages** weigh each sample by the time and the cell's density:
+`ã = Σ w ρ a / Σ w ρ` and `<ρ a'' b''>/<ρ> = Σ w ρ (a - ã)(b - b̃) / Σ w ρ`,
+exactly, with no triple correlation left out. `RHO` is added to the fields.
+
+**Homogeneous directions.** `--homogeneous x,z` averages the per-cell
+results over x and z as functions of y, weighted by cell volume, on any mesh:
+cells whose centers agree in the kept directions (to `--rtol` of the mesh's
+extent, 1e-6) form a row. A covariance becomes that over time and the
+averaged directions together,
+
+```text
+<a'b'> = avg(COV_a_b + MEAN_a MEAN_b) - avg(MEAN_a) avg(MEAN_b)
+```
+
+adding the dispersive part (the spatial variation of the time means); Favre
+columns are weighted by volume times `MEAN_RHO`. The CSV, `average/average.csv`,
+holds the kept coordinates, `n_cells`, then each column, and is the `profile`
+[synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)
+reads. `--statistics` does the same to the `MEAN_`, `COV_` (and
+`FAVRE_`) fields a snapshot of a run's `[statistics]` holds, pairing
+`COV_<a>_<b>` with `MEAN_<a>` and `MEAN_<b>` where both are there.
+
+- Snapshots of `RHO`, `U` and `P` give the run's averages to their stored
+  precision; restart files and snapshots of the conservative variables, bit for bit.
+- A single snapshot has no interval to weigh it by: give `--t-start`.
+- Under `mpirun -n N` the cells are split over N ranks; the profile's rows
+  are summed over them.
 
 ## Spectra and two-point correlations: `[statistics.spectra]`
 
@@ -130,4 +203,5 @@ level by a variable at a probe point.
 - [Input reference: `[statistics]`](../input.md#statistics), [`[statistics.spectra]`](../input.md#statisticsspectra), [`[statistics.phase]`](../input.md#statisticsphase)
 - [Large-eddy simulation](les.md): turbulent inflow and the dissipation budget
 - [Probes and monitors](probes.md): samples and reductions of the instantaneous solution
-- [Units](output.md#units) of `MEAN_`, `COV_` and `PHASE_` fields and of spectra
+- [Units](output.md#units) of `MEAN_`, `COV_`, `RMS_`, `FAVRE_` and `PHASE_` fields and of spectra
+- [`mallard post average`](cli.md): its options in full

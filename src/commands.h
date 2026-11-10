@@ -49,6 +49,12 @@ int derive_main(const cli::Args & args);
 /** @brief The work of `mallard post derive`, with MPI and Kokkos started (tests call it). */
 int post_derive(const cli::Args & args);
 
+/** @brief `mallard post average FILE...`: statistics over saved snapshots. */
+int average_main(const cli::Args & args);
+
+/** @brief The work of `mallard post average`, with MPI and Kokkos started (tests call it). */
+int post_average(const cli::Args & args);
+
 /** @brief `mallard mesh convert INPUT OUTPUT.h5`. */
 int mesh_convert_main(const cli::Args & args);
 
