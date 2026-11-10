@@ -34,7 +34,6 @@ ROOT = Path(__file__).resolve().parents[2]
 PERF_DIR = ROOT / "benchmarks" / "perf"
 SUITE = PERF_DIR / "suite.json"
 BASELINES = PERF_DIR / "baselines.csv"
-SI = {"": 1.0, "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12}
 
 
 def detect_hardware():
@@ -79,17 +78,14 @@ def stage_input(case_input, work):
     return staged
 
 
-def seconds(text):
-    """A duration as Mallard's log writes it ("320 ms", "13.8 s", "2m 05s", "1h 02m") in seconds."""
-    text = text.strip()
-    m = re.fullmatch(r"([0-9.]+) (us|ms|s)", text)
-    if m:
-        return float(m.group(1)) * {"us": 1e-6, "ms": 1e-3, "s": 1.0}[m.group(2)]
-    m = re.fullmatch(r"(\d+)([hm]) (\d+)([ms])", text)
-    if not m:
-        raise RuntimeError(f"unknown duration {text!r}")
-    big = 3600 if m.group(2) == "h" else 60
-    return int(m.group(1)) * big + int(m.group(3)) * (60 if m.group(4) == "m" else 1)
+def run_end(work):
+    """The last `end` record of the run log the run wrote in `work`, or None."""
+    log = work / "mallard.jsonl"
+    if not log.exists():
+        return None
+    ends = [r for r in map(json.loads, log.read_text().splitlines()) if r.get("type") == "end"]
+    log.unlink()
+    return ends[-1] if ends else None
 
 
 def run_once(case, binary, launcher, work, log=None):
@@ -103,18 +99,15 @@ def run_once(case, binary, launcher, work, log=None):
         raise RuntimeError(f"{case['name']}: {shlex.join(cmd)} exited with {out.returncode}\n"
                            f"{out.stdout[-3000:]}\n{out.stderr[-3000:]}")
     if "command" not in case:
-        m = re.search(r"Throughput\s+([0-9.]+)([kMGT]?) cells/s", out.stdout)
-        if not m:
-            raise RuntimeError(f"{case['name']}: no throughput in the output\n{out.stdout[-3000:]}")
-        throughput = float(m.group(1)) * SI[m.group(2)]
+        end = run_end(work)
+        if end is None or end.get("cells_per_second") is None:
+            raise RuntimeError(f"{case['name']}: no end record with cells_per_second in mallard.jsonl\n"
+                               f"{out.stdout[-3000:]}")
+        throughput = end["cells_per_second"]
         if case.get("metric") == "with_output":
             # Probes sample in the output phase: cells per second over time stepping, diagnostics and output
-            w = re.search(r"Wall time\s+.*?: setup (.+?), time stepping (.+?), diagnostics (.+?), output (.+?)$",
-                          out.stdout, flags=re.M)
-            if not w:
-                raise RuntimeError(f"{case['name']}: no wall time in the output\n{out.stdout[-3000:]}")
-            stepping, diagnostics, output = (seconds(w.group(k)) for k in (2, 3, 4))
-            throughput *= stepping / (stepping + diagnostics + output)
+            stepping = end["wall_stepping"]
+            throughput *= stepping / (stepping + end["wall_diagnostics"] + end["wall_output"])
         return {case["name"]: throughput}
     result = {}
     csv_files = sorted(work.glob("*.csv"))
