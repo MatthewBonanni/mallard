@@ -379,10 +379,7 @@ TEST(InputUpgradeTest, MeshPeriodicBecomesPeriodicZonePairsAfterTheMesh) {
         "Lx = 2.0\n"
         "\n"
         "[output]\n"
-        "check_interval = 10\n"
-        "\n"
-        "[numerics]\n"
-        "preset = \"second_order\"\n";
+        "check_interval = 10\n";
     const std::string expected =
         "[run]\n"
         "n_steps = 1\n"
@@ -398,10 +395,7 @@ TEST(InputUpgradeTest, MeshPeriodicBecomesPeriodicZonePairsAfterTheMesh) {
         "zones = [\"back\", \"front\"]\n"
         "\n"
         "[output]\n"
-        "check_interval = 10\n"
-        "\n"
-        "[numerics]\n"
-        "preset = \"second_order\"\n";
+        "check_interval = 10\n";
     bool reformatted = true;
     std::vector<Finding> findings;
     EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), expected);
@@ -492,27 +486,19 @@ TEST(InputUpgradeTest, PresetsNamedForTheirOrderReadTheOldNamesWithAWarning) {
     }
 }
 
-TEST(InputUpgradeTest, AnInputThatRanFirstOrderByDefaultIsPinnedToFirstOrder) {
-    const std::string text = "[run]\nt_stop = 1.0\ncfl = 0.5\n\n[numerics]\nriemann_solver = \"Roe\"\n\n[output]\nx = 1\n";
+TEST(InputUpgradeTest, AnInputOnTheChangedDefaultGetsANoticeAndNoChange) {
+    const std::string text = "[run]\nt_stop = 1.0\ncfl = 0.5\n\n[numerics]\nriemann_solver = \"Roe\"\n";
     bool reformatted = true;
     std::vector<Finding> findings;
-    const std::string upgraded = input_upgrade::upgrade_text(text, findings, reformatted);
-    EXPECT_FALSE(reformatted);
-    ASSERT_EQ(findings.size(), 1u);
-    EXPECT_EQ(findings[0].key, "numerics.face_reconstruction.type");
-    EXPECT_EQ(upgraded, "[run]\nt_stop = 1.0\ncfl = 0.5\n\n[numerics]\nriemann_solver = \"Roe\"\n\n"
-                        "[numerics.face_reconstruction]\ntype = \"FO\"  # " +
-                            input_upgrade::rules().defaults[0].note + "\n\n[output]\nx = 1\n");
-    // Upgraded once, nothing is left to change; a run does not pin the default itself
-    input_upgrade::upgrade_text(upgraded, findings, reformatted);
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), text);
     EXPECT_TRUE(findings.empty());
-    Input input = parse_input_string(text);
-    EXPECT_TRUE(input_upgrade::apply(input).empty());
-    EXPECT_FALSE(input.at("numerics").contains("face_reconstruction"));
-    // A preset, a reconstruction table, or a file that is not a run's input is left alone
+    const std::vector<std::string> notes = input_upgrade::notices(text);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_NE(notes[0].find("type = \"FO\""), std::string::npos) << notes[0];
+    // A preset, a reconstruction table, or a file that is not a run's input gets none
     for (const std::string other : {"[run]\nt_stop = 1.0\n[numerics]\npreset = \"les\"\n",
                                     "[run]\nt_stop = 1.0\n[numerics.face_reconstruction]\nbound_preserving = true\n",
                                     "[mesh]\ntype = \"cartesian\"\n"}) {
-        EXPECT_EQ(input_upgrade::upgrade_text(other, findings, reformatted), other);
+        EXPECT_TRUE(input_upgrade::notices(other).empty()) << other;
     }
 }

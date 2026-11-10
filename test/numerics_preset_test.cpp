@@ -143,8 +143,8 @@ TEST(NumericsPreset, WithoutAPresetOrAReconstructionTheDefaultIsHighOrderUnderTh
     EXPECT_TRUE(r.is_default);
     EXPECT_EQ(input.at("numerics").at("face_reconstruction").at("type").as_string(), "TENO");
     EXPECT_EQ(input.at("numerics").at("riemann_solver").as_string(), "Roe");
-    EXPECT_EQ(r.summary(resolve_input(input)), "high_order (the default: the input sets no preset and no "
-                                               "[numerics.face_reconstruction]; the input sets "
+    EXPECT_EQ(r.summary(resolve_input(input)), "high_order (the default since 0.10.0, first order before: the input "
+                                               "sets no preset and no [numerics.face_reconstruction]; the input sets "
                                                "numerics.riemann_solver = \"Roe\", run.cfl = 0.7)");
     Input bare;
     EXPECT_TRUE(resolve("[run]\nt_stop = 1.0\n", &bare).is_default);

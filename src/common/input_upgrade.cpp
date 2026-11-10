@@ -114,11 +114,6 @@ const Rules & rules() {
             {"initialize.mesh.periodic", "initialize.periodic", "zones", "type", "0.9.0", "0.10.0",
              "one syntax for the periodic zones of generated meshes and mesh files", periodic_zones},
         },
-        {
-            {{"numerics.preset", "numerics.face_reconstruction"}, "run", "numerics.face_reconstruction", "type",
-             "\"FO\"", "0.10.0",
-             "first order, the default before Mallard 0.10.0; without it the run takes the high_order preset"},
-        },
     };
     return table;
 }
@@ -371,23 +366,6 @@ Concrete plain_path(const std::string & dotted_path) {
     return key;
 }
 
-template <typename V>
-bool default_applies(V & root, const DefaultRule & rule) {
-    if (at(root, plain_path(rule.with)) == nullptr) return false;
-    for (const std::string & key : rule.unless) {
-        if (at(root, plain_path(key)) != nullptr) return false;
-    }
-    return true;
-}
-
-Finding default_finding(const DefaultRule & rule) {
-    Finding f;
-    f.key = rule.table + "." + rule.key;
-    f.suggestion = f.key + " = " + rule.value;
-    f.message = f.suggestion + " added (" + rule.note + ")";
-    return f;
-}
-
 /**
  * @brief Whether the rule applies to a run of dimension dim (0: unknown). Throws
  *        if it depends on the dimension, which is unknown, and the input has its option.
@@ -486,15 +464,6 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
                 array.as_array().push_back(V(element));
             }
             entries_of(*at(root, parent(key))).erase(key.back().first);
-        }
-    }
-    if (!setup) {
-        for (const DefaultRule & rule : table.defaults) {
-            if (!default_applies(root, rule)) continue;
-            findings.push_back(default_finding(rule));
-            V * holder = at(root, plain_path(rule.table), true);
-            if (holder == nullptr || !holder->is_table()) throw InputError("cannot set " + findings.back().key + ".");
-            entries_of(*holder)[rule.key] = toml::parse_str<typename V::config_type>("x = " + rule.value).at("x");
         }
     }
     return findings;
@@ -757,18 +726,21 @@ bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule,
     return true;
 }
 
-/** @brief A default rule's key added after its parent table's keys (or at the end), or false if it has none to add. */
-bool rewrite_default(std::vector<std::string> & lines, const DefaultRule & rule) {
-    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
-    if (!default_applies(root, rule)) return false;
-    const std::vector<std::string> block = {"", "[" + rule.table + "]",
-                                            rule.key + " = " + rule.value + "  # " + rule.note};
-    const auto end = end_of_table(lines, parent(plain_path(rule.table)));
-    lines.insert(end ? lines.begin() + static_cast<long>(*end) : lines.end(), block.begin(), block.end());
-    return true;
-}
-
 } // namespace
+
+std::vector<std::string> notices(const std::string & text) {
+    const Input input = parse_input_string(text);
+    const auto has = [&](const char * table, const char * key) {
+        return input.contains(table) && input.at(table).is_table() && input.at(table).contains(key);
+    };
+    std::vector<std::string> out;
+    if (input.contains("run") && !has("numerics", "preset") && !has("numerics", "face_reconstruction")) {
+        out.push_back("no preset and no [numerics.face_reconstruction]: since 0.10.0 this runs the high_order "
+                      "preset, not first order; add [numerics.face_reconstruction] type = \"FO\" to reproduce "
+                      "older first-order results");
+    }
+    return out;
+}
 
 std::string advice(const Finding & finding) {
     return describe(finding) + "; `mallard input upgrade old.toml > new.toml` rewrites the file";
@@ -811,9 +783,6 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     for (const ArrayRule & rule : table.arrays) {
         for (int guard = 0; guard < 100000 && !impossible && rewrite_one_array(lines, rule, impossible); guard++) {}
     }
-    for (const DefaultRule & rule : table.defaults) {
-        if (!impossible) rewrite_default(lines, rule);
-    }
     if (!impossible) {
         try {
             if (same(parse_input_string(join_lines(lines)), expected)) return join_lines(lines);
@@ -839,6 +808,7 @@ int upgrade_file(const std::string & file, bool check, int dim, const std::strin
         bool reformatted = false;
         const std::string upgraded = upgrade_text(text, findings, reformatted, rules(), dim, unknown_dimension);
         for (const Finding & f : findings) std::cerr << file << ": " << describe(f) << "\n";
+        for (const std::string & note : notices(text)) std::cerr << file << ": note: " << note << "\n";
         if (reformatted) {
             std::cerr << file << ": a changed key is a dotted key or in an inline table, so the whole file was "
                       << "reformatted (comments are kept, layout is not)\n";

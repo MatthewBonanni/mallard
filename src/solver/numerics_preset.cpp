@@ -123,7 +123,8 @@ std::string Resolution::summary(const ResolvedInput & resolved) const {
         const KeyRecord * record = resolved.find(s.key);
         overrides += (overrides.empty() ? "" : ", ") + s.key + " = " + (record ? record->value : "");
     }
-    std::string note = is_default ? "the default: the input sets no preset and no [numerics.face_reconstruction]" : "";
+    std::string note = is_default ? "the default since 0.10.0, first order before: the input sets no preset and no "
+                                    "[numerics.face_reconstruction]" : "";
     if (!overrides.empty()) note += (note.empty() ? "" : "; ") + std::string("the input sets ") + overrides;
     return note.empty() ? name : name + " (" + note + ")";
 }

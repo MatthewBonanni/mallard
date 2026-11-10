@@ -70,25 +70,11 @@ struct ArrayRule {
     std::vector<std::string> (*convert)(const std::string & item, const std::string & context) = nullptr;
 };
 
-/**
- * @brief A default that changed: a file that has the table `with` and none of
- *        `unless` gets `key = value` in `table`, the old default, so that it
- *        runs as before. Only `mallard input upgrade` applies it: a run takes
- *        the new default without a warning, since the input sets nothing old.
- */
-struct DefaultRule {
-    std::vector<std::string> unless;  ///< Dotted keys or tables, any of which the file sets
-    std::string with;                 ///< A table every input it applies to has, e.g. "run"
-    std::string table, key, value;    ///< Dotted table, key, and the value's TOML text
-    std::string since, note;
-};
-
 /** @brief Every rule, oldest first; docs/guide/input_files.md lists them. */
 struct Rules {
     std::vector<KeyRule> keys;
     std::vector<OptionRule> options;
     std::vector<ArrayRule> arrays;
-    std::vector<DefaultRule> defaults = {};
 };
 const Rules & rules();
 
@@ -130,6 +116,14 @@ std::vector<Finding> apply(Input & input, const std::string & version = "", cons
 std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
                          bool & reformatted, const Rules & table = rules(), int dim = N_DIM,
                          const std::string & unknown_dimension = "");
+
+/**
+ * @brief Changes of behavior that need no rewrite but are worth knowing,
+ *        e.g. a changed default the input relies on: one line each, for
+ *        `mallard input upgrade` to print. They change neither the file nor
+ *        the exit status of `--check`.
+ */
+std::vector<std::string> notices(const std::string & text);
 
 /**
  * @brief `mallard input upgrade [--check] old.toml > new.toml`: writes the

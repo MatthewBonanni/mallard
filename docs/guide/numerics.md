@@ -219,7 +219,8 @@ order = 5          # TENO: 3 to 6
     Without a [preset](#presets) or this table Mallard runs the `high_order`
     preset (TENO-E 5). With this table and no preset, `type` defaults to
     `"FO"`: set it. Before Mallard 0.10 the default without either was first
-    order; `mallard input upgrade` [keeps old inputs first order](input_files.md#inputs-from-older-releases).
+    order: add `type = "FO"` to reproduce older results (`mallard input upgrade`
+    [notes the inputs this concerns](input_files.md#inputs-from-older-releases)).
 
 ![Density of the Sod shock tube at t = 0.2 with first order, MUSCL, TENO-E 3 and TENO-E 5 against the exact solution](../images/guide/sod_schemes-light.svg#gh-light-mode-only)
 ![Density of the Sod shock tube at t = 0.2 with first order, MUSCL, TENO-E 3 and TENO-E 5 against the exact solution](../images/guide/sod_schemes-dark.svg#gh-dark-mode-only)
