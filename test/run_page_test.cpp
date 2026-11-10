@@ -30,9 +30,11 @@ namespace fs = std::filesystem;
 std::string case_input(const std::string & dir, const std::string & run, const std::string & output) {
     std::ostringstream s;
     s << "[run]\n" << run
-      << "[mesh]\ntype = \"cartesian_tri\"\nNx = 12\nNy = 10\nLx = 1.0\nLy = 1.0\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 10\nLx = 1.0\nLy = 1.0\n"
+      << (N_DIM == 3 ? "Nz = 3\nLz = 0.25\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
       << "[initialize]\ntype = \"analytical\"\n"
-      << "rho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"]\np = \"x < 0.4 ? 2.0 : 1.0\"\n"
+      << "rho = \"1.0 + (x < 0.4 ? 1.0 : 0.0)\"\nu = [\"0.2\", \"0.1\"" << (N_DIM == 3 ? ", \"0.0\"" : "")
+      << "]\np = \"x < 0.4 ? 2.0 : 1.0\"\n"
       << "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
       << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
@@ -126,7 +128,7 @@ TEST(RunPageTest, ARunWritesItsReportFromItsRecordsAndInfoRebuildsTheSamePage) {
 TEST(RunPageTest, ADivergedRunsReportShowsTheLikelyCauseAndItsFix) {
     const std::string dir = fresh_dir("report_diverged");
     Solver solver;
-    solver.init(parse_toml(case_input(dir, "n_steps = 500\ndt = 0.04\n", logged(dir))));
+    solver.init(parse_toml(case_input(dir, "n_steps = 500\ndt = 0.2\n", logged(dir))));
     EXPECT_THROW(solver.run(), std::runtime_error);
     if (!comm::is_root()) return;
     const std::string page = read_file(dir + "/report.html");
