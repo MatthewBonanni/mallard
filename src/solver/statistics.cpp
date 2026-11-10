@@ -576,8 +576,10 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
         buckets[key(b)].push_back(p);
     }
 
+    const curved::Geometry * curves = mesh.curved_geometry.get();
     for (uint32_t c = 0; c < n_owned && n_points > 0; c++) {
         const uint32_t n_nodes = mesh.h_n_nodes_of_cell(c);
+        const bool curved_cell = curves && curves->cell_is_curved(c);
         std::array<double, N_DIM> c_lo, c_hi;
         c_lo.fill(std::numeric_limits<double>::max());
         c_hi.fill(std::numeric_limits<double>::lowest());
@@ -587,8 +589,17 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
                 c_hi[d] = std::max(c_hi[d], node(c, k, d));
             }
         }
+        if (curved_cell) {
+            curved::Vec3 lo3, hi3;
+            curves->bounds(c, lo3, hi3);
+            for (size_t d = 0; d < N_DIM; d++) {
+                c_lo[d] = lo3[d];
+                c_hi[d] = hi3[d];
+            }
+        }
+        const double relative_tol = precision_tol<double>(1e-9, 1e-5);
         const double size = std::pow(static_cast<double>(mesh.h_cell_volume(c)), 1.0 / N_DIM);
-        const double tol = precision_tol<double>(1e-9, 1e-5) * size;
+        const double tol = relative_tol * size;
         bool outside = false;
         for (size_t d = 0; d < N_DIM; d++) {
             c_lo[d] -= tol;
@@ -603,6 +614,11 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
         }
         // Each face's plane through its centroid, with the normal out of c
         auto contains = [&](const std::array<double, N_DIM> & x) {
+            if (curved_cell) {
+                curved::Vec3 y = {0.0, 0.0, 0.0};
+                for (size_t d = 0; d < N_DIM; d++) y[d] = x[d];
+                return curves->contains(c, y, relative_tol);
+            }
             for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
                 const uint32_t f = mesh.h_face_of_cell(c, k);
                 const bool side_1 = mesh.h_cells_of_face(f, 1) == static_cast<int32_t>(c) &&

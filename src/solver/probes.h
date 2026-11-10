@@ -313,6 +313,7 @@ class Probes {
             snapshot_block::Reconstruction reconstruction;  // of the point values
             std::vector<Location> locations;     // rank 0: of each located sample (node), in sample order
             std::string clipped;                 // JSON of the samples dropped outside the mesh, or empty
+            std::string measures;                // filled regions: JSON of their own measures and in the domain
             /** @brief The probe sampling block: method, variables, and where each located sample is read. */
             std::string sampling_json() const;
             uint32_t rho_column = 0;             // of RHO among the evaluated variables (favre)
@@ -396,6 +397,13 @@ class Probes {
          */
         static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
                                   const std::vector<double> & cell_weights, uint32_t n_variables);
+        /**
+         * @brief A filled region probe's measures: its own and of its part in
+         *        the domain, with a warning and p.clipped where part of it is
+         *        outside. Collective.
+         */
+        static void region_measures(Probe & p, const Mesh & mesh, const region::Region & r,
+                                    const std::vector<double> & f, const std::string & key);
         /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
         static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
                                     bool per_cell);

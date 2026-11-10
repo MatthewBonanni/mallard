@@ -62,6 +62,87 @@ Region::Region(Definition d) :
     }
 }
 
+std::vector<Piece> boundary_pieces(const std::vector<Filled> & filled, const uint32_t i, const bool flip) {
+    const Filled f = filled[i];
+    auto with = [](std::vector<Piece> pieces, const std::vector<uint32_t> & inside,
+                   const std::vector<uint32_t> & outside) {
+        for (Piece & p : pieces) {
+            p.inside.insert(p.inside.end(), inside.begin(), inside.end());
+            p.outside.insert(p.outside.end(), outside.begin(), outside.end());
+        }
+        return pieces;
+    };
+    Piece piece;
+    piece.flip = flip;
+    if (f.kind == Filled::Kind::SHAPES) {
+        piece.carriers = {i};
+        return {piece};
+    }
+    if (f.kind == Filled::Kind::INSIDE) {
+        piece.zones = f.zones;
+        return {piece};
+    }
+    if (f.cells) {
+        piece.cells = static_cast<int32_t>(i);
+        return {piece};
+    }
+    // A boolean of shapes and regions of the mesh: each part's boundary where it bounds the whole
+    std::vector<Piece> out;
+    for (size_t k = 0; k < f.parts.size(); k++) {
+        std::vector<uint32_t> others;
+        for (size_t j = 0; j < f.parts.size(); j++) {
+            if (j != k && !(f.kind == Filled::Kind::DIFFERENCE && j == 0)) others.push_back(f.parts[j]);
+        }
+        std::vector<Piece> sub;
+        if (f.kind == Filled::Kind::UNION) {
+            sub = with(boundary_pieces(filled, f.parts[k], flip), {}, others);
+        } else if (f.kind == Filled::Kind::INTERSECTION) {
+            sub = with(boundary_pieces(filled, f.parts[k], flip), others, {});
+        } else if (k == 0) {
+            sub = with(boundary_pieces(filled, f.parts[0], flip), {}, others);
+        } else {
+            sub = with(boundary_pieces(filled, f.parts[k], !flip), {f.parts[0]}, others);
+        }
+        out.insert(out.end(), sub.begin(), sub.end());
+    }
+    return out;
+}
+
+Region Region::surface_in_domain() const {
+    Definition d;
+    d.nodes = m_nodes;
+    d.vertices = m_vertices;
+    d.programs = m_programs;
+    d.filled = m_filled;
+    Filled domain;
+    domain.kind = Filled::Kind::ALL;
+    domain.cells = true;
+    d.filled.push_back(domain);
+    // The boundary of its intersection with the domain: its own in the cells, and the domain's inside it, but
+    // outside its parts of whole cells, whose faces on the domain's boundary are already their own
+    d.pieces = boundary_pieces(m_filled, m_root, false);
+    Piece faces;
+    faces.cells = static_cast<int32_t>(d.filled.size() - 1);
+    faces.inside = {m_root};
+    std::vector<uint32_t> stack = {m_root};
+    while (!stack.empty()) {
+        const uint32_t i = stack.back();
+        stack.pop_back();
+        if (m_filled[i].cells) {
+            faces.outside.push_back(i);
+        } else {
+            stack.insert(stack.end(), m_filled[i].parts.begin(), m_filled[i].parts.end());
+        }
+    }
+    d.pieces.push_back(faces);
+    d.dimension = N_DIM - 1;
+    d.bounded = m_bounded;
+    d.closed = true;
+    d.resolution = m_resolution;
+    d.summary = "boundary(intersection(domain, " + m_summary + "))";
+    return Region(std::move(d));
+}
+
 RegionView<Kokkos::HostSpace> Region::host(const Filled & shapes) const {
     RegionView<Kokkos::HostSpace> r;
     r.nodes = Kokkos::View<const Node *, Kokkos::HostSpace>(m_nodes.data() + shapes.first, shapes.count);
@@ -162,6 +243,107 @@ struct Sampler {
     }
 };
 
+/**
+ * @brief Integral of the indicator (times r in axisymmetric runs) and of 1
+ *        over a curved cell: over each of its cones (curved::Geometry::
+ *        cone_eval), in boxes of face and radial coordinates subdivided into
+ *        2^N_DIM children where the surface or edge may cross them.
+ */
+struct ConeSampler {
+    const Mesh & mesh;
+    const RegionView<Kokkos::HostSpace> & region;
+    bool bounded;
+    int max_level;
+
+    const curved::Geometry & geometry = *mesh.curved_geometry;
+
+    void integrate(const uint32_t c, double & inside, double & total) const {
+        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
+            std::array<double, 2> lo, hi;
+            geometry.box_of(face(c, k), lo, hi);
+            box(c, k, {lo[0], N_DIM == 2 ? 0.0 : lo[1], 0.0}, {hi[0], N_DIM == 2 ? 1.0 : hi[1], 1.0}, 0, inside, total);
+        }
+    }
+
+    uint32_t face(const uint32_t c, const uint32_t k) const { return mesh.h_face_of_cell(c, k); }
+
+    /** @brief The point at box coordinates p (face coordinates, then t last) and the volume per unit p. */
+    double at(const uint32_t c, const uint32_t k, const Vec & p, Vec & x) const {
+        double xi[2] = {0.0, 0.0};
+        const double j = geometry.face_coordinates(face(c, k), p.data(), xi);
+        curved::Vec3 y, dx[3];
+        const double dv = geometry.cone_eval(c, k, xi, p[N_DIM - 1], y, dx);
+        x = {y[0], y[1], y[2]};
+        return dv * j;
+    }
+
+    void box(const uint32_t c, const uint32_t k, const Vec & lo, const Vec & hi, const int level, double & inside,
+             double & total) const {
+        Vec mid, x_mid;
+        for (size_t i = 0; i < 3; i++) mid[i] = 0.5 * (lo[i] + hi[i]);
+        at(c, k, mid, x_mid);
+        double radius = 0.0;
+        for (int corner = 0; corner < (1 << N_DIM); corner++) {
+            Vec p = mid, x;
+            for (size_t i = 0; i < N_DIM; i++) p[i] = (corner >> i) & 1 ? hi[i] : lo[i];
+            at(c, k, p, x);
+            Vec d;
+            for (size_t i = 0; i < 3; i++) d[i] = x[i] - x_mid[i];
+            radius = std::max(radius, norm(d));
+        }
+        radius *= 1.25;  // the box's image is curved
+        const double phi = region.distance(x_mid.data());
+        const double half_edge = 0.5 * region.edge;
+        bool uniform = level >= max_level;
+        if (bounded) {
+            if (std::abs(phi) >= radius + half_edge) uniform = true;
+        } else if (!uniform) {
+            double slope = 0.0;
+            for (int corner = 0; corner < (1 << N_DIM); corner++) {
+                Vec p = mid, x;
+                for (size_t i = 0; i < N_DIM; i++) p[i] = (corner >> i) & 1 ? hi[i] : lo[i];
+                at(c, k, p, x);
+                Vec d;
+                for (size_t i = 0; i < 3; i++) d[i] = x[i] - x_mid[i];
+                if (norm(d) > 0.0) slope = std::max(slope, std::abs(region.distance(x.data()) - phi) / norm(d));
+            }
+            uniform = std::abs(phi) > 2.0 * slope * radius && half_edge == 0.0;
+        }
+        if (uniform) {
+            // Gauss points: 3 per direction, exact for the cones' radial factor and smooth faces
+            constexpr double G[3] = {-0.7745966692414834, 0.0, 0.7745966692414834};
+            constexpr double W[3] = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
+            const int n = N_DIM == 2 ? 9 : 27;
+            for (int q = 0; q < n; q++) {
+                Vec p = mid, x;
+                double w = 1.0;
+                int rest = q;
+                for (size_t i = 0; i < N_DIM; i++) {
+                    const int g = rest % 3;
+                    rest /= 3;
+                    p[i] = mid[i] + 0.5 * (hi[i] - lo[i]) * G[g];
+                    w *= 0.5 * (hi[i] - lo[i]) * W[g];
+                }
+                w *= at(c, k, p, x) * (mesh.axisymmetric ? x[1] : 1.0);
+                inside += w * indicator(region.distance(x.data()), region.edge);
+                total += w;
+            }
+            return;
+        }
+        for (int child = 0; child < (1 << N_DIM); child++) {
+            Vec a = lo, b = hi;
+            for (size_t i = 0; i < N_DIM; i++) {
+                if ((child >> i) & 1) {
+                    a[i] = mid[i];
+                } else {
+                    b[i] = mid[i];
+                }
+            }
+            box(c, k, a, b, level + 1, inside, total);
+        }
+    }
+};
+
 /** @brief The fractions of a filled region of shapes. */
 std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, const RegionView<Kokkos::HostSpace> & view) {
     const Sampler sampler{view, region.bounded(), mesh.axisymmetric, N_DIM == 2 ? 8 : 5};
@@ -171,7 +353,10 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
                          Kokkos::RangePolicy<HostSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, mesh.n_cells),
                          [&](const uint32_t i_cell) {
         double inside = 0.0, total = 0.0;
-        if constexpr (N_DIM == 2) {
+        if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(i_cell)) {
+            const ConeSampler cones{mesh, view, region.bounded(), N_DIM == 2 ? 8 : 5};
+            cones.integrate(i_cell, inside, total);
+        } else if constexpr (N_DIM == 2) {
             const uint32_t n_nodes = mesh.h_n_nodes_of_cell(i_cell);
             auto node = [&](const uint32_t k) {
                 const uint32_t n = mesh.h_node_of_cell(i_cell, k);
@@ -446,6 +631,383 @@ std::array<std::array<double, 3>, 2> bounds(const Region & region) {
             out[1][k] = std::max(out[1][k], b[1][k]);
         }
     }
+    return out;
+}
+
+
+namespace {
+
+/** @brief The measures of one primitive in closed form, or false: a similarity transform of a bounded primitive. */
+bool primitive_measures(const Node & n, const std::vector<double> & vertices, const bool axisymmetric, Measures & out) {
+    const double k = n.scale;
+    const double * m = n.m;
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) {
+            const double g = m[3 * i] * m[3 * j] + m[3 * i + 1] * m[3 * j + 1] + m[3 * i + 2] * m[3 * j + 2];
+            if (std::abs(g - (i == j ? 1.0 / (k * k) : 0.0)) > 1e-12 / (k * k)) return false;
+        }
+    }
+    // World points x = k^2 M^T (q - d) of local ones q
+    auto world = [&](const Vec & q) {
+        Vec x = {0.0, 0.0, 0.0};
+        for (size_t i = 0; i < 3; i++) {
+            for (size_t j = 0; j < 3; j++) x[i] += k * k * m[3 * j + i] * (q[j] - n.d[j]);
+        }
+        return x;
+    };
+    const double * p = n.p;
+    double volume = 0.0, surface = 0.0;
+    double r_volume = world({0.0, 0.0, 0.0})[1], r_surface = r_volume;  // axisymmetric: the centroids' radii
+    if constexpr (N_DIM == 2) {
+        const bool planar = m[2] == 0.0 && m[5] == 0.0 && m[6] == 0.0 && m[7] == 0.0;
+        if (!planar) return false;
+        switch (n.kind) {
+            case Kind::SPHERE:
+                volume = PI * p[0] * p[0];
+                surface = 2.0 * PI * p[0];
+                break;
+            case Kind::ELLIPSOID:
+                if (p[0] != p[1]) return false;
+                volume = PI * p[0] * p[0];
+                surface = 2.0 * PI * p[0];
+                break;
+            case Kind::CYLINDER:
+                if (!(p[2] > 0.0)) return false;
+                volume = PI * (p[0] * p[0] - p[1] * p[1]);
+                surface = 2.0 * PI * (p[0] + p[1]);
+                break;
+            case Kind::BOX:
+                if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !(p[2] > 0.0)) return false;
+                volume = 4.0 * p[0] * p[1];
+                surface = 4.0 * (p[0] + p[1]);
+                break;
+            case Kind::POLYGON: {
+                const uint32_t c = n.count;
+                const double * v = vertices.data() + 2 * n.first;
+                auto at = [&](const uint32_t i) { return std::array<double, 2>{v[2 * (i % c)], v[2 * (i % c) + 1]}; };
+                // Simple polygons only: the even-odd rule of a self-crossing one is not the shoelace's area
+                auto side = [](const std::array<double, 2> & a, const std::array<double, 2> & b,
+                               const std::array<double, 2> & q) {
+                    return (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]);
+                };
+                if (c > 1000) return false;
+                for (uint32_t i = 0; i < c; i++) {
+                    for (uint32_t j = i + 2; j < c; j++) {
+                        if (i == 0 && j == c - 1) continue;
+                        const auto a = at(i), b = at(i + 1), e = at(j), f = at(j + 1);
+                        const double s1 = side(a, b, e), s2 = side(a, b, f), s3 = side(e, f, a), s4 = side(e, f, b);
+                        if (s1 * s2 <= 0.0 && s3 * s4 <= 0.0) return false;
+                    }
+                }
+                double signed_area = 0.0;
+                Vec area_centroid = {0.0, 0.0, 0.0}, length_centroid = {0.0, 0.0, 0.0};
+                for (uint32_t i = 0; i < c; i++) {
+                    const auto a = at(i), b = at(i + 1);
+                    const double cr = a[0] * b[1] - b[0] * a[1], length = std::hypot(b[0] - a[0], b[1] - a[1]);
+                    signed_area += 0.5 * cr;
+                    surface += length;
+                    for (size_t d = 0; d < 2; d++) {
+                        area_centroid[d] += (a[d] + b[d]) * cr / 6.0;
+                        length_centroid[d] += 0.5 * (a[d] + b[d]) * length;
+                    }
+                }
+                volume = std::abs(signed_area);
+                for (size_t d = 0; d < 2; d++) {
+                    area_centroid[d] /= signed_area;
+                    length_centroid[d] /= surface;
+                }
+                r_volume = world(area_centroid)[1];
+                r_surface = world(length_centroid)[1];
+                break;
+            }
+            default: return false;
+        }
+        volume *= k * k;
+        surface *= k;
+    } else {
+        switch (n.kind) {
+            case Kind::SPHERE:
+                volume = 4.0 / 3.0 * PI * p[0] * p[0] * p[0];
+                surface = 4.0 * PI * p[0] * p[0];
+                break;
+            case Kind::ELLIPSOID:
+                if (p[0] != p[1] || p[1] != p[2]) return false;
+                volume = 4.0 / 3.0 * PI * p[0] * p[0] * p[0];
+                surface = 4.0 * PI * p[0] * p[0];
+                break;
+            case Kind::CYLINDER:
+                if (!std::isfinite(p[2])) return false;
+                volume = 2.0 * p[2] * PI * (p[0] * p[0] - p[1] * p[1]);
+                surface = 2.0 * PI * (p[0] * p[0] - p[1] * p[1]) + 4.0 * p[2] * PI * (p[0] + p[1]);
+                break;
+            case Kind::CONE: {
+                const double h = 2.0 * p[0], r1 = p[1], r2 = p[2];
+                volume = PI * h / 3.0 * (r1 * r1 + r1 * r2 + r2 * r2);
+                surface = PI * (r1 + r2) * std::hypot(r1 - r2, h) + PI * (r1 * r1 + r2 * r2);
+                break;
+            }
+            case Kind::BOX:
+                if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) return false;
+                volume = 8.0 * p[0] * p[1] * p[2];
+                surface = 8.0 * (p[0] * p[1] + p[1] * p[2] + p[2] * p[0]);
+                break;
+            case Kind::TORUS:
+                if (!(p[0] > p[1])) return false;
+                volume = 2.0 * PI * PI * p[0] * p[1] * p[1];
+                surface = 4.0 * PI * PI * p[0] * p[1];
+                break;
+            default: return false;
+        }
+        volume *= k * k * k;
+        surface *= k * k;
+    }
+    if (axisymmetric) {
+        volume *= r_volume;
+        surface *= r_surface;
+    }
+    out = {volume, surface, 0.0};
+    return true;
+}
+
+/**
+ * @brief The measures of a filled region of shapes by adaptive subdivision of
+ *        a box around it into cubes (squares in 2D), down to max_level
+ *        halvings of the first ones, where the volume (area) of the
+ *        linear interpolant of the distance's negative part and the measure
+ *        of its zero set are summed on each cube's simplices.
+ */
+struct Subdivision {
+    const RegionView<Kokkos::HostSpace> & region;
+    bool bounded;
+    bool axisymmetric;
+    int max_level;
+    double volume = 0.0, surface = 0.0;
+
+    double phi(const Vec & x) const { return region.distance(x.data()); }
+
+    /** @brief The weight of a piece with centroid c: r in axisymmetric runs (the revolved part at r >= 0). */
+    double weight(const Vec & c) const { return axisymmetric ? std::max(c[1], 0.0) : 1.0; }
+
+    void cube(const Vec & lo, const Vec & h, const int level) {
+        Vec c = lo;
+        double radius = 0.0;
+        for (size_t i = 0; i < N_DIM; i++) {
+            c[i] += 0.5 * h[i];
+            radius += 0.25 * h[i] * h[i];
+        }
+        radius = std::sqrt(radius);
+        const double f = phi(c), half_edge = 0.5 * region.edge;
+        bool uniform = false;
+        if (bounded) {
+            uniform = std::abs(f) >= radius + half_edge;
+            // Well within the smooth edge and away from the surface: the indicator is smooth there
+            if (!uniform && half_edge > 0.0 && radius < 0.125 * region.edge && std::abs(f) >= radius &&
+                std::abs(f) < half_edge - radius) {
+                gauss(c, h);
+                return;
+            }
+        } else if (level > 1) {
+            double slope = 0.0;
+            for (int corner = 0; corner < (1 << N_DIM); corner++) {
+                Vec x = lo;
+                for (size_t i = 0; i < N_DIM; i++) x[i] += (corner >> i & 1) ? h[i] : 0.0;
+                slope = std::max(slope, std::abs(phi(x) - f) / radius);
+            }
+            uniform = std::abs(f) > 2.0 * slope * radius && half_edge == 0.0;
+        }
+        if (uniform) {
+            if (f < 0.0) {
+                double measure = 1.0;
+                for (size_t i = 0; i < N_DIM; i++) measure *= h[i];
+                if (axisymmetric) {
+                    // The integral of max(r, 0) across the cube
+                    const double a = std::max(lo[1], 0.0), b = std::max(lo[1] + h[1], 0.0);
+                    measure *= (b * b - a * a) / (2.0 * h[1]);
+                }
+                volume += measure;
+            }
+            return;
+        }
+        if (level < max_level) {
+            Vec half;
+            for (size_t i = 0; i < 3; i++) half[i] = 0.5 * h[i];
+            for (int child = 0; child < (1 << N_DIM); child++) {
+                Vec l = lo;
+                for (size_t i = 0; i < N_DIM; i++) l[i] += (child >> i & 1) ? half[i] : 0.0;
+                cube(l, half, level + 1);
+            }
+            return;
+        }
+        std::array<Vec, 1 << N_DIM> x;
+        std::array<double, 1 << N_DIM> v;
+        for (size_t corner = 0; corner < (size_t(1) << N_DIM); corner++) {
+            x[corner] = lo;
+            for (size_t i = 0; i < N_DIM; i++) x[corner][i] += (corner >> i & 1) ? h[i] : 0.0;
+            v[corner] = phi(x[corner]);
+        }
+        const double volume_before = volume;
+        if constexpr (N_DIM == 2) {
+            triangle({x[0], x[1], x[3]}, {v[0], v[1], v[3]});
+            triangle({x[0], x[3], x[2]}, {v[0], v[3], v[2]});
+        } else {
+            // The six tetrahedra of the cube about its diagonal from corner 0 to corner 7
+            constexpr size_t ORDER[6][2] = {{0, 1}, {0, 2}, {1, 0}, {1, 2}, {2, 0}, {2, 1}};
+            for (const auto & o : ORDER) {
+                const size_t a = size_t(1) << o[0], b = a | size_t(1) << o[1];
+                tetrahedron({x[0], x[a], x[b], x[7]}, {v[0], v[a], v[b], v[7]});
+            }
+        }
+        if (half_edge > 0.0) {
+            volume = volume_before;
+            gauss(c, h);
+        }
+    }
+
+    /** @brief A smooth edge: the indicator's integral over the cube by 3-point Gauss rules. */
+    void gauss(const Vec & c, const Vec & h) {
+        constexpr double G[3] = {-0.7745966692414834, 0.0, 0.7745966692414834};
+        constexpr double W[3] = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
+        for (int a = 0; a < 3; a++) {
+            for (int b = 0; b < 3; b++) {
+                for (int e = 0; e < (N_DIM == 3 ? 3 : 1); e++) {
+                    Vec q = c;
+                    const int g[3] = {a, b, e};
+                    double w = 1.0;
+                    for (size_t i = 0; i < N_DIM; i++) {
+                        q[i] += 0.5 * h[i] * G[g[i]];
+                        w *= 0.5 * h[i] * W[g[i]];
+                    }
+                    volume += w * weight(q) * indicator(phi(q), region.edge);
+                }
+            }
+        }
+    }
+
+    static Vec lerp(const Vec & a, const Vec & b, const double fa, const double fb) {
+        const double t = fa / (fa - fb);
+        return {a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2])};
+    }
+
+    void triangle(const std::array<Vec, 3> & x, const std::array<double, 3> & f) {
+        std::vector<Vec> negative, zeros;
+        for (size_t i = 0; i < 3; i++) {
+            const size_t j = (i + 1) % 3;
+            if (f[i] < 0.0) negative.push_back(x[i]);
+            if ((f[i] < 0.0) != (f[j] < 0.0)) {
+                const Vec z = lerp(x[i], x[j], f[i], f[j]);
+                negative.push_back(z);
+                zeros.push_back(z);
+            }
+        }
+        double area = 0.0;
+        Vec centroid = {0.0, 0.0, 0.0};
+        for (size_t i = 0; i < negative.size(); i++) {
+            const Vec & a = negative[i];
+            const Vec & b = negative[(i + 1) % negative.size()];
+            const double cr = a[0] * b[1] - b[0] * a[1];
+            area += 0.5 * cr;
+            for (size_t d = 0; d < 2; d++) centroid[d] += (a[d] + b[d]) * cr / 6.0;
+        }
+        if (area != 0.0) {
+            for (size_t d = 0; d < 2; d++) centroid[d] /= area;
+            volume += std::abs(area) * weight(centroid);
+        }
+        if (zeros.size() == 2) {
+            const Vec mid = {0.5 * (zeros[0][0] + zeros[1][0]), 0.5 * (zeros[0][1] + zeros[1][1]), 0.0};
+            surface += std::hypot(zeros[1][0] - zeros[0][0], zeros[1][1] - zeros[0][1]) * weight(mid);
+        }
+    }
+
+    static double tet_volume(const Vec & a, const Vec & b, const Vec & c, const Vec & d) {
+        const Vec u = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+        const Vec w = {d[0] - a[0], d[1] - a[1], d[2] - a[2]};
+        return std::abs(dot(u, cross(v, w))) / 6.0;
+    }
+
+    static double triangle_area(const Vec & a, const Vec & b, const Vec & c) {
+        return 0.5 * norm(cross({b[0] - a[0], b[1] - a[1], b[2] - a[2]}, {c[0] - a[0], c[1] - a[1], c[2] - a[2]}));
+    }
+
+    void tetrahedron(const std::array<Vec, 4> & x, const std::array<double, 4> & f) {
+        std::vector<size_t> in, out;
+        for (size_t i = 0; i < 4; i++) (f[i] < 0.0 ? in : out).push_back(i);
+        const double whole = tet_volume(x[0], x[1], x[2], x[3]);
+        if (in.empty()) return;
+        if (out.empty()) {
+            volume += whole;
+            return;
+        }
+        auto z = [&](const size_t i, const size_t j) { return lerp(x[i], x[j], f[i], f[j]); };
+        if (in.size() == 1 || in.size() == 3) {
+            // A corner cut off: inside it (one vertex in) or outside (three)
+            const size_t a = in.size() == 1 ? in[0] : out[0];
+            const std::vector<size_t> & rest = in.size() == 1 ? out : in;
+            const Vec p = z(a, rest[0]), q = z(a, rest[1]), r = z(a, rest[2]);
+            const double corner = tet_volume(x[a], p, q, r);
+            volume += in.size() == 1 ? corner : whole - corner;
+            surface += triangle_area(p, q, r);
+            return;
+        }
+        // Two in, two out: a prism between the two inside vertices' triangles
+        const size_t a = in[0], b = in[1], c = out[0], d = out[1];
+        const Vec ac = z(a, c), ad = z(a, d), bc = z(b, c), bd = z(b, d);
+        volume += tet_volume(x[a], ac, ad, bd) + tet_volume(x[a], ac, bd, bc) + tet_volume(x[a], x[b], bc, bd);
+        surface += triangle_area(ac, ad, bd) + triangle_area(ac, bd, bc);
+    }
+};
+
+} // namespace
+
+Measures measures(const Region & region, const bool axisymmetric) {
+    Measures out;
+    if (!region.analytic()) return out;
+    const Box b = bounds(region);
+    for (size_t i = 0; i < N_DIM; i++) {
+        if (!std::isfinite(b[0][i]) || !std::isfinite(b[1][i])) return out;
+    }
+    const RegionView<Kokkos::HostSpace> & view = region.host();
+    if (region.edge() == 0.0 && view.nodes.extent(0) == 1) {
+        const std::vector<double> vertices(view.vertices.data(), view.vertices.data() + view.vertices.extent(0));
+        if (!axisymmetric || b[0][1] >= 0.0) {
+            if (primitive_measures(view.nodes(0), vertices, axisymmetric, out)) return out;
+        }
+    }
+    // Cubes of about a quarter of the box's longest side, padded by the smooth edge and a little more
+    double longest = 0.0;
+    for (size_t i = 0; i < N_DIM; i++) longest = std::max(longest, b[1][i] - b[0][i]);
+    const double pad = 0.5 * region.edge() + 1e-6 * longest;
+    Vec lo = {0.0, 0.0, 0.0}, h = {0.0, 0.0, 0.0};
+    std::array<int, 3> n = {1, 1, 1};
+    for (size_t i = 0; i < N_DIM; i++) {
+        lo[i] = b[0][i] - pad;
+        const double extent = b[1][i] - b[0][i] + 2.0 * pad;
+        n[i] = std::max(1, static_cast<int>(std::ceil(4.0 * extent / (longest + 2.0 * pad))));
+        h[i] = extent / n[i];
+    }
+    constexpr int LEVELS = N_DIM == 2 ? 10 : 5;
+    std::array<Measures, 3> m;
+    for (size_t k = 0; k < 3; k++) {
+        Subdivision s{view, region.bounded(), axisymmetric, LEVELS - 2 + static_cast<int>(k)};
+        for (int i = 0; i < n[0]; i++) {
+            for (int j = 0; j < n[1]; j++) {
+                for (int l = 0; l < n[2]; l++) {
+                    s.cube({lo[0] + i * h[0], lo[1] + j * h[1], lo[2] + l * h[2]}, h, 0);
+                }
+            }
+        }
+        m[k] = {s.volume, s.surface, 0.0};
+    }
+    // Extrapolated in the cubes' size at the order the three levels show: 2 for smooth surfaces, down to 1 for the
+    // surface area of sharp edges, which the interpolant's zero set cuts; the correction is the tolerance
+    auto extrapolate = [](const double m0, const double m1, const double m2, double & tolerance) {
+        const double d1 = m1 - m0, d2 = m2 - m1;
+        const double order = d1 * d2 > 0.0 && std::abs(d2) < std::abs(d1) ? std::clamp(std::log2(d1 / d2), 1.0, 2.0) : 1.0;
+        const double correction = d2 / (std::pow(2.0, order) - 1.0), value = m2 + correction;
+        if (value != 0.0) tolerance = std::max(tolerance, std::abs(correction / value));
+        return value;
+    };
+    out.volume = extrapolate(m[0].volume, m[1].volume, m[2].volume, out.tolerance);
+    out.surface = extrapolate(m[0].surface, m[1].surface, m[2].surface, out.tolerance);
     return out;
 }
 

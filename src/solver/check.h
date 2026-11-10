@@ -119,6 +119,12 @@ struct CheckRegion {
     uint64_t cells = 0;       // owned cells it touches, over every rank
     bool exact = true;        // a surface or curve of the case: exact, else extracted at resolution
     int resolution = 0;
+    // Filled regions of the case: the surface of their part in the domain (2D: its perimeter), and their own
+    // measures, independent of the mesh (NaN unless of shapes alone and bounded)
+    double surface = std::numeric_limits<double>::quiet_NaN();
+    double own_measure = std::numeric_limits<double>::quiet_NaN();
+    double own_surface = std::numeric_limits<double>::quiet_NaN();
+    double own_tolerance = 0.0;  // relative; 0 in closed form
 };
 
 /** @brief An estimate of the resolution: its value and units, what it rests on, and its target if it has one. */

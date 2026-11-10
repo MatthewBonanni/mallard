@@ -514,10 +514,11 @@ struct OnMesh {
     uint64_t cells = 0;
     Box box = {std::array<double, 3>{0.0, 0.0, 0.0}, std::array<double, 3>{0.0, 0.0, 0.0}};
     bool exact = true;
+    region::Measures own, in;  // filled regions of the case
     case_view::Block block;
 };
 
-OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name) {
+OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name, const bool measures) {
     OnMesh m;
     m.block.name = name;
     const bool distributed = mesh.n_global_cells > 0;
@@ -531,6 +532,10 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
     };
     if (region.dimension() == N_DIM) {
         const std::vector<double> f = region::cell_fractions(mesh, region);
+        if (measures) {
+            m.own = region::measures(region, mesh.axisymmetric);
+            m.in = region::measures_in_domain(mesh, region, f);
+        }
         auto & fraction = m.block.field("fraction", 1);
         for (uint32_t c = 0; c < mesh.n_owned(); c++) {
             if (f[c] == 0.0) continue;
@@ -591,8 +596,9 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     std::vector<case_view::Block> blocks;
     auto entry = [&](const std::string & name, const region::Region & region, const OnMesh & m, const bool of_mesh) {
         const int d = region.dimension();
-        return CheckRegion{name,   of_mesh, d, m.measure, mesh->axisymmetric && d == N_DIM, m.cells,
-                           m.exact, d < N_DIM && !m.exact ? region.resolution() : 0};
+        return CheckRegion{name,         of_mesh,         d,           m.measure,     mesh->axisymmetric && d == N_DIM,
+                           m.cells,      m.exact,         d < N_DIM && !m.exact ? region.resolution() : 0,
+                           m.in.surface, m.own.volume,    m.own.surface, m.own.tolerance};
     };
     // The mesh's own regions: the domain, its boundary zones and cell zones
     const region::MeshRegions & automatic = used_regions->automatic();
@@ -600,7 +606,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     for (const std::string & name : automatic.names()) {
         const Input value = parse_input_string("r = \"" + name + "\"").at("r");
         const region::Region region = region::read(value, name, nullptr, &automatic);
-        OnMesh m = on_mesh(*mesh, region, block_name(name));
+        OnMesh m = on_mesh(*mesh, region, block_name(name), false);
         if (name == "domain") domain = m.box;
         r.regions.push_back(entry(name, region, m, true));
         if (name != "domain") blocks.push_back(std::move(m.block));
@@ -608,7 +614,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     const std::vector<std::string> mesh_names = automatic.names();
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
-        OnMesh m = on_mesh(*mesh, *region, block_name(label));
+        OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM);
         r.regions.push_back(entry(label, *region, m, false));
         if (m.cells == 0) {
             const Box b = region::bounds(*region);

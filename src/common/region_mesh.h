@@ -59,10 +59,19 @@ struct Elements {
  *        region.resolution() times, as the zero set of the linear interpolant.
  *        Clipping regions keep the parts inside them (outside subtracted
  *        ones): on primitives' own surfaces at the roots of their distance
- *        along the parameters (high order), elsewhere linearly between
- *        vertices (exact for planes). Collective.
+ *        along the parameters (high order), elsewhere at the roots of
+ *        their distance along the elements' edges. Collective.
  */
 Elements elements(const Mesh & mesh, const Region & region);
+
+/**
+ * @brief The measures of a filled region's intersection with the domain:
+ *        the sum of f V over the cells, with fractions f (cell_fractions),
+ *        and the measure of its surface_in_domain(); per radian in
+ *        axisymmetric runs. Measures::tolerance is 0: the mesh's own
+ *        accuracy. Collective.
+ */
+Measures measures_in_domain(const Mesh & mesh, const Region & region, const std::vector<double> & fractions);
 
 /**
  * @brief A patch of a surface in world coordinates: x(u, v) and its
