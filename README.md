@@ -79,7 +79,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-[Installation](docs/installation.md) covers containers, Spack, GPU and MPI builds and every CMake option; [supported platforms](docs/guide/support.md) lists what CI builds and runs.
+[Installation](docs/installation.md) covers containers, Spack, GPU and MPI builds and every CMake option. [Supported platforms](docs/installation.md#supported-platforms): GCC 15, Clang 22 or Xcode 26.4 and newer, CMake 4.2 and newer, on Linux (x86-64 and arm64) and macOS, with CUDA 13.4, ROCm or oneAPI for GPUs.
 
 ## Running
 

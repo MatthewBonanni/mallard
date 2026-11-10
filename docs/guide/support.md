@@ -84,4 +84,5 @@ Some MPI distributions start the real launcher from a wrapper that passes no sig
 signals sent to `mpirun` may not reach the run: see [MPI launchers and Slurm](running.md#mpi-launchers-and-slurm).
 
 `python3 tools/dev/check_support_matrix.py` (run by CI) fails when a workflow gains or loses a
-job without this page naming it in its *Job* column.
+job without this page naming it in its *Job* column, or the
+[supported-platforms table](../installation.md#supported-platforms) naming it in its row.
