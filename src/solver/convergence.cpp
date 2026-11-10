@@ -19,6 +19,7 @@
 #include <limits>
 #include <numbers>
 
+#include "batch_means.h"
 #include "comm.h"
 #include "common_io.h"
 #include "field_units.h"
@@ -99,12 +100,9 @@ double student_t(double confidence, uint32_t nu) {
 Interval batch_interval(const std::vector<double> & means, uint64_t batch_size, double t) {
     const size_t b = means.size();
     if (b < 2 || batch_size == 0) return {};
-    double mean = 0.0;
-    for (const double v : means) mean += v;
-    mean /= static_cast<double>(b);
-    double ss = 0.0;
-    for (const double v : means) ss += (v - mean) * (v - mean);
-    return {mean, t * std::sqrt(ss / static_cast<double>(b - 1) / static_cast<double>(b)), batch_size};
+    double mean = 0.0, m2 = 0.0;
+    for (size_t j = 0; j < b; j++) batch_means::add(mean, m2, static_cast<double>(j + 1), means[j]);
+    return {mean, batch_means::half_width(m2, b, t), batch_size};
 }
 
 Interval batch_means(const double * x, uint64_t n, uint32_t b, double confidence) {

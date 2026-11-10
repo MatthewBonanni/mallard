@@ -142,7 +142,12 @@ class PhaseAverage {
  *            cov_ab += a (d_a (b_new - mean_b,new) - cov_ab),
  *        so each output field is the current average itself. Restart files
  *        carry the averages and the weights, so a restarted run continues them
- *        bitwise. [statistics.spectra] adds spectra and two-point correlations
+ *        bitwise. With a batch duration T_b, the samples also fall in batches
+ *        of T_b from the start of the averages (a sample in the batch that
+ *        holds its time), each averaged the same way; when a sample opens a
+ *        batch, the last one's averages join the mean and the sum of squared
+ *        deviations of the batch values (batch_means.h), which give the
+ *        confidence intervals CI_<average>. [statistics.spectra] adds spectra and two-point correlations
  *        along homogeneous directions (Spectra), [statistics.phase] phase
  *        averages (PhaseAverage).
  */
@@ -164,8 +169,13 @@ class Statistics {
         /** @brief Add the sample at (step, t) of cells [0, n_owned) to whatever is due (collective). */
         void sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned);
 
-        /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., PHASE_<bin>_<field>... */
+        /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., CI_ of each with batches, PHASE_<bin>_<field>... */
         std::vector<std::string> variables() const;
+        /** @brief What restart files carry: the averages, the batch state BATCH_<average>, BATCH_AVG_<average>, BATCH_M2_<average> and the phases. */
+        std::vector<std::string> restart_variables() const;
+        /** @brief Whether the averages have confidence intervals by batches. */
+        bool batches_enabled() const { return batch > 0.0_r; }
+        uint64_t batches() const { return n_batches; }
         void register_data(std::vector<Data> & data) const;
         void copy_device_to_host();
 
@@ -198,6 +208,8 @@ class Statistics {
         /** @brief Host copies (see copy_device_to_host): (cell, field) means, (cell, product) covariances. */
         const auto & host_means() const { return h_mean; }
         const auto & host_covariances() const { return h_cov; }
+        /** @brief Host copy of the half widths: (cell, average), the means' then the covariances'. */
+        const auto & host_intervals() const { return h_ci; }
 
     private:
         std::vector<std::string> fields;
@@ -212,6 +224,17 @@ class Statistics {
         Kokkos::View<rtype **, Kokkos::LayoutLeft> cov;
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_mean;
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_cov;
+
+        // Batches: (cell, average) of the current batch, and the mean and m2 of the closed ones
+        rtype batch = 0.0;  // duration; 0: none
+        double confidence = 0.95;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft> batch_value, batch_avg, batch_m2;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_batch_value, h_batch_avg, h_batch_m2;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_ci;
+        uint64_t n_batches = 0;     // closed
+        uint64_t batch_index = 0;   // of the current batch, from the start of the averages
+        rtype batch_weight = 0.0;   // of the current batch
+        rtype batch_origin = 0.0;   // start of the averages
 
         rtype weight = 0.0;
         rtype t_last = 0.0;

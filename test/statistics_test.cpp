@@ -123,6 +123,85 @@ TEST(StatisticsTest, AveragesOfAnOscillatingFlowMatchTheAnalyticalOnes) {
     }
 }
 
+TEST(StatisticsTest, BatchIntervalsAreThoseOfTheBatchAveragesOfTheOscillation) {
+    // The oscillation above, u = u0 sin(w t), in batches of a quarter period from t = 1/4: four
+    // closed by t = 1.3125, whose time-weighted averages of u and of u'^2 (about each batch's own
+    // mean) are computed here from the samples' times; the half widths are t_3 s / sqrt(4)
+    const double u0 = 0.1, w = 2.0 * M_PI;
+    std::ostringstream force;
+    force << std::setprecision(17) << u0 * w << " * cos(" << w << " * t)";
+    const std::string input =
+        "[run]\nn_steps = 168\ndt = 0.0078125\n" + box(4, true) +
+        "[initialize]\ntype = \"constant\"\nu = " + numbers3("0", "0", "0") + "\np = 1.0\nT = 1.0\n" + PERFECT_GAS +
+        "[source]\nrhou = " + vector3(force.str().c_str(), "0", "0") + "\ntime_dependent = true\n"
+        "[output]\ncheck_interval = 1000000\n"
+        "[statistics]\nt_start = 0.25\ninterval = 2\nfields = [\"U_X\"]\nproducts = [\"U_X*U_X\"]\nbatch = 0.25\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input));
+    solver.run();
+    solver.copy_device_to_host();
+    const Statistics & stats = solver.get_statistics();
+    ASSERT_EQ(stats.batches(), 4u);
+    std::vector<double> u_mean, u_var;
+    for (int b = 0; b < 4; b++) {
+        double s1 = 0.0, s2 = 0.0;
+        int n = 0;
+        // Samples at t = 1/4 + k/64, k = 1..16 in each batch, all of weight 1/64
+        for (int k = 16 * b + 1; k <= 16 * (b + 1); k++, n++) {
+            const double u = u0 * std::sin(w * (0.25 + k / 64.0));
+            s1 += u;
+            s2 += u * u;
+        }
+        u_mean.push_back(s1 / n);
+        u_var.push_back(s2 / n - (s1 / n) * (s1 / n));
+    }
+    auto half_width = [](const std::vector<double> & v) {
+        double m = 0.0, ss = 0.0;
+        for (const double x : v) m += x / static_cast<double>(v.size());
+        for (const double x : v) ss += (x - m) * (x - m);
+        return 3.182446305284263 * std::sqrt(ss / 3.0 / 4.0);  // t_{0.975, 3}
+    };
+    const double ci_u = half_width(u_mean), ci_var = half_width(u_var);
+    ASSERT_GT(ci_u, 0.01 * u0);
+    ASSERT_GT(ci_var, 1e-4 * u0 * u0);
+    const auto & ci = stats.host_intervals();
+    const double tol = precision_tol<double>(1e-6, 1e-3);
+    for (uint32_t c = 0; c < solver.get_mesh()->n_cells; c++) {
+        EXPECT_NEAR(double(ci(c, 0)), ci_u, tol * ci_u);
+        EXPECT_NEAR(double(ci(c, 1)), ci_var, tol * ci_var);
+    }
+}
+
+TEST(StatisticsTest, BatchIntervalsRestartBitwise) {
+    const std::string dir = (scratch_dir() / "mallard_statistics_batch_test").string();
+    auto extra = [&](const std::string & sub) {
+        return "[statistics]\nt_start = 0.005\ninterval = 2\nfields = [\"T\"]\nproducts = [\"U_X*U_Y\"]\nbatch = 0.004\n"
+               "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/r\"\nformat = \"restart\"\ninterval = 21\n";
+    };
+    Solver straight;
+    straight.set_distributed(false);
+    straight.init(parse_toml(blob_input(42, BLOB, extra("a"))));
+    straight.run();
+    straight.copy_device_to_host();
+    Solver first;
+    first.set_distributed(false);
+    first.init(parse_toml(blob_input(21, BLOB, extra("b"))));
+    first.run();
+    Solver second;
+    second.set_distributed(false);
+    second.init(parse_toml(blob_input(42, "type = \"restart\"\nfile = \"" + dir + "/b/r_000021.restart\"\n", extra("b"))));
+    second.run();
+    second.copy_device_to_host();
+    const Statistics & a = straight.get_statistics();
+    const Statistics & b = second.get_statistics();
+    ASSERT_GE(a.batches(), 3u);
+    EXPECT_EQ(b.batches(), a.batches());
+    for (uint32_t c = 0; c < straight.get_mesh()->n_cells; c++) {
+        for (uint32_t q = 0; q < 2; q++) EXPECT_EQ(b.host_intervals()(c, q), a.host_intervals()(c, q));
+    }
+}
+
 TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
     // Samples every 3 steps, a restart at step 20 between two of them: the
     // continued averages (their weights and the last sample's time carry over)
