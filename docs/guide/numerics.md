@@ -117,8 +117,8 @@ h<sup>-3</sup> (cells times time steps) whatever the order. A higher order
 costs more per cell, and on any but the coarsest meshes that is repaid many
 times over:
 
-![L2 density error of the isentropic vortex on irregular triangles against cell count and CPU time, for FO, MUSCL, TENO-E 3 and TENO-E 5](../images/guide/high_order_cost-light.svg#gh-light-mode-only)
-![L2 density error of the isentropic vortex on irregular triangles against cell count and CPU time, for FO, MUSCL, TENO-E 3 and TENO-E 5](../images/guide/high_order_cost-dark.svg#gh-dark-mode-only)
+![L2 density error of the isentropic vortex on irregular triangles against cell count and CPU time, for FO, MUSCL and TENO-E 3 to 6](../images/guide/high_order_cost-light.svg#gh-light-mode-only)
+![L2 density error of the isentropic vortex on irregular triangles against cell count and CPU time, for FO, MUSCL and TENO-E 3 to 6](../images/guide/high_order_cost-dark.svg#gh-dark-mode-only)
 
 *The isentropic vortex of [Shu (1998)](../references.md#shu-1998), strength
 5, convected 2 units across a periodic 10 × 10 box of irregular triangles
@@ -131,23 +131,39 @@ recorded). Script and data: `tools/docs/high_order_cost.py`.*
 
 Read off the curves (interpolated between the measured meshes):
 
-| Error | FO | MUSCL | TENO-E 3 | TENO-E 5 |
-|---|---|---|---|---|
-| 10<sup>-3</sup> | not reached (1.7 × 10<sup>-3</sup> on 524,288 cells, 395 s) | 5,800 cells, 0.57 s | 2,700 cells, 0.54 s | 1,100 cells, 0.66 s |
-| 10<sup>-4</sup> | not reached | 64,500 cells, 20.8 s | 13,000 cells, 3.8 s | 3,600 cells, 2.8 s |
-| Measured order (two finest meshes) | 0.97 | 1.89 (1.23 from 131,072 to 524,288 cells) | 3.00 | 4.87 |
+| Error | FO | MUSCL | TENO-E 3 | TENO-E 4 | TENO-E 5 | TENO-E 6 |
+|---|---|---|---|---|---|---|
+| 10<sup>-3</sup> | not reached (1.7 × 10<sup>-3</sup> on 524,288 cells, 395 s) | 5,800 cells, 0.57 s | 2,700 cells, 0.52 s | 960 cells, 0.25 s | 1,100 cells, 0.62 s | 750 cells, 0.76 s |
+| 10<sup>-4</sup> | not reached | 64,500 cells, 20.8 s | 13,000 cells, 3.7 s | 3,300 cells, 1.1 s | 3,600 cells, 2.8 s | 1,900 cells, 2.4 s |
+| 10<sup>-5</sup> | not reached | not reached | 61,000 cells, 35 s | 10,000 cells, 4.6 s | 9,700 cells, 10.4 s | 4,400 cells, 6.9 s |
+| Measured order (two finest meshes) | 0.97 | 1.89 (1.23 from 131,072 to 524,288 cells) | 3.00 | 3.90 | 4.87 | 5.54 |
 
 - **At an error of 10<sup>-4</sup>** TENO-E 5 needs 18 times fewer cells than
   MUSCL and 7.4 times less CPU time; FO would need, at its measured first
   order, about 300 times the cells of its finest run (some 150 million).
 - **FO's finest run** (524,288 cells, 395 s) has an error of 1.7 × 10<sup>-3</sup>;
-  TENO-E 5 has 3.8 × 10<sup>-4</sup> on 2,048 cells in 1.4 s.
-- **The crossover:** above an error of about 8 × 10<sup>-4</sup> (here,
-  meshes under about 5,000 cells, some 7 cells per core radius of the
+  TENO-E 5 has 3.8 × 10<sup>-4</sup> on 2,048 cells in 1.3 s.
+- **The crossover with second order:** above an error of about 9 × 10<sup>-4</sup>
+  (here, meshes under about 5,000 cells, some 7 cells per core radius of the
   vortex) MUSCL is as cheap as TENO-E 5 or cheaper: at 10<sup>-3</sup> it
-  costs 0.87 times TENO-E 5's time. Below it the gap widens with every refinement, since each halving of
-  h divides TENO-E 5's error by about 29 and MUSCL's by about 4. TENO-E 3 is
-  cheapest down to about 2.5 × 10<sup>-4</sup>, then TENO-E 5.
+  costs 0.92 times TENO-E 5's time. Below it the gap widens with every
+  refinement, since each halving of h divides TENO-E 5's error by about 29
+  and MUSCL's by about 4.
+- **Which order is cheapest:** TENO-E 4, over the whole range from
+  10<sup>-3</sup> to 10<sup>-5</sup>. It needs about as many cells as TENO-E 5
+  for a given error, at a smaller stencil, and so reaches it in about 0.4
+  times TENO-E 5's CPU time. TENO-E 6 is cheaper than TENO-E 5 below an error
+  of about 2.5 × 10<sup>-3</sup> (0.66 times its time at 10<sup>-5</sup>) and,
+  at the highest order, closes in on TENO-E 4 as the error falls. TENO-E 3 is
+  cheaper than TENO-E 5 only above about 1.8 × 10<sup>-4</sup>.
+- **Why `high_order` is order 5 nonetheless:** this is one smooth 2D case.
+  `high_order` stays at order 5 until order 4 is shown to be as robust: the
+  shock checks the presets pass, the odd-even wall-pressure mode on stretched
+  wall cells, which at order 4 [only the metric and the mirror images together remove](../numerics/teno_e.md#candidates),
+  and the [linear instability of periodic pyramid lattices](../numerics/teno_e.md#known-limitations)
+  at order 4 in 3D ([#711](https://github.com/MatthewBonanni/mallard/issues/711)). For smooth flow, setting
+  `order = 4` under `[numerics.face_reconstruction]` is the cheaper choice
+  this study measured.
 
 The advantage is for **smooth flow**. At shocks and contacts TENO-E falls
 back to its ENO sector stencils and every scheme is first order there, so on

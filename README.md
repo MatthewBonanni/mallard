@@ -23,7 +23,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 
 **Numerics** ([guide](docs/guide/numerics.md))
 - [TENO-E](https://doi.org/10.1007/s10915-025-02918-w) reconstruction, orders 3 to 6, on every cell type ([what is new](docs/numerics/originality.md))
-- High order by default: on smooth flow, the error falls fast enough with refinement that TENO-E 5 is the cheapest way to an accurate answer ([measured](docs/guide/numerics.md#why-high-order))
+- High order by default: on smooth flow, the error falls fast enough with refinement that TENO-E reaches an accurate answer at a fraction of a second-order scheme's cost ([measured](docs/guide/numerics.md#why-high-order))
 - Rusanov, HLL, HLLC, Roe and RHLL Riemann solvers, with low-Mach correction
 - Explicit Runge-Kutta, at a CFL number or with error-controlled steps
 
