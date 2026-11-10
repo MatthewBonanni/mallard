@@ -17,7 +17,7 @@ t_start = 40.0
 interval = 10
 ```
 
-*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 2 more.
+*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence) and 3 more.
 
 `[statistics]` keeps running time averages and covariances per cell, on the
 device, without communication: bitwise the same on any number of ranks, and
@@ -148,7 +148,7 @@ when = "convergence_converged"      # every interval within the tolerance
 do = "stop"
 ```
 
-*Used in:* [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les).
+*Used in:* [`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence).
 
 Answers two questions every averaging run asks: when has the initial
 transient ended, and how close are the averages to their long-time values?
