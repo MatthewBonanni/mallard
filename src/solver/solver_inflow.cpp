@@ -43,9 +43,6 @@ void Solver::init_inlets(const std::vector<Input> & input_boundaries,
             }
         }
         if (bound.contains("u") && TimedInletTargets::depends_on_time(bound, where)) {
-            if (InletProfile::turbulent(bound)) {
-                throw InputError(where + ": a velocity depending on t cannot have turbulence.");
-            }
             timed_inlets.add(bound, where, chars, x, n_in);
         }
         if (!profile.uniform()) {
@@ -124,8 +121,9 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
 
 void Solver::update_inflow(rtype t_eval) {
     if ((inflows.empty() && timed_inlets.empty()) || t_eval == t_inflow) return;
-    for (auto & inflow : inflows) inflow->fill(double(t_eval), boundary_data.char_target);
+    // Timed means first: the fluctuations of their inlets are superposed on them
     timed_inlets.fill(double(t_eval), boundary_data.char_target);
+    for (auto & inflow : inflows) inflow->fill(double(t_eval), boundary_data.char_target);
     t_inflow = t_eval;
 }
 

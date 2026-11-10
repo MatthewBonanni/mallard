@@ -173,6 +173,10 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
         return f;
     };
     if (turbulence && turbulence->contains("profile")) {
+        if (boundary.contains("u") && TimedInletTargets::depends_on_time(boundary, where)) {
+            throw InputError(where + ".u depends on t, but " + where + ".turbulence.profile gives the mean velocity "
+                             "too: remove the profile and give reynolds_stress, or remove u to take the profile's mean.");
+        }
         read_table(*turbulence, where);
         return;
     }
@@ -196,8 +200,12 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
         throw InputError(where + ".turbulence.reynolds_stress must be [" + stress_names() + "].");
     }
     for (uint8_t k = 0; k < N_STRESS; k++) {
-        stress.push_back(field(r_in.as_array()[k], where + ".turbulence.reynolds_stress[" + std::to_string(k) + "]",
-                               dim::velocity_squared, varies));
+        const std::string key = where + ".turbulence.reynolds_stress[" + std::to_string(k) + "]";
+        stress.push_back(field(r_in.as_array()[k], key, dim::velocity_squared, varies));
+        if (stress.back().expression && stress.back().expression->depends_on_time()) {
+            throw InputError(key + " depends on t, but the Reynolds stress is fixed at setup: write it in x, y, z "
+                             "only (the mean velocity u may depend on t).");
+        }
     }
 }
 
@@ -319,6 +327,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
         }
     }
     stream = stream_;
+    timed_mean = boundary.contains("u") && TimedInletTargets::depends_on_time(boundary, where);
     if (turbulence.contains("seed")) {
         const int64_t s = find_value<int64_t>(turbulence, "seed");
         if (s < 0) throw InputError(tw + ".seed must be non-negative.");
@@ -439,7 +448,10 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     U_c = turbulence.contains("convection_velocity") ? find_double(turbulence, "convection_velocity", dim::velocity)
                                                      : flux / area;
     if (!(U_c > 0.0) || !std::isfinite(U_c)) {
-        throw InputError(tw + ": the convection velocity (default the mean inflow speed) must be positive.");
+        if (turbulence.contains("convection_velocity")) throw InputError(tw + ".convection_velocity must be positive.");
+        throw InputError(tw + ": the convection velocity, by default the area-averaged mean inflow speed" +
+                         (timed_mean ? " at t = 0" : "") + ", is not positive: set " + tw +
+                         ".convection_velocity to the flow's typical speed.");
     }
 
     // Auxiliary grid on the plane
@@ -638,7 +650,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     text << ", spacing ";
     for (int d = 0; d < N_T; d++) text << (d ? " x " : "") << logging::real(spacing[d]);
     text << ", a plane every " << logging::real(dt_plane) << " (U_c = " << logging::real(U_c) << "), seed " << seed
-         << (zero_net_flux ? ", zero net flux" : "");
+         << (zero_net_flux ? ", zero net flux" : "") << (timed_mean ? ", on the mean of t" : "");
     summary_ = text.str();
 }
 
@@ -783,6 +795,7 @@ void SyntheticInflow::fill(double t, const Kokkos::View<rtype *[N_DIM]> & target
     const rtype a_r = static_cast<rtype>(a);
     const rtype inv_area = static_cast<rtype>(1.0 / area);
     const bool flux = zero_net_flux;
+    const bool timed = timed_mean;
     const uint32_t axis = normal_axis;
     Kokkos::Array<int32_t, N_T> n;
     for (uint32_t d = 0; d < N_T; d++) n[d] = n_grid[d];
@@ -810,9 +823,10 @@ void SyntheticInflow::fill(double t, const Kokkos::View<rtype *[N_DIM]> & target
             }
             v[j] = sum * scale(i, j) * tau[j];
         }
+        const int32_t k = chars(i);
         rtype u[N_DIM];
         for (uint32_t r = 0; r < N_DIM; r++) {
-            u[r] = mean(i, r);
+            u[r] = timed ? target(k, r) : mean(i, r);
             for (uint32_t c = 0; c <= r; c++) u[r] += chol(i, lower(r, c)) * v[c];
         }
         if (flux) {
@@ -821,7 +835,6 @@ void SyntheticInflow::fill(double t, const Kokkos::View<rtype *[N_DIM]> & target
             for (uint32_t j = 0; j < N_DIM; j++) q += tau[j] * ((1.0_r - a_r) * total(s0, j) + a_r * total(s1, j));
             u[axis] -= q * inv_area;
         }
-        const int32_t k = chars(i);
         for (int r = 0; r < N_DIM; r++) target(k, r) = u[r];
     });
 }
