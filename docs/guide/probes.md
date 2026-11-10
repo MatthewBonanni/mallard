@@ -407,6 +407,9 @@ curved shapes, and the surface's part on the wall is the curved faces'.
 ![Volume fractions of a disk across the curved outer wall of a coarse annulus mesh, the cells drawn with their curved faces, the disk's part in the domain outlined, and its recorded area and perimeter against the closed form](../images/guide/region-curved-wall-light.svg#gh-light-mode-only)
 ![Volume fractions of a disk across the curved outer wall of a coarse annulus mesh, the cells drawn with their curved faces, the disk's part in the domain outlined, and its recorded area and perimeter against the closed form](../images/guide/region-curved-wall-dark.svg#gh-dark-mode-only)
 
+![A sphere across the curved wall of a coarse tetrahedral ball: the cells' volume fractions on the plane through its center, the closed surface of its part in the domain with outward normals, and its recorded volume and surface area against the closed form](../images/guide/region-curved-wall-3d-light.svg#gh-light-mode-only)
+![A sphere across the curved wall of a coarse tetrahedral ball: the cells' volume fractions on the plane through its center, the closed surface of its part in the domain with outward normals, and its recorded volume and surface area against the closed form](../images/guide/region-curved-wall-3d-dark.svg#gh-dark-mode-only)
+
 Give the region by name to measure exactly where a source or sponge acts:
 
 **Control-volume balances.** The conserved variables and the flux variables
