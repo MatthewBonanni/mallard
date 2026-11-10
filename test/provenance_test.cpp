@@ -79,11 +79,12 @@ const std::string UNIFORM = "type = \"analytical\"\nrho = \"1.0\"\np = \"1.0\"\n
 bool writes_hdf5() { return have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()); }
 
 /** @brief Runs the box from an input file in dir, as the executable does; returns the input file's path. */
-std::string run_box(const std::string & dir, uint32_t n_steps, const std::string & initialize) {
+std::string run_box(const std::string & dir, uint32_t n_steps, const std::string & initialize,
+                    const std::string & extra = "") {
     const std::string input = dir + "/input_" + std::to_string(n_steps) + ".toml";
     if (comm::is_root()) {
         std::filesystem::create_directories(dir);
-        std::ofstream(input) << box(dir, n_steps, initialize, writes_hdf5());
+        std::ofstream(input) << box(dir, n_steps, initialize, writes_hdf5()) << extra;
     }
     comm::barrier();
     Solver solver;
@@ -380,6 +381,51 @@ TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
     }
     EXPECT_EQ(starts, (std::vector<std::string>{dir + "/input_4.toml", dir + "/input_8.toml"}));
     EXPECT_EQ(read_restart(dir + "/r_000008.restart").provenance, second);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(ProvenanceTest, RecordsTheFilesTheRunRead) {
+    const std::string dir = (scratch_dir() / "mallard_provenance_read_files").string();
+    const std::string points = dir + "/points.txt";
+    if (comm::is_root()) {
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+        std::ofstream(points) << (N_DIM == 3 ? "0.25 0.25 0.5\n0.75 0.75 0.5\n" : "0.25 0.25\n0.75 0.75\n");
+    }
+    const std::string probe = "[[probes]]\nname = \"pts\"\ntype = \"points\"\npoints_file = \"" + points +
+                              "\"\nfile = \"" + dir + "/pts.csv\"\ninterval = 2\nvariables = [\"RHO\"]\n";
+    run_box(dir, 4, UNIFORM, probe);
+    const std::string first_id = provenance::run_id();
+    const Value first = json::parse(provenance::json());
+    const std::string restart = dir + "/r_000004.restart";
+    run_box(dir, 8, "type = \"restart\"\nfile = \"" + restart + "\"\n");
+    const Value second = json::parse(provenance::json());
+    const std::string copy = dir + "/copy.restart";
+    if (comm::is_root()) std::filesystem::copy_file(restart, copy);
+    run_box(dir, 12, "type = \"restart\"\nfile = \"" + copy + "\"\n");
+    const Value third = json::parse(provenance::json());
+    if (!comm::is_root()) return;
+
+    // A small input file is hashed, once whichever ranks read it
+    ASSERT_EQ(first["files"].array.size(), 1u);
+    const Value & read = first["files"].array[0];
+    EXPECT_EQ(read["kind"].string, "probe_points");
+    EXPECT_EQ(read["path"].string, points);
+    EXPECT_EQ(read["sha256"].string, provenance::sha256_file(points));
+    // A restart file is not hashed again: its run, step and the SHA-256 of that run's output record
+    ASSERT_EQ(second["files"].array.size(), 1u);
+    const Value & start = second["files"].array[0];
+    EXPECT_EQ(start["kind"].string, "restart");
+    EXPECT_EQ(start["run_id"].string, first_id);
+    EXPECT_EQ(start["step"].number, 4);
+    EXPECT_EQ(start["sha256"].string, provenance::sha256_file(restart));
+    EXPECT_EQ(start["bytes"].number, double(std::filesystem::file_size(restart)));
+    // A copy has no output record of its own: its size and time instead
+    const Value & copied = third["files"].array.at(0);
+    EXPECT_EQ(copied["run_id"].string, first_id);
+    EXPECT_TRUE(copied["sha256"].is_null());
+    EXPECT_EQ(copied["note"].string, "not hashed (no output record)");
+    EXPECT_FALSE(copied["modified"].string.empty());
     std::filesystem::remove_all(dir);
 }
 

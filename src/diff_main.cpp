@@ -290,6 +290,34 @@ std::string string_at(const json::Value & v, std::initializer_list<const char *>
     return p && p->type == json::Value::Type::STRING ? p->string : "";
 }
 
+/** @brief The block's files by kind and path as given, with their SHA-256 ("" if not hashed). */
+std::map<std::string, std::string> read_files(const json::Value & run) {
+    std::map<std::string, std::string> out;
+    const json::Value * files = at(run, {"files"});
+    if (!files || files->type != json::Value::Type::ARRAY) return out;
+    for (const json::Value & f : files->array) {
+        out[string_at(f, {"kind"}) + " " + string_at(f, {"path"})] = string_at(f, {"sha256"});
+    }
+    return out;
+}
+
+/** @brief Notes on the files the runs of A and B read that differ (SHA-256), or that only one of them read. */
+void read_files_notes(const json::Value & a, const json::Value & b, std::vector<std::string> & notes) {
+    if (!at(a, {"files"}) || !at(b, {"files"})) return;
+    const auto files_a = read_files(a), files_b = read_files(b);
+    for (const auto & [file, sha] : files_a) {
+        const auto other = files_b.find(file);
+        if (other == files_b.end()) {
+            notes.push_back("only the run of A read " + file);
+        } else if (!sha.empty() && !other->second.empty() && sha != other->second) {
+            notes.push_back("the runs of A and B read different " + file + " (SHA-256)");
+        }
+    }
+    for (const auto & [file, sha] : files_b) {
+        if (!files_a.contains(file)) notes.push_back("only the run of B read " + file);
+    }
+}
+
 /**
  * @brief The mesh of a file's case (collective): mesh_file, else the [mesh]
  *        table of the input its run block records, with its [[periodic]]
@@ -659,6 +687,7 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
 
     const std::string sha_a = string_at(a.run, {"mesh", "sha256"});
     const std::string sha_b = string_at(b.run, {"mesh", "sha256"});
+    read_files_notes(a.run, b.run, r.notes);
     std::map<std::string, std::vector<double>> remapped;
     if (remap) {
         for (Side * s : {&a, &b}) {
