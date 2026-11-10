@@ -192,14 +192,20 @@ std::optional<FieldDescription> find(const std::string & name) {
     }
     for (const char * prefix : {"COV_", "FAVRE_COV_"}) {
         if (!starts_with(name, prefix)) continue;
-        // COV_<A>_<B>: the first split whose halves are both sampled fields (names hold underscores)
+        // COV_<A>_<B>: the first split whose halves are both sampled fields (names hold underscores),
+        // preferring halves that are not species (COV_U_Y_U_Y is U_Y and U_Y, not U and Y_U_Y)
         const std::string pair = name.substr(std::string(prefix).size());
         const std::string what = prefix[0] == 'F' ? "Favre covariance of " : "covariance of ";
-        for (size_t at = pair.find('_'); at != std::string::npos; at = pair.find('_', at + 1)) {
-            const auto a = find_sampled(pair.substr(0, at)), b = find_sampled(pair.substr(at + 1));
-            if (a && b) {
-                return FieldDescription{a->dimension.times(b->dimension), what + a->long_name + " and " + b->long_name,
-                                        "", ""};
+        const auto species = [](const std::string & s) { return starts_with(s, "Y_") || starts_with(s, "RHOY_"); };
+        for (const bool any : {false, true}) {
+            for (size_t at = pair.find('_'); at != std::string::npos; at = pair.find('_', at + 1)) {
+                const std::string first = pair.substr(0, at), second = pair.substr(at + 1);
+                if (!any && (species(first) || species(second))) continue;
+                const auto a = find_sampled(first), b = find_sampled(second);
+                if (a && b) {
+                    return FieldDescription{a->dimension.times(b->dimension),
+                                            what + a->long_name + " and " + b->long_name, "", ""};
+                }
             }
         }
         return std::nullopt;

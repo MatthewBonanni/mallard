@@ -120,6 +120,8 @@ reads. `--statistics` does the same to the `MEAN_`, `COV_` (and
 
 - Snapshots of `RHO`, `U` and `P` give the run's averages to their stored
   precision; restart files and snapshots of the conservative variables, bit for bit.
+- It reads restart files and VTKHDF or XDMF snapshots of the whole mesh,
+  as `mallard post extract` does; VTU files hold cells in an order of their own.
 - A single snapshot has no interval to weigh it by: give `--t-start`.
 - Under `mpirun -n N` the cells are split over N ranks; the profile's rows
   are summed over them.

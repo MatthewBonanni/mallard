@@ -1237,9 +1237,14 @@ int average(const cli::Args & args) {
     if (!comm::is_root()) return 0;
     const std::vector<Written> written = a.homogeneous.empty() ? read_written(plan, since) : std::vector<Written>{};
     std::vector<std::string> products;
-    for (const auto & p : a.products) products.push_back(a.product(p));
+    for (const auto & [i, j] : a.products) products.push_back(a.fields[i] + "*" + a.fields[j]);
     std::vector<std::string> paths;
-    for (const Written & w : written) paths.push_back(w.contents.path);
+    for (const Written & w : written) {
+        paths.push_back(w.contents.path);
+        for (const output::Snapshot & snapshot : w.contents.snapshots) {
+            if (snapshot.file != w.contents.path) paths.push_back(snapshot.file);
+        }
+    }
     if (!profile_path.empty()) paths.push_back(profile_path);
     if (report == "json") {
         json::Object o;
