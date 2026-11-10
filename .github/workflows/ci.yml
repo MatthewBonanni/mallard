@@ -694,12 +694,15 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
       - name: Install Mallard
         run: spack -e /opt/env install --fail-fast --test=root mallard
+      # The suites as a user: their child runs start under mpirun, which refuses root
       - name: Test (2D and 3D)
-        env:
-          OMP_NUM_THREADS: 2
         run: |
           spack -e /opt/env test run mallard
-          for dim in 2 3; do "$GITHUB_WORKSPACE/spack-build-${dim}d/src/mallard" test --gtest_brief=1; done
+          useradd -m ci
+          chown -R ci "$GITHUB_WORKSPACE"
+          for dim in 2 3; do
+            su ci -c "OMP_NUM_THREADS=2 '$GITHUB_WORKSPACE/spack-build-${dim}d/src/mallard' test --gtest_brief=1"
+          done
       - name: Report the job's result
         if: always()
         env:
