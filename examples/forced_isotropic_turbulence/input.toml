@@ -11,6 +11,15 @@
 # integrals.csv logs the kinetic energy integrated over the box (divide
 # kinetic_energy by (2 pi)^3). 20 s on one A100.
 #
+# [statistics.convergence] follows the enstrophy (convergence.csv) and the
+# "converged" trigger stops the run once its mean is known to +-2%; through
+# t = 20 it is not, and the run stops at t_stop. Run to t = 200 at 16^3, the
+# enstrophy's integrated autocorrelation time is about 9 time units (76
+# samples) and it wanders slowly: MSER-5 moved the end of the transient from
+# t = 2-17 to t = 79 once the higher enstrophy (mean 205 from t = 2 to 79) had
+# passed, leaving 134 +- 8 (6%, 13 effective samples) at t = 200; +-2% would
+# take some 1,500 time units.
+#
 # The domain averages need one global sum per Runge-Kutta stage, so steps run
 # kernel by kernel on GPUs (no CUDA graph).
 
@@ -71,7 +80,7 @@ check_interval = 100
 [integrals]
 interval = 10
 
-# When the enstrophy is statistically stationary, and its mean known to +-2%
+# Stop once the enstrophy is statistically stationary and its mean known to +-2%
 [statistics.convergence]
 signals = ["integrals_enstrophy"]
 tolerance = 0.02
