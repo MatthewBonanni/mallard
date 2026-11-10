@@ -610,7 +610,7 @@ TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
     const json::Value keys = json::parse(listed.out)["keys"];
     EXPECT_EQ(keys.keys(), json::parse(read_file("keys.json")).keys());
     EXPECT_TRUE(keys["physics.gamma"]["set"].boolean);
-    EXPECT_FALSE(keys["numerics.riemann_solver"]["set"].boolean);
+    EXPECT_FALSE(keys["run.cfl"]["set"].boolean);
 }
 
 TEST(CliTest, ListTemplatesIsWhatNewListShowedWhichStillWorks) {

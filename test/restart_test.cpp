@@ -262,7 +262,7 @@ TEST(RestartTest, PeakPressureIsARunningMaximumThatSurvivesRestarts) {
     const std::string dir = (scratch_dir() / "mallard_restart_p_max").string();
     auto input = [&](const std::string & sub, const std::string & init, uint32_t n_steps) {
         std::string s = restart_input(dir + sub, init, n_steps);
-        s.replace(s.find("fields = [\"RHO\"]"), 19, "fields = [\"RHO\", \"P_MAX\"]");
+        s.replace(s.find("fields = [\"RHO\"]"), 16, "fields = [\"RHO\", \"P_MAX\"]");
         return parse_toml(s);
     };
 

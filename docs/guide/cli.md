@@ -104,6 +104,8 @@ Commands:
     mallard list fields     The output fields there are, or exactly those of one
                             case
     mallard list species    The species of a case
+    mallard list keys       The input keys there are, or exactly those of one
+                            case: type, units, default, values
     mallard list templates  The case templates of mallard new
     mallard diff            Compare two solutions field by field: norms of the
                             difference, where it is largest, bitwise
@@ -496,12 +498,14 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard list <command> [options]
 
-Catalogs: the fields, species and case templates there are.
+Catalogs: the fields, species, input keys and case templates there are.
 
 Commands:
   mallard list fields       The output fields there are, or exactly those of one
                             case
   mallard list species      The species of a case
+  mallard list keys         The input keys there are, or exactly those of one
+                            case: type, units, default, values
   mallard list templates    The case templates of mallard new
 
 mallard list <command> --help shows the page of a command.
@@ -514,20 +518,19 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard list fields [INPUT] [--format text|json]
 
-Without an input file, lists every field the [[write_data]] variables,
-[[probes]] and [statistics] take, by group, with its units, its description and
-what a case needs to have it, and the patterns (Y_<s>, MEAN_<A>, COV_<A>_<B>,
-...).
+Without an input file, lists every field the [[write_data]], [[probes]] and
+[statistics] fields take, by group, with its units, its description and what a
+case needs to have it, and the patterns (Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).
 
 With an input file, sets the case up as mallard check does (reading its mesh,
-writing nothing) and lists exactly the fields [[write_data]] variables accept
-for it: its species, its physics, chemistry, LES and statistics, and its
-dimension; then the common fields it does not have, with what they need.
+writing nothing) and lists exactly the fields [[write_data]] fields accept for
+it: its species, its physics, chemistry, LES and statistics, and its dimension;
+then the common fields it does not have, with what they need.
 
 Options:
-  --format text|json  text: one table per group, with the units of every field;
-                      json: the same as one JSON object, for scripts. Default:
-                      text.
+  --format text|json  text: one table per group (of fields) or table (of keys),
+                      with units; json: the same as one JSON object, for
+                      scripts. Default: text.
   --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
                       rank) or --kokkos-device-id=1 (the GPU; by default each
                       rank gets its own).
@@ -556,9 +559,9 @@ each, in the order of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s>
 fields. A single gas has none.
 
 Options:
-  --format text|json  text: one table per group, with the units of every field;
-                      json: the same as one JSON object, for scripts. Default:
-                      text.
+  --format text|json  text: one table per group (of fields) or table (of keys),
+                      with units; json: the same as one JSON object, for
+                      scripts. Default: text.
   --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
                       rank) or --kokkos-device-id=1 (the GPU; by default each
                       rank gets its own).
@@ -574,6 +577,47 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-species
+```
+
+### mallard list keys
+
+```text
+Usage: mallard list keys [SECTION] [INPUT] [--format text|json]
+
+Without an input file, lists the key catalog docs/input-keys.json: every key the
+examples and tutorials read, by table, with its type, units (of a number with a
+physical dimension), default (or required) and accepted values; (2D) or (3D)
+marks a key only that dimension reads.
+
+With an input file, sets the case up as mallard check does (reading its mesh,
+writing nothing) and lists the keys its setup reads, the same columns and
+whether the input sets each: what mallard check --catalog writes, as tables.
+
+SECTION keeps the keys of one table (numerics, [numerics], write_data) or of one
+key path (numerics.face_reconstruction). An argument that ends in .toml or names
+a file is the input.
+
+Options:
+  --format text|json  text: one table per group (of fields) or table (of keys),
+                      with units; json: the same as one JSON object, for
+                      scripts. Default: text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard list keys
+  $ mallard list keys numerics
+  $ mallard list keys write_data input.toml
+  $ mallard list keys input.toml --format json
+
+Exit status:
+  0  listed
+  1  the case cannot be set up (the errors are printed), or the catalog is not found
+  2  usage error, or a section with no key
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-keys
 ```
 
 ### mallard list templates
@@ -779,7 +823,7 @@ Options:
   --name NAME            The name of the --region probe and of --snapshot:
                          probe_NAME.csv, probe_NAME_reductions.csv,
                          NAME_<step>.vtkhdf. Default: extract.
-  --fields LIST          The variables of --region and --snapshot, separated by
+  --fields LIST          The fields of --region and --snapshot, separated by
                          commas, as [[probes]] and [[write_data]] take them
                          (RHO,U,P,T,MASS_FLUX). Default: RHO,U,P,T.
   --reductions LIST      The reductions of --region, separated by commas:

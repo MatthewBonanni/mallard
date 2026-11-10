@@ -1675,7 +1675,7 @@ TEST(ProbesTest, RestartedRunsContinueTheSpectraHistoriesBitwise) {
     }
     comm::barrier();
     // Another history: other variables
-    input.replace(input.find("fields = [\"RHO\", \"U_X\"], length"), 30, "fields = [\"RHO\"], length");
+    input.replace(input.find("fields = [\"RHO\", \"U_X\"], length"), 31, "fields = [\"RHO\"], length");
     Solver other;
     EXPECT_THROW(other.init(parse_toml(input)), InputError);
 }
