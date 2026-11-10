@@ -618,9 +618,10 @@ jobs:
 
   # spack install of this checkout on Red Hat's Universal Base Images 8 and 9, as a user of
   # a RHEL-based cluster (TOSS 4 and 5) would: Spack builds GCC 15 with the system's GCC,
-  # then Open MPI, HDF5 and Mallard's other dependencies with GCC 15, then Mallard with its
-  # tests, and the 2D and 3D suites run. The Spack installs are cached across runs, so a
-  # run with the cache builds only Mallard.
+  # then Open MPI, HDF5 and Mallard's other dependencies with GCC 15, then Mallard, running
+  # its 2D and 3D suites. The Spack installs are cached across runs, so a run with the cache
+  # builds only Mallard. Spack runs as a user: the suites start runs under mpirun, which
+  # refuses root.
   spack:
     needs: [changelog, device]
     if: needs.device.outputs.code == 'true' && (!inputs.only || contains(format(',{0},', inputs.only), ',spack,'))
@@ -637,33 +638,29 @@ jobs:
     env:
       SPACK_VERSION: v1.2.2
       SPACK_PACKAGES_VERSION: v2026.10.1
-      OMPI_ALLOW_RUN_AS_ROOT: 1
-      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+    defaults:
+      run:
+        shell: runuser -u ci -- bash -e {0}
     steps:
       - name: Install the system's build tools
-        run: >
-          dnf install -y -q git gcc gcc-c++ gcc-gfortran make patch bzip2 xz unzip file
-          python3 which findutils tar diffutils gzip
+        shell: bash -e {0}
+        run: |
+          dnf install -y -q git gcc gcc-c++ gcc-gfortran make patch bzip2 xz unzip file \
+            python3 which findutils tar diffutils gzip util-linux
+          useradd -m ci
+          mkdir -p /opt/spack-opt /opt/env
+          chown ci /opt /opt/spack-opt /opt/env
+          echo /opt/spack/bin >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
           submodules: true
       - name: Report the job as running
+        shell: bash -e {0}
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: ${{ matrix.name }}
         run: sh tools/dev/ci_status.sh running
-      - name: Install Spack
-        run: |
-          git clone -q --depth 1 -b "$SPACK_VERSION" https://github.com/spack/spack /opt/spack
-          git clone -q --depth 1 -b "$SPACK_PACKAGES_VERSION" https://github.com/spack/spack-packages /opt/spack-packages
-          echo /opt/spack/bin >> "$GITHUB_PATH"
-          export PATH=/opt/spack/bin:$PATH
-          spack repo set --destination /opt/spack-packages builtin
-          spack repo add "$GITHUB_WORKSPACE/spack/spack_repo/mallard"
-          spack config add config:install_tree:root:/opt/spack-opt
-          spack config add "config:build_jobs:$(nproc)"
-          spack compiler find
       # A change to the package restores the latest tree, and Spack reuses what still fits
       - name: Restore the Spack installs
         id: cache
@@ -672,11 +669,23 @@ jobs:
           path: /opt/spack-opt
           key: spack-${{ matrix.name }}-${{ env.SPACK_VERSION }}-${{ env.SPACK_PACKAGES_VERSION }}-${{ hashFiles('spack/spack_repo/mallard/packages/mallard/package.py') }}
           restore-keys: spack-${{ matrix.name }}-${{ env.SPACK_VERSION }}-${{ env.SPACK_PACKAGES_VERSION }}-
+      - name: Hand the checkout and the installs to the user
+        shell: bash -e {0}
+        run: chown -R ci "$GITHUB_WORKSPACE" /opt/spack-opt
+      - name: Install Spack
+        run: |
+          git clone -q --depth 1 -b "$SPACK_VERSION" https://github.com/spack/spack /opt/spack
+          git clone -q --depth 1 -b "$SPACK_PACKAGES_VERSION" https://github.com/spack/spack-packages /opt/spack-packages
+          export PATH=/opt/spack/bin:$PATH
+          spack repo set --destination /opt/spack-packages builtin
+          spack repo add "$GITHUB_WORKSPACE/spack/spack_repo/mallard"
+          spack config add config:install_tree:root:/opt/spack-opt
+          spack config add "config:build_jobs:$(nproc)"
+          spack compiler find
       # As in docs/installation.md: GCC 15 first, then Mallard with it
       - name: Install GCC 15 and Mallard's dependencies
         run: |
           spack install --fail-fast gcc@15
-          mkdir -p /opt/env
           cat > /opt/env/spack.yaml << EOF
           spack:
             specs: ["mallard@main %gcc@15"]
@@ -692,19 +701,15 @@ jobs:
         with:
           path: /opt/spack-opt
           key: ${{ steps.cache.outputs.cache-primary-key }}
-      - name: Install Mallard
-        run: spack -e /opt/env install --fail-fast --test=root mallard
-      # The suites as a user: their child runs start under mpirun, which refuses root
-      - name: Test (2D and 3D)
+      - name: Install and test Mallard (2D and 3D)
+        env:
+          OMP_NUM_THREADS: 2
         run: |
+          spack -e /opt/env install --fail-fast --test=root mallard
           spack -e /opt/env test run mallard
-          useradd -m ci
-          chown -R ci "$GITHUB_WORKSPACE"
-          for dim in 2 3; do
-            su ci -c "OMP_NUM_THREADS=2 '$GITHUB_WORKSPACE/spack-build-${dim}d/src/mallard' test --gtest_brief=1"
-          done
       - name: Report the job's result
         if: always()
+        shell: bash -e {0}
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ job.check_run_id }}
