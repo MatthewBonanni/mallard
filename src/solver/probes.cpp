@@ -1502,6 +1502,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             reduction_columns.emplace_back(reduction_name(r) + "_" + v, r == Reduction::INTEGRAL ? d.times(measure) : d);
         }
     }
+    for (const auto & [name, dimension] : reduction_columns) p.reduction_dimensions.push_back(dimension);
     const char * point_label = boundary ? "face" : cut ? "cell" : "point";
     if (!snapshot && entry.contains("spectra")) {
         if (p.average) {
@@ -1806,6 +1807,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         // Averages are written once they hold a sample
         if (p.average && p.average_samples == 0) continue;
+        p.step_last_value = step;
         std::vector<double> & sampled_nodes = p.gathered_nodes;
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
@@ -1867,6 +1869,30 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         if (!p.reductions.empty()) p.write_reductions(step, t);
     }
+}
+
+std::vector<uint64_t> Probes::value_steps() const {
+    std::vector<uint64_t> steps;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        steps.insert(steps.end(), p.reduction_names().size() + (p.point_value ? p.variables.size() : 0),
+                     p.step_last_value);
+    }
+    return steps;
+}
+
+std::vector<Dimension> Probes::value_dimensions() const {
+    std::vector<Dimension> dimensions;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        dimensions.insert(dimensions.end(), p.reduction_dimensions.begin(), p.reduction_dimensions.end());
+        if (p.point_value) {
+            for (const auto & v : p.variables) dimensions.push_back(field_units::describe(v).dimension);
+        }
+    }
+    return dimensions;
 }
 
 std::vector<std::string> Probes::value_names() const {

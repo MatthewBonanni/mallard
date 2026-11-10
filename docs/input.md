@@ -1024,6 +1024,37 @@ weights and the trigger state.
 | `probe`, `variable`, `level` | The trigger point `[x, y(, z)]`, its variable and the level of its upward crossings (default 0) |
 | `interval`, `t_start` | Sampling, default those of `[statistics]` |
 
+### `[statistics.convergence]`
+
+The end of the initial transient and confidence intervals of monitored values
+([guide](guide/statistics.md#convergence-statisticsconvergence)): each listed
+value gets a sample each time its monitor writes it. MSER-5 on each signal
+finds where its transient ends, again each time its series has grown by 5%;
+the run is stationary once an end in the first half of the series has been
+accepted for every signal, from the latest of the latest accepted ends
+(`t_stationary`, which can move later as the series grow). From then on, the samples after `t_stationary` and after
+the start of the `[statistics]` averages give the mean and the variance
+(of `(x - mean)^2`) with confidence intervals by non-overlapping batch means
+and Student's t, the integrated autocorrelation time `tau` (samples, Sokal's
+window `M >= 5 tau`) and `n_eff = samples / tau`. Converged: stationary, every
+half width within `tolerance` of the mean (and `variance_tolerance` of the
+variance) and every batch at least `10 tau` long. Triggers read the values as
+`convergence_stationary`, `convergence_t_stationary`, `convergence_converged`
+and `convergence_<signal>_{mean, ci, variance, variance_ci, tau, n_eff,
+samples}` (NaN before the run is stationary); restart files carry the
+histories (reset with `statistics.reset`). Runs on the host, on every rank,
+only when a signal has a new sample.
+
+| Key | Description |
+|---|---|
+| `signals` | Monitored values, named as in `[[triggers]]`: `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, `<probe>_<variable>`. Required |
+| `confidence` | Confidence of the intervals, default 0.95 |
+| `batches` | Batches of the batch means (at least 2), default 20 |
+| `tolerance` | Relative half width of every mean at which the run is converged (adds `converged`), default none |
+| `variance_tolerance` | Also of every variance (needs `tolerance`), default none |
+| `min_samples` | Samples of a signal before MSER-5 is tried (at least 10), default 100 |
+| `file` | Output CSV (`step, t` and the values, with units), default `convergence.csv` |
+
 ## `[[probes]]`
 
 Samples of the solution on a geometry (points, curves, surfaces, exact cut planes or boundary zones;
@@ -1350,7 +1381,7 @@ step ([Triggers](guide/running.md#triggers)).
 
 | Key | Description |
 |---|---|
-| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>` and, for probes of one point, `<probe>_<variable>`; true when not 0. Required |
+| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
 | `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set). Required |
 | `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
 | `for` | Simulated time the condition must hold before it fires, default 0 |

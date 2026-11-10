@@ -71,6 +71,16 @@ check_interval = 100
 [integrals]
 interval = 10
 
+# When the enstrophy is statistically stationary, and its mean known to +-2%
+[statistics.convergence]
+signals = ["integrals_enstrophy"]
+tolerance = 0.02
+
+[[triggers]]
+name = "converged"
+when = "convergence_converged"
+do = "stop"
+
 [[write_data]]
 prefix = "solut/forced"
 time_interval = 1.0

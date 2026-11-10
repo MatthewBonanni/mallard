@@ -2157,6 +2157,7 @@ int Solver::run_loop() {
             const snapshot_block::Reason reason(snapshot_block::reason::START);
             write_data(true);
             write_probes();
+            update_convergence();
             t_wall_output += output_timer.seconds();
         }
         print_progress();
@@ -2196,6 +2197,7 @@ int Solver::run_loop() {
             write_integrals();
             // Probes first, so that triggers read this step's values and restarts carry their state
             write_probes();
+            update_convergence();
             act_on_triggers();
             write_data();
             if (checkpoint_requested) write_checkpoint();
@@ -2366,6 +2368,7 @@ void Solver::print_progress() {
             if (!monitor.last.name.empty()) status.monitored.push_back(monitor.last);
         }
         if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
+        if (!convergence.last().name.empty()) status.monitored.push_back(convergence.last());
         for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
         run_log::write(status.record());
     }
@@ -2485,6 +2488,7 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     }
     logging::items(statistics.summary());
     logging::items(probes.summary());
+    logging::items(convergence.summary());
     logging::items(triggers.summary());
 }
 
@@ -2534,6 +2538,7 @@ void Solver::print_summary(const RunEnd & end) const {
     }
     for (const auto & monitor : force_monitors) s.files.push_back({"forces", 0, monitor.file});
     if (integral_monitor.interval > 0) s.files.push_back({"integrals", 0, integral_monitor.file});
+    if (convergence.enabled()) s.files.push_back({"convergence", 0, convergence.file_name()});
     for (const auto & file : probes.files()) s.files.push_back({"probes", 0, file});
     report::Text text(logging::color_stdout());
     summary_section(text, s);
@@ -2615,6 +2620,7 @@ RestartAttributes Solver::restart_attributes() const {
         if (!name.empty()) attributes.emplace_back(name, static_cast<double>(writer->snapshots_written()));
     }
     for (const auto & a : triggers.attributes()) attributes.push_back(a);
+    for (const auto & a : convergence.attributes()) attributes.push_back(a);
     return attributes;
 }
 
@@ -2692,6 +2698,7 @@ void Solver::sample_probe_averages() {
 RestartArrays Solver::restart_arrays() const {
     RestartArrays arrays = statistics.arrays();
     for (auto && a : probes.arrays()) arrays.push_back(std::move(a));
+    for (auto && a : convergence.arrays()) arrays.push_back(std::move(a));
     return arrays;
 }
 

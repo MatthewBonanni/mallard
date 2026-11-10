@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iterator>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -254,5 +255,78 @@ TEST(TriggersTest, UnknownActionOrWriterIsAnInputError) {
                                                            "\"\n"))),
                      InputError)
             << action;
+    }
+}
+
+namespace {
+
+/** @brief The data rows of a CSV file, by step (header and comment lines left out). */
+std::map<uint64_t, std::string> csv_rows(const std::string & file) {
+    std::map<uint64_t, std::string> rows;
+    std::ifstream in(file);
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty() && std::isdigit(static_cast<unsigned char>(line[0]))) rows[std::stoull(line)] = line;
+    }
+    return rows;
+}
+
+std::string convergence_case(const std::string & dir) {
+    // The pressure ahead of the expansion is steady until it arrives
+    return "[[probes]]\nname = \"far\"\npoint = [0.95, 0.5]\nvariables = [\"P\"]\ninterval = 1\nfile = \"" + dir +
+           "/far.csv\"\n[statistics]\nfields = [\"P\"]\n[statistics.convergence]\nsignals = [\"far_P\"]\n"
+           "min_samples = 10\nbatches = 4\ntolerance = 1e-3\nfile = \"" + dir + "/convergence.csv\"\n"
+           "[[triggers]]\nname = \"steady\"\nwhen = \"convergence_stationary\"\ndo = \"start statistics\"\n";
+}
+
+} // namespace
+
+TEST(TriggersTest, ConvergenceStartsStatisticsWhenStationaryAndResumesBitwise) {
+    const std::string first = fresh_dir("convergence_first"), second = fresh_dir("convergence_second");
+    Solver whole;
+    whole.init(parse_toml(case_input(first, "n_steps = 40\ncfl = 0.25\n", convergence_case(first), 20)));
+    EXPECT_EQ(run(whole), 0);
+    const auto rows = csv_rows(first + "/convergence.csv");
+    ASSERT_EQ(rows.size(), 41u);
+    uint64_t stationary = 0;
+    double t_stationary = 0.0;
+    for (const auto & [step, row] : rows) {
+        std::vector<std::string> cells;
+        std::stringstream s(row);
+        for (std::string cell; std::getline(s, cell, ',');) cells.push_back(cell);
+        if (cells[2] == "1") {
+            stationary = step;
+            t_stationary = std::stod(cells[1]);
+            break;
+        }
+    }
+    ASSERT_GT(stationary, 0u);
+    ASSERT_LT(stationary, 20u);
+    const RestartData end = read_restart(restart_file(first, 40));
+    ASSERT_NE(end.attribute("TRIGGER_steady_T_FIRST"), nullptr);
+    EXPECT_EQ(*end.attribute("TRIGGER_steady_T_FIRST"), t_stationary);
+
+    std::string input = case_input(second, "n_steps = 40\ncfl = 0.25\n", convergence_case(second), 20);
+    const size_t begin = input.find("type = \"analytical\""), stop = input.find("[[boundaries]]");
+    input.replace(begin, stop - begin, "type = \"restart\"\nfile = \"" + restart_file(first, 20) + "\"\n");
+    Solver resumed;
+    resumed.init(parse_toml(input));
+    EXPECT_EQ(run(resumed), 0);
+    const auto continued = csv_rows(second + "/convergence.csv");
+    ASSERT_EQ(continued.size(), 20u);
+    for (const auto & [step, row] : continued) EXPECT_EQ(row, rows.at(step)) << step;
+}
+
+TEST(TriggersTest, UnknownConvergenceSignalIsAnInputErrorListingTheMonitoredValues) {
+    const std::string dir = fresh_dir("convergence_unknown");
+    Solver solver;
+    try {
+        solver.init(parse_toml(case_input(dir, "n_steps = 2\ncfl = 0.25\n",
+                                          TRIGGER_CASE_PROBE + "[statistics.convergence]\nsignals = [\"gauge_T\"]\n")));
+        FAIL() << "no error";
+    } catch (const InputError & e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("statistics.convergence.signals"), std::string::npos) << what;
+        EXPECT_NE(what.find("did you mean"), std::string::npos) << what;
+        EXPECT_NE(what.find("gauge_P"), std::string::npos) << what;
     }
 }

@@ -125,6 +125,90 @@ level by a variable at a probe point.
 - `examples/cylinder` phase-averages
   its vortex street this way.
 
+## Convergence: `[statistics.convergence]`
+
+```toml
+[statistics]
+fields = ["U_X", "U_Y", "U_Z", "P"]
+products = ["U_X*U_X", "U_X*U_Y"]
+interval = 10
+
+[statistics.convergence]
+signals = ["wall_integral_TAU_WALL_X", "integrals_kinetic_energy"]
+tolerance = 0.01                    # converged at +-1% of the means
+
+[[triggers]]
+name = "developed"
+when = "convergence_stationary"     # the initial transient has ended
+do = "start statistics"
+
+[[triggers]]
+name = "converged"
+when = "convergence_converged"      # every interval within the tolerance
+do = "stop"
+```
+
+*Used in:* [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les).
+
+Answers two questions every averaging run asks: when has the initial
+transient ended, and how close are the averages to their long-time values?
+It follows monitored values, those [triggers](running.md#triggers) read
+(`[integrals]`, `[[forces]]`, reductions of `[[probes]]` and probes of one
+point, with the same names), one sample each time the monitor writes one.
+
+- **End of the transient**: MSER-5 (White 1997) on each signal: the start
+  that minimizes the standard error of the mean of what remains, over the
+  first half of the series; a minimum at the end of that half means the
+  signal still drifts. MSER-5 runs again each time a signal's series has
+  grown by 5%. Once it has accepted a start for every signal, the run is
+  *stationary* (and stays so), from the latest start, `t_stationary`. A
+  longer series can show that a slow transient lasted longer: each accepted
+  start replaces the previous one, and `t_stationary` moves with it.
+- **Confidence intervals** on the mean and on the variance of each signal, of
+  the samples after `t_stationary` (and, once the `[statistics]` averages
+  run, after their start, so the intervals are those of the samples the
+  averages cover): non-overlapping batch means (Schmeiser 1982) with
+  Student's t, which account for the samples' correlation in time; the
+  variance is the mean of `(x - mean)^2`.
+- **Integrated autocorrelation time** `tau` (in samples, by Sokal's automatic
+  window) and the effective sample size `n_eff = samples / tau`: how many
+  independent samples the run holds.
+- **Converged** (with `tolerance`): stationary, every interval within
+  `tolerance` times the mean (and `variance_tolerance` times the variance),
+  and every batch at least 10 `tau` long, so the batch means are nearly
+  independent and the intervals trustworthy.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `signals` | none | Monitored values, named as in [triggers](running.md#triggers) |
+| `confidence` | 0.95 | Confidence of the intervals |
+| `batches` | 20 | Batches of the batch means (10 to 30 is usual) |
+| `tolerance` | none | Converged when every mean's half width is within this fraction of the mean |
+| `variance_tolerance` | none | And every variance's within this fraction of the variance |
+| `min_samples` | 100 | Samples of a signal before MSER-5 is tried |
+| `file` | `convergence.csv` | Output CSV, a row each time a signal has a new sample |
+
+The values, a row of `file` and the monitor `convergence` of the run record,
+are `stationary` (0 or 1), `t_stationary`, `converged` (with `tolerance`) and,
+per signal, `<signal>_mean`, `_ci` (the half width), `_variance`,
+`_variance_ci`, `_tau`, `_n_eff` and `_samples`; they are NaN before the run
+is stationary. Triggers read them as `convergence_<value>`, e.g.
+`convergence_stationary`, `convergence_integrals_kinetic_energy_ci`: start
+the statistics or stop the run with them, as above, or with a tolerance of
+your own (`convergence_forces_cylinder_Fy_pressure_ci < 1e-3` for a mean near
+zero, where a relative tolerance means nothing). Restart files carry the
+histories, so a continued run keeps them.
+
+- Pick signals that settle with the statistics you want: a wall shear stress
+  integral for a channel, a force for a bluff body. Integrals over the whole
+  domain converge faster than any point; a point probe is the strict test.
+- Samples equally spaced in time (a probe's `time_interval`) are best: a
+  sample is a sample, whatever time separates it from the last.
+- The statistics start when the trigger fires, after the transient has been
+  detected, not at `t_stationary`: what came before was not kept.
+- Costs nothing on the device: the analysis runs on the host each time a
+  signal has a new sample, on every rank alike.
+
 ## See also
 
 - [Input reference: `[statistics]`](../input.md#statistics), [`[statistics.spectra]`](../input.md#statisticsspectra), [`[statistics.phase]`](../input.md#statisticsphase)

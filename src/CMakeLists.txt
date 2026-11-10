@@ -64,6 +64,7 @@ add_library(MallardCore STATIC
     solver/chemistry_balance.cpp
     solver/chemistry_benchmark.cpp
     solver/conservation_ledger.cpp
+    solver/convergence.cpp
     solver/derived_fields.cpp
     solver/numerics_preset.cpp
     solver/repair_audit.cpp
