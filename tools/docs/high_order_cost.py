@@ -1,6 +1,6 @@
 """Error against cost of each order of reconstruction: the isentropic vortex
 (Shu 1998) convected across a periodic box of irregular triangles, with FO,
-MUSCL and TENO-E orders 3 and 5, each on several meshes.
+MUSCL and TENO-E orders 3 to 6, each on several meshes.
 
     python tools/docs/high_order_cost.py --mallard build/src/mallard [--threads 2]
 
@@ -42,10 +42,12 @@ SCHEMES = {
     "FO": dict(recon='type = "FO"', meshes=(16, 32, 64, 128, 256, 512)),
     "MUSCL": dict(recon='type = "MUSCL"\nlimiter = "none"', meshes=(16, 32, 64, 128, 256, 512)),
     "TENO3": dict(recon='type = "TENO"\norder = 3', meshes=(16, 32, 64, 128, 256)),
+    "TENO4": dict(recon='type = "TENO"\norder = 4', meshes=(16, 32, 64, 128)),
     "TENO5": dict(recon='type = "TENO"\norder = 5', meshes=(16, 32, 64, 128)),
+    "TENO6": dict(recon='type = "TENO"\norder = 6', meshes=(16, 32, 64, 128)),
 }
-TARGETS = (1e-3, 1e-4)
-COLORS = {"FO": "red", "MUSCL": "gold", "TENO3": "blue", "TENO5": "teal"}
+TARGETS = (1e-3, 1e-4, 1e-5)
+COLORS = {"FO": "red", "MUSCL": "gold", "TENO3": "blue", "TENO4": "green", "TENO5": "teal", "TENO6": "plum"}
 
 
 def triangles(path, n, jitter=0.25, seed=7):
@@ -179,14 +181,16 @@ def run_case(binary, mesh, recon, threads, work):
     return dict(error=density_error(final, T_STOP), wall=wall, cpu=cpu, steps=int(steps[-1].replace(',', '')) if steps else None)
 
 
-def measure(binary, threads):
-    results = dict(machine=f"{platform.machine()} {platform.system()}, {threads} threads", runs={})
+def measure(binary, threads, schemes, results):
+    """Runs the schemes named, replacing their earlier measurements in results."""
+    results = dict(results, machine=f"{platform.machine()} {platform.system()}, {threads} threads")
+    results["runs"] = {k: v for k, v in results.get("runs", {}).items() if k not in schemes}
     with tempfile.TemporaryDirectory() as work:
-        for n in sorted({n for s in SCHEMES.values() for n in s["meshes"]}):
+        for n in sorted({n for k in schemes for n in SCHEMES[k]["meshes"]}):
             mesh = Path(work) / f"tri{n}.msh"
             triangles(mesh, n)
             for name, s in SCHEMES.items():
-                if n not in s["meshes"]:
+                if name not in schemes or n not in s["meshes"]:
                     continue
                 tries = []
                 while not tries or (sum(t["wall"] for t in tries) < 30.0 and len(tries) < 3):  # short: best of 3
@@ -197,6 +201,7 @@ def measure(binary, threads):
                 results["runs"].setdefault(name, []).append(r)
                 print(f"{name:6s} {2 * n * n:7d} cells  error {r['error']:.3e}  cpu {r['cpu']:8.2f} s  "
                       f"wall {r['wall']:8.2f} s  steps {r['steps']}", flush=True)
+    results["runs"] = {k: results["runs"][k] for k in SCHEMES if k in results["runs"]}
     return results
 
 
@@ -227,10 +232,12 @@ def table(results):
         for name, r in runs.items():
             cells, cpu = at_error(r, "cells", target), at_error(r, "cpu", target)
             print(f"  {name:6s} " + ("not reached" if cells is None else f"{cells:9.0f} cells {cpu:8.2f} s CPU"))
-    for name in ("FO", "MUSCL", "TENO3"):
+    for name in ("FO", "MUSCL", "TENO3", "TENO4", "TENO6"):
         print(f"{name} / TENO5 CPU time at equal error, and where it crosses 1:")
         crossing = None
         for target in np.geomspace(1e-2, 1e-6, 81):
+            if name not in runs:
+                continue
             a, b = at_error(runs[name], "cpu", target), at_error(runs["TENO5"], "cpu", target)
             if a is None or b is None:
                 continue
@@ -238,7 +245,8 @@ def table(results):
                 crossing = target
             if any(np.isclose(target, t) for t in TARGETS + (1e-5,)):
                 print(f"  error {target:g}: {a / b:.2f}")
-        print(f"  TENO5 cheaper below error {crossing:.2g}" if crossing else "  TENO5 never cheaper in range")
+        if name in runs:
+            print(f"  TENO5 cheaper below error {crossing:.2g}" if crossing else "  TENO5 never cheaper in range")
 
 
 def figure(results):
@@ -268,10 +276,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--mallard", help="2D Mallard executable (without it, the saved measurements are redrawn)")
     ap.add_argument("--threads", type=int, default=2)
+    ap.add_argument("--only", help="comma-separated schemes to (re)measure, keeping the saved others")
     ap.add_argument("--no-figure", action="store_true")
     args = ap.parse_args()
     if args.mallard:
-        results = measure(args.mallard, args.threads)
+        schemes = args.only.split(",") if args.only else list(SCHEMES)
+        saved = json.loads(DATA.read_text()) if args.only and DATA.exists() else {}
+        results = measure(args.mallard, args.threads, schemes, saved)
         DATA.write_text(json.dumps(results, indent=1) + "\n")
     else:
         results = json.loads(DATA.read_text())
