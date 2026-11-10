@@ -94,6 +94,8 @@ class Page {
         /** @brief The run's status: by its outcome (none without an end record), a warning with warnings. */
         report::Status status() const;
         Series & series(const std::string & group, const std::string & name, const std::string & unit);
+        /** @brief The unit the start record gives a progress record quantity (of an object of it; "": at the top). */
+        std::string unit(const std::string & group, const std::string & name) const;
 
         uint64_t n_records = 0;
         bool nondimensional = false;

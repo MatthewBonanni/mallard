@@ -4,7 +4,7 @@
 (function () {
   "use strict";
   var NS = "http://www.w3.org/2000/svg";
-  var W = 460, H = 210, L = 62, R = 12, T = 12, B = 34;
+  var W = 460, H = 230, L = 62, R = 12, T = 26, B = 40;
 
   function el(name, attrs, parent) {
     var e = document.createElementNS(NS, name);
@@ -48,9 +48,9 @@
 
     var fig = document.createElement("figure");
     var cap = document.createElement("figcaption");
-    cap.textContent = s.name + (s.unit && s.unit !== "-" ? " [" + s.unit + "]" : "") + (log ? ", log scale" : "");
+    cap.textContent = (s.title || s.name) + (log ? " (log scale)" : "");
     fig.appendChild(cap);
-    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": cap.textContent }, fig);
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": cap.textContent + ": " + s.label }, fig);
     var yt = log ? ticks(Math.ceil(a), Math.floor(b), 4) : ticks(a, b, 4);
     yt.forEach(function (v) {
       var y = T + (b - v) / (b - a) * (H - T - B);
@@ -62,7 +62,8 @@
       el("line", { x1: x, x2: x, y1: T, y2: H - B, "class": "grid" }, svg);
       el("text", { x: x, y: H - B + 15, "class": "tick", "text-anchor": "middle" }, svg).textContent = fmt(v);
     });
-    el("text", { x: (L + W - R) / 2, y: H - 4, "class": "tick", "text-anchor": "middle" }, svg).textContent = "t [" + (s.tunit || "s") + "]";
+    el("text", { x: (L + W - R) / 2, y: H - 6, "class": "axis", "text-anchor": "middle" }, svg).textContent = s.xlabel;
+    el("text", { x: 4, y: 14, "class": "axis", "text-anchor": "start" }, svg).textContent = s.label;
     el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, "class": "frame" }, svg);
 
     var ok = function (i) { return s.t[i] !== null && lo[i] !== null && hi[i] !== null && (!log || lo[i] > 0); };
@@ -120,7 +121,7 @@
       var axis = data.axes[s.axis];
       s.t = axis.t;
       s.step = axis.step;
-      s.tunit = data.tunit;
+      s.xlabel = data.xlabel;
       plot(s, parent);
     });
   });

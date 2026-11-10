@@ -15,6 +15,7 @@
 #include "common_io.h"
 #include "input.h"
 #include "log.h"
+#include "run_health.h"
 
 namespace run_page {
 
@@ -59,7 +60,8 @@ figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radi
 figcaption{font-size:.9em;margin-bottom:2px}.readout{font-size:.8em;min-height:1.3em}
 svg{width:100%;height:auto;display:block}
 svg .grid{stroke:var(--line);stroke-width:1}svg .frame{fill:none;stroke:var(--line)}
-svg .tick{fill:var(--dim);font-size:11px}svg .line{fill:none;stroke:var(--accent);stroke-width:1.6}
+svg .tick{fill:var(--dim);font-size:11px}svg .axis{fill:var(--fg);font-size:12px}
+svg .line{fill:none;stroke:var(--accent);stroke-width:1.6}
 svg .band{fill:var(--band);stroke:none}svg .cursor{stroke:var(--dim);stroke-dasharray:3 3}
 details summary{cursor:pointer;color:var(--accent)}
 @media print{nav,.plots,#plots-nojs{display:none}body{background:#fff;color:#000}}
@@ -151,17 +153,103 @@ std::string status_span(const char * status, const std::string & word) {
     return std::string("<span class=\"status ") + status + "\">" + escape(word) + "</span>";
 }
 
-/** @brief Units of the progress record's quantities, in SI; empty where the case is nondimensional. */
-std::string unit_of(const std::string & name, bool nondimensional) {
-    static const std::map<std::string, std::string> SI = {
-        {"dt", "s"}, {"min_rho", "kg/m^3"}, {"min_p", "Pa"}, {"min_T", "K"}, {"max_T", "K"}, {"rho", "kg/m^3"},
-        {"p", "Pa"}, {"T", "K"}, {"wall_per_step", "s"}};
-    static const std::map<std::string, std::string> ANY = {
-        {"cfl", "-"}, {"max_mach", "-"}, {"troubled_cells", "-"}, {"reacting_cells", "-"}, {"max_sum_Y_error", "-"},
-        {"max_chemistry_cost", "steps"}, {"cells_per_second", "cells/s"}, {"memory_host", "B"},
-        {"memory_device", "B"}};
-    if (const auto it = ANY.find(name); it != ANY.end()) return it->second;
-    if (const auto it = SI.find(name); it != SI.end()) return nondimensional ? "-" : it->second;
+/** @brief A unit as the page shows it: "-" for a dimensionless quantity ("1"). */
+std::string shown(const std::string & unit) { return unit == "1" ? "-" : unit; }
+
+/** @brief What a quantity of the progress record is, in words; empty if it has no description here. */
+std::string description(const std::string & name) {
+    static const std::map<std::string, std::string> TEXT = {
+        {"dt", "time step"},
+        {"cfl", "CFL number: the time step over the largest stable one"},
+        {"min_rho", "lowest density over the cells"},
+        {"min_p", "lowest pressure over the cells"},
+        {"max_mach", "highest Mach number over the cells"},
+        {"troubled_cells", "share of the cells TENO marks troubled (shocks, discontinuities)"},
+        {"min_T", "lowest temperature over the cells"},
+        {"max_T", "highest temperature over the cells"},
+        {"max_sum_Y_error", "largest |sum of the mass fractions - 1| over the cells"},
+        {"reacting_cells", "share of the cells whose chemistry is advanced"},
+        {"max_chemistry_cost", "most chemistry integrator steps of a cell"},
+        {"wall_per_step", "wall time per time step"},
+        {"cells_per_second", "throughput: cell updates per second of time stepping"},
+        {"memory_host", "host memory of the largest rank"},
+        {"memory_device", "GPU memory in use on the fullest device"},
+        {"kinetic_energy", "kinetic energy, integral of rho |u|^2 / 2"},
+        {"enstrophy", "enstrophy, integral of rho |omega|^2 / 2"},
+        {"dilatation_squared", "integral of (div u)^2"},
+        {"pressure_dilatation", "pressure-dilatation work, integral of p div u"},
+        {"velocity_squared", "integral of |u|^2"},
+        {"vorticity_squared", "integral of |omega|^2"},
+        {"density_squared", "integral of rho^2"},
+        {"temperature", "integral of T"},
+        {"temperature_squared", "integral of T^2"},
+        {"ke_rate_convective", "kinetic energy rate of the convective fluxes"},
+        {"ke_rate_viscous", "kinetic energy rate of the viscous fluxes"},
+        {"ke_rate_sgs", "kinetic energy rate of the subgrid model"},
+        {"eps_numerical", "numerical dissipation of kinetic energy"},
+        {"pressure_work", "kinetic energy rate of the pressure work"},
+        {"les_C", "dynamic LES model coefficient"},
+        {"tf_beta", "dynamic flame efficiency coefficient"},
+        {"Q", "heat flux of the modeled walls into the fluid"},
+        {"mass", "total mass"},
+        {"energy", "total energy"},
+    };
+    if (const auto it = TEXT.find(name); it != TEXT.end()) return it->second;
+    if (name.size() > 2 && name[0] == 'F' && name.find('_') == 2) {
+        return (name.ends_with("_pressure") ? std::string("pressure") : std::string("viscous")) + " force along " +
+               name[1];
+    }
+    if (name.starts_with("momentum_")) return "total momentum along " + name.substr(9);
+    return "";
+}
+
+/** @brief An axis label: the quantity and its units in brackets, "-" for none. */
+std::string label(const std::string & name, const std::string & unit) {
+    return name + " [" + (unit.empty() ? "units not recorded" : unit) + "]";
+}
+
+/** @brief What a group of plots shows, in words. */
+std::string group_note(const std::string & group) {
+    if (group == "Time step") return "The time step and the CFL number it was taken at.";
+    if (group == "Extremes over the cells") {
+        return "The lowest and highest values over the cells at each progress row: what fails first in a run that "
+               "diverges.";
+    }
+    if (group == "Throughput and memory") return "The cost of each step and the memory in use.";
+    if (group == "Integrals over the domain") {
+        return "The [integrals] over the domain, as integrals.csv records them; per unit depth in 2D.";
+    }
+    if (group.starts_with("Forces on ")) {
+        return "The force on the zone's walls, from the pressure and the viscous stress, as its [[forces]] file "
+               "records it; per unit depth in 2D.";
+    }
+    if (group == "Conservation") {
+        return "The conservation ledger's unexplained change of each total, relative to its scale (see Health).";
+    }
+    if (group == "Numerical repairs") return "How often each numerical repair has acted since the run started.";
+    return "";
+}
+
+/** @brief What a plotted series is, in words: its quantity's description, or what its group makes of it. */
+std::string caption(const Series & s) {
+    if (s.group == "Conservation") return "unexplained change of the " + s.name + " total, relative to its scale";
+    if (s.group == "Numerical repairs") return "times the repair " + s.name + " has acted";
+    const std::string d = description(s.name);
+    return d.empty() ? s.name : d;
+}
+
+/** @brief What a health activity counts, and why it matters. */
+std::string activity_text(const std::string & name) {
+    if (name == "limited_cells") {
+        return "cells where the MUSCL limiter cuts the reconstructed gradient (smallest limiter below " +
+               format("%.2g", health::LIMITED_BELOW) + "): shocks and steep gradients";
+    }
+    if (name == "troubled_cells") {
+        return "cells TENO marks troubled and reconstructs from its smoother stencils: shocks";
+    }
+    if (name == "upwind_fraction") {
+        return "the hybrid flux's mean upwind fraction: how much numerical dissipation it adds";
+    }
     return "";
 }
 
@@ -272,6 +360,14 @@ void Kept::add(const json::Value & v) {
     if (last.size() > KEPT) last.erase(last.begin());
 }
 
+std::string Page::unit(const std::string & group, const std::string & name) const {
+    const json::Value * units = start.find("units");
+    if (!units) return "";
+    if (!group.empty()) units = units->find(group);
+    const json::Value * u = units ? units->find(name) : nullptr;
+    return u && u->type == Type::STRING ? shown(u->string) : "";
+}
+
 Series & Page::series(const std::string & group, const std::string & name, const std::string & unit) {
     const std::string key = group + "\n" + name;
     if (const auto it = by_key.find(key); it != by_key.end()) return all[it->second];
@@ -291,40 +387,39 @@ void Page::progress(const json::Value & r) {
                    const std::string & unit) {
         if (v && v->type == Type::NUMBER && std::isfinite(v->number)) series(group, name, unit).add(s, time, v->number);
     };
-    add("Time step", "dt", r.find("dt"), step, t, unit_of("dt", nondimensional));
-    add("Time step", "cfl", r.find("cfl"), step, t, "-");
+    add("Time step", "dt", r.find("dt"), step, t, unit("", "dt"));
+    add("Time step", "cfl", r.find("cfl"), step, t, unit("", "cfl"));
     if (const json::Value * m = r.find("monitors"); m && m->type == Type::OBJECT) {
         for (size_t i = 0; i < m->names.size(); i++) {
-            add("Monitors", m->names[i], &m->members[i], step, t, unit_of(m->names[i], nondimensional));
+            add("Extremes over the cells", m->names[i], &m->members[i], step, t, unit("monitors", m->names[i]));
         }
     }
-    add("Throughput and memory", "wall_per_step", r.find("wall_per_step"), step, t, "s");
-    add("Throughput and memory", "cells_per_second", r.find("cells_per_second"), step, t, "cells/s");
-    add("Throughput and memory", "memory_host", r.find("memory_host"), step, t, "B");
-    add("Throughput and memory", "memory_device", r.find("memory_device"), step, t, "B");
+    for (const char * key : {"wall_per_step", "cells_per_second", "memory_host", "memory_device"}) {
+        add("Throughput and memory", key, r.find(key), step, t, unit("", key));
+    }
     for (size_t i = 0; i < r.names.size(); i++) {
         const std::string & key = r.names[i];
         const json::Value & v = r.members[i];
         const bool integrals = key == "integrals";
         if (v.type != Type::OBJECT || (!integrals && !key.starts_with("forces_"))) continue;
-        const std::string group = integrals ? "Integrals (integrals.csv)" : "Forces on " + key.substr(7);
+        const std::string group = integrals ? "Integrals over the domain" : "Forces on " + key.substr(7);
         const uint64_t s = static_cast<uint64_t>(number_of(v.find("step"), double(step)));
         const double time = number_of(v.find("t"), t);
         for (size_t j = 0; j < v.names.size(); j++) {
-            if (v.names[j] != "step" && v.names[j] != "t") add(group, v.names[j], &v.members[j], s, time, "");
+            if (v.names[j] != "step" && v.names[j] != "t") {
+                add(group, v.names[j], &v.members[j], s, time, unit(key, v.names[j]));
+            }
         }
     }
     if (const json::Value * b = at(r, {"health", "balance_run"}); b && b->type == Type::OBJECT) {
         for (size_t i = 0; i < b->names.size(); i++) {
             if (is_false(b->members[i].find("checked"))) continue;
-            add("Conservation: unexplained change, relative", b->names[i], b->members[i].find("relative"), step, t,
-                "-");
+            add("Conservation", b->names[i], b->members[i].find("relative"), step, t, "-");
         }
     }
     if (const json::Value * rep = at(r, {"health", "repairs_run"}); rep && rep->type == Type::OBJECT) {
         for (size_t i = 0; i < rep->names.size(); i++) {
-            add("Numerical repairs since the start", rep->names[i], rep->members[i].find("activations"), step, t,
-                "times");
+            add("Numerical repairs", rep->names[i], rep->members[i].find("activations"), step, t, "-");
         }
     }
     last_progress = r;
@@ -463,13 +558,28 @@ std::string Page::text(const bool color) const {
             for (size_t i = 0; i < m->names.size(); i++) {
                 const json::Value & e = m->members[i];
                 if (is_false(e.find("valid"))) continue;
-                const std::string unit = unit_of(m->names[i], nondimensional);
+                const std::string u = unit("margins", m->names[i]);
                 rows.push_back({Status::NONE, {m->names[i], format("%.4g", number_of(e.find("value"))),
-                                               unit.empty() ? "-" : unit, text_of(e.find("step")),
+                                               u.empty() ? "-" : u, text_of(e.find("step")),
                                                text_of(e.find("x"))}});
             }
-            text.note("Lowest values at the progress rows, over the cells:");
+            text.note("Lowest values over the cells at any progress row so far, with where they occurred:");
             text.table({"quantity", {"value", Kind::VALUE}, {"units", Kind::UNITS}, "step", "at"}, rows, false);
+        }
+        if (const json::Value * a = health->find("activity"); a && a->type == Type::OBJECT && !a->names.empty()) {
+            std::vector<Row> rows;
+            std::string what;
+            for (size_t i = 0; i < a->names.size(); i++) {
+                const json::Value & e = a->members[i];
+                rows.push_back({Status::NONE, {a->names[i], format("%.2f", 100.0 * number_of(e.find("all"))),
+                                               format("%.2f", 100.0 * number_of(e.find("rank_min"))),
+                                               format("%.2f", 100.0 * number_of(e.find("rank_max")))}});
+                if (const std::string t = activity_text(a->names[i]); !t.empty()) what += "; " + a->names[i] + ": " + t;
+            }
+            text.blank();
+            text.note("Activity at the last progress row, over the whole domain and on the least and most loaded "
+                      "rank (the same in a serial run)" + what + ":");
+            text.table({"activity", "whole domain [%]", "least loaded rank [%]", "most loaded rank [%]"}, rows, false);
         }
         text.blank();
         if (repairs.empty()) {
@@ -700,23 +810,29 @@ std::string Page::html() const {
         h += "<p class=\"note\">No health record: no progress row yet, or <code>[output] health = false</code>.</p>";
     } else {
         if (const json::Value * m = health->find("margins_run"); m && m->type == Type::OBJECT && !m->names.empty()) {
-            h += "<h3>Lowest values</h3><p class=\"note\">At the progress rows so far, over the cells.</p>" +
+            h += "<h3>Lowest values</h3><p class=\"note\">The lowest density, pressure and temperature over the "
+                 "cells at any progress row so far, with the step and the cell center where each occurred. A value "
+                 "falling toward zero is the usual first sign of a run about to fail.</p>" +
                  head({"quantity", "value", "units", "step", "at"});
             for (size_t i = 0; i < m->names.size(); i++) {
                 const json::Value & e = m->members[i];
                 if (is_false(e.find("valid"))) continue;
                 h += "<tr>" + cell(m->names[i]) + num(text_of(e.find("value"))) +
-                     cell(unit_of(m->names[i], nondimensional)) + num(text_of(e.find("step"))) +
+                     cell(unit("margins", m->names[i])) + num(text_of(e.find("step"))) +
                      cell(text_of(e.find("x"))) + "</tr>";
             }
             h += TABLE_END;
         }
         if (const json::Value * a = health->find("activity"); a && a->type == Type::OBJECT && !a->names.empty()) {
-            h += "<h3>Activity</h3><p class=\"note\">Shares of the cells at the last progress row.</p>" +
-                 head({"activity", "all ranks [%]", "least rank [%]", "most rank [%]"});
+            h += "<h3>Activity</h3><p class=\"note\">How much of the domain the shock-capturing numerics act on, "
+                 "at the last progress row: over the whole domain and on the ranks with the least and the most of "
+                 "it. Very different ranks mean an unbalanced load, since those cells cost more; in a serial run "
+                 "the three columns match.</p>" +
+                 head({"activity", "what is counted", "whole domain [%]", "least loaded rank [%]",
+                       "most loaded rank [%]"});
             for (size_t i = 0; i < a->names.size(); i++) {
                 const json::Value & s = a->members[i];
-                h += "<tr>" + cell(a->names[i]);
+                h += "<tr>" + cell(a->names[i]) + cell(activity_text(a->names[i]));
                 for (const char * k : {"all", "rank_min", "rank_max"}) {
                     h += num(format("%.2f", 100.0 * number_of(s.find(k))));
                 }
@@ -735,13 +851,16 @@ std::string Page::html() const {
             h += "<h3>Numerical repairs</h3>";
             h += rows.empty() ? "<p>" + status_span("ok", "ok") + " None since the run started.</p>"
                               : "<p>" + status_span("warning", "WARN") +
-                                    " Repairs since the run started: each changed the solution to keep it "
-                                    "admissible.</p>" +
+                                    " Repairs since the run started: each changed the solution of a cell to keep "
+                                    "its density, pressure or mass fractions physical. A few are harmless; many, or "
+                                    "a growing number, point at a time step or mesh problem.</p>" +
                                     head({"repair", "times", "distinct cells"}) + rows + TABLE_END;
         }
         if (const json::Value * b = health->find("balance_run"); b && b->type == Type::OBJECT && !b->names.empty()) {
-            h += "<h3>Conservation</h3><p class=\"note\">The change of each total that the boundaries, sources and "
-                 "repairs do not explain, relative to the total's scale.</p>" +
+            h += "<h3>Conservation</h3><p class=\"note\">The conservation ledger: the change of each total over "
+                 "the run that the boundary fluxes, sources and repairs do not explain, relative to the total's "
+                 "scale. A healthy run keeps it at round-off; Mallard warns above 1e5 machine epsilons, and a value "
+                 "near that is a bug to report, not a setting to tune.</p>" +
                  head({"total", "unexplained change [-]", "note"});
             for (size_t i = 0; i < b->names.size(); i++) {
                 const json::Value & e = b->members[i];
@@ -752,7 +871,8 @@ std::string Page::html() const {
             h += TABLE_END;
         }
         if (const json::Value * d = health->find("element_drift")) {
-            h += "<p>Elements: largest relative change over a chemistry call " +
+            h += "<p>Elements: the largest relative change of an element's mass over a chemistry call, which "
+                 "chemistry must keep at round-off: " +
                  escape(format("%.1e", number_of(d))) + "</p>";
         }
     }
@@ -786,17 +906,22 @@ std::string Page::html() const {
         plotted[s.group].push_back(&s);
         n_plotted++;
     }
-    h += "<section id=\"monitors\"><h2>Monitors</h2>\n<p class=\"note\">At every progress row; a long run's rows "
-         "are combined in up to " +
+    h += "<section id=\"monitors\"><h2>Monitors</h2>\n<p class=\"note\">The quantities of every progress row "
+         "against simulated time. A long run's rows are combined in up to " +
          std::to_string(BUCKETS) +
-         " buckets per plot, the line through each bucket's last value and the band between its least and largest."
-         "</p>\n<p id=\"plots-nojs\" class=\"note\">The plots need JavaScript; the table of last values below does "
+         " points per plot: the line goes through the last value of each point's rows, the shaded band spans their "
+         "least and largest, so a short spike still shows. Hover over a plot to read its values.</p>\n"
+         "<p id=\"plots-nojs\" class=\"note\">The plots need JavaScript; the table of last values below does "
          "not.</p>\n";
     std::string data = "{\"groups\":[";
     std::map<std::string, size_t> axis_of;  // series of the same rows share their times and steps
     std::vector<std::string> axes;
     for (size_t g = 0; g < groups.size(); g++) {
-        h += "<h3>" + escape(groups[g]) + "</h3><div class=\"plots\" id=\"plots-" + std::to_string(g) + "\"></div>\n";
+        h += "<h3>" + escape(groups[g]) + "</h3>";
+        if (const std::string note = group_note(groups[g]); !note.empty()) {
+            h += "<p class=\"note\">" + escape(note) + "</p>";
+        }
+        h += "<div class=\"plots\" id=\"plots-" + std::to_string(g) + "\"></div>\n";
         data += std::string(g ? "," : "") + "{\"title\":" + json::quote(groups[g]) + ",\"series\":[";
         const auto & list = plotted[groups[g]];
         for (size_t i = 0; i < list.size(); i++) {
@@ -817,21 +942,25 @@ std::string Page::html() const {
             const auto [it, added] = axis_of.emplace(axis, axes.size());
             if (added) axes.push_back(axis);
             data += std::string(i ? "," : "") + "{\"name\":" + json::quote(s.name) +
-                    ",\"unit\":" + json::quote(s.unit) +
+                    ",\"unit\":" + json::quote(s.unit) + ",\"label\":" + json::quote(label(s.name, s.unit)) +
+                    ",\"title\":" + json::quote(caption(s)) +
                     ",\"axis\":" + std::to_string(it->second) + ",\"y\":[" + ys + "]" +
                     (band ? ",\"lo\":[" + lo + "],\"hi\":[" + hi + "]" : "") + "}";
         }
         data += "]}";
     }
-    data += "],\"tunit\":" + json::quote(nondimensional ? "-" : "s") + ",\"axes\":[";
+    data += "],\"xlabel\":" + json::quote(label("t", unit("", "t").empty() ? "s" : unit("", "t"))) + ",\"axes\":[";
     for (size_t i = 0; i < axes.size(); i++) data += (i ? "," : "") + axes[i];
     data += "]}";
     if (all.empty()) h += "<p class=\"note\">No progress row yet.</p>";
     if (!all.empty()) {
-        h += "<h3>Last values</h3>" + head({"group", "quantity", "units", "last", "least", "largest", "rows"});
+        h += "<h3>Last values</h3><p class=\"note\">Each plotted quantity's value at the last progress row, and "
+             "its least and largest over the run.</p>" +
+             head({"group", "quantity", "what it is", "units", "last", "least", "largest", "rows"});
         for (const Series & s : all) {
             if (s.rows() == 0) continue;
-            h += "<tr>" + cell(s.group) + cell(s.name) + cell(s.unit) + num(format("%.6g", s.buckets().back().last)) +
+            h += "<tr>" + cell(s.group) + cell(s.name) + cell(caption(s)) + cell(s.unit) +
+                 num(format("%.6g", s.buckets().back().last)) +
                  num(format("%.6g", s.least())) + num(format("%.6g", s.largest())) + num(logging::count(s.rows())) +
                  "</tr>";
         }

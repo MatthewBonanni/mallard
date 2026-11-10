@@ -53,7 +53,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Initial states from expressions, layered regions, tables and divergence-free synthetic turbulence of a prescribed spectrum
 - `mallard check` before a run, with mesh-quality and reconstruction-stencil fields for ParaView and every cell's stencils in one file, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file, `mallard diff` between two solutions, `mallard post extract` for probes and region integrals of existing output, `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions; tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
-- A [run report](docs/guide/output.md#run-report-reporthtml), `report.html`, from every run: outcome, configuration, health, plots of the monitors, cost and output, one self-contained page
+- A [run report](docs/guide/output.md#run-report-reporthtml), `report.html`, from every run: outcome, configuration, health, plots of the monitors, cost and output, one self-contained page ([sample](docs/images/guide/run_report_sample.html))
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields): Mach number, Q-criterion, λ₂ and numerical schlieren
 - Probes on points, curves, surfaces, boundaries and regions; statistics, spectra and phase averages

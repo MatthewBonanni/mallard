@@ -436,7 +436,7 @@ Each record has a `type`:
 
 | `type` | When | Fields |
 |---|---|---|
-| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks), `units` (the units of the progress records' quantities, as the CSV files' units lines write them, `"1"` for none: `t`, `dt`, `cfl`, `wall`, ..., and per object `monitors`, `margins` (of `health.margins`), `integrals` and `forces_<zone>`, a column each; bytes `B`; in a nondimensional case `"1"` for every physical quantity); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
 | `progress` | Every progress row | as below |
 | `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`; probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; no `sha256` for a [file appended to](#complete-files)) |
 | `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
@@ -499,7 +499,10 @@ would rehash the whole file at every step.
 ### Run report: `report.html`
 
 Every run also writes `report.html`, one page to open after a run (or during
-one) in any browser: the first thing to look at. It shows
+one) in any browser: the first thing to look at.
+[A sample report](../images/guide/run_report_sample.html) of a short shock
+run shows every section (download it and open it in a browser; GitHub shows its
+source; `tools/docs/run_report.py` builds it). It shows
 
 - the **outcome**: how and where the run ended (finished, stopped, a signal,
   the wall-time limit, diverged, an error), its last snapshot and restart file,
@@ -572,7 +575,7 @@ it all off.
 |---|---|
 | `margins` | The smallest `rho`, `p`, `T` and, for mixtures, mass fraction (`Y_<species>`) over the domain: `value`, cell centroid `x` and `step` |
 | `margins_run` | The smallest of each at any progress row so far |
-| `activity` | Fractions of cells, over the domain (`all`) and the least and most active rank (`rank_min`, `rank_max`): `troubled_cells` (TENO's troubled-cell indicator), `limited_cells` (MUSCL cells whose limiter is below one in some variable), `upwind_fraction` (the hybrid flux's mean upwind fraction) |
+| `activity` | Fractions of cells, over the domain (`all`) and the least and most active rank (`rank_min`, `rank_max`): `troubled_cells` (TENO's troubled-cell indicator), `limited_cells` (MUSCL cells whose smallest limiter over the variables is below 0.9, where the limiter cuts the reconstructed gradient by more than a tenth: shocks and steep gradients; smooth limiters such as Venkatakrishnan's sit just below 1 almost everywhere in smooth flow, which this leaves out), `upwind_fraction` (the hybrid flux's mean upwind fraction) |
 | `chemistry` | Since the previous row: `substeps` and `rejected_substeps` of the Rosenbrock integration, `failures`, `reacting_cells` (fraction of the last call), `wall` (seconds of the slowest rank) and `imbalance` (the slowest rank's chemistry time over the ranks' mean) |
 | `timing` | Per step since the previous row, `all` (mean), `rank_min`, `rank_max` over ranks: `output_sync` (the run's own output time) and `output_async` (time of the background writers). The step's own wall time and throughput are the row's `wall_per_step` and `cells_per_second` |
 | `repairs`, `repairs_run` | Each [numerical repair](#numerical-repairs), since the previous row and since the start: `activations`, `cells` (distinct owned cells) and `change`, the integrated change of each quantity it changes |

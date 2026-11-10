@@ -99,7 +99,9 @@ const std::vector<json::Value> & axis(const json::Value & data, const json::Valu
 TEST(RunPageTest, ARunWritesItsReportFromItsRecordsAndInfoRebuildsTheSamePage) {
     const std::string dir = fresh_dir("report");
     Solver solver;
-    solver.init(parse_toml(case_input(dir, "n_steps = 7\ncfl = 0.25\n", logged(dir))));
+    const std::string monitors = "[integrals]\ninterval = 1\n[[forces]]\nzone = \"bottom\"\ninterval = 1\nfile = \"" +
+                                 dir + "/forces_bottom.csv\"\n";
+    solver.init(parse_toml(case_input(dir, "n_steps = 7\ncfl = 0.25\n", logged(dir) + monitors)));
     EXPECT_EQ(solver.run(), 0);
     if (!comm::is_root()) return;
     const std::string log = dir + "/mallard.jsonl";
@@ -121,6 +123,25 @@ TEST(RunPageTest, ARunWritesItsReportFromItsRecordsAndInfoRebuildsTheSamePage) {
     const json::Value * min_rho = find_series(data, "min_rho");
     ASSERT_NE(min_rho, nullptr);
     EXPECT_EQ(axis(data, *min_rho, "step").back().number, 7.0);
+
+    // Every plot has its axes labeled with the units the run recorded
+    EXPECT_EQ(data["xlabel"].string, "t [s]");
+    size_t n_series = 0;
+    std::vector<std::string> groups;
+    for (const json::Value & g : data["groups"].array) {
+        groups.push_back(g["title"].string);
+        for (const json::Value & s : g["series"].array) {
+            n_series++;
+            const std::string & unit = s["unit"].string;
+            EXPECT_FALSE(unit.empty()) << s["name"].string;
+            EXPECT_EQ(s["label"].string, s["name"].string + " [" + unit + "]");
+        }
+    }
+    EXPECT_NE(std::find(groups.begin(), groups.end(), "Integrals over the domain"), groups.end());
+    EXPECT_NE(std::find(groups.begin(), groups.end(), "Forces on bottom"), groups.end());
+    EXPECT_GT(n_series, 10u);
+    EXPECT_EQ(find_series(data, "min_p")->find("unit")->string, "kg m-1 s-2");
+    EXPECT_EQ(find_series(data, "Fx_pressure")->find("unit")->string, N_DIM == 2 ? "kg s-2" : "kg m s-2");
 
     EXPECT_EQ(run_page::from_file(log).html(), page);
 }
@@ -217,10 +238,14 @@ TEST(RunPageTest, ActivityShowsTheShareOfAllRanksAndOfTheLeastAndMostActiveRank)
                          R"("troubled_cells":{"all":0.5,"rank_min":0.25,"rank_max":0.75},)"
                          R"("limited_cells":{"all":1,"rank_min":1,"rank_max":1}}}})"));
     const std::string html = page.html();
-    const auto row = [](const char * name, const char * all, const char * least, const char * most) {
-        return "<tr><td>" + std::string(name) + "</td><td class=\"num\">" + all + "</td><td class=\"num\">" + least +
-               "</td><td class=\"num\">" + most + "</td></tr>";
+    const auto row = [&](const std::string & name) {
+        const size_t begin = html.find("<tr><td>" + name + "</td>");
+        return begin == std::string::npos ? std::string() : html.substr(begin, html.find("</tr>", begin) - begin);
     };
-    EXPECT_NE(html.find(row("troubled_cells", "50.00", "25.00", "75.00")), std::string::npos) << html;
-    EXPECT_NE(html.find(row("limited_cells", "100.00", "100.00", "100.00")), std::string::npos) << html;
+    const auto shares = [](const char * all, const char * least, const char * most) {
+        return "<td class=\"num\">" + std::string(all) + "</td><td class=\"num\">" + least +
+               "</td><td class=\"num\">" + most + "</td>";
+    };
+    EXPECT_TRUE(row("troubled_cells").ends_with(shares("50.00", "25.00", "75.00"))) << row("troubled_cells");
+    EXPECT_TRUE(row("limited_cells").ends_with(shares("100.00", "100.00", "100.00"))) << row("limited_cells");
 }
