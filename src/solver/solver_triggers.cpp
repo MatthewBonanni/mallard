@@ -113,6 +113,9 @@ double Solver::averages_start() const {
 
 void Solver::update_convergence() {
     if (!convergence.enabled()) return;
+    bool written = (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || probes.wrote_values(step);
+    for (const auto & monitor : force_monitors) written = written || step % monitor.interval == 0;
+    if (!written) return;
     const std::vector<uint64_t> steps = monitored_steps();
     const size_t first_probe = steps.size() - probes.value_steps().size();
     std::vector<std::pair<size_t, double>> samples;

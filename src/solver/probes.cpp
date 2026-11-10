@@ -1882,6 +1882,12 @@ std::vector<uint64_t> Probes::value_steps() const {
     return steps;
 }
 
+bool Probes::wrote_values(uint64_t step) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return !p->snapshot && p->step_last_value == step;
+    });
+}
+
 std::vector<Dimension> Probes::value_dimensions() const {
     std::vector<Dimension> dimensions;
     for (const auto & pp : probes) {
