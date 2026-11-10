@@ -210,6 +210,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"mallard_logo/input.toml", "second_order", 2,
      "type = \"constant\"\np = 0.7142857142857143\nT = 0.7142857142857143\nu = [0.0, 0.0]\n",
      {{"inlet", "inflow"}, {"outlet", "outflow"}, {"walls", "top"}, {"cylinder", "duck"}}, ""},
+    {"moving_heaters/input.toml", "second_order", 2, "", {}, ""},
     {"noh_axisymmetric/input.toml", "second_order", 2, "", {}, ""},
     {"nozzle/input.toml", "second_order", 2, "",
      {{"inlet", "inlet"}, {"outlet", "outlet"}, {"walls", "wall"}, {"cylinder", "axis"}}, ""},

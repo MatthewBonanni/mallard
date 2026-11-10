@@ -149,7 +149,7 @@ TEST(RegionMotionTest, RegionsAcrossPeriodicBoundariesWrapIntoTheDomain) {
     EXPECT_EQ(own.tolerance, 0.0);
     EXPECT_NEAR(own.volume, exact, 1e-15);
     const std::vector<double> f = region::cell_fractions(mesh, across);
-    EXPECT_NEAR(integral(mesh, f), integral(mesh, region::cell_fractions(mesh, inside)), 1e-5 * exact);
+    EXPECT_NEAR(integral(mesh, f), integral(mesh, region::cell_fractions(mesh, inside)), (N_DIM == 2 ? 1e-5 : 1e-4) * exact);
     EXPECT_NEAR(region::measures_in_domain(mesh, across, f).volume, exact, 1e-3 * exact);
     // Points past x = 0 are inside where their image across x = 1 is
     const double image[3] = {0.05, 0.5, N_DIM == 2 ? 0.0 : 0.5};

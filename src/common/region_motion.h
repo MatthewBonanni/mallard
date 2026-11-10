@@ -52,9 +52,6 @@ class MovingFractions {
 
         const Kokkos::View<double *> & fractions() const { return m_fractions; }
 
-        /** @brief Bytes of device memory it holds. */
-        size_t bytes() const;
-
         struct Leaf {
             uint32_t first = 0, count = 0;  // its nodes
             double edge = 0.0;

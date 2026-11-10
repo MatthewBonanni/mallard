@@ -73,7 +73,7 @@ bool reads_solution(const kexpr::Program & p, const uint16_t n_variables) {
 }
 
 bool reads_means(const kexpr::Program & p) {
-    for (uint16_t i = MEAN_RHO; i < N_FIXED; i++) {
+    for (uint16_t i = MEAN_RHO; i < COPY; i++) {
         if (p.uses(i)) return true;
     }
     return false;
@@ -298,7 +298,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         std::string kinds;
         for (size_t v = 0; v < compiled.size(); v++) {
             kexpr::Program & p = compiled[v];
-            const bool of_t = p.uses(TIME), time = of_t || moves, solution = reads_solution(p, n_variables), mean = reads_means(p);
+            const bool time = p.uses(TIME) || moves, solution = reads_solution(p, n_variables), mean = reads_means(p);
             m_time = m_time || time;
             m_means = m_means || mean;
             for (uint32_t k = 0; k < parts.size(); k++) {
@@ -312,7 +312,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
                 (time || solution || mean ? dyn_terms : static_terms).push_back(term);
             }
             programs.push_back(std::move(p));
-            const std::string kind = mean ? "domain averages" : (solution ? "solution" : (of_t ? "t" : ""));
+            const std::string kind = mean ? "domain averages" : (solution ? "solution" : (time ? "t" : ""));
             if (!kind.empty() && kinds.find(kind) == std::string::npos) kinds += (kinds.empty() ? "" : ", ") + kind;
         }
         std::string text;

@@ -156,17 +156,18 @@ def holed_mesh(path, n=14, jitter=0.25, seed=3, hole=(0.3, 0.5, 0.12)):
 
 # ------------------------------------------------------------------- runs
 
-def fractions(binary, mesh, region, work, name, dim, zones=("wall",)):
-    """Cells of the mesh and the region's volume fraction in each, from a one-step run."""
+def fractions(binary, mesh, region, work, name, dim, zones=("wall",), periodic=()):
+    """Cells of the mesh (a file, or the [mesh] table of a generated one) and the region's volume fraction in each,
+    from a one-step run; periodic: pairs of zones."""
     zero = "[0.0, 0.0]" if dim == 2 else "[0.0, 0.0, 0.0]"
     boundaries = "".join(f'[[boundaries]]\nname = "{z}"\ntype = "symmetry"\n' for z in zones)
+    boundaries += "".join(f'[[periodic]]\nzones = ["{a}", "{b}"]\n' for a, b in periodic)
+    mesh_table = mesh if "\n" in mesh else f'type = "file"\nfilename = "{mesh}"\n'
     toml = f"""[run]
 n_steps = 1
 dt = 1e-9
 [mesh]
-type = "file"
-filename = "{mesh}"
-[initialize]
+{mesh_table}[initialize]
 type = "constant"
 u = {zero}
 p = 1.0
@@ -367,6 +368,98 @@ def regions_3d(P, args):
         ax.set_zlim(0, 1)
         ax.set_box_aspect((1, 1, 1), zoom=1.35)
         ax.view_init(elev=18, azim=-75)
+        ax.set_axis_off()
+        ax.set_title(title, fontsize=12)
+    sm = plt.cm.ScalarMappable(cmap=P["cmap"], norm=plt.Normalize(0, 1))
+    cb = fig.colorbar(sm, ax=fig.axes, shrink=0.55, pad=0.02)
+    cb.set_label("cell volume fraction")
+    cb.outline.set_edgecolor(P["muted"])
+    return fig
+
+
+# ------------------------------------------------- arrays and periodic wraps
+
+RING = ('{type = "disk", center = [0.8, 0.5], radius = 0.09, '
+        'repeat = {count = 8, rotate = 45, pivot = [0.5, 0.5]}}')
+WRAPPED = '{type = "disk", center = [0.9, 0.45], radius = 0.24}'
+RING_3D = ('{type = "sphere", center = [0.78, 0.5, 0.5], radius = 0.13, '
+           'repeat = {count = 6, rotate = {axis = [0, 0, 1], angle = 60}, pivot = [0.5, 0.5, 0.5]}}')
+WRAPPED_3D = '{type = "sphere", center = [0.88, 0.5, 0.5], radius = 0.3}'
+
+
+@functools.cache
+def data_arrays(mallard):
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "square.msh"
+    triangle_mesh(mesh, n=16)
+    box = 'type = "cartesian"\nNx = 20\nNy = 20\n'
+    return (fractions(mallard, mesh.name, RING, work, "ring", 2),
+            fractions(mallard, box, WRAPPED, work, "wrapped", 2, ("bottom", "top"), [("left", "right")]))
+
+
+def region_arrays(P, args):
+    """Eight copies of a disk about a pivot on the triangle mesh, and a disk across the periodic boundary of a
+    box periodic in x, entering again at x = 0."""
+    ring, wrapped = data_arrays(args.mallard)
+    fig, axes = plt.subplots(1, 2, figsize=(8.2, 3.9), gridspec_kw=dict(wspace=0.08))
+    angles = np.radians(45.0 * np.arange(8))
+    centers = [(0.5 + 0.3 * np.cos(a), 0.5 + 0.3 * np.sin(a)) for a in angles]
+    panel(axes[0], P, *ring, lambda x, y: np.min([np.hypot(x - cx, y - cy) for cx, cy in centers], axis=0) < 0.09,
+          "repeat: 8 copies about a pivot")
+    for k, (cx, cy) in enumerate(centers):
+        label(axes[0], cx, cy, str(k), P, size=9)
+    panel(axes[1], P, *wrapped, lambda x, y: (np.hypot(x - 0.9, y - 0.45) < 0.24) | (np.hypot(x + 0.1, y - 0.45) < 0.24),
+          "across a periodic boundary")
+    for x in (0.0, 1.0):
+        axes[1].plot([x, x], [0, 1], color=P["flame"], lw=2.0, ls="--")
+    label(axes[1], 0.5, 0.06, "periodic in x", P, size=10, box=True)
+    colorbar(fig, axes, P)
+    return fig
+
+
+@functools.cache
+def data_arrays_3d(mallard3d):
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "cube.msh"
+    tetrahedron_mesh(mesh)
+    box = 'type = "cartesian_tet"\nNx = 14\nNy = 14\nNz = 14\n'
+    return (fractions(mallard3d, mesh.name, RING_3D, work, "ring3d", 3),
+            fractions(mallard3d, box, WRAPPED_3D, work, "wrapped3d", 3, ("bottom", "top", "back", "front"),
+                      [("left", "right")]))
+
+
+def region_arrays_3d(P, args):
+    """The cells the plane z = 0.5 cuts (ring) or y = 0.53 cuts (wrap, between the box's grid planes), colored by
+    their fraction, in front of the cells behind it that the region fills (faint)."""
+    ring, wrapped = data_arrays_3d(args.mallard3d)
+    fig = plt.figure(figsize=(8.6, 4.2))
+    cmap = plt.get_cmap(P["cmap"])
+    tris = ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3))
+    for k, ((pts, cells, f), axis, at, title) in enumerate(((ring, 2, 0.5, "repeat: 6 copies about the z axis"),
+                                                             (wrapped, 1, 0.53, "across a periodic boundary"))):
+        ax = fig.add_subplot(1, 2, k + 1, projection="3d", computed_zorder=False)
+        back, cut, colors = [], [], []
+        for c, fc in zip(cells, f):
+            p = pts[c]
+            faces = [p[list(t)] for t in tris] if len(c) == 4 else [p[[0, 1, 2]], p[[0, 2, 3]]]
+            if p[:, axis].min() < at < p[:, axis].max():
+                if fc > 0.0:
+                    cut += faces
+                    colors += [cmap(fc)] * len(faces)
+            elif (p[:, axis].min() >= at if axis == 1 else p[:, axis].max() <= at) and fc > 0.5:
+                back += faces
+        ax.add_collection3d(Poly3DCollection(back, facecolors=P["faint"], edgecolors=P["mesh"], linewidths=0.1,
+                                             alpha=0.35, rasterized=True))
+        ax.add_collection3d(Poly3DCollection(cut, facecolors=colors, edgecolors=P["mesh"], linewidths=0.2,
+                                             rasterized=True))
+        if axis == 1:
+            for x in (0.0, 1.0):
+                ax.plot([x, x, x, x, x], [0, 1, 1, 0, 0], [0, 0, 1, 1, 0], color=P["flame"], lw=1.6, ls="--")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.set_zlim(0, 1)
+        ax.set_box_aspect((1, 1, 1), zoom=1.3)
+        ax.view_init(elev=55 if axis == 2 else 18, azim=-75)
         ax.set_axis_off()
         ax.set_title(title, fontsize=12)
     sm = plt.cm.ScalarMappable(cmap=P["cmap"], norm=plt.Normalize(0, 1))
@@ -1113,7 +1206,8 @@ FIGURES = {"region_primitives": primitives_2d, "region_booleans": booleans_2d, "
            "region_mesh_regions": mesh_regions, "region_orientation": orientation, "regions_3d": regions_3d,
            "initial_layers": initial_layers, "region_curved_wall": region_curved_wall,
            "region_control_surface": region_control_surface, "region_outside": region_outside,
-           "region_curved_wall_3d": region_curved_wall_3d}
+           "region_curved_wall_3d": region_curved_wall_3d, "region_arrays": region_arrays,
+           "region_arrays_3d": region_arrays_3d}
 
 
 def figures(mallard, mallard3d=None, names=()):

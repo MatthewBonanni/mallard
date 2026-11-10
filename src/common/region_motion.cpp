@@ -362,10 +362,4 @@ void MovingFractions::update(const double t) const {
     update(Kokkos::View<const rtype>(host_time));
 }
 
-size_t MovingFractions::bytes() const {
-    return nodes.span() * sizeof(Node) + fixed.span() * sizeof(double) + spheres.span() * sizeof(double) +
-           curved.span() * sizeof(int32_t) + curved_faces.span() * sizeof(CurvedFace) +
-           coefficients.span() * sizeof(double) + m_fractions.span() * sizeof(double);
-}
-
 } // namespace region
