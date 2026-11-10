@@ -18,6 +18,7 @@
 
 #include "binding.h"
 #include "input.h"
+#include "json.h"
 #include "log.h"
 #include "memory_tracker.h"
 #include "mesh_quality.h"
@@ -266,6 +267,13 @@ std::string check_text(const CheckReport & report, bool color);
 
 /** @brief The report as one JSON object (docs/guide/input_files.md#the-report-as-json). */
 std::string check_json(const CheckReport & report);
+
+/**
+ * @brief The parts of the report a run records at setup (docs/guide/output.md#the-check-at-setup): status,
+ *        diagnostics, mesh_quality and resolution as check_json writes them, and the time step's integrator,
+ *        stability limit and CFL number.
+ */
+json::Object check_summary(const CheckReport & report);
 
 /** @brief Prints the report on rank 0: as text, colored on terminals, or as JSON. */
 void print_check(const CheckReport & report, bool json = false);

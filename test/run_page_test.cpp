@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "check.h"
 #include "comm.h"
 #include "json.h"
 #include "provenance.h"
@@ -248,4 +249,47 @@ TEST(RunPageTest, ActivityShowsTheShareOfAllRanksAndOfTheLeastAndMostActiveRank)
     };
     EXPECT_TRUE(row("troubled_cells").ends_with(shares("50.00", "25.00", "75.00"))) << row("troubled_cells");
     EXPECT_TRUE(row("limited_cells").ends_with(shares("100.00", "100.00", "100.00"))) << row("limited_cells");
+}
+
+TEST(RunPageTest, ARunRecordsTheCheckAtSetupAsMallardCheckMeasuresIt) {
+    const std::string dir = fresh_dir("report_check");
+    // CFL 1.3 is above SSPRK3's limit for smooth flow (1.2): a warning of the check
+    const std::string input = case_input(dir, "n_steps = 2\ncfl = 1.3\n", logged(dir));
+    Solver solver;
+    solver.init(parse_toml(input));
+    EXPECT_EQ(solver.run(), 0);
+    Solver checker;
+    const CheckReport checked = checker.check(parse_toml(input), CheckOptions{});
+    if (!comm::is_root()) return;
+
+    const json::Value check = last_record(dir + "/mallard.jsonl", "start")["check"];
+    ASSERT_EQ(check.type, json::Value::Type::OBJECT);
+    for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
+        const json::Value & q = check["mesh_quality"][MeshQuality::FIELDS[m]];
+        EXPECT_EQ(q["max"].number, checked.quality[m].max) << MeshQuality::NAMES[m];
+        EXPECT_EQ(q["units"].string, MeshQuality::UNITS[m]);
+    }
+    ASSERT_FALSE(checked.resolution.empty());
+    for (const CheckEstimate & e : checked.resolution) {
+        const json::Value & recorded = check["resolution"][e.id];
+        EXPECT_EQ(recorded["quantity"].string, e.quantity);
+        if (!std::isnan(e.value)) EXPECT_EQ(recorded["value"].number, e.value) << e.id;
+    }
+    EXPECT_EQ(check["time_step"]["cfl_limit"].number, 1.2);
+    EXPECT_EQ(check["status"].string, "warning");
+    ASSERT_EQ(check["diagnostics"].array.size(), 1u);
+    EXPECT_EQ(check["diagnostics"].array[0]["code"].string, check_code::CFL_LIMIT);
+
+    const run_page::Page page = run_page::from_file(dir + "/mallard.jsonl");
+    const std::string text = page.text(false);
+    const size_t section = text.find("== Check at setup");
+    ASSERT_NE(section, std::string::npos);
+    EXPECT_NE(text.find("WARN", section), std::string::npos);
+    const size_t row = text.find("CFL number, run.cfl", section);
+    ASSERT_NE(row, std::string::npos);
+    EXPECT_EQ(text.substr(text.rfind('\n', row) + 1, 6), "  WARN");
+    EXPECT_NE(text.find(check_code::CFL_LIMIT, section), std::string::npos);
+    const std::string html = page.html();
+    EXPECT_NE(html.find("<section id=\"check\"><h2>Check at setup <span class=\"status warning\">"), std::string::npos);
+    EXPECT_NE(html.find("<td>aspect ratio</td>"), std::string::npos);
 }

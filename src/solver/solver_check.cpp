@@ -28,6 +28,7 @@
 #include "case_view.h"
 #include "region_input.h"
 #include "region_mesh.h"
+#include "run_status.h"
 
 namespace {
 
@@ -106,6 +107,26 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_settings(r);
     check_regions(r, options);
     return r;
+}
+
+std::string Solver::setup_check() {
+    CheckReport r;
+    CheckOptions options;
+    options.n_worst = 3;
+    check_resolution(r);
+    check_mesh_quality(r, options, {});
+    r.integrator = TIME_INTEGRATOR_NAMES.at(time_integrator->get_type());
+    r.cfl_limit = cfl_limit(time_integrator->get_type());
+    r.dt_limit = use_cfl ? "CFL" : "fixed";
+    if (use_cfl) r.cfl = static_cast<double>(cfl);
+    check_settings(r);
+    const MemoryUsage m = memory_usage();
+    const auto largest =
+        comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total}, comm::Op::MAX);
+    json::Object memory;
+    memory.add_known("host", largest[0]).add_known("host_peak", largest[1]);
+    memory.add_known("device", largest[2]).add_known("device_total", largest[3]);
+    return check_summary(r).raw("memory", memory.str()).str();
 }
 
 void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, const CheckFields & extra) const {

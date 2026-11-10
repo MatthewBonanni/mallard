@@ -436,7 +436,7 @@ Each record has a `type`:
 
 | `type` | When | Fields |
 |---|---|---|
-| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks), `units` (the units of the progress records' quantities, as the CSV files' units lines write them, `"1"` for none: `t`, `dt`, `cfl`, `wall`, ..., and per object `monitors`, `margins` (of `health.margins`), `integrals` and `forces_<zone>`, a column each; bytes `B`; in a nondimensional case `"1"` for every physical quantity); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks), `units` (the units of the progress records' quantities, as the CSV files' units lines write them, `"1"` for none: `t`, `dt`, `cfl`, `wall`, ..., and per object `monitors`, `margins` (of `health.margins`), `integrals` and `forces_<zone>`, a column each; bytes `B`; in a nondimensional case `"1"` for every physical quantity), `check` (the [check at setup](#the-check-at-setup)); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
 | `progress` | Every progress row | as below |
 | `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`; probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; no `sha256` for a [file appended to](#complete-files)) |
 | `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
@@ -512,6 +512,9 @@ source; `tools/docs/run_report.py` builds it). It shows
   SHA-256, and each run of a record continued by restarts;
 - the **configuration**: physics, mesh, numerics, time step and stop
   conditions, the boundaries, and the whole resolved input;
+- the [**check at setup**](#the-check-at-setup): mesh quality, the CFL number
+  against the time integrator's limit, the resolution estimates, the memory
+  after setup, and the check's warnings;
 - its **health**: the lowest density, pressure and temperature and where they
   occurred, the numerics' activity, the numerical repairs, the conservation
   ledger, and the warnings and errors;
@@ -539,7 +542,7 @@ It is written as `report.html.partial` and renamed once complete. A run
 started from a restart file reads its run record once, at setup, so the page
 covers the whole record. `[output] run_log = ""` does not turn the page off.
 
-`mallard info RUN_DIR` prints the page's outcome, health, cost and warnings
+`mallard info RUN_DIR` prints the page's outcome, health, check at setup, cost and warnings
 as text, from the same records, each section with its status (ok, WARN,
 ERROR) as `mallard check` gives them. `mallard info RUN_DIR --html` builds the same page from `RUN_DIR/mallard.jsonl`
 into `RUN_DIR/report.html`, byte for byte what the run would have written: for
@@ -558,6 +561,27 @@ plotted (the others are in the table), and the warnings and events shown are
 the first and last 20 (all are in `mallard.jsonl`). A page is typically a few
 hundred kB, under 2 MB whatever the run's length, and costs milliseconds to
 write.
+
+#### The check at setup
+
+At the end of setup a run measures, as [`mallard check`](input_files.md#checking-an-input)
+does and with the same code, the mesh quality and the resolution of the case's
+physical scales, and records them with the time step's stability limit and the
+memory after setup in the `start` record's `check`:
+
+| Member | Holds |
+|---|---|
+| `status`, `diagnostics` | As in [the check's JSON](input_files.md#the-report-as-json): `ok` or `warning`, and the warnings with their codes (`W-QUALITY-SKEWNESS`, `W-CFL-LIMIT`, `W-WALL-Y-PLUS`, ...) |
+| `mesh_quality`, `resolution` | As in the check's JSON, with the 3 worst cells of each metric |
+| `time_step` | `integrator`, `cfl_limit` (its stability limit for smooth flow, `null` if none is known), `set_by` (`CFL` or `fixed`), and `cfl` (`run.cfl`) when set by CFL |
+| `memory` | Bytes of the rank that uses the most, after setup: `host`, `host_peak`, `device`, `device_total` (`null` where unknown) |
+
+It costs one pass over the cells and faces, timed as the setup phase "mesh
+quality and resolution"; the run does not repeat the check's memory and cost
+estimates or its partitions for other rank counts. The report and
+`mallard info RUN_DIR` show it in the check's terms and statuses, with the
+largest CFL number of the progress rows against the same limit. The check's
+warnings are shown there, not as warnings of the run.
 
 ## Run health
 
