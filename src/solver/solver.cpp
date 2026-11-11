@@ -2226,6 +2226,7 @@ int Solver::run_loop() {
                 t_wall_stepping += step_timer.seconds();
                 Kokkos::Timer output_timer;
                 write_staged_monitors(record);
+                write_staged_probes(record);
                 t_wall_output += output_timer.seconds();
                 for (auto & writer : data_writers) writer->publish_written();
                 if (record.progress) {

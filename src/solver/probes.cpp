@@ -1001,35 +1001,55 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     });
 }
 
-void Probes::Samples::gather(std::vector<double> & out, const CellColumns & columns) const {
-    using Space = Kokkos::View<rtype **, Kokkos::LayoutRight>::memory_space;
-    if (Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space>::accessible ||
-        host_values.extent(0) != values.extent(0) || host_values.extent(1) != values.extent(1)) {
-        host_values = Kokkos::create_mirror_view(values);
-    }
-    Kokkos::deep_copy(host_values, values);
-    const auto & h = host_values;
-    for (const auto & [column, data] : columns) {
-        for (size_t i = 0; i < host_cells.size(); i++) h(i, column) = (*data)[host_cells[i]];
+void Probes::Samples::gather(std::vector<double> & out, const CellColumns & columns, const rtype * staged) const {
+    const rtype * h = staged;
+    if (!staged) {
+        using Space = Kokkos::View<rtype **, Kokkos::LayoutRight>::memory_space;
+        if (Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space>::accessible ||
+            host_values.extent(0) != values.extent(0) || host_values.extent(1) != values.extent(1)) {
+            host_values = Kokkos::create_mirror_view(values);
+        }
+        Kokkos::deep_copy(host_values, values);
+        for (const auto & [column, data] : columns) {
+            for (size_t i = 0; i < host_cells.size(); i++) host_values(i, column) = (*data)[host_cells[i]];
+        }
+        h = host_values.data();
     }
     const size_t n_vars = values.extent(1);
+    const size_t n_local = values.extent(0) * n_vars;
     std::vector<double> all;
     if (distributed) {
-        std::vector<double> local(h.size());
-        for (size_t i = 0; i < local.size(); i++) local[i] = static_cast<double>(h.data()[i]);
+        std::vector<double> local(n_local);
+        for (size_t i = 0; i < local.size(); i++) local[i] = static_cast<double>(h[i]);
         all = comm::gatherv(local);
         if (!comm::is_root()) {
             out.clear();
             return;
         }
     }
-    out.resize(distributed ? all.size() : h.size());
+    out.resize(distributed ? all.size() : n_local);
     for (uint64_t p = 0; p < n_global; p++) {
         const size_t row = gathered_row[p] * n_vars;
         for (size_t v = 0; v < n_vars; v++) {
-            out[p * n_vars + v] = distributed ? all[row + v] : static_cast<double>(h.data()[row + v]);
+            out[p * n_vars + v] = distributed ? all[row + v] : static_cast<double>(h[row + v]);
         }
     }
+}
+
+void Probes::Samples::allocate_staging(const uint64_t n_records) {
+    staging = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
+        "probe_staging", n_records, values.extent(0) * values.extent(1));
+}
+
+void Probes::Samples::copy_to_staging(const uint64_t * seq) const {
+    const auto v = values;
+    const auto st = staging;
+    const uint64_t n_records = staging.extent(0);
+    const uint32_t n_vars = static_cast<uint32_t>(values.extent(1));
+    Kokkos::parallel_for("probe_staged", values.extent(0), KOKKOS_LAMBDA(const size_t i) {
+        const uint64_t slot = (*seq - 1) % n_records;
+        for (uint32_t k = 0; k < n_vars; k++) st(slot, i * n_vars + k) = v(i, k);
+    });
 }
 
 namespace probe {
@@ -1739,6 +1759,7 @@ rtype Probes::Probe::due_time() const {
 void Probes::due_limits(const uint64_t step, uint64_t & step_limit, rtype & t_limit) const {
     bool average = false;
     for (const auto & p : probes) {
+        if (p->staged && p->interval > 0) continue;
         if (p->interval > 0) {
             step_limit = std::min(step_limit, (step / p->interval + 1) * p->interval);
         } else {
@@ -1811,9 +1832,55 @@ bool Probes::any_snapshots() const {
 
 void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snapshots, bool force) {
     for (auto & pp : probes) {
-        Probe & p = *pp;
-        if (p.snapshot != snapshots) continue;
-        if (!p.due_or_forced(step, t, force)) continue;
+        if (pp->snapshot == snapshots) write_probe(*pp, step, t, &fields, force, -1);
+    }
+}
+
+bool Probes::can_stage(const size_t k) const {
+    const Probe & p = *probes[k];
+    return !p.snapshot && !p.average && p.cell_columns.empty() && p.interval > 0;
+}
+
+void Probes::stage(const size_t k, const uint64_t n_records) {
+    Probe & p = *probes[k];
+    p.staged = true;
+    if (p.samples_nodes()) p.nodes.allocate_staging(n_records);
+    if (p.samples_quadrature()) p.quadrature.allocate_staging(n_records);
+}
+
+uint64_t Probes::staged_interval(const size_t k) const { return probes[k]->staged ? probes[k]->interval : 0; }
+
+std::tuple<bool, bool, bool> Probes::staged_needs(bool wall_model) const {
+    bool cell_W = false, transport = false, all_gradients = false;
+    for (const auto & p : probes) {
+        if (!p->staged) continue;
+        cell_W = cell_W || p->sampling == Sampling::POINT || p->gradients;
+        transport = transport || p->transport;
+        all_gradients = all_gradients || p->diffusive || (wall_model && p->gradients);
+    }
+    return {cell_W, transport, all_gradients};
+}
+
+void Probes::evaluate_staged(const size_t k, const ProbeFields & fields, const uint64_t * seq) {
+    Probe & p = *probes[k];
+    if (p.samples_nodes()) {
+        p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients, p.diffusive);
+        p.nodes.copy_to_staging(seq);
+    }
+    if (p.samples_quadrature()) {
+        p.quadrature.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
+        p.quadrature.copy_to_staging(seq);
+    }
+}
+
+void Probes::write_staged(const size_t k, const uint64_t step, const rtype t, const uint64_t slot) {
+    write_probe(*probes[k], step, t, nullptr, false, static_cast<int64_t>(slot));
+}
+
+void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const ProbeFields * fields, const bool force,
+                         const int64_t slot) {
+    {
+        if (!p.due_or_forced(step, t, force)) return;
         p.step_last = step;
         if (p.time_interval > 0.0_r) {
             while (static_cast<rtype>(p.n_written) * p.time_interval <=
@@ -1822,12 +1889,12 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
             }
         }
         // Averages are written once they hold a sample
-        if (p.average && p.average_samples == 0) continue;
+        if (p.average && p.average_samples == 0) return;
         std::vector<double> & sampled_nodes = p.gathered_nodes;
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
         sampled_quad.clear();
-        if (!p.average) p.sample(fields, sampled_nodes, sampled_quad);
+        if (!p.average) p.sample(fields, sampled_nodes, sampled_quad, slot);
         const std::vector<double> & nodes = p.average ? p.mean_nodes : sampled_nodes;
         const std::vector<double> & quad = p.average ? p.mean_quadrature : sampled_quad;
         // Rank 0 writes; spectra histories are kept like the averages, on every rank that runs alone
@@ -1845,7 +1912,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
                 p.write_spectra(step, t);
             }
         }
-        if (!comm::is_root()) continue;
+        if (!comm::is_root()) return;
         if (p.write_samples) {
             if (p.format == Format::CSV) {
                 std::ostream & out = *p.out;
@@ -1943,16 +2010,17 @@ bool Probes::Probe::samples_nodes() const {
 
 bool Probes::Probe::samples_quadrature() const { return !reductions.empty() && quadrature.n_global > 0; }
 
-void Probes::Probe::sample(const ProbeFields & fields, std::vector<double> & node_values,
-                           std::vector<double> & quad_values) {
+void Probes::Probe::sample(const ProbeFields * fields, std::vector<double> & node_values,
+                           std::vector<double> & quad_values, const int64_t slot) {
     // Collective on every rank (the geometry lives on rank 0 for some shapes)
+    const uint64_t s = static_cast<uint64_t>(slot);
     if (samples_nodes()) {
-        nodes.evaluate(sampling, codes, fields, reference, gradients, diffusive);
-        nodes.gather(node_values, cell_columns);
+        if (slot < 0) nodes.evaluate(sampling, codes, *fields, reference, gradients, diffusive);
+        nodes.gather(node_values, cell_columns, slot < 0 ? nullptr : nodes.staged(s));
     }
     if (samples_quadrature()) {
-        quadrature.evaluate(sampling, codes, fields, reference, gradients);
-        quadrature.gather(quad_values, cell_columns);
+        if (slot < 0) quadrature.evaluate(sampling, codes, *fields, reference, gradients);
+        quadrature.gather(quad_values, cell_columns, slot < 0 ? nullptr : quadrature.staged(s));
     }
 }
 
@@ -1992,7 +2060,7 @@ void Probes::sample_averages(uint64_t step, rtype t, const ProbeFields & fields)
         const double w = static_cast<double>(t) - p.average_t_last;
         if (!(w > 0.0)) continue;
         std::vector<double> nodes, quad;
-        p.sample(fields, nodes, quad);
+        p.sample(&fields, nodes, quad);
         p.average_weight += w;
         p.average_t_last = static_cast<double>(t);
         p.average_samples++;

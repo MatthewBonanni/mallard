@@ -432,6 +432,8 @@ class Solver {
         void write_force_row(ForceMonitor & monitor, const double * values);
         void write_integral_row(const double * values);
         void write_staged_monitors(const step_queue::Record & record);
+        /** @brief Writes the probes the record staged (collective). */
+        void write_staged_probes(const step_queue::Record & record);
         /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
         void after_step(Kokkos::Timer & step_timer, bool on_device);
         /** @brief Whether the device writes progress rows' local values, which the host reports later. */
@@ -821,6 +823,9 @@ class Solver {
         std::vector<size_t> monitor_offsets;    // first column of each monitor, then their number
         Kokkos::View<uint32_t> statistics_due;  // the current launch samples the means
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
+        std::vector<size_t> staged_probes;       // probes the step graph evaluates
+        Kokkos::View<uint32_t *> probe_due;      // the current launch evaluates staged probe k (last: any)
+        Kokkos::View<uint64_t *> probe_intervals;
         Kokkos::View<uint64_t *> monitor_intervals;
         Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> monitor_staging;  // (record, column)
 

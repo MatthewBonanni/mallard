@@ -138,6 +138,7 @@ struct Record {
     uint32_t progress;    // progress holds the step's progress row
     uint64_t chemistry_ns;  // of the step's chemistry calls, on the device's clock
     uint64_t monitors;      // bit k: monitor k (forces of each zone, then the integrals) staged its row
+    uint64_t probes;        // bit k: staged probe k staged its values
     ProgressLocals progress_locals;
 };
 
