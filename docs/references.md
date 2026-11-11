@@ -335,15 +335,15 @@ The numerical methods Mallard implements and the reference data it is validated 
 ## Statistics of time series
 
 - <a id="white-1997"></a>K. P. White Jr., An effective truncation heuristic for bias reduction in simulation output, *Simulation* 69, 323–334 (1997). [doi:10.1177/003754979706900601](https://doi.org/10.1177/003754979706900601)
-  Used in: MSER-5, the end of the initial transient in `[statistics.convergence]` (`src/solver/convergence.h`).
+  Used in: MSER-5, the end of the initial transient in `[statistics.convergence]` (`src/solver/statistical_convergence.h`).
 - <a id="hoad-2010"></a>K. Hoad, S. Robinson and R. Davies, Automating warm-up length estimation, *J. Oper. Res. Soc.* 61, 1389–1403 (2010). [doi:10.1057/jors.2009.87](https://doi.org/10.1057/jors.2009.87)
-  Used in: MSER-5 with batches of 5 and its rejection of a minimum in the second half (`src/solver/convergence.h`).
+  Used in: MSER-5 with batches of 5 and its rejection of a minimum in the second half (`src/solver/statistical_convergence.h`).
 - <a id="schmeiser-1982"></a>B. Schmeiser, Batch size effects in the analysis of simulation output, *Oper. Res.* 30, 556–568 (1982). [doi:10.1287/opre.30.3.556](https://doi.org/10.1287/opre.30.3.556)
-  Used in: confidence intervals by batch means, 10 to 30 batches (`src/solver/convergence.h`).
+  Used in: confidence intervals by batch means, 10 to 30 batches (`src/solver/statistical_convergence.h`).
 - <a id="madras-sokal-1988"></a>N. Madras and A. D. Sokal, The pivot algorithm: a highly efficient Monte Carlo method for the self-avoiding walk, *J. Stat. Phys.* 50, 109–186 (1988). [doi:10.1007/BF01022990](https://doi.org/10.1007/BF01022990)
-  Used in: the integrated autocorrelation time with the automatic window M >= 5 tau (`src/solver/convergence.h`).
+  Used in: the integrated autocorrelation time with the automatic window M >= 5 tau (`src/solver/statistical_convergence.h`).
 - <a id="abramowitz-stegun-1964"></a>M. Abramowitz and I. A. Stegun, *Handbook of Mathematical Functions*, National Bureau of Standards (1964), 26.7.3–4.
-  Used in: Student's t distribution for integer degrees of freedom (`src/solver/convergence.cpp`).
+  Used in: Student's t distribution for integer degrees of freedom (`src/solver/statistical_convergence.cpp`).
 
 ## Validation cases and reference data
 

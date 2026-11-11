@@ -1,5 +1,5 @@
 /**
- * @file convergence.h
+ * @file statistical_convergence.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief [statistics.convergence]: the end of the initial transient of
  *        monitored signals (MSER-5) and confidence intervals on their means
@@ -11,8 +11,8 @@
  *
  */
 
-#ifndef CONVERGENCE_H
-#define CONVERGENCE_H
+#ifndef STATISTICAL_CONVERGENCE_H
+#define STATISTICAL_CONVERGENCE_H
 
 #include <cstdint>
 #include <fstream>
@@ -26,7 +26,7 @@
 #include "run_status.h"
 #include "units.h"
 
-namespace convergence {
+namespace time_series {
 
 /** @brief The batch size of MSER-5. */
 constexpr uint32_t MSER_BATCH = 5;
@@ -75,7 +75,7 @@ Interval batch_means(const double * x, uint64_t n, uint32_t b, double confidence
  */
 double autocorrelation_time(const double * x, uint64_t n, double c = 5.0);
 
-} // namespace convergence
+} // namespace time_series
 
 /**
  * @brief [statistics.convergence]: every rank keeps the history of each
@@ -129,7 +129,7 @@ class Convergence {
             std::vector<double> t, x;
             std::vector<double> s1 = {0.0}, s2 = {0.0};  // prefix sums of x - x[0] and of its square
             uint64_t next_check = 0;  // samples at the next MSER check
-            convergence::Truncation truncation;  // the latest accepted
+            time_series::Truncation truncation;  // the latest accepted
             uint64_t n_tau = 0;       // window samples at the last autocorrelation time
             double window_tau = 0.0;  // its window's start
             double tau = 0.0;
@@ -154,4 +154,4 @@ class Convergence {
         MonitorValues values;
 };
 
-#endif // CONVERGENCE_H
+#endif // STATISTICAL_CONVERGENCE_H

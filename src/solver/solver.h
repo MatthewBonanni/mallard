@@ -42,7 +42,7 @@
 #include "derived_fields.h"
 #include "probes.h"
 #include "statistics.h"
-#include "convergence.h"
+#include "statistical_convergence.h"
 #include "triggers.h"
 #include "health_state.h"
 #include "step_queue.h"

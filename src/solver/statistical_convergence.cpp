@@ -1,5 +1,5 @@
 /**
- * @file convergence.cpp
+ * @file statistical_convergence.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief [statistics.convergence]: MSER-5, batch means and integrated
  *        autocorrelation times of monitored signals.
@@ -10,7 +10,7 @@
  *
  */
 
-#include "convergence.h"
+#include "statistical_convergence.h"
 
 #include <algorithm>
 #include <cmath>
@@ -24,7 +24,7 @@
 #include "field_units.h"
 #include "log.h"
 
-namespace convergence {
+namespace time_series {
 
 Truncation mser(const double * x, uint64_t n, uint32_t m, uint64_t min_batches) {
     const uint64_t k = n / m;
@@ -142,7 +142,7 @@ double autocorrelation_time(const double * x, uint64_t n, double c) {
     return tau;
 }
 
-} // namespace convergence
+} // namespace time_series
 
 namespace {
 
@@ -216,10 +216,10 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
                           .docs = DOCS});
     }
     min_samples = find_value_or<uint64_t>(table, "min_samples", 100);
-    if (min_samples < 2 * convergence::MSER_BATCH) {
+    if (min_samples < 2 * time_series::MSER_BATCH) {
         throw InputError({.key = key + ".min_samples",
                           .line = line_of(table, "min_samples"),
-                          .message = "must be at least " + std::to_string(2 * convergence::MSER_BATCH) +
+                          .message = "must be at least " + std::to_string(2 * time_series::MSER_BATCH) +
                                      " (two batches of MSER-5)",
                           .docs = DOCS});
     }
@@ -245,7 +245,7 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
     stationary = false;
     t_stationary = 0.0;
     values = {};
-    t_quantile = convergence::student_t(confidence, batches - 1);
+    t_quantile = time_series::student_t(confidence, batches - 1);
     for (auto & s : signals) s.next_check = min_samples;
     out.reset();
     if (comm::is_root() && output_files_enabled()) {
@@ -299,10 +299,10 @@ void Convergence::add(uint64_t step, double t, const std::vector<std::pair<size_
     for (auto & s : signals) {
         const uint64_t n = s.x.size();
         if (n >= s.next_check) {
-            const convergence::Truncation cut =
-                convergence::mser(s.x.data(), n, convergence::MSER_BATCH, min_samples / convergence::MSER_BATCH);
+            const time_series::Truncation cut =
+                time_series::mser(s.x.data(), n, time_series::MSER_BATCH, min_samples / time_series::MSER_BATCH);
             if (cut.accepted) s.truncation = cut;
-            s.next_check = n + std::max<uint64_t>(convergence::MSER_BATCH, n / 20);
+            s.next_check = n + std::max<uint64_t>(time_series::MSER_BATCH, n / 20);
             checked = true;
         }
         all = all && s.truncation.accepted;
@@ -349,7 +349,7 @@ void Convergence::update(double window_start) {
             if (n > 0) {
                 if (s.n_tau == 0 || s.t[i0] != s.window_tau ||
                     static_cast<double>(n) >= 1.05 * static_cast<double>(s.n_tau) + 1.0) {
-                    s.tau = convergence::autocorrelation_time(s.x.data() + i0, n);
+                    s.tau = time_series::autocorrelation_time(s.x.data() + i0, n);
                     s.n_tau = n;
                     s.window_tau = s.t[i0];
                 }
@@ -369,8 +369,8 @@ void Convergence::update(double window_start) {
                         // The batch's mean of (x - mean)^2
                         variances[j] = (b2 - 2.0 * shifted * b1) / dm + shifted * shifted;
                     }
-                    ci = convergence::batch_interval(means, m, t_quantile).half_width;
-                    variance_ci = convergence::batch_interval(variances, m, t_quantile).half_width;
+                    ci = time_series::batch_interval(means, m, t_quantile).half_width;
+                    variance_ci = time_series::batch_interval(variances, m, t_quantile).half_width;
                 }
                 converged = converged && m > 0 && static_cast<double>(m) >= BATCH_TAUS * s.tau &&
                             ci <= tolerance * std::fabs(mean) &&
