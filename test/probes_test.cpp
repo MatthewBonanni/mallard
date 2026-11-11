@@ -239,7 +239,7 @@ TEST(ProbesTest, ProbeFilesRecordWhereEachPointIsRead) {
         extra += "[[probes]]\nname = \"" + format + "\"\nformat = \"" + format + "\"\nsampling = \"" + sampling +
                  "\"\nfile = \"" + dir + "/" + format + "." + (format == "vtp" ? "pvd" : format == "hdf5" ? "h5" : format) +
                  "\"\ntype = \"points\"\npoints = [" + numbers3("0.3", "0.4", "0.6") + ", " + numbers3("1.0", "0.4", "0.6") +
-                 "]\nvariables = [\"RHO\", \"P\"]\n";
+                 "]\nfields = [\"RHO\", \"P\"]\n";
     }
     Solver solver;
     solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"TENO\"\norder = 3\n", extra)));
@@ -682,7 +682,7 @@ TEST(ProbesTest, PointsOutsideTheMeshAreErrorsAndCurvesAreClippedToIt) {
     const std::string dir = fresh_dir("outside");
     auto probe = [&](const std::string & name, const std::string & where) {
         return "[[probes]]\nname = \"" + name + "\"\nfile = \"" + dir + "/" + name +
-               ".csv\"\nvariables = [\"RHO\"]\nsampling = \"point\"\n" + where + "\n";
+               ".csv\"\nfields = [\"RHO\"]\nsampling = \"point\"\n" + where + "\n";
     };
     auto error_of = [&](const std::string & probes) {
         try {
