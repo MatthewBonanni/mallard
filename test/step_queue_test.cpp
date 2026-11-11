@@ -574,12 +574,33 @@ TEST(StepQueueTest, ControlFilesStopAsRequests) {
     }
 }
 
-TEST(StepQueueTest, TriggersActAtTheirSteps) {
+TEST(StepQueueTest, TriggersAreEvaluatedWithoutStoppingTheDevice) {
+    // Conditions of t with a hold, of the integrals' rows, repeated, and of the step: evaluated on the device,
+    // which stops for the host only at a step one fires at
     Case c;
     c.run = "n_steps = 40\ncfl = 0.5\n";
-    c.extra = RESTARTS + "[[triggers]]\nname = \"late\"\nwhen = \"step >= 9\"\ndo = \"stop\"\n";
-    const Outcome o = expect_queue_invariant("triggers", c, false);
+    c.extra = RESTARTS + "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+              "[[triggers]]\nname = \"held\"\nwhen = \"t > 0.05\"\nfor = 0.04\ndo = \"checkpoint\"\n"
+              "[[triggers]]\nname = \"energy\"\nwhen = \"integrals_kinetic_energy > 0 and step % 6 < 3\"\nrepeat = true\n"
+              "do = \"checkpoint\"\n"
+              "[[triggers]]\nname = \"late\"\nwhen = \"step >= 31\"\ndo = \"stop\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("triggers", c);
+    EXPECT_EQ(o.step, 31u);
+    if (comm::is_root()) {
+        size_t firings = 0;
+        for (const auto & line : o.log) firings += line.find("trigger") != std::string::npos;
+        EXPECT_GT(firings, 3u);
+    }
+}
+
+TEST(StepQueueTest, TriggersOfTheWallTimeStopAtEveryStep) {
+    Case c;
+    c.run = "n_steps = 12\ncfl = 0.5\n";
+    c.extra = "[[triggers]]\nname = \"late\"\nwhen = \"step >= 9 or wall > 1e9\"\ndo = \"stop\"\n";
+    const Outcome o = expect_queue_invariant("wall_triggers", c, false);
     EXPECT_EQ(o.step, 9u);
+    EXPECT_EQ(run_case("wall_triggers", c, 3).queued, 0u);
 }
 
 TEST(StepQueueTest, DivergenceWritesTheLastValidStateAsTheHostDoes) {

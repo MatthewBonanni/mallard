@@ -1,0 +1,1 @@
+- `[[triggers]]` are evaluated on the device at every step, from `t`, the step, `dt` and the monitors' rows: the device stops for the host only at a step a trigger fires at, so runs with triggers no longer stop the step queue at every step. Triggers that read the wall time or a probe's value still do (#730).

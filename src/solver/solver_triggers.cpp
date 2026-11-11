@@ -69,6 +69,80 @@ std::vector<double> Solver::trigger_values() const {
     return values;
 }
 
+bool Solver::triggers_on_device() const {
+    if (triggers.empty() || defer_chemistry || !triggers.fit_device() || triggers.size() > 64) return false;
+    // Monitors written by the host stop the device at their rows anyway; probes' values are reduced by the host
+    if (triggers.reads(3)) return false;
+    const size_t n_monitored = triggers.variables().size() - probes.value_names().size();
+    for (size_t v = n_monitored; v < triggers.variables().size(); v++) {
+        if (triggers.reads(static_cast<uint16_t>(v))) return false;
+    }
+    return true;
+}
+
+void Solver::evaluate_triggers() {
+    const Kokkos::View<step_queue::Loop> loop = step_loop;
+    const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
+    const uint64_t n_records = step_records.extent(0);
+    const Kokkos::View<double *> vars = trigger_vars;
+    const Kokkos::View<Triggers::DeviceState *> states = trigger_states;
+    const Kokkos::View<TriggerSource *> sources = trigger_sources;
+    const Kokkos::View<double *> results = monitor_results;
+    const kexpr::ProgramTable<> table = trigger_conditions;
+    const rtype * const scalars = step_time_device();
+    const rtype * const step_dt = step_dt_device();
+    const uint32_t n_triggers = static_cast<uint32_t>(trigger_states.extent(0));
+    const uint32_t n_sources = static_cast<uint32_t>(trigger_sources.extent(0));
+    Kokkos::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
+        step_queue::Loop & L = loop();
+        if (!(L.active && L.advanced)) return;
+        step_queue::Record & record = records((L.seq - 1) % n_records);
+        // trigger_values at the step: t, step, dt, and the rows the monitors wrote
+        const double t_now = static_cast<double>(*scalars);
+        vars(0) = t_now;
+        vars(1) = static_cast<double>(L.step);
+        vars(2) = static_cast<double>(*step_dt);
+        for (uint32_t k = 0; k < n_sources; k++) {
+            const TriggerSource & src = sources(k);
+            if (!(record.monitors >> src.monitor & 1)) continue;
+            const double v = results(src.column);
+            vars(src.variable) = src.rounded ? static_cast<double>(static_cast<rtype>(v)) : v;
+        }
+        // Triggers::evaluate and advance, kept only if none fires: the host then takes that step itself
+        bool fires = false;
+        Triggers::DeviceState next[64];
+        for (uint32_t i = 0; i < n_triggers; i++) {
+            Triggers::DeviceState st = states(i);
+            bool unknown = false;
+            for (uint32_t u = 0; u < st.n_used; u++) unknown = unknown || Kokkos::isnan(vars(st.used[u]));
+            bool on = false;
+            if (!unknown) {
+                const double value = table(i, vars);
+                on = value != 0.0 && !Kokkos::isnan(value);
+            }
+            if (!on) {
+                st.holding = 0;
+                if (st.repeat) st.armed = 1;
+            } else {
+                if (!st.holding) {
+                    st.holding = 1;
+                    st.since = t_now;
+                }
+                if (st.armed && !(t_now < trigger_hold_end(st.since, st.hold))) fires = true;
+            }
+            next[i] = st;
+        }
+        if (table.loops && table.runaway() != 0) fires = true;
+        if (fires) {
+            record.reasons |= step_queue::TRIGGER;
+            L.active = 0;
+            L.progress = 0;
+            return;
+        }
+        for (uint32_t i = 0; i < n_triggers; i++) states(i) = next[i];
+    });
+}
+
 void Solver::act_on_triggers() {
     if (triggers.empty()) return;
     // Rank 0 holds the probes' values, and its wall time counts
