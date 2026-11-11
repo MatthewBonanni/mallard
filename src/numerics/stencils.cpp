@@ -154,7 +154,9 @@ struct Builder {
         keep = kept[c] != 0;
     }
 
-    void add(const uint32_t cell, const uint8_t stencil, const uint8_t role, const int32_t face, const rtype * w) {
+    /** @brief A member with its n weights (the rest of the row 0). */
+    void add(const uint32_t cell, const uint8_t stencil, const uint8_t role, const int32_t face,
+             const rtype * w = nullptr, const uint32_t n = 0) {
         Summary & s = table.summary[target];
         s.sizes[stencil]++;
         if (wall_cell[cell] || (face >= 0 && wall_face[static_cast<uint32_t>(face)])) s.reach |= WALL;
@@ -165,7 +167,7 @@ struct Builder {
         table.stencil.push_back(stencil);
         table.role.push_back(role);
         table.face.push_back(face);
-        for (uint32_t k = 0; k < table.width; k++) table.weights.push_back(w ? double(w[k]) : 0.0);
+        for (uint32_t k = 0; k < table.width; k++) table.weights.push_back(w && k < n ? double(w[k]) : 0.0);
     }
 
     void end() {
@@ -243,16 +245,15 @@ void build_teno(const TENO & teno, const Mesh & mesh, Builder & b) {
             uint8_t role = face >= 0 ? MIRROR : 0;
             if (turned || (lattices && lattices->periodic(c, cell))) role |= PERIODIC;
             uint8_t stencil = 0;
-            const rtype * w = nullptr;
-            if (k < s.central) {
-                if (!s.pinv.empty()) w = s.pinv.data() + k * nk;
-            } else {
+            size_t at_row = k * nk, n = nk;
+            if (k >= s.central) {
                 size_t at = s.central;
                 while (stencil < teno::MAX_FACES && k >= at + s.sectors[stencil]) at += s.sectors[stencil++];
                 stencil++;
-                if (!s.pinv.empty()) w = s.pinv.data() + s.central * nk + (k - s.central) * teno::NK_SMALL;
+                at_row = s.central * nk + (k - s.central) * teno::NK_SMALL;
+                n = teno::NK_SMALL;
             }
-            b.add(cell, stencil, role, face, b.table.width ? w : nullptr);
+            b.add(cell, stencil, role, face, s.pinv.empty() ? nullptr : s.pinv.data() + at_row, static_cast<uint32_t>(n));
         }
         Summary & summary = b.table.summary[c];
         summary.degree = central_degree(s.pinv, s.central, nk);
@@ -300,37 +301,40 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
     for (uint32_t c = 0; c < mesh.n_owned(); c++) {
         b.begin(c);
         P.assign(N_DIM, rtype(0));
-        b.add(c, 0, 0, -1, no_weight);
-        auto add = [&](const uint32_t cell, const uint8_t role, const int32_t face, const rtype * w) {
+        b.add(c, 0, 0, -1, no_weight, N_DIM);
+        // Device views and their mirrors are LayoutLeft on GPUs: a row is not contiguous
+        auto add = [&](const uint32_t cell, const uint8_t role, const int32_t face, const auto & weights,
+                       const uint32_t k) {
+            rtype w[N_DIM];
+            FOR_I_DIM w[i] = weights(k, i);
             P.insert(P.end(), w, w + N_DIM);
-            b.add(cell, 0, role, face, w);
+            b.add(cell, 0, role, face, w, N_DIM);
         };
         const uint32_t f0 = mesh.h_offsets_faces_of_cell(c), f1 = mesh.h_offsets_faces_of_cell(c + 1);
         bool vertex_fit = N_DIM == 3 && f1 - f0 == 4;
         for (uint32_t k = f0; k < f1; k++) vertex_fit = vertex_fit || (h_flags(mesh.h_faces_of_cell(k)) & 2);
         if (vertex_fit) {
             for (uint32_t k = offsets(c); k < offsets(c + 1); k++) {
-                add(neighbors(k), lattice_of(neighbor_shift(k)) ? PERIODIC : 0, -1, &w_cells(k, 0));
+                add(neighbors(k), lattice_of(neighbor_shift(k)) ? PERIODIC : 0, -1, w_cells, k);
             }
             if (image_offsets.extent(0) > 0) {
-                for (uint32_t k = image_offsets(c); k < image_offsets(c + 1); k++) add(images(k), MIRROR, -1, &w_images(k, 0));
+                for (uint32_t k = image_offsets(c); k < image_offsets(c + 1); k++) add(images(k), MIRROR, -1, w_images, k);
             }
             for (uint32_t k = f0; k < f1; k++) {
                 const uint32_t f = mesh.h_faces_of_cell(k);
-                if (h_flags(f) & 1) add(c, MIRROR, static_cast<int32_t>(f), &w_faces(k, 0));
+                if (h_flags(f) & 1) add(c, MIRROR, static_cast<int32_t>(f), w_faces, k);
             }
         } else {
             for (uint32_t k = f0; k < f1; k++) {
                 const uint32_t f = mesh.h_faces_of_cell(k);
                 const int32_t c0 = mesh.h_cells_of_face(f, 0), c1 = mesh.h_cells_of_face(f, 1);
-                const rtype * w = &h_face_fit(k, 0);
                 if (c1 >= 0) {
                     const uint32_t j = static_cast<uint32_t>(c0 == static_cast<int32_t>(c) ? c1 : c0);
-                    add(j, lattice_of(mesh.h_face_shift(f)) ? PERIODIC : 0, -1, w);
+                    add(j, lattice_of(mesh.h_face_shift(f)) ? PERIODIC : 0, -1, h_face_fit, k);
                 } else if (h_flags(f) & 4) {
-                    add(static_cast<uint32_t>(face_image(f)), MIRROR, static_cast<int32_t>(f), w);
+                    add(static_cast<uint32_t>(face_image(f)), MIRROR, static_cast<int32_t>(f), h_face_fit, k);
                 } else {
-                    add(c, MIRROR, static_cast<int32_t>(f), w);
+                    add(c, MIRROR, static_cast<int32_t>(f), h_face_fit, k);
                 }
             }
         }
@@ -379,7 +383,7 @@ Table build(const FaceReconstruction & reconstruction, const Mesh & mesh, const 
     } else {
         for (uint32_t c = 0; c < mesh.n_owned(); c++) {
             b.begin(c);
-            b.add(c, 0, 0, -1, nullptr);
+            b.add(c, 0, 0, -1);
             b.end();
         }
     }

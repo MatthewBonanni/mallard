@@ -319,7 +319,7 @@ stencils' members, compressed-row style: target `t`'s members are rows
 | `/stencils/members/stencil` | member | 0 the central stencil, 1 + k the sector stencil of face k (TENO) |
 | `/stencils/members/role` | member | Bits: 1 a mirror image across a boundary face (MUSCL: the boundary's ghost or image value), 2 a periodic image |
 | `/stencils/members/face_cell`, `face` | member | The boundary face of a mirror image: the global id of its cell (-1 for none) and its place among that cell's faces (255 for none) |
-| `/stencils/members/weights` | member × coefficients | With `--weights`: the member's row of the central or sector fit's pseudo-inverse (TENO), its contribution to each polynomial coefficient, or its weight in each gradient component (MUSCL), each times the member's value minus the cell's (a mirror's: its ghost or image value). First order has none |
+| `/stencils/members/weights` | member × coefficients | With `--weights`: the member's row of the central or sector fit's pseudo-inverse (TENO), its contribution to each polynomial coefficient (a sector fit's quadratic ones, then zeros), or its weight in each gradient component (MUSCL), each times the member's value minus the cell's (a mirror's: its ghost or image value). First order has none |
 | `/partition/rank`, `member_rank` | target, member | The rank that owns each target and member |
 
 Root attributes: `format` (`"mallard-stencils"`), `version` (1), `dimension`,
