@@ -58,7 +58,7 @@ class Spectra {
     public:
         /** @brief Read [statistics.spectra] (table) of the run (input), sampling every interval steps from t_start. */
         void init(const Input & table, const Input & input, const std::vector<std::string> & species_names,
-                  const Mesh & mesh, uint64_t interval, rtype t_start);
+                  const Mesh & mesh, uint64_t interval, rtype t_start, bool use_nccl = false);
 
         bool enabled() const { return !pairs.empty(); }
         bool due(uint64_t step, rtype t) const { return enabled() && step % interval == 0 && t > t_start; }
@@ -126,6 +126,7 @@ class Spectra {
         rtype t_start = 0.0;
         bool average = true;
         bool distributed = false;
+        bool use_nccl = false;  // the transposes and the gather of the rows with NCCL (else MPI)
 
         std::array<uint32_t, 3> N{1, 1, 1};
         std::array<double, 3> L{1.0, 1.0, 1.0};
@@ -142,13 +143,15 @@ class Spectra {
         Kokkos::View<int32_t *> codes;
         Kokkos::View<rtype *> cell_values;
         Kokkos::View<Complex *> slab, slab2, work;
-        Kokkos::View<rtype *> send_buffer;
+        Kokkos::View<rtype *> send_buffer, recv_buffer;
         std::array<Kokkos::View<Complex *>, 3> twiddles;
         std::array<std::vector<uint32_t>, 3> factors;
 
         // Per row (plane, position in plane): [pair][h][n][re, im], [field], [pair][shell]
         uint32_t spec_width = 0;
         Kokkos::View<double **, Kokkos::LayoutRight> partial;
+        Kokkos::View<double *> gathered;      // partial of every rank, in rank order
+        std::vector<uint64_t> partial_counts;  // values of partial per rank
 
         std::vector<double> acc_spec, acc_mean, acc_shell;
         std::vector<double> smp_spec, smp_mean, smp_shell;

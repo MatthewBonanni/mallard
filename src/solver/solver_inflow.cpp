@@ -11,6 +11,8 @@
 
 #include "solver.h"
 
+#include <limits>
+
 #include <algorithm>
 #include <iomanip>
 #include <memory>
@@ -174,11 +176,12 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     return value;
 }
 
-void Solver::update_inflow(rtype t_eval) {
+void Solver::update_inflow(rtype t_eval, rtype c) {
     if ((inflows.empty() && timed_inlets.empty()) || t_eval == t_inflow) return;
     // Timed means first: the fluctuations of their inlets are superposed on them
-    timed_inlets.fill(double(t_eval), boundary_data.char_target);
-    for (auto & inflow : inflows) inflow->fill(double(t_eval), boundary_data.char_target);
+    set_stage_time(t_eval, c);
+    timed_inlets.fill(stage_time, boundary_data.char_target);
+    for (auto & inflow : inflows) inflow->fill(stage_time, boundary_data.char_target);
     t_inflow = t_eval;
 }
 

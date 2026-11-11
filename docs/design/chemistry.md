@@ -516,7 +516,7 @@ same arithmetic and are bitwise unchanged (restart files of sod, shu_osher,
 double_mach, riemann_2d, wedge, sedov_axisymmetric, viscous_shock_tube,
 poiseuille_pipe, reactive_shock_tube and flame_outflow identical to main's
 after 40 steps); SIMPLER runs are bitwise independent of the rank count
-and across restarts (`MPITest.GasMixtureMatchesSerial`,
+and across restarts (`MPITest.GasMixtureMatchesSerialWithAndWithoutStepGraphs`,
 `ThickenedFlameMatchesSerial`, `MixtureTest.RestartedRunMatchesUninterruptedRunExactly`).
 
 Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):
@@ -1037,8 +1037,9 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   from 16 species, one thread per cell otherwise (and on CPUs).
 - **Wide teams for expensive cells** (GPUs, with a warp per cell): after the
   cost ordering, the queued cells whose last call took at least 16 sub-steps
-  get 8 warps each (16 from 512 species), launched on a second stream
-  concurrently with the other cells' one-warp teams. These few igniting cells
+  get 8 warps each (16 from 512 species, at most 2048 cells per call),
+  launched on a second stream concurrently with the other cells' one-warp
+  teams. These few igniting cells
   set the time at dt = 1e-6 s; with more lanes each of their sub-steps
   (rates, Jacobian entries, the sparse LU's updates per pivot, the solves)
   takes fewer rounds. Since a team's result does not depend on its width
@@ -1050,8 +1051,9 @@ cell, its bin or its rank, so binning and load balancing only reorder work.
   global memory for their work. Cells that take one or two sub-steps never
   take this path, so the other cases are unchanged.
 - **Cost ordering** (GPUs only; `bin_by_cost` in the benchmark): the queued
-  cells are sorted by the sub-steps they took in their last call, most
-  expensive first. With one thread per cell a warp's cells then take similar
+  cells are binned by the sub-steps they took in their last call, most
+  expensive first, in classes of a quarter octave (a counting sort on the
+  device, so that the queue's length never reaches the host). With one thread per cell a warp's cells then take similar
   numbers of sub-steps; with a team per cell the expensive teams start first
   and cheap ones fill in behind them instead of leaving a tail. Only the order
   of work changes, never a cell's result.
@@ -1271,12 +1273,24 @@ compacts one queue (before: per chunk of the work memory), then integrates it
 in batches of the work memory. Between the two, `ChemistryBalance`:
 
 - gathers each rank's work, the sum over its queued cells of the sub-steps
-  of their last call (at least 1): one `allgatherv` of two numbers per rank
-  and call;
+  of their last call (at least 1): one gather of two numbers per rank
+  and call, on the device;
 - if the largest exceeds the mean by more than 5%, pairs ranks above the
   mean with ranks below it in rank order and turns each pair's share into a
-  count of cells (the sender's mean cost per cell): every rank computes the
-  same plan from the same numbers;
+  count of cells (the sender's mean cost per cell), at most the pair's
+  capacity: every rank computes the same plan from the same numbers, in a
+  one-thread kernel, and the cells over the capacity stay in the sender's
+  queue;
+- the capacities: each pair's, the most cells one sends the other in a call,
+  is 0 at the start; the plan records on the device the most cells each pair
+  asked for in a step, and between steps (after the step's own fence) every
+  rank sets the capacities from these numbers alike: 1.25 times the most asked
+  for, in blocks of 64 cells, at once when a pair asked for more, and after 256
+  steps in which a pair asked for less than half of its capacity. Pairs of
+  capacity 0 exchange nothing, so a balanced run sends no cells; a change of
+  the capacities records the step's CUDA graph again. With NCCL the messages
+  hold every slot of the capacity (their sizes are fixed for the graph), with
+  MPI only the planned cells;
 - each sender packs the end of its queue (the cheapest cells: the queue is
   ordered by cost on GPUs) as raw bits, `N_CONSERVATIVE + Ns + 4` values per
   cell (state, partial densities, `T_SEED`, `CHEM_H`, last cost, multiplier
@@ -1288,19 +1302,20 @@ in batches of the work memory. Between the two, `ChemistryBalance`:
   over the sender's integration made receivers wait for it (det2d on 4 GPUs:
   45 ms per call instead of 37.5 without balancing);
 - receivers integrate their own queue, then the guests with the same kernel
-  (sorted by cost, in batches), and return `Ns + 3` values per cell
+  (binned by cost, in batches), and return `Ns + 3` values per cell
   (partial densities, those of the end state with SIMPLER, `CHEM_H`,
   sub-steps, last cost).
 
 Each cell's integration reads only its own inputs and takes the same code
 path on every rank (decision 6, [Determinism](#determinism)), so results are
 bitwise those of an unbalanced run and of a serial one;
-`MPITest.ChemistryLoadBalancingMatchesSerial` checks it on 1-4 ranks (Euler,
+`MPITest.ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs` checks it on 1-4 ranks (Euler,
 Navier-Stokes with fused half steps, the thickened flame's multiplier of
 `dt`, SIMPLER with and without it) and that cells did move. Restarts are unaffected: the plan uses only
 the last call's costs, which are not restarted, and changes only where cells
 are integrated. The summary reports, for every distributed reacting run,
-the sum over calls of the slowest rank's chemistry time against the mean,
+the chemistry time of the slowest rank against the mean over the ranks (each
+rank sums its own calls; the ranks reduce once, for the summary),
 and with balancing the share of integrations done elsewhere.
 
 **Measurements** (A100-80GB, CUDA-aware Open MPI; 4 GPUs: three on one node

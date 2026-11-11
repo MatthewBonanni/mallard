@@ -35,48 +35,15 @@ r = m L / N) and shell (|k| in shells of width dk = 2 pi / L_max).
 import argparse
 import csv
 import os
-import struct
 import sys
 import tomllib
 
 import numpy as np
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from mallard import restart  # noqa: E402
+
 AXES = "xyz"
-
-
-def read_restart(path):
-    """(fields by name, t, step, attributes, arrays) of an uncompressed double-precision restart file, versions 2-6."""
-    with open(path, "rb") as f:
-        if not f.read(16).startswith(b"MALLARD-RESTART"):
-            raise SystemExit(f"{path}: not a Mallard restart file")
-        version, real_size, n_cells, n_vars, step, t = struct.unpack("<IIQQQd", f.read(40))
-        if version < 2 or version > 6 or real_size != 8:
-            raise SystemExit(f"{path}: expected a double-precision restart file of version 2-6")
-
-        def name():
-            (length,) = struct.unpack("<I", f.read(4))
-            return f.read(length).decode()
-        names = [name() for _ in range(n_vars)]
-        attributes, arrays = {}, {}
-        if version >= 3:
-            (n_attr,) = struct.unpack("<Q", f.read(8))
-            for _ in range(n_attr):
-                key = name()
-                attributes[key] = struct.unpack("<d", f.read(8))[0]
-        if version >= 4:
-            f.read(12)  # face count and width
-        if version >= 5:
-            _, chunk_cells = struct.unpack("<IQ", f.read(12))
-            if chunk_cells > 0:
-                raise SystemExit(f"{path}: compressed restart files are not supported (write with compression = \"none\")")
-        if version >= 6:
-            (n_arrays,) = struct.unpack("<Q", f.read(8))
-            for _ in range(n_arrays):
-                key = name()
-                (n,) = struct.unpack("<Q", f.read(8))
-                arrays[key] = np.fromfile(f, dtype="<f8", count=n)
-        data = np.fromfile(f, dtype="<f8", count=n_cells * n_vars).reshape(n_vars, n_cells)
-    return dict(zip(names, data)), t, step, attributes, arrays
 
 
 def si(value, key):
@@ -152,7 +119,8 @@ def spectra_from_restarts(cfg, files):
     weight, t_last, n_samples = 0.0, t_start, 0
     step = 0
     for path in files:
-        cons, t, step, _, _ = read_restart(path)
+        r = restart.read(path)
+        cons, t, step = r.fields, r.t, r.step
         if t <= t_start:
             continue
         vals = variables(cons, fields, cfg.get("physics", {}), dim)

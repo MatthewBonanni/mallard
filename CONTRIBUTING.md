@@ -107,6 +107,21 @@ that adds or changes behavior includes:
 
 1. **Code**, in `src/`, following the style above. New input keys are read through
    `Input` with explicit defaults.
+   Communication between ranks during the run (exchanges, reductions, gathers on
+   the step path) needs an NCCL path on the device stream that the step's CUDA
+   graph can capture (`comm::allreduce_device`, `HaloExchange`), MPI as the
+   fallback in builds without NCCL, and a test comparing the two bit for bit
+   (`expect_matches_serial` runs both); setup, partitioning and I/O collectives
+   are exempt.
+   Work on the step path is capturable in the step CUDA graph: no host work per
+   step (no host reads of device results, allocations, fences or host branches on
+   the solution; time-dependent values come from the device step time), with a
+   test asserting that the step is graphed in CUDA builds
+   (`expect_matches_serial_with_and_without_step_graphs`). On every backend that
+   test also runs the code the capture records under Kokkos Tools callbacks
+   (`StepGraphGuard`), which fail it on a fence, an allocation or a copy through
+   pageable host memory there; MPI's host-staged fallbacks mark themselves with
+   `comm::HostStaged`.
 2. **Tests** in `test/` (GoogleTest, registered in
    [test/CMakeLists.txt](test/CMakeLists.txt)). Each test must fail for a plausible
    regression: prefer checks against an exact solution, a design order of
