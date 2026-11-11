@@ -1532,17 +1532,16 @@ Centers, `point`, `base`, sizes (`radius`, `inner_radius`, `length`, `size`,
 `rotate` angles, `scale` and an implicit `f` may be expressions of `t` (time,
 s): the region moves, placed where it is at each stage
 ([Moving regions](guide/geometry.md#moving-regions)). Filled regions alone
-move, in `[[sources]]`, `[[sponges]]` and `[[probes]]`; elsewhere, and for
-surfaces, curves and points, a moving region is an error. On a mesh with
+move, in `[[sources]]`, `[[sponges]]`, `[[probes]]` and `[[write_data]]`;
+elsewhere, and for surfaces, curves and points, a moving region is an error. On a mesh with
 `[[periodic]]` boundaries, a region that crosses one wraps into the domain
 ([Periodic boundaries](guide/geometry.md#periodic-boundaries)).
 
 Regions defined by the solution, `where` and `isosurface` and the booleans and
 boundaries that use them, follow the solution: in `[[sources]]` and
-`[[sponges]]` at every stage, in `[[probes]]` at every write, and in
-`mallard post extract` on the state of the output it reads. They take no
-transforms, `repeat` or `edge`; snapshots of them (`[[write_data]]`),
-averaged probes and probes of `n_points` on isosurfaces,
+`[[sponges]]` at every stage, in `[[probes]]` and `[[write_data]]` at every
+write, and in `mallard post extract` on the state of the output it reads. They
+take no transforms, `repeat` or `edge`; averaged probes and probes of `n_points` on isosurfaces,
 `[[initialize.regions]]` and `[[initialize.data]]` are errors.
 
 The outermost region may also have `edge`, the width of a smooth edge: the
@@ -1715,7 +1714,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `series` | (`vtkhdf`) `false` (default): one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`; `true`: every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
 | `fields` | (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), `Q_CRITERION` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs; called `Q` before 0.10.0, which is now an error), `LAMBDA2` (the middle eigenvalue of S² + Ω², negative in vortex cores) and `SCHLIEREN` (the density gradient magnitude, kg/m⁴), with the gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares; see [derived fields](guide/output.md#derived-fields)), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`, and the [mesh and stencil fields](guide/output.md#mesh-and-stencil-fields) `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` and `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION`. A trailing `*` selects every field with that prefix, e.g. `Y_*`; `mallard list fields input.toml` lists those of a case |
-| `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it; a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `fields` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for `xdmf` |
+| `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it (a [moving](guide/geometry.md#moving-regions) one, or one [defined by the solution](guide/geometry.md#regions-defined-by-the-solution), the cells it covers at each write); a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `fields` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for `xdmf` |
 | `regions` | (`vtkhdf`, `vtu`) Instead of `region`: a list of regions, each written as `region` writes it, to `PREFIX_<name>` (a named region or zone) or `PREFIX_<index>` (inline, from 0) |
 | `geometry` | Removed in 0.10.0 (deprecated in 0.9.0) for `region`, which `mallard input upgrade` writes in its place (`"all"` as `"domain"`) |
 | `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and XDMF's HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Filled regions only: boundary zones and other regions of lower dimension are written uncompressed |
@@ -1737,7 +1736,9 @@ on the curved geometry, after the mesh's nodes. A filled region's file is the
 With
 `series = true` the mesh is stored once and VTKHDF's `Steps` group holds every
 snapshot's time (`Steps/Values`) and where its cell values start
-(`Steps/CellDataOffsets/<name>`). Nothing else is added to the VTKHDF layout:
+(`Steps/CellDataOffsets/<name>`); a region whose cells change between writes
+stores each snapshot's mesh after the previous ones', where `Steps/PartOffsets`,
+`PointOffsets`, `CellOffsets` and `ConnectivityIdOffsets` say. Nothing else is added to the VTKHDF layout:
 the units and descriptions are HDF5 attributes of each dataset (`units`,
 `long_name`), and the root group carries the run block (`mallard_run`) and the format
 `version` as HDF5 attributes and the snapshot blocks as the dataset `mallard_snapshot`, which VTK ignores;

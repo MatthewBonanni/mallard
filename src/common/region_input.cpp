@@ -1690,11 +1690,6 @@ void require_full_dimension(const Region & region, const Input & value, const st
 }
 
 void require_fixed(const Region & region, const Input & value, const std::string & where, const std::string & what) {
-    if (region.solution()) {
-        fail(where, line_of(value), "follows the solution, and " + what + " of regions defined by the solution are not "
-                                    "supported yet",
-             "Give a fixed region", SOLUTION_DOCS);
-    }
     if (!region.moving()) return;
     fail(where, line_of(value), "moves (it has expressions of t), and " + what + " of moving regions are not supported yet",
          "Give a fixed region", "docs/guide/geometry.md#moving-regions");

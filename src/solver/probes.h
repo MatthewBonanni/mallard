@@ -428,6 +428,8 @@ class Probes {
                  const Snapshot * snapshot, const std::vector<Data> * cell_data, int32_t copy = -1);
         /** @brief A snapshot's samples of a region of lower dimension: one at each element's center. */
         static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables);
+        static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Elements & e, int dimension,
+                                             const std::string & summary, uint32_t n_variables);
         /**
          * @brief A filled region probe's samples: the owned cells with their weight f V.
          */
