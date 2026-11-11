@@ -172,6 +172,11 @@ std::string build_block() {
 #else
     constexpr bool hdf5 = false;
 #endif
+#if defined(Mallard_HAS_HDF5) && defined(H5_HAVE_PARALLEL)
+    constexpr bool hdf5_parallel = true;
+#else
+    constexpr bool hdf5_parallel = false;
+#endif
 #ifdef Mallard_HAS_KAMINPAR
     constexpr bool kaminpar = true;
 #else
@@ -196,6 +201,7 @@ std::string build_block() {
         .add("gpu_aware_mpi", gpu_aware_mpi)
         .add("nccl", nccl)
         .add("hdf5", hdf5)
+        .add("hdf5_parallel", hdf5_parallel)
         .add("kaminpar", kaminpar)
         .add("species_layout", species_layout);
     return b.str();

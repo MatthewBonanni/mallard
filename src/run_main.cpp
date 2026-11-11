@@ -77,14 +77,17 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
             if (check) {
                 CheckReport report;
                 try {
-                    Input input = parse_input(input_file);
-                    if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
-                    report = solver.check(input, *check);
+                    if (!input_file.empty()) {
+                        Input input = parse_input(input_file);
+                        if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
+                        report = solver.check(input, *check);
+                    }
                 } catch (const InputError & e) {
                     if (resolve) throw;
                     report.input_file = input_file;
                     report.error(check_code::INPUT, input_file + ": " + error_text(e));
                 }
+                if (!resolve) check_environment(report);
                 if (resolve && report.ok()) {
                     if (comm::is_root()) std::cout.rdbuf(out);
                     std::cout << report.resolved << std::flush;
@@ -152,10 +155,15 @@ int run_main(const cli::Args & args) {
 
 int check_main(const cli::Args & args) {
     const cli::Command & command = *cli::command("check");
-    if (args.has("-i") == !args.positional.empty()) {
-        return cli::usage_error(command, args.positional.empty() ? "missing the input file" : "two input files");
+    if (args.has("-i") && !args.positional.empty()) return cli::usage_error(command, "two input files");
+    const std::string input_file =
+        args.has("-i") ? args.value_or("-i", "") : args.positional.empty() ? "" : args.positional[0];
+    if (input_file.empty()) {
+        for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--memory", "--quality",
+                                    "--catalog", "--view"}) {
+            if (args.has(option)) return cli::usage_error(command, std::string(option) + " needs an input file");
+        }
     }
-    const std::string input_file = args.has("-i") ? args.value_or("-i", "") : args.positional[0];
     CheckOptions options;
     options.input_file = input_file;
     options.quality_file = args.value_or("--quality", "");

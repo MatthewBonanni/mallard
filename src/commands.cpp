@@ -428,8 +428,9 @@ constexpr Command COMMANDS[] = {
     {
         .name = "check",
         .group = "Inspect",
-        .summary = "Set up a case without running it and report on it: keys, mesh, time step, memory, cost",
-        .synopsis = "mallard check input.toml [options]",
+        .summary = "Set up a case without running it and report on it: keys, mesh, time step, memory, cost, environment",
+        .synopsis = "mallard check input.toml [options]\n"
+                    "mallard check [--format text|json]",
         .description =
             "Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial solution) without "
             "time stepping and without writing any file, then reports: unknown or unused keys, boundary zones "
@@ -438,15 +439,24 @@ constexpr Command COMMANDS[] = {
             "error or warning a stable code (E-REGION-OUTSIDE, W-CFL-LIMIT) and the docs that explain it. It lists "
             "every region the case uses and the mesh's own (domain, boundary zones, cell zones) with its dimension, measure and cells, "
             "and whether a surface or curve is exact or extracted; a region that covers no cell is an error. Under "
-            "mpirun -n N it checks the run on N ranks.",
+            "mpirun -n N it checks the run on N ranks.\n"
+            "\n"
+            "Without an input, checks the environment only; with one, the report ends with the same Environment "
+            "section: the build (dimension, precision, the solvers installed), Kokkos and its execution spaces, "
+            "every rank's host, device and memory, CPUs and threads, MPI (library, ranks per host), GPU-aware MPI "
+            "and NCCL (built, and whether the run uses them), HDF5 (serial or parallel), CGNS, zlib and KaMinPar. "
+            "Each problem is a diagnostic with its fix: ranks sharing a GPU or cores, OpenMP threads free to "
+            "migrate, a GPU-aware build on an MPI that cannot read device memory (an error), device halos "
+            "staged through host memory. Run it under the job's launcher (srun, mpirun) to check its nodes.",
         .options = CHECK_OPTIONS,
         .arguments = CHECK_ARGUMENTS,
         .examples = "$ mallard check input.toml\n"
+                    "$ srun -N 2 --ntasks-per-node 4 mallard check   # the environment of a job\n"
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
                     "$ mpirun -n 4 mallard check input.toml --quality quality\n"
                     "$ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView",
         .exit_status = "0  no errors (there may be warnings)\n"
-                       "1  errors: in the input, the mesh or the setup\n"
+                       "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
         .dim = Case::input,
         .run = check_main,

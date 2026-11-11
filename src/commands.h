@@ -10,11 +10,20 @@
 
 #include "cli.h"
 
+struct CheckReport;
+
 /** @brief `mallard -i input.toml`: runs a case. */
 int run_main(const cli::Args & args);
 
 /** @brief `mallard check input.toml`: sets up a case and reports on it. */
 int check_main(const cli::Args & args);
+
+/**
+ * @brief The Environment of `mallard check`: the build, every rank's placement and device, MPI, GPU-aware
+ *        MPI and NCCL (as the case's resolved input chooses, if any), with what to fix as the report's
+ *        diagnostics on rank 0. Collective; after Kokkos is initialized.
+ */
+void check_environment(CheckReport & report);
 
 /** @brief `mallard input resolve input.toml`: writes the input as setup uses it. */
 int resolve_main(const cli::Args & args);
