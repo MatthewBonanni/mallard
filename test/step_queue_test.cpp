@@ -320,7 +320,9 @@ struct Outcome {
  */
 void expect_capturable(const StepGraphGuard & guard, const Solver & solver) {
     EXPECT_TRUE(solver.step_graph_unsupported().empty()) << solver.step_graph_unsupported();
-    if (solver.get_step() > 1) EXPECT_GT(guard.captures(), 0u);
+    if (solver.get_step() > 1) {
+        EXPECT_GT(guard.captures(), 0u);
+    }
     for (const std::string & v : guard.violations()) ADD_FAILURE() << "in a step graph's capture: " << v;
 }
 
@@ -406,7 +408,9 @@ Outcome expect_queue_invariant(const std::string & name, const Case & c, const b
     for (const int depth : {1, 3}) {
         const Outcome queued = run_case(name, c, depth);
         expect_same(host, queued, name + ", step_queue = " + std::to_string(depth));
-        if (depth > 1 && runs_ahead) EXPECT_GT(queued.queued, 0u) << name << ": no step ran ahead of the host";
+        if (depth > 1 && runs_ahead) {
+            EXPECT_GT(queued.queued, 0u) << name << ": no step ran ahead of the host";
+        }
     }
     return host;
 }
@@ -451,7 +455,9 @@ TEST(StepQueueTest, ProgressRowsWithHealthAndNanChecks) {
     c.extra = "check_interval = 1\n";
     c.numerics = "check_nan = true\n";
     const Outcome o = expect_queue_invariant("rows", c);
-    if (comm::is_root()) EXPECT_GE(o.log.size(), 12u);
+    if (comm::is_root()) {
+        EXPECT_GE(o.log.size(), 12u);
+    }
 }
 
 TEST(StepQueueTest, RejectedStepsAreRetriedAsTheHostRetriesThem) {
@@ -569,7 +575,9 @@ TEST_P(StepQueueExample, EnqueuedStepsMatchTheHostsBitForBit) {
     const ExampleOutcome queued = run_example(GetParam(), 3);
     EXPECT_EQ(host.queued, 0u);
     // A progress row every step
-    if (host.rows_on_device) EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
+    if (host.rows_on_device) {
+        EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
+    }
     EXPECT_EQ(queued.step, host.step);
     EXPECT_EQ(queued.t, host.t);
     EXPECT_EQ(queued.rejected, host.rejected);
