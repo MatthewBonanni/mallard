@@ -127,7 +127,8 @@ namespace {
 
 class FileOutput : public Output {
     public:
-        explicit FileOutput(const std::string & path) : file(path, std::ios::binary | std::ios::trunc), path(path) {
+        explicit FileOutput(const std::string & file_path)
+            : file(file_path, std::ios::binary | std::ios::trunc), path(file_path) {
             if (!file) throw cannot_write("the archive", path);
         }
         void write(const char * data, size_t n) override {
@@ -176,7 +177,7 @@ class GzipOutput : public Output {
 /** @brief Reads a plain or gzip-compressed file. */
 class Input {
     public:
-        explicit Input(const std::string & path) : path(path) {
+        explicit Input(const std::string & file_path) : path(file_path) {
 #ifdef Mallard_HAS_ZLIB
             // gzread reads files that are not compressed as they are
             gz = gzopen(path.c_str(), "rb");
@@ -251,7 +252,7 @@ bool have_gzip() {
 
 bool is_gzip_name(std::string_view name) { return name.ends_with(".tar.gz") || name.ends_with(".tgz"); }
 
-Writer::Writer(const std::string & path) : path(path) {
+Writer::Writer(const std::string & file_path) : path(file_path) {
     if (is_gzip_name(path)) {
 #ifdef Mallard_HAS_ZLIB
         out = std::make_unique<GzipOutput>(path);
