@@ -8,7 +8,7 @@ into it. The user-facing pages are [Python](../guide/python.md) and the
 
 ## One package
 
-There is one Python distribution, `mallard`, imported as `mallard`, for both
+There is one Python distribution, `mallard-python`, imported as `mallard`, for both
 post-processing and driving the solver. Its source is `tools/mallard`, and its
 version is Mallard's (`tools/mallard/_version.py`, checked against
 `project(VERSION)` by every build with `Mallard_ENABLE_PYTHON`, on by default).
@@ -42,8 +42,8 @@ tests in `test/python` pin.
 ## Dependencies
 
 numpy is the only required dependency. Heavier ones are extras of the same
-distribution, installed only by those who need them: `mallard[mpi]` (mpi4py,
+distribution, installed only by those who need them: `mallard-python[mpi]` (mpi4py,
 for the bindings under MPI), and others as the bindings need them. A
-post-processing wheel without the extension comes first
+post-processing wheel of `mallard-python` without the extension comes first
 ([#792](https://github.com/MatthewBonanni/mallard/issues/792)); wheels with the
 compiled extension follow with #345.

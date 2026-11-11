@@ -31,7 +31,8 @@ after its usual command:
 | [From source](../installation.md#from-source) | `cmake --install build`, then `pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF` |
 
 The package is `tools/mallard` of the Mallard repository
-(`share/mallard/tools/mallard` of an install). A build writes its library,
+(`share/mallard/tools/mallard` of an install; its distribution name, for pip,
+is `mallard-python`). A build writes its library,
 `build/src/libmallard2d.so` (`.dylib` on macOS), next to `build/src/mallard`,
 and `cmake --install` installs it in `PREFIX/lib`; a build with
 `-DMallard_DIM=3` gives `libmallard3d`, and either reads the output of both

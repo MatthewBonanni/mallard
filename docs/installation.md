@@ -202,7 +202,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 
 ### Python package
 
-Every build makes the library of the [Python package](guide/python.md); after `cmake --install`, one command adds the package to a Python environment (3.10 or newer; it brings numpy):
+Every build makes the library of the [Python package](guide/python.md); after `cmake --install`, one command adds the package (distribution `mallard-python`, imported as `mallard`) to a Python environment (3.10 or newer; it brings numpy):
 
 ```sh
 pip install $HOME/mallard/share/mallard/tools     # or: uv pip install, or pip install -e tools in the repository
