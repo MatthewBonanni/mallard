@@ -74,32 +74,6 @@ double det3(const double * a, const double * b, const double * c) {
     return a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
 }
 
-/** @brief Local node k of local face j of a cell with n_nodes nodes (Gmsh/VTK order, outward). */
-KOKKOS_INLINE_FUNCTION
-int local_face_node(const uint32_t n_nodes, const int j, const int k) {
-    const int tet[4][3] = {{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}};
-    const int pyramid[5][4] = {{0, 3, 2, 1}, {0, 1, 4, -1}, {1, 2, 4, -1}, {2, 3, 4, -1}, {3, 0, 4, -1}};
-    const int prism[5][4] = {{0, 2, 1, -1}, {3, 4, 5, -1}, {0, 1, 4, 3}, {1, 2, 5, 4}, {2, 0, 3, 5}};
-    const int hex[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
-    switch (n_nodes) {
-        case 4: return tet[j][k];
-        case 5: return pyramid[j][k];
-        case 6: return prism[j][k];
-        default: return hex[j][k];
-    }
-}
-
-KOKKOS_INLINE_FUNCTION
-int local_face_count(const uint32_t n_nodes) { return n_nodes == 4 ? 4 : (n_nodes == 8 ? 6 : 5); }
-
-KOKKOS_INLINE_FUNCTION
-int local_face_size(const uint32_t n_nodes, const int j) {
-    if (n_nodes == 4) return 3;
-    if (n_nodes == 8) return 4;
-    if (n_nodes == 5) return j == 0 ? 4 : 3;
-    return j < 2 ? 3 : 4;
-}
-
 /** @brief f(std::integral_constant<int, k>) for k = B .. E - 1, unrolled at compile time. */
 template <int B, int E, class F>
 KOKKOS_FORCEINLINE_FUNCTION void static_for(F && f) {
@@ -176,9 +150,8 @@ struct StaticTables {
     }
 };
 
-// Clang 16 counts only uses outside constant expressions
 template <int R>
-[[maybe_unused]] inline constexpr StaticTables<R> STATIC_TABLES{};
+inline constexpr StaticTables<R> STATIC_TABLES{};
 
 /**
  * @brief Reflected moments (CellSetup::reflected_moments) for degree R:
@@ -740,18 +713,6 @@ bool pseudo_inverse(const Lane<double> & A, const Lane<double> & X, const int m,
 }
 
 /**
- * @brief Spread a least-squares solution X (m rows of nf columns) over rows
- *        of n columns, zero in the others, in place.
- */
-template <typename L>
-KOKKOS_INLINE_FUNCTION void widen(const L & X, const int m, const int nf, const int n) {
-    if (nf == n) return;
-    for (int s = m - 1; s >= 0; s--) {
-        for (int l = n - 1; l >= 0; l--) X[s * n + l] = l < nf ? X[s * nf + l] : 0.0;
-    }
-}
-
-/**
  * @brief Lebesgue constant max_q |1 - sum_s c_qs| + sum_s |c_qs| of the
  *        reconstruction at the rows of psi (zero-mean basis, n per row),
  *        c_qs = psi_q . P(:, s), for P from pseudo_inverse().
@@ -800,6 +761,8 @@ struct CellSetup {
     // images: nk columns of the lower degree (nk itself: none) and the stencil size
     uint8_t wall_nk = 0;
     uint16_t wall_ns = 0;
+    // Central stencil size per fitted monomial, for fits that drop the monomials of flat axes
+    double stencil_factor = 2.0;
 
     /** @brief Whether one of the first n sorted entries is a cell at a curved wall without mirror images. */
     KOKKOS_INLINE_FUNCTION
@@ -1495,10 +1458,19 @@ struct CellSetup {
             return n < n_list && Kokkos::fabs(key(w, n) - key(w, n - 1)) < tie;
         };
         uint32_t n_means = 0;
+        FlatAxes spanned;
+        for (uint32_t j = 0; j + 1 < end[depth_large] && spanned.flat != 0; j++) {
+            double xc[3];
+            g.centroid(w.visit_cell[j + 1], w.visit_lattice[j + 1], xc);
+            for (int d = 0; d < N_DIM; d++) xc[d] = (xc[d] - x0[d]) / h;
+            spanned.add(xc);
+        }
+        const uint8_t flat = spanned.axes();
         // Stencils reaching a curved wall without mirror images fit a lower degree
         const bool at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < ns ? uint32_t(n_entries) : ns);
-        const int nf = at_wall ? wall_nk : nk;
-        const uint16_t n_first = at_wall ? wall_ns : ns;
+        const FitColumns fit = fit_columns(flat, at_wall ? wall_nk : nk);
+        const int nf = fit.n;
+        const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf)) : at_wall ? wall_ns : ns;
         auto build = [&](const int m) {
             for (; n_means < uint32_t(m); n_means++) {
                 double means[teno::MAX_NK];
@@ -1506,10 +1478,10 @@ struct CellSetup {
                 for (uint32_t l = 0; l < nk; l++) w.means[n_means * nk + l] = means[l];
             }
             for (int s = 0; s < m; s++) {
-                for (int l = 0; l < nf; l++) w.A[s * nf + l] = w.means[s * nk + l] - mean0[l];
+                for (int j = 0; j < nf; j++) w.A[s * nf + j] = w.means[s * nk + fit.col[j]] - mean0[fit.col[j]];
             }
             const bool ok_fit = pseudo_inverse(w.A, w.X, m, nf, max_condition);
-            if (ok_fit) widen(w.X, m, nf, nk);
+            if (ok_fit) widen(w.X, m, fit, nk);
             return ok_fit;
         };
         uint16_t n_used = n_first;
@@ -1564,6 +1536,7 @@ struct CellSetup {
             n_entries = gather(w, i, end[depth_wide], x0, h, n_planes, n_plane_faces);
             if (n_entries < 0) return uint8_t(-n_entries);
         }
+        const FitColumns fit_small = fit_columns(flat, teno::NK_SMALL);
         uint32_t k_face = 0;
         for (uint32_t kf = g.offsets_faces_of_cell(i); kf < g.offsets_faces_of_cell(i + 1); kf++, k_face++) {
             const uint32_t f = g.faces_of_cell(kf);
@@ -1614,12 +1587,15 @@ struct CellSetup {
             for (uint32_t s = 0; s < n_sector; s++) {
                 double means[teno::NK_SMALL];
                 entry_means(w, w.sector[s], n_plane_faces, x0, h, teno::NK_SMALL, means);
-                for (uint32_t l = 0; l < teno::NK_SMALL; l++) w.A[s * teno::NK_SMALL + l] = means[l] - mean0[l];
+                for (int j = 0; j < fit_small.n; j++) {
+                    w.A[int(s) * fit_small.n + j] = means[fit_small.col[j]] - mean0[fit_small.col[j]];
+                }
             }
-            if (!pseudo_inverse(w.A, w.X, static_cast<int>(n_sector), teno::NK_SMALL, max_condition)) {
+            if (!pseudo_inverse(w.A, w.X, static_cast<int>(n_sector), fit_small.n, max_condition)) {
                 invalid++;
                 continue;
             }
+            widen(w.X, static_cast<int>(n_sector), fit_small, teno::NK_SMALL);
             small_size[k_face] = static_cast<uint16_t>(n_sector);
             for (uint32_t s = 0; s < n_sector; s++) {
                 const uint32_t j = w.sector[s];
@@ -2633,6 +2609,17 @@ struct CellTeam {
         double * X_used = X;
         // A in level-0 scratch, too, unless the system is too large
         double * A_used = A;
+        uint8_t flat = 0;
+        Kokkos::single(Kokkos::PerTeam(tm), [&](uint8_t & axes) {
+            FlatAxes spanned;
+            for (uint32_t j = 0; j + 1 < end[depth_large] && spanned.flat != 0; j++) {
+                double xc[3];
+                c.g.centroid(w.visit_cell[j + 1], w.visit_lattice[j + 1], xc);
+                for (int d = 0; d < N_DIM; d++) xc[d] = (xc[d] - x0[d]) / h;
+                spanned.add(xc);
+            }
+            axes = spanned.axes();
+        }, flat);
         // Stencils reaching a curved wall without mirror images fit a lower degree
         bool at_wall = false;
         if (c.wall_nk < nk && c.g.wall_cell.extent(0) > 0) {
@@ -2640,15 +2627,20 @@ struct CellTeam {
                 reached = c.reaches_wall(w, uint32_t(n_entries) < c.ns ? uint32_t(n_entries) : c.ns);
             }, at_wall);
         }
-        const int nf = at_wall ? c.wall_nk : nk;
-        const uint16_t n_first = at_wall ? c.wall_ns : c.ns;
+        const FitColumns fit = fit_columns(flat, at_wall ? c.wall_nk : nk);
+        const int nf = fit.n;
+        const uint16_t n_first =
+            flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(c.stencil_factor * nf)) : at_wall ? c.wall_ns : c.ns;
         auto build = [&](const int m) {
             ensure_means(tm, w, base, ctl, uint32_t(m) > means_floor ? uint32_t(m) : means_floor, x0, h);
             const size_t bytes = sizeof(double) * size_t(m) * size_t(nk);
             A_used = bytes <= big_bytes ? A : reinterpret_cast<double *>(base + layout.A);
             X_used = A_used == A && 2 * bytes <= big_bytes ? A + size_t(m) * size_t(nk) : X;
             Kokkos::parallel_for(Kokkos::TeamThreadRange(tm, m * nf),
-                                 [&](const int e) { A_used[e] = w.means[(e / nf) * nk + e % nf] - mean0[e % nf]; });
+                                 [&](const int e) {
+                                     const int l = fit.col[e % nf];
+                                     A_used[e] = w.means[(e / nf) * nk + l] - mean0[l];
+                                 });
             tm.team_barrier();
             Kokkos::Array<double *, 1> As = {A_used};
             Kokkos::Array<double *, 1> Xs = {X_used};
@@ -2656,7 +2648,7 @@ struct CellTeam {
             Kokkos::Array<bool, 1> okq;
             okq = team_pseudo_inverse<1>(tm, As, Xs, ms, nf, c.max_condition, qr);
             if (nf < nk) {
-                Kokkos::single(Kokkos::PerTeam(tm), [&]() { if (okq[0]) widen(X_used, m, nf, nk); });
+                Kokkos::single(Kokkos::PerTeam(tm), [&]() { if (okq[0]) widen(X_used, m, fit, nk); });
                 tm.team_barrier();
             }
             return okq[0];
@@ -2817,6 +2809,12 @@ struct CellTeam {
         });
         int total = 0;
         static_for<0, int(NF)>([&](auto kc) { total += size[decltype(kc)::value]; });
+        // Each monomial's column in the sector fits (-1: on a flat axis)
+        const FitColumns fit_small = fit_columns(flat, teno::NK_SMALL);
+        const int nfs = fit_small.n;
+        int column[teno::NK_SMALL];
+        for (int l = 0; l < teno::NK_SMALL; l++) column[l] = -1;
+        for (int j = 0; j < nfs; j++) column[fit_small.col[j]] = j;
         // Entries of the central stencil's search have their means already (the
         // first NK_SMALL of nk); the others are computed
         const uint32_t n_known = ctl[N_MEANS];
@@ -2838,8 +2836,10 @@ struct CellTeam {
                     todo[offset] = q;
                     return;
                 }
-                double * a = pick(As, k) + s2 * teno::NK_SMALL;
-                for (int l = 0; l < teno::NK_SMALL; l++) a[l] = w.means[j * uint32_t(c.nk) + uint32_t(l)] - mean0[l];
+                double * a = pick(As, k) + s2 * nfs;
+                for (int jj = 0; jj < nfs; jj++) {
+                    a[jj] = w.means[j * uint32_t(c.nk) + fit_small.col[jj]] - mean0[fit_small.col[jj]];
+                }
             });
         team_means(
             tm, w, base, n_todo,
@@ -2851,9 +2851,9 @@ struct CellTeam {
             [&](const uint32_t q, const int l, const double v) {
                 int k, s2;
                 entry_of(int(todo[q]), k, s2);
-                pick(As, k)[s2 * teno::NK_SMALL + l] = v - mean0[l];
+                if (column[l] >= 0) pick(As, k)[s2 * nfs + column[l]] = v - mean0[l];
             });
-        const Kokkos::Array<bool, NF> ok_sector = team_pseudo_inverse<NF>(tm, As, Xs, size, teno::NK_SMALL, c.max_condition, qr);
+        const Kokkos::Array<bool, NF> ok_sector = team_pseudo_inverse<NF>(tm, As, Xs, size, nfs, c.max_condition, qr);
         Kokkos::Array<int, NF> start;
         static_for<0, int(NF)>([&](auto kc) {
             constexpr int k = decltype(kc)::value;
@@ -2878,8 +2878,10 @@ struct CellTeam {
             int32_t pf;
             o.small_cells[at] = int32_t(w.visit_cell[vv]);
             o.small_faces[at] = entry_face(w, base, j, pf);
-            const double * x = pick(Xs, k) + s * teno::NK_SMALL;
-            for (int l = 0; l < teno::NK_SMALL; l++) o.small_pinv[at * teno::NK_SMALL + l] = rtype(x[l]);
+            const double * x = pick(Xs, k) + s * nfs;
+            for (int l = 0; l < teno::NK_SMALL; l++) {
+                o.small_pinv[at * teno::NK_SMALL + l] = column[l] >= 0 ? rtype(x[column[l]]) : rtype(0);
+            }
         });
         tm.team_barrier();
 
@@ -2892,6 +2894,32 @@ template <int NM, class Space>
 struct MomentsTask {
     Geometry<Space> g;
     int n_moments = 0;
+
+    /** @brief Local node k of local face j of a cell with n_nodes nodes (Gmsh/VTK order, outward). */
+    KOKKOS_INLINE_FUNCTION
+    static int local_face_node(const uint32_t n_nodes, const int j, const int k) {
+        const int tet[4][3] = {{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}};
+        const int pyramid[5][4] = {{0, 3, 2, 1}, {0, 1, 4, -1}, {1, 2, 4, -1}, {2, 3, 4, -1}, {3, 0, 4, -1}};
+        const int prism[5][4] = {{0, 2, 1, -1}, {3, 4, 5, -1}, {0, 1, 4, 3}, {1, 2, 5, 4}, {2, 0, 3, 5}};
+        const int hex[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+        switch (n_nodes) {
+            case 4: return tet[j][k];
+            case 5: return pyramid[j][k];
+            case 6: return prism[j][k];
+            default: return hex[j][k];
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    static int local_face_count(const uint32_t n_nodes) { return n_nodes == 4 ? 4 : (n_nodes == 8 ? 6 : 5); }
+
+    KOKKOS_INLINE_FUNCTION
+    static int local_face_size(const uint32_t n_nodes, const int j) {
+        if (n_nodes == 4) return 3;
+        if (n_nodes == 8) return 4;
+        if (n_nodes == 5) return j == 0 ? 4 : 3;
+        return j < 2 ? 3 : 4;
+    }
 
     KOKKOS_INLINE_FUNCTION
     void add(const double w, const double * x, double * m) const {
@@ -3509,7 +3537,8 @@ class Setup3D {
                     scratch = Scratch<DefaultMem>(caps, n_threads, nk, false, tables.n_low);
                 }
                 CellSetup<Kokkos::DefaultExecutionSpace> task{device, d_tables.data(), scratch, out, cells, {}, r, nk, ns, nss,
-                                                              ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns};
+                                                              ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
+                                                              double(options.stencil_factor)};
                 Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task);
             } else {
                 using Exec = Kokkos::DefaultExecutionSpace;
@@ -3521,7 +3550,8 @@ class Setup3D {
                     pool_locks = Kokkos::View<int *, DefaultMem>("teno_setup_pool_locks", slots);
                 }
                 CellTeam<Exec> task{CellSetup<Exec>{device, d_tables.data(), Scratch<DefaultMem>(), out, cells, {}, r, nk, ns, nss,
-                                                    ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns},
+                                                    ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
+                                                    double(options.stencil_factor)},
                                     out, cells, layout, caps, pool, pool_locks};
                 Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(static_cast<int>(n), TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes));
@@ -3591,7 +3621,8 @@ class Setup3D {
                 TableBatchT<HostMem> h_out(m, nk, ns_max, max_small(), false);
                 Scratch<HostMem> h_scratch(caps.scaled(scale), n_threads, nk, false, tables.n_low);
                 CellSetup<Kokkos::DefaultHostExecutionSpace> task{host, &tables, h_scratch, h_out, h_cells, {}, r, nk, ns,
-                                                                  nss, ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns};
+                                                                  nss, ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
+                                                                  double(options.stencil_factor)};
                 Kokkos::parallel_for("teno_setup_cells_host",
                                      Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
                                      task);

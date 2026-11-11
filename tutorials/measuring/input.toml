@@ -74,7 +74,7 @@ file = "forces_cylinder.csv"
 [[probes]]
 name = "wall"
 boundary = "cylinder"
-variables = ["TRACTION_PRESSURE", "TRACTION_VISCOUS"]
+fields = ["TRACTION_PRESSURE", "TRACTION_VISCOUS"]
 samples = false
 reductions = ["integral"]
 interval = 20
@@ -83,7 +83,7 @@ interval = 20
 [[probes]]
 name = "box"
 region = "box"
-variables = ["RHO", "RHOU", "RHOE"]
+fields = ["RHO", "RHOU", "RHOE"]
 reductions = ["integral"]
 interval = 20
 
@@ -91,7 +91,7 @@ interval = 20
 [[probes]]
 name = "west"
 region = "west"
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral"]
@@ -100,7 +100,7 @@ interval = 20
 [[probes]]
 name = "east"
 region = "east"
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral"]
@@ -109,7 +109,7 @@ interval = 20
 [[probes]]
 name = "south"
 region = "south"
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral"]
@@ -118,7 +118,7 @@ interval = 20
 [[probes]]
 name = "north"
 region = "north"
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral"]
@@ -130,12 +130,12 @@ interval = 20
 name = "wake"
 type = "point"
 point = [3.0, 0.5]
-variables = ["U_Y", "P"]
+fields = ["U_Y", "P"]
 sampling = "point"
 time_interval = 0.5
 
 [probes.spectra]
-variables = ["U_Y"]
+fields = ["U_Y"]
 t_start = 60.0
 length = 140.0
 strouhal = {length = 1.0, velocity = 0.2}
@@ -160,4 +160,4 @@ level = 0.0
 prefix = "./solut/box"
 region = "box"
 time_interval = 200.0
-variables = ["U_X", "U_Y", "P", "MEAN_*", "COV_*", "PHASE_*"]
+fields = ["U_X", "U_Y", "P", "MEAN_*", "COV_*", "PHASE_*"]

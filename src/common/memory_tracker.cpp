@@ -73,7 +73,7 @@ constexpr Rule RULES[] = {
     {"sponge_", true, C::MODELS}, {"source_", true, C::MODELS}, {"SOURCE", false, C::MODELS},
     {"les_", true, C::MODELS}, {"dynamic_halo", true, C::HALO}, {"dynamic_", true, C::MODELS},
     {"tfles_halo", true, C::HALO}, {"tfles_", true, C::MODELS}, {"budget_", true, C::MODELS}, {"mass_flow_", true, C::MODELS},
-    {"inflow_", true, C::MODELS}, {"wall_", true, C::MODELS}, {"expr_", true, C::MODELS},
+    {"profile_", true, C::MODELS}, {"inflow_", true, C::MODELS}, {"wall_", true, C::MODELS}, {"expr_", true, C::MODELS},
     // Chemistry, thermodynamics and transport
     {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", false, C::WORK}, {"chem_pivot", false, C::WORK}, {"chem_", true, C::CHEMISTRY},
     {"chemistry_", true, C::CHEMISTRY}, {"thermo_", true, C::CHEMISTRY}, {"transport_", true, C::CHEMISTRY},

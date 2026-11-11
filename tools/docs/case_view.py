@@ -76,7 +76,7 @@ T = "300 K"
 
 [[probes]]
 name = "wake"
-variables = ["P"]
+fields = ["P"]
 type = "line"
 start = [1.1, 0.1]
 end = [1.1, 0.9]
@@ -84,12 +84,12 @@ n_points = 9
 
 [[probes]]
 name = "tap"
-variables = ["P"]
+fields = ["P"]
 point = [0.3, 0.8]
 
 [[probes]]
 name = "ring"
-variables = ["P"]
+fields = ["P"]
 region = {type = "circle", center = [1.4, 0.5], radius = 0.12}
 """ + PHYSICS
 
@@ -144,7 +144,7 @@ rhoE = 1e5
 
 [[probes]]
 name = "wake"
-variables = ["P"]
+fields = ["P"]
 type = "line"
 start = [1.2, 0.1, 0.25]
 end = [1.2, 0.9, 0.25]
@@ -152,7 +152,7 @@ n_points = 9
 
 [[probes]]
 name = "section"
-variables = ["P"]
+fields = ["P"]
 region = {type = "disk", center = [1.6, 0.5, 0.25], normal = [1, 0, 0], radius = 0.2}
 """ + PHYSICS
 

@@ -88,7 +88,7 @@ check_interval = 100
 [[write_data]]
 prefix = "./solut/cell"
 time_interval = 1.5e-6
-variables = ["P", "T", "P_MAX"]
+fields = ["P", "T", "P_MAX"]
 
 [[write_data]]
 prefix = "./restart/cell"

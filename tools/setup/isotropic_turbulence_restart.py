@@ -27,9 +27,13 @@ field), mu_ref = u_rms0 lambda0 / Re_lambda at T0 for the power law
 mu = mu_ref (T / T0)^(3/4), and tau = lambda0 / u_rms0.
 """
 import argparse
-import struct
+import os
+import sys
 
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from mallard import restart  # noqa: E402
 
 K_MAX = 31  # modes |k_i| <= K_MAX are drawn, independently of the mesh
 
@@ -96,35 +100,6 @@ def taylor_microscale(u_hat, n):
     return np.sqrt(num / den)
 
 
-def write_restart(path, fields, t=0.0, step=0):
-    """Version-2 double-precision restart: magic, header, names, then each field's cells."""
-    names = list(fields)
-    n_cells = fields[names[0]].size
-    with open(path, "wb") as f:
-        f.write(b"MALLARD-RESTART\0")
-        f.write(struct.pack("<IIQQQd", 2, 8, n_cells, len(names), step, t))
-        for name in names:
-            f.write(struct.pack("<I", len(name)) + name.encode())
-        for name in names:
-            f.write(np.ascontiguousarray(fields[name], dtype="<f8").tobytes())
-
-
-def read_restart(path):
-    """(fields by name, t, step) of a version-2 double-precision restart file."""
-    with open(path, "rb") as f:
-        if f.read(16) != b"MALLARD-RESTART\0":
-            raise SystemExit(f"{path}: not a Mallard restart file")
-        version, real_size, n_cells, n_vars, step, t = struct.unpack("<IIQQQd", f.read(40))
-        if version != 2 or real_size != 8:
-            raise SystemExit(f"{path}: expected a double-precision restart file of version 2")
-        names = []
-        for _ in range(n_vars):
-            (length,) = struct.unpack("<I", f.read(4))
-            names.append(f.read(length).decode())
-        data = np.fromfile(f, dtype="<f8", count=n_cells * n_vars).reshape(n_vars, n_cells)
-    return dict(zip(names, data)), t, step
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("n", type=int, help="cells per direction")
@@ -152,7 +127,7 @@ def main():
     for d, name in enumerate(["RHOU_X", "RHOU_Y", "RHOU_Z"]):
         fields[name] = rho0 * u[d].ravel()
     fields["RHOE"] = p0 / (par["gamma"] - 1.0) + 0.5 * rho0 * (u ** 2).sum(axis=0).ravel()
-    write_restart(args.out, fields)
+    restart.write(args.out, fields)
 
     print(f"wrote {args.out}: {n}^3 cells, seed {args.seed}")
     print(f"u_rms0 = {par['u_rms']:.10g}, lambda0 = {par['lambda']:.6g} (drawn field: {lam:.6g}), "

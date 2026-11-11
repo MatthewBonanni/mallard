@@ -18,6 +18,7 @@ its progress on the terminal and in a machine-readable run record.
 | Wall forces | `forces_<zone>.csv` | `[[forces]]` | [Wall forces](probes.md#wall-forces-forces) |
 | Domain integrals | `integrals.csv` | `[integrals]` | [Domain integrals](probes.md#domain-integrals-integrals) |
 | Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files; probe columns `MEAN_<variable>` with `average = true` | `[statistics]`, `[statistics.phase]`, `[[probes]]` | [Statistics](statistics.md), [Probes](probes.md#time-averages) |
+| Mesh and stencil fields | `PREFIX_000000.vtkhdf`, `PREFIX_stencils.h5`; in a run, fields of the snapshots and a stencil file | `mallard check --mesh-fields`; `[[write_data]]` fields, `[output] write_stencils` | [Mesh and stencil fields](#mesh-and-stencil-fields) |
 | Spectra and two-point correlations | `spectra.csv` | `[statistics.spectra]` | [Spectra](statistics.md#spectra-and-two-point-correlations-statisticsspectra) |
 | Time spectra of probes | `probe_<name>_spectra.csv`, `probe_<name>_reductions_spectra.csv` | `[[probes]]` with `spectra` | [Time spectra](probes.md#time-spectra) |
 
@@ -33,13 +34,13 @@ Mallard's readers take step, time and run from what the files record.
 [[write_data]]
 prefix = "solut/flow"         # directories are created
 time_interval = 0.01          # or interval = 100 (steps)
-variables = ["RHO", "U", "P", "T", "VORTICITY"]
+fields = ["RHO", "U", "P", "T", "VORTICITY"]
 
 [[write_data]]                # several entries write independently
 prefix = "solut/wall"
 interval = 50
 region = "cylinder"           # a boundary zone, a slice, a volume: any region (below)
-variables = ["P", "T"]
+fields = ["P", "T"]
 ```
 
 *Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
@@ -50,14 +51,14 @@ variables = ["P", "T"]
 | `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, with a `.vtkhdf.series` index), `vtu` (ParaView, with a `.pvd` time series), `xdmf` (XDMF indexes over HDF5 files) or `restart`; see [which format](#which-format). Builds without HDF5 write `vtu`, with a warning |
 | `series` | `false` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf` |
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
-| `variables` | required (all but `restart`) | Variables to write, below; `Y_*` selects every variable with that prefix |
+| `fields` | required (all but `restart`) | Fields to write, below (`mallard list fields input.toml` lists those of a case); `Y_*` selects every field with that prefix |
 | `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (removed in 0.10.0; `mallard input upgrade` rewrites it) |
 | `regions` | none | Instead of `region`: a list of regions, each written as its own series, `PREFIX_<name>` (inline ones: `PREFIX_<place in the list>`) |
 | `compression` | `"none"` | `"zlib"`: lossless compression of `vtkhdf`, `vtu`, `xdmf` and `restart` files (below) |
 | `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `xdmf` with `compression = "zlib"`: lossy, each cell value within this relative error |
 | `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
 
-**Variables:** `mallard list fields input.toml` lists exactly those of a case, and
+**Fields:** `mallard list fields input.toml` lists exactly those of a case, and
 `mallard list fields` all of them with their units and what each needs
 ([Command line](cli.md#mallard-list-fields)).
 
@@ -71,6 +72,7 @@ variables = ["P", "T"]
 | Chemistry, radiation | `HRR`, `OMEGA_<s>`, `CHEM_COST`, `QRAD` |
 | LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
+| [Mesh and stencils](#mesh-and-stencil-fields) | `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`; `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION` |
 | [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
 
 ### Derived fields
@@ -84,7 +86,7 @@ in steps that write none:
 [[write_data]]
 prefix = "solut/jet"
 interval = 500
-variables = ["RHO", "U", "P", "MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN"]
+fields = ["RHO", "U", "P", "MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN"]
 ```
 
 | Name | Units | Definition |
@@ -114,7 +116,7 @@ ParaView's calculator shows both.
 | `format` | Opens in | Files |
 |---|---|---|
 | `vtkhdf` (default) | ParaView 5.12+, PyVista, h5py | One file per snapshot, or one for the series (`series = true`) |
-| `xdmf` | VisIt, meshio, ParaView of any version; h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
+| `xdmf` | VisIt, meshio, ParaView of any version ([open by a path with a directory](#xdmf-in-paraview)); h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
 | `vtu` | Anything with a VTK XML reader (e.g. Tecplot); builds without HDF5 | One file per rank per snapshot, with a `.pvtu` and a `.pvd` series |
 | `restart` | Mallard, to continue or remap a run | One file per snapshot |
 
@@ -151,6 +153,17 @@ once (`PREFIX_mesh.h5`), one HDF5 file of fields per snapshot and XDMF
 indexes (`PREFIX.xmf` for the series), all in global cell order; read it in
 Python with `tools/mallard/h5.py`.
 
+<a id="xdmf-in-paraview"></a>**XDMF in ParaView.** The `.xmf` files name their
+HDF5 files relative to themselves, as XDMF allows. ParaView's XDMF reader
+(ParaView 6.0.1, Xdmf3) gets this wrong when it is given a bare file name, as in
+`pvpython script.py flow.xmf` or `OpenDataFile("flow.xmf")`: it fails to open
+`flow.xmfflow_mesh.h5` and aborts with a misleading error about the number of
+dimensions. Give it a path with a directory in it: `./flow.xmf`,
+`solut/flow.xmf` or an absolute path. The ParaView GUI passes absolute paths, so
+files opened from it are not affected. VTKHDF does not have this problem.
+Mallard does not write absolute paths into the `.xmf` files, because then a run
+directory could no longer be moved or copied.
+
 **Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
 
 ```toml
@@ -160,7 +173,7 @@ io_threads = 8              # async = true is the default
 [[write_data]]
 prefix = "solut/flow"
 interval = 500
-variables = ["RHO", "U", "P", "T"]
+fields = ["RHO", "U", "P", "T"]
 compression = "zlib"       # lossless; readable by any ParaView
 relative_error = 1e-4       # optional: lossy, |x' - x| <= 1e-4 |x| per value
 ```
@@ -189,19 +202,19 @@ x3 = {type = "cut_plane", point = [0.04, 0, 0], normal = [1, 0, 0]}
 prefix = "solut/near"
 time_interval = 1e-4
 region = "near_field"
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 
 [[write_data]]                # three slices: solut/x_x1.vtkhdf, solut/x_x2.vtkhdf, solut/x_x3.vtkhdf
 prefix = "solut/x"
 time_interval = 2e-5
 regions = ["x1", "x2", "x3"]
-variables = ["U", "P", "MASS_FLUX"]
+fields = ["U", "P", "MASS_FLUX"]
 
 [[write_data]]                # a boundary zone, by its name
 prefix = "solut/wall"
 interval = 50
 region = "cylinder"
-variables = ["P", "T"]
+fields = ["P", "T"]
 ```
 
 ![A disk's cells with their REGION_FRACTION, and their pressure with three slices across the field, on a triangle mesh](../images/guide/region_snapshots-light.svg#gh-light-mode-only)
@@ -222,7 +235,7 @@ A volume is written by every rank in global order, like the whole mesh;
 zone, cut plane, surface, curve or points is written as a probe writes it, by
 the same code: `vtkhdf` writes one PolyData file `PREFIX.vtkhdf` of every
 snapshot (`series` is always on), `vtu` one VTK PolyData file per snapshot,
-`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `variables` are sampled
+`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `fields` are sampled
 as [`[[probes]]`](probes.md) sample them (`U` writes `U_X`, `U_Y`, `U_Z`);
 any other variable of a snapshot (`HRR`, `P_MAX`, `MEAN_P`, ...) takes the value
 of the cell holding each sample. Either kind is
@@ -245,6 +258,104 @@ Pitfalls:
 - Regions are written as `vtkhdf` or `vtu` only, not as `xdmf`.
 - `compression` on a region of lower dimension, alone in its entry, is an
   unused key: those files are small and written uncompressed.
+
+## Mesh and stencil fields
+
+Where a mesh is poor, and which cells each cell's reconstruction reads, as
+fields to view in ParaView and a file of every stencil. Use them when a run
+diverges or loses accuracy near a cell, before a long run on a new mesh, and to
+see what a wall, a periodic seam or a partition does to the stencils.
+
+```sh
+mallard check input.toml --mesh-fields mesh                    # mesh_000000.vtkhdf: quality and stencil fields
+mallard check input.toml --mesh-fields mesh --cells 120,4031   # and those cells' stencils: fields and mesh_stencils.h5
+mallard check input.toml --mesh-fields mesh --region '{type = "disk", center = [0.5, 0], radius = 0.05}'
+mallard check input.toml --mesh-fields mesh --stencils all --weights   # every cell's stencils, with their weights
+mallard info mesh.msh --mesh-fields mesh                       # the quality fields of a mesh file alone
+```
+
+`--mesh-fields PREFIX` writes `PREFIX_000000.vtkhdf` (`.vtu` in builds without
+HDF5), one value per cell of each field below, the
+[resolution](input_files.md#resolution) fields of the case, and with `--cells`
+or `--region` a field `STENCIL_<id>` per selected cell (the first 64): 1 on the
+cells of its central stencil only, 2 of a sector stencil only, 3 of both, 4 on
+the cell itself. `--cells` takes global cell ids (from 0, as `mallard check`
+reports cells), `--region` a [region](geometry.md#regions), inline or by name,
+whose cells to select. With one of `--stencils all`, `--cells` or `--region`, it
+also writes those cells' stencils to `PREFIX_stencils.h5` (builds with HDF5).
+The stencils are those the case's run builds: its reconstruction, after the
+partition, with the mirror images of its boundaries and the reduced degree of
+`curved_wall_degree`. A run writes the same: the fields with `[[write_data]]`,
+and every cell's stencils with `[output] write_stencils`:
+
+```toml
+[output]
+write_stencils = "stencils.h5"   # every cell's stencils, once, at the setup
+
+[[write_data]]
+prefix = "solut/flow"
+interval = 100
+fields = ["RHO", "P", "NON_ORTHOGONALITY", "STENCIL_CONDITION"]
+```
+
+| Field | Units | Meaning |
+|---|---|---|
+| `NON_ORTHOGONALITY` | `degree` | The largest over the cell's faces ([Mesh quality](meshes.md#mesh-quality)) |
+| `SKEWNESS`, `VOLUME_RATIO` | `1` | The largest over the cell's faces |
+| `ASPECT_RATIO` | `1` | The cell's |
+| `STENCIL_SIZE` | `1` | Members of the central stencil: the cell itself, its mirror and periodic images included |
+| `STENCIL_SECTORS` | `1` | Sector stencils kept (TENO; 0 otherwise) |
+| `STENCIL_DEGREE` | `1` | Degree of the central reconstruction polynomial: the scheme's, lower where `curved_wall_degree` reduces it; 1 with MUSCL, 0 first order |
+| `STENCIL_CONDITION` | `1` | 2-norm condition number of the central least-squares fit (TENO) or of the gradient fit (MUSCL): how much the fit amplifies rounding and noise in the cell values. 0 at first order, which fits nothing |
+| `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION` | `1` | 1 where a stencil reaches a wall, a periodic image, or a cell of another rank |
+
+![Non-orthogonality, the condition number of the central fit, and the central stencil of one triangle next to a symmetry boundary (with its five mirror images, hatched) on a mesh of quadrilaterals and triangles, from mallard check --mesh-fields](../images/guide/mesh_fields-light.svg#gh-light-mode-only)
+![Non-orthogonality, the condition number of the central fit, and the central stencil of one triangle next to a symmetry boundary (with its five mirror images, hatched) on a mesh of quadrilaterals and triangles, from mallard check --mesh-fields](../images/guide/mesh_fields-dark.svg#gh-dark-mode-only)
+
+![Non-orthogonality on the surface cells of a mesh of hexahedra and prisms, and the central stencil of one cell](../images/guide/mesh_fields_3d-light.svg#gh-light-mode-only)
+![Non-orthogonality on the surface cells of a mesh of hexahedra and prisms, and the central stencil of one cell](../images/guide/mesh_fields_3d-dark.svg#gh-dark-mode-only)
+
+**The stencil file** (HDF5) lists, for each selected cell in global order, its
+stencils' members, compressed-row style: target `t`'s members are rows
+`offsets[t]` to `offsets[t + 1]` of `/stencils/members`.
+
+| Dataset | Per | Holds |
+|---|---|---|
+| `/stencils/cells` | target | Global id of the target cell |
+| `/stencils/offsets` | target, plus one | Its first member row |
+| `/stencils/degree`, `condition` | target | As the fields `STENCIL_DEGREE` and `STENCIL_CONDITION` |
+| `/stencils/sizes` | target × (1 + faces) | Cells of the central stencil, then of the sector stencil of each face (0 for faces it lacks) |
+| `/stencils/reach` | target | Bits: 1 a wall, 2 a periodic image |
+| `/stencils/members/cell` | member | Global id of the member cell |
+| `/stencils/members/stencil` | member | 0 the central stencil, 1 + k the sector stencil of face k (TENO) |
+| `/stencils/members/role` | member | Bits: 1 a mirror image across a boundary face (MUSCL: the boundary's ghost or image value), 2 a periodic image |
+| `/stencils/members/face_cell`, `face` | member | The boundary face of a mirror image: the global id of its cell (-1 for none) and its place among that cell's faces (255 for none) |
+| `/stencils/members/weights` | member × coefficients | With `--weights`: the member's row of the central or sector fit's pseudo-inverse (TENO), its contribution to each polynomial coefficient (a sector fit's quadratic ones, then zeros), or its weight in each gradient component (MUSCL), each times the member's value minus the cell's (a mirror's: its ghost or image value). First order has none |
+| `/partition/rank`, `member_rank` | target, member | The rank that owns each target and member |
+
+Root attributes: `format` (`"mallard-stencils"`), `version` (1), `dimension`,
+`scheme` (`TENO`, `MUSCL` or `first_order`), `n_cells` of the mesh,
+`weights_width` (coefficients per weight row, 0 without `--weights`) and the
+[run block](#run-block) (`mallard_run`). Every dataset but `/partition` is the
+same whatever the number of ranks. `tools/mallard/stencils.py` reads it:
+
+```python
+import sys; sys.path.insert(0, "tools")
+from mallard.stencils import MIRROR, read_stencils
+s = read_stencils("mesh_stencils.h5")
+st = s.stencil(120)                          # cell 120's members, by name
+st["cell"][st["stencil"] == 0]               # its central stencil
+st["cell"][(st["role"] & MIRROR) != 0]       # the cells mirrored across a boundary
+s.sectors(120)                               # {face: its sector stencil's cells}
+```
+
+Pitfalls: a member's `cell` is the cell its value comes from, so a mirror
+image or a periodic image has the id of a cell already in the stencil, or far
+from it; `role` and `face_cell` say which. The file of every cell is large:
+about 1.5 kB per cell in 2D at fifth order, 8 kB with `--weights`, and more in 3D; select cells
+with `--cells` or `--region` on large meshes. `STENCIL_PARTITION` and `/partition`
+show the partition of the check's or run's ranks: `mpirun -n 8 mallard check
+input.toml --mesh-fields mesh` shows that of 8 ranks.
 
 ## Run progress
 
@@ -468,8 +579,8 @@ error, so neither is a repair.
 
 ### Units
 
-Every value Mallard writes is in SI units (the mesh-quality angle of
-`mallard check` excepted, in degrees), and every output file says which,
+Every value Mallard writes is in SI units (the mesh-quality angle
+`NON_ORTHOGONALITY` excepted, in degrees), and every output file says which,
 as metadata in the way its format's tools expect; field names never change.
 Restart files are the exception: they hold the conservative variables, in SI
 units by definition, for Mallard to read back.
@@ -510,7 +621,7 @@ those of `A` per second.
 | `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
 | `Q_CRITERION`, `LAMBDA2` | `s-2` | `CFL`, `MACH`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
-| `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
+| `NON_ORTHOGONALITY` | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `STENCIL_*`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
 | `MASS_FLUX`, `SPECIES_FLUX_<s>`, `SPECIES_DIFFUSIVE_FLUX_<s>`, `SPECIES_TOTAL_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `ENERGY_DIFFUSIVE_FLUX`, `ENERGY_TOTAL_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
 | `CF`, `CP`, `Y_PLUS` | `1` | `REGION_FRACTION` (regions) | `1` |
@@ -556,11 +667,12 @@ after it are that run's), and the run record's `start` record.
 | `schema`, `version` | `"mallard-run"`, 3 |
 | `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
 | `dependencies` | Versions of `compiler`, `kokkos`, `mpi` (the library's own string and the standard), `hdf5`, `cgns`, `zlib`, `nccl`, `gpu_runtime` and `gpu_driver` (CUDA or HIP); `null` for those not built in |
-| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
+| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `hdf5_parallel` (HDF5 built with MPI), `kaminpar`, `species_layout` |
 | `run` | `run_id` (a random UUID, new for every run, restarts included), `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run record's `placement`), `restart_of` (as the run record's: `run_id`, `file`, `step`; `null` for a fresh start) |
 | `input` | `file`, `sha256` of its bytes, its `text`, and `resolved`: the input with every key explicit, as the run used it ([the resolved input](input_files.md#the-resolved-input), what `mallard input resolve` writes) |
 | `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
-| `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, its `value` in the resolved input (as TOML: `"\"HLLC\""`, `0.5`) and `from_preset` (`false` where the input overrides it) |
+| `files` | Each other file the run read, once (absent if none): `kind` (`mechanism`, `table`, `inflow_profile`, `probe_points`, `restart`, `remap_source`, `remap_mesh`, and `snapshot` for each snapshot `mallard post extract` read, once per step of a file of several), `path` as given, `resolved`, `bytes`, and `sha256` of its bytes. A restart file, remap source or snapshot is not hashed again: it records the `run_id`, `step` and `t` of the run that wrote it, and the `sha256` from that run's [output record](#run-record-mallardjsonl) of the file (`sha256_from`). Where there is none (a copied or moved file, a run before 0.10, a changed file) and for a remap source mesh, `sha256` is `null`, with the file's `modified` time and a `note` saying why |
+| `preset` | The `[numerics] preset` (`null` without one): `name`, `default` (`true` when the input names no preset and gets the default, `high_order`), and per key it covers its `key`, its `value` in the resolved input (as TOML: `"\"HLLC\""`, `0.5`) and `from_preset` (`false` where the input overrides it) |
 
 Before 0.10 the block was named the provenance block: schema
 `"mallard-provenance"`, the comment `<!-- provenance {...} -->`, the attribute
@@ -632,7 +744,7 @@ build reads. It is never misread.
 
 | File | Version, where | Versions (written from) | Read by |
 |---|---|---|---|
-| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), 7: the [snapshot block](#snapshot-metadata) trailer (0.10) | Mallard: all |
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), 7: the [snapshot block](#snapshot-metadata) trailer (0.10) | Mallard: all; `tools/mallard/restart.py`: 2 on |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
@@ -697,6 +809,10 @@ $ mallard info solut/flow.vtkhdf.series
 `mallard post extract` evaluates probes, region integrals and snapshots of
 chosen fields on the state of restart files and snapshots after the run, as
 the run would have written them ([Probes of existing output](probes.md#probes-of-existing-output)).
+
+`mallard post convergence` compares runs of a case at several resolutions:
+the observed order, the extrapolated value and the grid convergence index of
+their forces, integrals and probes ([Grid convergence](convergence.md)).
 
 ### Comparing two solutions: `mallard diff`
 
@@ -797,6 +913,7 @@ ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` 
 
 - [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output)
 - [Probes and monitors](probes.md): probes, wall forces, domain integrals
+- [Grid convergence](convergence.md): discretization error from runs at several resolutions
 - [Statistics](statistics.md): time averages, spectra and correlations, phase averages
 - [Initialization and restarts](initialization.md): restart files and their format
 - [Running](running.md): run control of a running case

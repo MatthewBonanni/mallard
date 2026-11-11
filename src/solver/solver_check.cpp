@@ -121,9 +121,55 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, c
                                               logging::real(MeshQuality::LIMITS[m]) + ", the worst " +
                                               logging::format("%.3g", r.quality[m].max) + " at " +
                                               point(r.quality[m].worst.front().x) +
-                                              " m: improve the mesh there (--quality shows where)");
+                                              " m: improve the mesh there (--mesh-fields shows where)");
     }
-    if (!options.quality_file.empty()) r.quality_file = write_quality(mesh, quality, options.quality_file, extra);
+    if (options.mesh_fields.empty()) return;
+    try {
+        const bool selected = !options.stencil_cells.empty() || !options.stencil_region.empty();
+        std::vector<uint32_t> targets;
+        if (options.all_stencils) {
+            for (uint32_t c = 0; c < mesh->n_owned(); c++) targets.push_back(c);
+        } else if (!options.stencil_cells.empty()) {
+            const uint64_t n_global = mesh->n_global_cells > 0 ? mesh->n_global_cells : mesh->n_cells;
+            for (const uint64_t id : options.stencil_cells) {
+                if (id >= n_global) {
+                    throw std::runtime_error("--cells: no cell " + std::to_string(id) + "; the mesh's cells are 0 to " +
+                                             std::to_string(n_global - 1));
+                }
+            }
+            for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+                const uint64_t id = mesh->h_global_cell(c);
+                if (std::find(options.stencil_cells.begin(), options.stencil_cells.end(), id) !=
+                    options.stencil_cells.end()) {
+                    targets.push_back(c);
+                }
+            }
+        } else if (!options.stencil_region.empty()) {
+            const std::string & text = options.stencil_region;
+            const Input value = text.find('{') == std::string::npos
+                                    ? Input(text)
+                                    : parse_input_string("region = " + text, "--region").as_table().entries().at("region");
+            const std::vector<double> & fractions = used_regions->fractions(value, "--region");
+            for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+                if (fractions[c] > 0.0) targets.push_back(c);
+            }
+            if (comm::allreduce(uint64_t(targets.size()), comm::Op::SUM) == 0) {
+                throw std::runtime_error("--region " + text + " touches no cell");
+            }
+        }
+        const stencils::Table table = stencil_table(targets, options.stencil_weights);
+        CheckFields fields = extra;
+        for (auto & field : table.summary_fields()) fields.push_back(std::move(field));
+        if (selected) {
+            for (auto & field : stencils::target_fields(table, *mesh)) fields.push_back(std::move(field));
+        }
+        r.mesh_fields_file = write_quality(mesh, quality, options.mesh_fields, fields);
+        if (options.all_stencils || selected) {
+            r.stencil_file = stencils::write(table, *mesh, cell_owners(), options.mesh_fields + "_stencils.h5");
+        }
+    } catch (const std::exception & e) {
+        r.error(check_code::MESH_FIELDS, error_text(e));
+    }
 }
 
 void Solver::check_time_step(CheckReport & r) {

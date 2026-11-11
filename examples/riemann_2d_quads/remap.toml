@@ -66,4 +66,4 @@ check_interval = 200
 [[write_data]]
 prefix = "./remap/riemann"
 time_interval = 0.05
-variables = ["RHO", "U_X", "U_Y", "P"]
+fields = ["RHO", "U_X", "U_Y", "P"]

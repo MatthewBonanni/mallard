@@ -132,7 +132,7 @@ TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
         return "[statistics]\nt_start = 0.01\ninterval = 3\nfields = [\"T\"]\n"
                "products = [\"U_X*U_X\", \"U_X*U_Y\", \"RHO*T\"]\n"
                "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + sub + "/probe.csv\"\ninterval = 2\n"
-               "variables = [\"RHO\", \"U_Y\"]\nstart = " + numbers3("0.05", "0.05", "0.05") + "\nend = " +
+               "fields = [\"RHO\", \"U_Y\"]\nstart = " + numbers3("0.05", "0.05", "0.05") + "\nend = " +
                numbers3("0.95", "0.7", "0.5") + "\nn_points = 7\n"
                "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/r\"\nformat = \"restart\"\ninterval = 20\n";
     };
@@ -191,9 +191,9 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
     // outside the domain the nearest centroid; the values are the cell's, bitwise
     const std::string dir = (scratch_dir() / "mallard_probe_test").string();
     const std::string probes =
-        "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/line.csv\"\nvariables = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
+        "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/line.csv\"\nfields = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
         "start = " + numbers3("0", "0.5", "0.5") + "\nend = " + numbers3("1", "0.5", "0.5") + "\nn_points = 11\n"
-        "[[probes]]\nname = \"out\"\nfile = \"" + dir + "/out.csv\"\nvariables = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
+        "[[probes]]\nname = \"out\"\nfile = \"" + dir + "/out.csv\"\nfields = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
         "point = " + numbers3("1.3", "0.27", "0.62") + "\n";
     Solver solver;
     solver.set_distributed(false);

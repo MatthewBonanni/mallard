@@ -212,9 +212,10 @@ TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     expect_matches_serial(input);
 }
 
-TEST(MPI3DTest, SyntheticTurbulenceInletMatchesSerial) {
+TEST(MPI3DTest, SyntheticTurbulenceInletMatchesSerialWithAndWithoutStepGraphs) {
     // The inflow field is a function of the time and the inlet's geometry alone,
-    // and its zero-net-flux correction sums over the whole inlet in a fixed order
+    // and its zero-net-flux correction sums over the whole inlet in a fixed order;
+    // a step graph picks and filters its planes at the device's times
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
     input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n");
@@ -223,7 +224,7 @@ TEST(MPI3DTest, SyntheticTurbulenceInletMatchesSerial) {
                   "name = \"left\"\ntype = \"inlet_state\"\nu = [\"0.3 + 0.1 * y\", 0.0, 0.0]\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n"
                   "[boundaries.turbulence]\nreynolds_stress = [0.004, 0.002, 0.002, -0.001, 0.0, 0.0]\n"
                   "length_scale = [0.3, 0.15, 0.1]\n");
-    expect_matches_serial(input);
+    expect_matches_serial_with_and_without_step_graphs(input);
 }
 
 TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
@@ -250,7 +251,7 @@ TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
     Solver solver;
     solver.init(parse_toml(blast_input("cartesian", "type = \"FO\"\n") +
                            "[[write_data]]\nprefix = \"" + dir + "/left\"\nformat = \"vtu\"\nregion = \"left\"\n"
-                           "interval = 3\nvariables = [\"RHO\"]\n"));
+                           "interval = 3\nfields = [\"RHO\"]\n"));
     solver.run();
     comm::barrier();
     std::ifstream in(dir + "/left_000003.vtp");
@@ -270,10 +271,10 @@ TEST(MPI3DTest, BoundaryProbesDoNotDependOnTheRankCount) {
     auto input = [&](const std::string & sub) {
         return box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n") +
                "[[probes]]\nname = \"walls\"\nboundary = [\"bottom\", \"left\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
-               sub + "/walls.pvd\"\nvariables = [\"P\", \"TAU_W\", \"Q_W\", \"MASS_FLUX\"]\ninterval = 4\n"
+               sub + "/walls.pvd\"\nfields = [\"P\", \"TAU_W\", \"Q_W\", \"MASS_FLUX\"]\ninterval = 4\n"
                "reductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub + "/walls.csv\"\n"
                "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\npoint = [0.5, 0.4, 0.3]\nnormal = [1.0, 0.6, 0.3]\n"
-               "variables = [\"P\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub + "/cut.pvd\"\n"
+               "fields = [\"P\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub + "/cut.pvd\"\n"
                "interval = 8\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/cut.csv\"\n";
     };
     Solver reference;
@@ -310,7 +311,7 @@ TEST(MPI3DTest, HDF5OutputDoesNotDependOnTheRankCount) {
 #ifdef Mallard_HAS_HDF5
     const std::string dir = (scratch_dir() / "mallard_mpi3d_hdf5").string();
     expect_hdf5_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
-                                      "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
+                                      "interval = 4\nfields = [\"RHO\", \"U\", \"P\"]\n", dir, {0, 4, 8});
 #endif
 }
 
@@ -322,7 +323,7 @@ TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
 #ifdef Mallard_HAS_HDF5
     const std::string dir = (scratch_dir() / "mallard_mpi3d_vtkhdf").string();
     expect_vtkhdf_output_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"),
-                                        "interval = 4\nvariables = [\"RHO\", \"U\", \"P\"]\n", dir,
+                                        "interval = 4\nfields = [\"RHO\", \"U\", \"P\"]\n", dir,
                                         {"_000000", "_000004", "_000008"});
     const std::string file = write_temp_shared("mallard_mpi_vtkhdf_shell.msh", shell_gmsh(4, 3, true, false));
     expect_vtkhdf_output_matches_serial(
@@ -334,7 +335,7 @@ TEST(MPI3DTest, VTKHDFOutputDoesNotDependOnTheRankCount) {
         "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
         "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n",
-        "interval = 2\nseries = true\nvariables = [\"RHO\", \"U\"]\n", dir + "_curved", {""});
+        "interval = 2\nseries = true\nfields = [\"RHO\", \"U\"]\n", dir + "_curved", {""});
 #endif
 }
 

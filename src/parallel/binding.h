@@ -108,6 +108,12 @@ std::vector<std::string> check(const std::vector<Placement> & ranks);
 void select_device(int argc, char ** argv);
 
 /**
+ * @brief After Kokkos is initialized: every rank's placement on rank 0, in rank
+ *        order (empty on the other ranks). Collective.
+ */
+std::vector<Placement> placements();
+
+/**
  * @brief After Kokkos is initialized: prints every rank's host, GPU and CPUs
  *        from rank 0, and the warnings of check(). Collective; does nothing
  *        for single-rank runs.

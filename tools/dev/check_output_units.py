@@ -57,39 +57,39 @@ name = "line"
 start = [0.1, 0.5]
 end = [1.9, 0.5]
 n_points = 5
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 reductions = ["integral", "mean"]
 [[probes]]
 name = "h5"
 format = "hdf5"
 point = [1.0, 0.5]
-variables = ["RHO", "T"]
+fields = ["RHO", "T"]
 [[write_data]]
 prefix = "flow"
 format = "vtu"
 interval = 2
-variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
+fields = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[write_data]]
 prefix = "flow"
 format = "xdmf"
 interval = 2
-variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
+fields = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[write_data]]
 prefix = "flow"
 interval = 2
-variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
+fields = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[probes]]
 name = "vtkhdf"
 format = "vtkhdf"
 point = [1.0, 0.5]
-variables = ["RHO", "T"]
+fields = ["RHO", "T"]
 [[probes]]
 name = "tone"
 point = [1.0, 0.5]
-variables = ["U", "P"]
+fields = ["U", "P"]
 time_interval = 1.0e-4
 reductions = ["mean"]
-spectra = {variables = ["U_X", "P", "mean_P"], length = 1.0e-3, strouhal = {length = 1.0, velocity = 10.0}}
+spectra = {fields = ["U_X", "P", "mean_P"], length = 1.0e-3, strouhal = {length = 1.0, velocity = 10.0}}
 """
 
 

@@ -104,6 +104,18 @@ std::string restart_of_text(const json::Value * r) {
            (id && !id->is_null() ? " (run " + id->string + ")" : " (a run that recorded no run id)");
 }
 
+/** @brief "path, sha256 ..." of an entry of the block's files; a file a run starts from with its step and run. */
+std::string read_file_text(const json::Value & f) {
+    const json::Value * sha = f.find("sha256");
+    std::string out = text(f.find("path"));
+    if (const json::Value * step = f.find("step")) {
+        const json::Value * id = f.find("run_id");
+        out += ", step " + text(step) + (id && !id->is_null() ? " of run " + id->string : "");
+    }
+    if (sha && !sha->is_null()) return out + ", sha256 " + sha->string;
+    return out + ", " + text(f.find("note")) + ", modified " + text(f.find("modified"));
+}
+
 void print_run(const json::Value & p) {
     logging::section("Run", "same for every file of the run");
     std::string mallard = text(at(p, {"mallard", "version"}));
@@ -140,8 +152,13 @@ void print_run(const json::Value & p) {
         if (mesh->find("file")) item("Mesh file", text(mesh->find("file")));
         if (mesh->find("sha256")) item("Mesh sha256", text(mesh->find("sha256")));
     }
+    if (const json::Value * files = p.find("files"); files && files->type == json::Value::Type::ARRAY) {
+        for (const json::Value & f : files->array) item("Read " + text(f.find("kind")), read_file_text(f));
+    }
     if (const json::Value * preset = p.find("preset"); preset && !preset->is_null()) {
-        item("Preset", text(preset->find("name")));
+        const json::Value * is_default = preset->find("default");
+        const bool by_default = is_default && is_default->type == json::Value::Type::BOOL && is_default->boolean;
+        item("Preset", text(preset->find("name")) + (by_default ? " (the default)" : ""));
     }
 }
 
@@ -684,7 +701,8 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         std::cerr << "mallard info: " << path << " is a mesh file, which records no input.\n";
         return 1;
     }
-    const std::string quality_file = args.value_or("--quality", "");
+    const std::string quality_file = args.value_or("--mesh-fields", args.value_or("--quality", ""));
+    if (args.has("--quality") && comm::is_root()) std::cerr << "mallard info --quality is deprecated: use --mesh-fields\n";
     const MeshBlock block = output::read_mesh(path);
     output::Contents c = output::mesh_contents(path, block);
     Kokkos::ScopeGuard kokkos(argc, argv);
@@ -718,13 +736,13 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         std::string files;
         for (const std::string & f : view) files += (files.empty() ? "" : ",") + json::quote(f);
         std::cout << out << ",\"quality\":" << quality_json(summary)
-                  << ",\"quality_file\":" << (written.empty() ? "null" : json::quote(written))
+                  << ",\"mesh_fields_file\":" << (written.empty() ? "null" : json::quote(written))
                   << ",\"case_view\":[" << files << "]}\n";
         return 0;
     }
     print_contents(c);
     print_quality_table(summary);
-    if (!written.empty()) item("Quality fields", written);
+    if (!written.empty()) item("Mesh fields", written);
     for (size_t k = 0; k < view.size(); k++) item(k == 0 ? "Case view" : "Case view image", view[k]);
     return 0;
 }
@@ -742,7 +760,7 @@ int info_main(const cli::Args & args) {
     try {
         std::error_code error;
         const bool mesh_file = output::is_mesh_file(path);
-        for (const char * option : {"--quality", "--view"}) {
+        for (const char * option : {"--mesh-fields", "--quality", "--view"}) {
             if (!mesh_file && args.has(option)) {
                 return cli::usage_error(*cli::command("info"), std::string(option) + " takes a mesh file, not " + path);
             }

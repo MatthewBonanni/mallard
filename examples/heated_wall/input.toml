@@ -71,4 +71,4 @@ check_interval = 1000
 prefix = "./solut/box"
 format = "vtu"
 time_interval = 1.0e-3
-variables = ["RHO", "RHOE", "T"]
+fields = ["RHO", "RHOE", "T"]

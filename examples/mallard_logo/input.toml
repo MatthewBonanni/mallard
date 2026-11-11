@@ -106,4 +106,4 @@ check_interval = 500
 [[write_data]]
 prefix = "./solut/logo"
 time_interval = 0.02
-variables = ["RHO", "U_X", "U_Y", "P"]
+fields = ["RHO", "U_X", "U_Y", "P"]

@@ -39,7 +39,8 @@ std::string velocity(const std::string & u) {
 }
 
 std::string physics() {
-    return "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+    return "[numerics.face_reconstruction]\ntype = \"FO\"\n"
+           "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
            "[output]\ncheck_interval = 5\n";
 }
 

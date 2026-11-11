@@ -67,11 +67,37 @@ void set_input(const std::string & file, const std::string & text);
 /** @brief The mesh: its type (e.g. "file", "cartesian"), file and file hash (empty if none). */
 void set_mesh(const std::string & type, const std::string & file, const std::string & hash);
 
+/** @brief A small data file the run reads (a mechanism, a table, a profile, probe points): set_read_files hashes it. */
+void read_file(const std::string & kind, const std::string & path);
+
+/**
+ * @brief A file the run starts from (a restart file, a remap source), by the identity it carries: the run id
+ *        in run_block (the run block of the run that wrote it, or "" if it has none), its step and t, and the
+ *        SHA-256 that run's output record gives the file, where its run log has one. Not hashed again: it may
+ *        be large.
+ */
+void read_start_file(const std::string & kind, const std::string & path, const std::string & run_block,
+                     std::uint64_t step, double t);
+
+/** @brief A large file read that carries no identity (a remap source mesh): its size and modification time. */
+void read_large_file(const std::string & kind, const std::string & path);
+
+/**
+ * @brief The block's files: each file every rank read, once, with its path as given and resolved, its size,
+ *        and its SHA-256 or identity (collective; rank 0 hashes).
+ */
+void set_read_files();
+
 /** @brief The input with every key explicit, as setup used it (ResolvedInput::toml). */
 void set_resolved(const std::string & toml);
 
-/** @brief The numerics preset (empty name: none) and each key it covers: value, and whether the preset set it. */
-void set_preset(const std::string & name, const std::vector<std::tuple<std::string, std::string, bool>> & settings);
+/**
+ * @brief The numerics preset (empty name: none), whether it applies as the
+ *        default (the input names none), and each key it covers: value, and
+ *        whether the preset set it.
+ */
+void set_preset(const std::string & name, bool is_default,
+                const std::vector<std::tuple<std::string, std::string, bool>> & settings);
 
 /** @brief Every rank takes rank 0's block and run id (collective). */
 void share();

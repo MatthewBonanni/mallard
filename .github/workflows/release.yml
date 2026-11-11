@@ -28,7 +28,7 @@ env:
 
 jobs:
   meta:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
@@ -45,8 +45,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: amd64, runner: ubuntu-24.04 }
-          - { arch: arm64, runner: ubuntu-24.04-arm }
+          - { arch: amd64, runner: ubuntu-26.04 }
+          - { arch: arm64, runner: ubuntu-26.04-arm }
     runs-on: ${{ matrix.runner }}
     name: cpu (${{ matrix.arch }})
     steps:
@@ -74,7 +74,7 @@ jobs:
 
   cuda:
     needs: meta
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 340
     steps:
       - name: Free disk space
@@ -109,7 +109,7 @@ jobs:
   # spack install of this checkout (CPU: OpenMP, MPI, HDF5, CGNS, zlib, 2D and 3D) with
   # the package in spack/, then its standalone test and the smoke test
   spack:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
       - run: git submodule update --init --depth 1 src/external/toml11
@@ -172,7 +172,7 @@ jobs:
   publish:
     needs: [meta, cpu, cuda, spack]
     if: github.ref_type == 'tag' || inputs.push
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Tag
         env:

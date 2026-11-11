@@ -65,13 +65,13 @@ file = "./solut/forces_cylinder.csv"
 [[write_data]]
 prefix = "./solut/cylinder"
 time_interval = 1.0
-variables = ["RHO", "U_X", "U_Y", "P"]
+fields = ["RHO", "U_X", "U_Y", "P"]
 
 [[write_data]]
 prefix = "./solut/wall"
 region = "cylinder"
 time_interval = 1.0
-variables = ["P"]
+fields = ["P"]
 
 # Often, and small: the near wake's cells (with their REGION_FRACTION), and
 # three cuts across the recirculation bubble at x = 1.0, 1.4 and 1.8 (point
@@ -81,7 +81,7 @@ variables = ["P"]
 prefix = "./solut/near_wake"
 region = {type = "rectangle", center = [3.0, 0.0], size = [6.0, 3.0]}
 time_interval = 0.6
-variables = ["RHO", "U", "P", "VORTICITY"]
+fields = ["RHO", "U", "P", "VORTICITY"]
 
 [[write_data]]
 prefix = "./solut/wake"
@@ -89,13 +89,13 @@ regions = [{type = "cut_plane", point = [1.0, 0.0], normal = [1.0, 0.0], bounds 
            {type = "cut_plane", point = [1.4, 0.0], normal = [1.0, 0.0], bounds = [[1.3, -2.0], [1.5, 2.0]]},
            {type = "cut_plane", point = [1.8, 0.0], normal = [1.0, 0.0], bounds = [[1.7, -2.0], [1.9, 2.0]]}]
 time_interval = 0.6
-variables = ["U", "P", "MASS_FLUX"]
+fields = ["U", "P", "MASS_FLUX"]
 
 # Transverse velocity two diameters behind the cylinder (its spectrum gives
 # St), point values of the TENO polynomials every 0.1 time units
 [[probes]]
 name = "wake_point"
-variables = ["U_Y", "P"]
+fields = ["U_Y", "P"]
 sampling = "point"
 point = [2.5, 0.0]
 time_interval = 0.1
@@ -105,7 +105,7 @@ file = "./solut/probe_wake_point.csv"
 # .pvd series), with its mean and RMS each time unit
 [[probes]]
 name = "wake_arc"
-variables = ["U", "P"]
+fields = ["U", "P"]
 sampling = "point"
 type = "arc"
 center = [0.0, 0.0]
@@ -123,7 +123,7 @@ reductions_file = "./solut/probe_wake_arc_reductions.csv"
 [[probes]]
 name = "wall"
 boundary = "cylinder"
-variables = ["CP", "CF", "Y_PLUS"]
+fields = ["CP", "CF", "Y_PLUS"]
 reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
 time_interval = 1.0
 file = "./solut/probe_wall.csv"
@@ -149,4 +149,4 @@ level = 0.0
 [[write_data]]
 prefix = "./solut/phase"
 time_interval = 100.0
-variables = ["PHASE_*"]
+fields = ["PHASE_*"]

@@ -68,7 +68,7 @@ Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an 
 
 | Key | Description |
 |---|---|
-| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35 with Strang splitting, 1.0 with `coupling = "simpler"`). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required, except that with `[numerics] preset` and neither of them the preset sets `cfl`. |
+| `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35 with Strang splitting, 1.0 with `coupling = "simpler"`). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required, except that with a [numerics preset](guide/numerics.md#presets) (also the default `high_order`, which applies when the input sets neither `[numerics] preset` nor `[numerics.face_reconstruction]`) and neither of them the preset sets `cfl`. |
 | `dt` | Fixed time step |
 | `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
 | `n_steps` | Stop after this many steps |
@@ -76,7 +76,8 @@ Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an 
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
-| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
+| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches one graph per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel only with halos exchanged with MPI (`[parallel] halo_exchange = "mpi"`, or builds without NCCL); the run log says so |
+| `step_queue` | Steps the host enqueues ahead of the GPU (default 3, at most 64). Each step's time step, end and checks are decided on the device, so the host does not wait for a step before launching the next; it stops the queue at the steps it acts on (outputs, statistics, probes, monitors, triggers, requests, the end of the run, a divergence) and acts on that step's state. `1` waits for every step; `0` has the host take every step itself, kernel by kernel. Results and files are the same bit for bit with any value. More than one step ahead needs the CUDA graphs of CUDA 12.4 or later; HIP and SYCL builds, and CUDA runs without graphs, take one step at a time ([details](guide/parallel.md#threads-and-gpus)) |
 
 At least one stop condition is required.
 
@@ -585,8 +586,8 @@ type that takes them; which options each type takes is the guide's
 | `wall_isothermal` | Wall at temperature `T` | `T`, `u` and `wall_model` (optional, as `wall_adiabatic`) |
 | `wall_heat_flux` | Wall with heat flux `q` [W/m^2] into the fluid | `q`, `u` and `wall_model` (optional, as `wall_adiabatic`) |
 | `inlet_state` | The full inflow state: exact for supersonic inflow; for subsonic inflow it also fixes `p` and reflects acoustic waves, unless `nscbc` | `u` (a vector, or a speed along `direction`, default the inward normal), `p`, `T`; `X` or `Y` for mixtures (numbers or expressions, with an optional `balance` species as in `[initialize]`); options `nscbc` (below) and, with it, `turbulence` (below) |
-| `inlet_stagnation` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction, into the domain at every face; default the inward normal of each face), `X` or `Y` for mixtures (as `inlet_state`) |
-| `inlet_mass_flow` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)]: a number or expression, or a vector `m`, which flows along `m / |m|` with `m . n_in` at each face) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]) with an optional `profile` (expression of `x`, `y`, `z`, default uniform) shaping it along the inlet; `direction` (default the inward normal of each face; not with a `mass_flux` vector); `X` or `Y` for mixtures (as `inlet_state`) |
+| `inlet_stagnation` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction: numbers or expressions of `x`, `y`, `z`, `t`, into the domain at every face and time; default the inward normal of each face), `X` or `Y` for mixtures (as `inlet_state`) |
+| `inlet_mass_flow` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)]: a number or expression, or a vector `m`, which flows along `m / |m|` with `m . n_in` at each face) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]: a number or an expression of `t`, non-negative) with an optional `profile` (expression of `x`, `y`, `z`, `t`, non-negative, default uniform) shaping it along the inlet, rescaled to `mdot` at every stage; `direction` (numbers or expressions of `x`, `y`, `z`, `t`, into the domain at every face and time; default the inward normal of each face; not with a `mass_flux` vector); `X` or `Y` for mixtures (as `inlet_state`) |
 | `outlet_pressure` | Outlet: imposes `p` on subsonic faces, keeping the interior temperature and velocity; supersonic faces take the interior state | `p`; options `average` (`true`: on subsonic faces, shift the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile, for mixed subsonic/supersonic outflow; `p` then may depend on `t` only; default `false`; not with mixtures) or `nscbc` (below) |
 | `outlet_extrapolation` | Transmissive: the exterior state is the solution translated from inside the domain | |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike (single gases) | `u` (a vector), `p`, `T` (free stream) |
@@ -622,7 +623,7 @@ depend on `t`, these and `dirichlet` states alike, are evaluated once and
 cost nothing per stage; those that do are evaluated on the device at the
 stage time, inside the step's CUDA graph.
 A number of `t` that leaves its range (`p`, `T`, `p0`, `T0`, a wall `T` not
-positive, `mass_flux` negative, a `mass_flux` vector out of the domain) stops
+positive, `mass_flux` negative, a `mass_flux` vector or an inlet `direction` out of the domain) stops
 the run at the next progress check with the face, time and value. Guide:
 [values](guide/boundary_conditions.md#values-numbers-expressions-and-vectors).
 
@@ -630,7 +631,10 @@ A vector (`u` of `inlet_state`, walls and `farfield`; `mass_flux`) is either
 `N_DIM` components (each a number or an expression), or one number or
 expression, a magnitude along `direction` (normalized; default the inward
 normal of each face). A vector together with `direction` is an error; a wall
-speed needs its `direction`, and `farfield` takes a vector only.
+speed needs its `direction`, and `farfield` takes a vector only. `direction`
+(also the flow direction of `inlet_stagnation` and `inlet_mass_flow`) is
+`N_DIM` numbers or expressions of `x`, `y`, `z`, `t`, normalized at each
+face; at inlets it must point into the domain at every face and time.
 
 ### Characteristic boundaries (`nscbc`)
 
@@ -714,10 +718,10 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence-turbulence).
 
 | Key | Description |
 |---|---|
-| `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z`, positive semidefinite |
+| `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z` (not `t`, even when `u` depends on `t`), positive semidefinite |
 | `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/post/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
-| `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed) |
+| `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed); with a `u` of `t`, that of `t = 0`, so set it when the mean starts at rest or varies widely |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
 | `zero_net_flux` | `true` (default) removes the area mean of the normal fluctuation over the inlet at every instant, which would otherwise drive a plane acoustic wave; it also removes about `4 L_y L_z / A` of the normal Reynolds stress for an inlet of area `A` |
 | `points_per_length` | Resolution of the generator's grid on the inlet: points per smallest integral length (default 6, at least 2) |
@@ -763,7 +767,7 @@ T = 300.0
 
 | Key | Description |
 |---|---|
-| `preset` | `robust`, `accurate`, `les` or `reacting`: a validated combination of `face_reconstruction` (`type` and its `order` or `limiter`), `riemann_solver`, `convective_flux`, `time_integrator` and `[run] cfl`, each used only where the input does not set that key (a reconstruction option only when the reconstruction type is the preset's; `cfl` only when `[run]` sets neither `cfl` nor `dt`). What each chooses and why: [Numerics: presets](guide/numerics.md#presets). Default: none (the defaults below) |
+| `preset` | `high_order` (TENO-E 5), `second_order` (MUSCL), `first_order`, `les` (second order) or `reacting` (second order): a validated combination of `face_reconstruction` (`type` and its `order` or `limiter`), `riemann_solver`, `convective_flux`, `time_integrator` and `[run] cfl`, each used only where the input does not set that key (a reconstruction option only when the reconstruction type is the preset's; `cfl` only when `[run]` sets neither `cfl` nor `dt`). What each chooses and why: [Numerics: presets](guide/numerics.md#presets). `robust` and `accurate`, their names before 0.10, are read as `second_order` and `high_order`, with a warning, until 0.11. Default: `high_order` when the input has no `[numerics.face_reconstruction]` table; none (the defaults below) when it has one |
 | `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default), `RK4`, `SSPRK54` (five-stage fourth-order SSP, low storage), `CK45` (Carpenter-Kennedy five-stage fourth-order, 2N storage) or `RDPK3Sp35` (five-stage third order with an embedded error estimate, for `[numerics.error_control]`). See [time integrators](numerics/overview.md#time-integrators) for their stability limits and cost |
 | `check_nan` | Check every conservative and partial density for non-finite values right after each step, so a diverging step writes no output (one more reduction per step). Without it the run still stops at the next step, through the time-step reduction; see [run control](guide/running.md). Default `false` |
@@ -792,7 +796,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 
 | Key | Description |
 |---|---|
-| `type` | `FO` (first order; the default, also without this table), `MUSCL` or `TENO` |
+| `type` | `FO` (first order; the default, when this table is given without a `preset`), `MUSCL` or `TENO`. Without a `preset` or this table, the `high_order` preset applies |
 | `limiter` | (`MUSCL`) `venkatakrishnan` (default), `barth_jespersen` or `none` |
 | `venkatakrishnan_K` | (`MUSCL`) Venkatakrishnan threshold constant, default 5 |
 | `order` | (`TENO`) Order of accuracy, 3 to 6, default 5. In 3D, faces use Dunavant (triangles) or Gauss (quadrilaterals) rules exact to this order, capped at degree 5 on triangles |
@@ -839,7 +843,7 @@ double precision in every build.
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
 | `fuse_half_steps` | `true` fuses the closing half step of a step with the next step's opening one, except where output, checks, probes, statistics or the end of the run read the state (default `false`). Faster where cells take few sub-steps, but results then depend on when output is written, and a restart reproduces an uninterrupted run only from a step at which that run also wrote output |
 | `C_reg` | concentration [kmol/m³] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
-| `load_balance` | `true` moves the integration of cells from ranks with more chemistry work than the mean (sub-steps of their cells' last calls) to ranks with less, in every call where the most loaded rank exceeds the mean by 5%; only the cells' states travel, and results stay bitwise the same (default `false`). The summary reports the time ranks wait for the slowest rank's chemistry with or without it |
+| `load_balance` | `true` moves the integration of cells from ranks with more chemistry work than the mean (sub-steps of their cells' last calls) to ranks with less, in every call where the most loaded rank exceeds the mean by 5%; only the cells' states travel, and results stay bitwise the same (default `false`). Each pair of ranks moves at most its capacity of cells per call, which starts at 0 and follows the cells the pair asked for (growing at once, shrinking after 256 steps of less than half); the rest stay with their owner, and a balanced run moves none. With NCCL the messages carry the whole capacity, so that the step's CUDA graph keeps its sizes; a change of the capacities records it again. The summary reports the time ranks wait for the slowest rank's chemistry with or without it |
 | `sparse` | `true` for the sparse LU (static pattern, with the Jacobian's dense rank-one part by Sherman-Morrison), `false` for the dense one; by default sparse from 30 species when its factors fill at most 60% of the dense matrix (GRI-3.0 and larger) |
 | `lanes` | Vector lanes integrating one cell: 1 for one thread per cell (cells ordered by their last cost), a power of 2 up to 32 for a team per cell on GPUs; default 0, automatic: a warp per cell on GPUs from 16 species (8 warps, 16 from 512 species, for cells whose last call took 16 or more sub-steps), else one thread |
 
@@ -1038,7 +1042,7 @@ ranks. A probe that is not due costs nothing.
 | Key | Description |
 |---|---|
 | `name` | Probe name |
-| `variables` | Any of the `[statistics]` fields, `U` and `RHOU` for all components, `Y_*` and `RHOY_*` for every species; and the averages `[statistics]` keeps (`MEAN_<A>`, `MEAN_U`, `COV_<A>_<B>`, `PHASE_<bin>_<A>`), each sample's the value of its cell in both `sampling` modes |
+| `fields` | Any of the `[statistics]` fields, `U` and `RHOU` for all components, `Y_*` and `RHOY_*` for every species; and the averages `[statistics]` keeps (`MEAN_<A>`, `MEAN_U`, `COV_<A>_<B>`, `PHASE_<bin>_<A>`), each sample's the value of its cell in both `sampling` modes |
 | `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `surface` (below); without it, `point` or `start`/`end` select a point or a line |
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples (below). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
@@ -1137,7 +1141,7 @@ t_start = 0.2
 [[probes]]
 name = "wall_mean"
 boundary = "wall"
-variables = ["CF", "Q_W"]
+fields = ["CF", "Q_W"]
 reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}
 average = true
 interval = 1000
@@ -1168,7 +1172,7 @@ cannot be changed during the run.
 
 | `spectra` key | Description |
 |---|---|
-| `variables` | Variables of the probe (`U` for its components) and columns of its reductions file (`<reduction>_<variable>`); required |
+| `fields` | Fields of the probe (`U` for its components) and columns of its reductions file (`<reduction>_<field>`); required |
 | `length` | Time spanned by the history, at least 4 samples per segment; required |
 | `t_start` | Time of the first sample, default 0 |
 | `segments` | Welch segments, overlapping by half, default 1 |
@@ -1184,9 +1188,9 @@ cannot be changed during the run.
 name = "wake"
 type = "point"
 point = [3.0, 0.5]
-variables = ["U_Y"]
+fields = ["U_Y"]
 time_interval = 0.5
-spectra = {variables = ["U_Y"], t_start = 60.0, length = 140.0, strouhal = {length = 1.0, velocity = 0.2}}
+spectra = {fields = ["U_Y"], t_start = 60.0, length = 140.0, strouhal = {length = 1.0, velocity = 0.2}}
 ```
 
 ```toml
@@ -1196,7 +1200,7 @@ name = "section"
 type = "cut_plane"
 point = [0.5, 0.0, 0.0]
 normal = [1.0, 0.2, 0.0]
-variables = ["P", "MASS_FLUX"]
+fields = ["P", "MASS_FLUX"]
 sampling = "point"
 format = "vtp"
 reductions = ["integral", "mean"]
@@ -1263,7 +1267,7 @@ faces as polygons with cell data (3D).
 [[probes]]
 name = "wall"
 boundary_type = "wall"
-variables = ["P", "CP", "CF", "Q_W", "Y_PLUS"]
+fields = ["P", "CP", "CF", "Q_W", "Y_PLUS"]
 reference = {rho = 1.2, u = [30.0, 0.0], p = 101325.0}
 format = "vtp"
 interval = 100
@@ -1272,7 +1276,7 @@ interval = 100
 name = "outlet"
 boundary = "outlet"
 samples = false
-variables = ["MASS_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "ENTHALPY_FLUX"]
 reductions = ["integral"]
 ```
 
@@ -1319,7 +1323,7 @@ A region probe has no samples: `type`, `sampling`, `format`, `file` and
 # Fuel mass and the extreme temperatures in the combustor
 [[probes]]
 name = "combustor"
-variables = ["RHO", "Y_CH4", "T"]
+fields = ["RHO", "Y_CH4", "T"]
 region = {type = "cylinder", center = [0.1, 0, 0], axis = [1, 0, 0], radius = 0.04, length = 0.2}
 reductions = ["integral", "mean", "favre", "min", "max"]
 interval = 10
@@ -1331,7 +1335,7 @@ fuel's mass fraction there, so the fuel mass is their product.
 ```toml
 [[probes]]
 name = "wake"
-variables = ["U", "P"]
+fields = ["U", "P"]
 sampling = "point"
 type = "arc"
 center = [0.0, 0.0]
@@ -1382,7 +1386,7 @@ Source terms per unit volume (or integrated totals over a region), any number
 of them, added up with `[source]`. Each is evaluated on the device: entries of
 position alone once, entries of `t`, the solution or domain averages at every
 Runge-Kutta stage, in one kernel without host round trips (steps stay CUDA
-graphs, except with domain averages, which need a global sum per stage).
+graphs; domain averages add an exact global sum per stage, on the device).
 
 | Key | Default | Description |
 |---|---|---|
@@ -1563,7 +1567,7 @@ Expressions in regions are those of every section:
 # The mass of the whole domain, and the heat release in the mesh's cell zone "flame"
 [[probes]]
 name = "total"
-variables = ["RHO"]
+fields = ["RHO"]
 region = "domain"
 
 [[sources]]
@@ -1601,7 +1605,7 @@ region = "flame_zone"
 
 [[probes]]
 name = "flame"
-variables = ["T"]
+fields = ["T"]
 region = "flame_zone"
 ```
 
@@ -1634,6 +1638,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the run block; `false` skips reading it again for very large meshes. Default `true` |
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
+| `write_stencils` | Path of an HDF5 file of every cell's reconstruction stencils as the run builds them, written once at the setup ([layout](guide/output.md#mesh-and-stencil-fields)); `""` writes none. Needs HDF5. Default `""` |
 
 The run's summary reports the size of the files written and the time spent writing them (in the background with `async`); `output` in its wall time is what the run waited for.
 
@@ -1657,8 +1662,8 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | `format` | Which to choose: [output](guide/output.md#which-format). `vtkhdf` (default: VTK's HDF5 format, see below; ParaView 5.12+, PyVista, h5py), `vtu` (with a `.pvd` series next to it; any VTK XML reader, e.g. Tecplot, and builds without HDF5), `xdmf` (XDMF indexes over HDF5 files, see below; VisIt, meshio, ParaView of any version) or `restart`. `hdf5`, the name of `xdmf` before 0.10.0, is an error (VTKHDF is HDF5 too); `mallard input upgrade` rewrites it to `vtkhdf`. Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
 | `series` | (`vtkhdf`) `false` (default): one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`; `true`: every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
-| `variables` | (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), `Q_CRITERION` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs; called `Q` before 0.10.0, which is now an error), `LAMBDA2` (the middle eigenvalue of S² + Ω², negative in vortex cores) and `SCHLIEREN` (the density gradient magnitude, kg/m⁴), with the gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares; see [derived fields](guide/output.md#derived-fields)), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every variable with that prefix, e.g. `Y_*`; `mallard list fields input.toml` lists those of a case |
-| `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it; a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `variables` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for `xdmf` |
+| `fields` | (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), `Q_CRITERION` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs; called `Q` before 0.10.0, which is now an error), `LAMBDA2` (the middle eigenvalue of S² + Ω², negative in vortex cores) and `SCHLIEREN` (the density gradient magnitude, kg/m⁴), with the gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares; see [derived fields](guide/output.md#derived-fields)), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`, and the [mesh and stencil fields](guide/output.md#mesh-and-stencil-fields) `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` and `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION`. A trailing `*` selects every field with that prefix, e.g. `Y_*`; `mallard list fields input.toml` lists those of a case |
+| `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it; a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `fields` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for `xdmf` |
 | `regions` | (`vtkhdf`, `vtu`) Instead of `region`: a list of regions, each written as `region` writes it, to `PREFIX_<name>` (a named region or zone) or `PREFIX_<index>` (inline, from 0) |
 | `geometry` | Removed in 0.10.0 (deprecated in 0.9.0) for `region`, which `mallard input upgrade` writes in its place (`"all"` as `"domain"`) |
 | `compression` | `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's `vtkZLibDataCompressor` reads them (needs `Mallard_ENABLE_ZLIB`); VTKHDF and XDMF's HDF5 datasets are chunked, byte-shuffled and deflated (HDF5's standard filters, which every HDF5 reader has); restart files become version 5 (6 with averaged spectra), each variable in byte-shuffled, deflated chunks (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Filled regions only: boundary zones and other regions of lower dimension are written uncompressed |

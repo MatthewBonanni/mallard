@@ -50,7 +50,7 @@ std::unique_ptr<Solver> init_flow(const std::string & rho, const std::string & u
       << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << (physics.empty() ? "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n" : physics)
       << "[output]\ncheck_interval = 1000000\n[[write_data]]\nprefix = \""
-      << (scratch_dir() / "mallard_derived").string() << "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = ["
+      << (scratch_dir() / "mallard_derived").string() << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = ["
       << variables << "]\n";
     auto solver = std::make_unique<Solver>();
     solver->set_distributed(false);
@@ -254,7 +254,7 @@ TEST(DerivedFields, MachOfAUniformArgonFlowTakesTheMixtureGamma) {
     s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n" << mixture
       << "[output]\ncheck_interval = 1000000\n[[write_data]]\nprefix = \""
       << (scratch_dir() / "mallard_derived_argon").string()
-      << "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"MACH\"]\n";
+      << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"MACH\"]\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(s.str()));

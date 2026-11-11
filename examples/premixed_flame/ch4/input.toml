@@ -78,4 +78,4 @@ check_interval = 2000
 [[write_data]]
 prefix = "./solut/flame"
 time_interval = 0.00011637103889377862
-variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]
+fields = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"]

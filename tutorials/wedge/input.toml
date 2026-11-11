@@ -64,7 +64,7 @@ check_interval = 200
 
 [[probes]]
 name = "line"
-variables = ["P"]
+fields = ["P"]
 start = [1.5, 0.15]
 end = [1.5, 1.45]
 n_points = 66
@@ -73,4 +73,4 @@ interval = 10
 [[write_data]]
 prefix = "./solut/wedge"
 time_interval = 0.002
-variables = ["RHO", "U_X", "U_Y", "P", "T"]
+fields = ["RHO", "U_X", "U_Y", "P", "T"]
