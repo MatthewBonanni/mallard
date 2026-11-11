@@ -29,10 +29,13 @@ dir=$repo
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse "$base")" ]; then
     echo "== merges into $base"
     if merge=$(git merge-tree --write-tree --name-only --no-messages "$base" HEAD); then
-        commit=$(git commit-tree -p "$base" -p HEAD -m precheck "$(echo "$merge" | head -n 1)")
+        # A throwaway commit of the merge (CI runners have no git identity)
+        commit=$(GIT_AUTHOR_NAME=precheck GIT_AUTHOR_EMAIL=precheck@localhost GIT_COMMITTER_NAME=precheck \
+            GIT_COMMITTER_EMAIL=precheck@localhost git commit-tree -p "$base" -p HEAD -m precheck \
+            "$(echo "$merge" | head -n 1)") || exit 1
         dir=$(mktemp -d)
         trap 'git -C "$repo" worktree remove --force "$dir"' EXIT
-        git worktree add -q --detach "$dir" "$commit"
+        git worktree add -q --detach "$dir" "$commit" || exit 1
     else
         echo "conflicts in:"
         echo "$merge" | sed -n '2,$s/^/  /p'
