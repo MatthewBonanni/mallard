@@ -437,7 +437,7 @@ they were, so the next launch takes it again with the controller's dt), adds the
 ledger, updates p_max, counts non-finite values (`check_nan`) and, at progress rows, reduces the row's and the
 run health's local values into a pinned record. The host computes, at each step it acts on, the first step
 and the first time at which it must act again (`Solver::step_horizon`: `n_steps`, `t_stop`, output and sample
-intervals, time-based outputs, monitors, control files). Each such condition is `step >= s` or `t >= t_x`
+intervals, time-based outputs, control files). Each such condition is `step >= s` or `t >= t_x`
 (intervals: their next multiple; times: the threshold `due` compares with), so the device's comparison with
 their minima is the host's decision bit for bit; a condition the device cannot evaluate exactly (statistics
 after `t_start`) stops it at every step where it may hold, and the host decides as before.
@@ -454,6 +454,14 @@ launch one step at a time with the IF bodies always run.
 Runs with triggers stop the device at every step (triggers read probe values and the wall time on the
 host), and runs with boundary conditions of `t` at every progress row (the rows check the expressions'
 errors on the host). Outputs stop the device at their steps.
+
+Force and integral monitors are evaluated in the graph. After a step's end, a kernel sets one flag per
+monitor (the step is accepted, the device goes on, and the step is a multiple of the monitor's interval);
+each monitor's reduction sits under an IF node on its flag and is reduced over the ranks on the device
+(NCCL in NCCL builds), then copied into a pinned array per record slot with a bit in the record. The host
+writes the rows from the record as it takes it. At a step where the device stops, the host evaluates the
+monitors itself, with the same device reduction, so rows match at any depth. Monitors with the
+kinetic-energy budget or fused chemistry stay on the host.
 
 ## Scaling (one node)
 
