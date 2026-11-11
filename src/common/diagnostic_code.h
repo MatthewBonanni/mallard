@@ -61,6 +61,7 @@ inline constexpr const char * SIGNAL_HANDLERS = "W-SIGNAL-HANDLERS";
 inline constexpr const char * CONTROL_SOCKET = "W-CONTROL-SOCKET";
 inline constexpr const char * RUN_REPORT = "W-RUN-REPORT";
 inline constexpr const char * EXTRACT_AVERAGED = "W-EXTRACT-AVERAGED";
+inline constexpr const char * PACK_RERUN = "W-PACK-RERUN";
 
 /** @brief A code and the page that explains it, at the anchor of its lowercase name. */
 struct Entry {
@@ -72,7 +73,7 @@ inline constexpr const char * CHECK_PAGE = "docs/guide/input_files.md";
 inline constexpr const char * RUN_PAGE = "docs/guide/running.md";
 
 /** @brief Every code. */
-inline constexpr std::array<Entry, 42> ALL = {{
+inline constexpr std::array<Entry, 43> ALL = {{
     {INPUT, CHECK_PAGE}, {SETUP, CHECK_PAGE}, {KEY_UNUSED, CHECK_PAGE}, {KEY_DEPRECATED, CHECK_PAGE},
     {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
     {REGION_OUTSIDE, CHECK_PAGE}, {QUALITY_NON_ORTHOGONALITY, CHECK_PAGE}, {QUALITY_SKEWNESS, CHECK_PAGE},
@@ -85,6 +86,7 @@ inline constexpr std::array<Entry, 42> ALL = {{
     {MESH_DIFFERS, RUN_PAGE}, {SNAPSHOT_INDEX, RUN_PAGE}, {FORMAT_VTU, RUN_PAGE}, {KEY_IGNORED, RUN_PAGE},
     {SPECTRA_RESTARTED, RUN_PAGE}, {CUDA_GRAPH, RUN_PAGE}, {TENO_CACHE, RUN_PAGE}, {QUADRATURE_WEIGHTS, RUN_PAGE},
     {SIGNAL_HANDLERS, RUN_PAGE}, {CONTROL_SOCKET, RUN_PAGE}, {RUN_REPORT, RUN_PAGE}, {EXTRACT_AVERAGED, RUN_PAGE},
+    {PACK_RERUN, RUN_PAGE},
 }};
 
 /** @brief The warning of each mesh-quality metric, in MeshQuality's order. */

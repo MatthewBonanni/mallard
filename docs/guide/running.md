@@ -244,6 +244,7 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-control-socket"></a>`W-CONTROL-SOCKET` | No control socket for `mallard ctl`: `mallard.sock` is not a socket, another run answers on it, or it cannot be made | Start each run in a directory of its own, or set `[run] control_socket = false` |
 | <a id="w-run-report"></a>`W-RUN-REPORT` | `report.html` cannot be written; the run goes on without it | Check the path and its permissions; `mallard info RUN_DIR --html` builds it from `mallard.jsonl` later |
 | <a id="w-extract-averaged"></a>`W-EXTRACT-AVERAGED` | `mallard post extract` leaves out probes that average over the run's steps, which a snapshot cannot give | Use the probes' own files from the run |
+| <a id="w-pack-rerun"></a>`W-PACK-RERUN` | `mallard pack` wrote the archive, but a rerun from it may differ from the run: a file it read is outside the run directory or named by an absolute path, a setting changed while it ran, or the run did not end | Copy the files into the run directory and use relative paths; repeat `mallard ctl` changes by hand; pack a run that ended |
 
 ## Kubernetes
 
