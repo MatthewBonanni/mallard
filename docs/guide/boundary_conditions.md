@@ -23,7 +23,7 @@ p = 1.0
 nscbc = { L = 1.0 }     # an option: non-reflecting
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 42 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 43 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -716,7 +716,7 @@ name = "bottom"
 type = "symmetry"
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 29 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach), [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge), [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d) and 30 more.
 
 **Imposes** zero normal velocity and zero normal gradients (the ghost mirrors
 the interior); under gravity it continues the hydrostatic pressure.
@@ -768,7 +768,7 @@ angle = 30.0
 axis = [0.0, 0.0, 1.0]
 ```
 
-*Used in:* [`rotational_sector`](https://matthewbonanni.github.io/mallard/docs/examples/#rotational-sector), [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence) and 11 more.
+*Used in:* [`rotational_sector`](https://matthewbonanni.github.io/mallard/docs/examples/#rotational-sector), [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d) and 12 more.
 
 Rules: zone B must match zone A node for node (to 1e-6 of the zones' shortest
 edge) after the translation or rotation, and a node without a partner is

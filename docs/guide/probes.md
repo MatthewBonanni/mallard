@@ -35,7 +35,7 @@ n_points = 200
 interval = 10
 ```
 
-*Used in:* [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct) and 2 more.
+*Used in:* [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions), [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180) and 3 more.
 
 ```toml
 # Wake survey: high-order point values on an arc, a VTK series for ParaView,
@@ -351,7 +351,7 @@ reductions = ["integral", "mean", "min", "max"]   # the default
 interval = 10
 ```
 
-*Used in:* [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions).
+*Used in:* [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions), [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters).
 
 A probe with `region` reduces the cell averages of the cells the region covers,
 each weighted by its volume times its volume fraction `f`, so a region need not

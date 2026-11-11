@@ -25,7 +25,7 @@ Lx = 2.0              # the domain is [0, Lx] x [0, Ly]
 Ly = 1.0
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 38 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 39 more.
 
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-light.svg#gh-light-mode-only)
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-dark.svg#gh-dark-mode-only)
@@ -109,7 +109,7 @@ Ny = 64
 zones = ["left", "right"]     # joined; the mesh gives the translation, [Lx, 0]
 ```
 
-*Used in:* [`rotational_sector`](https://matthewbonanni.github.io/mallard/docs/examples/#rotational-sector), [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence) and 11 more.
+*Used in:* [`rotational_sector`](https://matthewbonanni.github.io/mallard/docs/examples/#rotational-sector), [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d) and 12 more.
 
 Periodic boundaries join two zones into interior faces: every scheme sees the
 seam as the inside of the domain, and the zones disappear from
