@@ -1565,9 +1565,14 @@ std::vector<double> read(const Contents & file, const std::string & field, size_
         case Kind::mesh: fail(file.path, "holds no field values");
         default: break;
     }
-    if (s.file != file.path) return read(open(s.file), field, 0);
     const std::string ext = extension(s.file);
     if (ext == ".vtu" || ext == ".vtp" || ext == ".pvtu") return read_vtu_field(s.file, field);
+    if (s.file != file.path) {
+        // A series member, read without opening it whole (its mesh summary)
+        Contents member;
+        member.format = ext == ".vtkhdf" ? "VTKHDF" : "XDMF output";
+        return read_h5_field(member, field, s);
+    }
     return read_h5_field(file, field, s);
 }
 
@@ -1615,9 +1620,10 @@ Geometry read_geometry(const Contents & file, size_t snapshot) {
         fail(file.path, "has " + std::to_string(file.snapshots.size()) + " snapshots, not " + std::to_string(snapshot + 1));
     }
     const Snapshot & s = file.snapshots[snapshot];
-    if (s.file != file.path) return read_geometry(open(s.file), 0);
     const std::string ext = extension(s.file);
     if (ext == ".vtu" || ext == ".vtp" || ext == ".pvtu") return read_vtu_geometry(s.file);
+    if (ext == ".vtkhdf") return read_vtkhdf_geometry(s.file);
+    if (s.file != file.path) return read_geometry(open(s.file), 0);
     if (file.format == "probe HDF5") return read_probe_h5_geometry(s.file);
     if (file.format == "XDMF output") {
         if (file.mesh_file.empty() || !fs::exists(file.mesh_file)) fail(file.path, "its mesh file " + file.mesh_file + " is missing");
