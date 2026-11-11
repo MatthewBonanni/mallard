@@ -37,12 +37,10 @@ double dot(const Vec & a, const Vec & b) { return a[0] * b[0] + a[1] * b[1] + a[
 }
 double norm(const Vec & a) { return std::sqrt(dot(a, a)); }
 
-/** @brief The values at t of programs of t on the host, for move. */
-struct HostTimes {
-    const std::vector<kexpr::Program> & programs;
-    double t;
-
-    double operator()(const uint32_t p) const { return programs[p](&t); }
+/** @brief The values of programs of t for move: values[p]. */
+struct ProgramValues {
+    const double * values;
+    KOKKOS_INLINE_FUNCTION double operator()(const uint32_t p) const { return values[p]; }
 };
 
 } // namespace
@@ -117,9 +115,9 @@ bool Region::rigid() const {
 Region Region::at(const double t) const {
     Region r = with_root(m_root, m_copies);
     r.m_own = m_own;
-    for (const Motion & m : m_motions) {
-        move(m, m_steps.data(), HostTimes{m_times, t}, r.m_nodes[m.node]);
-    }
+    std::vector<double> values(m_times.size());
+    for (size_t p = 0; p < m_times.size(); p++) values[p] = m_times[p](&t);
+    for (const Motion & m : m_motions) move(m, m_steps.data(), ProgramValues{values.data()}, r.m_nodes[m.node]);
     r.m_motions.clear();
     r.m_steps.clear();
     r.m_moving = false;
@@ -281,7 +279,7 @@ struct HostCone {
 struct HostDistance {
     const RegionView<Kokkos::HostSpace> & view;
 
-    double operator()(const double * x) const { return view.distance(x); }
+    KOKKOS_INLINE_FUNCTION double operator()(const double * x) const { return view.distance(x); }
 };
 
 /** @brief Node k of a straight cell on the host. */
