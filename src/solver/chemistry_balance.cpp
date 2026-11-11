@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -255,10 +256,13 @@ void ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View<uin
         if (r(1) > r(2)) r(1) = r(2);
     });
     if (n_out == 0 && n_in == 0) return;
+#ifdef Mallard_HAS_MPI
+    // MPI's messages need the plan and the states on the host
+    std::optional<comm::HostStaged> host_staged;
     if (!use_nccl) {
+        host_staged.emplace();
         Kokkos::deep_copy(h_plan, d_plan);
     }
-#ifdef Mallard_HAS_MPI
     if (n_out > 0) {
         pack(cells, queue);
         if (!use_nccl) Kokkos::fence("chemistry_balance_pack");
@@ -430,23 +434,28 @@ void ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::View<
     rtype * out = staged() ? h_send_buffer.data() : send_buffer.data();
     rtype * in = staged() ? h_guest_buffer.data() : guest_buffer.data();
     if (n_in > 0) {
-        if (staged()) Kokkos::deep_copy(guest_buffer, h_guest_buffer);
+        if (staged()) {
+            const comm::HostStaged host_staged;
+            Kokkos::deep_copy(guest_buffer, h_guest_buffer);
+        }
         unpack();
         integrate(guests, guest_queue, guest_cost, n_in, guest_range);
         pack_results();
-        if (!use_nccl) Kokkos::fence("chemistry_balance_results");
-        if (staged()) Kokkos::deep_copy(h_guest_buffer, guest_buffer);
+        if (!use_nccl) {
+            const comm::HostStaged host_staged;
+            Kokkos::fence("chemistry_balance_results");
+            if (staged()) Kokkos::deep_copy(h_guest_buffer, guest_buffer);
+        }
     }
     if (use_nccl) {
         transfer(messages(false, in, R), messages(true, out, R), RESULT_TAG);
     } else {
+        const comm::HostStaged host_staged;
         transfer(messages(false, in, R), {}, RESULT_TAG);
         wait(requests);
+        if (staged() && n_out > 0) Kokkos::deep_copy(send_buffer, h_send_buffer);
     }
-    if (n_out > 0) {
-        if (staged()) Kokkos::deep_copy(send_buffer, h_send_buffer);
-        take_results(cells, queue);
-    }
+    if (n_out > 0) take_results(cells, queue);
 #else
     (void)cells;
     (void)queue;
