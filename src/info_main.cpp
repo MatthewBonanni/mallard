@@ -698,7 +698,8 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         std::cerr << "mallard info: " << path << " is a mesh file, which records no input.\n";
         return 1;
     }
-    const std::string quality_file = args.value_or("--quality", "");
+    const std::string quality_file = args.value_or("--mesh-fields", args.value_or("--quality", ""));
+    if (args.has("--quality") && comm::is_root()) std::cerr << "mallard info --quality is deprecated: use --mesh-fields\n";
     const MeshBlock block = output::read_mesh(path);
     output::Contents c = output::mesh_contents(path, block);
     Kokkos::ScopeGuard kokkos(argc, argv);
@@ -725,12 +726,12 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         std::string out = contents_json(c);
         out.pop_back();
         std::cout << out << ",\"quality\":" << quality_json(summary)
-                  << ",\"quality_file\":" << (written.empty() ? "null" : json::quote(written)) << "}\n";
+                  << ",\"mesh_fields_file\":" << (written.empty() ? "null" : json::quote(written)) << "}\n";
         return 0;
     }
     print_contents(c);
     print_quality_table(summary);
-    if (!written.empty()) item("Quality fields", written);
+    if (!written.empty()) item("Mesh fields", written);
     return 0;
 }
 
@@ -747,8 +748,8 @@ int info_main(const cli::Args & args) {
     try {
         std::error_code error;
         const bool mesh_file = output::is_mesh_file(path);
-        if (!mesh_file && args.has("--quality")) {
-            return cli::usage_error(*cli::command("info"), "--quality takes a mesh file, not " + path);
+        if (!mesh_file && (args.has("--mesh-fields") || args.has("--quality"))) {
+            return cli::usage_error(*cli::command("info"), "--mesh-fields takes a mesh file, not " + path);
         }
         if (mesh_file) return mesh_info(path, args, argc, argv);
         if (fs::is_directory(path, error)) return run_directory(path, args);

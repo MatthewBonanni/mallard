@@ -3727,6 +3727,15 @@
   "set_in": [],
   "type": "string"
  },
+ "output.write_stencils": {
+  "default": "\"\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string"
+ },
  "parallel": {
   "dims": [
    2,
