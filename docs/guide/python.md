@@ -22,7 +22,7 @@ Every function and class: [Python API](python_api.md).
 ## Installing
 
 The package is `tools/mallard` of the Mallard repository (`share/mallard/tools/mallard`
-of an install), and its library comes with a build with `-DMallard_ENABLE_PYTHON=ON`:
+of an install; its distribution name, for pip, is `mallard-python`), and its library comes with a build with `-DMallard_ENABLE_PYTHON=ON`:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_THREADS=ON \

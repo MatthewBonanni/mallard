@@ -198,7 +198,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 
 ### Python package
 
-The Python package is `tools/mallard` (`share/mallard/tools/mallard` of an install); its library comes with `-DMallard_ENABLE_PYTHON=ON`, in a build of either dimension (with HDF5 for HDF5 output):
+The Python package is `tools/mallard` (`share/mallard/tools/mallard` of an install; distribution `mallard-python`, imported as `mallard`); its library comes with `-DMallard_ENABLE_PYTHON=ON`, in a build of either dimension (with HDF5 for HDF5 output):
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_THREADS=ON \
