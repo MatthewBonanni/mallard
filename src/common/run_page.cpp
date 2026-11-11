@@ -818,7 +818,10 @@ std::string Page::text(const bool color) const {
         text.line(logging::count(kept.n) + " " + noun + (kept.n == 1 ? "" : "s") +
                   (cut ? ", the first and last " + std::to_string(KEPT) + " (all in mallard.jsonl):" : ":"));
         for (const auto * list : {&kept.first, &kept.last}) {
-            for (const json::Value & w : *list) text.line("- " + str(w.find("message")));
+            for (const json::Value & w : *list) {
+                const std::string code = str(w.find("code"));
+                text.line("- " + (code.empty() ? "" : code + ": ") + str(w.find("message")));
+            }
         }
     };
     messages(warnings, "Warnings", "warning", Status::WARNING);
@@ -1091,7 +1094,11 @@ std::string Page::html() const {
                   : std::string()) +
              ".</p><ul>";
         for (const auto * list : {&kept.first, &kept.last}) {
-            for (const json::Value & w : *list) h += "<li>" + escape(str(w.find("message"))) + "</li>";
+            for (const json::Value & w : *list) {
+                const std::string code = str(w.find("code"));
+                h += "<li>" + (code.empty() ? "" : "<code>" + escape(code) + "</code> ") + escape(str(w.find("message"))) +
+                     "</li>";
+            }
         }
         h += "</ul>";
     };

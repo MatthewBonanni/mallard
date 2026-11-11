@@ -117,10 +117,12 @@ the machine's speed; `==` on `t` rarely holds exactly (use `>=`).
 Every step's time-step reduction also tells whether any owned cell holds a non-finite value. The run then stops with the number of such cells and the first ones by global cell id (variable, value, cell, centroid and rank), and the most likely cause with what to try:
 
 ```text
-error: Solution diverged at step 9, t = 0.707496: 48 cells have a non-finite value: RHO = nan in cell 38 at
-(0.15625, 0.40625); ... The last valid state (step 8, t = 0.632983) is in restart_000008.restart. Most likely
-cause: time step too large (the failing step ran at CFL 3 (run.cfl = 3), above 1.2, the largest stable value of
-SSPRK3 for smooth flow); try: lower run.cfl to 1. divergence_report.txt has the evidence and other causes.
+error E-DIVERGED: Solution diverged at step 9, t = 0.707496: 48 cells have a non-finite value: RHO = nan in cell 38
+at (0.15625, 0.40625); RHO = nan in cell 41 at (0.15625, 0.59375); RHO = nan in cell 54 at (0.21875, 0.40625). The
+last valid state (step 8, t = 0.632983) is in restart_000008.restart. Most likely cause: time step too large (the
+failing step ran at CFL 3 (run.cfl = 3), above 1.2, the largest stable value of SSPRK3 for smooth flow); try: lower
+run.cfl to 1. divergence_report.txt has the evidence and other causes. See docs/guide/running.md#divergence.
+  docs/guide/running.md#e-diverged
 ```
 
 It writes the state at the start of the step before, the last valid one (all `[[write_data]]` outputs and a restart; see [`keep_last_good`](../input.md#run)), and exits with status 1. The invalid state is found one step after it appears, or right after its step with `[numerics] check_nan`; without `check_nan`, the outputs and `[statistics]` samples of that step may hold it (resume from the last valid state with `[statistics] reset = true` if its averages are not finite).
@@ -131,7 +133,9 @@ Before it stops, the run diagnoses the failure from the failing state and the la
 report; it also writes it as `divergence_report.txt` and `divergence_report.json` (`[output] divergence_report`
 sets the prefix, `""` none), as a `divergence` record of the [run record](output.md#run-record-mallardjsonl),
 and a snapshot of the failure's neighborhood for ParaView. It is gathered only once the run has failed, from
-what the run already keeps: a healthy run does nothing more per step, and its results do not change.
+what the run already keeps: a healthy run does nothing more per step, and its results do not change. The report
+is in sections and tables, with the case's units in the column headers and units columns (none in a
+nondimensional case); `divergence_report.json` gives them as `units`.
 
 - **What and where:** the step, the cells that became invalid (non-finite, or a non-positive density or
   pressure) by global id, with their rank on several ranks, what failed first in them (density, pressure,
@@ -148,10 +152,11 @@ what the run already keeps: a healthy run does nothing more per step, and its re
   | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
   | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
 
-- **Evidence:** the state of the cell closest to failing and of its face neighbors in the last valid state
-  (density, speed, pressure, temperature, local CFL number), their quality metrics, the nearest boundary zone,
-  repairs, TENO and limiter activity and chemistry sub-steps; the domain means; the last progress rows before the
-  failure (`dt`, CFL number, minimum density and pressure, and temperature for mixtures).
+- **Evidence:** a table of the cell closest to failing, its face neighbors and the next invalid cells in the last
+  valid state (density, speed, pressure, temperature, local CFL number), with their centroids, quality metrics,
+  the nearest boundary zone, repairs, TENO and limiter activity and chemistry sub-steps; the domain means.
+- **Progress rows before the failure:** `dt`, CFL number, minimum density and pressure, and temperature for
+  mixtures.
 - **Reproduce:** the restart of the last valid state to resume from (`mallard -i input.toml --restart FILE`,
   with `[numerics] check_nan = true` and `[output] check_interval = 1` to follow it step by step), and
   `divergence_report_neighborhood_<step>.vtkhdf` (`.vtu` in builds without HDF5): the invalid cells and three
@@ -161,35 +166,84 @@ what the run already keeps: a healthy run does nothing more per step, and its re
 An inflow that the flow next to it cannot take, for example:
 
 ```text
-Likely causes, most likely first
-  1. boundary condition of left (inlet_mass_flow) (0.90)
-     - its exterior state is far from the flow next to it: p 11.2049 and rho 11.2049 outside, against p 1 and
-       rho 1 in the cell next to it (ratio 11.2, velocity jump 7.29 sound speeds)
-     - 12 of the 12 invalid cells are within two cells of left
-     Try: check the values of left (units and signs), or start from a state closer to them
-  2. initial state (0.35)
-     - the run failed 1 step after its start, before the flow could develop
-     Try: check [initialize]: units, signs and the regions of its expressions (density, pressure and
-     temperature must be positive everywhere)
+== Likely causes ==========================================================================
+  Most likely first. The weight (0 to 1) ranks the causes of this failure; it is not a
+  probability.
+  #  cause                                         weight  evidence, and what to try
+  1  boundary condition of left (inlet_mass_flow)  0.90    - its exterior state is far from the flow next to it: p
+                                                           11.2049 Pa and rho 11.2049 kg/m^3 outside, against p 1 Pa and
+                                                           rho 1 kg/m^3 in the cell next to it (ratio 11.2, velocity
+                                                           jump 7.29 sound speeds)
+                                                           - 12 of the 12 invalid cells are within two cells of left
+                                                           Try: check the values of left (units and signs), or start
+                                                           from a state closer to them
+  2  initial state                                 0.35    - the run failed 1 step after its start, before the flow
+                                                           could develop
+                                                           Try: check [initialize]: units, signs and the regions of its
+                                                           expressions (density, pressure and temperature must be
+                                                           positive everywhere)
 ```
 
 and a cell squeezed to a sliver, at a fixed `dt` that suits the rest of the mesh:
 
 ```text
-  1. poor cells (0.98)
-     - cell 135 at (0.439063, 0.53125), which became invalid, has volume ratio 39 (questionable above 10; the
-       mesh's worst is 39)
-     - only 6 cells exceeded the stable CFL number: the time step suits the rest of the mesh
-     Try: improve cells 119, 134, 135, 136, 151 (mallard check input.toml --mesh-fields mesh writes the
-     metrics for ParaView), or lower the time step to suit them
-  2. time step too large (0.55)
-     - the failing step ran at CFL 3.08, above 1.2, the largest stable value of SSPRK3 for smooth flow
-     - 6 of 256 cells (2%) were above it: the excess is local, so look at those cells first
+== Likely causes ==========================================================================
+  Most likely first. The weight (0 to 1) ranks the causes of this failure; it is not a
+  probability.
+  #  cause                weight  evidence, and what to try
+  1  poor cells           0.98    - cell 135 at (0.439063, 0.53125) m, which became invalid, has volume ratio 39
+                                  (questionable above 10; the mesh's worst is 39)
+                                  - only 6 cells exceeded the stable CFL number: the time step suits the rest of the
+                                  mesh
+                                  Try: improve cells 119, 134, 135, 136, 151 (mallard check input.toml --quality quality
+                                  writes the metrics for ParaView), or lower the time step to suit them
+  2  time step too large  0.55    - the failing step ran at CFL 3.08, above 1.2, the largest stable value of SSPRK3 for
+                                  smooth flow
+                                  - 6 of 256 cells (2%) were above it: the excess is local, so look at those cells first
+                                  Try: lower run.dt below 0.00357 (CFL 1 at the last valid state), or set run.cfl
+                                  instead of run.dt
+  3  initial state        0.35    - the run failed 6 steps after its start, before the flow could develop
+                                  Try: check [initialize]: units, signs and the regions of its expressions (density,
+                                  pressure and temperature must be positive everywhere)
 ```
 
 The weights rank the causes of one failure; they are not probabilities. A pressure that becomes negative
 without becoming non-finite does not stop a run (the [run health](output.md#run-health) warns of it); the
 report covers the cells that do.
+
+## Warnings and errors
+
+Every warning and error a run prints has a stable code that scripts can match, from the one catalog
+`mallard check` uses ([its codes](input_files.md#diagnostics): `E-INPUT`, `W-KEY-DEPRECATED`, `W-ENV-PLACEMENT`, ...),
+and a line with the docs that explain it:
+
+```text
+warning W-HEALTH-MARGIN: density -1.82 is below 1e-3 of its mean at step 1, x = (0.4583, 0.15, 0)
+  docs/guide/running.md#w-health-margin
+```
+
+The [run record](output.md#run-record-mallardjsonl)'s `warning` and `error` records give the same `code` and
+`docs`, and the [run report](output.md#run-report-reporthtml) lists the warnings with their codes. Errors (`E-`)
+end the run with exit status 1; warnings (`W-`) do not.
+
+| Code | What it means | What to do |
+|---|---|---|
+| <a id="e-run"></a>`E-RUN` | The run stopped on an error after its setup: a file it cannot write, memory it cannot allocate, a failure of a library | The message says what failed |
+| <a id="e-diverged"></a>`E-DIVERGED` | The solution diverged: cells with a non-finite value, or a non-positive density or pressure ([Divergence](#divergence)) | The [divergence report](#the-divergence-report) ranks the likely causes, each with what to try |
+| <a id="w-health-margin"></a>`W-HEALTH-MARGIN` | At a progress row, a density or pressure below 1e-3 of its mean, or a negative mass fraction: the run is close to failing there ([Run health](output.md#run-health)) | Look at the place the message gives; the remedies are those of a divergence |
+| <a id="w-restart-skipped"></a>`W-RESTART-SKIPPED` | `--restart latest` passed over a restart file it cannot read, or one that is truncated | None needed: the run starts from the newest complete one |
+| <a id="w-mesh-differs"></a>`W-MESH-DIFFERS` | A restart file, or the snapshot `mallard post` reads, was written on a mesh file of other contents with as many cells | Check that the case's mesh is the run's |
+| <a id="w-snapshot-index"></a>`W-SNAPSHOT-INDEX` | A resumed run's snapshot index lists fewer snapshots than were written up to the restart time | None needed: the numbering continues after the snapshots on disk, which are never overwritten |
+| <a id="w-format-vtu"></a>`W-FORMAT-VTU` | `[[write_data]]` without a `format` writes VTU files: the default, VTKHDF, needs HDF5 (parallel HDF5 on several ranks) | Set `format = "vtu"`, or build with HDF5 ([Which format](output.md#which-format)) |
+| <a id="w-key-ignored"></a>`W-KEY-IGNORED` | A key that is read but has no effect: `source.time_dependent` (expressions of `t` are evaluated at every stage) | Remove it |
+| <a id="w-spectra-restarted"></a>`W-SPECTRA-RESTARTED` | A probe's time spectra got a sample that is not `dt` after the last one (a resumed run, a changed interval): its history starts afresh | Keep the probe's interval fixed over a run and its restarts ([Time spectra](probes.md#time-spectra)) |
+| <a id="w-cuda-graph"></a>`W-CUDA-GRAPH` | The step could not be captured as a CUDA graph; steps run kernel by kernel, slower but with the same results | Report it with the message: every step is meant to be graphed |
+| <a id="w-teno-cache"></a>`W-TENO-CACHE` | TENO's stencil cache file cannot be written; the next run of the mesh builds its stencils again | Check the directory and its permissions ([Reconstruction](numerics.md#reconstruction)) |
+| <a id="w-quadrature-weights"></a>`W-QUADRATURE-WEIGHTS` | A quadrature rule with negative weights is in use, which can amplify rounding errors | Report it with the message |
+| <a id="w-signal-handlers"></a>`W-SIGNAL-HANDLERS` | A library replaced Mallard's signal handlers during setup; they are restored | None needed |
+| <a id="w-control-socket"></a>`W-CONTROL-SOCKET` | No control socket for `mallard ctl`: `mallard.sock` is not a socket, another run answers on it, or it cannot be made | Start each run in a directory of its own, or set `[run] control_socket = false` |
+| <a id="w-run-report"></a>`W-RUN-REPORT` | `report.html` cannot be written; the run goes on without it | Check the path and its permissions; `mallard info RUN_DIR --html` builds it from `mallard.jsonl` later |
+| <a id="w-extract-averaged"></a>`W-EXTRACT-AVERAGED` | `mallard post extract` leaves out probes that average over the run's steps, which a snapshot cannot give | Use the probes' own files from the run |
 
 ## Kubernetes
 

@@ -16,6 +16,7 @@ add_library(MallardCore STATIC
     common/case_template.cpp
     common/growing_buffer.cpp
     common/json.cpp
+    common/diagnostic_code.cpp
     common/log.cpp
     common/report.cpp
     common/convergence.cpp

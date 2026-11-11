@@ -15,6 +15,8 @@
 
 #include "comm.h"
 #include "common_io.h"
+#include "diagnostic_code.h"
+#include "log.h"
 #include "run_page.h"
 
 namespace run_log {
@@ -32,7 +34,9 @@ void write_report() {
         run_page::write(report_file, page->html());
     } catch (const std::exception & e) {
         // Not through logging::warning, whose record would come back here
-        std::cerr << "warning: no run report from now on: " << e.what() << std::endl;
+        std::cerr << logging::diagnostic(false, diagnostic_code::RUN_REPORT,
+                                         std::string("no run report from now on: ") + e.what(), logging::color_stderr())
+                  << std::endl;
         page.reset();
     }
 }
