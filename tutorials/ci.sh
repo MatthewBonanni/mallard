@@ -5,7 +5,8 @@
 #   tutorials/ci.sh MALLARD [WORK_DIR] [TUTORIAL ...]
 #
 # MALLARD is the mallard of an install with both dimensions (mallard2d and
-# mallard3d), built with MPI; gmsh and python3 (with tutorials/requirements.txt) must be on the PATH.
+# mallard3d), built with MPI and -DMallard_ENABLE_PYTHON=ON; gmsh and python3 (with
+# tutorials/requirements.txt and the package of tools/) must be on the PATH.
 # Each tutorial's steps are the function of the same name in
 # tutorials/<name>/ci.sh, run in WORK_DIR/<name>; without TUTORIAL
 # arguments, every tutorial runs.
