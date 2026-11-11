@@ -11,7 +11,9 @@ into it. The user-facing pages are [Python](../guide/python.md) and the
 There is one Python distribution, `mallard`, imported as `mallard`, for both
 post-processing and driving the solver. Its source is `tools/mallard`, and its
 version is Mallard's (`tools/mallard/_version.py`, checked against
-`project(VERSION)` by a build with `-DMallard_ENABLE_PYTHON=ON`).
+`project(VERSION)` by every build with `Mallard_ENABLE_PYTHON`, on by default).
+The containers, Spack and `cmake --install` install it with Mallard
+([Installation](../installation.md)).
 
 ## Post-processing layer
 

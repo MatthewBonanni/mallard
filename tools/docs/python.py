@@ -3,7 +3,7 @@ the Sod example: the density of every snapshot along the tube, and its history a
 
     python tools/docs/python.py --mallard build/src/mallard
 
-The build needs -DMallard_ENABLE_PYTHON=ON and HDF5; the package finds its library next to --mallard.
+The build needs HDF5 (and Mallard_ENABLE_PYTHON, the default); the package finds its library next to --mallard.
 """
 import argparse
 import os
@@ -66,7 +66,7 @@ def figures(mallard_exe):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--mallard", required=True, help="Mallard executable of a build with -DMallard_ENABLE_PYTHON=ON")
+    ap.add_argument("--mallard", required=True, help="Mallard executable of a build with HDF5")
     figures(ap.parse_args().mallard)
 
 if __name__ == "__main__":

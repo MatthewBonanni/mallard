@@ -78,7 +78,7 @@ PYTHON=../../.venv/bin/python ./post.sh
 
 `post.sh` runs the case's plot script (copied into `tools/`) with the Python given by `PYTHON` (default `python3`), and says which packages to install if any are missing. `sod.png` shows the computed density along the strip against the exact Riemann solution at t = 0.2: the rarefaction, the contact discontinuity (spread over about five cells) and the shock (two cells). The [validation page](https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube) has the same comparison for velocity and pressure, and the error under mesh refinement.
 
-**Your own analysis in Python.** The [Python package](../guide/python.md) reads the output into numpy arrays through Mallard's own reader. It needs the build configured with `-DMallard_ENABLE_PYTHON=ON` (add it to the `cmake -S . -B build` line above and build again) and the package installed into the virtual environment:
+**Your own analysis in Python.** The [Python package](../guide/python.md) reads the output into numpy arrays through Mallard's own reader. The build above made its library; install the package into the virtual environment:
 
 ```bash
 ../../.venv/bin/pip install -e ../../tools

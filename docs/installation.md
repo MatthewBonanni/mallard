@@ -12,7 +12,7 @@ Each needs a [supported platform](#supported-platforms): GCC 15, Clang 22 or App
 
 Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](guide/cli.md)). Each also installs tab completion for bash, zsh and fish under `share/` ([shell completion](guide/cli.md#shell-completion)).
 
-The [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python, needs a build from source with `-DMallard_ENABLE_PYTHON=ON` ([Python package](#python-package)).
+Each also installs the [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python: `import mallard` works in the containers' Python and after `spack load mallard`, and a source build adds it to a Python environment with one `pip install` ([Python package](#python-package)).
 
 ## Supported platforms
 
@@ -70,7 +70,7 @@ Each release, from 0.9.1 on, publishes images to the GitHub Container Registry:
 | `ghcr.io/matthewbonanni/mallard` (`:latest`, or a version: `:0.9.1`) | CPUs: OpenMP, MPI with dKaMinPar; x86-64 and ARM (also Apple Silicon) |
 | `ghcr.io/matthewbonanni/mallard:cuda` (or `:0.9.1-cuda`) | NVIDIA GPUs: A100, A40 and RTX 30xx, L40S and RTX 40xx, H100 (driver R580 or newer); MPI with NCCL |
 
-Both have HDF5, CGNS, zlib and the Python tools, and set `MALLARD_SHARE` to the examples' directory.
+Both have HDF5, CGNS, zlib, the Python tools and the [Python package](guide/python.md) `mallard` (in the image's `python3`, with numpy), and set `MALLARD_SHARE` to the examples' directory.
 
 With Docker, run the Sod shock tube in the current directory:
 
@@ -132,6 +132,9 @@ spack install mallard ^openmpi@5                         # a particular MPI
 | `cuda` + `cuda_arch`, `rocm` + `amdgpu_target`, `sycl` | off | Kokkos GPU backend |
 | `mpi`, `gpu_aware_mpi`, `nccl` | `+mpi` | MPI; device buffers to a GPU-aware MPI; halo exchanges with NCCL |
 | `hdf5`, `cgns`, `zlib` | on | HDF5 meshes and output; CGNS meshes; zlib compression |
+| `python` | on | The [Python package](guide/python.md) `mallard` and its library, with Python and numpy |
+
+`spack load mallard` also puts the [Python package](guide/python.md) on `PYTHONPATH`, with Spack's Python and numpy: `python3 -c 'import mallard'` works with no other step. `spack install mallard ~python` leaves out the package, its library, Python and numpy.
 
 For tab completion, add `source <(mallard completion bash)` (or the [zsh or fish line](guide/cli.md#shell-completion)) to the shell's startup file, after `spack load mallard`. Spack builds its own Kokkos to match. A cluster's MPI, CUDA or compilers can be registered with `spack external find` (e.g. `spack external find openmpi cuda`). dKaMinPar is not in the package: build from source for `partitioner = "graph"`.
 
@@ -188,7 +191,8 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files, `mallard mesh convert`, and the HDF5 outputs: `[[write_data]]` `format = "vtkhdf"` (the default) and `"xdmf"`, and `[[probes]]` `"hdf5"` and `"vtkhdf"` (parallel HDF5 with MPI, when available) |
 | `Mallard_ENABLE_ZLIB` | `OFF` | zlib compression of VTU and restart files (`[[write_data]] compression = "zlib"`; HDF5 output compresses with HDF5's own deflate filter and needs no option) |
 | `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
-| `Mallard_ENABLE_PYTHON` | `OFF` | `libmallard2d` or `libmallard3d`, the output reader as a library for the [Python package](guide/python.md), installed in `lib/`; compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
+| `Mallard_ENABLE_PYTHON` | `ON` | `libmallard2d` or `libmallard3d`, the output reader as a library for the [Python package](guide/python.md), installed in `lib/`; compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
+| `Mallard_PYTHON_INSTALL_DIR` | empty | A `site-packages` directory into which `cmake --install` also copies the Python package (besides `share/mallard/tools`) |
 | `Mallard_ENABLE_TESTS` | `ON` | Build the test suite, `mallard-test2d` or `mallard-test3d` (fetches GoogleTest) |
 | `Mallard_INSTALL_TESTS` | `ON` | Install the test suite and its data, so that `mallard test` checks an installed build |
 | `Mallard_INSTALL_COMPLETION` | `ON` | Install bash, zsh and fish completion under `share/`, printed by the built `mallard completion` (skipped, with a warning, where the build cannot run it) |
@@ -198,13 +202,10 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 
 ### Python package
 
-The Python package is `tools/mallard` (`share/mallard/tools/mallard` of an install); its library comes with `-DMallard_ENABLE_PYTHON=ON`, in a build of either dimension (with HDF5 for HDF5 output):
+Every build makes the library of the [Python package](guide/python.md); after `cmake --install`, one command adds the package to a Python environment (3.10 or newer; it brings numpy):
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_THREADS=ON \
-    -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_PYTHON=ON -DCMAKE_INSTALL_PREFIX=$HOME/mallard
-cmake --build build -j && cmake --install build
-uv venv && uv pip install $HOME/mallard/share/mallard/tools   # or: pip install, or -e tools in the repository
+pip install $HOME/mallard/share/mallard/tools     # or: uv pip install, or pip install -e tools in the repository
 ```
 
-It needs Python 3.10 or newer and numpy, and finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`): [Python](guide/python.md#installing).
+It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF` builds without the library ([Python](guide/python.md#installing)).

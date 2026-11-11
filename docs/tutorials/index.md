@@ -30,7 +30,7 @@ multi-rank runs, and Python 3 with the packages of
 `tutorials/requirements.txt` (numpy, scipy, matplotlib, h5py, gmsh, cantera), which
 also provide the `gmsh` command. The tutorials' scripts read the output with
 `tools/mallard`'s h5py readers; for your own analysis, the [Python package](../guide/python.md)
-reads it through Mallard's own reader, with `-DMallard_ENABLE_PYTHON=ON` added to the builds below:
+reads it through Mallard's own reader, whose library the builds below make:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \

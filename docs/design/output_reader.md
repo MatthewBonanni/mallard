@@ -89,7 +89,7 @@ GPUs: they run in the solver, so they read in C++. A second reader in Python
 would duplicate every format and drift from it.
 
 The Python package ([Python](../guide/python.md), `tools/mallard`; its layout
-in [The Python package](python_package.md)) therefore reads through this reader. `-DMallard_ENABLE_PYTHON=ON` builds
+in [The Python package](python_package.md)) therefore reads through this reader. `Mallard_ENABLE_PYTHON` (on by default) builds
 `libmallard2d`/`libmallard3d`, a shared library of `src/io/reader_c_api.h`: a
 C interface over `open`, `read`, `read_all`, `read_geometry` and `run_files`,
 with `Contents` passed as the JSON of `to_json`, values as arrays of doubles,
@@ -108,7 +108,8 @@ package loads it with ctypes and copies the arrays into numpy:
   command share every line of code and option, so they cannot disagree.
 - **Position-independent code.** A shared library needs every library it links
   compiled with `-fPIC`; the option sets `CMAKE_POSITION_INDEPENDENT_CODE` for
-  the whole build, which is why it is an option rather than always on.
+  the whole build. It is on by default, so that every installer installs the
+  package; `-DMallard_ENABLE_PYTHON=OFF` (Spack: `~python`) leaves it out.
 - **One version.** `tools/mallard/_version.py` holds Mallard's version, and a
   build with the option checks it against `project(VERSION)`.
 
