@@ -300,6 +300,8 @@ class Solver {
         void update_cell_fields(const State & solution);
         /** @brief At a row on the device: stops it where check_timed_boundaries would throw on any rank. */
         void flag_timed_boundaries();
+        /** @brief The budget pass's rates of this rank, into budget_rates on the device (calc_rhs). */
+        void budget_rates_of_fluxes(int stage);
         /** @brief Inside a captured step: stage_time = t_n + c dt from the step's device scalars. */
         void record_stage_time(rtype c);
         /** @brief Inside a captured step: the step's dt on the device. */
@@ -888,8 +890,6 @@ class Solver {
          *        flux with cell values) plus the kinetic_energy_rate of the boundary faces' face_flux.
          */
         rtype pressure_work_rate() const;
-        /** @brief The budget pass's rates of this rank, into budget_rates on the device (calc_rhs). */
-        void budget_rates_of_fluxes(int stage);
         /** @brief kinetic_energy_budget's rates over the ranks into budget_rates, on the device (capturable). */
         void enqueue_kinetic_energy_budget();
         void allocate_budget();
