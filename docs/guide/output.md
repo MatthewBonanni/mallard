@@ -114,7 +114,7 @@ ParaView's calculator shows both.
 | `format` | Opens in | Files |
 |---|---|---|
 | `vtkhdf` (default) | ParaView 5.12+, PyVista, h5py | One file per snapshot, or one for the series (`series = true`) |
-| `xdmf` | VisIt, meshio, ParaView of any version; h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
+| `xdmf` | VisIt, meshio, ParaView of any version ([open by a path with a directory](#xdmf-in-paraview)); h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
 | `vtu` | Anything with a VTK XML reader (e.g. Tecplot); builds without HDF5 | One file per rank per snapshot, with a `.pvtu` and a `.pvd` series |
 | `restart` | Mallard, to continue or remap a run | One file per snapshot |
 
@@ -150,6 +150,17 @@ per rank in parallel, assembled by a `.pvtu`, with a `.pvd` series. Set
 once (`PREFIX_mesh.h5`), one HDF5 file of fields per snapshot and XDMF
 indexes (`PREFIX.xmf` for the series), all in global cell order; read it in
 Python with `tools/mallard/h5.py`.
+
+<a id="xdmf-in-paraview"></a>**XDMF in ParaView.** The `.xmf` files name their
+HDF5 files relative to themselves, as XDMF allows. ParaView's XDMF reader
+(ParaView 6.0.1, Xdmf3) gets this wrong when it is given a bare file name, as in
+`pvpython script.py flow.xmf` or `OpenDataFile("flow.xmf")`: it fails to open
+`flow.xmfflow_mesh.h5` and aborts with a misleading error about the number of
+dimensions. Give it a path with a directory in it: `./flow.xmf`,
+`solut/flow.xmf` or an absolute path. The ParaView GUI passes absolute paths, so
+files opened from it are not affected. VTKHDF does not have this problem.
+Mallard does not write absolute paths into the `.xmf` files, because then a run
+directory could no longer be moved or copied.
 
 **Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
 
