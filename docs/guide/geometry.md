@@ -17,6 +17,7 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output | [Probes](probes.md#probes-of-existing-output) |
 | `mallard post average` `--region` | what `[[write_data]]` `region` takes; with `--homogeneous`, a filled region, cells weighted by their fraction in it | [Statistics](statistics.md#averages-of-saved-snapshots-mallard-post-average) |
+| `mallard check` `--mesh-fields` `--region` | a [region](#regions) or its [name](#named-regions): the cells whose stencils to write | [Mesh and stencil fields](output.md#mesh-and-stencil-fields) |
 | `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file of them | [Checking regions](#checking-regions) |
 | `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |

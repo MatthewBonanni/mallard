@@ -3,3 +3,4 @@
 build = "2d"
 demonstrates = ["Gmsh O-grid", "vortex shedding", "wall forces"]
 tutorial = "cylinder"
+validation = [{anchor = "cylinder-at-re-100", regime = "laminar vortex shedding at Re = 100 and Mach 0.2, against incompressible computations and experiment"}]

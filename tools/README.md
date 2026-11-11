@@ -123,13 +123,13 @@ Triangles around a duck silhouette (a periodic spline), refined linearly from `-
 
 ### `plot_mesh_quality.py`: mesh quality
 
-The quality fields that `mallard check --quality PREFIX` writes for a 2D
+The quality fields that `mallard check --mesh-fields PREFIX` writes for a 2D
 mesh (non-orthogonality, skewness, aspect ratio, volume ratio), with the worst
 cells circled; readable on light and dark backgrounds. Use it before a long run
 to find the cells that limit the time step or the accuracy.
 
 ```bash
-mallard check input.toml --quality quality
+mallard check input.toml --mesh-fields quality
 python tools/mesh/plot_mesh_quality.py quality_000000.vtkhdf quality.png --fields NON_ORTHOGONALITY SKEWNESS --worst 10
 ```
 
@@ -276,7 +276,7 @@ rho = arrays["RHO"]                       # one value per cell; arrays["TIME"] i
 pts, conn, offsets, types, arrays = read_vtu_cells("solut/flow_000010.vtkhdf")  # 2D or 3D cells
 ```
 
-`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "xdmf"` output (`"hdf5"` before 0.10): the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, `resolved_input(path)` the [resolved input](../docs/guide/input_files.md#the-resolved-input) that made it (`None` for files of 0.9), and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units.
+`mallard.vtu` reads binary or ASCII VTU (boundary-zone output too) and takes `.vtkhdf` and `.h5` snapshots as well; `snapshot("solut/flow_000010")` finds a snapshot in whichever format the build wrote, `series(dir)` lists them and `read_index(prefix)` reads a `.vtkhdf.series` or `.pvd` index. `mallard.vtkhdf` (needs h5py) reads VTKHDF files: `read_cells(path, step)` a snapshot, also of a `series = true` file, `times(path)`, and `read_points(path)` a probe file; `mallard.h5` (needs h5py) reads `format = "xdmf"` output (`"hdf5"` before 0.10): the mesh, the cell fields of a snapshot, and the snapshots of a series `PREFIX.xmf`. `mallard.vtu.provenance(path)` reads the provenance block of any output file, `resolved_input(path)` the [resolved input](../docs/guide/input_files.md#the-resolved-input) that made it (`None` for files of 0.9), and `mallard.vtu.units(path)` and `long_names(path)` the [units](../docs/guide/output.md#units) and descriptions of its fields; `mallard.tables.read_csv(path)` reads a probe, forces or integrals CSV file as columns and their units. `mallard.stencils` (needs h5py) reads the [stencil file](../docs/guide/output.md#mesh-and-stencil-fields) of `mallard check --mesh-fields`: `read_stencils(path).stencil(cell)` gives a cell's stencil members (global ids) with their stencil, role and boundary face, and its degree, sizes, condition number and reach.
 
 ### `plot_vtu.py`: one field of a snapshot
 
@@ -407,6 +407,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
 | `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard` that every snapshot and monitor format carries the same units for each field, and that `mallard info --format json` finds them too; the `openmp` job of `ci.yml` runs it |
+| `dev/check_restart_tools.py MALLARD...` | Runs a small periodic box and checks that `tools/mallard/restart.py` (`read`, `write`), `setup/tile_restart.py`, `setup/interpolate_restart.py` (3D) and `post/insitu_statistics.py spectra` read the restart files it writes, compressed too where the build has zlib, so a new restart format version fails it until the reader learns it; the `openmp` (2D) and `clang-23-arm64` (3D) jobs of `ci.yml` run it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases on tags); the first job of `ci.yml` runs it |
 | `dev/check_support_matrix.py` | Fails if a test or build job of the GitHub workflows is missing from the [support matrix](../docs/guide/support.md) or the [supported-platforms table](../docs/installation.md#supported-platforms), or either names a job no workflow has; the first job of `ci.yml` runs it |
 | `dev/check_ci_only.py ONLY` | Fails if the `only` input of a `ci.yml` dispatch names a job it doesn't know (valid: the backend names, `tutorials`, `device`, `spack`, `fuzz`), so a typo fails the run instead of skipping jobs; the first job of `ci.yml` runs it |
@@ -419,6 +420,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `docs/tools.py` | The figures of this page (`docs/images/tools/`), from running each tool (`--mallard` for those from Mallard runs) |
 | `docs/cli.py --mallard build/src/mallard [--check]` | The help pages of the [command line](../docs/guide/cli.md) page, from running `mallard <command> --help` for every command `mallard --help` lists; `CliTest.UserDocsShowEveryHelpPage` fails when they are out of date; standard library only |
 | `docs/verification.py` | The [verification manual](../docs/verification/index.md) (`docs/verification/`): runs the convergence tests of 2D and 3D test-suite builds (`--test build-2/test/mallard-test2d build-3/test/mallard-test3d`) and writes its order-of-accuracy tables, `results.json` and plots (`docs/images/verification/`); without `--test`, redraws them from `results.json` |
+| `docs/feature_matrix.py [--check]` | The [feature matrix](../docs/guide/features.md): each pair of features marked validated, verified, implemented, rejected or untested, from the input guards in `src/`, the example cards' `validation` entries, `docs/verification/results.json`, `test/features.toml` and the support matrix; `--check` fails on a stale page or an inconsistent record (first job of `ci.yml`); standard library only |
 | `docs/used_in.py [--check]` | The "Used in" line of each feature section of the user guide, from the example inputs; `--check` fails on stale lines (first job of `ci.yml`); standard library only |
 | `docs/figstyle.py`, `docs/meshes.py`, `docs/domains.py`, `docs/schematics.py`, `docs/theory.py`, `docs/teno.py`, `docs/runs.py`, `docs/remap_tgv.py` | Their shared style (light and dark palettes, SVG output), mesh readers and figure sets |
 | `../tutorials/common/` | `tutfig.py` (the tutorials' figure style), `gmsh_mesh.py` (Gmsh meshes for plots), `snapshots.py` (series of VTKHDF or VTU snapshots) |

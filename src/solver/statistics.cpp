@@ -20,6 +20,7 @@
 
 #include "comm.h"
 #include "common_io.h"
+#include "device_comm.h"
 #include "input.h"
 #include "log.h"
 
@@ -85,15 +86,15 @@ std::vector<derived::Field> Statistics::derived_fields(const Input & input) {
 }
 
 void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
-                      const derived::Selection & derived) {
+                      const derived::Selection & derived, const bool use_nccl) {
     if (!input.contains("statistics")) return;
     const Input & table = input.at("statistics");
     interval = find_value_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
     t_start = find_real_or(table, "t_start", dim::time, 0.0);
     reset = find_value_or<bool>(table, "reset", false);
-    if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start);
-    if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start);
+    if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start, use_nccl);
+    if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start, use_nccl);
     auto add_field = [&](const std::string & name) {
         const auto it = std::find(fields.begin(), fields.end(), name);
         if (it != fields.end()) return static_cast<uint32_t>(it - fields.begin());
@@ -301,7 +302,7 @@ Dimension variable_dimension(const std::string & name) {
 } // namespace
 
 void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
-                        uint32_t n_cells, uint64_t interval_in, rtype t_start_in) {
+                        uint32_t n_cells, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
     const std::string key = "statistics.phase";
     interval = find_value_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
@@ -336,6 +337,8 @@ void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vecto
         level = find_double_or(table, "level", variable_dimension(trigger_variable), 0.0);
         trigger_cell = locate_points(mesh, {trigger_point})[0];
         distributed = mesh.n_global_cells > 0;
+        use_nccl = use_nccl_;
+        signal = Kokkos::View<double *>("phase_signal", 1);
     }
     mean = Kokkos::View<rtype **, Kokkos::LayoutLeft>("phase_mean", n_cells, size_t(bins) * fields.size());
     h_mean = Kokkos::create_mirror_view(mean);
@@ -356,16 +359,15 @@ void PhaseAverage::sample(rtype t, const CellSampler & sampler, uint32_t n_owned
     double phase = 0.0;
     bool use = t > t_start;
     if (trigger_cell != NO_TRIGGER) {
-        Kokkos::View<rtype> value("phase_signal");
-        if (trigger_cell >= 0) {
-            const uint32_t c = static_cast<uint32_t>(trigger_cell);
-            const int32_t code = trigger_code;
-            Kokkos::parallel_for("phase_signal", 1, KOKKOS_LAMBDA(const int) { value() = sampler(c, code); });
-        }
-        rtype v_local = 0.0_r;
-        Kokkos::deep_copy(v_local, value);
+        const Kokkos::View<double *> value = signal;
+        const int32_t c = trigger_cell, code = trigger_code;
         // Every other rank adds an exact zero
-        const double v = distributed ? comm::allreduce(static_cast<double>(v_local), comm::Op::SUM) : double(v_local);
+        Kokkos::parallel_for("phase_signal", 1, KOKKOS_LAMBDA(const int) {
+            value(0) = c >= 0 ? static_cast<double>(sampler(static_cast<uint32_t>(c), code)) : 0.0;
+        });
+        if (distributed) comm::allreduce_device(value, comm::Op::SUM, use_nccl);
+        double v = 0.0;
+        Kokkos::deep_copy(v, Kokkos::subview(value, 0));
         const double tt = static_cast<double>(t);
         if (have_signal && v_signal < level && v >= level) {
             crossing[0] = crossing[1];

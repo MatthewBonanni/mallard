@@ -38,6 +38,7 @@ set(MALLARD_TEST_SOURCES
     numerics_preset_test.cpp
     tfles_test.cpp
     check_test.cpp
+    stencils_test.cpp
     run_report_test.cpp
     error_messages_test.cpp
     synthetic_inflow_test.cpp
@@ -57,6 +58,7 @@ set(MALLARD_TEST_SOURCES
     rotational_periodic_test.cpp
     invariance_test.cpp
     inlet_test.cpp
+    step_queue_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

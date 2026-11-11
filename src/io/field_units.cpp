@@ -42,6 +42,7 @@ constexpr const char * CHEMISTRY = "chemistry";
 constexpr const char * LES = "LES";
 constexpr const char * SURFACE = "surface probes";
 constexpr const char * QUALITY = "mesh quality";
+constexpr const char * STENCILS = "stencils";
 constexpr const char * WALLS = "[[probes]] on a wall zone";
 constexpr const char * SURFACES = "[[probes]] on a surface or boundary zone";
 
@@ -93,15 +94,21 @@ const Entry NAMED[] = {
     {"WALL_MODEL_U", dim::velocity, "wall model exchange-point tangential speed", SURFACE, WALLS},
     {"WALL_MODEL_T", dim::temperature, "wall model exchange-point temperature", SURFACE, WALLS},
     {"WALL_MODEL_H", dim::length, "wall model exchange-point height", SURFACE, WALLS},
-    {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", QUALITY,
-     "mallard check or info --quality", "degree"},
-    {"SKEWNESS", dim::none, "largest face skewness", QUALITY, "mallard check or info --quality"},
-    {"ASPECT_RATIO", dim::none, "cell aspect ratio", QUALITY, "mallard check or info --quality"},
-    {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor", QUALITY, "mallard check or info --quality"},
+    {"NON_ORTHOGONALITY", dim::of(0, 0, 0, 0, 0, 1), "largest face non-orthogonality", QUALITY, "", "degree"},
+    {"SKEWNESS", dim::none, "largest face skewness", QUALITY, ""},
+    {"ASPECT_RATIO", dim::none, "cell aspect ratio", QUALITY, ""},
+    {"VOLUME_RATIO", dim::none, "largest volume ratio to a neighbor", QUALITY, ""},
     {"DELTA_OVER_ETA", dim::none, "cell size over the estimated Kolmogorov length", QUALITY,
-     "mallard check --quality (resolution estimates)"},
+     "mallard check --mesh-fields (resolution estimates)"},
     {"CELLS_PER_DELTA_L", dim::none, "cells across the laminar flame thickness", QUALITY,
-     "mallard check --quality (resolution estimates) with [les.combustion] (TFLES)"},
+     "mallard check --mesh-fields (resolution estimates) with [les.combustion] (TFLES)"},
+    {"STENCIL_SIZE", dim::none, "cells in the central stencil", STENCILS, ""},
+    {"STENCIL_SECTORS", dim::none, "sector stencils kept (TENO)", STENCILS, ""},
+    {"STENCIL_DEGREE", dim::none, "degree of the central reconstruction polynomial", STENCILS, ""},
+    {"STENCIL_CONDITION", dim::none, "condition number of the central least-squares fit", STENCILS, ""},
+    {"STENCIL_WALL", dim::none, "1 where a stencil reaches a wall", STENCILS, ""},
+    {"STENCIL_SEAM", dim::none, "1 where a stencil reaches across a periodic seam", STENCILS, ""},
+    {"STENCIL_PARTITION", dim::none, "1 where a stencil reaches cells of another rank", STENCILS, ""},
     {"DIVERGED", dim::none, "1 in the cells that became invalid", DERIVED,
      "a run that diverges, whose divergence report snapshot writes it"},
 };
@@ -151,15 +158,20 @@ std::optional<FieldDescription> find_base(const std::string & name) {
 }
 
 /**
- * @brief A field that statistics and probes sample (a conservative, a primitive,
- *        Y_<species>, RHOY_<species> or a derived field), or the vector U or RHOU.
+ * @brief A scalar that statistics sample: a conservative, a primitive, Y_<species>,
+ *        RHOY_<species> or a derived field.
  */
-std::optional<FieldDescription> find_sampled(const std::string & name) {
-    bool sampled = name == "U" || name == "RHOU" || (starts_with(name, "Y_") && name.size() > 2) ||
-                   (starts_with(name, "RHOY_") && name.size() > 5) || derived::find(name.c_str()) != derived::N_FIELDS;
+std::optional<FieldDescription> find_sampled_scalar(const std::string & name) {
+    bool sampled = (starts_with(name, "Y_") && name.size() > 2) || (starts_with(name, "RHOY_") && name.size() > 5) ||
+                   derived::find(name.c_str()) != derived::N_FIELDS;
     for (const auto & conservative : CONSERVATIVE_NAMES) sampled = sampled || name == conservative;
     for (const auto & primitive : PRIMITIVE_NAMES) sampled = sampled || name == primitive;
     return sampled ? find_base(name) : std::nullopt;
+}
+
+/** @brief A field that statistics and probes sample: a sampled scalar, or the vector U or RHOU. */
+std::optional<FieldDescription> find_sampled(const std::string & name) {
+    return name == "U" || name == "RHOU" ? find_base(name) : find_sampled_scalar(name);
 }
 
 } // namespace
@@ -168,6 +180,10 @@ namespace field_units {
 
 std::optional<FieldDescription> find(const std::string & name) {
     if (auto base = find_base(name)) return base;
+    if (starts_with(name, "STENCIL_") && name.size() > 8 &&
+        name.find_first_not_of("0123456789", 8) == std::string::npos) {
+        return FieldDescription{dim::none, "membership in the stencils of cell " + name.substr(8), "", ""};
+    }
     if (starts_with(name, "SOURCE_")) {
         auto of = find_base(name.substr(7));
         if (!of) return std::nullopt;
@@ -192,20 +208,14 @@ std::optional<FieldDescription> find(const std::string & name) {
     }
     for (const char * prefix : {"COV_", "FAVRE_COV_"}) {
         if (!starts_with(name, prefix)) continue;
-        // COV_<A>_<B>: the first split whose halves are both sampled fields (names hold underscores),
-        // preferring halves that are not species (COV_U_Y_U_Y is U_Y and U_Y, not U and Y_U_Y)
+        // COV_<A>_<B> of two sampled scalars: the first split whose halves are both (names hold underscores)
         const std::string pair = name.substr(std::string(prefix).size());
         const std::string what = prefix[0] == 'F' ? "Favre covariance of " : "covariance of ";
-        const auto species = [](const std::string & s) { return starts_with(s, "Y_") || starts_with(s, "RHOY_"); };
-        for (const bool any : {false, true}) {
-            for (size_t at = pair.find('_'); at != std::string::npos; at = pair.find('_', at + 1)) {
-                const std::string first = pair.substr(0, at), second = pair.substr(at + 1);
-                if (!any && (species(first) || species(second))) continue;
-                const auto a = find_sampled(first), b = find_sampled(second);
-                if (a && b) {
-                    return FieldDescription{a->dimension.times(b->dimension),
-                                            what + a->long_name + " and " + b->long_name, "", ""};
-                }
+        for (size_t at = pair.find('_'); at != std::string::npos; at = pair.find('_', at + 1)) {
+            const auto a = find_sampled_scalar(pair.substr(0, at)), b = find_sampled_scalar(pair.substr(at + 1));
+            if (a && b) {
+                return FieldDescription{a->dimension.times(b->dimension), what + a->long_name + " and " + b->long_name,
+                                        "", ""};
             }
         }
         return std::nullopt;
@@ -226,7 +236,7 @@ std::optional<FieldDescription> find(const std::string & name) {
 
 size_t group_rank(const std::string & group) {
     const char * order[] = {CONSERVATIVE, PRIMITIVE, DERIVED, TRANSPORT, MIXTURE, CHEMISTRY, LES,
-                            "sources", "statistics", SURFACE, QUALITY};
+                            "sources", "statistics", SURFACE, QUALITY, STENCILS};
     for (size_t i = 0; i < std::size(order); i++) {
         if (group == order[i]) return i;
     }
@@ -250,6 +260,7 @@ std::string group(const std::string & name) {
         if (starts_with(name, e.name) && name.size() > std::string(e.name).size()) return e.group;
     }
     if (starts_with(name, "SOURCE_")) return "sources";
+    if (starts_with(name, "STENCIL_")) return STENCILS;
     for (const char * prefix : {"MEAN_", "COV_", "PHASE_", "RMS_", "FAVRE_MEAN_", "FAVRE_COV_"}) {
         if (starts_with(name, prefix)) return "statistics";
     }
@@ -276,11 +287,13 @@ std::vector<CatalogField> catalog() {
         {"RMS_<A>", dim::none, "", "statistics", "mallard post average, of A with its variance"},
         {"FAVRE_MEAN_<A>", dim::none, "", "statistics", "mallard post average --favre"},
         {"FAVRE_COV_<A>_<B>", dim::none, "", "statistics", "mallard post average --favre, of A*B"},
+        {"STENCIL_<id>", dim::none, "", STENCILS, "mallard check --mesh-fields with --cells or --region"},
     };
     const char * long_names[] = {"source of A, per second", "time average of A", "covariance of A and B",
                                  "phase average of A in a bin", "root mean square fluctuation of A",
-                                 "Favre (density-weighted) time average of A", "Favre covariance of A and B"};
-    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "A's", "A's", "A's times B's"};
+                                 "Favre (density-weighted) time average of A", "Favre covariance of A and B",
+                                 "membership in the stencils of cell id"};
+    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "A's", "A's", "A's times B's", "1"};
     for (size_t i = 0; i < std::size(derived); i++) {
         out.push_back({derived[i].name, units[i], long_names[i], derived[i].group, derived[i].needs});
     }

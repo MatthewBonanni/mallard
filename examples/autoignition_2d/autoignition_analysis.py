@@ -43,7 +43,6 @@ prints the table of results (with the HRR-weighted median of |S_d*| / S_L).
 import argparse
 import os
 import re
-import struct
 import sys
 
 import cantera as ct
@@ -54,24 +53,11 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from mallard import restart  # noqa: E402
 from mallard.vtu import grid_fields, series as snapshot_files  # noqa: E402
 
 FIELDS = ["RHO", "P", "T", "HRR", "Y_H2O", "OMEGA_H2O", "X_H2O", "D_H2O"]
 W_H2O = 18.01528e-3
-
-
-def read_restart(path):
-    with open(path, "rb") as f:
-        raw = f.read()
-    _, _, n, nv, _, _ = struct.unpack_from("<IIQQQd", raw, 16)
-    off = 16 + struct.calcsize("<IIQQQd")
-    names = []
-    for _ in range(nv):
-        (ln,) = struct.unpack_from("<I", raw, off)
-        names.append(raw[off + 4:off + 4 + ln].decode())
-        off += 4 + ln
-    data = np.frombuffer(raw, "<f8", n * nv, off).reshape(nv, n)
-    return dict(zip(names, data))
 
 
 class DeflagrationSpeed:
@@ -160,7 +146,7 @@ def main():
     results = []
     for label, run_dir in args.run:
         run = os.path.basename(os.path.normpath(run_dir))
-        init = read_restart(os.path.join(run_dir, "autoignition.restart"))
+        init = restart.read(os.path.join(run_dir, "autoignition.restart"))
         n = int(round(np.sqrt(init["RHO"].size)))
         T0 = init["T_SEED"].reshape(n, n)
         rho0 = init["RHO"].reshape(n, n)
