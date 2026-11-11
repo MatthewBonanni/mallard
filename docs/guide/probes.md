@@ -436,6 +436,10 @@ $ mallard post extract solut/restart_000002.restart solut/restart_000004.restart
 `--format json` prints the same as one object. Under `mpirun -n N` the probes
 are evaluated on N ranks, with the same values as on one.
 
+The tables' run block lists each snapshot read with the run id, step and time
+it records, so tables extracted into a run's directory are that run's to
+[`mallard post convergence`](convergence.md#what-it-reads).
+
 Pitfalls:
 
 - The values are those the run's probe gave at that step: bit for bit from

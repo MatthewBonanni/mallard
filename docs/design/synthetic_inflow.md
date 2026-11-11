@@ -94,6 +94,11 @@ index alone:
 - **Cost.** Each new plane costs one random plane plus three filter passes on
   the auxiliary grid, about once per time step; the face kernel
   interpolates four points (two in 2D) per component.
+- **Step graphs.** Which planes to compute is decided on the device, from
+  the time on the device: a one-thread kernel compares the planes the time
+  needs with those already filtered and cached, and the filter kernels skip
+  the slots with nothing to do. Every launch is the same at every step, so
+  CUDA graphs capture them, and the planes are the same as without a graph.
 
 ### Zero net flux
 

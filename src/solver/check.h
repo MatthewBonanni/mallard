@@ -28,7 +28,7 @@ constexpr double SIZING_MARGIN = 0.05;
 /** @brief The halo, as a share of the owned cells, that the ranks sizing recommends stay below. */
 constexpr double SIZING_HALO_FRACTION = 0.1;
 
-/** @brief Fields of the owned cells by name, written with the mesh-quality fields (--quality). */
+/** @brief Fields of the owned cells by name, written with the mesh-quality fields (--mesh-fields). */
 using CheckFields = std::vector<std::pair<std::string, std::vector<double>>>;
 
 struct CheckOptions {
@@ -36,7 +36,11 @@ struct CheckOptions {
     double throughput = 0.0;    // cells/s (cell updates per wall second) per rank; 0: steps or none
     uint64_t steps = 0;         // steps to time for a measured throughput
     size_t n_worst = 5;         // worst cells listed per quality metric
-    std::string quality_file;   // prefix of the quality fields' snapshot, or empty
+    std::string mesh_fields;    // prefix of the mesh and stencil fields' snapshot (--mesh-fields), or empty
+    bool all_stencils = false;  // the stencil file of every cell (--stencils all)
+    std::vector<uint64_t> stencil_cells;  // or of these cells, by global id (--cells)
+    std::string stencil_region;           // or of the cells of this region: a name or an inline table (--region)
+    bool stencil_weights = false;         // with the pseudo-inverse rows (--weights)
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
     std::string input_file;     // named before input errors, as a run names it, or empty
@@ -52,6 +56,7 @@ inline constexpr const char * SETUP = "E-SETUP";  // the setup stopped on anothe
 inline constexpr const char * KEY_UNUSED = "E-KEY-UNUSED";
 inline constexpr const char * KEY_DEPRECATED = "W-KEY-DEPRECATED";
 inline constexpr const char * CATALOG_WRITE = "E-CATALOG-WRITE";
+inline constexpr const char * MESH_FIELDS = "E-MESH-FIELDS";      // --mesh-fields or its stencils not written
 inline constexpr const char * RANKS = "E-RANKS";                  // --ranks under mpirun on other ranks
 inline constexpr const char * MEMORY_DEVICE = "E-MEMORY-DEVICE";  // the peak exceeds the device's memory
 inline constexpr const char * REGION_EMPTY = "E-REGION-EMPTY";
@@ -74,8 +79,8 @@ inline constexpr const char * ENV_PLACEMENT = "W-ENV-PLACEMENT";          // bin
 inline constexpr const char * ENV_THREAD_BINDING = "W-ENV-THREAD-BINDING";  // OpenMP threads free to migrate
 
 /** @brief Every code: errors (E-) and warnings (W-). */
-inline constexpr std::array<const char *, 25> ALL = {
-    INPUT, SETUP, KEY_UNUSED, KEY_DEPRECATED, CATALOG_WRITE, RANKS, MEMORY_DEVICE, REGION_EMPTY, REGION_OUTSIDE,
+inline constexpr std::array<const char *, 26> ALL = {
+    INPUT, SETUP, KEY_UNUSED, KEY_DEPRECATED, CATALOG_WRITE, MESH_FIELDS, RANKS, MEMORY_DEVICE, REGION_EMPTY, REGION_OUTSIDE,
     QUALITY_NON_ORTHOGONALITY, QUALITY_SKEWNESS, QUALITY_ASPECT_RATIO, QUALITY_VOLUME_RATIO, CFL_LIMIT,
     TFLES_THICKENING, WALL_Y_PLUS, WALL_SPACING, WALL_MODEL_EXCHANGE, DNS_ETA, SIZING_FIXED, SIZING_PARTS,
     ENV_GPU_AWARE_MPI, ENV_HOST_STAGING, ENV_PLACEMENT, ENV_THREAD_BINDING};
@@ -154,7 +159,8 @@ struct CheckReport {
     std::vector<CheckBoundary> boundaries;
     std::vector<CheckRegion> regions;
     std::string view_file;     // the case view written, or empty
-    std::string quality_file;  // the quality fields written, or empty
+    std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
+    std::string stencil_file;      // the stencils written, or empty
 
     bool has_quality = false;
     std::array<QualitySummary, MeshQuality::N_METRICS> quality;

@@ -332,7 +332,7 @@ mallard check --format json | python3 -c "import json, sys; print(json.load(sys.
 ```
 
 ```text
-$ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality quality --view view
+$ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --mesh-fields mesh --view view
 ...
 == Check ================================================================================ ok
   Result: ok, 0 errors and 0 warnings (exit status 0)
@@ -488,7 +488,8 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | <a id="e-memory-device"></a>`E-MEMORY-DEVICE` | The estimated peak per rank exceeds the device's memory | Run on more ranks or GPUs, or on a coarser mesh; GPU sizing says how many fit |
 | <a id="e-region-empty"></a>`E-REGION-EMPTY` | A region the case uses overlaps the domain's bounding box but touches no cell: too thin, or in a hole of the mesh | Enlarge or move it; `--view` shows it with the mesh's zones ([Regions on a mesh](geometry.md#regions-on-a-mesh)) |
 | <a id="e-region-outside"></a>`E-REGION-OUTSIDE` | A region the case uses lies outside the domain. The message gives both extents | Move it inside: often a unit or a sign ([Regions on a mesh](geometry.md#regions-on-a-mesh)) |
-| <a id="w-quality-non-orthogonality"></a>`W-QUALITY-NON-ORTHOGONALITY`, <a id="w-quality-skewness"></a>`W-QUALITY-SKEWNESS`, <a id="w-quality-aspect-ratio"></a>`W-QUALITY-ASPECT-RATIO`, <a id="w-quality-volume-ratio"></a>`W-QUALITY-VOLUME-RATIO` | Cells above the metric's limit (70 deg, 0.5, 1000, 10). Such cells limit the time step and the accuracy, and can make a run diverge | Improve the mesh where they are: `--quality PREFIX` writes the metrics as fields ([Mesh quality](meshes.md#mesh-quality)) |
+| <a id="w-quality-non-orthogonality"></a>`W-QUALITY-NON-ORTHOGONALITY`, <a id="w-quality-skewness"></a>`W-QUALITY-SKEWNESS`, <a id="w-quality-aspect-ratio"></a>`W-QUALITY-ASPECT-RATIO`, <a id="w-quality-volume-ratio"></a>`W-QUALITY-VOLUME-RATIO` | Cells above the metric's limit (70 deg, 0.5, 1000, 10). Such cells limit the time step and the accuracy, and can make a run diverge | Improve the mesh where they are: `--mesh-fields PREFIX` writes the metrics as fields ([Mesh quality](meshes.md#mesh-quality)) |
+| <a id="e-mesh-fields"></a>`E-MESH-FIELDS` | `--mesh-fields` could not write its files, or `--cells` or `--region` selects no cell: an id beyond the mesh's cells, a region that touches none | Check the path, the ids (global, from 0) and the region ([Mesh and stencil fields](output.md#mesh-and-stencil-fields)) |
 | <a id="w-cfl-limit"></a>`W-CFL-LIMIT` | The CFL number at the initial state is above the time integrator's stability limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4) | Lower `run.cfl`, or `run.dt` |
 | <a id="w-tfles-thickening"></a>`W-TFLES-THICKENING` | TFLES thickens the flame by more than 5 (`F = n_res Delta / delta_L`). Beyond that the flame's response to turbulence is unreliable | Refine the mesh where the flame goes, or lower `les.combustion.n_res` ([LES](les.md#thickened-flames-lescombustion)) |
 | <a id="w-wall-y-plus"></a>`W-WALL-Y-PLUS` | First cells of walls without a wall model above y+ 1, which DNS and wall-resolved LES need. The message gives the first-cell distance to aim for | Refine toward the walls, or model them (`wall_model`) ([Resolution](#resolution)) |
@@ -513,7 +514,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
 | `regions`, `case_view` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's file |
-| `mesh_quality`, `quality_file` | By field name (`NON_ORTHOGONALITY`, ...): `{max, mean, limit, above_limit, worst: [{value, cell, x}]}` |
+| `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{max, mean, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ...): `{quantity, value, units, target, status, basis, x}` |
 | `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, and by category `at_setup_peak` and `steady` |
@@ -596,7 +597,7 @@ otherwise; walls with a `wall_model` are wall-modeled):
 | Wall-modeled LES | Exchange points in the log layer, `y+ >= 30` |
 | TFLES | Thickening `F = n_res Delta / delta_L` at most 5 |
 
-`--quality PREFIX` also writes the estimates' fields with the mesh-quality
+`--mesh-fields PREFIX` also writes the estimates' fields with the mesh-quality
 ones: `Y_PLUS` on wall cells, `DELTA_OVER_ETA` (cell size over the mean
 Kolmogorov length) and `CELLS_PER_DELTA_L` (TFLES), to see in ParaView where
 the mesh is short. The mean `eta` stands for the whole domain, so

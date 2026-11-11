@@ -366,7 +366,7 @@ do. `mallard check input.toml --restart latest` checks the run it would start.
   none. With MPI, rank 0 decides for every rank.
 - A file named `latest` is given as `./latest`.
 - Restart files of every earlier release are read, back to 0.1, and files from a newer Mallard are rejected clearly ([compatibility](output.md#formats-and-compatibility)).
-- `compression = "zlib"` writes compressed restart files (version 5, losslessly: they restart bit for bit), about a third smaller for smooth flows; reading them needs a build with `Mallard_ENABLE_ZLIB`, and the Python tools in `tools/` read only uncompressed ones.
+- `compression = "zlib"` writes compressed restart files (version 5, losslessly: they restart bit for bit), about a third smaller for smooth flows; reading them needs a build with `Mallard_ENABLE_ZLIB`; the Python tools in `tools/` read them too.
 
 ### Initial states from scripts
 
@@ -390,7 +390,7 @@ count and step, `float64` time, each variable name as a `uint32` length and its
 characters, and finally the values, variable after variable, each over all
 cells in the mesh's global order. The variables are `RHO`, `RHOU_X`, `RHOU_Y`
 (`RHOU_Z`), `RHOE` and, for gas mixtures, `RHOY_<species>` for every species
-and `T_SEED` (a temperature guess); `channel_init.py` has a short writer.
+and `T_SEED` (a temperature guess). `tools/mallard/restart.py` reads every version from 2 on (`read`) and writes them (`write`), as the scripts above do.
 
 ## Remap from another mesh
 

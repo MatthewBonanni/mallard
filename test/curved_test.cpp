@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <functional>
@@ -23,9 +24,11 @@
 #include <tuple>
 #include <vector>
 
+#include "check.h"
 #include "curved.h"
 #include "face_reconstruction.h"
 #include "gmsh_fixtures.h"
+#include "hdf5_output.h"
 #include "input.h"
 #include "mesh.h"
 #include "physics.h"
@@ -761,4 +764,27 @@ TEST(CurvedTENO, CellsReachingCurvedWallsFitAtMostTheWallDegree) {
                                 "max wall-value error", {4, 8}, {f1, f2}, 5.0, 4.5});
     EXPECT_THROW(curved_reconstruction_error(4, "curved", 5, false, "curved_wall_degree = 1\n"), std::runtime_error);
 }
+
+#ifdef Mallard_HAS_HDF5
+TEST(CurvedTENO, StencilDegreeFieldShowsTheWallDegree) {
+    // STENCIL_DEGREE of mallard check --mesh-fields: the wall degree where the
+    // central stencil reaches a curved wall, the scheme's elsewhere
+    const std::string file = write_temp("curved_degree.msh", annulus_gmsh(12, 192));
+    const std::string prefix = (scratch_dir() / "mallard_curved_degree" / "mesh").string();
+    for (const int wall_degree : {3, 4}) {
+        CheckOptions options;
+        options.mesh_fields = prefix;
+        Solver solver;
+        solver.set_distributed(false);
+        const std::string recon =
+            "type = \"TENO\"\norder = 5\ncurved_wall_degree = " + std::to_string(wall_degree) + "\n";
+        const CheckReport r = solver.check(parse_toml(vortex_input(file, "curved", recon, "n_steps = 1\n")), options);
+        ASSERT_TRUE(r.ok()) << r.errors().front();
+        if (!comm::is_root()) continue;
+        const auto degree = h5_values<double>(r.mesh_fields_file, "VTKHDF/CellData/STENCIL_DEGREE");
+        EXPECT_EQ(*std::max_element(degree.begin(), degree.end()), 4.0);
+        EXPECT_EQ(*std::min_element(degree.begin(), degree.end()), double(wall_degree));
+    }
+}
+#endif
 
