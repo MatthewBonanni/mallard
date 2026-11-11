@@ -531,8 +531,8 @@ bool Solver::statistics_on_device() const {
 }
 
 bool Solver::monitors_on_device() const {
-    // The kinetic-energy budget is the host's; fused chemistry is advanced by the host before a monitor reads the state
-    return (!force_monitors.empty() || integral_monitor.interval > 0) && !integral_monitor.budget && !defer_chemistry &&
+    // Fused chemistry is advanced by the host before a monitor reads the state
+    return (!force_monitors.empty() || integral_monitor.interval > 0) && !defer_chemistry &&
            force_monitors.size() + 1 <= 64;
 }
 
@@ -540,9 +540,10 @@ void Solver::allocate_monitors() {
     if (monitor_results.is_allocated()) return;
     monitor_offsets.assign(1, 0);
     for (size_t k = 0; k < force_monitors.size(); k++) monitor_offsets.push_back(monitor_offsets.back() + 2 * N_DIM + 1);
-    monitor_offsets.push_back(monitor_offsets.back() + N_FLOW_STATISTICS + 2);
+    monitor_offsets.push_back(monitor_offsets.back() + N_FLOW_STATISTICS + 2 + (integral_monitor.budget ? N_BUDGET : 0));
     monitor_results = Kokkos::View<double *>("step_monitor_results", monitor_offsets.back());
     monitor_sums = Kokkos::View<rtype *>("step_monitor_sums", std::max<size_t>(2 * N_DIM + 1, N_FLOW_STATISTICS));
+    if (integral_monitor.budget) allocate_budget();
 }
 
 void Solver::monitor_reductions(const size_t k) {
@@ -559,6 +560,18 @@ void Solver::monitor_reductions(const size_t k) {
     Kokkos::parallel_for("integrals_les", 1, KOKKOS_LAMBDA(const int) {
         out[N_FLOW_STATISTICS] = has_state ? state(0) : C;
         out[N_FLOW_STATISTICS + 1] = has_state ? state(2) : 0.0;
+    });
+    if (!integral_monitor.budget) return;
+    enqueue_kinetic_energy_budget();
+    const Kokkos::View<rtype *> b = budget_rates;
+    Kokkos::parallel_for("integrals_budget", 1, KOKKOS_LAMBDA(const int) {
+        // The exact convective rate is the pressure work; the rest is numerical
+        double * const budget = out + N_FLOW_STATISTICS + 2;
+        budget[0] = double(b(0));
+        budget[1] = double(b(1));
+        budget[2] = double(b(2));
+        budget[3] = double(b(3) - b(0));
+        budget[4] = double(b(3));
     });
 }
 

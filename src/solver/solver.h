@@ -881,11 +881,18 @@ class Solver {
         void update_upwind_sensor();
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
+        /** @brief kinetic_energy_rate into *out on the device. */
+        void kinetic_energy_rate(rtype * out) const;
         /**
          * @brief Over owned cells, -u . sum_f mean(p) n_f of the interior faces (Jameson's two-point pressure
          *        flux with cell values) plus the kinetic_energy_rate of the boundary faces' face_flux.
          */
         rtype pressure_work_rate() const;
+        /** @brief The budget pass's rates of this rank, into budget_rates on the device (calc_rhs). */
+        void budget_rates_of_fluxes(int stage);
+        /** @brief kinetic_energy_budget's rates over the ranks into budget_rates, on the device (capturable). */
+        void enqueue_kinetic_energy_budget();
+        void allocate_budget();
 
         template <typename T_riemann_solver>
         ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
@@ -1051,7 +1058,10 @@ class Solver {
         Kokkos::View<double *> les_state;  // device: [C, <L:M> / <M:M>, TFLES beta] of the dynamic procedures
         /** @brief les_state(k), 0 without LES. */
         double les_value(int k) const;
-        KineticEnergyBudget budget;
+        Kokkos::View<rtype *> budget_rates;  // device: [convective, viscous, sgs, pressure work]
+        static constexpr size_t N_BUDGET = 5;  // integrals' budget columns
+        State budget_rhs;
+        Kokkos::View<rtype *> budget_T_seed;
 
         // Wall-modeled LES (docs/design/wall_model.md)
         bool wall_model_on = false;

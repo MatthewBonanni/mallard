@@ -437,8 +437,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     }
 
     if (budget_pass) {
-        budget.convective = kinetic_energy_rate();
-        budget.pressure_work = pressure_work_rate();
+        budget_rates_of_fluxes(0);
     }
     ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
@@ -455,7 +454,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
                                              mesh->cell_covariance, les_coefficients};
         viscous_functor.wall_model = wall_model.out;
         parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
-        if (budget_pass) budget.viscous = kinetic_energy_rate() - budget.convective;
+        if (budget_pass) budget_rates_of_fluxes(1);
     }
 
     FaceFluxSumFunctor sum_functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -491,11 +490,10 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     }
     if (budget_pass && les_on) {
         // The SGS fluxes alone, into the face fluxes this evaluation no longer needs
-        Kokkos::deep_copy(face_flux, 0.0_r);
+        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), face_flux, 0.0_r);
         viscous_functor.sgs_only = true;
         parallel_for_faces("viscous_flux", viscous_functor, rhs_faces, mesh->n_faces);
-        budget.sgs = kinetic_energy_rate();
-        budget.viscous -= budget.sgs;
+        budget_rates_of_fluxes(2);
     }
 }
 

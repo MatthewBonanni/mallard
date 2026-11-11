@@ -3399,12 +3399,8 @@ void Solver::write_integrals() {
 void Solver::write_integral_row(const double * monitored) {
     std::vector<double> values;
     for (size_t i = 0; i < N_FLOW_STATISTICS; i++) values.push_back(double(static_cast<rtype>(monitored[i])));
-    if (integral_monitor.budget) {
-        // The exact convective rate is the pressure work; the rest is numerical
-        const KineticEnergyBudget rates = kinetic_energy_budget();
-        values.insert(values.end(), {double(rates.convective), double(rates.viscous), double(rates.sgs),
-                                     double(rates.pressure_work - rates.convective), double(rates.pressure_work)});
-    }
+    if (integral_monitor.budget) values.insert(values.end(), monitored + N_FLOW_STATISTICS + 2,
+                                               monitored + N_FLOW_STATISTICS + 2 + N_BUDGET);
     if (les_on && les.dynamic) values.push_back(double(static_cast<rtype>(monitored[N_FLOW_STATISTICS])));
     if (dynamic_efficiency()) values.push_back(monitored[N_FLOW_STATISTICS + 1]);
     const auto columns = integral_columns();

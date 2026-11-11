@@ -418,6 +418,21 @@ TEST(StepQueueTest, ForcesAndIntegralsAreStagedWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("monitors", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, KineticEnergyBudgetIsStagedWithoutStoppingTheDevice) {
+    // The budget's extra right-hand side runs in the step graph at the monitor's steps, at the device's t
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 3\nbudget = true\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("budget", c);
+    if (comm::is_root()) {
+        EXPECT_NE(o.files.at("integrals.csv").find("eps_numerical"), std::string::npos);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("budget", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, MeansAreSampledWithoutStoppingTheDevice) {
     Case c;
     c.run = "n_steps = 20\ncfl = 0.5\n";
