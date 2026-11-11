@@ -601,7 +601,10 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     o.t = solver.get_time();
     o.rejected = solver.get_rejected_steps();
     o.queued = solver.get_queued_steps();
-    o.rows_on_device = solver.progress_on_device();
+    // Rows of runs with fused chemistry follow the host's half step
+    const bool fused = input.contains("chemistry") && input.at("chemistry").contains("fuse_half_steps") &&
+                       input.at("chemistry").at("fuse_half_steps").as_boolean();
+    o.rows_on_device = solver.progress_on_device() && !fused;
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {
         const json::Value v = json::parse(line);

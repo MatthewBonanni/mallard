@@ -138,8 +138,9 @@ std::string Solver::step_graph_unsupported() const {
 }
 
 bool Solver::progress_on_device() const {
-    // Rows of runs whose timed boundaries can fail are checked by the host at each row
-    return !reacting && !timed_boundaries;
+    // Rows of runs whose timed boundaries can fail are checked by the host at each row, and rows of runs with fused
+    // chemistry follow the half step the host completes first
+    return !defer_chemistry && !timed_boundaries;
 }
 
 void Solver::record_step() {
