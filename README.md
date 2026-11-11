@@ -51,7 +51,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 **Input and output** ([guide](docs/guide/input_files.md))
 - TOML input with units (`p = "1 atm"`); every error names the key, line and fix
 - Initial states from expressions, layered regions, tables and divergence-free synthetic turbulence of a prescribed spectrum
-- `mallard check` before a run, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file, `mallard diff` between two solutions, `mallard post extract` for probes and region integrals of existing output, `mallard post derive` for its derived fields, `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions; tab completion for bash, zsh and fish
+- `mallard check` before a run, with mesh-quality and reconstruction-stencil fields for ParaView and every cell's stencils in one file, `mallard new` case templates, `mallard ctl` to steer a running job, `mallard info` on any output file, `mallard diff` between two solutions, `mallard post extract` for probes and region integrals of existing output, `mallard post derive` for its derived fields, `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](docs/guide/convergence.md) of runs at several resolutions, `mallard pack` for one archive that reproduces a run (with a manifest of SHA-256 hashes and `--verify`); tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields) in the run or after it (`mallard post derive`): Mach number, stagnation state, entropy, Q-criterion, λ₂, enstrophy, helicity, numerical schlieren, pressure coefficient, and for flames mixture fraction, progress variable, flame index and scalar dissipation
@@ -80,7 +80,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-[Installation](docs/installation.md) covers containers, Spack, GPU and MPI builds and every CMake option. [Supported platforms](docs/installation.md#supported-platforms): GCC 15, Clang 22 or Xcode 26.4 and newer, CMake 4.2 and newer, on Linux (x86-64 and arm64) and macOS, with CUDA 13.4, ROCm or oneAPI for GPUs.
+[Installation](docs/installation.md) covers containers, Spack, GPU and MPI builds and every CMake option. [Supported platforms](docs/installation.md#supported-platforms): GCC 15, Clang 22 or Xcode 26.4 and newer, CMake 4.2 and newer, on Linux (x86-64 and arm64) and macOS, with CUDA 13.4, ROCm or oneAPI for GPUs. The [feature matrix](docs/guide/features.md) shows which features combine, each pair marked validated, verified, implemented, rejected or untested.
 
 ## Running
 

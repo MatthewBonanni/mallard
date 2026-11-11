@@ -12,10 +12,14 @@ volume elements. Reads ASCII Gmsh 2.2 meshes of linear elements; the restart
 keeps the old file's step and time.
 """
 import argparse
-import struct
+import os
+import sys
 
 import numpy as np
 from scipy.spatial import cKDTree
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from mallard import restart  # noqa: E402
 
 NODES_PER_TYPE = {2: 3, 3: 4, 4: 4, 5: 8, 6: 6, 7: 5}  # Gmsh element type -> nodes
 VOLUME_TYPES = {4, 5, 6, 7}
@@ -51,48 +55,6 @@ def cell_centroids(path):
     return np.array(centroids)
 
 
-def read_restart(path):
-    with open(path, "rb") as f:
-        magic = f.read(16)
-        version, real_size = struct.unpack("<II", f.read(8))
-        n_cells, n_vars, step = struct.unpack("<QQQ", f.read(24))
-        (t,) = struct.unpack("<d", f.read(8))
-        if not magic.startswith(b"MALLARD-RESTART") or version not in (2, 3, 4) or real_size != 8:
-            raise SystemExit(f"{path}: expected a double-precision restart file of version 2, 3 or 4")
-
-        def name():
-            (length,) = struct.unpack("<I", f.read(4))
-            return f.read(length).decode()
-
-        names = [name() for _ in range(n_vars)]
-        attributes = []
-        if version >= 3:
-            (n_attributes,) = struct.unpack("<Q", f.read(8))
-            attributes = [(name(), struct.unpack("<d", f.read(8))[0]) for _ in range(n_attributes)]
-        if version >= 4:
-            f.read(12)  # characteristic boundary faces, which belong to the old mesh
-        fields = np.fromfile(f, dtype="<f8", count=n_vars * n_cells).reshape(n_vars, n_cells)
-    # Without its faces, the new mesh's file is of version 3
-    version = min(version, 3)
-    return {"version": version, "step": step, "t": t, "names": names, "attributes": attributes, "fields": fields}
-
-
-def write_restart(path, restart, fields):
-    n_vars, n_cells = fields.shape
-    with open(path, "wb") as f:
-        f.write(b"MALLARD-RESTART\0")
-        f.write(struct.pack("<II", restart["version"], 8))
-        f.write(struct.pack("<QQQ", n_cells, n_vars, restart["step"]))
-        f.write(struct.pack("<d", restart["t"]))
-        for name in restart["names"]:
-            f.write(struct.pack("<I", len(name)) + name.encode())
-        if restart["version"] == 3:
-            f.write(struct.pack("<Q", len(restart["attributes"])))
-            for name, value in restart["attributes"]:
-                f.write(struct.pack("<I", len(name)) + name.encode() + struct.pack("<d", value))
-        fields.astype("<f8").tofile(f)
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("old_mesh")
@@ -102,17 +64,18 @@ def main():
     ap.add_argument("--neighbors", type=int, default=8)
     args = ap.parse_args()
 
-    old = read_restart(args.old_restart)
+    old = restart.read(args.old_restart)
     old_c = cell_centroids(args.old_mesh)
-    if len(old_c) != old["fields"].shape[1]:
-        raise SystemExit(f"{args.old_restart} has {old['fields'].shape[1]} cells, {args.old_mesh} {len(old_c)}")
+    if len(old_c) != old.n_cells:
+        raise SystemExit(f"{args.old_restart} has {old.n_cells} cells, {args.old_mesh} {len(old_c)}")
     new_c = cell_centroids(args.new_mesh)
     dist, near = cKDTree(old_c).query(new_c, k=args.neighbors)
     w = 1.0 / np.maximum(dist, 1e-12) ** 2
     w /= w.sum(1, keepdims=True)
-    fields = np.einsum("vnk,nk->vn", old["fields"][:, near], w)
-    write_restart(args.new_restart, old, fields)
-    print(f"{args.new_restart}: {len(new_c)} cells from {len(old_c)}, t = {old['t']}, step {old['step']}")
+    values = np.einsum("vnk,nk->vn", old.values.astype(float)[:, near], w)
+    restart.write(args.new_restart, dict(zip(old.names, values)), old.step, old.t, old.attributes,
+                  real_size=old.real_size)
+    print(f"{args.new_restart}: {len(new_c)} cells from {len(old_c)}, t = {old.t}, step {old.step}")
 
 
 if __name__ == "__main__":

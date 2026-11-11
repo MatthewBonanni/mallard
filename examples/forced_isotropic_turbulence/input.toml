@@ -11,8 +11,8 @@
 # integrals.csv logs the kinetic energy integrated over the box (divide
 # kinetic_energy by (2 pi)^3). 20 s on one A100.
 #
-# The domain averages need one global sum per Runge-Kutta stage, so steps run
-# kernel by kernel on GPUs (no CUDA graph).
+# The domain averages are one exact global sum per Runge-Kutta stage, on the
+# GPU inside the step's CUDA graph.
 
 [run]
 t_stop = 20.0

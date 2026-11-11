@@ -458,7 +458,7 @@ RestartData read_state(const output::Contents & c, const Selected & e, const Mes
                                   count(n_global) + ": give the input of the run that wrote it (-i)");
     };
     if (c.kind == output::Kind::restart) {
-        RestartData data = read_restart(c.path, distributed ? &mesh.h_global_cell_id : nullptr);
+        RestartData data = read_restart(c.path, mesh.h_global_cell_id.empty() ? nullptr : &mesh.h_global_cell_id);
         if (data.n_cells != n_global) throw wrong_mesh(data.n_cells);
         return data;
     }
@@ -480,6 +480,23 @@ RestartData read_state(const output::Contents & c, const Selected & e, const Mes
         }
     }
     return data;
+}
+
+/** @brief The run block a snapshot is recorded by: its file's, with the run id its own snapshot block gives. */
+std::string source_block(const output::Contents & c, const Selected & e) {
+    std::string block = c.run;
+    if (e.snapshot.file != c.path) {
+        try {
+            block = output::open(e.snapshot.file).run;
+        } catch (const std::exception &) {
+        }
+    }
+    if (e.snapshot.run_id.empty() || provenance::find_string(block, "run", "run_id") == e.snapshot.run_id) return block;
+    json::Object run;
+    run.add("run_id", e.snapshot.run_id);
+    const std::string directory = provenance::find_string(block, "run", "directory");
+    if (!directory.empty()) run.add("directory", directory);
+    return json::Object().raw("run", run.str()).str();
 }
 
 /** @brief A file the extraction wrote, as the reader reads it back. */
@@ -667,6 +684,13 @@ int extract(const cli::Args & args, const bool derive) {
     Solver solver;
     size_t current = 0;
     solver.set_state_reader([&](const Mesh & mesh) {
+        // The first state is read within init, after the run block starts and before it lists the files read
+        if (current == 0 && comm::is_root()) {
+            for (const Selected & e : selected) {
+                provenance::read_start_file("snapshot", e.snapshot.file, source_block(files[e.file], e),
+                                            static_cast<uint64_t>(e.step), e.snapshot.t);
+            }
+        }
         try {
             return read_state(files[selected[current].file], selected[current], mesh);
         } catch (const std::exception & e) {

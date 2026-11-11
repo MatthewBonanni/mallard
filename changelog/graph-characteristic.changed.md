@@ -1,0 +1,1 @@
+- Characteristic (`nscbc`) boundaries take their steps in the CUDA graph (CUDA builds): the incoming waves advance over the step's dt on the device, and inlet values of `t` are evaluated at the stage and step-end times on the device.

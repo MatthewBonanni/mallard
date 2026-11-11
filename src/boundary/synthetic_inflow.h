@@ -14,6 +14,7 @@
 #define SYNTHETIC_INFLOW_H
 
 #include <array>
+#include <climits>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -114,6 +115,8 @@ class SyntheticInflow {
          *        A mean of t is the one already in target, written there by TimedInletTargets at t.
          */
         void fill(double t, const Kokkos::View<rtype *[N_DIM]> & target);
+        /** @brief The same at the time on the device (kernels only, capturable in a step graph). */
+        void fill(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM]> & target);
 
         /** @brief One-line description for the run log. */
         std::string summary() const { return summary_; }
@@ -124,15 +127,16 @@ class SyntheticInflow {
         double convection_velocity() const { return U_c; }
 
         // Public because nvcc rejects device lambdas in non-public member functions
-        uint32_t plane(int64_t m);
-        void random_plane(int64_t m, uint32_t slot);
-        void time_filter(int64_t m, uint32_t slot);
-        void net_flux(uint32_t slot);
+        void plan(const Kokkos::View<rtype> & time);
+        void random_planes();
+        void time_filter();
+        void net_flux();
 
     private:
         static constexpr int N_T = N_DIM - 1;  // transverse directions
         static constexpr uint32_t N_CACHE = 4;  // filtered planes kept
         static constexpr uint32_t CHUNK = 256;  // points per partial sum of the net flux
+        static constexpr int64_t NO_PLANE = INT64_MIN;
 
         std::string summary_;
         uint64_t seed = 1;
@@ -167,17 +171,19 @@ class SyntheticInflow {
         Kokkos::View<rtype *[N_DIM]> face_mean;
         Kokkos::View<rtype *[N_STRESS]> face_cholesky;  // lower triangle, row by row
 
-        // Planes
-        Kokkos::View<rtype **> random_work;      // (component, padded point)
-        Kokkos::View<rtype **> filter_work;      // (component, point after the first direction)
+        // Planes, and which of them are cached, on the device
+        int64_t n_filtered = 0;                  // slots of planes filtered in space: 2 n_time + 3
+        Kokkos::View<rtype ***> filter_work;     // (slot, component, point after the first direction)
         Kokkos::View<rtype ***> filtered;        // (slot, component, point): filtered in space, slot = plane mod
-        std::vector<int64_t> filtered_index;     // plane of each slot
         Kokkos::View<rtype ***> planes;          // (cache slot, component, point): filtered in space and time
-        std::vector<int64_t> plane_index;
-        std::vector<uint64_t> plane_used;
-        uint64_t use_count = 0;
+        // [plane of each cache slot, its last use, use count, plane of each filtered slot]
+        Kokkos::View<int64_t *> cache;
+        // [plane to filter in space per slot, planes m and m + 1 to filter in time, their cache slots]
+        Kokkos::View<int64_t *> jobs;
+        Kokkos::View<double> time_fraction;      // (t - t_m) / dt_plane
+        Kokkos::View<rtype> host_time;
         Kokkos::View<rtype **> flux_weight;      // (component, point): weight of the net normal flux
-        Kokkos::View<rtype **> chunk_sums;       // (chunk, component)
+        Kokkos::View<rtype ***> chunk_sums;      // (plane m or m + 1, chunk, component)
         Kokkos::View<rtype **> plane_flux;       // (cache slot, component): sum of flux_weight * plane
 };
 

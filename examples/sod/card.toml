@@ -3,3 +3,4 @@
 build = "2d"
 demonstrates = ["TENO5 reconstruction", "exact Riemann solution", "a first run"]
 tutorial = "first_simulation"
+validation = [{anchor = "sod-shock-tube", regime = "Riemann problem with a shock, a contact and a rarefaction, against the exact solution"}]

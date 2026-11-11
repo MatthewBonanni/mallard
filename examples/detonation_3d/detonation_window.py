@@ -43,7 +43,7 @@ front at (Y, Z) with the fresh gas of the last column, at rest, to start
 transverse waves in z.
 
 Cells are numbered as Mallard's generated boxes number them, z fastest, then
-y: c = (i NY + j) NZ + k. Double-precision restart files of version 2 or 3.
+y: c = (i NY + j) NZ + k. Uncompressed double-precision restart files.
 `foils(INPUT)` (import this module) assembles the soot foils of the whole
 duct so far. Needs only numpy (Python 3.11 or later).
 """
@@ -59,6 +59,9 @@ import sys
 import tomllib
 
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from mallard.restart import memmap as memmap_restart, read_header  # noqa: E402
 
 ATOMIC_WEIGHTS = {"H": 1.008, "O": 15.999, "N": 14.007, "C": 12.011, "Ar": 39.95, "He": 4.002602}
 GAS_CONSTANT = 8314.462618  # J / (kmol K)
@@ -98,34 +101,11 @@ class Case:
         os.replace(tmp, self.state_file)
 
 
-def read_header(f):
-    magic = f.read(16)
-    version, real_size = struct.unpack("<II", f.read(8))
-    n_cells, n_vars, step = struct.unpack("<QQQ", f.read(24))
-    (t,) = struct.unpack("<d", f.read(8))
-    if not magic.startswith(b"MALLARD-RESTART") or version not in (2, 3) or real_size != 8:
-        raise SystemExit("expected a double-precision Mallard restart file of version 2 or 3")
-
-    def name():
-        (length,) = struct.unpack("<I", f.read(4))
-        return f.read(length).decode()
-
-    names = [name() for _ in range(n_vars)]
-    if version == 3:
-        (n_attributes,) = struct.unpack("<Q", f.read(8))
-        for _ in range(n_attributes):
-            name()
-            f.read(8)
-    return {"version": version, "n_cells": n_cells, "names": names, "step": step, "t": t, "offset": f.tell()}
-
-
 def open_restart(path, shape, mode="r"):
-    with open(path, "rb") as f:
-        h = read_header(f)
-    if h["n_cells"] != np.prod(shape):
-        raise SystemExit(f"{path}: {h['n_cells']} cells, not {' x '.join(map(str, shape))}")
-    data = np.memmap(path, dtype="<f8", mode=mode, offset=h["offset"], shape=(len(h["names"]),) + tuple(shape))
-    return h, data
+    h, data = memmap_restart(path, mode)
+    if h.n_cells != np.prod(shape):
+        raise SystemExit(f"{path}: {h.n_cells} cells, not {' x '.join(map(str, shape))}")
+    return h, data.reshape((len(h.names),) + tuple(shape))
 
 
 def front_index(rho):
@@ -147,25 +127,25 @@ def wall_strips(p_max):
 def shift(case, restart, keep, state):
     """Shift RESTART in place to keep KEEP meters behind the front; returns the shift in cells."""
     h, data = open_restart(restart, case.shape, mode="r+")
-    i_front = front_index(data[h["names"].index("RHO")])
+    i_front = front_index(data[h.names.index("RHO")])
     s = i_front - int(round(keep / case.dx))
     if s < 1:
         print(f"front at x = {(state['shift_cells'] + i_front + 0.5) * case.dx:.4f} m in the duct: no shift")
         return 0
-    if "P_MAX" in h["names"]:
+    if "P_MAX" in h.names:
         os.makedirs(case.foil_dir, exist_ok=True)
         chunk = f"chunk_{len(state['chunks']):04d}.npz"
-        np.savez(os.path.join(case.foil_dir, chunk), **wall_strips(np.asarray(data[h["names"].index("P_MAX"), :s])))
+        np.savez(os.path.join(case.foil_dir, chunk), **wall_strips(np.asarray(data[h.names.index("P_MAX"), :s])))
         state["chunks"].append({"file": chunk, "first_cell": state["shift_cells"], "cells": s,
-                                "step": h["step"], "t": h["t"]})
-    for v in range(len(h["names"])):
+                                "step": h.step, "t": h.t})
+    for v in range(len(h.names)):
         field = data[v]
         field[:-s] = field[s:].copy()
         field[-s:] = field[-1 - s]
     data.flush()
     del data
     state["shift_cells"] += s
-    print(f"step {h['step']}, t = {h['t']:.6e}: front at cell {i_front}, shifted by {s} cells; "
+    print(f"step {h.step}, t = {h.t:.6e}: front at cell {i_front}, shifted by {s} cells; "
           f"box starts at x = {state['shift_cells'] * case.dx:.4f} m in the duct", flush=True)
     return s
 
@@ -187,7 +167,7 @@ def molecular_weights(mechanism):
 
 def pressure(h, data, i0, i1, mechanism):
     """Pressure of columns i0:i1 from the partial densities and T_SEED (the temperature of the last state)."""
-    names = h["names"]
+    names = h.names
     weights = molecular_weights(mechanism)
     rho_over_w = np.zeros((i1 - i0,) + data.shape[2:])
     for name in names:
@@ -198,18 +178,18 @@ def pressure(h, data, i0, i1, mechanism):
 
 def frame(case, restart, out, depth, state):
     h, data = open_restart(restart, case.shape)
-    i_front = front_index(data[h["names"].index("RHO")])
+    i_front = front_index(data[h.names.index("RHO")])
     i0 = max(0, i_front + 3 - int(round(depth / case.dx)))
     i1 = min(case.shape[0], i_front + 4)
     p = pressure(h, data, i0, i1, case.mechanism)
     result = {"p_kpa": (p / 1000).astype(np.float16), "i0": i0, "shift_cells": state["shift_cells"],
-              "dx": case.dx, "t": h["t"], "step": h["step"], "i_front": i_front, "size": case.size}
-    if "P_MAX" in h["names"]:
-        for wall, strip in wall_strips(np.asarray(data[h["names"].index("P_MAX")])).items():
+              "dx": case.dx, "t": h.t, "step": h.step, "i_front": i_front, "size": case.size}
+    if "P_MAX" in h.names:
+        for wall, strip in wall_strips(np.asarray(data[h.names.index("P_MAX")])).items():
             result["pmax_" + wall] = strip.astype(np.float32)
     np.savez(out + ".tmp.npz", **result)
     os.replace(out + ".tmp.npz", out)
-    print(f"{out}: t = {h['t']:.6e}, front at x = {(state['shift_cells'] + i_front + 0.5) * case.dx:.4f} m",
+    print(f"{out}: t = {h.t:.6e}, front at x = {(state['shift_cells'] + i_front + 0.5) * case.dx:.4f} m",
           flush=True)
 
 
@@ -224,24 +204,23 @@ def foils(input_path, restart=None):
                 parts.setdefault(w, []).append(z[w])
     restart = restart or case.path(case.toml["initialize"]["file"])
     h, data = open_restart(restart, case.shape)
-    for w, strip in wall_strips(np.asarray(data[h["names"].index("P_MAX")])).items():
+    for w, strip in wall_strips(np.asarray(data[h.names.index("P_MAX")])).items():
         parts.setdefault(w, []).append(strip)
     return {w: np.concatenate(p) for w, p in parts.items()}, case.dx
 
 
 def extrude(input_2d, restart_2d, input_3d, out, pockets, superpose):
     case2, case3 = Case(input_2d), Case(input_3d)
-    with open(restart_2d, "rb") as f:
-        h = read_header(f)
+    h = read_header(restart_2d)
     nx2, ny = case2.shape[:2]
     nx, ny3, nz = case3.shape
     if ny3 != ny or nx > nx2 or abs(case3.dx - case2.dx) > 1e-9 * case2.dx or (superpose and nz != ny):
         raise SystemExit("the 3D box needs the 2D box's cells and NY, at most its NX, and NZ = NY to superpose")
     _, data = open_restart(restart_2d, (nx2, ny, 1))
     cut = nx2 - nx
-    names = list(h["names"])
+    names = list(h.names)
     names.insert(names.index("RHOU_Y") + 1, "RHOU_Z")
-    i_front = front_index(data[h["names"].index("RHO")]) - cut
+    i_front = front_index(data[h.names.index("RHO")]) - cut
     h_cell = case2.size[1] / ny
     x = (np.arange(nx) + 0.5) * case2.dx
     y = (np.arange(ny) + 0.5) * h_cell
@@ -251,13 +230,13 @@ def extrude(input_2d, restart_2d, input_3d, out, pockets, superpose):
         xc = (i_front + 0.5) * case2.dx - behind
         inside |= ((x[:, None, None] - xc) ** 2 + (y[None, :, None] - yc) ** 2 + (z[None, None, :] - zc) ** 2
                    < r ** 2)
-    column = {name: np.asarray(data[h["names"].index(name), cut:, :, 0]) for name in h["names"]}
+    column = {name: np.asarray(data[h.names.index(name), cut:, :, 0]) for name in h.names}
     if superpose:
         T = column["T_SEED"]
         from_z = T[:, None, :] > T[:, :, None]  # at (x, y, z): the 2D state at (x, z) is hotter than at (x, y)
     with open(out, "wb") as f:
         f.write(b"MALLARD-RESTART\0")
-        f.write(struct.pack("<IIQQQd", 2, 8, nx * ny * nz, len(names), h["step"], h["t"]))
+        f.write(struct.pack("<IIQQQd", 2, 8, nx * ny * nz, len(names), h.step, h.t))
         for name in names:
             f.write(struct.pack("<I", len(name)) + name.encode())
         for name in names:
@@ -278,7 +257,7 @@ def extrude(input_2d, restart_2d, input_3d, out, pockets, superpose):
             if name not in ("CHEM_H", "P_MAX"):
                 field[inside] = 0.0 if name.startswith("RHOU_") else column[name][-1].mean()
             field.astype("<f8").tofile(f)
-    print(f"wrote {out}: {nx} x {ny} x {nz} cells at t = {h['t']:.6e} ({cut} columns cut behind), "
+    print(f"wrote {out}: {nx} x {ny} x {nz} cells at t = {h.t:.6e} ({cut} columns cut behind), "
           f"{'superposed in y and z, ' if superpose else ''}{inside.sum()} cells of fresh gas in {len(pockets)} pockets")
 
 
@@ -303,8 +282,7 @@ def run(case, keep, segment, t_end, frames_dir, depth, command):
     rdir = restart_dir(case)
     if frames_dir:
         os.makedirs(frames_dir, exist_ok=True)
-    with open(init, "rb") as f:
-        t = read_header(f)["t"]
+    t = read_header(init).t
     while t < t_end * (1 - 1e-9):
         t_next = min(t_end, segment * (round(t / segment) + 1))
         with open(case.input) as f:
@@ -318,8 +296,7 @@ def run(case, keep, segment, t_end, frames_dir, depth, command):
         restarts = sorted(glob.glob(os.path.join(rdir, "*.restart")))
         if rc != 0 or not restarts:
             raise SystemExit(f"Mallard exited with {rc}; resume by rerunning this command")
-        with open(restarts[-1], "rb") as f:
-            t_last = read_header(f)["t"]
+        t_last = read_header(restarts[-1]).t
         if abs(t_last - t_next) > 1e-9 * t_next:
             raise SystemExit(f"the last restart is at t = {t_last}, not the segment end {t_next}")
         for r in restarts:

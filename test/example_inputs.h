@@ -39,6 +39,9 @@ struct ExampleCase {
     std::string mesh;
 };
 
+/** @brief Every solver example of this build's dimension (numerics_preset_test.cpp). */
+std::vector<ExampleCase> examples_of_this_build();
+
 inline void PrintTo(const ExampleCase & c, std::ostream * os) { *os << c.file << " (" << c.preset << ")"; }
 
 inline std::filesystem::path example_path(const std::string & file) {
