@@ -1,0 +1,1 @@
+- Spectra statistics (`[statistics.spectra]`) of distributed runs move their slabs between the ranks and gather the plane sums with NCCL on the GPU's stream in NCCL builds (MPI with `halo_exchange = "mpi"` and in builds without NCCL), with the same results.
