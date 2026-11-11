@@ -130,14 +130,25 @@ class ConservationLedger {
 
         /** @brief The step is accepted with time step dt: its stages enter the run's sums. */
         void end_step(double dt);
+        /** @brief end_step on the device, of the dt there, if *accepted (steps decided on the device). */
+        void end_step(const rtype * dt, const uint32_t * accepted);
+
+        /** @brief Values of local_totals: sum V U and its scales over the rank's cells, then the element masses. */
+        uint32_t n_totals() const { return 2 * N + n_elements; }
+        /** @brief Enqueues the rank's totals of U and rhoY into out (n_totals() values) on the device. */
+        void local_totals(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<double *> & out) const;
+        /** @brief The rank's sums over the steps so far, (term, component); empty while off. */
+        Kokkos::View<double *> run_sums() const { return on() ? run_sum : Kokkos::View<double *>(); }
 
         /**
          * @brief The balances since the previous report and since the start
-         *        (collective): totals from U and rhoY, repairs per component
-         *        (N flow components, then the elements) since the start.
+         *        (collective): the rank's totals (local_totals) and run sums
+         *        (run_sums) at the report's step, repairs per component (N
+         *        flow components, then the elements) since the start.
          */
-        void report(const StateView & U, const SpeciesView & rhoY, const std::vector<double> & repairs,
-                    std::vector<health::Balance> & interval, std::vector<health::Balance> & run);
+        void report(const std::vector<double> & local_totals, const std::vector<double> & local_run_sum,
+                    const std::vector<double> & repairs, std::vector<health::Balance> & interval,
+                    std::vector<health::Balance> & run);
 
         /**
          * @brief Around a chemistry call (mixtures): the element totals of the
@@ -157,7 +168,7 @@ class ConservationLedger {
         const std::vector<std::string> & names() const { return component_names; }
 
     private:
-        std::vector<double> totals(const StateView & U, const SpeciesView & rhoY, std::vector<double> & scale) const;
+        std::vector<double> totals(const std::vector<double> & local, std::vector<double> & scale) const;
         /** @brief The current stage's weighting into a term of the step's sums. */
         ledger_detail::Weighted weighted(Term term) const;
 

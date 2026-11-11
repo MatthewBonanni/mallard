@@ -33,11 +33,7 @@ struct MarginsFunctor {
     Kokkos::View<rtype *> T_seed;
     Kokkos::View<rtype *> volume;
 
-    struct value_type {
-        double v[N_MARGINS];
-        int64_t at[N_MARGINS];
-        double sum[3];  // V rho, V p, V
-    };
+    using value_type = step_queue::Margins;
 
     KOKKOS_INLINE_FUNCTION void init(value_type & m) const {
         for (int i = 0; i < N_MARGINS; i++) {
@@ -96,15 +92,24 @@ struct ActivityFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
     Kokkos::View<rtype *> upwind;
 
-    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, double & troubled, double & limited,
-                                           double & upwinded) const {
-        if (sigma.extent(0) > 0 && sigma(c) >= sigma_threshold) troubled += 1.0;
+    using value_type = step_queue::Activity;
+
+    KOKKOS_INLINE_FUNCTION void init(value_type & a) const {
+        for (int i = 0; i < 3; i++) a.v[i] = 0.0;
+    }
+
+    KOKKOS_INLINE_FUNCTION void join(value_type & dst, const value_type & src) const {
+        for (int i = 0; i < 3; i++) dst.v[i] += src.v[i];
+    }
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, value_type & a) const {
+        if (sigma.extent(0) > 0 && sigma(c) >= sigma_threshold) a.v[0] += 1.0;
         if (limiters.extent(0) > 0) {
             rtype phi = 1.0_r;
             FOR_I_CONSERVATIVE phi = Kokkos::fmin(phi, limiters(c, i));
-            if (phi < 1.0_r) limited += 1.0;
+            if (phi < 1.0_r) a.v[1] += 1.0;
         }
-        if (upwind.extent(0) > 0) upwinded += static_cast<double>(upwind(c));
+        if (upwind.extent(0) > 0) a.v[2] += static_cast<double>(upwind(c));
     }
 };
 
@@ -214,18 +219,52 @@ void Solver::init_health() {
     }
 }
 
+void Solver::health_reductions() {
+    using Memory = Kokkos::DefaultExecutionSpace::memory_space;
+    step_queue::ProgressLocals * const out = progress_device.data();
+    const uint32_t n_owned = mesh->n_owned();
+    Kokkos::parallel_reduce("health_margins", Kokkos::RangePolicy<>(0, n_owned),
+                            MarginsFunctor{physics, mixture, is_mixture(), conservatives, species, T_seed,
+                                           mesh->cell_measure},
+                            Kokkos::View<step_queue::Margins, Memory>(&out->margins));
+    auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
+    auto * muscl = dynamic_cast<MUSCL *>(face_reconstruction.get());
+    const bool limiting = muscl && muscl->limiter != LimiterType::NONE;
+    if (teno || limiting || hybrid_flux) {
+        Kokkos::parallel_reduce("health_activity", n_owned,
+                                ActivityFunctor{teno ? teno->troubled : Kokkos::View<rtype *>(),
+                                                teno ? teno->sigma_threshold : rtype(0),
+                                                limiting ? muscl->limiters : Kokkos::View<rtype *[N_CONSERVATIVE]>(),
+                                                hybrid_flux ? cell_upwind : Kokkos::View<rtype *>()},
+                                Kokkos::View<step_queue::Activity, Memory>(&out->activity));
+    }
+    const ConservationLedger & ledger = run_health.ledger;
+    if (progress_totals.extent(0) != ledger.n_totals()) {
+        progress_totals = Kokkos::View<double *>("step_progress_totals", ledger.n_totals());
+    }
+    ledger.local_totals(conservatives, species, progress_totals);
+    if (const Kokkos::View<double *> sums = ledger.run_sums(); sums.is_allocated()) {
+        const Kokkos::View<step_queue::ProgressLocals> p = progress_device;
+        Kokkos::parallel_for("progress_run_sums", sums.extent(0), KOKKOS_LAMBDA(const size_t i) {
+            p().run_sum[i] = sums(i);
+        });
+    }
+}
+
 void Solver::report_health() {
+    std::vector<double> totals;
+    const step_queue::ProgressLocals locals = progress_locals(totals);
+    report_health(locals, totals);
+}
+
+void Solver::report_health(const step_queue::ProgressLocals & locals, const std::vector<double> & totals) {
     health::Report & report = run_health.last;
     report = health::Report{};
     const uint32_t n_owned = mesh->n_owned();
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());
 
     // Admissibility margins, with the cell and step of each minimum
-    MarginsFunctor::value_type m;
-    Kokkos::parallel_reduce("health_margins", Kokkos::RangePolicy<>(0, n_owned),
-                            MarginsFunctor{physics, mixture, is_mixture(), conservatives, species, T_seed,
-                                           mesh->cell_measure},
-                            m);
+    const step_queue::Margins & m = locals.margins;
     std::vector<double> local;
     for (int i = 0; i < N_MARGINS; i++) {
         local.push_back(m.at[i] >= 0 ? m.v[i] : std::numeric_limits<double>::infinity());
@@ -287,13 +326,7 @@ void Solver::report_health() {
     auto * muscl = dynamic_cast<MUSCL *>(face_reconstruction.get());
     const bool limiting = muscl && muscl->limiter != LimiterType::NONE;
     if (teno || limiting || hybrid_flux) {
-        double troubled = 0.0, limited = 0.0, upwinded = 0.0;
-        Kokkos::parallel_reduce("health_activity", n_owned,
-                                ActivityFunctor{teno ? teno->troubled : Kokkos::View<rtype *>(),
-                                                teno ? teno->sigma_threshold : rtype(0),
-                                                limiting ? muscl->limiters : Kokkos::View<rtype *[N_CONSERVATIVE]>(),
-                                                hybrid_flux ? cell_upwind : Kokkos::View<rtype *>()},
-                                troubled, limited, upwinded);
+        const double troubled = locals.activity.v[0], limited = locals.activity.v[1], upwinded = locals.activity.v[2];
         std::vector<std::string> names;
         std::vector<double> values, weights;
         const double n = std::max(1.0, double(n_owned));
@@ -350,7 +383,8 @@ void Solver::report_health() {
             if (it != names.end()) repaired[static_cast<size_t>(it - names.begin())] += value;
         }
     }
-    ledger.report(conservatives, species, repaired, report.balance, report.balance_run);
+    const std::vector<double> run_sum(locals.run_sum, locals.run_sum + 2 * N_CONSERVATIVE);
+    ledger.report(totals, run_sum, repaired, report.balance, report.balance_run);
     report.element_drift = ledger.element_drift(chemistry_load_balance && is_distributed());
     for (const auto & b : report.balance_run) {
         if (b.checked && std::fabs(b.relative()) > 1e5 * double(std::numeric_limits<rtype>::epsilon())) {

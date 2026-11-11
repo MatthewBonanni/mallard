@@ -78,6 +78,14 @@ void ConservationLedger::end_step(const double dt) {
     Kokkos::parallel_for("ledger_commit", N_TERMS * N, KOKKOS_LAMBDA(const uint32_t i) { to(i) += dt * from(i); });
 }
 
+void ConservationLedger::end_step(const rtype * dt, const uint32_t * accepted) {
+    if (!on()) return;
+    const Kokkos::View<double *> from = step_sum, to = run_sum;
+    Kokkos::parallel_for("ledger_commit", N_TERMS * N, KOKKOS_LAMBDA(const uint32_t i) {
+        if (*accepted) to(i) += static_cast<double>(*dt) * from(i);
+    });
+}
+
 namespace {
 
 /** @brief Domain totals: sum V U, sum V |U| (scales) and element masses. */
@@ -117,13 +125,14 @@ struct TotalsFunctor {
 
 } // namespace
 
-std::vector<double> ConservationLedger::totals(const StateView & U, const SpeciesView & rhoY,
-                                               std::vector<double> & scale) const {
-    const uint32_t count = 2 * N + n_elements;
-    std::vector<double> sums(count, 0.0);
-    Kokkos::View<double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged> result(sums.data(), count);
+void ConservationLedger::local_totals(const StateView & U, const SpeciesView & rhoY,
+                                      const Kokkos::View<double *> & out) const {
     Kokkos::parallel_reduce("ledger_totals", Kokkos::RangePolicy<>(0, n_owned),
-                            TotalsFunctor{count, U, rhoY, volume, elements}, result);
+                            TotalsFunctor{n_totals(), U, rhoY, volume, elements}, out);
+}
+
+std::vector<double> ConservationLedger::totals(const std::vector<double> & local, std::vector<double> & scale) const {
+    std::vector<double> sums = local;
     comm::allreduce(std::span<double>(sums), comm::Op::SUM);
     std::vector<double> out(N + n_elements);
     scale.assign(N + n_elements, 0.0);
@@ -211,17 +220,17 @@ double ConservationLedger::element_drift(const bool balanced) const {
     return sums[0] > 0.0 ? worst / sums[0] : 0.0;
 }
 
-void ConservationLedger::report(const StateView & U, const SpeciesView & rhoY, const std::vector<double> & repairs,
-                                std::vector<health::Balance> & interval, std::vector<health::Balance> & run) {
+void ConservationLedger::report(const std::vector<double> & local_totals, const std::vector<double> & local_run_sum,
+                                const std::vector<double> & repairs, std::vector<health::Balance> & interval,
+                                std::vector<health::Balance> & run) {
     interval.clear();
     run.clear();
     std::vector<double> scale;
-    const std::vector<double> now = totals(U, rhoY, scale);
+    const std::vector<double> now = totals(local_totals, scale);
     const uint32_t n = N + n_elements;
     std::vector<double> sums(N_TERMS * N, 0.0);
     if (on()) {
-        const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), run_sum);
-        for (uint32_t i = 0; i < N_TERMS * N; i++) sums[i] = h(i);
+        for (uint32_t i = 0; i < N_TERMS * N; i++) sums[i] = local_run_sum[i];
         comm::allreduce(std::span<double>(sums), comm::Op::SUM);
     }
     std::vector<double> current(N_TERMS * n + n, 0.0);

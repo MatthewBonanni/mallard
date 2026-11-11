@@ -338,6 +338,7 @@ class DirichletStates {
         void finish(const Kokkos::View<rtype *[N_DIM + 2]> & face_state);
 
         bool depends_on_time() const { return n_timed > 0; }
+        bool empty() const { return faces_host.empty(); }
 
         /** @brief The states that depend on t, at the time held in `time`. */
         void apply(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM + 2]> & face_state) const;

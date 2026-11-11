@@ -12,6 +12,7 @@
 #ifndef STATISTICS_H
 #define STATISTICS_H
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <fstream>
@@ -162,6 +163,10 @@ class Statistics {
         bool resets() const { return reset; }
         bool due(uint64_t step, rtype t) const {
             return (means_enabled() && step % interval == 0 && t > t_start) || spectra.due(step, t) || phase.due(step, t);
+        }
+        /** @brief Lowers step_limit to the first step after step at which a sample may be due. */
+        void due_limits(uint64_t step, uint64_t & step_limit) const {
+            if (enabled()) step_limit = std::min(step_limit, (step / interval + 1) * interval);
         }
 
         /** @brief Add the sample at (step, t) of cells [0, n_owned) to whatever is due (collective). */

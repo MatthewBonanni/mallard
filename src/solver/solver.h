@@ -44,6 +44,7 @@
 #include "statistics.h"
 #include "triggers.h"
 #include "health_state.h"
+#include "step_queue.h"
 #include "divergence_report.h"
 #include "synthetic_inflow.h"
 #include "source_terms.h"
@@ -376,12 +377,41 @@ class Solver {
         void publish_status();
         std::string stop_conditions() const;
 
-        // A whole step (calc_dt and take_step) as one CUDA graph; see solver_graph.cpp
+        // Steps decided on the device, enqueued ahead of it, in CUDA builds as one CUDA graph each; see solver_graph.cpp
+        /** @brief Why steps are not decided on the device ([run] step_queue, the host taking part), else empty. */
+        std::string device_steps_unsupported() const;
+        /** @brief Why steps are not captured as CUDA graphs, else empty. */
         std::string step_graph_unsupported() const;
-        void graph_step();
         void record_step();
-        void captured_record_step();
         void destroy_step_graph();
+        void begin_device_steps();
+        /** @brief After the host acted at a step: what the device needs for the steps until the next stop. */
+        void resume_device_steps();
+        step_queue::Horizon step_horizon() const;
+        /** @brief Enqueues one step, which does nothing once the device stopped for the host. */
+        void launch_device_step();
+        void step_prologue();
+        /** @brief The launch a step graph captures, in the profiling section "step_graph_capture". */
+        void captured_launch();
+        void device_step_body();
+        void capture_step_graph();
+        /** @brief Whether a step can run under a conditional node (NCCL operations in one, tried on every rank). */
+        bool conditional_nodes_work();
+        template <typename F>
+        void device_if(const uint32_t * flag, F && body);
+        /** @brief The record of the oldest launch not yet taken, once it ran; passes on requests while waiting. */
+        const step_queue::Record & next_record();
+        /** @brief What the host does at the end of a step when it waits for every step, from the step's record. */
+        void take_record(const step_queue::Record & record);
+        /** @brief Waits for every launch: the steps after a stop do nothing. */
+        void drain_device_steps();
+        /** @brief Run-control requests (and the wall time) to the device's next step reductions. */
+        void post_requests();
+        void count_nonfinite();
+        /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
+        void after_step(Kokkos::Timer & step_timer, bool on_device);
+        /** @brief Whether the device writes progress rows' local values, which the host reports later. */
+        bool progress_on_device() const;
         void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
@@ -489,10 +519,8 @@ class Solver {
         void reduce_chemistry_failures();
         /** @brief SIMPLER's transport half step's rhs: T(U) + c. */
         RHSFunction simpler_transport_rhs();
-        /** @brief Inside a captured step: marks the start or end of a chemistry call (CUDA events). */
+        /** @brief Inside a captured step: times a chemistry call (the device clock in CUDA builds). */
         void mark_chemistry_time(bool start);
-        /** @brief Seconds of the chemistry calls of the last step graph. */
-        double step_chemistry_seconds();
         void update_heat_release_rate();
         /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
         std::pair<uint64_t, double> chemistry_statistics();
@@ -564,6 +592,8 @@ class Solver {
         uint64_t get_step() const { return step; }
         /** @brief Steps launched as a captured CUDA graph so far. */
         uint64_t get_graph_steps() const { return graph_steps; }
+        /** @brief Steps the host took from their records without acting on them (steps run ahead of it). */
+        uint64_t get_queued_steps() const { return n_queued_steps; }
         /** @brief Steps rejected by the error controller in this run. */
         uint64_t get_rejected_steps() const { return n_rejected; }
         const Euler & get_physics() const { return physics; }
@@ -674,10 +704,17 @@ class Solver {
         void register_data();
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
         RunEnd stop_reason() const;       // Empty while no stop condition holds
+        rtype t_stop_reached() const;     // The run has reached t_stop once t is at least this
         bool state_needed() const;        // Whether output, checks or the end of the run read the state now
         double progress() const;          // Fraction of the run done, by the first stop condition to hit
         void print_setup(const ResolvedInput & resolved) const;
         void print_progress();
+        void print_progress(const step_queue::ProgressLocals & locals, const std::vector<double> & totals);
+        /** @brief Enqueues a progress row's local values into progress_device and progress_totals. */
+        void progress_reductions();
+        void health_reductions();
+        step_queue::ProgressLocals progress_locals(std::vector<double> & totals);
+        void report_health(const step_queue::ProgressLocals & locals, const std::vector<double> & totals);
         void print_summary(const RunEnd & end) const;
         /** @brief The run log's end record: how the run ended, its last snapshot and restart, its timings. */
         void write_end_record(const RunEnd & end);
@@ -729,15 +766,28 @@ class Solver {
         /** @brief Throws, on every rank, the error of a time-dependent boundary value that went out of range on any. */
         void check_timed_boundaries() const;
 
-        // Step graph (solver_graph.cpp)
+        // Steps on the device (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs
-        bool use_step_graph = false;
+        uint64_t step_queue_depth = 3;         // [run] step_queue
+        bool use_device_steps = false;
+        bool use_step_graph = false;           // captured, in CUDA builds
         bool uncaptured_step_graphs = false;
+        uint32_t queue_depth = 1;              // launches ahead of the host
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
+        void * capture_graph = nullptr;        // cudaGraph_t being captured
         uint64_t graph_steps = 0;
+        uint64_t n_launched = 0, n_taken = 0;
+        uint64_t n_queued_steps = 0;
+        bool conditional_steps = false;        // launches after a stop do nothing
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
         Kokkos::View<rtype *> step_scalars;    // device: [t, t_target, dt_scales...]
-        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> step_io;  // pinned: [t, t_target, requests, dt, reduced]
+        Kokkos::View<rtype *> step_requests;   // device: this rank's requests in the step's reduction
+        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> requests_posted;  // pinned: written by the host any time
+        Kokkos::View<step_queue::Loop> step_loop;                                // device
+        Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> step_records;  // pinned: one per queued launch
+        std::vector<void *> step_events;       // cudaEvent_t, one per record
+        Kokkos::View<step_queue::ProgressLocals> progress_device;
+        Kokkos::View<double *> progress_totals;  // the conservation ledger's local totals
 
         // Run control
         bool control_enabled = false;
@@ -1009,8 +1059,7 @@ class Solver {
         Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> chem_io;
         uint64_t chem_failures_seen = 0;
         bool simpler_half_step = false;         // inside a captured step: stage times of SIMPLER's transport half step
-        std::vector<void *> chemistry_events;   // cudaEvent_t pairs around a step graph's chemistry calls
-        size_t chemistry_marks = 0, step_chemistry_marks = 0;
+        double chemistry_started = 0.0;         // timer.seconds() at the start of a step's chemistry call (no CUDA)
         bool chemistry_load_balance = false;
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
         bool simpler = false;             // SIMPLER balanced splitting instead of Strang

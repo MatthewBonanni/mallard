@@ -34,6 +34,11 @@ class StepGraphGuard {
     public:
         StepGraphGuard() : saved(Kokkos::Tools::Experimental::get_callbacks()) {
             state() = State{};
+#ifdef KOKKOS_ENABLE_THREADS
+            // Each resize of the Threads backend's scratch sets both its reduction and team parts, so alternating
+            // reductions and team kernels reallocate it at every step; reserved here, only growth past it is seen
+            Kokkos::Impl::ThreadsInternal::resize_scratch(size_t(1) << 16, size_t(1) << 20);
+#endif
             using namespace Kokkos::Tools::Experimental;
             set_create_profile_section_callback(&create_section);
             set_start_profile_section_callback(&start_section);
