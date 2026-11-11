@@ -706,8 +706,10 @@ behind Shu-Osher's shock); the KE correction keeps it.
 **Inviscid Taylor-Green vortex** (32³, Euler, the initial field of `examples/taylor_green_3d`,
 SSPRK3, CFL 0.8, HLLC as the Riemann solver; resolved kinetic energy over its initial value,
 and `eps_numerical` from `[integrals] budget`): with nothing else to remove energy, the
-central flux on reconstructed states adds it, with TENO5 and with MUSCL (the `les` preset;
-#825); the cell values keep it bounded.
+central flux on reconstructed states adds it, with TENO5 and with MUSCL (the `les` preset);
+the cell values keep it bounded. The last two rows are on tetrahedra (`cartesian_tet`, 16³
+boxes of six), where the reconstructed states add energy at a third of the rows but the
+Riemann solver, where the sensor fires, removes more.
 
 | Flux | K/K0 at t = 5 / 10 / 15 / 20 | Mean $\varepsilon_\mathrm{num}$ | Rows with $\varepsilon_\mathrm{num} < 0$ |
 |---|---|---|---|
@@ -716,6 +718,9 @@ central flux on reconstructed states adds it, with TENO5 and with MUSCL (the `le
 | TENO5, hybrid, `cell_averages` | 1.000 / 0.962 / 0.825 / 0.692 | 0.49 | 18% (at least -0.012) |
 | TENO5, hybrid, KE correction | 0.885 / 0.518 / 0.318 / 0.215 | 1.22 | 0% |
 | MUSCL, hybrid, `reconstructed` | 0.980 / 1.044 / 1.319 / 1.851 | -1.21 | 62% |
+| MUSCL, hybrid, `cell_averages` | 1.000 / 0.958 / 0.862 / 0.674 | 0.48 | 19% (at least -0.011) |
+| MUSCL, hybrid, `reconstructed`, tetrahedra | 1.010 / 0.974 / 0.867 / 0.738 | 0.39 | 34% (at least -0.74) |
+| MUSCL, hybrid, `cell_averages`, tetrahedra | 0.989 / 0.915 / 0.781 / 0.685 | 0.51 | 0% |
 
 `cell_averages`' dissipation comes once the vortex breaks down, from the Riemann solver
 where the sensor fires; before that $\varepsilon_\mathrm{num}$ stays at round-off. The KE correction
@@ -760,10 +765,38 @@ Findings:
 
 **Decision.** `cell_averages` is the default with TENO and the hybrid flux: of the fluxes
 evaluated it is the only one that never adds kinetic energy and stays low-dissipation from 64³
-to 128³. MUSCL keeps `reconstructed`, the `les` preset validated in section 8; that it adds
-energy without a model (inviscid Taylor-Green above) is #825. For LES of smooth turbulence
-MUSCL with the `les` preset stays the recommendation: TENO with `cell_averages` gives the same
-result at ten times the cost, and earns it only where shocks need TENO.
+to 128³. For LES of smooth turbulence MUSCL with the `les` preset stays the recommendation:
+TENO with `cell_averages` gives the same result at ten times the cost, and earns it only where
+shocks need TENO.
+
+**The `les` preset keeps `reconstructed` (#825).** MUSCL's reconstructed states add kinetic
+energy only where nothing else removes it (the inviscid Taylor-Green vortex above). With
+viscosity, with or without a model, the two central fluxes are about as accurate, and
+`reconstructed` is the more accurate one at the coarse resolutions LES runs at. Viscous
+Taylor-Green vortex at Re = 1600 (the set-up above with `mu = 1/1600`, the `les` preset; RMS
+deviation of -dK/dt from the spectral DNS of `examples/taylor_green_3d` for t = 0.5-20 over
+its peak, K/K0 at t = 20 against the DNS's 0.173, the numerical share of the dissipation
+over t = 0-20 and the rows with $\varepsilon_\mathrm{num} < 0$):
+
+| Mesh | Model | Central | -dK/dt error | K/K0 at t = 20 | Numerical | Rows with $\varepsilon_\mathrm{num} < 0$ |
+|---|---|---|---|---|---|---|
+| 32³ | Sigma | `reconstructed` | 0.232 | 0.182 | 0.043 | 45% |
+| 32³ | Sigma | `cell_averages` | 0.199 | 0.215 | 0.002 | 38% |
+| 32³ | none | `reconstructed` | **0.096** | 0.132 | 0.038 | 37% |
+| 32³ | none | `cell_averages` | 0.122 | **0.173** | 0.062 | 22% |
+| 16³ × 6 tetrahedra | Sigma | `reconstructed` | 0.318 | 0.121 | -0.015 | 68% |
+| 16³ × 6 tetrahedra | Sigma | `cell_averages` | 0.345 | 0.093 | 0.004 | 14% |
+
+With MUSCL on the shock tubes (the set-up above, `limiter = "none"`), the L1 density error is
+0.00333 / 0.742 with `reconstructed` against 0.00420 / 0.884 with `cell_averages` (Sod /
+Shu-Osher; 0.00328 / 0.770 with the Riemann solver alone). Together with Comte-Bellot &
+Corrsin (`cell_averages` piles up more energy at 64³: 0.172 / 0.142 against 0.107 / 0.104,
+and is mixed at 128³), no case favors `cell_averages` enough to change the preset under the
+channel, wall-modeled channel, flame and bluff-body validations of section 8, which use it.
+The numerical share of `reconstructed` stays within -2% to +6% of the dissipation in every
+viscous case here and in section 8. Runs with no viscous or model sink (Euler), and runs that
+need $\varepsilon_\mathrm{num} \ge 0$ face by face (a budget read as the scheme's dissipation
+alone), set `central = "cell_averages"`.
 
 ## 5. Implementation: SGS fluxes in the solver
 
