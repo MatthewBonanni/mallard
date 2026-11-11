@@ -225,6 +225,32 @@ TEST(Stencils, MUSCLWeightsDifferentiateLinearFieldsExactly) {
     }
 }
 
+TEST(Stencils, SectorWeightRowsHoldTheQuadraticCoefficientsOnly) {
+    // Fifth order: the central fit's coefficients outnumber a sector fit's quadratic ones
+    const std::string prefix = scratch("mallard_stencils_sector_weights");
+    CheckOptions options;
+    options.all_stencils = true;
+    options.stencil_weights = true;
+    const CheckReport r = check_fields(box("type = \"TENO\"\norder = 5\n"), options, prefix);
+    ASSERT_TRUE(r.ok()) << r.errors().front();
+    if (!comm::is_root()) return;
+    const auto stencil = h5_values<uint8_t>(r.stencil_file, "stencils/members/stencil");
+    const auto weights = h5_values<double>(r.stencil_file, "stencils/members/weights");
+    ASSERT_FALSE(stencil.empty());
+    const size_t width = weights.size() / stencil.size();
+    ASSERT_GT(width, size_t(teno::NK_SMALL));
+    size_t n_sector = 0;
+    double largest = 0.0;
+    for (size_t m = 0; m < stencil.size(); m++) {
+        if (stencil[m] == 0) continue;
+        n_sector++;
+        for (size_t l = 0; l < teno::NK_SMALL; l++) largest = std::max(largest, std::abs(weights[m * width + l]));
+        for (size_t l = teno::NK_SMALL; l < width; l++) ASSERT_EQ(weights[m * width + l], 0.0) << "member " << m;
+    }
+    EXPECT_GT(n_sector, 0u);
+    EXPECT_GT(largest, 0.0);
+}
+
 TEST(Stencils, CellsAndRegionsSelectTheStencilsWrittenAndViewed) {
     const std::string prefix = scratch("mallard_stencils_cells");
     const std::string input = box("type = \"TENO\"\norder = 3\n");
