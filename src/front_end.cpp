@@ -200,6 +200,26 @@ struct Need {
 
 Need dimension_free() { return {{}, "", true}; }
 
+/** @brief The dimension of the latest run its run record (mallard.jsonl) starts; 0 if it records none. */
+int run_directory_dimension(const std::string & dir) {
+    std::ifstream in(fs::path(dir) / "mallard.jsonl");
+    int dim = 0;
+    for (std::string line; std::getline(in, line);) {
+        if (line.find("\"start\"") == std::string::npos) continue;
+        try {
+            const json::Value v = json::parse(line);
+            const json::Value * type = v.find("type");
+            if (!type || type->string != "start") continue;
+            const json::Value * p = v.find("provenance");
+            const json::Value * build = p ? p->find("build") : nullptr;
+            const json::Value * d = build ? build->find("dim") : nullptr;
+            if (d && d->type == json::Value::Type::NUMBER) dim = static_cast<int>(d->number);
+        } catch (const std::exception &) {
+        }
+    }
+    return dim == 2 || dim == 3 ? dim : 0;
+}
+
 Need command_need(const cli::Command * command, const std::vector<std::string> & args) {
     cli::Args parsed;
     std::string error;
@@ -211,6 +231,11 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
             if (file.empty()) return dimension_free();
             return {input_dimension(file), file};
         }
+        case cli::Case::input_file:
+            for (const std::string & a : parsed.positional) {
+                if (a.ends_with(".toml") || fs::is_regular_file(a)) return {input_dimension(a), a};
+            }
+            return dimension_free();
         case cli::Case::template_name: {
             if (first.empty() || parsed.has("--list")) return dimension_free();
             try {
@@ -228,7 +253,9 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
             return {mesh_file_dimension(first), first};
         case cli::Case::output:
             try {
-                const int dim = first.empty() || output::is_mesh_file(first) ? 0 : output::open(first).dim;
+                const int dim = first.empty() || output::is_mesh_file(first) ? 0
+                                : fs::is_directory(first)                     ? run_directory_dimension(first)
+                                                                              : output::open(first).dim;
                 return dim == 0 ? dimension_free() : Need{{dim, ""}, first, true};
             } catch (const std::exception &) {
                 return dimension_free();
@@ -314,6 +341,15 @@ Dimension output_dimension(const std::string & path) {
     }
 }
 
+std::vector<int> solvers() {
+    const fs::path bin = executable_path().parent_path();
+    std::vector<int> installed;
+    for (const int d : {2, 3}) {
+        if (fs::exists(solver(bin, d))) installed.push_back(d);
+    }
+    return installed;
+}
+
 bool invoked(const char * argv0) { return fs::path(argv0).filename() == "mallard"; }
 
 int test_main(const cli::Args & args) {
@@ -352,11 +388,7 @@ int main(int argc, char ** argv) {
         return cli::main(static_cast<int>(command_argv.size()) - 1, command_argv.data());
     }
     const fs::path bin = executable_path().parent_path();
-
-    std::vector<int> installed;
-    for (const int d : {2, 3}) {
-        if (fs::exists(solver(bin, d))) installed.push_back(d);
-    }
+    const std::vector<int> installed = solvers();
     if (installed.empty()) {
         std::cerr << "mallard: neither mallard2d nor mallard3d is in " << bin.string() << ".\n";
         return 1;

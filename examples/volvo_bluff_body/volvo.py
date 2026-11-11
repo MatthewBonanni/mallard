@@ -42,7 +42,7 @@ def cmd_probes(a):
     n = int(round((a.x1 - a.x0) / a.dx)) + 1
     variables = ", ".join(f'"{v}"' for v in a.vars.split(","))
     for k, y in enumerate(ys):
-        print(f'\n[[probes]]\nname = "slice_{k:03d}"\nvariables = [{variables}]\n'
+        print(f'\n[[probes]]\nname = "slice_{k:03d}"\nfields = [{variables}]\n'
               f"start = [{a.x0}, {y:.6g}, {a.z}]\nend = [{a.x1}, {y:.6g}, {a.z}]\nn_points = {n}\ninterval = {a.interval}")
 
 

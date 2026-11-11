@@ -56,6 +56,7 @@ std::vector<std::string> periodic_zones(const std::string & direction, const std
 const Rules & rules() {
     static const std::string TYPES = "boundary types name their kind first, and options are keys";
     static const std::string NSCBC = "the characteristic parameters are the nscbc table";
+    static const std::string FIELDS = "[[write_data]], [[probes]] and [statistics] all name their output fields";
     // Deprecate before removing: `removed` is at least one minor release after `since`.
     // Keys removed before this policy (0.9.0) have since == removed.
     static const Rules table = {
@@ -83,6 +84,8 @@ const Rules & rules() {
              all_to_domain},
             {"mesh.curved[].shape", "mesh.curved[].type", "0.9.0", "0.10.0",
              "type selects the kind of every region; a curved zone lies on a surface (2D: a curve)"},
+            {"write_data[].variables", "write_data[].fields", "0.10.0", "0.11.0", FIELDS},
+            {"probes[].variables", "probes[].fields", "0.10.0", "0.11.0", FIELDS},
         },
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
@@ -102,6 +105,8 @@ const Rules & rules() {
              "a sphere is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
             {"mesh.curved[].shape", "cylinder", "cylinder", "0.9.0", "0.10.0",
              "a cylinder is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
+            {"numerics.preset", "robust", "second_order", "0.10.0", "0.11.0", "presets are named by their order"},
+            {"numerics.preset", "accurate", "high_order", "0.10.0", "0.11.0", "presets are named by their order"},
         },
         {
             {"mesh.periodic", "periodic", "zones", "type", "0.9.0", "0.10.0",
@@ -723,6 +728,20 @@ bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule,
 
 } // namespace
 
+std::vector<std::string> notices(const std::string & text) {
+    const Input input = parse_input_string(text);
+    const auto has = [&](const char * table, const char * key) {
+        return input.contains(table) && input.at(table).is_table() && input.at(table).contains(key);
+    };
+    std::vector<std::string> out;
+    if (input.contains("run") && !has("numerics", "preset") && !has("numerics", "face_reconstruction")) {
+        out.push_back("no preset and no [numerics.face_reconstruction]: since 0.10.0 this runs the high_order "
+                      "preset, not first order; add [numerics.face_reconstruction] type = \"FO\" to reproduce "
+                      "older first-order results");
+    }
+    return out;
+}
+
 std::string advice(const Finding & finding) {
     return describe(finding) + "; `mallard input upgrade old.toml > new.toml` rewrites the file";
 }
@@ -789,6 +808,7 @@ int upgrade_file(const std::string & file, bool check, int dim, const std::strin
         bool reformatted = false;
         const std::string upgraded = upgrade_text(text, findings, reformatted, rules(), dim, unknown_dimension);
         for (const Finding & f : findings) std::cerr << file << ": " << describe(f) << "\n";
+        for (const std::string & note : notices(text)) std::cerr << file << ": note: " << note << "\n";
         if (reformatted) {
             std::cerr << file << ": a changed key is a dotted key or in an inline table, so the whole file was "
                       << "reformatted (comments are kept, layout is not)\n";

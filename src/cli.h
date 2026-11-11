@@ -37,6 +37,7 @@ struct Option {
 enum class Case {
     none,           ///< any solver
     input,          ///< the input file: -i FILE, else the first argument
+    input_file,     ///< the input file: the argument that ends in .toml or names a file, else any solver
     template_name,  ///< the case template named by the first argument
     mesh,           ///< the mesh file, or input file, named by the first argument
     file,           ///< the first argument's: a mesh file's dimension; any solver for output files

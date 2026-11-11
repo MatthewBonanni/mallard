@@ -28,7 +28,7 @@ compilers only; on one host the geometry of every backend is the same bit for bi
 ```toml
 [[probes]]
 name = "centerline"
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 start = [0.0, 0.01]
 end = [1.0, 0.01]
 n_points = 200
@@ -42,7 +42,7 @@ interval = 10
 # and the arc's mean and RMS in probe_wake_reductions.csv
 [[probes]]
 name = "wake"
-variables = ["U", "P"]
+fields = ["U", "P"]
 sampling = "point"
 type = "arc"
 center = [0.0, 0.0]
@@ -60,7 +60,7 @@ reductions = ["mean", "rms"]
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | required | Names the files |
-| `variables` | required | `[statistics]` fields; `U`, `RHOU`, `Y_*` and `RHOY_*` expand to all components and species |
+| `fields` | required | `[statistics]` fields; `U`, `RHOU`, `Y_*` and `RHOY_*` expand to all components and species |
 | `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D `surface` (`x`, `y`, `z` of `u`, `v`) |
 | `region` | none | Instead of `type`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
 | `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
@@ -89,7 +89,7 @@ name = "midplane"
 type = "cut_plane"
 point = [0.0, 0.0, 0.5]
 normal = [0.0, 0.0, 1.0]
-variables = ["U", "P", "MASS_FLUX"]
+fields = ["U", "P", "MASS_FLUX"]
 sampling = "point"
 format = "vtp"
 time_interval = 0.01
@@ -107,7 +107,7 @@ ordered polylines with their arc length `s`; in 3D, polygons for ParaView.
 [[probes]]
 name = "cylinder"
 boundary = "cylinder"
-variables = ["P", "CP", "CF", "Q_W", "Y_PLUS"]
+fields = ["P", "CP", "CF", "Q_W", "Y_PLUS"]
 reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
 time_interval = 1.0
 
@@ -115,7 +115,7 @@ time_interval = 1.0
 name = "inflow"
 boundary = ["inlet", "outlet"]
 samples = false
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 reductions = ["integral"]
 ```
 
@@ -150,7 +150,7 @@ the tractions and `Q_W` are the model's, so `integral` of
 name = "wing"
 boundary = "wing"
 samples = false
-variables = ["TRACTION_PRESSURE", "TRACTION_VISCOUS"]
+fields = ["TRACTION_PRESSURE", "TRACTION_VISCOUS"]
 reductions = ["integral", "moment"]   # forces and moments
 moment_center = [0.25, 0.0, 0.0]      # quarter chord
 ```
@@ -211,7 +211,7 @@ interval = 5             # and their sampling
 [[probes]]
 name = "wall_mean"
 boundary_type = "wall"
-variables = ["CF", "Q_W", "Y_PLUS"]
+fields = ["CF", "Q_W", "Y_PLUS"]
 reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}
 average = true
 interval = 1000          # writes the means so far every 1000 steps
@@ -238,12 +238,12 @@ probe file.
 name = "wake"
 type = "point"
 point = [3.0, 0.5]
-variables = ["U_Y", "P"]
+fields = ["U_Y", "P"]
 sampling = "point"
 time_interval = 0.5      # the sampling interval of the spectra
 
 [probes.spectra]
-variables = ["U_Y"]
+fields = ["U_Y"]
 t_start = 60.0           # once the flow is periodic
 length = 140.0           # the last 140 time units: bin width 1 / 140
 strouhal = {length = 1.0, velocity = 0.2}   # St = f D / U
@@ -255,7 +255,7 @@ writes the one-sided PSD of every listed variable at every sample point to
 `probe_<name>_spectra.csv`, with columns `step, t, point, f, St, PSD_U_Y`
 (units in the second line: `PSD_U_Y` in `m2 s-1`, velocity squared per
 frequency), at the end of the run and, with `time_interval`, at its
-multiples. Reductions are signals too: `variables = ["integral_TRACTION_PRESSURE_Y"]`
+multiples. Reductions are signals too: `fields = ["integral_TRACTION_PRESSURE_Y"]`
 on a wall probe gives the spectrum of the lift, written to
 `probe_<name>_reductions_spectra.csv` (`step, t, f, St, PSD_...`). At each
 write the run's log reports the peak of each spectrum, and the run record
@@ -284,7 +284,7 @@ Restart files carry the history, so a restarted run continues it bit for bit
 
 | Key | Default | Meaning |
 |---|---|---|
-| `variables` | required | Variables of the probe (`U` for its components), and reduction columns (`mean_P`, `integral_MASS_FLUX`) |
+| `fields` | required | Fields of the probe (`U` for its components), and reduction columns (`mean_P`, `integral_MASS_FLUX`) |
 | `length` | required | Time spanned by the history; the bin width is `(segments + 1) / (2 length)` |
 | `t_start` | `0` | First sample |
 | `segments` | `1` | Welch segments, overlapping by half: more average out noise, at a coarser bin width |
@@ -310,7 +310,7 @@ Pitfalls:
 # Mass, mean temperature and pressure range in a box, every 10 steps
 [[probes]]
 name = "box"
-variables = ["RHO", "T", "P"]
+fields = ["RHO", "T", "P"]
 region = {type = "rectangle", center = [0.5, 0.5], size = [0.4, 0.2]}
 reductions = ["integral", "mean", "min", "max"]   # the default
 interval = 10
@@ -368,7 +368,7 @@ region = "heater"
 
 [[probes]]
 name = "heater"
-variables = ["T"]
+fields = ["T"]
 region = "heater"
 ```
 
@@ -436,6 +436,10 @@ $ mallard post extract solut/restart_000002.restart solut/restart_000004.restart
 `--format json` prints the same as one object. Under `mpirun -n N` the probes
 are evaluated on N ranks, with the same values as on one.
 
+The tables' run block lists each snapshot read with the run id, step and time
+it records, so tables extracted into a run's directory are that run's to
+[`mallard post convergence`](convergence.md#what-it-reads).
+
 Pitfalls:
 
 - The values are those the run's probe gave at that step: bit for bit from
@@ -495,4 +499,5 @@ molecular, SGS and numerical dissipation.
 - [Input reference: `[[probes]]`](../input.md#probes), [`[[forces]]`](../input.md#forces), [`[integrals]`](../input.md#integrals)
 - [Geometry](geometry.md): probe types, sample placement, reading probe files
 - [Statistics](statistics.md): time averages, spectra and phase averages
+- [Grid convergence](convergence.md): the order, extrapolated value and GCI of forces, integrals and probes over runs at several resolutions
 - [Output](output.md): snapshots, the run record (which repeats the latest forces and integrals at each progress row), units and file formats

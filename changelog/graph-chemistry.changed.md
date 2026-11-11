@@ -1,0 +1,2 @@
+- Reacting gas mixtures (Strang and SIMPLER splitting, fused half steps, TFLES, PaSR, chemistry load balancing) take their steps in the CUDA graph (CUDA builds): the chemistry's time step, queue, its order by cost, failure count and load-balancing plan stay on the device. A CUDA graph now covers every step whose halos go through NCCL.
+- `[chemistry] load_balance`: each pair of ranks moves at most a capacity of cells per call. The capacity starts at 0 and follows the cells the pair asked for, so the first step and a balanced run move no cells.

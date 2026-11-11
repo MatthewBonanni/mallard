@@ -13,7 +13,6 @@ tools' output between invocations (default: a temporary directory).
 import argparse
 import csv
 import re
-import struct
 import subprocess
 import sys
 import tempfile
@@ -33,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS = ROOT / "tools"
 OUT = ROOT / "docs" / "images" / "tools"
 sys.path[:0] = [str(TOOLS), str(TOOLS / "setup")]
+from mallard import restart  # noqa: E402
 from mallard.vtu import read_vtu, series  # noqa: E402
 
 WORK = None
@@ -52,30 +52,6 @@ def once(path, make):
         p.parent.mkdir(parents=True, exist_ok=True)
         make(p)
     return p
-
-
-def read_restart(path):
-    """Fields by name of a restart file of version 2 or 3 (double precision)."""
-    with open(path, "rb") as f:
-        f.read(16)
-        version, _ = struct.unpack("<II", f.read(8))
-        n_cells, n_vars, _ = struct.unpack("<QQQ", f.read(24))
-        f.read(8)
-
-        def name():
-            (n,) = struct.unpack("<I", f.read(4))
-            return f.read(n).decode()
-
-        names = [name() for _ in range(n_vars)]
-        if version >= 3:
-            (na,) = struct.unpack("<Q", f.read(8))
-            for _ in range(na):
-                name()
-                f.read(8)
-        if version >= 4:
-            f.read(12)
-        data = np.fromfile(f, dtype="<f8", count=n_vars * n_cells).reshape(n_vars, n_cells)
-    return dict(zip(names, data))
 
 
 def edges(ax, mesh, P, lw=0.3, color=None, rasterized=True):
@@ -209,7 +185,7 @@ def case_meshes(P):
 
 def isotropic(P):
     path = once("hit.restart", lambda p: tool("tools/setup/isotropic_turbulence_restart.py", 64, p))
-    f = read_restart(path)
+    f = restart.read(path)
     n = 64
     u = np.stack([f[c] / f["RHO"] for c in ("RHOU_X", "RHOU_Y", "RHOU_Z")]).reshape(3, n, n, n)
     k = np.fft.fftfreq(n, 1.0 / n)
@@ -251,7 +227,7 @@ def channel(P):
                 for k, v in inp[table].items() if not isinstance(v, dict)) + "\n"
     (WORK / "channel.toml").write_text(toml)
     path = once("channel.restart", lambda p: tool("tools/setup/channel_init.py", WORK / "channel.toml", p))
-    f = read_restart(path)
+    f = restart.read(path)
     nx, ny, nz = small["Nx"], small["Ny"], small["Nz"]
     u = (f["RHOU_X"] / f["RHO"]).reshape(nx, ny, nz)
     from channel_init import nodes
@@ -281,7 +257,7 @@ def channel(P):
 def tile(P):
     src = once("hit32.restart", lambda p: tool("tools/setup/isotropic_turbulence_restart.py", 32, p))
     out = once("tiled.restart", lambda p: tool("tools/setup/tile_restart.py", src, 32, 3, p))
-    a, b = read_restart(src), read_restart(out)
+    a, b = restart.read(src), restart.read(out)
     ua = (a["RHOU_X"] / a["RHO"]).reshape(32, 32, 32)[:, :, 0]
     ub = (b["RHOU_X"] / b["RHO"]).reshape(96, 32, 32)[:, :, 0]
     fig, axs = plt.subplots(1, 2, figsize=(11, 2.9), gridspec_kw=dict(width_ratios=[1, 3]))
@@ -319,7 +295,7 @@ def hex_layer(path):
 
 def interpolate(P):
     from matplotlib.collections import PolyCollection
-    from interpolate_restart import cell_centroids, write_restart
+    from interpolate_restart import cell_centroids
     coarse = once("volvo_coarse.msh", lambda p: tool("examples/volvo_bluff_body/make_volvo_mesh.py", p, "--ds", 6e-3, "--nz", 2))
     fine = once("volvo_fine.msh", lambda p: tool("examples/volvo_bluff_body/make_volvo_mesh.py", p, "--ds", 2e-3, "--nz", 2))
     cc = cell_centroids(coarse)
@@ -329,22 +305,21 @@ def interpolate(P):
         u = 1.0 - 1.3 * np.exp(-(y / 0.02) ** 2) * np.exp(-((x - 0.06) / 0.08) ** 2) * (x > 0) \
             + 0.25 * np.sin(60 * x) * np.exp(-(y / 0.03) ** 2) * (x > 0.1)
         rho = np.ones(len(cc))
-        write_restart(p, {"version": 2, "step": 0, "t": 0.0, "names": ["RHO", "RHOU_X", "RHOU_Y", "RHOU_Z", "RHOE"],
-                          "attributes": []}, np.stack([rho, u, 0 * u, 0 * u, 2.5 + 0.5 * u ** 2]))
+        restart.write(p, {"RHO": rho, "RHOU_X": u, "RHOU_Y": 0 * u, "RHOU_Z": 0 * u, "RHOE": 2.5 + 0.5 * u ** 2})
     old = once("volvo_coarse.restart", make_old)
     new = once("volvo_fine.restart", lambda p: tool("tools/setup/interpolate_restart.py", coarse, old, fine, p))
     fig, axs = plt.subplots(2, 1, figsize=(10, 5.6))
     for ax, msh, rs, title in ((axs[0], coarse, old, "OLD.msh and OLD.restart"),
                                (axs[1], fine, new, "interpolate_restart.py OLD.msh OLD.restart NEW.msh NEW.restart")):
         cells, polys = hex_layer(msh)
-        u = read_restart(rs)["RHOU_X"][cells]
+        u = restart.read(rs)["RHOU_X"][cells]
         pc = PolyCollection(polys, array=u, cmap=P["cmap"], edgecolors=P["bg"], linewidths=0.2, rasterized=True)
         pc.set_clim(-0.3, 1.25)
         ax.add_collection(pc)
         ax.set_xlim(-0.1, 0.45)
         ax.set_ylim(-0.06, 0.06)
         bare(ax)
-        ax.set_title(f"{title} ({len(read_restart(rs)['RHO']):,} cells)", fontsize=11)
+        ax.set_title(f"{title} ({len(restart.read(rs)['RHO']):,} cells)", fontsize=11)
     fig.colorbar(pc, ax=axs, shrink=0.8, label="ρu")
     return fig
 
@@ -360,7 +335,7 @@ def flame(P):
                                                      "--ny", 48, "--perturb", 1.5))
     ref = np.genfromtxt(ref_csv, delimiter=",", names=True)
     m = tomllib.loads((run / "input.toml").read_text())["mesh"]
-    f1 = read_restart(run / "flame.restart")
+    f1 = restart.read(run / "flame.restart")
     xc = (np.arange(m["Nx"]) + 0.5) * m["Lx"] / m["Nx"]
 
     def mid(x, y):
@@ -380,7 +355,7 @@ def flame(P):
     ax.set_title("1D strip, 8 cells per thermal thickness", fontsize=12)
     ax = axs[1]
     m2 = tomllib.loads((run2 / "input.toml").read_text())["mesh"]
-    f2 = read_restart(run2 / "flame.restart")
+    f2 = restart.read(run2 / "flame.restart")
     y2 = (f2["RHOY_H2O"] / f2["RHO"]).reshape(m2["Nx"], m2["Ny"])
     im = ax.imshow(y2.T, origin="lower", extent=[0, m2["Lx"] * 1e3, 0, m2["Ly"] * 1e3], cmap=P["cmap"],
                    rasterized=True)
@@ -402,7 +377,7 @@ def znd(P):
     out = once("znd2d.restart", lambda p: tool("tools/setup/znd_restart.py", zcsv, mech, "ohmech", nx, lx, 0.05, p, 2,
                                                "--ny", ny, "--ly", ly, "--pocket", 0.045, 0.006, 0.0015,
                                                "--pocket", 0.044, 0.014, 0.0012))
-    f = read_restart(out)
+    f = restart.read(out)
     fig, axs = plt.subplots(1, 2, figsize=(11.5, 3.6), gridspec_kw=dict(width_ratios=[1, 1.5], wspace=0.5))
     ax = axs[0]
     x = data[:, col["x"]] * 1e3

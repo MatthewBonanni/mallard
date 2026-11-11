@@ -42,7 +42,7 @@ statistics once the flow has developed.
 [[probes]]
 name = "outlet"
 point = [0.9, 0.5]
-variables = ["T"]
+fields = ["T"]
 interval = 1
 
 [[triggers]]
@@ -147,7 +147,7 @@ what the run already keeps: a healthy run does nothing more per step, and its re
   | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
   | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
   | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
-  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "robust"`) |
+  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
 
 - **Evidence:** the state of the cell closest to failing and of its face neighbors in the last valid state
   (density, speed, pressure, temperature, local CFL number), their quality metrics, the nearest boundary zone,
@@ -181,8 +181,8 @@ and a cell squeezed to a sliver, at a fixed `dt` that suits the rest of the mesh
      - cell 135 at (0.439063, 0.53125), which became invalid, has volume ratio 39 (questionable above 10; the
        mesh's worst is 39)
      - only 6 cells exceeded the stable CFL number: the time step suits the rest of the mesh
-     Try: improve cells 119, 134, 135, 136, 151 (mallard check input.toml --quality quality writes the metrics
-     for ParaView), or lower the time step to suit them
+     Try: improve cells 119, 134, 135, 136, 151 (mallard check input.toml --mesh-fields mesh writes the
+     metrics for ParaView), or lower the time step to suit them
   2. time step too large (0.55)
      - the failing step ran at CFL 3.08, above 1.2, the largest stable value of SSPRK3 for smooth flow
      - 6 of 256 cells (2%) were above it: the excess is local, so look at those cells first

@@ -37,7 +37,7 @@ budget = true              # model vs numerical dissipation in integrals.csv
 
 *Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
 
-The `les` [preset](numerics.md#presets) is the setup of the `channel_les`
+The `les` [preset](numerics.md#presets), second order (MUSCL), is the setup of the `channel_les`
 and `cbc_les` examples: the channel at
 Re<sub>τ</sub> = 395 and 590 lands within 0.7% and 1.6% of the DNS
 ([benchmark](https://matthewbonanni.github.io/mallard/validation/#les-channel)),

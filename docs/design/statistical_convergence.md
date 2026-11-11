@@ -10,12 +10,15 @@ docs: [Statistics](../guide/statistics.md#convergence-statisticsconvergence).
    `[[triggers]]` read (integrals, forces, probe reductions and one-point
    probes), under the same names, sampled each time their monitor writes
    them. Nothing new runs on the device or on the step path: the analysis is
-   output-interval work. Region reductions of probes give what per-cell
+   output-interval work, at the steps the step queue already stops at for
+   those monitors, so it adds no stop and nothing to the step's CUDA graph.
+   Region reductions of probes give what per-cell
    fields cannot without device work, e.g. a plane mean.
 2. **Every rank computes it.** Integrals and forces are summed over the ranks
    already; probe values live on rank 0, so at the steps where a probe signal
    has a new sample rank 0 sends those values to the others (one
-   `allgatherv`, at the probe's interval). Every rank then runs the same
+   `allgatherv` of host values, at the probe's interval, like the probe's
+   own gather). Every rank then runs the same
    arithmetic on the same doubles, so the state agrees bitwise without a
    per-step broadcast, and the values reach triggers through their existing
    variable list (`convergence_<column>`).
@@ -58,7 +61,7 @@ docs: [Statistics](../guide/statistics.md#convergence-statisticsconvergence).
 
 ## Validation
 
-- `test/convergence_test.cpp`, against synthetic AR(1) signals with known
+- `test/statistical_convergence_test.cpp`, against synthetic AR(1) signals with known
   answers: Student's t quantiles against tables to 1e-8; `tau` of AR(1) with
   phi = 0, 0.5, 0.8 within 8% of `(1 + phi) / (1 - phi)`; over 1000
   replicates (phi = 0.8, `tau` = 9), 95% intervals hold the exact mean and
@@ -70,3 +73,6 @@ docs: [Statistics](../guide/statistics.md#convergence-statisticsconvergence).
 - `test/triggers_test.cpp`: a trigger on `convergence_stationary` starts
   the statistics at the step the file first says stationary; a resumed run
   writes the same rows bitwise.
+- `test/step_queue_test.cpp`: an integral, a force and a probe value
+  followed while steps run ahead give the same `convergence.csv`, restarts
+  and log as the host stepping alone, serial and over the ranks.

@@ -1,0 +1,2 @@
+- `mallard post convergence` studies the tables `mallard post extract` wrote into a run's directory from that run's snapshots, matched by the run id, step and time each snapshot records; the report names those tables and `--format json` marks their quantities `extracted` (#812).
+- `mallard post extract` lists each snapshot it read in its run block's `files` (`kind` `snapshot`, with the `run_id`, `step` and `t` of the run that wrote it); a file read at several steps is listed once per step (#812).

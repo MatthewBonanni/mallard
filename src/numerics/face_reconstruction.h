@@ -13,6 +13,7 @@
 #define FACE_RECONSTRUCTION_H
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -421,6 +422,20 @@ class TENO : public FaceReconstruction {
             std::vector<int32_t> faces;
         };
         Stencils large_stencils() const;
+
+        /** @brief One reconstructed cell's stencils, as the reconstruction reads them (host copy). */
+        struct CellStencils {
+            std::vector<int32_t> cells, faces;  // the central stencil's slots, then each face's sector stencil's
+            uint16_t central = 0;               // slots of the central stencil
+            std::array<uint16_t, teno::MAX_FACES> sectors{};  // slots of each face's sector stencil, 0 if left out
+            std::vector<rtype> pinv;  // with pinv: n_dof_large entries per central slot, then NK_SMALL per sector slot
+        };
+
+        /**
+         * @brief Calls visit(c, stencils of c) for every reconstructed cell c in
+         *        increasing order, copying the tables to the host chunk by chunk.
+         */
+        void for_each_stencil(const std::function<void(uint32_t, const CellStencils &)> & visit, bool pinv) const;
 
         /** @brief Local cells that some stencil (central or sector) of a reconstructed cell reads. */
         std::vector<uint8_t> stencil_cells() const;

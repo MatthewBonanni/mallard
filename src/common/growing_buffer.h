@@ -48,7 +48,7 @@ class GrowingBuffer {
 
         std::string label;
         unsigned long long base = 0;
-        // CUDA builds only. A struct, not [[maybe_unused]] members, which GCC 11 rejects
+        // CUDA builds only
         struct Mapping {
             size_t reserved = 0;
             size_t mapped = 0;

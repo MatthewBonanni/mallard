@@ -117,7 +117,7 @@ snapshot; `--format json` the same as one object (`run`, and per snapshot its
 The text has two metadata sections: **Run** (the run block, the same for
 every file of the run) and **This snapshot** (the last snapshot's block,
 with units). On a mesh file it also reports mesh quality from
-`mallard check`'s summary (`--quality PREFIX` writes the fields). The text
+`mallard check`'s summary (`--mesh-fields PREFIX` writes the fields). The text
 follows the output principles of #657: tables rather than sentences, units
 on every dimensional quantity (column headers included) and `dimensionless`
 on the others, and each number labeled with what it is (which snapshot, per

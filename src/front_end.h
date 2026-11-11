@@ -14,6 +14,7 @@
 #define FRONT_END_H
 
 #include <string>
+#include <vector>
 
 #include "cli.h"
 
@@ -43,6 +44,9 @@ Dimension input_dimension(const std::string & input_file);
 
 /** @brief The dimension of the case an output file is of: its own, else its provenance's build. */
 Dimension output_dimension(const std::string & path);
+
+/** @brief The dimensions of the solvers installed with this executable (mallard2d, mallard3d). */
+std::vector<int> solvers();
 
 /**
  * @brief Whether this process was started as the front end, `mallard`.

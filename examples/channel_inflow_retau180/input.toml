@@ -111,7 +111,7 @@ check_interval = 2000
 
 [[probes]]
 name = "inlet_p"
-variables = ["P", "U_X", "U_Y"]
+fields = ["P", "U_X", "U_Y"]
 start = [0.02, 1.0, 0.0]
 end = [0.02, 1.0, 4.1887902047863905]
 n_points = 16
@@ -125,7 +125,7 @@ interval = 20000
 [[write_data]]
 prefix = "stats/channel"
 time_interval = 35.0
-variables = ["MEAN_*", "COV_*"]
+fields = ["MEAN_*", "COV_*"]
 
 # Turbulence leaving through the nscbc outlet drives its pressure away; damp it over the last 5.1 h (not analyzed)
 [[sponges]]

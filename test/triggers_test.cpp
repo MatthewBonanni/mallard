@@ -93,7 +93,7 @@ int run(Solver & solver) {
 }
 
 const std::string TRIGGER_CASE_PROBE =
-    "[[probes]]\nname = \"gauge\"\npoint = [0.45, 0.5]\nvariables = [\"P\"]\ninterval = 1\n";
+    "[[probes]]\nname = \"gauge\"\npoint = [0.45, 0.5]\nfields = [\"P\"]\ninterval = 1\n";
 
 } // namespace
 
@@ -175,7 +175,7 @@ TEST(TriggersTest, WriteActionWritesTheNamedSnapshotAtThatStep) {
     const std::string dir = fresh_dir("write");
     Solver solver;
     solver.init(parse_toml(case_input(dir, "n_steps = 6\ncfl = 0.25\n",
-                                      "[[write_data]]\nprefix = \"" + dir + "/snap\"\nformat = \"vtu\"\nvariables = [\"P\"]\ninterval = 1000\n"
+                                      "[[write_data]]\nprefix = \"" + dir + "/snap\"\nformat = \"vtu\"\nfields = [\"P\"]\ninterval = 1000\n"
                                       "[[triggers]]\nwhen = \"step == 4\"\ndo = [\"write " + dir + "/snap\"]\n")));
     run(solver);
     EXPECT_TRUE(fs::exists(dir + "/snap_000004.vtu") || fs::exists(dir + "/snap_000004.pvtu"));

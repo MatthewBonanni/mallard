@@ -21,7 +21,9 @@ import tomllib
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/setup"))
-from channel_init import grid, read_restart  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from channel_init import grid  # noqa: E402
+from mallard import restart  # noqa: E402
 
 
 def velocity_gradient(u, x, y, z):
@@ -43,7 +45,8 @@ def q_criterion(g):
 
 def load_velocity(path, n):
     """Step, time and velocity (3, nx, ny / 2, nz) of the lower half of the channel in a restart file."""
-    step, t, fields = read_restart(path)
+    r = restart.read(path)
+    step, t, fields = r.step, r.t, r.fields
     rho = fields["RHO"].reshape(n)
     u = np.stack([fields[f"RHOU_{c}"].reshape(n) / rho for c in "XYZ"])
     return step, t, u[:, :, :n[1] // 2]

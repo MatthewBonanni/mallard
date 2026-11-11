@@ -185,7 +185,7 @@ Cause mesh(const Evidence & e) {
     ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
     std::string list;
     for (size_t k = 0; k < std::min<size_t>(ids.size(), 6); k++) list += (k ? ", " : "") + ids[k];
-    c.fix = "improve cells " + list + " (mallard check input.toml --quality quality writes the metrics for ParaView)" +
+    c.fix = "improve cells " + list + " (mallard check input.toml --mesh-fields mesh writes the metrics for ParaView)" +
             (local_cfl ? ", or lower the time step to suit them" : "");
     return c;
 }
@@ -310,7 +310,7 @@ Cause numerics(const Evidence & e) {
         c.evidence.push_back("the MUSCL limiter was active in " + logging::count(e.n_limited) + " of the invalid cells");
     }
     if (c.evidence.empty()) c.evidence.push_back("no specific cause stands out; a more dissipative scheme often helps");
-    c.fix = "a more dissipative scheme: numerics.preset = \"robust\"" +
+    c.fix = "a more dissipative scheme: numerics.preset = \"second_order\" (or \"first_order\")" +
             std::string(e.teno ? ", or bound_preserving = true for TENO" : "");
     return c;
 }

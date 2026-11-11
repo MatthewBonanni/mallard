@@ -131,7 +131,7 @@ ProbeSpectra::ProbeSpectra(const Input & table, const std::string & key, const s
         throw InputError(Diagnostic{.key = key,
                                     .line = line_of(table),
                                     .message = "must be a table",
-                                    .fix = "e.g. spectra = {variables = [\"U_Y\"], length = 100.0}",
+                                    .fix = "e.g. spectra = {fields = [\"U_Y\"], length = 100.0}",
                                     .docs = docs});
     }
     if (!(dt > 0.0)) {
@@ -142,14 +142,14 @@ ProbeSpectra::ProbeSpectra(const Input & table, const std::string & key, const s
                                     .fix = "Give the probe a time_interval instead of interval",
                                     .docs = docs});
     }
-    if (!table.contains("variables")) throw missing_key(table, key + ".variables");
+    if (!table.contains("fields")) throw missing_key(table, key + ".fields");
     if (!table.contains("length")) {
         throw missing_key(table, key + ".length", "The span of the history, e.g. length = 100.0 (in time units)");
     }
     std::vector<std::string> accepted;
     for (const auto & [v, d] : variables) accepted.push_back(v);
     for (const auto & [r, d] : reductions) accepted.push_back(r);
-    for (const auto & v : find_value<std::vector<std::string>>(table, "variables")) {
+    for (const auto & v : find_value<std::vector<std::string>>(table, "fields")) {
         std::vector<std::string> names = {v};
         const bool known = std::find(accepted.begin(), accepted.end(), v) != accepted.end();
         if (!known) {
@@ -164,8 +164,8 @@ ProbeSpectra::ProbeSpectra(const Input & table, const std::string & key, const s
         if (names.empty()) {
             std::string list;
             for (const auto & a : accepted) list += (list.empty() ? "" : ", ") + a;
-            throw InputError(Diagnostic{.key = key + ".variables",
-                                        .line = line_of(table, "variables"),
+            throw InputError(Diagnostic{.key = key + ".fields",
+                                        .line = line_of(table, "fields"),
                                         .message = "\"" + v + "\" is neither a variable of the probe's samples nor "
                                                    "one of its reductions",
                                         .fix = "List one of: " + list,
@@ -173,7 +173,7 @@ ProbeSpectra::ProbeSpectra(const Input & table, const std::string & key, const s
         }
         for (const auto & n : names) {
             if (std::any_of(series.begin(), series.end(), [&](const Series & s) { return s.name == n; })) {
-                throw InputError(key + ".variables: \"" + n + "\" is listed twice.");
+                throw InputError(key + ".fields: \"" + n + "\" is listed twice.");
             }
             for (uint32_t i = 0; i < variables.size(); i++) {
                 if (variables[i].first == n) series.push_back({n, variables[i].second, true, i});
@@ -183,7 +183,7 @@ ProbeSpectra::ProbeSpectra(const Input & table, const std::string & key, const s
             }
         }
     }
-    if (series.empty()) throw InputError(key + ".variables is empty.");
+    if (series.empty()) throw InputError(key + ".fields is empty.");
 
     t_start = static_cast<double>(find_real_or(table, "t_start", dim::time, 0.0_r));
     const double length = static_cast<double>(find_real(table, "length", dim::time));

@@ -39,8 +39,8 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/setup"))
-from interpolate_restart import read_restart, write_restart  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from mallard import restart  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -111,7 +111,7 @@ def main():
                         'type = "symmetry"\n\n[[boundaries]]\nname = "top"\ntype = "symmetry"\n')
     fuel = "CH4" if "Y_CH4" in open(args.full).readline() else "H2"
     variables = ["RHO", "U", "P", "T", "HRR", "Y_" + fuel, "Y_O2"] + (["QRAD"] if args.radiation else [])
-    text = re.sub(r"variables = \[.*\]", "variables = [" + ", ".join(f'"{v}"' for v in variables) + "]", text)
+    text = re.sub(r"fields = \[.*\]", "fields = [" + ", ".join(f'"{v}"' for v in variables) + "]", text)
     dx = delta / args.cells
     nx = int(re.search(r"Nx = (\d+)", text).group(1))
     ny = H_cells
@@ -129,9 +129,9 @@ def main():
     uu, vv = pair_velocity(X, Y, 0.0, a, R_c, 1.0, 1e3 * R_c)
     C = u_pair / np.sqrt(uu**2 + vv**2).max()
 
-    restart = read_restart(os.path.join(args.run_dir, "flame.restart"))
-    f = restart["fields"].copy()
-    names = restart["names"]
+    flame = restart.read(os.path.join(args.run_dir, "flame.restart"))
+    f = flame.values.copy()
+    names = flame.names
     idx = {n: i for i, n in enumerate(names)}
     xc = ((np.arange(nx) + 0.5) * dx)[:, None] * np.ones((1, ny))
     yc = np.ones((nx, 1)) * ((np.arange(ny) + 0.5) * dx)[None, :]
@@ -150,7 +150,8 @@ def main():
     f[idx["RHOU_X"]] = rho_new * ux
     f[idx["RHOU_Y"]] = rho_new * uy
     f[idx["RHOE"]] = factor * rho_e + 0.5 * rho_new * (ux**2 + uy**2)
-    write_restart(os.path.join(args.run_dir, "flame.restart"), restart, f)
+    restart.write(os.path.join(args.run_dir, "flame.restart"), dict(zip(names, f)), flame.step, flame.t,
+                  flame.attributes, real_size=flame.real_size)
     print(f"{args.run_dir}: r / delta = {args.r:g}, u' / S_L = {args.u:g}: R_c = {R_c * 1e3:.4f} mm, "
           f"u' = {u_pair:.3f} m/s, vortex Reynolds number u' r / nu_u = "
           f"{u_pair * r * rho_u / ct_viscosity(args, T_u, data):.0f}, channel {nx} x {ny}, "

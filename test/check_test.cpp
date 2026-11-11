@@ -39,7 +39,8 @@ namespace {
 
 const char * const U_ZERO = N_DIM == 3 ? "[\"0.0\", \"0.0\", \"0.0\"]" : "[\"0.0\", \"0.0\"]";
 
-/** @brief A periodic-free box of Nx x 8 cells and size 2 x 1 with wall boundaries; u_x as an expression of x. */
+/** @brief A periodic-free box of Nx x 8 cells and size 2 x 1 with wall boundaries; u_x as an expression of x;
+ *         first order unless `extra` sets the reconstruction. */
 std::string box(const std::string & u_x = "1.0", const std::string & run = "t_stop = 0.5\ncfl = 0.8\n",
                 const std::string & extra = "", const std::vector<std::string> & zones = {}) {
     std::ostringstream s;
@@ -57,6 +58,9 @@ std::string box(const std::string & u_x = "1.0", const std::string & run = "t_st
     }
     for (const auto & name : names) s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"symmetry\"\n";
     s << extra;
+    if (extra.find("[numerics.face_reconstruction]") == std::string::npos) {
+        s << "[numerics.face_reconstruction]\ntype = \"FO\"\n";
+    }
     return s.str();
 }
 
@@ -161,7 +165,7 @@ TEST(CheckKeys, AValidInputUsesEveryKeyIncludingArraysOfTables) {
     const std::string dir = (scratch_dir() / "mallard_check_valid").string();
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
                                     "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\ninterval = 5\n"
-                                    "variables = [\"RHO\", \"P\"]\n[[forces]]\nzone = \"bottom\"\nfile = \"" + dir +
+                                    "fields = [\"RHO\", \"P\"]\n[[forces]]\nzone = \"bottom\"\nfile = \"" + dir +
                                         "/forces.csv\"\n"));
     EXPECT_TRUE(r.unused.empty()) << (r.unused.empty() ? "" : describe(r.unused[0]));
     EXPECT_TRUE(r.ok());
@@ -349,10 +353,10 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     CheckOptions options;
-    options.quality_file = (dir / "quality" / "mesh").string();
+    options.mesh_fields = (dir / "quality" / "mesh").string();
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
                                     "[[write_data]]\nprefix = \"" + (dir / "out" / "flow").string() +
-                                        "\"\nformat = \"vtu\"\ninterval = 5\nvariables = [\"RHO\"]\n[[forces]]\n"
+                                        "\"\nformat = \"vtu\"\ninterval = 5\nfields = [\"RHO\"]\n[[forces]]\n"
                                         "zone = \"bottom\"\nfile = \"" + (dir / "forces.csv").string() +
                                         "\"\n[integrals]\nfile = \"" + (dir / "integrals.csv").string() + "\"\n"),
                                 options);
@@ -638,8 +642,8 @@ TEST(CheckRegions, ListsEveryRegionWithItsDimensionMeasureAndCells) {
     // The box is 2 x 1 (x 0.25): its regions, a probe's ball and the ball's surface
     const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.3"
                                         : "{type = \"sphere\", center = [0.5, 0.5, 0.125], radius = 0.1";
-    const std::string extra = "[regions]\nball = " + ball + "}\n[[probes]]\nname = \"in\"\nvariables = [\"P\"]\n"
-                              "region = \"ball\"\n[[probes]]\nname = \"on\"\nvariables = [\"P\"]\nregion = " + ball +
+    const std::string extra = "[regions]\nball = " + ball + "}\n[[probes]]\nname = \"in\"\nfields = [\"P\"]\n"
+                              "region = \"ball\"\n[[probes]]\nname = \"on\"\nfields = [\"P\"]\nregion = " + ball +
                               ", filled = false}\n";
     auto report = [&](const bool distributed) {
         Solver solver;
@@ -696,7 +700,7 @@ TEST(CheckRegions, TheCaseViewHoldsEveryRegionAndZone) {
     const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
                                            : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
-                                    "[[probes]]\nname = \"s\"\nvariables = [\"P\"]\nregion = " + surface + "\n"),
+                                    "[[probes]]\nname = \"s\"\nfields = [\"P\"]\nregion = " + surface + "\n"),
                                 options);
     ASSERT_TRUE(r.ok()) << (first_error(r));
     EXPECT_EQ(r.view_file, (dir / "case.vtkhdf").string());
@@ -722,7 +726,7 @@ CheckReport report_case() {
     const std::string ring = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
                                         : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
     const std::string extra = "[[sponges]]\nstrength = 1.0\nregion = " + far + "\nu = " + U_ZERO +
-                              "\np = 1.0\nT = 1.0\n[[probes]]\nname = \"ring\"\nvariables = [\"P\"]\nregion = " + ring +
+                              "\np = 1.0\nT = 1.0\n[[probes]]\nname = \"ring\"\nfields = [\"P\"]\nregion = " + ring +
                               "\n";
     std::string input = box("1.0", "t_stop = 0.5\ncfl = 1.5\n", extra);
     input.replace(input.find("riemann_solver"), 14, "riemann_solvr");

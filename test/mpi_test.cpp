@@ -148,7 +148,7 @@ TEST(MPITest, LowStorageIntegratorsAndErrorControlMatchSerial) {
     }
 }
 
-TEST(MPITest, GasMixtureMatchesSerial) {
+TEST(MPITest, GasMixtureMatchesSerialWithAndWithoutStepGraphs) {
     // Species and the temperature seeds of halo cells follow the same history
     // as their owners'; with TENO also the troubled cells' stencil choices and
     // the scalars' bound-preserving factors, and with double flux the frozen
@@ -164,17 +164,21 @@ TEST(MPITest, GasMixtureMatchesSerial) {
                                                    "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
-                                                   "navier_stokes"}};
+                                                   "navier_stokes"},
+                                                  {"time_integrator = \"RDPK3Sp35\"\n"
+                                                   "[numerics.error_control]\ntolerance = 1e-4\n",
+                                                   "type = \"MUSCL\"\n", "", "navier_stokes"}};
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
-        expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
+        expect_matches_serial_with_and_without_step_graphs(mixture_input(extra, reconstruction, chemistry, type));
     }
 }
 
-TEST(MPITest, ChemistryLoadBalancingMatchesSerial) {
+TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
     // The hot half of the channel reacts and the cold half does not, so ranks
     // integrate each other's cells; each cell's reactor gives the same bits
     // wherever it runs, also with fused half steps, the thickened flame's
-    // multiplier of dt and SIMPLER's forcing
+    // multiplier of dt and SIMPLER's forcing. The capacities grow after the
+    // first step, which records the step graph again
     const std::string balanced = "[chemistry]\nload_balance = true\n";
     const std::string tfles = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
                               "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
@@ -187,7 +191,7 @@ TEST(MPITest, ChemistryLoadBalancingMatchesSerial) {
                                   mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
                                                 "navier_stokes") + tfles};
     for (const std::string & input : inputs) {
-        expect_matches_serial(input, [](const Solver & s) {
+        expect_matches_serial_with_and_without_step_graphs(input, [](const Solver & s) {
             if (s.is_distributed()) {
                 EXPECT_GT(s.chemistry_cells_sent(), 0.0);
             }
@@ -324,6 +328,83 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
         25));
 }
 
+TEST(MPITest, OutletAndSourceAveragesMatchSerialWithAndWithoutStepGraphs) {
+    // Average-pressure outlets and sources of domain averages sum over the
+    // ranks in fixed point on the device, with NCCL inside the step's CUDA
+    // graph or with MPI through the host: the same sums in every case
+    const std::string outlet = box_input(
+        "cartesian", "type = \"MUSCL\"\n", NS,
+        bcs("type = \"dirichlet\"\nrho = \"1.0\"\nu = [\"0.3\", \"0.0\"]\np = \"1.0\"\n",
+            "type = \"outlet_pressure\"\naverage = true\np = \"1.0 + 0.05 * sin(20 * t)\"\n",
+            "type = \"wall_adiabatic\"\n", "type = \"outlet_pressure\"\naverage = true\np = 0.95\n"),
+        25);
+    const std::string forcing = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                          bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",
+                                              "type = \"symmetry\"\n"),
+                                          25) +
+                                "[[sources]]\nrhou = [\"(1 - mean_ke / mean_rho) * rho * u_x\", \"0\"]\n"
+                                "rhoE = \"(1 - mean_ke / mean_rho) * rho * u_x^2\"\n";
+    for (const std::string & input : {outlet, forcing}) expect_matches_serial_with_and_without_step_graphs(input);
+}
+
+TEST(MPITest, LargeEddySimulationMatchesSerialWithAndWithoutStepGraphs) {
+    // The eddy viscosity and the dynamic constant (an exact sum over the ranks) stay on the device, with the
+    // boundary states at the step's time: the step graph takes LES, with a time-dependent inlet too
+    std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                  bcs("type = \"dirichlet\"\nrho = \"1.0\"\nu = [\"0.3 + 0.1 * sin(30 * t)\", \"0.0\"]\n"
+                                      "p = \"1.0\"\n",
+                                      "type = \"outlet_pressure\"\np = 1.0\n", "type = \"wall_isothermal\"\nT = 1.2\n",
+                                      "type = \"wall_adiabatic\"\n"),
+                                  25);
+    const std::string u = "u = [\"0.3\", \"-0.1\"]\n";
+    input.replace(input.find(u), u.size(), "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * x + 2 * y)\"]\n");
+    expect_matches_serial_with_and_without_step_graphs(input + "[les]\nmodel = \"wale\"\n");
+    expect_matches_serial_with_and_without_step_graphs(input + "[les]\nmodel = \"smagorinsky\"\ndynamic = true\n");
+    std::string teno = input;
+    const std::string muscl = "type = \"MUSCL\"\n";
+    teno.replace(teno.find(muscl), muscl.size(), "type = \"TENO\"\norder = 3\n");
+    expect_matches_serial_with_and_without_step_graphs(teno + "[les]\nmodel = \"vreman\"\ndynamic = true\n"
+                                                              "gradients = \"reconstruction\"\n");
+}
+
+TEST(MPITest, StepReductionsKernelByKernelMatchSerial) {
+    // Steps without the CUDA graph reduce over the ranks with NCCL (or MPI) on
+    // the device: the time step and the run-control requests, the step error,
+    // the dynamic LES constant, the dynamic TFLES efficiency, the chemistry
+    // loads and failures, and check_nan's count
+    auto graphs_off = [](std::string text) { return text.insert(text.find("[run]\n") + 6, "cuda_graphs = false\n"); };
+    std::string controlled = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                       bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                           "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"),
+                                       25);
+    const std::string ssprk3 = "time_integrator = \"SSPRK3\"\n";
+    controlled.replace(controlled.find(ssprk3), ssprk3.size(),
+                       "time_integrator = \"RDPK3Sp35\"\ncheck_nan = true\n[numerics.error_control]\ntolerance = 1e-4\n");
+    std::string dynamic = box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                    bcs("type = \"outlet_extrapolation\"\n", "type = \"outlet_pressure\"\np = 1.0\n",
+                                        "type = \"wall_isothermal\"\nT = 1.2\n", "type = \"wall_adiabatic\"\n"),
+                                    25);
+    const std::string u = "u = [\"0.3\", \"-0.1\"]\n";
+    dynamic.replace(dynamic.find(u), u.size(), "u = [\"0.3 + 0.4 * sin(9 * y)\", \"-0.1 + 0.3 * sin(7 * x + 2 * y)\"]\n");
+    dynamic += "[les]\nmodel = \"smagorinsky\"\ndynamic = true\n";
+    const std::string combustion = "[les]\nmodel = \"vreman\"\n[les.combustion]\n";
+    const std::string tfles = combustion + "model = \"tfles\"\ndelta_L = 2e-3\ns_L = 2.0\nT_unburnt = 300.0\n"
+                                           "T_burnt = 2400.0\n";
+    const std::string chemistry = "[chemistry]\nload_balance = true\n";
+    expect_matches_serial(graphs_off(controlled));
+    expect_matches_serial(graphs_off(dynamic), [](const Solver & s) { EXPECT_NE(s.les_dynamic_ratio(), 0.0); });
+    expect_matches_serial(graphs_off(mixture_input("", "type = \"MUSCL\"\n", chemistry, "navier_stokes") + tfles),
+                          [](const Solver & s) { EXPECT_GT(s.tfles_beta(), 0.0); });
+    expect_matches_serial(graphs_off(mixture_input("", "type = \"MUSCL\"\n", chemistry, "navier_stokes") + combustion +
+                                     "model = \"pasr\"\n"));
+    expect_matches_serial(graphs_off(mixture_input("", "type = \"MUSCL\"\n", chemistry, "euler")),
+                          [](const Solver & s) {
+                              if (s.is_distributed()) {
+                                  EXPECT_GT(s.chemistry_cells_sent(), 0.0);
+                              }
+                          });
+}
+
 TEST(MPITest, IntegralsOfAnUndistributedSolverAreThoseOfItsOwnMesh) {
     // A serial reference on every rank integrates its whole mesh once, not once per rank
     const std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
@@ -365,6 +446,21 @@ TEST(MPITest, InletsMatchSerial) {
                                     bcs("type = \"inlet_mass_flow\"\nmdot = 0.5\nprofile = \"1 + y\"\nT = 1.0\n",
                                         "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n"),
+                                    25));
+    // mdot and profile of t: every rank integrates the profile over all the inlet's faces at every stage
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"inlet_mass_flow\"\nmdot = \"0.5 * (1 + 0.3 * sin(60 * t))\"\n"
+                                        "profile = \"1 + y * (1 + sin(40 * t))\"\n"
+                                        "T = 1.0\n",
+                                        "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n"),
+                                    25));
+    // Directions of x, y and t, per face and per stage, at an inlet and a moving wall
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                    bcs("type = \"inlet_stagnation\"\np0 = 1.5\nT0 = 1.1\n"
+                                        "direction = [1.0, \"0.3 * y * (1 + sin(30 * t))\"]\n",
+                                        "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\nu = 0.2\ndirection = [\"cos(10 * t)\", \"0\"]\n"),
                                     25));
 }
 
@@ -420,20 +516,24 @@ TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
     expect_matches_serial(mixture_input(hybrid + "double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"));
 }
 
-TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerial) {
+TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerialWithAndWithoutStepGraphs) {
     // The transverse terms read the cells of neighboring boundary faces, which
-    // may be halo cells
+    // may be halo cells; the incoming waves advance over the device's dt, and
+    // an inlet velocity of t is evaluated at the device's stage and step-end times
     const std::string sponge = "[[sponges]]\nstrength = \"x > 0.7 ? 5 * (x - 0.7) : 0\"\nu = [0.3, 0.0]\np = 1.0\n"
                                "T = 1.0\n";
     for (const std::string & recon : {std::string("type = \"MUSCL\"\n"), std::string("type = \"TENO\"\norder = 5\n")}) {
-        expect_matches_serial(box_input("cartesian_tri", recon, NS,
-                                        bcs("type = \"inlet_state\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n"
-                                            "nscbc.sigma_T = 1.0\nnscbc.sigma_t = 1.0\n",
-                                            "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n",
-                                            "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\nnscbc.sigma = 2.0\nnscbc.beta = 0.5\n",
-                                            "type = \"wall_adiabatic\"\n"),
-                                        20) +
-                              sponge);
+        for (const std::string & u : {std::string("[0.3, 0.0]"), std::string("[\"0.3 + 0.05 * sin(40 * t)\", \"0.0\"]")}) {
+            expect_matches_serial_with_and_without_step_graphs(
+                box_input("cartesian_tri", recon, NS,
+                          bcs(("type = \"inlet_state\"\nu = " + u + "\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n"
+                               "nscbc.sigma_T = 1.0\nnscbc.sigma_t = 1.0\n").c_str(),
+                              "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n",
+                              "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\nnscbc.sigma = 2.0\nnscbc.beta = 0.5\n",
+                              "type = \"wall_adiabatic\"\n"),
+                          20) +
+                sponge);
+        }
     }
 }
 
@@ -501,6 +601,21 @@ TEST(MPITest, SyntheticTurbulenceMatchesSerial) {
                           "[initialize.turbulence]\nspectrum = \"passot_pouquet\"\nintensity = 0.1\nlength_scale = 0.15\n"
                           "[[initialize.regions]]\nregion = {type = \"disk\", center = [0.4, 0.4], radius = 0.25, edge = 0.05}\n"
                           "turbulence = {intensity = 0.05, length_scale = 0.1, kolmogorov_scale = 0.01, seed = 2}\n");
+}
+
+TEST(MPITest, SyntheticTurbulenceInletMatchesSerialWithAndWithoutStepGraphs) {
+    // A step graph picks and filters the inflow planes at the device's stage and
+    // step-end times; planes enter and leave the cache within the run
+    const std::string inlet = "type = \"inlet_state\"\nu = [0.3, 0.0]\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n"
+                              "[boundaries.turbulence]\nreynolds_stress = [0.004, 0.002, -0.001]\nlength_scale = 0.2\n"
+                              "convection_velocity = 2.0\n";
+    for (const std::string & flux : {std::string(""), std::string("zero_net_flux = false\n")}) {
+        expect_matches_serial_with_and_without_step_graphs(
+            box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                      bcs((inlet + flux).c_str(), "type = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n",
+                          "type = \"symmetry\"\n", "type = \"symmetry\"\n"),
+                      20));
+    }
 }
 
 TEST(MPITest, AxisymmetricRunsMatchSerial) {
@@ -743,13 +858,13 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     comm::barrier();
     const std::string stats = "[statistics]\ninterval = 2\nfields = [\"P\"]\nproducts = [\"U_X*U_Y\", \"RHO*RHO\"]\n";
     auto probe = [&](const std::string & file) {
-        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nvariables = [\"RHO\", \"P\", "
+        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nfields = [\"RHO\", \"P\", "
                "\"MEAN_P\", \"COV_U_X_U_Y\"]\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\n"
-               "[[probes]]\nname = \"mean_line\"\nfile = \"" + dir + "/mean_" + file + "\"\nvariables = [\"RHO\", "
+               "[[probes]]\nname = \"mean_line\"\nfile = \"" + dir + "/mean_" + file + "\"\nfields = [\"RHO\", "
                "\"P\", \"MASS_FLUX\"]\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\naverage = true\n"
                "interval = 5\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/mean_red_" + file + "\"\n"
                "[[probes]]\nname = \"outflow\"\nfile = \"" + dir + "/out_" + file + "\"\n"
-               "boundary_type = \"outlet_extrapolation\"\nvariables = [\"MASS_FLUX\", \"ENTHALPY_FLUX\"]\n"
+               "boundary_type = \"outlet_extrapolation\"\nfields = [\"MASS_FLUX\", \"ENTHALPY_FLUX\"]\n"
                "average = true\ninterval = 5\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
                "/out_red_" + file + "\"\n";
     };
@@ -805,7 +920,7 @@ TEST(MPITest, EveryRankWritesRankZerosProvenance) {
     comm::barrier();
     Solver solver;
     solver.init(parse_toml(restart_case(2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
-                                                  "interval = 2\nvariables = [\"RHO\"]\n"
+                                                  "interval = 2\nfields = [\"RHO\"]\n"
                                                   "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\n"
                                                   "interval = 2\n")));
     solver.run();
@@ -832,11 +947,11 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
     comm::barrier();
     auto probes = [&](const std::string & sub) {
         const std::string at = "file = \"" + dir + "/" + sub;
-        return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nvariables = [\"RHO\", \"U\", \"T\", \"H\"]\n"
+        return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nfields = [\"RHO\", \"U\", \"T\", \"H\"]\n"
                "sampling = \"point\"\ntype = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
                "interval = 5\nreductions = [\"integral\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_" + at +
                "/circle_red.csv\"\n"
-               "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nvariables = [\"P\"]\n"
+               "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nfields = [\"P\"]\n"
                "sampling = \"point\"\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 31\ninterval = 10\n";
     };
     auto input = [&](const std::string & sub) {
@@ -882,16 +997,16 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
                              "type = \"wall_isothermal\"\nT = 1.2\n"),
                          10) +
                "[[probes]]\nname = \"walls\"\nboundary_type = \"wall\"\nsampling = \"point\"\nfile = \"" + dir + "/" +
-               sub + "/walls.csv\"\nvariables = [\"P\", \"T\", \"CF\", \"Q_W\", \"Y_PLUS\", \"ENERGY_DIFFUSIVE_FLUX\", "
+               sub + "/walls.csv\"\nfields = [\"P\", \"T\", \"CF\", \"Q_W\", \"Y_PLUS\", \"ENERGY_DIFFUSIVE_FLUX\", "
                "\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\ninterval = 5\n"
                "reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}\nreductions = [\"integral\", \"moment\"]\n"
                "moment_center = [0.3, 0.2]\nreductions_file = \"" + dir + "/" + sub + "/walls_red.csv\"\n"
                "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\npoint = [0.5, 0.4]\nnormal = [1.0, 0.7]\n"
-               "sampling = \"point\"\nvariables = [\"RHO\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub +
+               "sampling = \"point\"\nfields = [\"RHO\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub +
                "/cut.pvd\"\ninterval = 10\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub +
                "/cut.csv\"\n"
                "[[probes]]\nname = \"open\"\nboundary = [\"left\", \"right\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
-               sub + "/open.pvd\"\nvariables = [\"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENERGY_TOTAL_FLUX\"]\ninterval = 10\n"
+               sub + "/open.pvd\"\nfields = [\"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENERGY_TOTAL_FLUX\"]\ninterval = 10\n"
                "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/open.csv\"\n";
     };
     Solver reference;
@@ -925,7 +1040,7 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     comm::barrier();
     Solver solver;
     solver.init(parse_toml(restart_case(2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
-                                                  "interval = 2\nvariables = [\"RHO\"]\n")));
+                                                  "interval = 2\nfields = [\"RHO\"]\n")));
     solver.run();
     comm::barrier();
     const uint64_t n_global = solver.get_mesh()->n_global_cells ? solver.get_mesh()->n_global_cells
@@ -962,7 +1077,7 @@ TEST(MPITest, OutputRecordsListEveryRanksPieceWithItsSizeAndHash) {
     Solver solver;
     // run_log continues box_input's [output] table
     solver.init(parse_toml(restart_case(2, "run_log = \"" + dir + "/run.jsonl\"\n[[write_data]]\nprefix = \"" + dir +
-                                                  "/f\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\"]\n")));
+                                                  "/f\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"RHO\"]\n")));
     solver.run();
     comm::barrier();
     if (!comm::is_root()) return;
@@ -1012,11 +1127,11 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
-                                      "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
+                                      "interval = 3\nfields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
                                       io_dir() + "_hdf5", {0, 3, 6});
     std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "", "euler");
     mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 4");
-    expect_hdf5_output_matches_serial(mixture, "interval = 4\nvariables = [\"T\", \"Y_*\"]\n",
+    expect_hdf5_output_matches_serial(mixture, "interval = 4\nfields = [\"T\", \"Y_*\"]\n",
                                       io_dir() + "_hdf5_species", {0, 4});
 #endif
 }
@@ -1036,12 +1151,12 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     const std::string zlib = have_hdf5_deflate() ? "compression = \"zlib\"\n" : "";
     expect_vtkhdf_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
-                                        "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
+                                        "interval = 3\nfields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
                                         io_dir() + "_vtkhdf", {"_000000", "_000003", "_000006"});
-    expect_vtkhdf_output_matches_serial(input, "interval = 3\nseries = true\nvariables = [\"RHO\", \"U\"]\n",
+    expect_vtkhdf_output_matches_serial(input, "interval = 3\nseries = true\nfields = [\"RHO\", \"U\"]\n",
                                         io_dir() + "_vtkhdf_series", {""});
     expect_vtkhdf_output_matches_serial(input,
-                                        "interval = 3\nvariables = [\"P\", \"U\"]\n" + zlib +
+                                        "interval = 3\nfields = [\"P\", \"U\"]\n" + zlib +
                                             "regions = [{type = \"disk\", center = [0.5, 0.4], radius = 0.25}, \"bottom\", "
                                             "{type = \"cut_plane\", point = [0.45, 0.4], normal = [1.0, 0.3]}]\n",
                                         io_dir() + "_vtkhdf_regions", {"_0_000000", "_0_000006", "_bottom", "_2"});
@@ -1055,7 +1170,7 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
         "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
         "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n",
-        "interval = 2\nvariables = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
+        "interval = 2\nfields = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
 #endif
 }
 
