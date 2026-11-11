@@ -148,7 +148,7 @@ class FileOutput : public Output {
 #ifdef Mallard_HAS_ZLIB
 class GzipOutput : public Output {
     public:
-        explicit GzipOutput(const std::string & path) : file(gzopen(path.c_str(), "wb6")), path(path) {
+        explicit GzipOutput(const std::string & file_path) : file(gzopen(file_path.c_str(), "wb6")), path(file_path) {
             if (!file) throw cannot_write("the archive", path);
         }
         ~GzipOutput() override {
