@@ -453,7 +453,8 @@ void Solver::capture_step_graph() {
 
 bool Solver::conditional_nodes_work() {
 #ifdef MALLARD_CONDITIONAL_NODES
-    // A step under a conditional node captures its NCCL operations there: try one first, on every rank
+    // A step under a conditional node captures its NCCL operations there, which fails where NCCL communicates
+    // over a network (it then adds host nodes): try one first, on every rank
     bool works = true;
     if (is_distributed() && halo.uses_nccl()) {
         Kokkos::fence("conditional_nodes");
