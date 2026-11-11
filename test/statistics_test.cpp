@@ -214,16 +214,17 @@ TEST(StatisticsTest, AveragedProbesRecordTheirOwnWindow) {
     const output::Contents file = output::open(dir + "/p.pvd");
     ASSERT_TRUE(file.snapshots.back().has_block);
     const snapshot_block::Block & b = file.snapshots.back().block;
-    // Samples at steps 4, 6, ..., 20 (t > 0.02), the first weighted from t_start
+    // Samples at steps 4, 6, ..., 20 (t > 0.02), the first weighted from t_start, an rtype as times are
+    const double t_start = static_cast<double>(static_cast<rtype>(0.02));
     EXPECT_TRUE(b.averaged);
-    EXPECT_NEAR(b.average_start, 0.02, 1e-12);
+    EXPECT_NEAR(b.average_start, t_start, 1e-12);
     EXPECT_DOUBLE_EQ(b.average_end, 20 * 0.0078125);
     EXPECT_EQ(b.samples, 9);
     const snapshot_block::Field * f = b.field("MEAN_P");
     ASSERT_TRUE(f);
     EXPECT_EQ(f->average.kind, "reynolds");
     EXPECT_EQ(f->average.of, std::vector<std::string>{"P"});
-    EXPECT_NEAR(f->average.start, 0.02, 1e-12);
+    EXPECT_NEAR(f->average.start, t_start, 1e-12);
     EXPECT_EQ(f->average.samples, 9);
     EXPECT_EQ(f->average.interval, 2);
     EXPECT_EQ(f->value, "cell_state");
