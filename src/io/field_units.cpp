@@ -151,16 +151,17 @@ std::optional<FieldDescription> find_base(const std::string & name) {
     return std::nullopt;
 }
 
-/**
- * @brief A field that statistics and probes sample (a conservative, a primitive,
- *        Y_<species> or RHOY_<species>), or the vector U or RHOU.
- */
-std::optional<FieldDescription> find_sampled(const std::string & name) {
-    bool sampled = name == "U" || name == "RHOU" || (starts_with(name, "Y_") && name.size() > 2) ||
-                   (starts_with(name, "RHOY_") && name.size() > 5);
+/** @brief A scalar that statistics sample: a conservative, a primitive, Y_<species> or RHOY_<species>. */
+std::optional<FieldDescription> find_sampled_scalar(const std::string & name) {
+    bool sampled = (starts_with(name, "Y_") && name.size() > 2) || (starts_with(name, "RHOY_") && name.size() > 5);
     for (const auto & conservative : CONSERVATIVE_NAMES) sampled = sampled || name == conservative;
     for (const auto & primitive : PRIMITIVE_NAMES) sampled = sampled || name == primitive;
     return sampled ? find_base(name) : std::nullopt;
+}
+
+/** @brief A field that statistics and probes sample: a sampled scalar, or the vector U or RHOU. */
+std::optional<FieldDescription> find_sampled(const std::string & name) {
+    return name == "U" || name == "RHOU" ? find_base(name) : find_sampled_scalar(name);
 }
 
 } // namespace
@@ -182,10 +183,10 @@ std::optional<FieldDescription> find(const std::string & name) {
         return FieldDescription{of->dimension, "time average of " + of->long_name, "", ""};
     }
     if (starts_with(name, "COV_")) {
-        // COV_<A>_<B>: the first split whose halves are both sampled fields (names hold underscores)
+        // COV_<A>_<B> of two sampled scalars: the first split whose halves are both (names hold underscores)
         const std::string pair = name.substr(4);
         for (size_t at = pair.find('_'); at != std::string::npos; at = pair.find('_', at + 1)) {
-            const auto a = find_sampled(pair.substr(0, at)), b = find_sampled(pair.substr(at + 1));
+            const auto a = find_sampled_scalar(pair.substr(0, at)), b = find_sampled_scalar(pair.substr(at + 1));
             if (a && b) {
                 return FieldDescription{a->dimension.times(b->dimension),
                                         "covariance of " + a->long_name + " and " + b->long_name, "", ""};
