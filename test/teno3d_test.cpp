@@ -506,6 +506,33 @@ TEST(TENO3DSetup, TablesDoNotDependOnTheBatchOrOnWhetherTheDeviceOrTheHostSetsTh
     expect_same_tables(*reference, *host, "host setup");
 }
 
+namespace {
+
+// The field along y = z = 0, on slabs and pencils one cell thick
+void x_conservatives(double x, double, double, double * U) { smooth_conservatives(x, 0.0, 0.0, U); }
+
+} // namespace
+
+TEST(TENO3DSetup, SlabsAndPencilsOneCellThickConvergeAtDesignOrder) {
+    // No neighbors across the thin directions: the fits take the monomials of the others (#706)
+    for (const bool pencil : {false, true}) {
+        auto mesh_of = [&](const uint32_t n) {
+            const rtype h = 1.0_r / rtype(n);
+            return pencil ? make_mesh_3d("cartesian", n, 1, 1, 1.0_r, h, h) : make_mesh_3d("cartesian", n, n, 1, 1.0_r, 1.0_r, h);
+        };
+        const char * what = pencil ? "max face-value error, one cell by one" : "max face-value error, one cell thick";
+        verification::expect_order({"boundaries", "TENO5", verification::cells_of("cartesian"), what, {16, 32},
+                                    {reconstruction_error(mesh_of(16), 5, 0.0, "", x_conservatives),
+                                     reconstruction_error(mesh_of(32), 5, 0.0, "", x_conservatives)},
+                                    5.0, 4.6});
+        // The device sets them up in teams, the host one cell per thread
+        auto mesh = mesh_of(16);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        auto host = make_teno_with(mesh, bd, 5, [](TENO & t) { t.setup_on_host = true; });
+        expect_same_tables(*make_teno(mesh, bd, 5), *host, pencil ? "pencil" : "slab");
+    }
+}
+
 TEST(TENO3DSetup, FacetedSpheresOfTetrahedraMirrorAcrossEachFacet) {
     // Straight-sided spherical walls of tetrahedra: every facet is a mirror
     // plane of its own, so searches near the walls meet dozens of planes. They

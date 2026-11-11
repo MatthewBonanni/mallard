@@ -264,6 +264,17 @@ most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
 it are zero, so the run-time kernels are unchanged.
 
+**Meshes one cell thick.** A cell whose central-stencil candidates (mirror
+images aside) all lie level with it along a coordinate axis, as on a 2D strip
+or a 3D slab or pencil one cell thick, has no data across that axis: its
+mirror images only repeat its own column, and every monomial in that
+coordinate makes the fit rank deficient. Its central and sector fits (`flat_axes`,
+`fit_columns`) take only the monomials of the other axes, in a polynomial of
+the same degree (so the design order holds along the strip), from
+$\lceil f N'\rceil$ entries for their number $N'$; the coefficients of the
+dropped monomials are zero, so the run-time kernels are unchanged. A strip
+not aligned with an axis is not detected and still fails as below.
+
 If no size has full rank, the setup stops ("could not build a full-rank
 large stencil"), unless the search was cut off by the halo of an MPI
 partition, in which case the cell is redone once the halo is deep enough.
