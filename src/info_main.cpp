@@ -153,7 +153,9 @@ void print_run(const json::Value & p) {
         for (const json::Value & f : files->array) item("Read " + text(f.find("kind")), read_file_text(f));
     }
     if (const json::Value * preset = p.find("preset"); preset && !preset->is_null()) {
-        item("Preset", text(preset->find("name")));
+        const json::Value * is_default = preset->find("default");
+        const bool by_default = is_default && is_default->type == json::Value::Type::BOOL && is_default->boolean;
+        item("Preset", text(preset->find("name")) + (by_default ? " (the default)" : ""));
     }
 }
 

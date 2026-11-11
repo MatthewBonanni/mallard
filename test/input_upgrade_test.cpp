@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <toml.hpp>
@@ -472,5 +473,32 @@ TEST(InputUpgradeTest, MeshPeriodicOnlyTakesTheDirectionsOfAGeneratedMesh) {
         } catch (const InputError & e) {
             EXPECT_NE(std::string(e.what()).find(error), std::string::npos) << e.what();
         }
+    }
+}
+
+TEST(InputUpgradeTest, PresetsNamedForTheirOrderReadTheOldNamesWithAWarning) {
+    for (const auto & [old_name, new_name] : {std::pair{"robust", "second_order"}, {"accurate", "high_order"}}) {
+        Input input = parse_input_string(std::string("[run]\nt_stop = 1.0\n[numerics]\npreset = \"") + old_name + "\"\n");
+        const std::vector<Finding> findings = input_upgrade::apply(input, "0.10.0");
+        ASSERT_EQ(findings.size(), 1u);
+        EXPECT_FALSE(findings[0].removed);
+        EXPECT_EQ(input.at("numerics").at("preset").as_string(), new_name);
+    }
+}
+
+TEST(InputUpgradeTest, AnInputOnTheChangedDefaultGetsANoticeAndNoChange) {
+    const std::string text = "[run]\nt_stop = 1.0\ncfl = 0.5\n\n[numerics]\nriemann_solver = \"Roe\"\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), text);
+    EXPECT_TRUE(findings.empty());
+    const std::vector<std::string> notes = input_upgrade::notices(text);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_NE(notes[0].find("type = \"FO\""), std::string::npos) << notes[0];
+    // A preset, a reconstruction table, or a file that is not a run's input gets none
+    for (const std::string other : {"[run]\nt_stop = 1.0\n[numerics]\npreset = \"les\"\n",
+                                    "[run]\nt_stop = 1.0\n[numerics.face_reconstruction]\nbound_preserving = true\n",
+                                    "[mesh]\ntype = \"cartesian\"\n"}) {
+        EXPECT_TRUE(input_upgrade::notices(other).empty()) << other;
     }
 }

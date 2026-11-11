@@ -39,7 +39,8 @@ namespace {
 
 const char * const U_ZERO = N_DIM == 3 ? "[\"0.0\", \"0.0\", \"0.0\"]" : "[\"0.0\", \"0.0\"]";
 
-/** @brief A periodic-free box of Nx x 8 cells and size 2 x 1 with wall boundaries; u_x as an expression of x. */
+/** @brief A periodic-free box of Nx x 8 cells and size 2 x 1 with wall boundaries; u_x as an expression of x;
+ *         first order unless `extra` sets the reconstruction. */
 std::string box(const std::string & u_x = "1.0", const std::string & run = "t_stop = 0.5\ncfl = 0.8\n",
                 const std::string & extra = "", const std::vector<std::string> & zones = {}) {
     std::ostringstream s;
@@ -57,6 +58,9 @@ std::string box(const std::string & u_x = "1.0", const std::string & run = "t_st
     }
     for (const auto & name : names) s << "[[boundaries]]\nname = \"" << name << "\"\ntype = \"symmetry\"\n";
     s << extra;
+    if (extra.find("[numerics.face_reconstruction]") == std::string::npos) {
+        s << "[numerics.face_reconstruction]\ntype = \"FO\"\n";
+    }
     return s.str();
 }
 

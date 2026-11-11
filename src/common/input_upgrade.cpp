@@ -105,6 +105,8 @@ const Rules & rules() {
              "a sphere is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
             {"mesh.curved[].shape", "cylinder", "cylinder", "0.9.0", "0.10.0",
              "a cylinder is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
+            {"numerics.preset", "robust", "second_order", "0.10.0", "0.11.0", "presets are named by their order"},
+            {"numerics.preset", "accurate", "high_order", "0.10.0", "0.11.0", "presets are named by their order"},
         },
         {
             {"mesh.periodic", "periodic", "zones", "type", "0.9.0", "0.10.0",
@@ -726,6 +728,20 @@ bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule,
 
 } // namespace
 
+std::vector<std::string> notices(const std::string & text) {
+    const Input input = parse_input_string(text);
+    const auto has = [&](const char * table, const char * key) {
+        return input.contains(table) && input.at(table).is_table() && input.at(table).contains(key);
+    };
+    std::vector<std::string> out;
+    if (input.contains("run") && !has("numerics", "preset") && !has("numerics", "face_reconstruction")) {
+        out.push_back("no preset and no [numerics.face_reconstruction]: since 0.10.0 this runs the high_order "
+                      "preset, not first order; add [numerics.face_reconstruction] type = \"FO\" to reproduce "
+                      "older first-order results");
+    }
+    return out;
+}
+
 std::string advice(const Finding & finding) {
     return describe(finding) + "; `mallard input upgrade old.toml > new.toml` rewrites the file";
 }
@@ -792,6 +808,7 @@ int upgrade_file(const std::string & file, bool check, int dim, const std::strin
         bool reformatted = false;
         const std::string upgraded = upgrade_text(text, findings, reformatted, rules(), dim, unknown_dimension);
         for (const Finding & f : findings) std::cerr << file << ": " << describe(f) << "\n";
+        for (const std::string & note : notices(text)) std::cerr << file << ": note: " << note << "\n";
         if (reformatted) {
             std::cerr << file << ": a changed key is a dotted key or in an inline table, so the whole file was "
                       << "reformatted (comments are kept, layout is not)\n";
