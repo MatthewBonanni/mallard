@@ -565,11 +565,14 @@ jobs:
       # Without git in the image, checkout downloads the sources through the REST API:
       # enough for the install script; the checkout after it clones with submodules
       - uses: actions/checkout@v4
+      # g++ and gfortran keep GCC at Ubuntu's default: libopenmpi-dev alone pulls in GCC 16's
+      # gfortran and C compiler but not its libstdc++ headers, and hipcc and icpx use the
+      # newest GCC they find
       - name: Install tools
         timeout-minutes: 25
         run: >
           sh tools/dev/apt_install.sh --no-install-recommends
-          git cmake make curl libopenmpi-dev openmpi-bin ca-certificates
+          git cmake make curl g++ gfortran libopenmpi-dev openmpi-bin ca-certificates
       # The oneAPI image lags the releases: the compiler from Intel's apt repository
       - name: Install oneAPI ${{ matrix.toolchain.oneapi }}
         if: matrix.toolchain.oneapi
@@ -585,7 +588,9 @@ jobs:
             > /etc/apt/sources.list.d/oneAPI.list
           sh tools/dev/apt_install.sh intel-oneapi-compiler-dpcpp-cpp-$ONEAPI
           . /opt/intel/oneapi/setvars.sh > /dev/null
-          env | grep -E '^(PATH|LD_LIBRARY_PATH|LIBRARY_PATH|CPATH|CMPLR_ROOT|OCL_ICD_FILENAMES)=' >> "$GITHUB_ENV"
+          env | grep -E '^(LD_LIBRARY_PATH|LIBRARY_PATH|CPATH|CMPLR_ROOT|OCL_ICD_FILENAMES)=' >> "$GITHUB_ENV"
+          # In a container job, a PATH in GITHUB_ENV is replaced by the image's PATH
+          echo "$PATH" | tr ':' '\n' | grep '^/opt/intel/' >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -649,7 +654,7 @@ jobs:
             python3 which findutils tar diffutils gzip util-linux
           useradd -m ci
           mkdir -p /opt/spack-opt /opt/env
-          chown ci /opt /opt/spack-opt /opt/env
+          chown ci:ci /opt /opt/spack-opt /opt/env
           echo /opt/spack/bin >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
         with:
@@ -671,7 +676,7 @@ jobs:
           restore-keys: spack-${{ matrix.name }}-${{ env.SPACK_VERSION }}-${{ env.SPACK_PACKAGES_VERSION }}-
       - name: Hand the checkout and the installs to the user
         shell: bash -e {0}
-        run: chown -R ci "$GITHUB_WORKSPACE" /opt/spack-opt
+        run: chown -R ci:ci "$GITHUB_WORKSPACE" /opt/spack-opt
       - name: Install Spack
         run: |
           git clone -q --depth 1 -b "$SPACK_VERSION" https://github.com/spack/spack /opt/spack
