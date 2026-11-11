@@ -372,3 +372,57 @@ TEST(PostConvergenceTest, SinglePrecisionRunsGetSinglePrecisionRoundOff) {
         EXPECT_EQ(q["behavior"].string, q["name"].string == "integrals:enstrophy" ? "zero" : "unchanged") << r.out;
     }
 }
+
+namespace {
+
+int extract_cmd(const std::vector<std::string> & words) {
+    cli::Args args;
+    std::string error;
+    EXPECT_TRUE(cli::parse(*cli::command("post extract"), words, args, error)) << error;
+    std::ostringstream out;
+    std::streambuf * o = std::cout.rdbuf(out.rdbuf());
+    const int status = post_extract(args);
+    std::cout.rdbuf(o);
+    return status;
+}
+
+/** @brief The maximum density at t_stop, extracted from a run's restart files into DIR/extract. */
+void extract_max_density(const std::string & from, const std::string & into) {
+    std::vector<std::string> words;
+    for (const auto & entry : fs::directory_iterator(from)) {
+        if (entry.path().extension() == ".restart") words.push_back(entry.path().string());
+    }
+    for (const char * w : {"--latest", "--region", "domain", "--fields", "RHO", "--reductions", "max", "-o"}) {
+        words.emplace_back(w);
+    }
+    words.push_back(into + "/extract");
+    ASSERT_EQ(extract_cmd(words), 0);
+}
+
+} // namespace
+
+TEST(PostConvergenceTest, TablesExtractedFromTheRunsSnapshotsAreTheirs) {
+    if (comm::size() > 1) GTEST_SKIP() << "runs on one rank";
+    const std::string runs[] = {wave_run(8), wave_run(16), wave_run(32)};
+    for (const std::string & r : runs) extract_max_density(r, r);
+    const std::string table = "extract/probe_extract_reductions";
+    const Result r = convergence_cmd({runs[0], runs[1], runs[2], "--quantity", table, "--format", "json"});
+    ASSERT_EQ(r.status, 0) << r.out << r.err;
+    const json::Value v = json::parse(r.out);
+    ASSERT_EQ(v["quantities"].array.size(), 1u) << r.out;
+    const json::Value & q = v["quantities"].array[0];
+    EXPECT_TRUE(q["extracted"].boolean) << r.out;
+    for (size_t i = 0; i < 3; i++) {
+        EXPECT_DOUBLE_EQ(q["values"].array[i].number, last_value(runs[i] + "/" + table + ".csv", "RHO_max"));
+    }
+    const Result text = convergence_cmd({runs[0], runs[1], runs[2], "--quantity", table});
+    EXPECT_NE(text.out.find("extracted by mallard post extract from the runs' snapshots: " + table), std::string::npos)
+        << text.out;
+
+    // A table extracted from another run's snapshots is not this run's
+    fs::remove_all(runs[0] + "/extract");
+    extract_max_density(runs[1], runs[0]);
+    const Result other = convergence_cmd({runs[0], runs[1], runs[2], "--quantity", table});
+    EXPECT_EQ(other.status, 1) << other.out;
+    EXPECT_NE(other.err.find("no quantity " + table), std::string::npos) << other.err;
+}
