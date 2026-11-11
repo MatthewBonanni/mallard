@@ -1195,6 +1195,7 @@ class Solver {
         Kokkos::View<Triggers::DeviceState *> trigger_states;  // between firings
         Kokkos::View<TriggerSource *> trigger_sources;
         kexpr::ProgramTable<> trigger_conditions;
+        bool triggers_evaluated_by_host = true;  // since the device's states were last pushed or pulled
         RunEnd trigger_stop;  // a trigger that stopped the run, else empty
         HealthState run_health;
 };

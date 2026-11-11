@@ -831,8 +831,9 @@ void Solver::resume_device_steps() {
         Kokkos::deep_copy(probe_clocks, clocks);
         Kokkos::deep_copy(probe_target, next_target_time(true));
     }
-    if (triggers_on_device()) {
-        // The values and states the host's last evaluation left
+    if (triggers_on_device() && triggers_evaluated_by_host) {
+        // The values and states the host's last evaluation left; else the device's own are current
+        triggers_evaluated_by_host = false;
         const std::vector<double> values = trigger_values();
         Kokkos::deep_copy(trigger_vars, Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
                                             values.data(), values.size()));
@@ -914,6 +915,7 @@ void Solver::pull_trigger_states() {
                           states.data(), states.size()),
                       trigger_states);
     triggers.set_states(states);
+    triggers_evaluated_by_host = false;
 }
 
 void Solver::take_record(const step_queue::Record & record) {

@@ -145,6 +145,7 @@ void Solver::evaluate_triggers() {
 
 void Solver::act_on_triggers() {
     if (triggers.empty()) return;
+    triggers_evaluated_by_host = true;
     // Rank 0 holds the probes' values, and its wall time counts
     std::vector<double> values;
     std::string conditions;
