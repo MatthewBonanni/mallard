@@ -6211,7 +6211,7 @@
   "type": "array"
  },
  "write_data.format": {
-  "default": "\"vtu\"",
+  "default": "\"vtkhdf\"",
   "dims": [
    2,
    3
