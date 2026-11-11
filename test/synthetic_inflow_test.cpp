@@ -299,11 +299,13 @@ TEST(SyntheticInflowTest, FluctuationsRideOnAMeanOfTime) {
         means.add(timed_input, "timed", chars, x, n_in);
         means.finish();
         Kokkos::View<rtype *[N_DIM]> u_steady("u_steady", n_f), u_timed("u_timed", n_f);
+        const Kokkos::View<rtype> time("time");
         double max_diff = 0.0, max_area_error = 0.0, max_window_error = 0.0, window = 0.0, window_mean = 0.0;
         for (uint32_t k = 0; k < n_t; k++) {
             const double t = k * dt;
             steady.fill(t, u_steady);
-            means.fill(t, u_timed);
+            Kokkos::deep_copy(time, static_cast<rtype>(t));
+            means.fill(time, u_timed);
             timed.fill(t, u_timed);
             auto hs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), u_steady);
             auto ht = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), u_timed);

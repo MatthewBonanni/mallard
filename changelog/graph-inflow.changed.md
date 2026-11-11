@@ -1,0 +1,2 @@
+- Synthetic inflow turbulence takes its steps in the CUDA graph (CUDA builds): the inflow planes are picked, generated and filtered on the device from the step's time on the device.
+- In GPU builds the interpolation weights of the inflow planes in time are computed on the device: results of synthetic-turbulence runs on GPUs can differ from earlier versions in the last digits.

@@ -34,6 +34,7 @@
 #include "output_reader.h"
 #include "overlap.h"
 #include "parallel/comm.h"
+#include "provenance.h"
 #include "remap.h"
 #include "report.h"
 
@@ -316,6 +317,7 @@ struct Value {
     double scale = 0.0;           ///< the largest magnitude of its table's columns at that row
     double t = convergence::NaN;  ///< of the row taken (the end of the window of an average)
     std::string units;
+    bool extracted = false;       ///< by mallard post extract, from the run's snapshots
 };
 
 std::vector<std::string> split_csv(const std::string & line) {
@@ -326,7 +328,44 @@ std::vector<std::string> split_csv(const std::string & line) {
     return out;
 }
 
-/** @brief The quantities of one table of a run: label:column -> value. Only rows of the run's own parts count. */
+/** @brief A snapshot a run read by its identity: the run that wrote it, its step and time. */
+struct Source {
+    std::string run_id;
+    int64_t step = -1;
+    double t = convergence::NaN;
+};
+
+/** @brief The snapshots each run that wrote a CSV table extracted its rows from (post extract), by run id. */
+std::map<std::string, std::vector<Source>> table_sources(const std::string & path) {
+    std::map<std::string, std::vector<Source>> out;
+    std::ifstream in(path);
+    for (std::string line; std::getline(in, line);) {
+        if (line.empty() || line[0] != '#') continue;
+        const std::string block = provenance::parse_comment(line);
+        if (block.empty()) continue;
+        json::Value v;
+        try {
+            v = json::parse(block);
+        } catch (const std::exception &) {
+            continue;
+        }
+        const json::Value * files = v.find("files");
+        if (!files || files->type != json::Value::Type::ARRAY) continue;
+        std::vector<Source> & sources = out[string_at(v, {"run", "run_id"})];
+        for (const json::Value & f : files->array) {
+            if (string_at(f, {"kind"}) != "snapshot") continue;
+            const double step = number_at(f, {"step"});
+            sources.push_back({string_at(f, {"run_id"}), std::isfinite(step) ? static_cast<int64_t>(step) : -1,
+                               number_at(f, {"t"})});
+        }
+    }
+    return out;
+}
+
+/**
+ * @brief The quantities of one table of a run: label:column -> value. Only rows of the run's own parts count,
+ *        and rows post extract wrote from the snapshots of those parts.
+ */
 void table_values(const Run & run, const output::Contents & c, const std::string & label, const Selection & sel,
                   std::map<std::string, Value> & out) {
     size_t t_column = c.fields.size();
@@ -334,10 +373,24 @@ void table_values(const Run & run, const output::Contents & c, const std::string
         if (c.fields[i].name == "t") t_column = i;
     }
     if (t_column == c.fields.size() || c.snapshots.empty() || c.mesh.n_points != 1) return;
+    const std::map<std::string, std::vector<Source>> sources = table_sources(c.path);
+    bool extracted = false;
+    const auto of_run = [&](const output::Snapshot & s) {
+        if (run.run_ids.contains(s.run_id)) return true;
+        const auto it = sources.find(s.run_id);
+        if (it == sources.end()) return false;
+        for (const Source & source : it->second) {
+            if (run.run_ids.contains(source.run_id) && source.step == s.step && same_time(source.t, s.t, sel.same)) {
+                extracted = true;
+                return true;
+            }
+        }
+        return false;
+    };
     std::vector<size_t> rows;  // rows of the run, in time order: a rewound run's rows replace those they repeat
     std::vector<double> times;
     for (const output::Snapshot & s : c.snapshots) {
-        if (!run.run_ids.contains(s.run_id)) continue;
+        if (!of_run(s)) continue;
         while (!times.empty() && times.back() >= s.t) {
             times.pop_back();
             rows.pop_back();
@@ -410,6 +463,7 @@ void table_values(const Run & run, const output::Contents & c, const std::string
             value.v = cell(chosen[0]);
         }
         value.t = times[chosen.back()];
+        value.extracted = extracted;
         out[label + ":" + name] = value;
     }
 }
@@ -580,6 +634,7 @@ struct QuantityResult {
     std::vector<double> values, times;            ///< per run, in the runs' order (coarse to fine)
     std::vector<convergence::Estimate> triplets;  ///< finest first: grids (1, 2, 3), then (2, 3, 4), ...
     bool zero = false;  ///< zero to round-off on every run
+    bool extracted = false;  ///< of a table mallard post extract wrote from the runs' snapshots
     Status status = Status::OK;
     std::string verdict;
 
@@ -746,6 +801,18 @@ report::Text study_text(const Study & s, const bool color) {
         }
         text.blank();
         for (const QuantityResult & q : s.quantities) text.line(q.name + ": " + q.verdict);
+        std::vector<std::string> extracted;
+        for (const QuantityResult & q : s.quantities) {
+            const std::string table = q.name.substr(0, q.name.rfind(':'));
+            if (q.extracted && std::find(extracted.begin(), extracted.end(), table) == extracted.end()) {
+                extracted.push_back(table);
+            }
+        }
+        if (!extracted.empty()) {
+            std::string list;
+            for (const std::string & t : extracted) list += (list.empty() ? "" : ", ") + t;
+            text.note("extracted by mallard post extract from the runs' snapshots: " + list);
+        }
     }
     if (!s.norms.empty()) {
         Status worst = Status::NONE;
@@ -825,6 +892,7 @@ std::string study_json(const Study & s, const int exit_status) {
         for (const auto & e : q.triplets) triplets += (triplets.size() > 1 ? "," : "") + estimate_json(e);
         json::Object e;
         e.add("name", q.name).add("units", q.units).add("status", std::string(report::status_name(q.status)));
+        e.add("extracted", q.extracted);
         e.raw("values", numbers_json(q.values)).raw("t", numbers_json(q.times));
         e.add("behavior", q.behavior()).raw("estimate", estimate_json(q.triplets[0])).raw("triplets", triplets + "]").add("verdict", q.verdict);
         quantities += (quantities.size() > 1 ? "," : "") + e.str();
@@ -1012,6 +1080,7 @@ int convergence_study(const cli::Args & args) {
                 }
                 q.values.push_back(it->second.v);
                 q.times.push_back(it->second.t);
+                q.extracted = q.extracted || it->second.extracted;
                 q.zero = (i == 0 || q.zero) && std::abs(it->second.v) <= study.zero * it->second.scale;
             }
             if (!everywhere) {

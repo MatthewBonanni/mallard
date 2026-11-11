@@ -80,8 +80,12 @@ struct LES {
 
     /** @brief Kinematic eddy viscosity for the gradient g[i][j] = d u_i / d x_j and filter width delta. */
     KOKKOS_INLINE_FUNCTION
-    rtype nu_t(const double g[3][3], const rtype delta) const {
-        const double c = static_cast<double>(C);
+    rtype nu_t(const double g[3][3], const rtype delta) const { return nu_t(g, delta, C); }
+
+    /** @brief nu_t with the constant C_ in place of C (the dynamic procedure's, on the device). */
+    KOKKOS_INLINE_FUNCTION
+    rtype nu_t(const double g[3][3], const rtype delta, const rtype C_) const {
+        const double c = static_cast<double>(C_);
         const double coefficient = model == SGSModel::VREMAN ? c : c * c;
         const double d = static_cast<double>(delta);
         return static_cast<rtype>(coefficient * d * d * operator_of(model, g));

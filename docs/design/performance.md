@@ -424,6 +424,37 @@ Initial states are bitwise those of `main`: 2D and 3D generated meshes of every 
 tetrahedra, prisms and curved (second-order) boundaries, regions with sharp and smooth edges, tabulated data,
 mixtures and synthetic turbulence, on CPUs and on an A100.
 
+### 10. Steps enqueued ahead of the GPU (#730)
+
+With one CUDA graph per step, the host still waited for every step: it read dt, the step controller's verdict
+and the divergence check, then decided on the host whether the step was due for output, statistics, probes,
+monitors, a progress row or the end of the run, before launching the next graph. The GPU was idle for that
+round trip at every step, the larger part of a step on small meshes.
+
+The step's end now runs on the device, in the graph (`step_queue.h`): it advances t (the host's `t += dt`,
+the same rounding), counts the step, counts rejected tries (a rejected step leaves t and the solution where
+they were, so the next launch takes it again with the controller's dt), adds the step to the conservation
+ledger, updates p_max, counts non-finite values (`check_nan`) and, at progress rows, reduces the row's and the
+run health's local values into a pinned record. The host computes, at each step it acts on, the first step
+and the first time at which it must act again (`Solver::step_horizon`: `n_steps`, `t_stop`, output and sample
+intervals, time-based outputs, monitors, control files). Each such condition is `step >= s` or `t >= t_x`
+(intervals: their next multiple; times: the threshold `due` compares with), so the device's comparison with
+their minima is the host's decision bit for bit; a condition the device cannot evaluate exactly (statistics
+after `t_start`) stops it at every step where it may hold, and the host decides as before.
+
+The host keeps `step_queue` launches enqueued and reads each launch's record once its event completes.
+Run-control requests (signals, `mallard ctl`, the wall time) go to a pinned array that each step's
+time-step reduction reads, as before. The step body sits under a conditional IF node on a device flag: after
+a step the host must act on (or a divergence, or the last allowed rejection), the device clears the flag and
+the launches already enqueued do nothing; the host then acts on that step's state with the code of the
+one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
+before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
+launch one step at a time with the IF bodies always run.
+
+Runs with triggers stop the device at every step (triggers read probe values and the wall time on the
+host), and runs with boundary conditions of `t` at every progress row (the rows check the expressions'
+errors on the host). Outputs stop the device at their steps.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
