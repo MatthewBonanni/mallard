@@ -938,8 +938,9 @@ record (mallard.jsonl) records, never its name: its run, its cell count and its
 input. The runs are ordered by cell count, whatever the order given, and their
 refinement ratios follow from it. The quantities are the columns of the forces,
 integrals and probe tables each run wrote ([[forces]], [integrals], [[probes]]),
-by default their last values. Inputs that differ other than in [mesh], [run],
-[output] and [[write_data]] are a warning.
+or mallard post extract wrote into its directory from its snapshots, by default
+their last values. Inputs that differ other than in [mesh], [run], [output] and
+[[write_data]] are a warning.
 
 Three runs give an observed order; more give one per three successive runs,
 which agree once the runs are in the asymptotic range. Two runs assume the
