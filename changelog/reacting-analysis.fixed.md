@@ -1,1 +1,0 @@
-- `mallard post` reads the restart files of single-rank runs whose cells are renumbered for memory locality (the default `[mesh] cell_order = "auto"` picks the Hilbert curve on most meshes) in the run's cell order; it put the state on the wrong cells.

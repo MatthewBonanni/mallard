@@ -43,6 +43,7 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
 void Solver::init_solution() {
     if (state_reader) {
         apply_output_state(state_reader(*mesh));
+        update_primitives();
         statistics.start(statistics.sampling_start());
         initial_state = "output, at step " + std::to_string(step) + ", t = " + logging::real(double(t));
         return;
@@ -290,7 +291,6 @@ void Solver::apply_output_state(RestartData state) {
     apply_restart(out, "the output file", false);
     copy_host_to_device();
     if (is_mixture() && !seeded) init_temperature_seed();
-    update_primitives();
 }
 
 void Solver::init_solution_constant() {

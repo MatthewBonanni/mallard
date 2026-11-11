@@ -1267,7 +1267,11 @@ int average(const cli::Args & args) {
 
     homogeneous::Profile profile;
     std::string profile_path;
-    if (a.homogeneous.empty() || !a.conditional.empty()) solver.write_output_of_state(false);
+    if (a.homogeneous.empty() && !a.fields.empty()) {
+        solver.write_output_of_state(false);
+    } else if (!a.conditional.empty()) {
+        statistics.write(solver.get_step(), solver.get_time(), snapshot_block::current_reason(true));
+    }
     if (!a.homogeneous.empty()) {
         std::vector<homogeneous::Column> columns;
         const auto add_column = [&](const std::string & name, const auto & view, uint32_t k, bool is_favre) {

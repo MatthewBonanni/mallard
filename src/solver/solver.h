@@ -419,6 +419,8 @@ class Solver {
          *        and the last bits of T, do not depend on output or diagnostics.
          */
         void update_cell_states(const State & solution, bool update_seed);
+        /** @brief update_cell_states of the state and update_primitives, solving each cell's temperature once. */
+        void update_cell_states_and_primitives();
         /**
          * @brief Viscous mixtures, after update_cell_states: transport
          *        coefficients of every cell and the gradients of [u, T, X].
@@ -635,7 +637,7 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
-        /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*. */
+        /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*; the primitives are left to their users. */
         void apply_output_state(RestartData state);
         void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
