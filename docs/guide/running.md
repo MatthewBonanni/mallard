@@ -10,7 +10,7 @@ A running `mallard` takes requests from signals, from `mallard ctl` and, optiona
 | `mallard ctl <run-dir> checkpoint` | As `SIGUSR1`; replies with the restart file once it is written |
 | `mallard ctl <run-dir> stop` | As `SIGTERM`; replies with the restart file once the run has ended |
 | `mallard ctl <run-dir> set <key>=<value> ...` | Change settings from the next step on: `n_steps`, `t_stop`, `t_wall_stop` (0 removes a limit; one must remain; times in seconds or with a unit, e.g. `t_wall_stop=2h`), `check_interval`, `write_data.<prefix or index>.interval` or `.time_interval` (whichever the writer has), `probes.<name>.interval` or `.time_interval`, `forces.<zone>.interval`, `integrals.interval`. Other keys are refused |
-| `STOP`, `CHECKPOINT` files | With `[run] control_file_interval`, as `stop` and `checkpoint`; the file is removed once seen |
+| `STOP`, `CHECKPOINT` files | With `[run] control_file_interval`, as `stop` and `checkpoint` (and at the same step as they would act); the file is removed once seen |
 
 ```bash
 $ mallard ctl runs/cylinder status

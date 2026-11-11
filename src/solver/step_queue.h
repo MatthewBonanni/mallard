@@ -43,7 +43,7 @@ enum Outcome : uint32_t {
 /** @brief Why the host must act after a step, as bits. */
 enum Reason : uint32_t {
     REQUEST = 1,       // a run-control request reached the step's reduction
-    STEP_DUE = 2,      // a step limit: output, n_steps, control files
+    STEP_DUE = 2,      // a step limit: output, n_steps
     TIME_DUE = 4,      // a time limit: output by time, t_stop
     NONFINITE = 8,     // [numerics] check_nan found a non-finite value
     REJECTIONS = 16,   // MAX_TRIES rejections of the same step
