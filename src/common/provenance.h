@@ -12,6 +12,8 @@
 #ifndef PROVENANCE_H
 #define PROVENANCE_H
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -29,6 +31,23 @@ constexpr int VERSION = 3;
 /** @brief The root attribute of HDF5 files holding the block; LEGACY_ATTRIBUTE before version 3. */
 inline constexpr const char * ATTRIBUTE = "mallard_run";
 inline constexpr const char * LEGACY_ATTRIBUTE = "provenance";
+
+/** @brief SHA-256 (FIPS 180-4) of data given in parts. */
+class Sha256 {
+    public:
+        void update(const char * data, size_t n);
+        /** @brief The digest in hexadecimal; ends the hash. */
+        std::string hex();
+
+    private:
+        void compress(const uint8_t * data, size_t n);
+
+        std::array<uint32_t, 8> h = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+        std::array<uint8_t, 64> block{};
+        size_t fill = 0;
+        uint64_t length = 0;
+};
 
 /** @brief SHA-256 of data, in hexadecimal. */
 std::string sha256(std::string_view data);
