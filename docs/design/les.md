@@ -701,6 +701,61 @@ oscillates.
 times the Riemann solver's error on Sod's contact and expansion, 1.4 times on the entropy wave
 behind Shu-Osher's shock); the corrected fluxes keep it.
 
+**Inviscid Taylor-Green vortex** (32³, Euler, the initial field of `examples/taylor_green_3d`,
+SSPRK3, CFL 0.8, HLLC as the Riemann solver; resolved kinetic energy over its initial value,
+and `eps_numerical` from `[integrals] budget`): with nothing else to remove energy, the
+central flux on reconstructed states adds it, with TENO5 and with MUSCL (the `les` preset;
+#825); the cell values keep it bounded.
+
+| Flux | K/K0 at t = 5 / 10 / 15 / 20 | Mean $\varepsilon_\mathrm{num}$ | Rows with $\varepsilon_\mathrm{num} < 0$ |
+|---|---|---|---|
+| TENO5 + HLLC | 0.892 / 0.485 / 0.341 / 0.275 | 1.04 | 0% |
+| TENO5, hybrid, `reconstructed` | 0.989 / 1.268 / 1.775 / 2.512 | -2.11 | 77% |
+| TENO5, hybrid, `cell_averages` | 1.000 / 0.962 / 0.825 / 0.692 | 0.49 | 18% (at least -0.012) |
+| TENO5, hybrid, `ke_stable` | 0.885 / 0.518 / 0.318 / 0.215 | 1.22 | 0% |
+| MUSCL, hybrid, `reconstructed` | 0.980 / 1.044 / 1.319 / 1.851 | -1.21 | 62% |
+
+`cell_averages`' dissipation comes once the vortex breaks down, from the Riemann solver
+where the sensor fires; before that $\varepsilon_\mathrm{num}$ stays at round-off. `ke_stable`
+is stable but removes more energy than HLLC early on ($\varepsilon_\mathrm{num}$ 0.17 / 0.38 /
+0.63 at t = 0.5 / 2 / 3, against 0.04 / 0.26 / 0.49).
+
+**Comte-Bellot & Corrsin** (the set-up and columns of section 3.1: `examples/cbc_les`, Sigma
+with C = 1.35, HLLC, SSPRK3, CFL 0.8, two rescaled MUSCL pre-runs; spectral error and energy
+at stations 2 / 3, budget shares averaged to station 3; one A100 per run):
+
+| Mesh | Numerics | Spectral error | Energy | Numerical | SGS | Molecular |
+|---|---|---|---|---|---|---|
+| 64³ | MUSCL, hybrid, `reconstructed` | 0.107 / 0.104 | 1.25 / 1.02 | -0.014 | 0.710 | 0.304 |
+| 64³ | MUSCL, hybrid, `cell_averages` | 0.172 / 0.142 | 1.35 / 1.14 | 0.007 | 0.704 | 0.289 |
+| 64³ | TENO5 + HLLC | 0.117 / 0.140 | 1.06 / 1.01 | 0.531 | 0.335 | 0.134 |
+| 64³ | TENO5, hybrid, `reconstructed` | 0.146 / 0.124 | 1.34 / 1.11 | -0.157 | 0.813 | 0.345 |
+| 64³ | TENO5, hybrid, `cell_averages` | 0.173 / 0.143 | 1.35 / 1.14 | 0.007 | 0.704 | 0.289 |
+| 64³ | TENO5, hybrid, `ke_stable` | **0.056 / 0.081** | 1.03 / 0.93 | 0.440 | 0.394 | 0.166 |
+| 128³ | MUSCL, hybrid, `reconstructed` | 0.063 / 0.085 | 1.03 / 0.91 | -0.003 | 0.534 | 0.470 |
+| 128³ | MUSCL, hybrid, `cell_averages` | 0.076 / 0.056 | 1.07 / 0.91 | 0.003 | 0.537 | 0.460 |
+| 128³ | TENO5 + HLLC | 0.187 / 0.222 | 1.00 / 0.93 | 0.446 | 0.296 | 0.258 |
+| 128³ | TENO5, hybrid, `reconstructed` | **0.058 / 0.083** | 1.03 / 0.88 | -0.047 | 0.558 | 0.489 |
+| 128³ | TENO5, hybrid, `cell_averages` | 0.076 / **0.056** | 1.07 / 0.91 | 0.004 | 0.537 | 0.460 |
+| 128³ | TENO5, hybrid, `ke_stable` | 0.165 / 0.195 | 0.93 / 0.88 | 0.402 | 0.314 | 0.285 |
+
+Findings:
+
+- **`reconstructed` with TENO is not stable**: it adds energy at both resolutions (-16% and
+  -5% of the dissipation), as in section 8.1, although at 128³ its spectrum is the closest.
+- **`ke_stable` is an upwind scheme in disguise.** Its correction removes 40-44% of the
+  dissipation at both resolutions, as much as HLLC does; that happens to be the right amount
+  at 64³ (the best spectrum of all runs, where every central scheme with the model alone piles
+  energy up) and far too much at 128³, where it shares HLLC's error floor.
+- **`cell_averages` meets the goal at both resolutions**: $\varepsilon_\mathrm{num} \ge 0$ and
+  under 1% of the dissipation, and at 128³ as accurate as MUSCL + hybrid (0.076 / 0.056
+  against 0.063 / 0.085). At 64³ the SGS model alone leaves the pile-up that section 8.1
+  found for every central scheme at C = 1.35 (energy 1.35 at station 2).
+- **With `cell_averages`, TENO plays no part in smooth flow**: TENO5 and MUSCL give the same
+  spectra and budgets to three digits (the sensor upwinds 0.1-0.2% of the cells, and TENO
+  flags none troubled), at ten times the cost
+  per step (309 against 33 ms at 128³ on an A100).
+
 ## 5. Implementation: SGS fluxes in the solver
 
 - Input `[les]`: `model` (`sigma`, `wale`, `vreman`, `smagorinsky`),
