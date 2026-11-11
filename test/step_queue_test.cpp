@@ -468,12 +468,12 @@ TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
     c.run = "n_steps = 20\ncfl = 0.5\n";
     const std::string probes =
         "[[probes]]\nname = \"point\"\nfile = \"{dir}/point.csv\"\ninterval = 2\npoint = " + point_of("0.4", "0.5", "0.2") +
-        "\nvariables = [\"RHO\", \"U\", \"P\", \"T\"]\n"
+        "\nfields = [\"RHO\", \"U\", \"P\", \"T\"]\n"
         "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nstart = " + point_of("0.1", "0.3", "0.2") +
-        "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 5\nvariables = [\"RHO\", \"P\"]\n"
+        "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 5\nfields = [\"RHO\", \"P\"]\n"
         "reductions = [\"integral\", \"rms\"]\nreductions_file = \"{dir}/line_reductions.csv\"\n"
         "[[probes]]\nname = \"wall\"\nfile = \"{dir}/wall.csv\"\ninterval = 4\nboundary = \"bottom\"\n"
-        "variables = [\"P\", \"MASS_FLUX\", \"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"mean\"]\n"
+        "fields = [\"P\", \"MASS_FLUX\", \"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"mean\"]\n"
         "reductions_file = \"{dir}/wall_reductions.csv\"\n";
     c.extra = "check_interval = 1000\n" + probes;
     expect_queue_invariant("probes", c);
@@ -555,7 +555,7 @@ TEST(StepQueueTest, DistributedRunsAsTheHostTakesThem) {
               "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 5\n"
               "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n"
               "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nstart = " + point_of("0.1", "0.3", "0.2") +
-              "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 5\nvariables = [\"RHO\", \"P\"]\n"
+              "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 5\nfields = [\"RHO\", \"P\"]\n"
               "reductions = [\"integral\", \"rms\"]\nreductions_file = \"{dir}/line_reductions.csv\"\n"
               "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n";
     c.numerics = "check_nan = true\n";
