@@ -1657,7 +1657,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | Key | Description |
 |---|---|
 | `prefix` | Output path prefix; directories are created as needed |
-| `format` | Which to choose: [output](guide/output.md#which-format). `vtkhdf` (default: VTK's HDF5 format, see below; ParaView 5.12+, PyVista, h5py), `vtu` (with a `.pvd` series next to it; any VTK XML reader, e.g. Tecplot, and builds without HDF5), `xdmf` (XDMF indexes over HDF5 files, see below; VisIt, meshio, ParaView of any version) or `restart`. `hdf5`, the name of `xdmf` before 0.10.0, is an error (VTKHDF is HDF5 too); `mallard input upgrade` rewrites it to `vtkhdf`. Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
+| `format` | Which to choose: [output](guide/output.md#which-format). `vtkhdf` (default: VTK's HDF5 format, see below; ParaView 5.12+, PyVista, the [Python package](guide/python.md), h5py), `vtu` (with a `.pvd` series next to it; any VTK XML reader, e.g. Tecplot, and builds without HDF5), `xdmf` (XDMF indexes over HDF5 files, see below; VisIt, meshio, ParaView of any version) or `restart`. `hdf5`, the name of `xdmf` before 0.10.0, is an error (VTKHDF is HDF5 too); `mallard input upgrade` rewrites it to `vtkhdf`. Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
 | `series` | (`vtkhdf`) `false` (default): one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`; `true`: every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
 | `fields` | (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), `Q_CRITERION` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs; called `Q` before 0.10.0, which is now an error), `LAMBDA2` (the middle eigenvalue of S² + Ω², negative in vortex cores) and `SCHLIEREN` (the density gradient magnitude, kg/m⁴), with the gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares; see [derived fields](guide/output.md#derived-fields)), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), and the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`. A trailing `*` selects every field with that prefix, e.g. `Y_*`; `mallard list fields input.toml` lists those of a case |
@@ -1688,7 +1688,7 @@ the units and descriptions are HDF5 attributes of each dataset (`units`,
 `long_name`), and the root group carries the run block (`mallard_run`) and the format
 `version` as HDF5 attributes and the snapshot blocks as the dataset `mallard_snapshot`, which VTK ignores;
 the field data holds `TIME` and `STEP` ([snapshot metadata](guide/output.md#snapshot-metadata)).
-`tools/mallard/vtkhdf.py` reads the files.
+The [Python package](guide/python.md) reads the files (`mallard.open`).
 
 `format = "xdmf"` (`"hdf5"` before 0.10.0; builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
 parallel HDF5) scales to large runs: every rank writes its part of one file per
@@ -1713,7 +1713,7 @@ two files instead of one per rank. A shared file pays off on parallel file
 systems; on one node's local disk, which serializes writes to a file, VTU
 pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
 HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
-the simpler choice for small runs. `tools/mallard/h5.py` reads the files.
+the simpler choice for small runs. The [Python package](guide/python.md) reads the files (`mallard.open`).
 
 ## `mallard reactor`
 

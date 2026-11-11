@@ -602,6 +602,17 @@ last = d[d["step"] == d["step"].max()]
 print(last["x"], last["y"], last["P"])
 ```
 
+Any probe file, CSV, HDF5 or VTKHDF, reads the same with the
+[Python package](python.md):
+
+```python
+import mallard
+
+f = mallard.open("probe_wake.csv")       # or probe_wake.h5, probe_wake.vtkhdf
+f.times                                   # each output's time
+p = f.read("P")                           # the last output, one value per sample
+```
+
 `format = "hdf5"` writes one file, its arrays growing by a row per output:
 
 ```python

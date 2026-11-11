@@ -5,7 +5,7 @@ manual and TENO-E reference into docs/images/theory/, light and dark.
 
 Schematics and domain diagrams need numpy, scipy and matplotlib only; with
 --mallard (a 2D build; an MPI build for the partitions) the figures from
-short runs are redrawn too, and with --mallard3d the 3D region and probe figures. MALLARD_FIGURE_PREVIEW=dir also writes PNGs on
+short runs are redrawn too (the Python package's with a build with -DMallard_ENABLE_PYTHON=ON), and with --mallard3d the 3D region and probe figures. MALLARD_FIGURE_PREVIEW=dir also writes PNGs on
 the site's backgrounds there, for review.
 """
 import argparse
@@ -17,6 +17,7 @@ import geometry
 import high_order_cost
 import inlets
 import probes
+import python
 import regions
 import runs
 import schematics
@@ -44,6 +45,7 @@ def main():
         sys.argv = [sys.argv[0], "--mallard", args.mallard] + (["--mallard3d", args.mallard3d] if args.mallard3d else [])
         probes.main()
         regions.figures(args.mallard, args.mallard3d)
+        python.figures(args.mallard)
 
 
 if __name__ == "__main__":

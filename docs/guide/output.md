@@ -113,9 +113,9 @@ ParaView's calculator shows both.
 
 | `format` | Opens in | Files |
 |---|---|---|
-| `vtkhdf` (default) | ParaView 5.12+, PyVista, h5py | One file per snapshot, or one for the series (`series = true`) |
-| `xdmf` | VisIt, meshio, ParaView of any version ([open by a path with a directory](#xdmf-in-paraview)); h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
-| `vtu` | Anything with a VTK XML reader (e.g. Tecplot); builds without HDF5 | One file per rank per snapshot, with a `.pvtu` and a `.pvd` series |
+| `vtkhdf` (default) | ParaView 5.12+, PyVista, the [Python package](python.md), h5py | One file per snapshot, or one for the series (`series = true`) |
+| `xdmf` | VisIt, meshio, ParaView of any version ([open by a path with a directory](#xdmf-in-paraview)); the [Python package](python.md), h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
+| `vtu` | Anything with a VTK XML reader (e.g. Tecplot), the [Python package](python.md); builds without HDF5 | One file per rank per snapshot, with a `.pvtu` and a `.pvd` series |
 | `restart` | Mallard, to continue or remap a run | One file per snapshot |
 
 `vtkhdf` and `xdmf` need a build with HDF5 (parallel HDF5 on several ranks).
@@ -130,8 +130,8 @@ are the same on any number of ranks. Cells touching a curved wall are written as
 quadratic Lagrange cells, so ParaView shows the curved geometry. With `series = true` the mesh is stored
 once and every snapshot goes into `PREFIX.vtkhdf`; a restarted run drops the
 snapshots after its restart time and continues the file. Read the files in
-Python with `tools/mallard/vtkhdf.py` (or `read_vtu_cells`, which reads every
-format), or with h5py alone.
+Python with the [Python package](python.md) (`mallard.open("PREFIX.vtkhdf.series")`),
+or with h5py alone.
 
 **Restarted runs continue the series.** A run resumed from a restart file
 numbers its next snapshot after the snapshots up to the restart time, which the
@@ -149,7 +149,7 @@ per rank in parallel, assembled by a `.pvtu`, with a `.pvd` series. Set
 `format = "vtu"` to choose it explicitly. `format = "xdmf"` writes the mesh
 once (`PREFIX_mesh.h5`), one HDF5 file of fields per snapshot and XDMF
 indexes (`PREFIX.xmf` for the series), all in global cell order; read it in
-Python with `tools/mallard/h5.py`.
+Python with the [Python package](python.md) (`mallard.open("PREFIX.xmf")`).
 
 <a id="xdmf-in-paraview"></a>**XDMF in ParaView.** The `.xmf` files name their
 HDF5 files relative to themselves, as XDMF allows. ParaView's XDMF reader
@@ -494,15 +494,14 @@ units by definition, for Mallard to read back.
 | Spectra CSV (`[statistics.spectra]`) | A last column `units`: the units of each row's `value` |
 
 ```python
-import h5py
+import mallard                                     # the Python package: any file Mallard writes
+f = mallard.open("solut/flow_000100.vtkhdf")
+f.fields["U"].units, f.fields["U"].long_name       # ('m s-1', 'velocity')
+mallard.open("forces_cylinder.csv").fields["Fx_pressure"].units   # 'kg s-2' (2D: per unit depth)
+
+import h5py                                        # or the attributes themselves
 f = h5py.File("solut/flow_000100.h5")
 f["fields/P"].attrs["units"], f["fields/P"].attrs["long_name"]   # ('kg m-1 s-2', 'pressure')
-
-import sys; sys.path.insert(0, "tools")
-from mallard.vtu import units, long_names        # any output file: .vtkhdf, .vtu, .pvtu, .vtp, .h5, .xmf, .csv
-units("solut/flow_000100.vtkhdf")["U"]             # 'm s-1'
-from mallard.tables import read_csv               # CSV columns and their units
-columns, column_units = read_csv("forces_cylinder.csv")
 ```
 
 These are the attributes xarray and netCDF tools look for, readable as
@@ -578,15 +577,14 @@ Before 0.10 the block was named the provenance block: schema
 `"mallard-provenance"`, the comment `<!-- provenance {...} -->`, the attribute
 `provenance` and the CSV line `# provenance {...}`, without `run_id` and
 `restart_of`. Every reader (`mallard info`, the post-processing commands,
-`tools/mallard`) reads those names too, and says so. Version 2 (0.9.1) added
+the [Python package](python.md)) reads those names too, and says so. Version 2 (0.9.1) added
 `input.resolved`; version 1 (0.9) had none, its preset values were plain text
 (`"HLLC"`), and a `setup` object held the terminal output's setup summary as
-`[key, value]` pairs per section; `resolved_input()` of `tools/mallard/vtu.py`
-returns `None` for such files.
+`[key, value]` pairs per section.
 
 Check that a file belongs to a given input with `sha256sum input.toml`; read
-the block in Python with `run_block(path)` of `tools/mallard/vtu.py` (any
-file; `run_blocks(path)` gives each run of a continued CSV file).
+the block in Python as `mallard.open(path).run`, a dict (any file; each
+snapshot's `run_id` says which run of a continued file wrote it).
 `mallard info FILE` summarizes the block, and `mallard info --input FILE`
 prints the input that produced the file, ready to run again
 ([Command line](cli.md#mallard-info)).
@@ -629,9 +627,9 @@ Files written before 0.10 have no snapshot block. Readers then take step and
 time from the format's own slots, and say so: VTU, VTKHDF and the indexes had
 no step, so their snapshots are numbered by their position in the file or
 index, from 0; their run is that of the file's run block, and their reason
-and stored precision are unknown. `snapshot_blocks(path)` of
-`tools/mallard/vtu.py` reads the blocks of any file (`[]` for older files),
-and `mallard info FILE` prints the last one under **This snapshot**.
+and stored precision are unknown. In Python, `mallard.open(path).snapshots[k].block`
+is a snapshot's block as a dict (`None` for older files), and
+`mallard info FILE` prints the last one under **This snapshot**.
 
 ### Formats and compatibility
 
@@ -646,12 +644,12 @@ build reads. It is never misread.
 |---|---|---|---|
 | Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), 7: the [snapshot block](#snapshot-metadata) trailer (0.10) | Mallard: all |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
-| VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
-| XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
-| VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard/vtu.py` |
+| VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, the [Python package](python.md) |
+| XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, the [Python package](python.md) |
+| VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, the [Python package](python.md) |
 | Run record (`mallard.jsonl`, `[output] run_log`) | `version` of each `start` record | 1 (0.9), 2: `run_id`, `restart_of`, `output` records (0.10) | Your scripts (records only gain fields within a version) |
-| [Run block](#run-block) (every output file) | its `version` | 3: `mallard-run`, `run_id`, `restart_of` (0.10); as the provenance block: 2 (0.9.1), 1 (0.9) | `mallard info`, `tools/mallard/vtu.py` (`run_block()`, `resolved_input()`, every version) |
-| [Snapshot block](#snapshot-metadata) (every snapshot) | its `version` | 1 (0.10) | `mallard info`, `tools/mallard/vtu.py` (`snapshot_blocks()`) |
+| [Run block](#run-block) (every output file) | its `version` | 3: `mallard-run`, `run_id`, `restart_of` (0.10); as the provenance block: 2 (0.9.1), 1 (0.9) | `mallard info`, the [Python package](python.md) (`File.run`, every version) |
+| [Snapshot block](#snapshot-metadata) (every snapshot) | its `version` | 1 (0.10) | `mallard info`, the [Python package](python.md) (`Snapshot.block`) |
 | Probe output (`[[probes]]` `format = "hdf5"`, `"vtkhdf"`, `"vtp"`) | root attribute `version` (HDF5, VTKHDF), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
 
@@ -704,7 +702,9 @@ $ mallard info solut/flow.vtkhdf.series
   min and max of fields with several components are of their magnitude.
 ```
 
-`--format json` prints the same as one JSON object, for scripts.
+`--format json` prints the same as one JSON object, for scripts; in Python,
+`mallard.open(path)` holds it as attributes and reads the values
+([Python](python.md)).
 
 `mallard post extract` evaluates probes, region integrals and snapshots of
 chosen fields on the state of restart files and snapshots after the run, as
@@ -795,25 +795,29 @@ $ mallard diff coarse/solut/restart_000020.restart fine/solut/restart_000020.res
 ...
 ```
 
-The Python scripts in `tools/` (numpy, matplotlib; see
-[Tools](https://matthewbonanni.github.io/mallard/docs/tools/)) read Mallard's output directly:
+For your own scripts and notebooks, the [Python package](python.md) reads every
+file into numpy arrays through Mallard's own reader and runs these commands as
+functions (`mallard.open`, `mallard.post.extract`, `mallard.diff`). The scripts
+in `tools/` (numpy, matplotlib; see
+[Tools](https://matthewbonanni.github.io/mallard/docs/tools/)) plot and animate output:
 
 | Script | Use |
 |---|---|
-| `mallard/vtu.py`, `mallard/vtkhdf.py`, `mallard/h5.py`, `mallard/tables.py` | Readers for VTKHDF, VTU, HDF5 and CSV output and the [units](#units) of each file, for your own scripts (`from mallard.vtu import read_vtu_cells` with `tools/` on `sys.path`) |
+| `mallard/` | The [Python package](python.md); its modules `vtu`, `vtkhdf`, `h5` and `tables` are the h5py and numpy readers these scripts use |
 | `post/plot_vtu.py`, `post/compare_png.py` | A field of one or several snapshots |
 | `post/animate.py` | MP4/GIF animation of a 2D series with numerical schlieren |
 | `post/plane_average.py` | Averages over homogeneous directions |
 | `post/insitu_statistics.py` | Plots `[statistics.spectra]` output; recomputes it, or phase-bins a probe series, to check the in-situ values |
 | `plot_<case>.py` | Each validation case against its reference |
 
-ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` (HDF5) series directly. `read_vtu_cells` reads any snapshot file, and `mallard.vtu.snapshot("solut/flow_000100")` finds it whichever format the build wrote.
+ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` (HDF5) series directly, and `mallard.open` any of them.
 
 ## See also
 
 - [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output)
 - [Probes and monitors](probes.md): probes, wall forces, domain integrals
 - [Grid convergence](convergence.md): discretization error from runs at several resolutions
+- [Python](python.md): every output file as numpy arrays, and the commands as functions
 - [Statistics](statistics.md): time averages, spectra and correlations, phase averages
 - [Initialization and restarts](initialization.md): restart files and their format
 - [Running](running.md): run control of a running case

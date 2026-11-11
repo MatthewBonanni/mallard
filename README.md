@@ -56,6 +56,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields): Mach number, Q-criterion, λ₂ and numerical schlieren
 - Probes on points, curves, surfaces, boundaries and regions; statistics, spectra and phase averages
+- A [Python package](docs/guide/python.md): every output file as numpy arrays, through Mallard's own reader, and the post-processing commands as functions
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
 - 40 [examples](examples), compared with exact solutions, other codes, DNS and experiments
@@ -90,7 +91,7 @@ mallard -i input.toml --kokkos-num-threads=8                   # installed (cont
 ../../build/src/mallard -i input.toml --kokkos-num-threads=8   # source build
 ```
 
-`mallard list templates` shows ready-to-run templates (`mallard new cylinder` creates a case with its mesh, run and plot scripts), `mallard check input.toml` checks a case before a long run, `mallard list fields|keys input.toml` lists the output fields and input keys of a case, and `mallard ctl <run-dir> status|stop` steers it while it runs; `mallard info solut` tells what a run wrote. Start with the [tutorials](docs/tutorials/index.md); see [`examples/`](examples) for complete cases, the [user guide](docs/guide/input_files.md) for each topic, [`docs/input.md`](docs/input.md) for every input key, [Running on clusters](docs/guide/parallel.md#running-on-clusters) for MPI and job scripts, and [`tools/`](tools) for plotting and animation.
+`mallard list templates` shows ready-to-run templates (`mallard new cylinder` creates a case with its mesh, run and plot scripts), `mallard check input.toml` checks a case before a long run, `mallard list fields|keys input.toml` lists the output fields and input keys of a case, and `mallard ctl <run-dir> status|stop` steers it while it runs; `mallard info solut` tells what a run wrote. Start with the [tutorials](docs/tutorials/index.md); see [`examples/`](examples) for complete cases, the [user guide](docs/guide/input_files.md) for each topic, [`docs/input.md`](docs/input.md) for every input key, [Running on clusters](docs/guide/parallel.md#running-on-clusters) for MPI and job scripts, [`tools/`](tools) for plotting and animation, and the [Python package](docs/guide/python.md) for your own analysis in Python.
 
 `mallard test` runs the test suites of an install (`./build/src/mallard test` in a build tree).
 
