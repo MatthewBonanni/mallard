@@ -12,7 +12,7 @@
 #include "statistics.h"
 
 #include "batch_means.h"
-#include "convergence.h"
+#include "statistical_convergence.h"
 
 #include <algorithm>
 #include <cmath>
@@ -297,7 +297,7 @@ void Statistics::copy_device_to_host() {
     Kokkos::deep_copy(h_batch_value, batch_value);
     Kokkos::deep_copy(h_batch_avg, batch_avg);
     Kokkos::deep_copy(h_batch_m2, batch_m2);
-    const double t = n_batches >= 2 ? convergence::student_t(confidence, static_cast<uint32_t>(n_batches - 1)) : 0.0;
+    const double t = n_batches >= 2 ? time_series::student_t(confidence, static_cast<uint32_t>(n_batches - 1)) : 0.0;
     for (size_t c = 0; c < h_ci.extent(0); c++) {
         for (size_t q = 0; q < h_ci.extent(1); q++) {
             h_ci(c, q) = static_cast<rtype>(batch_means::half_width(static_cast<double>(h_batch_m2(c, q)), n_batches, t));
