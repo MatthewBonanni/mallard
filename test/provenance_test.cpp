@@ -180,7 +180,7 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
     const std::set<std::string> progress_keys = {
         "type", "step", "t", "dt", "cfl", "progress", "wall", "wall_per_step", "cells_per_second", "eta", "cells",
         "ranks", "memory_host", "memory_host_peak", "memory_device", "memory_device_total", "monitors", "integrals",
-        "health"};
+        "probes", "health"};
     std::vector<double> steps;
     double last_progress = 0.0;
     std::set<std::pair<std::string, double>> outputs;
