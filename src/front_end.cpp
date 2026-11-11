@@ -200,6 +200,26 @@ struct Need {
 
 Need dimension_free() { return {{}, "", true}; }
 
+/** @brief The dimension of the latest run its run record (mallard.jsonl) starts; 0 if it records none. */
+int run_directory_dimension(const std::string & dir) {
+    std::ifstream in(fs::path(dir) / "mallard.jsonl");
+    int dim = 0;
+    for (std::string line; std::getline(in, line);) {
+        if (line.find("\"start\"") == std::string::npos) continue;
+        try {
+            const json::Value v = json::parse(line);
+            const json::Value * type = v.find("type");
+            if (!type || type->string != "start") continue;
+            const json::Value * p = v.find("provenance");
+            const json::Value * build = p ? p->find("build") : nullptr;
+            const json::Value * d = build ? build->find("dim") : nullptr;
+            if (d && d->type == json::Value::Type::NUMBER) dim = static_cast<int>(d->number);
+        } catch (const std::exception &) {
+        }
+    }
+    return dim == 2 || dim == 3 ? dim : 0;
+}
+
 Need command_need(const cli::Command * command, const std::vector<std::string> & args) {
     cli::Args parsed;
     std::string error;
@@ -233,7 +253,9 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
             return {mesh_file_dimension(first), first};
         case cli::Case::output:
             try {
-                const int dim = first.empty() || output::is_mesh_file(first) ? 0 : output::open(first).dim;
+                const int dim = first.empty() || output::is_mesh_file(first) ? 0
+                                : fs::is_directory(first)                     ? run_directory_dimension(first)
+                                                                              : output::open(first).dim;
                 return dim == 0 ? dimension_free() : Need{{dim, ""}, first, true};
             } catch (const std::exception &) {
                 return dimension_free();
