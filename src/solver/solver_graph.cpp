@@ -454,7 +454,6 @@ void Solver::device_step_body() {
         const Kokkos::View<uint32_t *> due = probe_due;
         const Kokkos::View<Probes::StagedClock *> clocks = probe_clocks;
         const Kokkos::View<rtype> target = probe_target;
-        const Kokkos::View<rtype *> s = step_scalars;
         const uint32_t n_probes = static_cast<uint32_t>(staged_probes.size());
         const uint64_t average_interval = probes.get_average_interval();
         const rtype average_start = probes.get_average_start();
