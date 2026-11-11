@@ -490,7 +490,9 @@ TEST(DerivedFields, PremixedFlameIndexAndProgressVariable) {
     }
     auto by_T = init_mixture(Y, "[output.mixture]\nprogress = {T_unburnt = 300.0, T_burnt = 500.0}\n",
                              "\"PROGRESS_VARIABLE\"");
-    expect_everywhere(*by_T, derived::PROGRESS_VARIABLE, 0.5, 1e-6);
+    // T comes from e, about -3.5e6 J/kg of H2O formation against cv T of 4e5 J/kg: its round-off, plus the
+    // 1e-10 T of the T_from_e iteration, over the 200 K of T_burnt - T_unburnt
+    expect_everywhere(*by_T, derived::PROGRESS_VARIABLE, 0.5, 1e-9 + roundoff(1e-14));
 }
 
 TEST(DerivedFields, ScalarDissipationIsTwiceTheDiffusivityForAUnitGradient) {
