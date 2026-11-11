@@ -40,7 +40,10 @@ constexpr double roundoff(double tol_in_double) {
 #ifdef Mallard_USE_DOUBLE
     #define SKIP_IN_SINGLE_PRECISION(reason) do {} while (false)
 #else
-    #define SKIP_IN_SINGLE_PRECISION(reason) GTEST_SKIP() << "single precision: " << reason
+/** @brief True; a call, so that nvcc doesn't reject the code after a skip as unreachable. */
+inline bool single_precision_build() { return true; }
+    #define SKIP_IN_SINGLE_PRECISION(reason) \
+        if (single_precision_build()) GTEST_SKIP() << "single precision: " << reason
 #endif
 
 /** @brief Text without its comment lines (starting with '#', e.g. the provenance of CSV files). */
