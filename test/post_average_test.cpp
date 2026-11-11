@@ -24,6 +24,7 @@
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "test_utils.h"
 
 namespace {
 
@@ -156,10 +157,10 @@ TEST(PostAverageTest, RestartFilesGiveTheRunsStatisticsBitForBit) {
         const std::vector<double> mach = output::read(flow, "MACH", k);
         for (size_t i = 0; i < mach.size(); i++) expected[i] += w * mach[i];
     }
-    for (size_t i = 0; i < expected.size(); i++) EXPECT_NEAR(mean_mach[i], expected[i] / total, 1e-14);
+    for (size_t i = 0; i < expected.size(); i++) EXPECT_NEAR(mean_mach[i], expected[i] / total, roundoff(1e-15));
     // RMS_ is the root of the variance
     const std::vector<double> var = output::read(averaged, "COV_U_X_U_X", 0), rms = output::read(averaged, "RMS_U_X", 0);
-    for (size_t i = 0; i < var.size(); i++) EXPECT_DOUBLE_EQ(rms[i] * rms[i], var[i]);
+    for (size_t i = 0; i < var.size(); i++) EXPECT_EQ(rtype(rms[i]), std::sqrt(rtype(var[i])));
 }
 
 TEST(PostAverageTest, FavreAveragesWeighTheSamplesByDensityExactly) {
@@ -191,6 +192,7 @@ TEST(PostAverageTest, FavreAveragesWeighTheSamplesByDensityExactly) {
     const std::vector<double> fx = output::read(averaged, "FAVRE_MEAN_U_X", 0), fy = output::read(averaged, "FAVRE_MEAN_U_Y", 0);
     const std::vector<double> fxy = output::read(averaged, "FAVRE_COV_U_X_U_Y", 0);
     const std::vector<double> reynolds = output::read(averaged, "MEAN_U_X", 0);
+    const double mean_tolerance = roundoff(1e-15), cov_tolerance = sizeof(rtype) == sizeof(double) ? 2e-16 : 2.5e-10;
     double largest_difference = 0.0, largest_triple = 0.0;
     for (size_t i = 0; i < fx.size(); i++) {
         double sw = 0.0, sx = 0.0, sy = 0.0, sxy = 0.0;
@@ -202,9 +204,9 @@ TEST(PostAverageTest, FavreAveragesWeighTheSamplesByDensityExactly) {
             sxy += m * ux[k][i] * uy[k][i];
         }
         const double ex = sx / sw, ey = sy / sw;
-        EXPECT_NEAR(fx[i], ex, 1e-14);
-        EXPECT_NEAR(fy[i], ey, 1e-14);
-        EXPECT_NEAR(fxy[i], sxy / sw - ex * ey, 1e-14);
+        EXPECT_NEAR(fx[i], ex, mean_tolerance);
+        EXPECT_NEAR(fy[i], ey, mean_tolerance);
+        EXPECT_NEAR(fxy[i], sxy / sw - ex * ey, cov_tolerance);
         largest_difference = std::max(largest_difference, std::abs(fx[i] - reynolds[i]));
         double t = 0.0, r = 0.0, u = 0.0, v = 0.0, triple = 0.0;
         for (size_t k = 0; k < w.size(); k++) {
@@ -220,8 +222,8 @@ TEST(PostAverageTest, FavreAveragesWeighTheSamplesByDensityExactly) {
     }
     // The density varies, so Favre and Reynolds means differ, and by more than the tolerance
     // the triple correlation <rho'u'v'> / <rho>, which Favre covariances from Reynolds statistics leave out
-    EXPECT_GT(largest_difference, 1e-6);
-    EXPECT_GT(largest_triple, 1e-12);
+    EXPECT_GT(largest_difference, 10 * mean_tolerance);
+    EXPECT_GT(largest_triple, 10 * cov_tolerance);
 }
 
 TEST(PostAverageTest, HomogeneousAveragesOfStatesAndOfTheRunsStatisticsAgree) {
@@ -302,5 +304,7 @@ TEST(PostAverageTest, ChoicesItCannotAverageAreUsageErrors) {
                        fresh_dir("order")},
                       &errors),
               1);
-    if (comm::is_root()) EXPECT_NE(errors.find("increasing time"), std::string::npos) << errors;
+    if (comm::is_root()) {
+        EXPECT_NE(errors.find("increasing time"), std::string::npos) << errors;
+    }
 }
