@@ -269,6 +269,27 @@ std::string without_timing(const json::Value & v) {
     return "";
 }
 
+json::Value * member(json::Value & v, const std::string & key) {
+    for (size_t i = 0; i < v.names.size(); i++) {
+        if (v.names[i] == key) return &v.members[i];
+    }
+    return nullptr;
+}
+
+/** @brief A progress row without timing, and without the repairs' changes: atomic sums whose last bits vary (#782). */
+std::string comparable_row(json::Value row) {
+    if (json::Value * health = member(row, "health")) {
+        for (const char * key : {"repairs", "repairs_run"}) {
+            json::Value * sites = member(*health, key);
+            if (sites == nullptr) continue;
+            for (json::Value & site : sites->members) {
+                if (json::Value * change = member(site, "change")) *change = json::Value{};
+            }
+        }
+    }
+    return without_timing(row);
+}
+
 /** @brief What a run shows: its state, step, time and rejections, its files, and its run log's rows and events. */
 struct Outcome {
     std::vector<rtype> U;
@@ -517,7 +538,7 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {
         const json::Value v = json::parse(line);
-        if (v["type"].string == "progress") o.rows.push_back(without_timing(v));
+        if (v["type"].string == "progress") o.rows.push_back(comparable_row(v));
     }
     return o;
 }
