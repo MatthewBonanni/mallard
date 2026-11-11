@@ -73,4 +73,4 @@ check_interval = 1000
 prefix = "./solut/duct"
 format = "vtu"
 time_interval = 1.0e-4
-variables = ["RHO", "U_X", "P", "T"]
+fields = ["RHO", "U_X", "P", "T"]

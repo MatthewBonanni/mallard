@@ -49,6 +49,7 @@ set(MALLARD_TEST_SOURCES
     output_reader_test.cpp
     post_extract_test.cpp
     post_derive_test.cpp
+    post_convergence_test.cpp
     wall_model_test.cpp
     units_test.cpp
     periodic_pairs_test.cpp
@@ -122,12 +123,11 @@ FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG v1.18.0
-  ${MALLARD_THIRD_PARTY}
+  SYSTEM
 )
 # Test-only: `cmake --install` leaves GoogleTest out
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
-mallard_system_headers(gtest gmock)
 
 target_link_libraries(mallard-test PRIVATE gtest)
 

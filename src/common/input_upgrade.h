@@ -118,6 +118,14 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
                          const std::string & unknown_dimension = "");
 
 /**
+ * @brief Changes of behavior that need no rewrite but are worth knowing,
+ *        e.g. a changed default the input relies on: one line each, for
+ *        `mallard input upgrade` to print. They change neither the file nor
+ *        the exit status of `--check`.
+ */
+std::vector<std::string> notices(const std::string & text);
+
+/**
  * @brief `mallard input upgrade [--check] old.toml > new.toml`: writes the
  *        upgraded file to stdout and the changes to stderr; with `check`, only
  *        the changes, and exit status 1 if there are any. `dim` is the case's

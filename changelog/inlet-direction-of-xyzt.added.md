@@ -1,0 +1,1 @@
+- `direction` of inlets and moving walls may have expressions of `x`, `y`, `z`, `t` among its components (a swirl, a direction that turns in time): normalized at each face, evaluated per stage on the device when it depends on `t`, and at inlets checked to point into the domain, at setup and at every stage, with the face, time and value.

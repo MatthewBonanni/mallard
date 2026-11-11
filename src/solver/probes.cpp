@@ -205,7 +205,7 @@ int32_t variable_code(const std::string & name, const std::vector<std::string> &
     try {
         return CellSampler::code(name, species_names, key);
     } catch (const InputError &) {
-        throw InputError(key + ": unknown variable \"" + name + "\" (the [statistics] fields and " +
+        throw InputError(key + ": unknown field \"" + name + "\" (the [statistics] fields and " +
                          "the averages it keeps, MEAN_<field> and COV_<a>_<b>, or on boundaries " +
                          "MASS_FLUX, MOMENTUM_FLUX, ENTHALPY_FLUX, SPECIES_FLUX_<species>, ENERGY_DIFFUSIVE_FLUX, " +
                          "ENERGY_TOTAL_FLUX, SPECIES_DIFFUSIVE_FLUX_<species>, SPECIES_TOTAL_FLUX_<species>, " +
@@ -227,7 +227,7 @@ std::vector<std::string> expand_variables(const std::vector<std::string> & liste
             for (size_t d = 0; d < N_DIM; d++) names.push_back(v + "_" + AXES[d]);
         } else if (v == "Y_*" || v == "RHOY_*" || v == "SPECIES_FLUX_*" || v == "SPECIES_DIFFUSIVE_FLUX_*" ||
                    v == "SPECIES_TOTAL_FLUX_*") {
-            if (species_names.empty()) throw InputError(key + ".variables: " + v + " needs a gas mixture.");
+            if (species_names.empty()) throw InputError(key + ".fields: " + v + " needs a gas mixture.");
             for (const auto & s : species_names) names.push_back(v.substr(0, v.size() - 1) + s);
         } else {
             names.push_back(v);
@@ -235,7 +235,7 @@ std::vector<std::string> expand_variables(const std::vector<std::string> & liste
     }
     for (size_t i = 0; i < names.size(); i++) {
         if (std::find(names.begin(), names.begin() + static_cast<long>(i), names[i]) != names.begin() + static_cast<long>(i)) {
-            throw InputError(key + ".variables: \"" + names[i] + "\" is listed twice.");
+            throw InputError(key + ".fields: \"" + names[i] + "\" is listed twice.");
         }
     }
     return names;
@@ -1230,7 +1230,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     p.reductions_file = find_value_or<std::string>(entry, "reductions_file", "probe_" + p.name + "_reductions.csv");
     }
 
-    if (!entry.contains("variables")) throw InputError(key + ": variables not specified.");
+    if (!entry.contains("fields")) throw InputError(key + ": fields not specified.");
     // Snapshots also write cell fields, and probes the [statistics] outputs, as the value of each sample's cell
     auto cell_field = [&](const std::string & name) -> const Data * {
         if (!cell_data) return nullptr;
@@ -1244,7 +1244,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         return nullptr;
     };
     std::vector<std::string> listed;
-    for (const auto & v : find_value<std::vector<std::string>>(entry, "variables")) {
+    for (const auto & v : find_value<std::vector<std::string>>(entry, "fields")) {
         const bool probe_name = v == "U" || v == "RHOU" || v == "MOMENTUM_FLUX" || v == "TRACTION_PRESSURE" ||
                                 v == "TRACTION_VISCOUS" || v == "Y_*" || v == "RHOY_*" || v == "SPECIES_FLUX_*" ||
                                 v == "SPECIES_DIFFUSIVE_FLUX_*" || v == "SPECIES_TOTAL_FLUX_*";
@@ -1253,7 +1253,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             for (const Data & d : *cell_data) {
                 if (d.name().rfind(v.substr(0, v.size() - 1), 0) == 0) listed.push_back(d.name());
             }
-            if (listed.size() == before) throw InputError(key + ".variables: no variable matches \"" + v + "\".");
+            if (listed.size() == before) throw InputError(key + ".fields: no field matches \"" + v + "\".");
         } else if (!probe_name && !cell_field(v) && cell_field(v + "_X")) {
             for (size_t d = 0; d < N_DIM; d++) listed.push_back(v + "_" + AXES[d]);
         } else {
@@ -1261,11 +1261,11 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         }
     }
     p.variables = expand_variables(listed, species_names, key);
-    if (p.variables.empty()) throw InputError(key + ".variables is empty.");
+    if (p.variables.empty()) throw InputError(key + ".fields is empty.");
     std::vector<int32_t> h_codes;
     for (const auto & v : p.variables) {
         try {
-            h_codes.push_back(variable_code(v, species_names, key + ".variables"));
+            h_codes.push_back(variable_code(v, species_names, key + ".fields"));
         } catch (const InputError &) {
             const Data * data = cell_field(v);
             if (!data) throw;
@@ -1282,8 +1282,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     p.codes = to_device(h_codes, "probe_codes");
     p.average = !snapshot && find_value_or<bool>(entry, "average", false);
     if (p.average && !p.cell_columns.empty()) {
-        throw InputError(Diagnostic{.key = key + ".variables",
-                                    .line = line_of(entry, "variables"),
+        throw InputError(Diagnostic{.key = key + ".fields",
+                                    .line = line_of(entry, "fields"),
                                     .message = "with average = true lists [statistics] averages, which are averaged "
                                                "already",
                                     .fix = "List the instantaneous variables (P, not MEAN_P), or drop average",
@@ -1312,23 +1312,23 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     for (size_t v = 0; v < p.variables.size(); v++) {
         const int32_t k = h_codes[v];
         if (code::on_faces(k) && !boundary) {
-            throw InputError(key + ".variables: " + p.variables[v] + " is for boundary probes.");
+            throw InputError(key + ".fields: " + p.variables[v] + " is for boundary probes.");
         }
         if (code::normals(k) && !boundary && !oriented) {
-            throw InputError(key + ".variables: " + p.variables[v] + " needs a surface (" +
+            throw InputError(key + ".fields: " + p.variables[v] + " needs a surface (" +
                              (N_DIM == 2 ? "a curve, boundary or cut plane)." : "a boundary, cut plane or surface)."));
         }
         if (code::normals(k) && !boundary && mesh.axisymmetric) {
-            throw InputError(key + ".variables: " + p.variables[v] +
+            throw InputError(key + ".fields: " + p.variables[v] +
                              " through a cut plane or curve is not supported with physics.axisymmetric; boundary "
                              "probes give fluxes per radian.");
         }
         if (code::gradients(k) && !viscous) {
-            throw InputError(key + ".variables: " + p.variables[v] + " needs a viscous run.");
+            throw InputError(key + ".fields: " + p.variables[v] + " needs a viscous run.");
         }
         p.gradients = p.gradients || code::gradients(k);
         if (code::reference(k) && !reference_table) {
-            throw InputError(key + ".variables: " + p.variables[v] +
+            throw InputError(key + ".fields: " + p.variables[v] +
                              " needs a reference = {rho, u, p}, in the probe or in [output].");
         }
     }
@@ -1352,7 +1352,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             throw InputError(Diagnostic{.key = rkey,
                                         .line = line_of(entry, "reductions"),
                                         .message = "moment needs a vector variable with all its components",
-                                        .fix = "Add TRACTION_PRESSURE or TRACTION_VISCOUS (or MOMENTUM_FLUX) to variables",
+                                        .fix = "Add TRACTION_PRESSURE or TRACTION_VISCOUS (or MOMENTUM_FLUX) to fields",
                                         .docs = "docs/guide/probes.md#boundary-data"});
         }
         const std::vector<rtype> center = entry.contains("moment_center")

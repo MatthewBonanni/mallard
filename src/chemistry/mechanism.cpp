@@ -26,6 +26,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "common_io.h"
+#include "provenance.h"
 #include "units.h"
 
 namespace chemistry {
@@ -155,6 +156,7 @@ std::shared_ptr<Source> Reader::load(const std::string & path) {
     try {
         source->root = YAML::LoadFile(path);
         source->units = UnitSystem(source->root["units"]);
+        provenance::read_file("mechanism", path);
     } catch (const YAML::BadFile &) {
         throw cannot_read("the mechanism file", path);
     } catch (const YAML::Exception & e) {

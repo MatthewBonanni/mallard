@@ -102,10 +102,10 @@ troubled_threshold = 1.0
 prefix = "mesh"
 format = "vtu"
 interval = 1
-variables = ["P"]
+fields = ["P"]
 {PHYSICS}"""
     for name, geometry in probes.items():
-        toml += f'\n[[probes]]\nname = "{name}"\nvariables = ["P"]\nsampling = "point"\n{geometry}\n'
+        toml += f'\n[[probes]]\nname = "{name}"\nfields = ["P"]\nsampling = "point"\n{geometry}\n'
     run(mallard, toml, work)
     polys, cells = polygons(work / "mesh_000000.vtu")
     return polys, cells["P"], {name: read_csv(work / f"probe_{name}.csv", step=0) for name in probes}
@@ -223,12 +223,12 @@ troubled_threshold = 1.0
 prefix = "mesh"
 format = "vtu"
 interval = 1
-variables = ["P"]
+fields = ["P"]
 {PHYSICS}"""
     for zone in ("inner", "outer"):
         for sampling in ("cell", "point"):
             toml += (f'\n[[probes]]\nname = "{zone}_{sampling}"\nboundary = "{zone}"\nsampling = "{sampling}"\n'
-                     f'variables = ["P"]\n')
+                     f'fields = ["P"]\n')
     run(mallard, toml, work)
     polys, _ = polygons(work / "mesh_000000.vtu")
     data = {f"{z}_{s}": read_csv(work / f"probe_{z}_{s}.csv", step=0) for z in ("inner", "outer")
@@ -313,7 +313,7 @@ name = "wall"
 boundary = "bottom"
 format = "vtp"
 interval = 120
-variables = ["Q_W", "CF"]
+fields = ["Q_W", "CF"]
 reference = {{rho = 1.0, u = [0.5, 0.0, 0.0], p = 1.0}}
 """
     run(mallard3d, toml, work)
@@ -383,7 +383,7 @@ point = [0.5, 0.5, 0.5]
 normal = [0.6, 0.35, 1.0]
 sampling = "point"
 format = "vtp"
-variables = ["P"]
+fields = ["P"]
 
 [[probes]]
 name = "sphere"
@@ -391,7 +391,7 @@ region = {{type = "sphere", center = [0.5, 0.5, 0.5], radius = 0.32, filled = fa
 n_points = [24, 48]
 sampling = "point"
 format = "vtp"
-variables = ["P"]
+fields = ["P"]
 """
     run(mallard3d, toml, work)
     return read_vtp(work / "probe_cut_000000.vtp"), read_vtp(work / "probe_sphere_000000.vtp")
@@ -511,11 +511,11 @@ Pr = 0.72
 prefix = "mesh"
 format = "vtu"
 time_interval = {T_MEAS}
-variables = ["U_X"]
+fields = ["U_X"]
 [[probes]]
 name = "wall"
 boundary = "inner"
-variables = ["CP", "CF", "Y_PLUS", "TRACTION_PRESSURE", "TRACTION_VISCOUS"]
+fields = ["CP", "CF", "Y_PLUS", "TRACTION_PRESSURE", "TRACTION_VISCOUS"]
 reference = {{rho = 1.0, u = [{U_INF}, 0.0], p = {p_inf}}}
 reductions = ["integral", "mean", "max"]
 time_interval = 0.5
@@ -525,7 +525,7 @@ type = "circle"
 center = [0.0, 0.0]
 radius = 1.5
 n_points = 120
-variables = ["MASS_FLUX"]
+fields = ["MASS_FLUX"]
 reductions = ["integral"]
 time_interval = 0.5
 [[probes]]
@@ -534,7 +534,7 @@ type = "cut_plane"
 point = [{CUT_X}, 0.0]
 normal = [1.0, 0.0]
 bounds = [[{CUT_X - 1}, {-CUT_H}], [{CUT_X + 1}, {CUT_H}]]
-variables = ["MASS_FLUX"]
+fields = ["MASS_FLUX"]
 reductions = ["integral"]
 time_interval = 0.5
 """
@@ -682,18 +682,18 @@ troubled_threshold = 1.0
 prefix = "mesh"
 format = "vtu"
 interval = 1
-variables = ["P"]
+fields = ["P"]
 [[write_data]]
 prefix = "near"
 format = "vtu"
 interval = 1
-variables = ["P"]
+fields = ["P"]
 region = {disk}
 [[write_data]]
 prefix = "cut"
 format = "vtu"
 interval = 1
-variables = ["P"]
+fields = ["P"]
 regions = [{cuts}]
 {PHYSICS}"""
     run(mallard, toml, work)

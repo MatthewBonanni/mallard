@@ -166,13 +166,13 @@ check_interval = 5000
 
 [[probes]]
 name = "wall"
-variables = ["T", "P", {variables}]
+fields = ["T", "P", {variables}]
 point = [{0.5 * dx:.17g}, {5 * dx:.17g}]
 interval = 5
 
 [[probes]]
 name = "strip"
-variables = ["T", "P", {variables}]
+fields = ["T", "P", {variables}]
 start = [{0.5 * dx:.17g}, {5 * dx:.17g}]
 end = [{L - 0.5 * dx:.17g}, {5 * dx:.17g}]
 n_points = {nx}

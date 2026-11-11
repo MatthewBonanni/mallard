@@ -63,4 +63,4 @@ check_interval = 100
 [[write_data]]
 prefix = "./solut/wedge"
 time_interval = 0.0005
-variables = ["RHO", "U_X", "U_Y", "P", "T"]
+fields = ["RHO", "U_X", "U_Y", "P", "T"]

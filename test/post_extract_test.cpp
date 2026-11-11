@@ -61,13 +61,13 @@ std::string case_input(const std::string & dir, uint32_t n) {
       << "[output]\ncheck_interval = 1000000\nrun_log = \"\"\n"
       << "[[probes]]\nname = \"line\"\ntype = \"line\"\nstart = " << (N_DIM == 3 ? "[0.1, 0.3, 0.5]" : "[0.1, 0.3]")
       << "\nend = " << (N_DIM == 3 ? "[0.9, 0.6, 0.5]" : "[0.9, 0.6]")
-      << "\nn_points = 7\nvariables = [\"RHO\", \"U\", \"P\"]\nsampling = \"point\"\ninterval = 2\n"
+      << "\nn_points = 7\nfields = [\"RHO\", \"U\", \"P\"]\nsampling = \"point\"\ninterval = 2\n"
       << "file = \"" << dir << "/probe_line.csv\"\n"
-      << "[[probes]]\nname = \"box\"\nregion = " << BOX << "\nvariables = [\"RHO\", \"T\", \"P\"]\n"
+      << "[[probes]]\nname = \"box\"\nregion = " << BOX << "\nfields = [\"RHO\", \"T\", \"P\"]\n"
       << "time_interval = 0.002\nreductions_file = \"" << dir << "/probe_box_reductions.csv\"\n"
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
     if (vtkhdf()) {
-        s << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtkhdf\"\nvariables = [\"RHO\", \"U\", \"P\"]\n"
+        s << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtkhdf\"\nfields = [\"RHO\", \"U\", \"P\"]\n"
           << "interval = 2\n";
     }
     return s.str();
@@ -216,7 +216,7 @@ TEST(PostExtractTest, TimeAveragedProbesAreSkippedOrRefused) {
                                            << "[[probes]]\nname = \"mean\"\ntype = \"line\"\nstart = "
                                            << (N_DIM == 3 ? "[0.1, 0.3, 0.5]" : "[0.1, 0.3]") << "\nend = "
                                            << (N_DIM == 3 ? "[0.9, 0.6, 0.5]" : "[0.9, 0.6]")
-                                           << "\nn_points = 3\nvariables = [\"P\"]\naverage = true\n";
+                                           << "\nn_points = 3\nfields = [\"P\"]\naverage = true\n";
     }
     comm::barrier();
     const std::string restart = run + "/restart_000002.restart";

@@ -79,7 +79,7 @@ check_interval = 2000
 
 [[probes]]
 name = "pressure"
-variables = ["P", "T"]
+fields = ["P", "T"]
 start = [0.3e-3, 2.0e-5]
 end = [2.1e-3, 2.0e-5]
 n_points = 4
@@ -88,4 +88,4 @@ interval = 50
 [[write_data]]
 prefix = "./solut/flame"
 time_interval = 1.0e-5
-variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*"]
+fields = ["RHO", "U_X", "P", "T", "HRR", "Y_*"]

@@ -173,6 +173,22 @@ exactly, with whatever measure the flux integral uses (per unit depth in
 own (an expression, or a profile) gets its own copy of the condition, as the
 faces of a composition that varies along `inlet_state` do.
 
+A `profile` or an `mdot` of `t` is renormalized at every stage, on the device,
+inside the step's CUDA graph (a constant `mdot` with a fixed profile keeps
+the setup-time division above). At setup every rank holding faces of the inlet gathers all
+its faces (centroid and measure) in the order of the area sum above. At each
+stage, such a rank evaluates the profile at all of them, sums `profile ×
+measure` in chunks of 256 faces, then the chunks in order, and gives its own
+faces `mdot(t) / sum × profile`. Every rank does the same arithmetic in the same
+order, so the fluxes and their total are identical on any rank count, with no
+communication. The cost is O(global inlet faces) on each of those ranks: 32
+bytes per face on the device (as much on the host) and one expression
+evaluation per face and stage. For an inlet of 10^6 faces that is 32 MB and
+one pass over 10^6 faces per stage, small next to the volume kernels of the
+mesh behind such an inlet; ranks away from the inlet skip it. A negative
+value or a zero integral at some stage is recorded on the device and stops
+the run at the next progress check.
+
 An NSCBC-relaxed variant, relaxing the mass flux like `inlet_state` with `nscbc` relaxes
 the velocity, would let acoustic waves leave; it is not implemented.
 `inlet_mass_flow` reflects them like `inlet_state`, at a fixed mass flux instead of a
@@ -188,12 +204,18 @@ fixed velocity.
   middle gains exactly `mdot t` (to 1e-11 of it, in practice 1e-14). This
   holds for a single gas with MUSCL/HLLC and TENO/Roe, for mixtures with and
   without double flux, and for a uniform `mass_flux` as well as an `mdot`
-  with a profile. `inlet_state` at the same initial mass flux misses by more than 1%.
+  with a profile, fixed or of `t`. `inlet_state` at the same initial mass flux misses by more than 1%.
+- **Profile of `t`.** The faces' fluxes integrate to `mdot(t)` at every time
+  and follow the profile's shape, bitwise the same whichever faces a rank
+  holds; a profile or an `mdot` that turns negative stops the run.
+- **`mdot` of `t`.** The closed duct fed by a cubic `mdot(t)`, with and
+  without a profile of `t`, gains its integral to 1e-11: SSPRK3's stages are
+  Simpson's rule, exact for a cubic.
 - **Rayleigh flow.** Steady flow through a heated duct to a pressure outlet
   matches Rayleigh flow to 1e-4: the inlet pressure the flow needs, and the
   exit velocity and temperature.
-- **MPI.** An `mdot` with a profile on two to four ranks matches the serial
-  run.
+- **MPI.** An `mdot` with a profile, fixed or of `t`, on two to four ranks
+  matches the serial run.
 
 ![Steady heated duct: pressure, velocity and temperature against Rayleigh flow](../images/guide/heated_duct-light.svg#gh-light-mode-only)
 ![Steady heated duct: pressure, velocity and temperature against Rayleigh flow](../images/guide/heated_duct-dark.svg#gh-dark-mode-only)

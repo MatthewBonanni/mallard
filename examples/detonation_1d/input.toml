@@ -62,4 +62,4 @@ check_interval = 1000
 [[write_data]]
 prefix = "./solut/detonation"
 time_interval = 1.0e-5
-variables = ["RHO", "U_X", "P", "T", "HRR", "CHEM_COST", "Y_*"]
+fields = ["RHO", "U_X", "P", "T", "HRR", "CHEM_COST", "Y_*"]

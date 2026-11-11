@@ -180,7 +180,7 @@ check_interval = 1000000
 prefix = "{name}"
 format = "vtu"
 interval = 1
-variables = ["SOURCE_RHOE"]
+fields = ["SOURCE_RHOE"]
 {PHYSICS}"""
     (work / f"{name}.toml").write_text(toml)
     subprocess.run([str(binary), "-i", f"{name}.toml", "--kokkos-num-threads=2"], cwd=work, check=True,
@@ -432,7 +432,7 @@ check_interval = 1000000
 prefix = "layers{i}"
 format = "vtu"
 interval = 1
-variables = ["RHO"]
+fields = ["RHO"]
 {PHYSICS}"""
         (work / f"layers{i}.toml").write_text(toml)
         subprocess.run([str(mallard), "-i", f"layers{i}.toml", "--kokkos-num-threads=2"], cwd=work, check=True,
@@ -524,7 +524,7 @@ def data_orientation(mallard):
     holed_mesh(mesh, hole=HOLE)
     regions = [r for _, r in ORIENTED] + ['{type = "ellipse", center = [0.62, 0.62], semi_axes = [0.2, 0.1], '
                                           'rotate = 30, pivot = [0.62, 0.62], flip = true}']
-    probes = "".join(f'[[probes]]\nname = "c{i}"\nvariables = ["P"]\nregion = {r}\n' for i, r in enumerate(regions))
+    probes = "".join(f'[[probes]]\nname = "c{i}"\nfields = ["P"]\nregion = {r}\n' for i, r in enumerate(regions))
     toml = f"""[run]
 n_steps = 1
 dt = 1e-9

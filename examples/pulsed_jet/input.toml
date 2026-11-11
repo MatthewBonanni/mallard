@@ -100,11 +100,11 @@ check_interval = 500
 [[probes]]
 name = "inlet"
 point = [0.001, 0.001]
-variables = ["U_X"]
+fields = ["U_X"]
 interval = 10
 file = "./solut/probe_inlet.csv"
 
 [[write_data]]
 prefix = "./solut/jet"
 time_interval = 1.0
-variables = ["VORTICITY", "U", "P"]
+fields = ["VORTICITY", "U", "P"]

@@ -74,4 +74,4 @@ check_interval = 100
 [[write_data]]
 prefix = "./solut/sod"
 time_interval = 0.02
-variables = ["RHO", "U_X", "P", "T"]
+fields = ["RHO", "U_X", "P", "T"]

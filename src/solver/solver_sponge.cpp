@@ -152,8 +152,8 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
         Kokkos::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), transverse);
     }
     // Inlet targets at the end of the step, whose change enters the incoming wave
-    for (auto & inflow : inflows) inflow->fill(double(t + dt), boundary_data.char_target_next);
     timed_inlets.fill(double(t + dt), boundary_data.char_target_next);
+    for (auto & inflow : inflows) inflow->fill(double(t + dt), boundary_data.char_target_next);
     const CharacteristicStateFunctor state{boundary_data,
                                            mesh->face_normals,
                                            face_solution,
