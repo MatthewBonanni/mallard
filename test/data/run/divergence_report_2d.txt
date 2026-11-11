@@ -31,7 +31,7 @@
                                                             0.4)
                                                             - the failure is confined to 3 cells
                                                             Try: improve cells 811, 812, 813 (mallard check input.toml
-                                                            --quality quality writes the metrics for ParaView)
+                                                            --mesh-fields mesh writes the metrics for ParaView)
 
 == Evidence ===============================================================================
   The last valid state (step 119).
@@ -106,7 +106,7 @@
                                                             0.4)
                                                             - the failure is confined to 3 cells
                                                             Try: improve cells 811, 812, 813 (mallard check input.toml
-                                                            --quality quality writes the metrics for ParaView)
+                                                            --mesh-fields mesh writes the metrics for ParaView)
 
 == Evidence ===============================================================================
   The last valid state (step 119).

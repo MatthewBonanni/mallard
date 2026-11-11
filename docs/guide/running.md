@@ -195,8 +195,8 @@ and a cell squeezed to a sliver, at a fixed `dt` that suits the rest of the mesh
                                   (questionable above 10; the mesh's worst is 39)
                                   - only 6 cells exceeded the stable CFL number: the time step suits the rest of the
                                   mesh
-                                  Try: improve cells 119, 134, 135, 136, 151 (mallard check input.toml --quality quality
-                                  writes the metrics for ParaView), or lower the time step to suit them
+                                  Try: improve cells 119, 134, 135, 136, 151 (mallard check input.toml --mesh-fields
+                                  mesh writes the metrics for ParaView), or lower the time step to suit them
   2  time step too large  0.55    - the failing step ran at CFL 3.08, above 1.2, the largest stable value of SSPRK3 for
                                   smooth flow
                                   - 6 of 256 cells (2%) were above it: the excess is local, so look at those cells first
@@ -237,7 +237,7 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-format-vtu"></a>`W-FORMAT-VTU` | `[[write_data]]` without a `format` writes VTU files: the default, VTKHDF, needs HDF5 (parallel HDF5 on several ranks) | Set `format = "vtu"`, or build with HDF5 ([Which format](output.md#which-format)) |
 | <a id="w-key-ignored"></a>`W-KEY-IGNORED` | A key that is read but has no effect: `source.time_dependent` (expressions of `t` are evaluated at every stage) | Remove it |
 | <a id="w-spectra-restarted"></a>`W-SPECTRA-RESTARTED` | A probe's time spectra got a sample that is not `dt` after the last one (a resumed run, a changed interval): its history starts afresh | Keep the probe's interval fixed over a run and its restarts ([Time spectra](probes.md#time-spectra)) |
-| <a id="w-cuda-graph"></a>`W-CUDA-GRAPH` | The step could not be captured as a CUDA graph; steps run kernel by kernel, slower but with the same results | Report it with the message: every step is meant to be graphed |
+| <a id="w-cuda-graph"></a>`W-CUDA-GRAPH` | The step could not be captured as a CUDA graph, so steps run kernel by kernel; or NCCL failed under a graph's conditional node, so the graph runs one step per launch. Slower, with the same results | Report it with the message: every step is meant to be graphed |
 | <a id="w-teno-cache"></a>`W-TENO-CACHE` | TENO's stencil cache file cannot be written; the next run of the mesh builds its stencils again | Check the directory and its permissions ([Reconstruction](numerics.md#reconstruction)) |
 | <a id="w-quadrature-weights"></a>`W-QUADRATURE-WEIGHTS` | A quadrature rule with negative weights is in use, which can amplify rounding errors | Report it with the message |
 | <a id="w-signal-handlers"></a>`W-SIGNAL-HANDLERS` | A library replaced Mallard's signal handlers during setup; they are restored | None needed |
