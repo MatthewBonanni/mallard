@@ -13,9 +13,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <iomanip>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <utility>
 
 #include "comm.h"
@@ -153,6 +156,111 @@ std::optional<std::vector<std::string>> zones_of(const Parsed & p) {
     return zones;
 }
 
+const char * const SOLUTION_DOCS = "docs/guide/geometry.md#regions-defined-by-the-solution";
+
+/** @brief Whether s has the word w at i (not inside a longer name). */
+bool word_at(const std::string & s, const size_t i, const std::string & w) {
+    auto name = [](const char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+    if (s.compare(i, w.size(), w) != 0) return false;
+    if (i > 0 && name(s[i - 1])) return false;
+    return i + w.size() >= s.size() || !name(s[i + w.size()]);
+}
+
+std::string trimmed(const std::string & s) {
+    const size_t a = s.find_first_not_of(" \t\n");
+    if (a == std::string::npos) return "";
+    return s.substr(a, s.find_last_not_of(" \t\n") - a + 1);
+}
+
+/** @brief s split at its outermost (parenthesis depth 0) occurrences of the operators ops (words or symbols). */
+std::vector<std::string> split_outer(const std::string & s, const std::vector<std::string> & ops) {
+    std::vector<std::string> parts;
+    int depth = 0;
+    size_t start = 0;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '(') depth++;
+        if (s[i] == ')') depth--;
+        if (depth != 0) continue;
+        for (const std::string & op : ops) {
+            const bool word = std::isalpha(static_cast<unsigned char>(op[0]));
+            if (word ? word_at(s, i, op) : s.compare(i, op.size(), op) == 0) {
+                parts.push_back(s.substr(start, i - start));
+                start = i + op.size();
+                i = start - 1;
+                break;
+            }
+        }
+    }
+    parts.push_back(s.substr(start));
+    return parts;
+}
+
+/** @brief Whether s is wrapped whole in one pair of parentheses. */
+bool wrapped(const std::string & s) {
+    if (s.size() < 2 || s.front() != '(' || s.back() != ')') return false;
+    int depth = 0;
+    for (size_t i = 0; i < s.size(); i++) {
+        depth += s[i] == '(' ? 1 : s[i] == ')' ? -1 : 0;
+        if (depth == 0 && i + 1 < s.size()) return false;
+    }
+    return true;
+}
+
+/** @brief Whether s has a comparison or logical operator outside parentheses. */
+bool logical(const std::string & s) {
+    return split_outer(s, {"<", ">", "and", "or", "&&", "||", "not"}).size() > 1 || (!s.empty() && s[0] == '!');
+}
+
+/**
+ * @brief The level of a condition, negative where it holds: a < b and a <= b
+ *        give a - b, a > b and a >= b give b - a; and, or and not give the
+ *        largest, the least and the negative of their parts' levels.
+ */
+std::string condition_level(const std::string & text, const std::string & key, const std::size_t line) {
+    const std::string s = trimmed(text);
+    const std::string fix = "Write comparisons of expressions joined by and, or and not, e.g. \"T > 1500 and U_X < 0\"";
+    auto bad = [&](const std::string & message) { fail(key, line, message, fix, SOLUTION_DOCS); };
+    if (s.empty()) bad("is empty");
+    const std::vector<std::string> any = split_outer(s, {"or", "||"});
+    if (any.size() > 1) {
+        std::string out = "min(";
+        for (size_t k = 0; k < any.size(); k++) out += (k ? ", " : "") + condition_level(any[k], key, line);
+        return out + ")";
+    }
+    const std::vector<std::string> all = split_outer(s, {"and", "&&"});
+    if (all.size() > 1) {
+        std::string out = "max(";
+        for (size_t k = 0; k < all.size(); k++) out += (k ? ", " : "") + condition_level(all[k], key, line);
+        return out + ")";
+    }
+    if (word_at(s, 0, "not")) return "-(" + condition_level(s.substr(3), key, line) + ")";
+    if (s[0] == '!' && s.compare(0, 2, "!=") != 0) return "-(" + condition_level(s.substr(1), key, line) + ")";
+    if (wrapped(s) && logical(s.substr(1, s.size() - 2))) return condition_level(s.substr(1, s.size() - 2), key, line);
+    for (const char * op : {"==", "!=", "?"}) {
+        if (split_outer(s, {op}).size() > 1) {
+            bad("\"" + s + "\" uses " + op + ", and a condition holds on a region: compare with <, <=, > or >=");
+        }
+    }
+    for (const auto & [op, less] : std::vector<std::pair<std::string, bool>>{{"<=", true}, {">=", false}, {"<", true}, {">", false}}) {
+        const std::vector<std::string> sides = split_outer(s, {op});
+        if (sides.size() == 1) continue;
+        if (sides.size() > 2 || logical(sides[0]) || logical(sides[1])) bad("\"" + s + "\" chains comparisons");
+        const std::string a = trimmed(sides[0]), b = trimmed(sides[1]);
+        if (a.empty() || b.empty()) bad("\"" + s + "\" lacks a side of " + op);
+        return less ? "(" + a + ") - (" + b + ")" : "(" + b + ") - (" + a + ")";
+    }
+    fail(key, line, "\"" + s + "\" is not a comparison", fix, SOLUTION_DOCS);
+}
+
+/** @brief The units of a field of conditions, for an isosurface's value. */
+Dimension field_dimension(const std::string & field) {
+    if (field == "T") return dim::temperature;
+    if (field == "P") return dim::pressure;
+    if (field == "RHO") return dim::density;
+    if (field.rfind("U_", 0) == 0 && field.size() == 3) return dim::velocity;
+    return dim::none;
+}
+
 class Parser {
     public:
         const Input * names = nullptr;
@@ -166,6 +274,7 @@ class Parser {
         std::vector<Motion> motions;
         std::vector<kexpr::Program> times;  // programs of t
         std::vector<double> time_values;    // their values at t = 0
+        std::vector<Condition> conditions;
         bool bounded = true;
         int max_depth = 0;
 
@@ -206,8 +315,8 @@ class Parser {
                     return !q.zones.empty() || q.cells >= 0;
                 });
                 if (mesh_parts) {
-                    fail(where, line, what + " of regions of primitives, and this one uses regions of the mesh, which "
-                                     "do not move", "", "docs/guide/geometry.md#regions-of-the-mesh");
+                    fail(where, line, what + " of regions of primitives, and this one uses regions of the mesh or of the "
+                                     "solution, which do not move", "", "docs/guide/geometry.md#regions-of-the-mesh");
                 }
                 const uint32_t base = static_cast<uint32_t>(out.dimension == N_DIM ? out.nodes.size() : out.pieces.size());
                 const uint32_t n = static_cast<uint32_t>(out.dimension == N_DIM ? p.nodes.size() : p.pieces.size());
@@ -303,6 +412,8 @@ class Parser {
             Parsed p;
             if (type == "union" || type == "intersection" || type == "difference") {
                 p = boolean(t, where, type, frame);
+            } else if (type == "where" || type == "isosurface") {
+                p = solution_region(t, where, type, frame);
             } else if (type == "boundary" || type == "interior") {
                 if (!t.contains("of")) {
                     fail(where, line_of(t, "type"), "needs of, the region (or the name of one) it is the " + type + " of",
@@ -459,7 +570,7 @@ class Parser {
             std::vector<std::string> out = {"sphere", "ellipsoid", "cylinder", "cone", "frustum", "torus",
                                             "half_space", "implicit", "circle", "ellipse", "disk", "annulus",
                                             "rectangle", "polygon", "union", "intersection", "difference",
-                                            "boundary", "interior"};
+                                            "boundary", "interior", "where", "isosurface"};
             if (N_DIM == 3) out.push_back("box");
             return out;
         }
@@ -518,6 +629,57 @@ class Parser {
             resolving.pop_back();
             p.text = name + " = " + p.text;
             return p;
+        }
+
+        /**
+         * @brief A region of the solution: where a condition holds (filled),
+         *        or an isosurface, the boundary of where its field is below the
+         *        value, facing toward increasing field.
+         */
+        Parsed solution_region(const Input & t, const std::string & where, const std::string & type,
+                               const Frame & frame) {
+            if (!is_identity(frame)) {
+                fail(where, line_of(t, "type"),
+                     "is where the solution says, in the run's coordinates, which transforms do not move",
+                     "Remove the transforms, or write them into the condition's x, y, z", SOLUTION_DOCS);
+            }
+            Condition c;
+            if (type == "where") {
+                if (!t.contains("condition")) {
+                    fail(where, line_of(t, "type"), "needs condition, e.g. condition = \"T > 1500\"", "", SOLUTION_DOCS);
+                }
+                c.text = find_value<std::string>(t, "condition");
+                c.key = where + ".condition";
+                c.level = condition_level(c.text, c.key, line_of(t, "condition"));
+            } else {
+                for (const char * key : {"field", "value"}) {
+                    if (!t.contains(key)) {
+                        fail(where, line_of(t, "type"), std::string("needs ") + key,
+                             "e.g. {type = \"isosurface\", field = \"T\", value = 1500}", SOLUTION_DOCS);
+                    }
+                }
+                const std::string field = find_value<std::string>(t, "field");
+                const double value = as_double(t.at("value"), where + ".value", field_dimension(field));
+                c.key = where + ".field";
+                c.text = field + " = " + logging::real(value);
+                std::ostringstream exact;
+                exact << std::setprecision(17) << value;
+                c.level = "(" + field + ") - (" + exact.str() + ")";
+            }
+            Filled f;
+            f.kind = Filled::Kind::CONDITION;
+            f.first = static_cast<uint32_t>(conditions.size());
+            conditions.push_back(c);
+            filled.push_back(f);
+            Parsed p;
+            p.filled = static_cast<int32_t>(filled.size() - 1);
+            if (type == "where") {
+                p.text = "where(" + c.text + ")";
+                return p;
+            }
+            Parsed out = boundary(std::move(p), where, line_of(t, "type"));
+            out.text = "isosurface(" + c.text + ")";
+            return out;
         }
 
         Parsed of_mesh(const std::string & name) {
@@ -1269,6 +1431,7 @@ Definition definition(Parser & parser, Parsed & p, const std::string & where, co
     d.steps = std::move(parser.steps);
     d.motions = std::move(parser.motions);
     d.times = std::move(parser.times);
+    d.conditions = std::move(parser.conditions);
     d.bounded = parser.bounded;
     return d;
 }
@@ -1484,8 +1647,8 @@ Definition parse(const Input & value, const std::string & where, const Input * n
         }
         if (d.filled[d.root].kind != Filled::Kind::SHAPES) {
             fail(key + ".edge", line_of(*table, "edge"),
-                 "a smooth edge needs a region of primitives alone, and this one uses regions of the mesh, whose "
-                 "cells are entirely inside or outside",
+                 "a smooth edge needs a region of primitives alone, and this one uses regions of the mesh or of the "
+                 "solution, which have no signed distance",
                  "Remove edge", "docs/guide/geometry.md#smooth-edges");
         }
         d.edge = as_double(table->at("edge"), key + ".edge", dim::length);
@@ -1527,6 +1690,11 @@ void require_full_dimension(const Region & region, const Input & value, const st
 }
 
 void require_fixed(const Region & region, const Input & value, const std::string & where, const std::string & what) {
+    if (region.solution()) {
+        fail(where, line_of(value), "follows the solution, and " + what + " of regions defined by the solution are not "
+                                    "supported yet",
+             "Give a fixed region", SOLUTION_DOCS);
+    }
     if (!region.moving()) return;
     fail(where, line_of(value), "moves (it has expressions of t), and " + what + " of moving regions are not supported yet",
          "Give a fixed region", "docs/guide/geometry.md#moving-regions");

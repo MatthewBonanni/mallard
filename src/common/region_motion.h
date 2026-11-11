@@ -1,9 +1,9 @@
 /**
  * @file region_motion.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief The cell fractions of a moving region, recomputed on the device at
- *        a time read from the device: no host work, so a CUDA graph can
- *        capture it.
+ * @brief The cell fractions of a moving region, or of one defined by the
+ *        solution, recomputed on the device at a time read from the device:
+ *        no host work, so a CUDA graph can capture it.
  * @version 0.1
  * @date 2026-11-10
  *
@@ -15,14 +15,59 @@
 #define REGION_MOTION_H
 
 #include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
+#include "cell_fields.h"
 #include "common_typedef.h"
+#include "periodic_maps.h"
 #include "region.h"
 
 class Mesh;
 
 namespace region {
+
+/**
+ * @brief The levels of a region's conditions in every cell, from the
+ *        solution: each one's value at the cell's centroid and its gradient,
+ *        by inverse-distance-squared least squares over the face neighbors
+ *        (across periodic faces, their images; boundary faces add nothing).
+ *        A condition's cell fractions and isosurfaces are cut from this
+ *        linear reconstruction, exact for a linear level. Halo cells get
+ *        their value and no gradient.
+ */
+class SolutionLevels {
+    public:
+        /** @brief Compiles the conditions' levels in the variables of condition_variables(species). */
+        SolutionLevels(const Mesh & mesh, const std::vector<Condition> & conditions,
+                       const std::vector<std::string> & species, const CellFields & fields);
+
+        /** @brief levels() at the time time() on the device, enqueued without host work or allocation. */
+        void update(const Kokkos::View<const rtype> & time) const;
+        /** @brief levels() at time t, given on the host. */
+        void update(double t) const;
+
+        /** @brief (cell, condition, [value, gradient]) of every cell. */
+        const Kokkos::View<double **[N_DIM + 1]> & levels() const { return m_levels; }
+        const Kokkos::View<rtype *[N_DIM]> & centroids() const { return m_centroids; }
+
+        uint32_t size() const { return n_conditions; }
+
+    private:
+        uint32_t n_cells = 0, n_owned = 0, n_conditions = 0, n_species = 0;
+        std::vector<kexpr::Program> programs;
+        kexpr::ProgramTable<> table;
+        CellFields fields;
+        Kokkos::View<rtype *[N_DIM]> m_centroids;
+        Kokkos::View<uint32_t *> offsets_faces_of_cell, faces_of_cell;
+        Kokkos::View<int32_t *[2]> cells_of_face;
+        Kokkos::View<uint8_t *> face_shift;
+        PeriodicMaps periodic;
+        Kokkos::View<rtype> host_time;
+        Kokkos::View<double **[N_DIM + 1]> m_levels;
+};
 
 /**
  * @brief The fractions of every cell (owned and halo) inside a filled region
@@ -37,13 +82,20 @@ class MovingFractions {
     public:
         static constexpr int DEGREE = 8;
 
-        /** @brief For filled part i of the region (its root by default). Collective (fixed parts of the mesh). */
-        MovingFractions(const Mesh & mesh, const Region & region);
-        MovingFractions(const Mesh & mesh, const Region & region, uint32_t filled);
+        /**
+         * @brief For filled part i of the region (its root by default), with
+         *        the levels of its conditions if it has any. Collective (fixed
+         *        parts of the mesh).
+         */
+        MovingFractions(const Mesh & mesh, const Region & region,
+                        std::shared_ptr<const SolutionLevels> levels = nullptr);
+        MovingFractions(const Mesh & mesh, const Region & region, uint32_t filled,
+                        std::shared_ptr<const SolutionLevels> levels = nullptr);
 
         /**
-         * @brief fractions() at the time time() on the device, enqueued on
-         *        the default execution space without host work or allocation.
+         * @brief fractions() at the time time() on the device (and the levels
+         *        of conditions on the current solution), enqueued on the default
+         *        execution space without host work or allocation.
          */
         void update(const Kokkos::View<const rtype> & time) const;
 
@@ -57,9 +109,9 @@ class MovingFractions {
             double edge = 0.0;
         };
         struct Op {
-            enum class Kind : uint8_t { SHAPES, CELLS, UNION, INTERSECTION, DIFFERENCE };
+            enum class Kind : uint8_t { SHAPES, CELLS, CONDITION, UNION, INTERSECTION, DIFFERENCE };
             Kind kind = Kind::SHAPES;
-            uint32_t index = 0;  // SHAPES: a leaf; CELLS: a column of fixed fractions
+            uint32_t index = 0;  // SHAPES: a leaf; CELLS: a column of fixed fractions; CONDITION: its level
         };
         struct CurvedFace {
             double lo[2] = {0.0, 0.0}, hi[2] = {1.0, 1.0};  // its box of face coordinates
@@ -90,6 +142,7 @@ class MovingFractions {
         Kokkos::View<const double *[3]> coefficients;
         Kokkos::View<rtype> host_time;
         Kokkos::View<double *> m_fractions;
+        std::shared_ptr<const SolutionLevels> m_levels;
 };
 
 } // namespace region

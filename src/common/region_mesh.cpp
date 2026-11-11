@@ -422,7 +422,9 @@ class Builder {
             for (const auto & f : region.filled()) m_views.push_back(region.host(f));
         }
 
-        Builder(const Mesh & mesh, const Region & region) : m_mesh(mesh), m_region(region) {
+        Builder(const Mesh & mesh, const Region & region, const Levels * levels = nullptr) :
+            m_mesh(mesh), m_region(region), m_levels(levels) {
+            if (region.solution() && !levels) throw std::logic_error("region::elements: the region's conditions need levels.");
             const bool distributed = mesh.n_global_cells > 0;
             double volume = 0.0;
             for (uint32_t c = 0; c < mesh.n_owned(); c++) volume += double(mesh.h_cell_volume(c));
@@ -460,6 +462,9 @@ class Builder {
             for (const Piece & p : m_region.pieces()) {
                 if (!p.zones.empty() || p.cells >= 0) {
                     faces(p);
+                } else if (conditional(p)) {
+                    m_out.exact = false;
+                    extract(p);
                 } else if (!exact_piece(p)) {
                     m_out.exact = m_out.exact && affine(p);
                     extract(p);
@@ -471,6 +476,7 @@ class Builder {
     private:
         const Mesh & m_mesh;
         const Region & m_region;
+        const Levels * m_levels = nullptr;
         std::vector<RegionView<Kokkos::HostSpace>> m_views;
         std::vector<std::vector<double>> m_cells;
         Vec m_lo, m_hi;
@@ -488,10 +494,42 @@ class Builder {
             }
         }
 
+        bool is_condition(const uint32_t i) const { return m_region.filled()[i].kind == Filled::Kind::CONDITION; }
+
+        /** @brief Whether a condition bounds or clips the piece. */
+        bool conditional(const Piece & p) const {
+            for (const auto * list : {&p.carriers, &p.inside, &p.outside}) {
+                for (const uint32_t i : *list) {
+                    if (has(i)) return true;
+                }
+            }
+            return false;
+        }
+        bool has(const uint32_t i) const {
+            const Filled & f = m_region.filled()[i];
+            return f.kind == Filled::Kind::CONDITION ||
+                   std::any_of(f.parts.begin(), f.parts.end(), [&](const uint32_t k) { return has(k); });
+        }
+
+        /** @brief The linear level of condition i of the filled regions at x in local cell c. */
+        double condition_level(const uint32_t i, const Vec & x, const int32_t c) const {
+            if (c < 0) throw std::logic_error("region::elements: a condition is evaluated in its cell.");
+            const uint32_t k = m_region.filled()[i].first, cell = static_cast<uint32_t>(c);
+            double g = (*m_levels)(cell, k, 0);
+            for (size_t d = 0; d < N_DIM; d++) g += (*m_levels)(cell, k, 1 + d) * (x[d] - double(m_mesh.h_cell_coords(cell, d)));
+            return g;
+        }
+
+        /** @brief The level of a carrier at x in cell c: its signed distance (implicit function), or condition's level. */
+        double carrier(const uint32_t i, const Vec & x, const int32_t c) const {
+            return is_condition(i) ? condition_level(i, x, c) : m_views[i].distance(x.data());
+        }
+
         /** @brief Whether x (in local cell c, or -1) is inside filled region i. */
         bool inside(const uint32_t i, const Vec & x, const int32_t c) const {
             const Filled & f = m_region.filled()[i];
             if (f.kind == Filled::Kind::SHAPES) return m_views[i].distance(x.data()) < 0.0;
+            if (f.kind == Filled::Kind::CONDITION) return condition_level(i, x, c) < 0.0;
             if (f.cells) return c >= 0 && m_cells[i][static_cast<size_t>(c)] > 0.5;
             bool in = f.kind != Filled::Kind::UNION;
             for (size_t k = 0; k < f.parts.size(); k++) {
@@ -506,6 +544,7 @@ class Builder {
         /** @brief A level of filled region i, negative inside: its signed distance, or -1 / 1 at x in cell c. */
         double level(const uint32_t i, const Vec & x, const int32_t c) const {
             if (m_region.filled()[i].kind == Filled::Kind::SHAPES) return m_views[i].distance(x.data());
+            if (is_condition(i)) return condition_level(i, x, c);
             return inside(i, x, c) ? -1.0 : 1.0;
         }
 
@@ -909,7 +948,15 @@ class Builder {
         }
 
         void extract(const Piece & p) {
-            // Planes are cut exactly without subdividing
+            // Planes, and conditions' linear levels in each cell, are cut exactly without subdividing
+            const bool conditions = std::any_of(p.carriers.begin(), p.carriers.end(), [&](const uint32_t i) { return is_condition(i); });
+            if (conditions) {
+                for (uint32_t c = 0; c < m_mesh.n_owned(); c++) {
+                    if (off_conditions(p, c)) continue;
+                    for (const auto & s : simplices(c)) extract(p, c, s, 0, 0);
+                }
+                return;
+            }
             const int levels = affine(p) ? 0 : m_region.resolution();
             // A plane's levels at the nodes. A cell with none negative has no negative simplex vertex either (and
             // the cells on the negative side take a face in the plane); one with all clearly negative has no zero
@@ -925,6 +972,28 @@ class Builder {
                 if (levels == 0 && !curved_cell && off_planes(phi, c)) continue;
                 for (const auto & s : simplices(c)) extract(p, c, s, 0, levels);
             }
+        }
+
+        /** @brief Whether a condition's linear level in cell c keeps its sign over a sphere around the cell. */
+        bool off_conditions(const Piece & p, const uint32_t c) const {
+            const uint32_t n = m_mesh.h_n_nodes_of_cell(c);
+            Vec x0 = {0.0, 0.0, 0.0};
+            for (size_t d = 0; d < N_DIM; d++) x0[d] = double(m_mesh.h_cell_coords(c, d));
+            double radius = 0.0;
+            for (uint32_t k = 0; k < n; k++) radius = std::max(radius, norm(sub(node(m_mesh.h_node_of_cell(c, k)), x0)));
+            if (m_mesh.curved_geometry && m_mesh.curved_geometry->cell_is_curved(c)) {
+                curved::Vec3 lo, hi;
+                m_mesh.curved_geometry->bounds(c, lo, hi);
+                for (size_t d = 0; d < N_DIM; d++) radius = std::max(radius, std::max(std::abs(lo[d] - x0[d]), std::abs(hi[d] - x0[d])) * std::sqrt(double(N_DIM)));
+            }
+            for (const uint32_t i : p.carriers) {
+                if (!is_condition(i)) continue;
+                const uint32_t k = m_region.filled()[i].first;
+                double slope = 0.0;
+                for (size_t d = 0; d < N_DIM; d++) slope += (*m_levels)(c, k, 1 + d) * (*m_levels)(c, k, 1 + d);
+                if (std::abs((*m_levels)(c, k, 0)) > 1.01 * std::sqrt(slope) * radius) return true;
+            }
+            return false;
         }
 
         bool off_planes(const std::vector<std::vector<double>> & phi, const uint32_t c) const {
@@ -952,15 +1021,16 @@ class Builder {
             double radius = 0.0;
             for (const Vec & x : s) radius = std::max(radius, norm(sub(x, center)));
             // Most simplices lie away from the surface: bounded distances say so before any vertex is evaluated
+            const int32_t cell = static_cast<int32_t>(c);
             if (m_region.bounded()) {
                 for (const uint32_t i : p.carriers) {
-                    if (std::abs(m_views[i].distance(center.data())) >= radius) return;
+                    if (!is_condition(i) && std::abs(m_views[i].distance(center.data())) >= radius) return;
                 }
             }
             std::vector<Vertex> simplex;
             for (const Vec & x : s) {
                 Vertex v{x, {}};
-                for (const uint32_t i : p.carriers) v.phi.push_back(m_views[i].distance(x.data()));
+                for (const uint32_t i : p.carriers) v.phi.push_back(carrier(i, x, cell));
                 simplex.push_back(v);
             }
             // Vertices within round-off of a zero set lie on it: a plane through mesh faces takes them once, from
@@ -971,7 +1041,7 @@ class Builder {
             for (size_t k = 0; k < p.carriers.size(); k++) {
                 // No zero set here: bounded distances farther than the simplex's radius, or implicit
                 // functions of one sign with a margin of twice their slope
-                if (m_region.bounded()) continue;
+                if (m_region.bounded() || is_condition(p.carriers[k])) continue;
                 const double phi = m_views[p.carriers[k]].distance(center.data());
                 bool positive = false, negative = false;
                 double slope = 0.0;
@@ -1566,6 +1636,11 @@ Grid sample_grid(const std::vector<SurfacePatch> & patches, const uint32_t nu, c
 Elements elements(const Mesh & mesh, const Region & region) {
     if (region.dimension() == N_DIM) throw std::logic_error("region::elements: the region is filled.");
     return Builder(mesh, region).build();
+}
+
+Elements elements(const Mesh & mesh, const Region & region, const Levels & levels) {
+    if (region.dimension() == N_DIM) throw std::logic_error("region::elements: the region is filled.");
+    return Builder(mesh, region, &levels).build();
 }
 
 Measures measures_in_domain(const Mesh & mesh, const Region & region, const std::vector<double> & fractions) {

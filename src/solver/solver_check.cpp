@@ -614,6 +614,16 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     const std::vector<std::string> mesh_names = automatic.names();
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
+        if (region->solution()) {
+            CheckRegion g;
+            g.name = label;
+            g.dimension = region->dimension();
+            g.per_radian = mesh->axisymmetric && g.dimension == N_DIM;
+            g.measure = std::numeric_limits<double>::quiet_NaN();
+            g.solution = true;
+            r.regions.push_back(g);
+            continue;
+        }
         OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM);
         r.regions.push_back(entry(label, *region, m, false));
         if (m.cells == 0) {
