@@ -1332,7 +1332,7 @@ With `sampling = "point"` (static filled regions), each sum is over the
 reconstruction instead: a cell entirely inside is one sample of its cell
 value weighing `V` (the integral of its polynomial, whose mean is that value),
 and a cell the region's surface cuts has quadrature points over its part
-inside (a high-order quadrature on the cell's simplices, spectrally accurate
+inside (a high-order quadrature on the cell, or on its simplices where it is not a convex quadrilateral or hexahedron, spectrally accurate
 for smooth surfaces and exact for planes, fitted to a few points that
 integrate polynomials of the reconstruction's degree alike), so `integral` is
 exact for the reconstruction polynomials, curved surfaces included, and the

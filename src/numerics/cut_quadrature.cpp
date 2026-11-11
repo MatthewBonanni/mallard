@@ -23,7 +23,7 @@ namespace {
 
 constexpr uint32_t N = N_DIM;
 constexpr uint32_t ALL = (1u << N) - 1;
-constexpr int MAX_DEPTH = N == 2 ? 14 : 9;
+constexpr int MAX_DEPTH = N == 2 ? 20 : 30;
 }
 namespace {
 
@@ -66,14 +66,31 @@ class Saye {
                 return;
             }
             std::vector<Step> steps;
-            if (depth >= MAX_DEPTH) {
-                tensor(b, true);
-                return;
-            }
             if (!plan(b, {whole}, ALL, steps)) {
-                uint32_t d = 0;
-                for (uint32_t i = 1; i < N; i++) {
-                    if (b.hi[i] - b.lo[i] > b.hi[d] - b.lo[d]) d = i;
+                if (depth >= MAX_DEPTH) {
+                    // Near a point where the zero set is tangent to a face: roots along a coordinate it is a
+                    // graph along, the other coordinates on tensor points
+                    for (uint32_t k = 0; k < N; k++) {
+                        if (!monotone(whole, b, ALL, k)) continue;
+                        steps = {{k, {whole}}};
+                        for (uint32_t d = 0; d < N; d++) {
+                            if (d != k) steps.push_back({d, {}});
+                        }
+                        integrate_steps(b, steps);
+                        return;
+                    }
+                    tensor(b, true);
+                    return;
+                }
+                // Splitting along a coordinate the zero set is a graph along would bring the faces closer to
+                // where it is tangent to them: split the others
+                uint32_t graph = N;
+                for (uint32_t k = 0; k < N && graph == N; k++) {
+                    if (monotone(whole, b, ALL, k)) graph = k;
+                }
+                uint32_t d = graph == 0 ? 1 : 0;
+                for (uint32_t i = 0; i < N; i++) {
+                    if (i != graph && b.hi[i] - b.lo[i] > b.hi[d] - b.lo[d]) d = i;
                 }
                 Box lo = b, hi = b;
                 lo.hi[d] = hi.lo[d] = 0.5 * (b.lo[d] + b.hi[d]);
@@ -81,13 +98,17 @@ class Saye {
                 piece(hi, depth + 1);
                 return;
             }
+            integrate_steps(b, steps);
+        }
+
+    private:
+        void integrate_steps(const Box & b, const std::vector<Step> & steps) {
             for (size_t r = 0; r < m_rules.size(); r++) {
                 Coordinates u{};
                 line(b, steps, static_cast<int>(steps.size()) - 1, u, 1.0, r);
             }
         }
 
-    private:
         struct Rule {
             std::vector<double> x, w;
         };
@@ -189,9 +210,9 @@ class Saye {
                 }
                 return true;
             }
-            // Along the coordinate the zero sets are steepest in
-            uint32_t k = 0;
-            double best = -1.0;
+            // Along the coordinate the zero sets are steepest in that keeps each a graph over a face; a zero set
+            // the coordinate leaves unchanged (on the collapsed faces of a simplex's map) passes to the face as is
+            std::vector<std::pair<double, uint32_t>> order;
             const Coordinates c = center(b, free, {});
             for (uint32_t d = 0; d < N; d++) {
                 if (!(free & (1u << d))) continue;
@@ -204,25 +225,51 @@ class Saye {
                     }
                     score += norm > 0.0 ? std::fabs(g[d]) / norm : 0.0;
                 }
-                if (score > best) {
-                    best = score;
-                    k = d;
+                order.emplace_back(-score, d);
+            }
+            std::sort(order.begin(), order.end());
+            for (const auto & [score, k] : order) {
+                std::vector<Restriction> crossing, faces;
+                bool graphs = true;
+                for (const Restriction & f : kept) {
+                    if (constant_along(f, b, free, k)) {
+                        Restriction g = f;
+                        g.fixed |= 1u << k;
+                        g.value[k] = b.lo[k];
+                        faces.push_back(g);
+                    } else if (monotone(f, b, free, k)) {
+                        crossing.push_back(f);
+                        for (const double s : {b.lo[k], b.hi[k]}) {
+                            Restriction g = f;
+                            g.fixed |= 1u << k;
+                            g.value[k] = s;
+                            faces.push_back(g);
+                        }
+                    } else {
+                        graphs = false;
+                        break;
+                    }
+                }
+                if (!graphs) continue;
+                std::vector<Step> rest = steps;
+                rest.push_back({k, crossing});
+                if (plan(b, faces, free & ~(1u << k), rest)) {
+                    steps = std::move(rest);
+                    return true;
                 }
             }
-            for (const Restriction & f : kept) {
-                if (!monotone(f, b, free, k)) return false;
+            return false;
+        }
+
+        /** @brief Whether f is the same along k at the sample points of the box. */
+        bool constant_along(const Restriction & f, const Box & b, const uint32_t free, const uint32_t k) const {
+            for (Coordinates u : samples(b, free & ~(1u << k))) {
+                u[k] = b.lo[k];
+                const double v = value(f, u);
+                u[k] = b.hi[k];
+                if (value(f, u) != v) return false;
             }
-            steps.push_back({k, kept});
-            std::vector<Restriction> faces;
-            for (const Restriction & f : kept) {
-                for (const double s : {b.lo[k], b.hi[k]}) {
-                    Restriction g = f;
-                    g.fixed |= 1u << k;
-                    g.value[k] = s;
-                    faces.push_back(g);
-                }
-            }
-            return plan(b, faces, free & ~(1u << k), steps);
+            return true;
         }
 
         /** @brief Roots of f along coordinate k of u in [a, b], to round-off. */
@@ -329,18 +376,54 @@ class Saye {
 
 } // namespace
 
-Map simplex_map(const overlap::Simplex & s) {
-    const double scale = overlap::volume(s) * (N == 2 ? 2.0 : 6.0);
-    return [s, scale](const Coordinates & u, Vec & x) {
-        std::array<double, N_DIM> xi;
-        xi[0] = u[0];
-        xi[1] = u[1] * (1.0 - u[0]);
-        if constexpr (N == 3) xi[2] = u[2] * (1.0 - u[0]) * (1.0 - u[1]);
-        const overlap::Point y = overlap::map(s, xi);
+Map box_map(const std::array<Vec, 1u << N_DIM> & corners) {
+    return [corners](const Coordinates & u, Vec & x) {
+        double jacobian[N][N] = {};
         x = {0.0, 0.0, 0.0};
-        for (uint32_t d = 0; d < N; d++) x[d] = y[d];
-        return N == 2 ? scale * (1.0 - u[0]) : scale * (1.0 - u[0]) * (1.0 - u[0]) * (1.0 - u[1]);
+        for (uint32_t b = 0; b < (1u << N); b++) {
+            double w = 1.0, dw[N];
+            for (uint32_t k = 0; k < N; k++) dw[k] = 1.0;
+            for (uint32_t k = 0; k < N; k++) {
+                const bool set = b & (1u << k);
+                const double f = set ? u[k] : 1.0 - u[k];
+                w *= f;
+                for (uint32_t l = 0; l < N; l++) dw[l] *= l == k ? (set ? 1.0 : -1.0) : f;
+            }
+            for (uint32_t d = 0; d < N; d++) {
+                x[d] += w * corners[b][d];
+                for (uint32_t k = 0; k < N; k++) jacobian[d][k] += dw[k] * corners[b][d];
+            }
+        }
+        if constexpr (N == 2) return jacobian[0][0] * jacobian[1][1] - jacobian[0][1] * jacobian[1][0];
+        return jacobian[0][0] * (jacobian[1][1] * jacobian[2][2] - jacobian[1][2] * jacobian[2][1]) -
+               jacobian[0][1] * (jacobian[1][0] * jacobian[2][2] - jacobian[1][2] * jacobian[2][0]) +
+               jacobian[0][2] * (jacobian[1][0] * jacobian[2][1] - jacobian[1][1] * jacobian[2][0]);
     };
+}
+
+std::vector<Map> simplex_maps(const overlap::Simplex & s) {
+    std::vector<Map> maps;
+    for (uint32_t i = 0; i <= N; i++) {
+        // Corner b of the unit box: the centroid of vertex i and the others whose bits b sets
+        std::array<Vec, 1u << N> corners;
+        for (uint32_t b = 0; b < (1u << N); b++) {
+            Vec x{0.0, 0.0, 0.0};
+            uint32_t n = 0;
+            for (uint32_t k = 0, j = 0; j <= N; j++) {
+                if (j == i) continue;
+                if (b & (1u << k)) {
+                    for (uint32_t d = 0; d < N; d++) x[d] += s[j][d];
+                    n++;
+                }
+                k++;
+            }
+            for (uint32_t d = 0; d < N; d++) x[d] = (x[d] + s[i][d]) / double(n + 1);
+            corners[b] = x;
+        }
+        const Map map = box_map(corners);
+        maps.push_back([map](const Coordinates & u, Vec & x) { return std::fabs(map(u, x)); });
+    }
+    return maps;
 }
 
 void integrate(const Map & map, const Level & level, const bool distance, const std::vector<uint32_t> & points,
@@ -364,7 +447,7 @@ bool fit(std::vector<Point> & points, const std::vector<Point> & reference, cons
             }
         }
     }
-    const size_t n_m = powers.size(), n_p = points.size();
+    const size_t n_m = powers.size();
     auto monomials = [&](const Vec & x, double * m) {
         double y[3];
         for (size_t d = 0; d < 3; d++) y[d] = (x[d] - center[d]) / scale;
@@ -376,6 +459,46 @@ bool fit(std::vector<Point> & points, const std::vector<Point> & reference, cons
             m[i] = v;
         }
     };
+    // The points whose monomials are the most independent, one per monomial (greedy pivoting), with weights
+    // scaled to the total
+    std::vector<Point> chosen;
+    {
+        std::vector<double> r(points.size() * n_m);
+        for (size_t j = 0; j < points.size(); j++) monomials(points[j].x, &r[j * n_m]);
+        std::vector<bool> used(points.size(), false);
+        double first = 0.0;
+        for (size_t i = 0; i < n_m; i++) {
+            size_t best = points.size();
+            double best_norm = 0.0;
+            for (size_t j = 0; j < points.size(); j++) {
+                if (used[j]) continue;
+                double s = 0.0;
+                for (size_t l = 0; l < n_m; l++) s += r[j * n_m + l] * r[j * n_m + l];
+                if (s > best_norm) {
+                    best_norm = s;
+                    best = j;
+                }
+            }
+            if (best == points.size() || (i > 0 && !(best_norm > 1e-24 * first))) break;
+            if (i == 0) first = best_norm;
+            used[best] = true;
+            chosen.push_back(points[best]);
+            const double inv = 1.0 / std::sqrt(best_norm);
+            std::vector<double> q(&r[best * n_m], &r[best * n_m] + n_m);
+            for (double & x : q) x *= inv;
+            for (size_t j = 0; j < points.size(); j++) {
+                if (used[j]) continue;
+                double s = 0.0;
+                for (size_t l = 0; l < n_m; l++) s += q[l] * r[j * n_m + l];
+                for (size_t l = 0; l < n_m; l++) r[j * n_m + l] -= s * q[l];
+            }
+        }
+        double total = 0.0, kept = 0.0;
+        for (const Point & p : points) total += p.w;
+        for (const Point & p : chosen) kept += p.w;
+        for (Point & p : chosen) p.w = kept != 0.0 ? p.w * total / kept : 0.0;
+    }
+    const size_t n_p = chosen.size();
     std::vector<double> target(n_m, 0.0), m(n_m);
     double size = 0.0;
     for (const Point & p : reference) {
@@ -386,8 +509,8 @@ bool fit(std::vector<Point> & points, const std::vector<Point> & reference, cons
     // B = A^T (points x monomials), row-major, and the residual of the current weights
     std::vector<double> B(n_p * n_m), residual = target;
     for (size_t j = 0; j < n_p; j++) {
-        monomials(points[j].x, &B[j * n_m]);
-        for (size_t i = 0; i < n_m; i++) residual[i] -= points[j].w * B[j * n_m + i];
+        monomials(chosen[j].x, &B[j * n_m]);
+        for (size_t i = 0; i < n_m; i++) residual[i] -= chosen[j].w * B[j * n_m + i];
     }
     const std::vector<double> A = B;
     // Householder QR of B with column pivoting: B P = Q R
@@ -450,12 +573,13 @@ bool fit(std::vector<Point> & points, const std::vector<Point> & reference, cons
     }
     std::vector<double> moments(n_m, 0.0);
     for (size_t j = 0; j < n_p; j++) {
-        for (size_t i = 0; i < n_m; i++) moments[i] += (points[j].w + dw[j]) * A[j * n_m + i];
+        for (size_t i = 0; i < n_m; i++) moments[i] += (chosen[j].w + dw[j]) * A[j * n_m + i];
     }
     for (size_t i = 0; i < n_m; i++) {
         if (!(std::fabs(moments[i] - target[i]) <= 1e-13 * size)) return false;
     }
-    for (size_t j = 0; j < n_p; j++) points[j].w += dw[j];
+    for (size_t j = 0; j < n_p; j++) chosen[j].w += dw[j];
+    points = std::move(chosen);
     return true;
 }
 

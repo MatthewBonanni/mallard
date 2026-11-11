@@ -184,7 +184,11 @@ void clip_convex(const CurvePiece & p, const double a, const double b, const std
             for (int i = 1; i <= SAMPLES; i++) {
                 const double s1 = i == SAMPLES ? iv.b : iv.a + (iv.b - iv.a) * i / SAMPLES;
                 const double g1 = g(s1);
-                if ((g0 < -tol && g1 > tol) || (g0 > tol && g1 < -tol)) cuts.push_back(bisect(g, s0, s1));
+                if (std::fabs(g1) <= tol && i < SAMPLES) {
+                    cuts.push_back(s1);
+                } else if ((g0 < -tol && g1 > tol) || (g0 > tol && g1 < -tol)) {
+                    cuts.push_back(bisect(g, s0, s1));
+                }
                 s0 = s1;
                 g0 = g1;
             }
@@ -676,8 +680,37 @@ std::vector<cut_quadrature::Map> cell_maps(const Mesh & mesh, const uint32_t c) 
         }
         return maps;
     }
-    for (const overlap::Simplex & s : overlap::region(overlap::cell_nodes(mesh, c)).simplices) {
-        maps.push_back(cut_quadrature::simplex_map(s));
+    const std::vector<overlap::Point> nodes = overlap::cell_nodes(mesh, c);
+    const overlap::Region region = overlap::region(nodes);
+    if (nodes.size() == (1u << N_DIM) && region.pieces.size() == 1) {
+        // A convex quadrilateral (hexahedron): its own multilinear map, where it keeps one orientation
+        std::array<Vec3, 1u << N_DIM> corners;
+        for (uint32_t b = 0; b < (1u << N_DIM); b++) {
+            constexpr uint32_t ORDER[4] = {0, 1, 3, 2};
+            const overlap::Point & x = nodes[ORDER[b & 3u] + 4 * (b >> 2)];
+            corners[b] = {x[0], x[1], N_DIM == 3 ? x[N_DIM - 1] : 0.0};
+        }
+        const cut_quadrature::Map map = cut_quadrature::box_map(corners);
+        double lo = INF, hi = -INF;
+        for (uint32_t b = 0; b < (1u << N_DIM); b++) {
+            cut_quadrature::Coordinates u;
+            for (size_t k = 0; k < N_DIM; k++) u[k] = (b >> k) & 1u ? 1.0 : 0.0;
+            Vec3 x;
+            const double j = map(u, x);
+            lo = std::min(lo, j);
+            hi = std::max(hi, j);
+        }
+        if (lo > 1e-12 * hi) {
+            maps.push_back(map);
+            return maps;
+        }
+        if (hi < 1e-12 * lo) {
+            maps.push_back([map](const cut_quadrature::Coordinates & u, Vec3 & x) { return -map(u, x); });
+            return maps;
+        }
+    }
+    for (const overlap::Simplex & s : region.simplices) {
+        for (cut_quadrature::Map & map : cut_quadrature::simplex_maps(s)) maps.push_back(std::move(map));
     }
     return maps;
 }

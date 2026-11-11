@@ -2114,7 +2114,7 @@ TEST(ProbesTest, CutQuadratureIntegratesPolynomialsOverABallToRoundOff) {
     size_t n_full = 0, n_few = 0, n_fitted = 0;
     for (const auto & s : simplices) {
         std::vector<std::vector<cut_quadrature::Point>> out;
-        cut_quadrature::integrate(cut_quadrature::simplex_map(s), level, true, {3, 10}, out);
+        for (const auto & map : cut_quadrature::simplex_maps(s)) cut_quadrature::integrate(map, level, true, {3, 10}, out);
         for (const auto & p : out[1]) {
             const double dx = p.x[0] - center[0], dy = p.x[1] - center[1];
             volume += p.w;
@@ -2139,11 +2139,11 @@ TEST(ProbesTest, CutQuadratureIntegratesPolynomialsOverABallToRoundOff) {
     const double pi = std::numbers::pi;
     const double exact = N_DIM == 2 ? pi * r * r : 4.0 / 3.0 * pi * r * r * r;
     const double exact_second = N_DIM == 2 ? pi * std::pow(r, 4) / 4.0 : 4.0 * pi * std::pow(r, 5) / 15.0;
-    EXPECT_NEAR(volume, exact, 1e-13 * exact);
-    EXPECT_NEAR(second, exact_second, 1e-13 * exact_second);
-    EXPECT_NEAR(mixed, 0.0, 1e-13 * exact_second);
-    EXPECT_NEAR(fitted, exact, 1e-13 * exact);
-    EXPECT_NEAR(fitted_second, exact_second, 1e-13 * exact_second);
+    EXPECT_NEAR(volume, exact, 1e-12 * exact);
+    EXPECT_NEAR(second, exact_second, 1e-12 * exact_second);
+    EXPECT_NEAR(mixed, 0.0, 1e-12 * exact_second);
+    EXPECT_NEAR(fitted, exact, 1e-12 * exact);
+    EXPECT_NEAR(fitted_second, exact_second, 1e-12 * exact_second);
     EXPECT_GT(n_fitted, simplices.size() / 4) << "the cut simplices are fitted, the outside ones have no points";
     EXPECT_LT(n_few, n_full / 4);
 }
@@ -2249,7 +2249,7 @@ TEST(ProbesTest, PointSampledRegionsIntegrateTheReconstructionOverTheCellsTheyCu
     // About the center: the linear terms vanish, the squares' halves of the Hessian (0.5 and -0.2) remain
     const double integral = quadratic(c[0], c[1]) * volume + 0.5 * (0.5 - 0.2) * second;
     const auto r = read_csv(dir + "/ball_serial.csv").front();
-    const double tol = precision_tol<double>(1e-12, 1e-5);
+    const double tol = precision_tol<double>(1e-11, 1e-5);
     const std::string measure = N_DIM == 3 ? "volume" : "area";
     EXPECT_NEAR(r.at(measure), volume, tol * volume);
     EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);

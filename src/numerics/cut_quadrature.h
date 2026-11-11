@@ -38,8 +38,19 @@ struct Point {
     double w;
 };
 
-/** @brief A simplex as the image of the unit box by the collapsed map of overlap::simplex_rule. */
-Map simplex_map(const overlap::Simplex & s);
+/**
+ * @brief The multilinear map of the unit box whose corner b (bit k: u_k = 1)
+ *        is corners[b]; it returns the signed determinant of its Jacobian.
+ */
+Map box_map(const std::array<Vec, 1u << N_DIM> & corners);
+
+/**
+ * @brief A simplex as the images of the unit box by N_DIM + 1 multilinear
+ *        maps, one per vertex: onto the quadrilateral (hexahedron) of the
+ *        vertex, the midpoints of its edges, the centroids of its faces and
+ *        the simplex's centroid.
+ */
+std::vector<Map> simplex_maps(const overlap::Simplex & s);
 
 /**
  * @brief Appends to out[i] the quadrature of {u in [0, 1]^N_DIM : level(x(u))
@@ -57,10 +68,11 @@ void integrate(const Map & map, const Level & level, bool distance, const std::v
                std::vector<std::vector<Point>> & out);
 
 /**
- * @brief Refits the weights of points so that they integrate the monomials of
- *        degree <= degree in (x - center) / scale as reference does, changing
- *        them least (in the 2-norm). False, with points unchanged, where no
- *        weights on these points match reference to round-off.
+ * @brief Reduces points to as many as there are monomials of degree <=
+ *        degree in (x - center) / scale, those of them whose monomials are
+ *        the most independent, with the weights that integrate these
+ *        monomials as reference does. False, with points unchanged, where no
+ *        such weights match reference to round-off.
  */
 bool fit(std::vector<Point> & points, const std::vector<Point> & reference, uint32_t degree, const Vec & center,
          double scale);
