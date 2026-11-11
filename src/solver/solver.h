@@ -693,7 +693,9 @@ class Solver {
         void sample_probe_averages();
         /** @brief The named arrays of restart files: averaged spectra and probes (collective). */
         RestartArrays restart_arrays() const;
-        CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives, derived_fields}; }
+        CellSampler cell_sampler() const {
+            return CellSampler{conservatives, species, primitives, derived_fields, hrr, production};
+        }
         /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
         void sample_statistics();
         /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
