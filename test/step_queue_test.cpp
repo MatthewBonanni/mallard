@@ -241,7 +241,7 @@ std::string without_records(std::string text) {
 std::string without_timing(const json::Value & v) {
     static const std::vector<std::string> TIMING = {"wall", "wall_per_step", "cells_per_second", "eta", "progress",
                                                     "memory_host", "memory_host_peak", "memory_device",
-                                                    "memory_device_total", "timing"};
+                                                    "memory_device_total", "timing", "imbalance"};
     std::ostringstream s;
     switch (v.type) {
         case json::Value::Type::NUMBER: {
