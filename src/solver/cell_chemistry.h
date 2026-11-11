@@ -248,6 +248,8 @@ class CellChemistry {
         Kokkos::View<uint64_t *> tally;
         Kokkos::View<float *> previous_cost;  // (cell)
         RepairRecorder clip_recorder;
+        Kokkos::View<double **, Kokkos::LayoutRight> clipped_mass;  // (slot of a launch, species), see ClipSumFunctor
+        Kokkos::View<double *> clip_sum;
         Kokkos::View<rtype *> cell_volume;
         Kokkos::View<uint8_t *> cell_repaired;
         Kokkos::View<uint64_t[2]> counters;  // sub-steps, rejected sub-steps

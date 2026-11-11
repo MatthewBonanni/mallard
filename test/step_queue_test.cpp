@@ -269,39 +269,6 @@ std::string without_timing(const json::Value & v) {
     return "";
 }
 
-json::Value * member(json::Value & v, const std::string & key) {
-    for (size_t i = 0; i < v.names.size(); i++) {
-        if (v.names[i] == key) return &v.members[i];
-    }
-    return nullptr;
-}
-
-/**
- * @brief A progress row without timing, and without the repairs' changes and what derives from them: atomic sums
- *        whose last bits vary between runs (#782).
- */
-std::string comparable_row(json::Value row) {
-    const auto clear = [](json::Value & v, const char * key) {
-        if (json::Value * m = member(v, key)) *m = json::Value{};
-    };
-    if (json::Value * health = member(row, "health")) {
-        for (const char * key : {"repairs", "repairs_run"}) {
-            if (json::Value * sites = member(*health, key)) {
-                for (json::Value & site : sites->members) clear(site, "change");
-            }
-        }
-        for (const char * key : {"balance", "balance_run"}) {
-            if (json::Value * components = member(*health, key)) {
-                for (json::Value & component : components->members) {
-                    for (const char * term : {"repairs", "residual", "relative"}) clear(component, term);
-                }
-            }
-        }
-        clear(*health, "element_drift");
-    }
-    return without_timing(row);
-}
-
 /** @brief What a run shows: its state, step, time and rejections, its files, and its run log's rows and events. */
 struct Outcome {
     std::vector<rtype> U;
@@ -608,7 +575,7 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {
         const json::Value v = json::parse(line);
-        if (v["type"].string == "progress") o.rows.push_back(comparable_row(v));
+        if (v["type"].string == "progress") o.rows.push_back(without_timing(v));
     }
     return o;
 }
