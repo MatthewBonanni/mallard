@@ -42,7 +42,7 @@ statistics once the flow has developed.
 [[probes]]
 name = "outlet"
 point = [0.9, 0.5]
-variables = ["T"]
+fields = ["T"]
 interval = 1
 
 [[triggers]]
@@ -146,7 +146,7 @@ what the run already keeps: a healthy run does nothing more per step, and its re
   | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
   | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
   | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
-  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "robust"`) |
+  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
 
 - **Evidence:** the state of the cell closest to failing and of its face neighbors in the last valid state
   (density, speed, pressure, temperature, local CFL number), their quality metrics, the nearest boundary zone,

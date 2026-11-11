@@ -8,8 +8,11 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <initializer_list>
 #include <iostream>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "check.h"
 #include "comm.h"
@@ -111,12 +114,18 @@ size_t n_of(const CheckReport & r, const std::string & code) {
 }
 
 
+bool environment_only(const CheckReport & r) { return r.input_file.empty() && r.environment.checked; }
+
 void overview(report::Text & text, const CheckReport & r) {
     text.section("Check", r.status());
     text.line(result_line(r));
-    text.line("Input: " + (r.input_file.empty() ? std::string("the input") : r.input_file) +
-              (r.setup_done ? ", set up on " + plural(uint64_t(r.ranks), "rank")
-                            : ": the setup stopped on an error, so the report covers what it got to"));
+    if (environment_only(r)) {
+        text.line("Input: none, so the report covers the environment only (mallard check input.toml adds the case)");
+    } else {
+        text.line("Input: " + (r.input_file.empty() ? std::string("the input") : r.input_file) +
+                  (r.setup_done ? ", set up on " + plural(uint64_t(r.ranks), "rank")
+                                : ": the setup stopped on an error, so the report covers what it got to"));
+    }
     text.line("Units: SI (m, s, kg, K) wherever a column or a value names none; bytes with decimal prefixes "
               "(1 GB = 10^9 B)");
 }
@@ -455,20 +464,147 @@ std::string array_json(const std::vector<T> & list, F && f) {
     return out + "]";
 }
 
+/** @brief A member of a provenance block: a string as it is, a bool as yes or no, null as empty. */
+std::string block_value(const json::Value & block, const std::string & key) {
+    const json::Value * v = block.find(key);
+    if (!v) return "";
+    if (v->type == json::Value::Type::BOOL) return v->boolean ? "yes" : "no";
+    if (v->type == json::Value::Type::NUMBER) return json::number(v->number);
+    return v->string;
+}
+
+std::string version_or(const json::Value & dependencies, const std::string & key, const std::string & none) {
+    const std::string v = block_value(dependencies, key);
+    return v.empty() ? none : v;
+}
+
+std::string gpu_aware_library_text(int answer) {
+    return answer < 0 ? "does not say" : answer ? "reads device memory" : "cannot read device memory";
+}
+
+void environment_section(report::Text & text, const CheckReport & r) {
+    const CheckEnvironment & e = r.environment;
+    const json::Value build = json::parse(e.build), deps = json::parse(e.dependencies);
+    const auto status_of = [&](std::initializer_list<const char *> codes) {
+        Status s = Status::OK;
+        for (const CheckDiagnostic & d : r.diagnostics) {
+            for (const char * code : codes) {
+                if (d.code == code) s = report::worse(s, d.severity);
+            }
+        }
+        return s;
+    };
+    std::string solvers;
+    for (const int d : e.solvers) solvers += (solvers.empty() ? "mallard" : ", mallard") + std::to_string(d) + "d";
+    const bool mpi = block_value(build, "mpi") == "yes";
+    const bool gpu = block_value(build, "backend") != block_value(build, "host_backend");
+    const bool openmp = block_value(build, "host_backend") == "OpenMP";
+    const std::string hdf5 = block_value(deps, "hdf5");
+    std::vector<Row> rows = {
+        {Status::OK,
+         {"Mallard", block_value(build, "dim") + "D, " + block_value(build, "precision") + " precision, " +
+                         block_value(build, "build_type") + ", " + block_value(build, "compiler")}},
+        {Status::OK, {"solvers installed", solvers.empty() ? "none beside this one" : solvers}},
+        {Status::OK,
+         {"Kokkos", block_value(build, "kokkos") + ", " + block_value(build, "backend") + " (host " +
+                        block_value(build, "host_backend") + ")"}},
+        {Status::OK,
+         {"MPI", mpi ? version_or(deps, "mpi", "built") + "; " + plural(uint64_t(e.ranks.size()), "rank") + " on " +
+                           plural(uint64_t(e.hosts), "host") + ", up to " + std::to_string(e.ranks_per_host) +
+                           " per host"
+                     : "not built"}},
+        {status_of({check_code::ENV_GPU_AWARE_MPI, check_code::ENV_HOST_STAGING}),
+         {"GPU-aware MPI", !mpi ? "not built"
+                           : !gpu ? "not needed: the fields are in host memory"
+                           : block_value(build, "gpu_aware_mpi") == "yes"
+                               ? std::string("built; the MPI library ") + gpu_aware_library_text(e.gpu_aware_library) +
+                                     "; " + (e.gpu_aware_used ? "used by this run" : "not used by this run")
+                               : std::string("not built; the MPI library ") + gpu_aware_library_text(e.gpu_aware_library)}},
+        {Status::OK,
+         {"NCCL", block_value(build, "nccl") == "yes"
+                      ? version_or(deps, "nccl", "built") +
+                            (e.nccl_used ? "; halo exchanges use it" : "; halo exchanges do not use it in this run")
+                      : "not built"}},
+        {Status::OK,
+         {"HDF5", hdf5.empty() ? "not built"
+                               : hdf5 + (block_value(build, "hdf5_parallel") == "yes" ? ", parallel" : ", serial")}},
+        {Status::OK, {"CGNS", version_or(deps, "cgns", "not built")}},
+        {Status::OK, {"zlib", version_or(deps, "zlib", "not built")}},
+        {Status::OK, {"KaMinPar", block_value(build, "kaminpar") == "yes" ? "built" : "not built"}},
+        {status_of({check_code::ENV_PLACEMENT, check_code::ENV_THREAD_BINDING}),
+         {"placement", status_of({check_code::ENV_PLACEMENT, check_code::ENV_THREAD_BINDING}) == Status::OK
+                           ? "no problem found"
+                           : std::string("see ") + check_code::ENV_PLACEMENT + " and " + check_code::ENV_THREAD_BINDING}},
+    };
+    Status s = Status::OK;
+    for (const Row & row : rows) s = report::worse(s, row.status);
+    text.section("Environment", s);
+    text.table({"check", "result"}, rows);
+
+    constexpr size_t MAX_RANKS = 16;
+    std::vector<Row> ranks;
+    for (size_t i = 0; i < e.ranks.size() && i < MAX_RANKS; i++) {
+        const binding::Placement & p = e.ranks[i];
+        ranks.push_back({Status::NONE,
+                         {std::to_string(p.rank), p.host, i < e.devices.size() ? e.devices[i] : "",
+                          p.gpu_index < 0 ? "-" : std::to_string(p.gpu_index) + " of " +
+                                                      std::to_string(std::max<size_t>(p.gpus_visible.size(), 1)),
+                          p.cpus.empty() ? "-" : binding::format_cpu_list(p.cpus), std::to_string(p.threads),
+                          !openmp ? "-" : p.omp_bind ? "bound" : "free"}});
+    }
+    text.table({"rank", "host", "device", "GPU", "CPUs", "threads", "binding"}, ranks, false);
+    if (e.ranks.size() > MAX_RANKS) text.note("... and " + plural(e.ranks.size() - MAX_RANKS, "more rank"));
+}
+
+std::string environment_json(const CheckEnvironment & e) {
+    if (!e.checked) return "null";
+    json::Object o;
+    o.raw("build", e.build).raw("dependencies", e.dependencies);
+    o.raw("solvers", array_json(e.solvers, [](int d) { return std::to_string(d); }));
+    o.add("ranks", uint64_t(e.ranks.size())).add("hosts", e.hosts).add("ranks_per_host", e.ranks_per_host);
+    o.raw("gpu_aware_mpi", json::Object()
+                               .raw("library", e.gpu_aware_library < 0 ? "null" : e.gpu_aware_library ? "true" : "false")
+                               .add("used", e.gpu_aware_used)
+                               .str());
+    o.raw("nccl", json::Object().add("used", e.nccl_used).str());
+    std::vector<size_t> index(e.ranks.size());
+    for (size_t i = 0; i < index.size(); i++) index[i] = i;
+    o.raw("placement", array_json(index, [&](size_t i) {
+              const binding::Placement & p = e.ranks[i];
+              const auto known = [](int v) { return v < 0 ? std::string("null") : std::to_string(v); };
+              return json::Object()
+                  .add("rank", p.rank)
+                  .add("host", p.host)
+                  .raw("device", i < e.devices.size() ? json::quote(e.devices[i]) : "null")
+                  .add("threads", p.threads)
+                  .raw("cpus", p.cpus.empty() ? "null" : json::quote(binding::format_cpu_list(p.cpus)))
+                  .add("omp_bind", p.omp_bind)
+                  .raw("gpu", p.gpu.empty() ? "null" : json::quote(p.gpu))
+                  .raw("gpu_index", known(p.gpu_index))
+                  .raw("gpu_numa", known(p.gpu_numa))
+                  .add("gpus_visible", uint64_t(p.gpus_visible.size()))
+                  .str();
+          }));
+    return o.str();
+}
+
 } // namespace
 
 std::string check_text(const CheckReport & r, const bool color) {
     report::Text text(color);
     overview(text, r);
-    input_section(text, r);
-    if (r.setup_done) boundaries_section(text, r);
-    regions_section(text, r);
-    if (r.has_quality) quality_section(text, r);
-    if (r.dt > 0.0) time_step_section(text, r);
-    resolution_section(text, r);
-    if (r.bytes > 0) memory_section(text, r);
-    sizing_section(text, r);
-    if (r.setup_done) cost_section(text, r);
+    if (!environment_only(r)) {
+        input_section(text, r);
+        if (r.setup_done) boundaries_section(text, r);
+        regions_section(text, r);
+        if (r.has_quality) quality_section(text, r);
+        if (r.dt > 0.0) time_step_section(text, r);
+        resolution_section(text, r);
+        if (r.bytes > 0) memory_section(text, r);
+        sizing_section(text, r);
+        if (r.setup_done) cost_section(text, r);
+    }
+    if (r.environment.checked) environment_section(text, r);
     diagnostics_section(text, r);
     text.blank();
     text.line(result_line(r));
@@ -480,7 +616,10 @@ std::string check_json(const CheckReport & r) {
     o.add("version", 1);
     o.add("status", std::string(report::status_name(r.status())));
     o.add("errors", uint64_t(r.errors().size())).add("warnings", uint64_t(r.warnings().size()));
-    o.add("input_file", r.input_file).add("setup_done", r.setup_done).add("dim", N_DIM);
+    o.raw("input_file", r.input_file.empty() ? "null" : json::quote(r.input_file))
+        .add("setup_done", r.setup_done)
+        .add("dim", N_DIM);
+    o.raw("environment", environment_json(r.environment));
     o.raw("diagnostics", array_json(r.diagnostics, [](const CheckDiagnostic & d) {
               return json::Object()
                   .add("severity", std::string(report::status_name(d.severity)))

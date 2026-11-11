@@ -339,7 +339,7 @@ TEST(Stencils, WriteDataWritesTheMeshAndStencilFieldsOfTheCheck) {
     const std::string dir = std::filesystem::path(prefix).parent_path().string();
     const std::string input = box("type = \"TENO\"\norder = 3\n",
                                   "[[write_data]]\nprefix = \"" + dir + "/run\"\nformat = \"vtkhdf\"\ninterval = 1\n"
-                                  "variables = [\"NON_ORTHOGONALITY\", \"STENCIL_SIZE\", \"STENCIL_WALL\"]\n");
+                                  "fields = [\"NON_ORTHOGONALITY\", \"STENCIL_SIZE\", \"STENCIL_WALL\"]\n");
     const CheckReport r = check_fields(input, {}, prefix);
     ASSERT_TRUE(r.ok()) << r.errors().front();
     Solver solver;

@@ -310,7 +310,7 @@ Cause numerics(const Evidence & e) {
         c.evidence.push_back("the MUSCL limiter was active in " + logging::count(e.n_limited) + " of the invalid cells");
     }
     if (c.evidence.empty()) c.evidence.push_back("no specific cause stands out; a more dissipative scheme often helps");
-    c.fix = "a more dissipative scheme: numerics.preset = \"robust\"" +
+    c.fix = "a more dissipative scheme: numerics.preset = \"second_order\" (or \"first_order\")" +
             std::string(e.teno ? ", or bound_preserving = true for TENO" : "");
     return c;
 }

@@ -74,25 +74,25 @@ std::string reference_case(const std::string & dir) {
     const std::map<std::string, std::string> geometry = {
         {"points", "type = \"points\"\npoints = [" + numbers3("0.21", "0.33", "0.17") + ", " +
                        numbers3("0.67", "0.52", "0.41") + ", " + numbers3("0.45", "0.71", "0.29") +
-                       "]\nvariables = [\"RHO\", \"U\", \"P\", \"T\", \"H\"]\n"},
+                       "]\nfields = [\"RHO\", \"U\", \"P\", \"T\", \"H\"]\n"},
         {"line", "start = " + numbers3("0.07", "0.11", "0.11") + "\nend = " + numbers3("0.92", "0.66", "0.47") +
-                     "\nn_points = 17\nvariables = [\"RHO\", \"U\", \"P\"]\n"},
+                     "\nn_points = 17\nfields = [\"RHO\", \"U\", \"P\"]\n"},
         {"circle", "type = \"circle\"\ncenter = " + numbers3("0.48", "0.41", "0.3") +
                        "\nradius = 0.23\nn_points = 19\n" + (N_DIM == 3 ? "normal = [0.0, 0.0, 1.0]\n" : "") +
-                       (N_DIM == 2 ? "variables = [\"P\", \"MASS_FLUX\"]\n" : "variables = [\"P\", \"U\"]\n")},
+                       (N_DIM == 2 ? "fields = [\"P\", \"MASS_FLUX\"]\n" : "fields = [\"P\", \"U\"]\n")},
         {"cut", "type = \"cut_plane\"\npoint = " + numbers3("0.47", "0.39", "0.3") + "\nnormal = " +
-                    numbers3("1.0", "0.7", "0.3") + "\nvariables = [\"RHO\", \"P\", \"MASS_FLUX\"]\n"},
-        {"walls", "boundary_type = \"wall\"\nvariables = [\"P\", \"T\", \"CP\", \"CF\", \"TAU_W\", \"Q_W\", \"U_TAU\", "
+                    numbers3("1.0", "0.7", "0.3") + "\nfields = [\"RHO\", \"P\", \"MASS_FLUX\"]\n"},
+        {"walls", "boundary_type = \"wall\"\nfields = [\"P\", \"T\", \"CP\", \"CF\", \"TAU_W\", \"Q_W\", \"U_TAU\", "
                   "\"Y_PLUS\"]\nreference = {rho = 1.0, u = " + numbers3("0.3", "0.0", "0.0") + ", p = 1.0}\n"},
-        {"open", "boundary = [\"left\", \"right\"]\nvariables = [\"P\", \"MASS_FLUX\", \"MOMENTUM_FLUX\", "
+        {"open", "boundary = [\"left\", \"right\"]\nfields = [\"P\", \"MASS_FLUX\", \"MOMENTUM_FLUX\", "
                  "\"ENTHALPY_FLUX\"]\n"},
         {"means", "start = " + numbers3("0.13", "0.07", "0.21") + "\nend = " + numbers3("0.88", "0.71", "0.39") +
-                      "\nn_points = 11\nvariables = [\"MEAN_P\", \"COV_U_X_U_X\"]\n"},
-        {"averaged", "boundary_type = \"wall\"\naverage = true\nvariables = [\"P\", \"CF\", \"TAU_W\", \"Q_W\"]\n"
+                      "\nn_points = 11\nfields = [\"MEAN_P\", \"COV_U_X_U_X\"]\n"},
+        {"averaged", "boundary_type = \"wall\"\naverage = true\nfields = [\"P\", \"CF\", \"TAU_W\", \"Q_W\"]\n"
                      "reference = {rho = 1.0, u = " + numbers3("0.3", "0.0", "0.0") + ", p = 1.0}\n"},
         {"sphere", "region = {type = \"sphere\", center = [0.5, 0.4, 0.3], radius = 0.2, filled = false}\n"
                    "n_points = [6, 12]\n"
-                   "variables = [\"RHO\", \"P\", \"MASS_FLUX\"]\n"},
+                   "fields = [\"RHO\", \"P\", \"MASS_FLUX\"]\n"},
     };
     for (const auto & name : PROBES) {
         s << "[[probes]]\nname = \"" << name << "\"\nfile = \"" << dir << "/" << name << ".csv\"\nreductions_file = \""
@@ -101,10 +101,10 @@ std::string reference_case(const std::string & dir) {
     }
     s << "[[probes]]\nname = \"fluxes\"\nboundary = [\"left\", \"right\", \"bottom\", \"top\"]\nfile = \"" << dir
       << "/fluxes.csv\"\nreductions_file = \"" << dir << "/fluxes_reductions.csv\"\nsampling = \"point\"\ninterval = 3\n"
-      << "variables = [\"ENERGY_DIFFUSIVE_FLUX\", \"ENERGY_TOTAL_FLUX\", \"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\n"
+      << "fields = [\"ENERGY_DIFFUSIVE_FLUX\", \"ENERGY_TOTAL_FLUX\", \"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\n"
       << "reductions = [\"integral\", \"moment\"]\nmoment_center = " << numbers3("0.4", "0.3", "0.2") << "\n";
     s << "[[probes]]\nname = \"ball\"\nreductions_file = \"" << dir << "/ball_reductions.csv\"\ninterval = 3\n"
-      << EVERY_REDUCTION << "variables = [\"RHO\", \"U\", \"P\", \"T\"]\nregion = {type = \"sphere\", center = "
+      << EVERY_REDUCTION << "fields = [\"RHO\", \"U\", \"P\", \"T\"]\nregion = {type = \"sphere\", center = "
       << numbers3("0.45", "0.35", "0.3") << ", radius = 0.3, edge = 0.1}\n";
     return s.str();
 }

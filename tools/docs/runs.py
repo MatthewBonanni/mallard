@@ -149,7 +149,7 @@ def sod_data(args):
         text += f"""
 [[probes]]
 name = "line"
-variables = ["RHO"]
+fields = ["RHO"]
 start = [{0.5 / nx}, 0.01]
 end = [{1 - 0.5 / nx}, 0.01]
 n_points = {nx}
@@ -216,7 +216,7 @@ partitioner = "{partitioner}"
 prefix = "{prefix}"
 format = "vtu"
 interval = 1
-variables = ["RHO"]
+fields = ["RHO"]
 {PHYSICS}"""
             run(args.mallard, toml, work, ranks=args.ranks, mpirun=args.mpirun, name=prefix + ".toml")
             cases.append((partitioner, box, [polygons(work / f"{prefix}_000000_p{r:04d}.vtu")[0]
@@ -446,7 +446,7 @@ cfl = 0.5
 prefix = "source"
 format = "vtu"
 interval = 1
-variables = ["RHO"]
+fields = ["RHO"]
 [[write_data]]
 prefix = "source"
 format = "restart"
@@ -470,7 +470,7 @@ degree = 3
 prefix = "target"
 format = "vtu"
 interval = 1
-variables = ["RHO"]
+fields = ["RHO"]
 {PHYSICS}""", work, name="target.toml")
     source, sdata = polygons(work / "source_000000.vtu")
     target, tdata = polygons(work / "target_000000.vtu")

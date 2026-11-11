@@ -200,14 +200,14 @@ void DataWriter::init(const Input & input,
             variables = restart_variables;
         }
     } else {
-        if (!input.contains("variables")) {
-            throw missing_key(input, "write_data.variables", "Add variables = [\"RHO\", \"U\", \"P\"], for example");
+        if (!input.contains("fields")) {
+            throw missing_key(input, "write_data.fields", "Add fields = [\"RHO\", \"U\", \"P\"], for example");
         }
-        variables = find_value<std::vector<std::string>>(input, "variables");
+        variables = find_value<std::vector<std::string>>(input, "fields");
     }
     if (variables.empty()) {
-        throw InputError({.key = "write_data.variables",
-                          .line = line_of(input, "variables"),
+        throw InputError({.key = "write_data.fields",
+                          .line = line_of(input, "fields"),
                           .message = "is empty",
                           .fix = "List the fields to write, e.g. [\"RHO\", \"U\", \"P\"]"});
     }
@@ -215,13 +215,13 @@ void DataWriter::init(const Input & input,
         std::vector<std::string> names;
         for (const auto & data_var : data) names.push_back(data_var.name());
         std::sort(names.begin(), names.end());
-        return InputError({.key = "write_data.variables",
-                           .line = line_of(input, "variables"),
+        return InputError({.key = "write_data.fields",
+                           .line = line_of(input, "fields"),
                            .message = message,
                            .valid = names,
                            .suggestion = suggest_value(var, names),
                            .fix = "Vectors also go by their name without _X, _Y, _Z (e.g. U); a trailing * selects "
-                                  "every variable it starts (e.g. Y_*); mallard list fields input.toml lists them",
+                                  "every field it starts (e.g. Y_*); mallard list fields input.toml lists them",
                            .docs = "docs/guide/output.md#solution-snapshots-write_data"});
     };
     auto find_data = [&](const std::string & name) -> const Data * {
@@ -243,7 +243,7 @@ void DataWriter::init(const Input & input,
             if (data_var.name().rfind(stem, 0) == 0) expanded.push_back(data_var.name());
         }
         if (expanded.size() == n_before) {
-            throw unknown_variable(var, "no variable matches \"" + var + "\"");
+            throw unknown_variable(var, "no field matches \"" + var + "\"");
         }
     }
     variables = expanded;
@@ -260,15 +260,15 @@ void DataWriter::init(const Input & input,
             if (field.components.size() != N_DIM) field.components.clear();
         }
         if (field.components.empty() && var == "Q") {
-            throw InputError({.key = "write_data.variables",
-                              .line = line_of(input, "variables"),
+            throw InputError({.key = "write_data.fields",
+                              .line = line_of(input, "fields"),
                               .message = "Q was renamed to Q_CRITERION in 0.10.0",
                               .suggestion = "Q_CRITERION",
                               .fix = "Write \"Q_CRITERION\" instead of \"Q\"",
                               .docs = "docs/guide/output.md#derived-fields"});
         }
         if (field.components.empty()) {
-            throw unknown_variable(var, "unknown variable \"" + var + "\"");
+            throw unknown_variable(var, "unknown field \"" + var + "\"");
         }
         if (format != DataFormat::RESTART) field.description = field_units::describe(var);
         fields.push_back(field);

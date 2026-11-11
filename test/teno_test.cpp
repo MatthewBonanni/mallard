@@ -52,14 +52,18 @@ std::unique_ptr<TENO> make_teno(std::shared_ptr<Mesh> mesh, const BoundaryData &
     return teno;
 }
 
+// The field along y = 0, on a strip one cell thick
+void strip_conservatives(double x, double, double * U) { smooth_conservatives(x, 0.0, U); }
+
+using Field = void (*)(double, double, double *);
+
 /**
  * @brief Max error of reconstructed face-point conservatives against the exact field.
  */
-double reconstruction_error(const std::string & mesh_type, uint32_t n, int order, const std::string & extra = "",
-                            double margin = 0.0) {
-    auto mesh = make_mesh(mesh_type, n, n);
+double reconstruction_error(std::shared_ptr<Mesh> mesh, int order, const std::string & extra = "", double margin = 0.0,
+                            Field field = smooth_conservatives) {
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
-    auto avg = cell_averages(*mesh, smooth_conservatives);
+    auto avg = cell_averages(*mesh, field);
     Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
     auto h_W = Kokkos::create_mirror_view(W);
@@ -87,7 +91,7 @@ double reconstruction_error(const std::string & mesh_type, uint32_t n, int order
             const double y = double(mesh->h_face_coords(f, 1)) + s * (double(mesh->h_node_coords(b, 1)) - double(mesh->h_node_coords(a, 1)));
             if (x < margin || x > 1.0 - margin || y < margin || y > 1.0 - margin) continue;
             double U[N_CONSERVATIVE];
-            smooth_conservatives(x, y, U);
+            field(x, y, U);
             for (uint8_t side = 0; side < 2; side++) {
                 if (mesh->h_cells_of_face(f, side) < 0) continue;
                 err = std::max(err, std::abs(double(h_face_W(f, q, side, 0)) - U[0]));
@@ -95,6 +99,17 @@ double reconstruction_error(const std::string & mesh_type, uint32_t n, int order
         }
     }
     return err;
+}
+
+double reconstruction_error(const std::string & mesh_type, uint32_t n, int order, const std::string & extra = "",
+                            double margin = 0.0) {
+    return reconstruction_error(make_mesh(mesh_type, n, n), order, extra, margin);
+}
+
+/** @brief Max face-value error on a strip of n square cells, one cell thick, with symmetry walls all around. */
+double strip_error(uint32_t n, int order) {
+    return reconstruction_error(make_mesh("cartesian", n, 1, 1.0_r, 1.0_r / rtype(n)), order, "", 0.0,
+                                strip_conservatives);
 }
 
 using OrderParam = std::tuple<std::string, int>;
@@ -128,6 +143,16 @@ INSTANTIATE_TEST_SUITE_P(TENO, TENOOrder,
 // The rest of the verification manual's matrix: run by tools/docs/verification.py
 INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, TENOOrder,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"), ::testing::Values(6)));
+
+TEST(TENOTest, StripsOneCellThickConvergeAtDesignOrder) {
+    // No neighbors across the strip: the fits take the monomials of x alone (#706)
+    SKIP_IN_SINGLE_PRECISION("the errors on the 64-cell strip are at round-off");
+    for (int order : {5, 6}) {
+        verification::expect_order({"boundaries", "TENO" + std::to_string(order), verification::cells_of("cartesian"),
+                                    "max face-value error, one cell thick", {32, 64},
+                                    {strip_error(32, order), strip_error(64, order)}, double(order), order - 0.4});
+    }
+}
 
 TEST(TENOTest, EigenvectorsAreInverse) {
     const rtype W[N_CONSERVATIVE] = {1.3_r, 0.4_r, -0.7_r, 2.1_r};

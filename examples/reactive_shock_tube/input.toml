@@ -63,4 +63,4 @@ check_interval = 2000
 [[write_data]]
 prefix = "./solut/rst"
 time_interval = 1.0e-5
-variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*"]
+fields = ["RHO", "U_X", "P", "T", "HRR", "Y_*"]

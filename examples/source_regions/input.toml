@@ -90,28 +90,28 @@ check_interval = 100
 
 [[probes]]
 name = "ring"
-variables = ["RHO", "T", "P"]
+fields = ["RHO", "T", "P"]
 region = "ring"
 reductions = ["integral", "mean", "max"]
 interval = 50
 
 [[probes]]
 name = "total"
-variables = ["RHO"]
+fields = ["RHO"]
 region = "domain"
 reductions = ["integral"]
 interval = 50
 
 [[probes]]
 name = "outside"
-variables = ["T"]
+fields = ["T"]
 region = {type = "difference", regions = ["domain", {type = "disk", center = [0.3, 0.5], radius = 0.15}]}
 reductions = ["mean", "max"]
 interval = 50
 
 [[probes]]
 name = "around"
-variables = ["T", "P"]
+fields = ["T", "P"]
 region = {type = "circle", center = [0.3, 0.5], radius = 0.15}
 reductions = ["mean", "max"]
 interval = 50
@@ -119,7 +119,7 @@ interval = 50
 [[write_data]]
 prefix = "solut/sources"
 time_interval = 0.05
-variables = ["RHO", "U", "P", "SOURCE_RHOE", "SOURCE_RHOU_X", "SOURCE_RHOU_Y"]
+fields = ["RHO", "U", "P", "SOURCE_RHOE", "SOURCE_RHOU_X", "SOURCE_RHOU_Y"]
 
 [[triggers]]
 name = "ring_cooled"

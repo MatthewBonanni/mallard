@@ -133,7 +133,9 @@ TEST(ErrorMessages, FacesWithTwoConditionsNameBothEntries) {
 }
 
 TEST(ErrorMessages, MissingTablesAndKeysSayWhatToAdd) {
-    const std::string no_run = replaced(box(), "[run]\nt_stop = 0.5\ncfl = 0.8\n", "");
+    // First order: the default preset would supply [run] cfl
+    const std::string no_run =
+        replaced(box(), "[run]\nt_stop = 0.5\ncfl = 0.8\n", "") + "[numerics.face_reconstruction]\ntype = \"FO\"\n";
     expect_parts(run_error(no_run), {"the [run] table is missing", "cfl = 0.5", "See docs/input.md#run"});
     expect_parts(run_error(box("cfl = 0.8\n")), {"nothing stops the run", "t_stop"});
     expect_parts(run_error(box("t_stop = 0.5\ncfl = 0.8\ndt = 0.1\n")), {"sets both dt and cfl"});
@@ -160,7 +162,7 @@ TEST(ErrorMessages, GeneratedMeshOfTheOtherDimensionNamesTheSolverToRun) {
 TEST(ErrorMessages, OutputThatCannotBeWrittenSaysWhatToCheck) {
     const std::filesystem::path blocker = write_temp("a_file_not_a_directory", "x");
     const std::string input = box() + "[[write_data]]\nprefix = \"" + (blocker / "flow").string() +
-                              "\"\nformat = \"vtu\"\ninterval = 5\nvariables = [\"P\"]\n";
+                              "\"\nformat = \"vtu\"\ninterval = 5\nfields = [\"P\"]\n";
     expect_parts(run_error(input), {"cannot write the output " + (blocker / "flow").string(), "directory exists"});
 }
 

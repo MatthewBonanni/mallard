@@ -54,26 +54,26 @@ run_log = "snapshots.jsonl"
 [[write_data]]
 prefix = "snapshots_vtkhdf"
 format = "vtkhdf"
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 interval = 1
 
 [[write_data]]
 prefix = "snapshots_series"
 format = "vtkhdf"
 series = true
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 interval = 1
 
 [[write_data]]
 prefix = "snapshots_vtu"
 format = "vtu"
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 interval = 1
 
 [[write_data]]
 prefix = "snapshots_xdmf"
 format = "xdmf"
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 interval = 1
 
 [[write_data]]
@@ -87,7 +87,7 @@ type = "line"
 start = [0.1, 0.5]
 end = [0.9, 0.5]
 n_points = 3
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 file = "snapshots_probe.csv"
 
 [[probes]]
@@ -96,7 +96,7 @@ type = "line"
 start = [0.1, 0.5]
 end = [0.9, 0.5]
 n_points = 3
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 format = "hdf5"
 file = "snapshots_probe.h5"
 

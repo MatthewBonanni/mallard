@@ -40,7 +40,15 @@ std::vector<std::string> reconstruction(const std::string & key) {
 
 const std::vector<Preset> & presets() {
     static const std::vector<Preset> list = {
-        {"robust", {
+        {"high_order", {
+            {reconstruction("type"), Input("TENO")},
+            {reconstruction("order"), Input(5)},
+            {{"numerics", "riemann_solver"}, Input("HLLC")},
+            {{"numerics", "convective_flux"}, Input("riemann")},
+            {{"numerics", "time_integrator"}, Input("SSPRK3")},
+            {{"run", "cfl"}, Input(1.0)},
+        }},
+        {"second_order", {
             {reconstruction("type"), Input("MUSCL")},
             {reconstruction("limiter"), Input("venkatakrishnan")},
             {{"numerics", "riemann_solver"}, Input("RHLL")},
@@ -48,13 +56,12 @@ const std::vector<Preset> & presets() {
             {{"numerics", "time_integrator"}, Input("SSPRK3")},
             {{"run", "cfl"}, Input(0.5)},
         }},
-        {"accurate", {
-            {reconstruction("type"), Input("TENO")},
-            {reconstruction("order"), Input(5)},
-            {{"numerics", "riemann_solver"}, Input("HLLC")},
+        {"first_order", {
+            {reconstruction("type"), Input("FO")},
+            {{"numerics", "riemann_solver"}, Input("HLL")},
             {{"numerics", "convective_flux"}, Input("riemann")},
             {{"numerics", "time_integrator"}, Input("SSPRK3")},
-            {{"run", "cfl"}, Input(1.0)},
+            {{"run", "cfl"}, Input(0.5)},
         }},
         {"les", {
             {reconstruction("type"), Input("MUSCL")},
@@ -116,18 +123,26 @@ std::string Resolution::summary(const ResolvedInput & resolved) const {
         const KeyRecord * record = resolved.find(s.key);
         overrides += (overrides.empty() ? "" : ", ") + s.key + " = " + (record ? record->value : "");
     }
-    return overrides.empty() ? name : name + " (the input sets " + overrides + ")";
+    std::string note = is_default ? "the default since 0.10.0, first order before: the input sets no preset and no "
+                                    "[numerics.face_reconstruction]" : "";
+    if (!overrides.empty()) note += (note.empty() ? "" : "; ") + std::string("the input sets ") + overrides;
+    return note.empty() ? name : name + " (" + note + ")";
 }
 
 Resolution apply(Input & input) {
     Resolution resolution;
     const Input * name = lookup(input, {"numerics", "preset"});
-    if (!name) return resolution;
+    if (!name && lookup(input, RECONSTRUCTION)) return resolution;
     std::unordered_map<std::string, const Preset *> by_name;
     for (const auto & preset : presets()) by_name.emplace(preset.name, &preset);
-    if (!name->is_string()) throw InputError(toml::format_error("numerics.preset must be a string", *name, "here"));
-    const auto it = find_option(by_name, "numerics.preset", name->as_string(), line_of(*name));
-    const Preset & preset = *it->second;
+    const Preset * found = by_name.at(DEFAULT);
+    if (name) {
+        if (!name->is_string()) throw InputError(toml::format_error("numerics.preset must be a string", *name, "here"));
+        found = find_option(by_name, "numerics.preset", name->as_string(), line_of(*name))->second;
+    } else {
+        resolution.is_default = true;
+    }
+    const Preset & preset = *found;
     resolution.name = preset.name;
 
     const Input * type = lookup(input, reconstruction("type"));

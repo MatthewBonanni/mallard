@@ -8,9 +8,56 @@ Three ways to install Mallard, quickest first:
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development; options the others lack | CMake |
 
-[Supported platforms](guide/support.md) lists what CI builds and runs: hardware, backends, compilers and MPI.
+Each needs a [supported platform](#supported-platforms): GCC 15, Clang 22 or Apple Clang 21 (Xcode 26.4) or newer, and CMake 4.2 or newer.
 
 Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](guide/cli.md)). Each also installs tab completion for bash, zsh and fish under `share/` ([shell completion](guide/cli.md#shell-completion)).
+
+## Supported platforms
+
+Mallard supports the two newest major releases of GCC and of Clang, the current Xcode, the two newest CUDA minor releases, and the latest ROCm and oneAPI. Supported means tested in CI on every change that lands: each row below names its jobs, and [the support matrix](guide/support.md) says what each one builds and runs. Anything else may work but is not tested, and configuring with a compiler older than the minimum stops with a message that names it.
+
+| Platform | Architecture | Compilers | CMake | GPU toolchain | CI jobs |
+|---|---|---|---|---|---|
+| Ubuntu 26.04 | x86-64 | GCC 15 and 16, Clang 22 and 23 | 4.2 and 4.4 | | `ci.yml/openmp`, `ci.yml/mpi`, `ci.yml/mpi-3d`, `ci.yml/float`, `ci.yml/float-3d`, `ci.yml/serial`, `ci.yml/serial-3d`, `ci.yml/gcc-16`, `ci.yml/clang-22`, `ci.yml/clang-23`, `ci.yml/tutorials`, `ci.yml/fuzz`, `fuzz.yml/fuzz`, `sanitizers.yml/asan-ubsan`, `verification.yml/verification` |
+| Ubuntu 26.04 | arm64 | GCC 15 and 16, Clang 22 and 23 | 4.2 and 4.4 | | `ci.yml/gcc-15-arm64`, `ci.yml/mpi-arm64`, `ci.yml/gcc-16-arm64`, `ci.yml/clang-22-arm64`, `ci.yml/clang-23-arm64` |
+| macOS 26 (Apple silicon) | arm64 | Apple Clang 21 (Xcode 26.4 or newer), Homebrew's GCC 16 | 4.4 | | `ci.yml/macos`, `ci.yml/macos-3d`, `ci.yml/macos-gcc` |
+| RHEL 8 and 9 with Spack (Red Hat's UBI images), as on TOSS 4 and 5 clusters | x86-64 | GCC 15, built by Spack | Spack's | | `ci.yml/ubi8-spack`, `ci.yml/ubi9-spack` |
+| NVIDIA GPUs | x86-64, arm64 (Grace) | GCC 15 (host) | 4.2 | CUDA 13.4 and 13.5 | `ci.yml/cuda-13.4`, `ci.yml/cuda-13.5`, `ci.yml/cuda-13.5-arm64` (compile); A100 runs in GPU CI |
+| AMD GPUs | x86-64 | ROCm's Clang | 4.2 | ROCm 10.1 | `ci.yml/hip` (compile) |
+| Intel GPUs | x86-64 | oneAPI `icpx` | 4.2 | oneAPI 2026.2 | `ci.yml/sycl` (compile) |
+| Containers (`docker/`), Spack on Ubuntu | x86-64, arm64 | GCC 15 | 4.2, 4.4 | CUDA 13.5 | `release.yml/cpu`, `release.yml/cuda`, `release.yml/spack` |
+
+The GPU builds are compiled in CI on every change to device code; only the NVIDIA A100 also runs them ([GPU CI](guide/support.md#builds)). ROCm and oneAPI are tested on x86-64 only.
+
+### If your compiler is too old
+
+- **A cluster**: load a newer compiler module if there is one (`module avail gcc`, then e.g. `module load gcc/15`), or let [Spack](#spack) build one:
+
+  ```sh
+  spack install gcc@15
+  spack install mallard %gcc@15
+  ```
+
+  For a source build with that compiler, `spack load gcc@15` puts it on `PATH`; then configure with `-DCMAKE_CXX_COMPILER=g++`.
+- **Ubuntu 26.04**: `sudo apt-get install g++ cmake` installs GCC 15 and CMake 4.2; `sudo apt-get install clang-22` adds Clang 22 (configure with `-DCMAKE_CXX_COMPILER=clang++-22`).
+- **Debian 13**: its GCC 14 is too old; use Clang 22 and, with `trixie-backports` enabled, the backported CMake: `sudo apt-get install clang-22 libomp-22-dev && sudo apt-get install -t trixie-backports cmake`.
+- **Fedora 44**: `sudo dnf install gcc-c++ cmake` installs GCC 16 and CMake 4.3.
+- **Older Ubuntu or Debian releases**: Clang 22 or 23 from [apt.llvm.org](https://apt.llvm.org), and CMake from `pip install cmake`.
+- **macOS**: install the current Xcode (26.4 or newer, for Apple Clang 21) from the App Store, or Homebrew's GCC: `brew install gcc cmake`, then configure with `-DCMAKE_CXX_COMPILER=g++-16`.
+- **Anywhere with Docker or Apptainer**: the [container images](#container) have Mallard built; `docker/Dockerfile` builds them from a checkout with their own toolchain (`docker build -f docker/Dockerfile -t mallard .`).
+
+A CMake older than 4.2 is replaced the same way (`spack install cmake`, `brew install cmake`, or `pip install cmake`).
+
+### MPI
+
+Mallard calls only the standard MPI C API, found through CMake's `find_package(MPI COMPONENTS CXX)`, with no code specific to an implementation, so vendor MPIs (Cray MPICH, Intel MPI, MVAPICH, HPE MPI, IBM Spectrum MPI) are expected to work; CI tests Ubuntu's Open MPI and the Open MPI that Spack builds in the UBI jobs. Each rank finds its rank within the node from the launcher's environment: Open MPI, MVAPICH, MPICH (and Intel MPI), Slurm, PMI and PALS (HPE Cray). `-DMallard_GPU_AWARE_MPI=ON` needs an MPI built with CUDA or ROCm support, which Mallard does not check at run time; NCCL (`-DMallard_ENABLE_NCCL=ON`) exchanges halos without one.
+
+### Not tested
+
+- macOS on x86-64, and Linux distributions other than Ubuntu 26.04, Debian 13 (the GCC 16 jobs) and RHEL 8 and 9.
+- Compilers older than the minimums above, `nvc++`, and vendor MPIs (Cray MPICH, Intel MPI, MVAPICH, HPE MPI, IBM Spectrum MPI).
+- Real TOSS or HPE Cray systems; the UBI jobs stand in for RHEL-based clusters.
+- GPUs other than the NVIDIA A100, and AMD or Intel GPUs at all (their builds compile only).
 
 ## Container
 
@@ -19,7 +66,7 @@ Each release, from 0.9.1 on, publishes images to the GitHub Container Registry:
 | Image | For |
 |---|---|
 | `ghcr.io/matthewbonanni/mallard` (`:latest`, or a version: `:0.9.1`) | CPUs: OpenMP, MPI with dKaMinPar; x86-64 and ARM (also Apple Silicon) |
-| `ghcr.io/matthewbonanni/mallard:cuda` (or `:0.9.1-cuda`) | NVIDIA GPUs: A100, A40 and RTX 30xx, L40S and RTX 40xx, H100 (driver R525 or newer); MPI with NCCL |
+| `ghcr.io/matthewbonanni/mallard:cuda` (or `:0.9.1-cuda`) | NVIDIA GPUs: A100, A40 and RTX 30xx, L40S and RTX 40xx, H100 (driver R580 or newer); MPI with NCCL |
 
 Both have HDF5, CGNS, zlib and the Python tools, and set `MALLARD_SHARE` to the examples' directory.
 
@@ -58,9 +105,12 @@ On Kubernetes, a `Job` runs a case on one GPU node with its files on a volume, a
 ```sh
 git clone --depth 1 https://github.com/spack/spack.git ~/spack && . ~/spack/share/spack/setup-env.sh
 spack repo add --path spack/spack_repo/mallard https://github.com/MatthewBonanni/mallard.git
-spack install mallard
+spack install gcc@15                  # skip if the system or a module has GCC 15 or newer
+spack install mallard %gcc@15
 spack load mallard
 ```
+
+Spack refuses compilers older than the [minimums](#supported-platforms). `spack install gcc@15` builds GCC 15 with the system's compiler (once, about an hour); a cluster's own compiler module works instead: `module load gcc/15 && spack compiler find`, then `spack install mallard %gcc@15`. `spack compilers` lists the ones Spack knows.
 
 `spack install mallard` builds the latest release, `mallard@0.9.0` an earlier one (0.9.0 or newer), and `mallard@main` the development version. `spack repo add` also takes a local checkout's package repository, `spack repo add mallard/spack/spack_repo/mallard`; `spack repo update mallard` pulls a newer package, with newer releases. The default is OpenMP (C++ threads on macOS), MPI, HDF5, CGNS and zlib, in 2D and 3D, double precision. Other builds name their variants:
 
@@ -85,7 +135,7 @@ For tab completion, add `source <(mallard completion bash)` (or the [zsh or fish
 
 ## From source
 
-Mallard needs a C++20 compiler (GCC 11.4, Clang 16 or newer), CMake 3.22 or newer, and git. It depends on [Kokkos](https://github.com/kokkos/kokkos) (5.x) and [toml11](https://github.com/ToruNiina/toml11), both included in this repository as submodules; CMake fetches yaml-cpp.
+Mallard needs a C++20 compiler (GCC 15, Clang 22 or Apple Clang 21 or newer; [if yours is older](#if-your-compiler-is-too-old)), CMake 4.2 or newer, and git. It depends on [Kokkos](https://github.com/kokkos/kokkos) (5.x) and [toml11](https://github.com/ToruNiina/toml11), both included in this repository as submodules; CMake fetches yaml-cpp.
 
 ```sh
 git clone --recursive https://github.com/MatthewBonanni/mallard.git
@@ -96,7 +146,7 @@ cmake --build build -j
 
 This builds the 2D solver, `build/src/mallard2d`, and `build/src/mallard`, which runs it. Add `-DMallard_DIM=3` (in a separate build directory) for the 3D solver, `mallard3d`; installed to the same prefix, one `mallard` runs both.
 
-With everything (MPI with dKaMinPar, HDF5, CGNS and zlib), on Ubuntu 24.04, in 2D and 3D, installed into `~/mallard` (the CPU container is built this way):
+With everything (MPI with dKaMinPar, HDF5, CGNS and zlib), on Ubuntu 26.04, in 2D and 3D, installed into `~/mallard` (the CPU container is built this way):
 
 ```sh
 sudo apt-get install -y build-essential cmake git libopenmpi-dev openmpi-bin libhdf5-openmpi-dev zlib1g-dev libtbb-dev
@@ -114,7 +164,7 @@ On macOS with Homebrew, `brew install cmake open-mpi hdf5 cgns` and the same loo
 
 Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel; with MPI, `-DMallard_ENABLE_NCCL=ON` for halo exchanges with NCCL). The CUDA container is built this way, for several GPUs at once (`docker/Dockerfile.cuda`). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
 
-For AMD GPUs, build with ROCm's Clang (ROCm 6.2 or newer, with the HIP development headers):
+For AMD GPUs, build with ROCm's Clang (ROCm 10.1, with the HIP development headers):
 
 ```sh
 cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \

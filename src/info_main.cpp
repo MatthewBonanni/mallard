@@ -101,6 +101,18 @@ std::string restart_of_text(const json::Value * r) {
            (id && !id->is_null() ? " (run " + id->string + ")" : " (a run that recorded no run id)");
 }
 
+/** @brief "path, sha256 ..." of an entry of the block's files; a file a run starts from with its step and run. */
+std::string read_file_text(const json::Value & f) {
+    const json::Value * sha = f.find("sha256");
+    std::string out = text(f.find("path"));
+    if (const json::Value * step = f.find("step")) {
+        const json::Value * id = f.find("run_id");
+        out += ", step " + text(step) + (id && !id->is_null() ? " of run " + id->string : "");
+    }
+    if (sha && !sha->is_null()) return out + ", sha256 " + sha->string;
+    return out + ", " + text(f.find("note")) + ", modified " + text(f.find("modified"));
+}
+
 void print_run(const json::Value & p) {
     logging::section("Run", "same for every file of the run");
     std::string mallard = text(at(p, {"mallard", "version"}));
@@ -137,8 +149,13 @@ void print_run(const json::Value & p) {
         if (mesh->find("file")) item("Mesh file", text(mesh->find("file")));
         if (mesh->find("sha256")) item("Mesh sha256", text(mesh->find("sha256")));
     }
+    if (const json::Value * files = p.find("files"); files && files->type == json::Value::Type::ARRAY) {
+        for (const json::Value & f : files->array) item("Read " + text(f.find("kind")), read_file_text(f));
+    }
     if (const json::Value * preset = p.find("preset"); preset && !preset->is_null()) {
-        item("Preset", text(preset->find("name")));
+        const json::Value * is_default = preset->find("default");
+        const bool by_default = is_default && is_default->type == json::Value::Type::BOOL && is_default->boolean;
+        item("Preset", text(preset->find("name")) + (by_default ? " (the default)" : ""));
     }
 }
 

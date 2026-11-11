@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <toml.hpp>
@@ -322,6 +323,23 @@ TEST(InputUpgradeTest, OldBoundaryTypesBecomeTypesWithOptions) {
     EXPECT_TRUE(bare.at("boundaries").at(0).at("nscbc").is_table());
 }
 
+TEST(InputUpgradeTest, OutputQuantitiesAreFieldsInWriteDataAndProbes) {
+    const std::string text = "[[write_data]]\nprefix = \"f\"\nvariables = [\"RHO\"]  # kept\n"
+                             "[[probes]]\nname = \"p\"\nvariables = [\"P\"]\n";
+    Input input = parse_input_string(text);
+    const std::vector<Finding> deprecated = input_upgrade::apply(input);
+    ASSERT_EQ(deprecated.size(), 2u);
+    for (const Finding & f : deprecated) EXPECT_FALSE(f.removed) << f.key;
+    EXPECT_EQ(input.at("write_data").at(0).at("fields").at(0).as_string(), "RHO");
+    EXPECT_EQ(input.at("probes").at(0).at("fields").at(0).as_string(), "P");
+
+    std::vector<Finding> findings;
+    bool reformatted = false;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted),
+              "[[write_data]]\nprefix = \"f\"\nfields = [\"RHO\"]  # kept\n[[probes]]\nname = \"p\"\nfields = [\"P\"]\n");
+    EXPECT_FALSE(reformatted);
+}
+
 // The names deprecated in 0.9.0 are rejected by this source, before its
 // version reaches 0.10.0, with the replacement and the command that rewrites
 // them. Fails if a run reads one again.
@@ -455,5 +473,32 @@ TEST(InputUpgradeTest, MeshPeriodicOnlyTakesTheDirectionsOfAGeneratedMesh) {
         } catch (const InputError & e) {
             EXPECT_NE(std::string(e.what()).find(error), std::string::npos) << e.what();
         }
+    }
+}
+
+TEST(InputUpgradeTest, PresetsNamedForTheirOrderReadTheOldNamesWithAWarning) {
+    for (const auto & [old_name, new_name] : {std::pair{"robust", "second_order"}, {"accurate", "high_order"}}) {
+        Input input = parse_input_string(std::string("[run]\nt_stop = 1.0\n[numerics]\npreset = \"") + old_name + "\"\n");
+        const std::vector<Finding> findings = input_upgrade::apply(input, "0.10.0");
+        ASSERT_EQ(findings.size(), 1u);
+        EXPECT_FALSE(findings[0].removed);
+        EXPECT_EQ(input.at("numerics").at("preset").as_string(), new_name);
+    }
+}
+
+TEST(InputUpgradeTest, AnInputOnTheChangedDefaultGetsANoticeAndNoChange) {
+    const std::string text = "[run]\nt_stop = 1.0\ncfl = 0.5\n\n[numerics]\nriemann_solver = \"Roe\"\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(input_upgrade::upgrade_text(text, findings, reformatted), text);
+    EXPECT_TRUE(findings.empty());
+    const std::vector<std::string> notes = input_upgrade::notices(text);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_NE(notes[0].find("type = \"FO\""), std::string::npos) << notes[0];
+    // A preset, a reconstruction table, or a file that is not a run's input gets none
+    for (const std::string other : {"[run]\nt_stop = 1.0\n[numerics]\npreset = \"les\"\n",
+                                    "[run]\nt_stop = 1.0\n[numerics.face_reconstruction]\nbound_preserving = true\n",
+                                    "[mesh]\ntype = \"cartesian\"\n"}) {
+        EXPECT_TRUE(input_upgrade::notices(other).empty()) << other;
     }
 }
