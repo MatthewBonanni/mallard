@@ -119,6 +119,8 @@ Commands:
     mallard post derive       Derived fields of existing output (MACH, P0,
                               Q_CRITERION, ...), as the run would have written
                               them
+    mallard post average      Means, RMS, Reynolds and Favre covariances over
+                              saved snapshots, as [statistics] keeps them
     mallard post convergence  Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -786,8 +788,8 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard post <command> [options]
 
-Commands on a run's output: probes, integrals, snapshots and derived fields of
-it, and the grid convergence of several runs.
+Commands on a run's output: probes, integrals, snapshots, derived fields and
+averages of it, and the grid convergence of several runs.
 
 Commands:
   mallard post extract        Probes, region integrals and snapshots of existing
@@ -795,6 +797,8 @@ Commands:
   mallard post derive         Derived fields of existing output (MACH, P0,
                               Q_CRITERION, ...), as the run would have written
                               them
+  mallard post average        Means, RMS, Reynolds and Favre covariances over
+                              saved snapshots, as [statistics] keeps them
   mallard post convergence    Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
