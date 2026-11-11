@@ -70,6 +70,7 @@ void allreduce_device(const Kokkos::View<T *> & values, const Op op, [[maybe_unu
         return;
     }
 #endif
+    const HostStaged staged;
     const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
     allreduce(std::span<T>(host.data(), host.extent(0)), op);
     Kokkos::deep_copy(values, host);
@@ -90,6 +91,7 @@ void allgather_device(const Kokkos::View<T *> & values, const Kokkos::View<T *> 
         return;
     }
 #endif
+    const HostStaged staged;
     const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
     const std::vector<T> gathered = allgatherv(std::vector<T>(host.data(), host.data() + host.extent(0)));
     Kokkos::deep_copy(all, Kokkos::View<const T *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(gathered.data(),
@@ -113,6 +115,7 @@ void alltoallv_device(const Kokkos::View<T *> & send, const std::vector<uint64_t
         send_receive_device(out, in);
         return;
     }
+    const HostStaged staged;
     const auto h_send = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), send);
     std::vector<std::vector<T>> out(send_counts.size());
     uint64_t at = 0;
@@ -151,6 +154,7 @@ void allgatherv_device(const Kokkos::View<T *> & values, const Kokkos::View<T *>
         send_receive_device(out, in);
         return;
     }
+    const HostStaged staged;
     const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
     const std::vector<T> gathered = allgatherv(std::vector<T>(host.data(), host.data() + host.extent(0)));
     Kokkos::deep_copy(Kokkos::subview(all, Kokkos::make_pair(size_t(0), gathered.size())),
@@ -186,6 +190,7 @@ void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::De
     cudaStreamWaitEvent(waiter.cuda_stream(), event, 0);
 #else
     (void)waiter;
+    const HostStaged staged;
     done.fence("comm::enqueue_wait");
 #endif
 }

@@ -48,20 +48,20 @@ void cuda_check(const cudaError_t err, const char * what) {
 
 std::string Solver::step_graph_unsupported() const {
 #ifndef KOKKOS_ENABLE_CUDA
-    return "not a CUDA build";
-#else
+    if (!uncaptured_step_graphs) return "not a CUDA build";
+#endif
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
-    if (is_distributed() && !halo.uses_nccl()) return "halo exchanged with MPI";
+    if (is_distributed() && !halo.uses_nccl() && !uncaptured_step_graphs) return "halo exchanged with MPI";
     if (is_mixture()) return "gas mixture";
-    if (les_on) return "LES models (not verified under capture yet)";
     if (boundary_data.char_faces.extent(0) > 0) return "characteristic boundaries";
     if (!inflows.empty()) return "synthetic inflow turbulence";
     return "";
-#endif
 }
 
 void Solver::record_step() {
     const Kokkos::DefaultExecutionSpace exec;
+    // Stage times come from step_scalars from here on, also in calc_dt's boundary updates (LES)
+    recording_step = true;
     Kokkos::deep_copy(exec, Kokkos::subview(step_scalars, Kokkos::make_pair(0, 2)),
                       Kokkos::subview(step_io, Kokkos::make_pair(0, 2)));
     // The run-control requests ride along the time-step reduction
@@ -101,7 +101,6 @@ void Solver::record_step() {
         c(i) = s(STEP_DT) / c(i);
     });
     // take_step
-    recording_step = true;
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func, step_scalars.data() + DT_SCALES);
     recording_step = false;
     halo_current = false;
@@ -137,8 +136,6 @@ void Solver::record_stage_time(const rtype c) {
 const rtype * Solver::step_dt_device() const { return step_scalars.data() + STEP_DT; }
 
 void Solver::graph_step() {
-#ifdef KOKKOS_ENABLE_CUDA
-    const cudaStream_t stream = Kokkos::DefaultExecutionSpace().cuda_stream();
     const bool record = !step_graph_exec && step_scalars.is_allocated();
     if (!step_scalars.is_allocated()) {
         // The first step through record_step runs without capture: it sets up
@@ -147,13 +144,15 @@ void Solver::graph_step() {
         step_scalars = Kokkos::View<rtype *>("step_scalars", N_STEP_SCALARS);
         step_io = Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace>("step_io", N_STEP_IO);
     }
+#ifdef KOKKOS_ENABLE_CUDA
     if (record) {
         Kokkos::fence("step_graph");
+        const cudaStream_t stream = Kokkos::DefaultExecutionSpace().cuda_stream();
         cudaGraph_t graph = nullptr;
         try {
             cuda_check(cudaStreamBeginCapture(stream, cudaStreamCaptureModeRelaxed), "cudaStreamBeginCapture");
             try {
-                record_step();
+                captured_record_step();
             } catch (...) {
                 cudaStreamEndCapture(stream, &graph);
                 throw;
@@ -175,6 +174,7 @@ void Solver::graph_step() {
         }
         cudaGraphDestroy(graph);
     }
+#endif
     step_io(IO_T) = t;
     step_io(IO_T_TARGET) = next_target_time();
     control_contributed = run_control::pending();
@@ -186,11 +186,21 @@ void Solver::graph_step() {
             n_rejected++;
             check_rejections(tries);
         }
+#ifdef KOKKOS_ENABLE_CUDA
         if (step_graph_exec) {
-            cuda_check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec), stream), "cudaGraphLaunch");
+            cuda_check(cudaGraphLaunch(static_cast<cudaGraphExec_t>(step_graph_exec),
+                                       Kokkos::DefaultExecutionSpace().cuda_stream()),
+                       "cudaGraphLaunch");
             graph_steps++;
-        } else {
-            record_step();
+        }
+#endif
+        if (!step_graph_exec) {
+            // Off CUDA every step after the first runs the code a capture would record
+            if (record) {
+                captured_record_step();
+            } else {
+                record_step();
+            }
         }
         Kokkos::DefaultExecutionSpace().fence("step_graph");
         dt_cfl1 = step_io(IO_REDUCED);
@@ -214,7 +224,19 @@ void Solver::graph_step() {
     halo_current = false;
     step++;
     t += dt;
-#endif
+}
+
+void Solver::captured_record_step() {
+    // Kokkos Tools see what a capture records: fences, host copies and allocations there break it
+    Kokkos::Profiling::ProfilingSection section("step_graph_capture");
+    section.start();
+    try {
+        record_step();
+    } catch (...) {
+        section.stop();
+        throw;
+    }
+    section.stop();
 }
 
 void Solver::destroy_step_graph() {

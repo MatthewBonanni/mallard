@@ -382,6 +382,7 @@ class Solver {
         std::string step_graph_unsupported() const;
         void graph_step();
         void record_step();
+        void captured_record_step();
         void destroy_step_graph();
         void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
@@ -450,7 +451,7 @@ class Solver {
         /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
         void update_partially_stirred_reactor();
         /**
-         * @brief Global dynamic procedure: les.C from the Germano identity of the current state, summed over
+         * @brief Global dynamic procedure: les_state(0), the constant, from the Germano identity of the current state, summed over
          *        the domain exactly (fixed point), so the constant is independent of the rank count. The
          *        velocity gradients of the state must be up to date on owned cells.
          */
@@ -493,11 +494,11 @@ class Solver {
          */
         KineticEnergyBudget kinetic_energy_budget();
         /** @brief LES: the model constant in use (the dynamic procedure's latest with les.dynamic). */
-        rtype les_constant() const { return les.C; }
+        rtype les_constant() const { return les_state.is_allocated() ? static_cast<rtype>(les_value(0)) : les.C; }
         /** @brief LES: <L:M> / <M:M> of the latest dynamic procedure, before clipping at zero. */
-        double les_dynamic_ratio() const { return dynamic_ratio; }
+        double les_dynamic_ratio() const { return les_value(1); }
         /** @brief Thickened flame: the efficiency's exponent beta (the dynamic procedure's latest with efficiency = "dynamic"). */
-        double tfles_beta() const { return thickened_flame.beta; }
+        double tfles_beta() const { return les_value(2); }
         bool dynamic_efficiency() const {
             return tfles_on && thickened_flame.efficiency == ThickenedFlame::Efficiency::DYNAMIC;
         }
@@ -530,6 +531,13 @@ class Solver {
          */
         void set_distributed(bool on) { distribute = on; }
         bool is_distributed() const { return distribute && comm::size() > 1; }
+        /**
+         * @brief Off CUDA, takes the steps a CUDA build would graph through the
+         *        graph's step path without capture, so tests check that path's
+         *        captured code on every backend (Kokkos profiling section
+         *        "step_graph_capture"). Call before run().
+         */
+        void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
         double chemistry_cells_sent() const { return comm::allreduce(chem_cells_sent, comm::Op::SUM); }
@@ -720,6 +728,7 @@ class Solver {
         // Step graph (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;
+        bool uncaptured_step_graphs = false;
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
         uint64_t graph_steps = 0;
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced
@@ -942,7 +951,9 @@ class Solver {
         Kokkos::View<double *[2]> dynamic_terms;       // (owned cell, [L:M, M:M] V)
         ExactSums<2> dynamic_sums;                     // of dynamic_terms over the ranks
         Kokkos::View<double *[6]> dynamic_stresses;    // (cell, rho Delta^2 D(g) S^d)
-        double dynamic_ratio = 0.0;
+        Kokkos::View<double *> les_state;  // device: [C, <L:M> / <M:M>, TFLES beta] of the dynamic procedures
+        /** @brief les_state(k), 0 without LES. */
+        double les_value(int k) const;
         KineticEnergyBudget budget;
 
         // Wall-modeled LES (docs/design/wall_model.md)

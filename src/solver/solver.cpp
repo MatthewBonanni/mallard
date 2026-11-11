@@ -3279,8 +3279,8 @@ void Solver::write_integrals() {
         values.insert(values.end(), {double(rates.convective), double(rates.viscous), double(rates.sgs),
                                      double(rates.pressure_work - rates.convective), double(rates.pressure_work)});
     }
-    if (les_on && les.dynamic) values.push_back(double(les.C));
-    if (dynamic_efficiency()) values.push_back(double(thickened_flame.beta));
+    if (les_on && les.dynamic) values.push_back(double(les_constant()));
+    if (dynamic_efficiency()) values.push_back(tfles_beta());
     const auto columns = integral_columns();
     integral_monitor.last = {"integrals", step, double(t), {}};
     for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(columns[i].first, values[i]);

@@ -25,6 +25,7 @@
 #include "comm.h"
 #include "device_comm.h"
 #include "solver.h"
+#include "step_graph_guard.h"
 #include "test_fixtures.h"
 
 /**
@@ -45,10 +46,12 @@ inline std::string with_halo_exchange(const std::string & input, const std::stri
  *        global numbering; every rank compares the gathered distributed
  *        solution with its serial one. NCCL builds exchange halos with NCCL
  *        by default, and also run the input with MPI's exchanges, so both
- *        match the serial run bit for bit.
+ *        match the serial run bit for bit. With uncaptured_step_graphs, off
+ *        CUDA the steps a CUDA build graphs take the graph's step path.
  */
 inline void expect_matches_serial(const std::string & input,
-                                  const std::function<void(const Solver &)> & check_distributed = {}) {
+                                  const std::function<void(const Solver &)> & check_distributed = {},
+                                  const bool uncaptured_step_graphs = false) {
     std::vector<std::string> inputs = {input};
     if (comm::nccl_available() && comm::size() > 1 && input.find("halo_exchange") == std::string::npos) {
         inputs.push_back(with_halo_exchange(input, "mpi"));
@@ -58,6 +61,7 @@ inline void expect_matches_serial(const std::string & input,
         Input distributed_input = parse_toml(text);
         if (!distributed_input["mesh"].contains("cell_order")) distributed_input["mesh"]["cell_order"] = "hilbert";
         auto & distributed = *runs.emplace_back(std::make_unique<Solver>());
+        distributed.set_uncaptured_step_graphs(uncaptured_step_graphs);
         distributed.init(distributed_input);
         distributed.run();
         distributed.copy_device_to_host();
@@ -69,6 +73,7 @@ inline void expect_matches_serial(const std::string & input,
     serial_input["mesh"]["cell_order"] = "input";
     Solver serial;
     serial.set_distributed(false);
+    serial.set_uncaptured_step_graphs(uncaptured_step_graphs);
     serial.init(serial_input);
     serial.run();
     serial.copy_device_to_host();
