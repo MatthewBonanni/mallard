@@ -706,15 +706,6 @@ void CellChemistry::audit(const RepairRecorder & recorder, const Kokkos::View<rt
     counters = Kokkos::View<uint64_t[2]>("chemistry_substeps");
 }
 
-std::array<uint64_t, 2> CellChemistry::substeps() const {
-    std::array<uint64_t, 2> out = {0, 0};
-    if (counters.is_allocated()) {
-        const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), counters);
-        out = {h(0), h(1)};
-    }
-    return out;
-}
-
 void CellChemistry::balance_across_ranks(const double threshold, const bool use_nccl) {
     balance = std::make_shared<ChemistryBalance>(gas.n_species, threshold, use_nccl);
 }

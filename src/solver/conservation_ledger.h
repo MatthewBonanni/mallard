@@ -158,11 +158,15 @@ class ConservationLedger {
         void chemistry_begin(const SpeciesView & rhoY, const Kokkos::View<double *> & species_repairs);
         void chemistry_end(const SpeciesView & rhoY, const Kokkos::View<double *> & species_repairs);
         /**
-         * @brief Largest relative element drift over a chemistry call so far, all ranks; -1 if none
-         *        (collective). With balanced chemistry (cells integrated on other ranks), the drift of
+         * @brief Largest relative element drift over a chemistry call so far, all ranks, from the
+         *        rank's local_drift; -1 if none (collective). With balanced chemistry (cells integrated on other ranks), the drift of
          *        the sum over ranks and calls instead.
          */
-        double element_drift(bool balanced) const;
+        double element_drift(bool balanced, const double * local) const;
+        /** @brief Values of local_drift: the rank's largest per-call drift, its mass and its unexplained changes. */
+        uint32_t n_drift() const { return n_elements > 0 ? 2 + n_elements : 0; }
+        /** @brief Enqueues the rank's drift (n_drift() values) into out on the device. */
+        void local_drift(const Kokkos::View<double *> & out) const;
 
         uint32_t n_components() const { return N + n_elements; }
         const std::vector<std::string> & names() const { return component_names; }

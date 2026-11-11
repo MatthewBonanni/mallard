@@ -55,6 +55,7 @@ void ConservationLedger::init(const std::vector<double> & weights_in, Kokkos::Vi
     stage_sum = Kokkos::View<double *>("ledger_stage", N);
     step_sum = Kokkos::View<double *>("ledger_step", N_TERMS * N);
     run_sum = Kokkos::View<double *>("ledger_run", N_TERMS * N);
+    drift = Kokkos::View<double *>("ledger_element_drift", n_drift());
     started = false;
 }
 
@@ -178,7 +179,6 @@ void ConservationLedger::chemistry_begin(const SpeciesView & rhoY, const Kokkos:
         element_before = Kokkos::View<double *>("ledger_elements_before", n_elements);
         element_after = Kokkos::View<double *>("ledger_elements_after", n_elements);
         repair_before = Kokkos::View<double *>("ledger_repair_before", species_repairs.extent(0));
-        drift = Kokkos::View<double *>("ledger_element_drift", 2 + n_elements);
     }
     Kokkos::parallel_reduce("ledger_elements", Kokkos::RangePolicy<>(0, n_owned),
                             ElementsFunctor{n_elements, rhoY, volume, elements}, element_before);
@@ -208,12 +208,16 @@ void ConservationLedger::chemistry_end(const SpeciesView & rhoY, const Kokkos::V
     });
 }
 
-double ConservationLedger::element_drift(const bool balanced) const {
-    if (drift.extent(0) == 0) return comm::allreduce(-1.0, comm::Op::MAX);
-    const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), drift);
-    if (!balanced) return comm::allreduce(h(0), comm::Op::MAX);
+void ConservationLedger::local_drift(const Kokkos::View<double *> & out) const {
+    if (n_drift() > 0) Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), out, drift);
+}
+
+double ConservationLedger::element_drift(const bool balanced, const double * local) const {
+    // Before the first chemistry call, the rank's mass is not set
+    if (n_drift() == 0 || comm::allreduce(local[1], comm::Op::MAX) == 0.0) return comm::allreduce(-1.0, comm::Op::MAX);
+    if (!balanced) return comm::allreduce(local[0], comm::Op::MAX);
     // Cells integrated on other ranks record their repairs there: only the sums over ranks match
-    std::vector<double> sums(h.data() + 1, h.data() + h.extent(0));
+    std::vector<double> sums(local + 1, local + n_drift());
     comm::allreduce(std::span<double>(sums), comm::Op::SUM);
     double worst = 0.0;
     for (size_t e = 1; e < sums.size(); e++) worst = std::max(worst, std::fabs(sums[e]));

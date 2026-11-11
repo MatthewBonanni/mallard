@@ -269,9 +269,7 @@ struct MixtureDiagnosticsFunctor {
     SpeciesView rhoY;
     Kokkos::View<rtype *> T_seed;
 
-    struct value_type {
-        rtype v[6];
-    };
+    using value_type = step_queue::MixtureDiagnostics;
 
     KOKKOS_INLINE_FUNCTION
     void init(value_type & m) const {
@@ -406,13 +404,11 @@ struct MixtureGeometricSourceFunctor {
 
 } // namespace
 
-std::array<rtype, 6> Solver::mixture_diagnostics() {
-    MixtureDiagnosticsFunctor::value_type result;
+void Solver::mixture_reductions(step_queue::MixtureDiagnostics * out) {
+    using Memory = Kokkos::DefaultExecutionSpace::memory_space;
     Kokkos::parallel_reduce("mixture_diagnostics", mesh->n_owned(),
-                            MixtureDiagnosticsFunctor{mixture, conservatives, species, T_seed}, result);
-    std::array<rtype, 6> m;
-    for (size_t i = 0; i < 6; i++) m[i] = result.v[i];
-    return comm::allreduce(m, comm::Op::MIN);
+                            MixtureDiagnosticsFunctor{mixture, conservatives, species, T_seed},
+                            Kokkos::View<step_queue::MixtureDiagnostics, Memory>(out));
 }
 
 void Solver::update_cell_states(const State & solution, const bool update_seed) {

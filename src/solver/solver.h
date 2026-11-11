@@ -408,9 +408,12 @@ class Solver {
         /** @brief Run-control requests (and the wall time) to the device's next step reductions. */
         void post_requests();
         void count_nonfinite();
-        /** @brief Enqueues a progress row's local values into progress_device and progress_totals. */
+        /** @brief Enqueues a progress row's local values into progress_device and progress_values. */
         void progress_reductions();
         void health_reductions();
+        uint32_t n_progress_values() const;
+        void mixture_reductions(step_queue::MixtureDiagnostics * out);
+        void chemistry_reductions(step_queue::Chemistry * out);
         /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
         void after_step(Kokkos::Timer & step_timer, bool on_device);
         /** @brief Whether the device writes progress rows' local values, which the host reports later. */
@@ -433,8 +436,6 @@ class Solver {
          */
         void freeze_thermodynamics();
         void reset_energy();
-        /** @brief Over owned cells and all ranks: min rho, min p, -max Ma, min T, -max T, -max |sum Y - 1|. */
-        std::array<rtype, 6> mixture_diagnostics();
         /**
          * @brief Gas mixtures: W = [rho, u, p] and the scalars [Y, gamma, e0]
          *        of every cell, with the temperature found by Newton from the
@@ -525,8 +526,6 @@ class Solver {
         /** @brief Inside a captured step: times a chemistry call (the device clock in CUDA builds). */
         void mark_chemistry_time(bool start);
         void update_heat_release_rate();
-        /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
-        std::pair<uint64_t, double> chemistry_statistics();
 
         /**
          * @brief Rates of change of the resolved kinetic energy by the
@@ -712,9 +711,9 @@ class Solver {
         double progress() const;          // Fraction of the run done, by the first stop condition to hit
         void print_setup(const ResolvedInput & resolved) const;
         void print_progress();
-        void print_progress(const step_queue::ProgressLocals & locals, const std::vector<double> & totals);
-        step_queue::ProgressLocals progress_locals(std::vector<double> & totals);
-        void report_health(const step_queue::ProgressLocals & locals, const std::vector<double> & totals);
+        void print_progress(const step_queue::ProgressLocals & locals, const std::vector<double> & values);
+        step_queue::ProgressLocals progress_locals(std::vector<double> & values);
+        void report_health(const step_queue::ProgressLocals & locals, const std::vector<double> & rank_values);
         void print_summary(const RunEnd & end) const;
         /** @brief The run log's end record: how the run ended, its last snapshot and restart, its timings. */
         void write_end_record(const RunEnd & end);
@@ -787,7 +786,8 @@ class Solver {
         Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> step_records;  // pinned: one per queued launch
         std::vector<void *> step_events;       // cudaEvent_t, one per record
         Kokkos::View<step_queue::ProgressLocals> progress_device;
-        Kokkos::View<double *> progress_totals;  // the conservation ledger's local totals
+        Kokkos::View<double *> progress_values;  // run health: ledger totals, element drift, repairs (rank's values)
+        Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> progress_staging;  // (record, value)
 
         // Run control
         bool control_enabled = false;

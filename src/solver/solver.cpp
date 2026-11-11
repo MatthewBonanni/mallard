@@ -2219,9 +2219,10 @@ int Solver::run_loop() {
                 for (auto & writer : data_writers) writer->publish_written();
                 if (record.progress) {
                     Kokkos::Timer check_timer;
-                    const step_queue::ProgressLocals & locals = record.progress_locals;
-                    const uint32_t n_totals = run_health.on ? run_health.ledger.n_totals() : 0;
-                    print_progress(locals, std::vector<double>(locals.totals, locals.totals + n_totals));
+                    const size_t n_totals = progress_staging.extent(1);
+                    const double * const totals =
+                        progress_staging.data() + (record.seq - 1) % step_records.extent(0) * n_totals;
+                    print_progress(record.progress_locals, std::vector<double>(totals, totals + n_totals));
                     t_wall_checks += check_timer.seconds();
                 }
                 publish_status();
@@ -2349,34 +2350,37 @@ void Solver::progress_reductions() {
                                teno ? teno->sigma_threshold : rtype(0), physics};
     Kokkos::parallel_reduce("diagnostics", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor,
                             Kokkos::View<step_queue::Diagnostics, Memory>(&out->diagnostics));
+    if (is_mixture()) mixture_reductions(&out->mixture);
+    if (reacting) chemistry_reductions(&out->chemistry);
     if (run_health.on) health_reductions();
 }
 
-step_queue::ProgressLocals Solver::progress_locals(std::vector<double> & totals) {
+step_queue::ProgressLocals Solver::progress_locals(std::vector<double> & values) {
     progress_reductions();
     step_queue::ProgressLocals locals;
     Kokkos::deep_copy(Kokkos::View<step_queue::ProgressLocals, Kokkos::HostSpace>(&locals), progress_device);
-    totals.assign(progress_totals.extent(0), 0.0);
+    values.assign(progress_values.extent(0), 0.0);
     if (run_health.on) {
-        Kokkos::deep_copy(Kokkos::View<double *, Kokkos::HostSpace>(totals.data(), totals.size()), progress_totals);
+        Kokkos::deep_copy(Kokkos::View<double *, Kokkos::HostSpace>(values.data(), values.size()), progress_values);
     }
     return locals;
 }
 
 void Solver::print_progress() {
-    std::vector<double> totals;
-    const step_queue::ProgressLocals locals = progress_locals(totals);
-    print_progress(locals, totals);
+    std::vector<double> values;
+    const step_queue::ProgressLocals locals = progress_locals(values);
+    print_progress(locals, values);
 }
 
-void Solver::print_progress(const step_queue::ProgressLocals & locals, const std::vector<double> & totals) {
+void Solver::print_progress(const step_queue::ProgressLocals & locals, const std::vector<double> & values) {
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
     const step_queue::Diagnostics & d = locals.diagnostics;
     rtype min_rho = d.min_rho, min_p = d.min_p, max_mach = d.max_mach;
     uint64_t n_troubled = d.n_troubled;
     std::array<rtype, 6> mix = {};  // min rho, min p, -max Ma, min T, -max T, -max |sum Y - 1|
     if (is_mixture()) {
-        mix = mixture_diagnostics();
+        for (size_t i = 0; i < 6; i++) mix[i] = locals.mixture.v[i];
+        mix = comm::allreduce(mix, comm::Op::MIN);
         min_rho = mix[0];
         min_p = mix[1];
         max_mach = -mix[2];
@@ -2424,7 +2428,8 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
                                {{"min_T", double(mix[3])}, {"max_T", double(-mix[4])}, {"max_sum_Y_error", double(-mix[5])}});
     }
     if (reacting) {
-        const auto [active, max_cost] = chemistry_statistics();
+        const uint64_t active = comm::allreduce(locals.chemistry.last_active, comm::Op::SUM);
+        const double max_cost = double(comm::allreduce(locals.chemistry.max_cost, comm::Op::MAX));
         row.reacting = static_cast<double>(active) / static_cast<double>(n_cells_global);
         row.chemistry_steps = max_cost;
         status.monitors.insert(status.monitors.end(),
@@ -2441,7 +2446,7 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
     for (const auto & [name, value] : status.monitors) monitor_values.emplace_back(name, format("%.6g", value));
 
     if (run_health.on) {
-        report_health(locals, totals);
+        report_health(locals, values);
         status.health = run_health.last;
     }
     if (run_log_on) {

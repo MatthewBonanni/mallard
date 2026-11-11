@@ -183,8 +183,9 @@ class CellChemistry {
         void audit(const RepairRecorder & recorder, const Kokkos::View<rtype *> & volume,
                    const Kokkos::View<uint8_t *> & repaired);
 
-        /** @brief Sub-steps and rejected sub-steps of every integration so far on this rank (also of guests). */
-        std::array<uint64_t, 2> substeps() const;
+        /** @brief Sub-steps and rejected sub-steps of every integration so far on this rank (also of guests), on
+         *         the device; allocated by audit. */
+        Kokkos::View<uint64_t[2]> substeps() const { return counters; }
 
         /** @brief Vector lanes per cell thread (1: one thread per cell). */
         uint32_t lanes() const { return n_lanes; }

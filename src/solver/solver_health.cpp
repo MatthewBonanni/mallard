@@ -239,10 +239,16 @@ void Solver::health_reductions() {
                                 Kokkos::View<step_queue::Activity, Memory>(&out->activity));
     }
     const ConservationLedger & ledger = run_health.ledger;
-    if (progress_totals.extent(0) != ledger.n_totals()) {
-        progress_totals = Kokkos::View<double *>("step_progress_totals", ledger.n_totals());
+    if (progress_values.extent(0) != n_progress_values()) {
+        progress_values = Kokkos::View<double *>("step_progress_values", n_progress_values());
     }
-    ledger.local_totals(conservatives, species, progress_totals);
+    const auto part = [&](const size_t first, const size_t n) {
+        return Kokkos::View<double *>(progress_values.data() + first, n);
+    };
+    const uint32_t n_totals = ledger.n_totals(), n_drift = ledger.n_drift();
+    ledger.local_totals(conservatives, species, part(0, n_totals));
+    ledger.local_drift(part(n_totals, n_drift));
+    run_health.repairs.local_values(mesh->n_owned(), part(n_totals + n_drift, run_health.repairs.n_values()));
     if (const Kokkos::View<double *> sums = ledger.run_sums(); sums.is_allocated()) {
         const Kokkos::View<step_queue::ProgressLocals> p = progress_device;
         Kokkos::parallel_for("progress_run_sums", sums.extent(0), KOKKOS_LAMBDA(const size_t i) {
@@ -251,13 +257,18 @@ void Solver::health_reductions() {
     }
 }
 
-void Solver::report_health() {
-    std::vector<double> totals;
-    const step_queue::ProgressLocals locals = progress_locals(totals);
-    report_health(locals, totals);
+uint32_t Solver::n_progress_values() const {
+    if (!run_health.on) return 0;
+    return run_health.ledger.n_totals() + run_health.ledger.n_drift() + run_health.repairs.n_values();
 }
 
-void Solver::report_health(const step_queue::ProgressLocals & locals, const std::vector<double> & totals) {
+void Solver::report_health() {
+    std::vector<double> values;
+    const step_queue::ProgressLocals locals = progress_locals(values);
+    report_health(locals, values);
+}
+
+void Solver::report_health(const step_queue::ProgressLocals & locals, const std::vector<double> & rank_values) {
     health::Report & report = run_health.last;
     report = health::Report{};
     const uint32_t n_owned = mesh->n_owned();
@@ -343,7 +354,7 @@ void Solver::report_health(const step_queue::ProgressLocals & locals, const std:
 
     // Chemistry over the interval
     if (reacting) {
-        const std::array<uint64_t, 2> local_substeps = cell_chemistry.substeps();
+        const std::array<uint64_t, 2> local_substeps = {locals.chemistry.substeps[0], locals.chemistry.substeps[1]};
         const auto substeps = comm::allreduce(local_substeps, comm::Op::SUM);
         const double interval = t_wall_chemistry - run_health.chemistry_wall_last;
         const double wall = comm::allreduce(interval, comm::Op::MAX);
@@ -351,7 +362,7 @@ void Solver::report_health(const step_queue::ProgressLocals & locals, const std:
         report.chemistry = {{"substeps", double(substeps[0] - run_health.substeps_last[0])},
                             {"rejected_substeps", double(substeps[1] - run_health.substeps_last[1])},
                             {"failures", 0.0},
-                            {"reacting_cells", double(comm::allreduce(cell_chemistry.statistics().last_active, comm::Op::SUM)) /
+                            {"reacting_cells", double(comm::allreduce(locals.chemistry.last_active, comm::Op::SUM)) /
                                                    double(std::max<uint64_t>(n_cells_global, 1))},
                             {"wall", wall}};
         report.chemistry.emplace_back("imbalance", mean > 0.0 ? wall / mean : 1.0);
@@ -373,8 +384,9 @@ void Solver::report_health(const step_queue::ProgressLocals & locals, const std:
     run_health.step_last = step;
 
     // Repairs and the ledger
-    run_health.repairs.report(n_owned, report.repairs, report.repairs_run);
     ConservationLedger & ledger = run_health.ledger;
+    const double * const drift = rank_values.data() + ledger.n_totals();
+    run_health.repairs.report(drift + ledger.n_drift(), report.repairs, report.repairs_run);
     std::vector<double> repaired(ledger.n_components(), 0.0);
     for (const auto & r : report.repairs_run) {
         for (const auto & [name, value] : r.change) {
@@ -384,8 +396,9 @@ void Solver::report_health(const step_queue::ProgressLocals & locals, const std:
         }
     }
     const std::vector<double> run_sum(locals.run_sum, locals.run_sum + 2 * N_CONSERVATIVE);
-    ledger.report(totals, run_sum, repaired, report.balance, report.balance_run);
-    report.element_drift = ledger.element_drift(chemistry_load_balance && is_distributed());
+    ledger.report(std::vector<double>(rank_values.begin(), rank_values.begin() + ledger.n_totals()), run_sum, repaired,
+                  report.balance, report.balance_run);
+    report.element_drift = ledger.element_drift(chemistry_load_balance && is_distributed(), drift);
     for (const auto & b : report.balance_run) {
         if (b.checked && std::fabs(b.relative()) > 1e5 * double(std::numeric_limits<rtype>::epsilon())) {
             warn("balance_" + b.name, logging::format("the %s balance has an unexplained relative change of %.2e",

@@ -93,6 +93,19 @@ struct Diagnostics {
     uint64_t n_troubled;
 };
 
+/** @brief A progress row's mixture minima: rho, p, -Mach, T, -T and -|sum Y - 1|. */
+struct MixtureDiagnostics {
+    rtype v[6];
+};
+
+/** @brief A progress row's chemistry: cells of the step's last call that needed it, sub-steps so far (taken and
+ *         rejected) and the largest sub-step count of a cell. */
+struct Chemistry {
+    uint64_t last_active;
+    uint64_t substeps[2];
+    rtype max_cost;
+};
+
 /** @brief Run health: troubled cells, limited cells and the sum of upwind fractions. */
 struct Activity {
     double v[3];
@@ -101,10 +114,11 @@ struct Activity {
 /** @brief Local sums and extrema of a progress row, before the reduction over the ranks. */
 struct ProgressLocals {
     Diagnostics diagnostics;
+    MixtureDiagnostics mixture;
+    Chemistry chemistry;
     Margins margins;
     Activity activity;
-    // The conservation ledger: totals (sum V U, scales) and the run's boundary and source sums
-    double totals[2 * N_CONSERVATIVE];
+    // The conservation ledger's boundary and source sums of the run
     double run_sum[2 * N_CONSERVATIVE];
 };
 

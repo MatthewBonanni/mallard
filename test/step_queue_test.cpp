@@ -484,12 +484,19 @@ struct ExampleOutcome {
     std::vector<rtype> U;
     uint64_t step = 0, rejected = 0, queued = 0;
     rtype t = 0.0;
+    std::vector<std::string> rows;
+    bool rows_on_device = false;
 };
 
 ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     Input input = example_under_preset(c, 7, N_DIM == 3 ? 8 : 16);
     input.as_table()["run"].as_table()["step_queue"] = static_cast<Input::integer_type>(depth);
-    input.as_table()["output"].as_table()["check_interval"] = static_cast<Input::integer_type>(3);
+    const fs::path log = rank_scratch_dir() / ("example_rows_" + std::to_string(depth) + ".jsonl");
+    fs::remove(log);
+    auto & output = input.as_table()["output"].as_table();
+    output["check_interval"] = static_cast<Input::integer_type>(1);
+    output["run_log"] = log.string();
+    ExampleOutcome o;
     const StepGraphGuard guard;
     Solver solver;
     solver.set_uncaptured_step_graphs(depth > 0);
@@ -497,7 +504,6 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     solver.run();
     if (depth > 0) expect_capturable(guard, solver);
     solver.copy_device_to_host();
-    ExampleOutcome o;
     const size_t n_species = solver.h_species.span() > 0 ? solver.h_species.extent(1) : 0;
     for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
         for (uint8_t v = 0; v < N_CONSERVATIVE; v++) o.U.push_back(solver.h_conservatives(i, v));
@@ -507,6 +513,12 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     o.t = solver.get_time();
     o.rejected = solver.get_rejected_steps();
     o.queued = solver.get_queued_steps();
+    o.rows_on_device = solver.progress_on_device();
+    std::ifstream in(log);
+    for (std::string line; std::getline(in, line);) {
+        const json::Value v = json::parse(line);
+        if (v["type"].string == "progress") o.rows.push_back(without_timing(v));
+    }
     return o;
 }
 
@@ -523,7 +535,8 @@ TEST_P(StepQueueExample, EnqueuedStepsMatchTheHostsBitForBit) {
     const ExampleOutcome host = run_example(GetParam(), 0);
     const ExampleOutcome queued = run_example(GetParam(), 3);
     EXPECT_EQ(host.queued, 0u);
-    EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
+    // A progress row every step
+    if (host.rows_on_device) EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
     EXPECT_EQ(queued.step, host.step);
     EXPECT_EQ(queued.t, host.t);
     EXPECT_EQ(queued.rejected, host.rejected);
@@ -531,6 +544,8 @@ TEST_P(StepQueueExample, EnqueuedStepsMatchTheHostsBitForBit) {
     size_t differ = 0;
     for (size_t k = 0; k < host.U.size(); k++) differ += !(queued.U[k] == host.U[k]);
     EXPECT_EQ(differ, 0u);
+    ASSERT_EQ(queued.rows.size(), host.rows.size());
+    for (size_t k = 0; k < host.rows.size(); k++) EXPECT_EQ(queued.rows[k], host.rows[k]) << "row " << k;
 }
 
 INSTANTIATE_TEST_SUITE_P(Examples, StepQueueExample, ::testing::ValuesIn(examples_of_this_build()), example_name);

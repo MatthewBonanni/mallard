@@ -201,9 +201,15 @@ void Solver::subtract_transport_rate(const State & rhs) {
     });
 }
 
-std::pair<uint64_t, double> Solver::chemistry_statistics() {
-    rtype max_cost = 0.0_r;
-    Kokkos::parallel_reduce("chemistry_cost", mesh->n_owned(), MaxCostFunctor{chem_cost}, Kokkos::Max<rtype>(max_cost));
-    return {comm::allreduce(cell_chemistry.statistics().last_active, comm::Op::SUM),
-            static_cast<double>(comm::allreduce(max_cost, comm::Op::MAX))};
+void Solver::chemistry_reductions(step_queue::Chemistry * out) {
+    using Memory = Kokkos::DefaultExecutionSpace::memory_space;
+    Kokkos::parallel_reduce("chemistry_cost", mesh->n_owned(), MaxCostFunctor{chem_cost},
+                            Kokkos::Max<rtype, Memory>(Kokkos::View<rtype, Memory>(&out->max_cost)));
+    const Kokkos::View<uint64_t *> tally = cell_chemistry.tallies();
+    const Kokkos::View<uint64_t[2]> substeps = cell_chemistry.substeps();
+    const bool counted = substeps.is_allocated();
+    Kokkos::parallel_for("chemistry_counts", 1, KOKKOS_LAMBDA(const int) {
+        out->last_active = tally(CellChemistry::LAST_ACTIVE);
+        for (int i = 0; i < 2; i++) out->substeps[i] = counted ? substeps(i) : 0;
+    });
 }

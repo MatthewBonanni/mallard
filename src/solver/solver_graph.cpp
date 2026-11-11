@@ -375,14 +375,16 @@ void Solver::device_step_body() {
     device_if(&step_loop.data()->progress, [&] {
         progress_reductions();
         const Kokkos::View<step_queue::ProgressLocals> p = progress_device;
-        const Kokkos::View<double *> totals = progress_totals;
-        const size_t n_totals = Kokkos::min(totals.extent(0), size_t(2 * N_CONSERVATIVE));
+        const Kokkos::View<double *> values = progress_values;
+        const Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged = progress_staging;
+        const size_t n_values = staged.extent(1);
         Kokkos::parallel_for("step_progress", 1, KOKKOS_LAMBDA(const int) {
             const step_queue::Loop & L = loop();
             if (!L.progress) return;
-            step_queue::Record & record = records((L.seq - 1) % n_records);
+            const uint64_t slot = (L.seq - 1) % n_records;
+            step_queue::Record & record = records(slot);
             record.progress_locals = p();
-            for (size_t i = 0; i < n_totals; i++) record.progress_locals.totals[i] = totals(i);
+            for (size_t i = 0; i < n_values; i++) staged(slot, i) = values(i);
             record.progress = 1;
         });
     });
@@ -494,6 +496,10 @@ void Solver::begin_device_steps() {
     const uint32_t n_records = static_cast<uint32_t>(std::max<uint64_t>(step_queue_depth, 1));
     step_records = Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace>("step_records", n_records);
     if (!progress_device.is_allocated()) progress_device = Kokkos::View<step_queue::ProgressLocals>("step_progress");
+    const uint32_t n_values = n_progress_values();
+    if (progress_values.extent(0) != n_values) progress_values = Kokkos::View<double *>("step_progress_values", n_values);
+    progress_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
+        "step_progress_staging", n_records, n_values);
     n_launched = n_taken = 0;
 #ifdef KOKKOS_ENABLE_CUDA
     for (uint32_t i = 0; i < n_records; i++) {
