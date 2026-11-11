@@ -104,7 +104,10 @@ class StepGraphGuard {
             if (std::strstr(name, "Kokkos Profile Tool Fence")) return;
             record(std::string("fence \"") + name + "\"");
         }
-        static void allocate(const Kokkos::Profiling::SpaceHandle space, const char * label, const void *, uint64_t) {
+        static void allocate(const Kokkos::Profiling::SpaceHandle space, const char * label, const void *,
+                             const uint64_t size) {
+            // Kokkos sizes a team kernel's level-1 scratch at every launch until it is not empty: 0 bytes is no allocation
+            if (size == 0) return;
             record(std::string("allocation \"") + label + "\" in " + space.name);
         }
         static void begin_deep_copy(const Kokkos::Profiling::SpaceHandle dst_space, const char * dst_label, const void *,
