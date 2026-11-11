@@ -673,17 +673,19 @@ void Solver::mark_chemistry_time(const bool start) {
     // A kernel reading the device's clock: event nodes cannot sit under the step's conditional node
     const Kokkos::View<step_queue::Loop> loop = step_loop;
     Kokkos::parallel_for("chemistry_clock", 1, KOKKOS_LAMBDA(const int) {
+        // Captures used in the same order by nvcc's host and device passes, or the kernel's names differ between them
+        step_queue::Loop * const L = loop.data();
+        const bool starts = start;
         KOKKOS_IF_ON_DEVICE((
             uint64_t now;
             asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(now));
-            step_queue::Loop & L = loop();
-            if (start) {
-                L.chemistry_start = now;
+            if (starts) {
+                L->chemistry_start = now;
             } else {
-                L.chemistry_ns += now - L.chemistry_start;
+                L->chemistry_ns += now - L->chemistry_start;
             }
         ))
-        KOKKOS_IF_ON_HOST(((void)start; (void)loop;))
+        KOKKOS_IF_ON_HOST(((void)L; (void)starts;))
     });
 #else
     const comm::HostStaged staged;
