@@ -107,6 +107,12 @@ that adds or changes behavior includes:
 
 1. **Code**, in `src/`, following the style above. New input keys are read through
    `Input` with explicit defaults.
+   Communication between ranks during the run (exchanges, reductions, gathers on
+   the step path) needs an NCCL path on the device stream that the step's CUDA
+   graph can capture (`comm::allreduce_device`, `HaloExchange`), MPI as the
+   fallback in builds without NCCL, and a test comparing the two bit for bit
+   (`expect_matches_serial` runs both); setup, partitioning and I/O collectives
+   are exempt.
 2. **Tests** in `test/` (GoogleTest, registered in
    [test/CMakeLists.txt](test/CMakeLists.txt)). Each test must fail for a plausible
    regression: prefer checks against an exact solution, a design order of

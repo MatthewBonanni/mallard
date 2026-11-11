@@ -50,6 +50,7 @@
 #include "wall_exchange.h"
 #include "expression.h"
 #include "comm.h"
+#include "exact_sums.h"
 #include "distributed_mesh.h"
 #include "distribution.h"
 #include "partition.h"
@@ -315,8 +316,6 @@ class Solver {
         void sum_mass_flow_terms();
         /** @brief domain_volume, as an exact sum. */
         void init_mass_flow_volume();
-        template <typename T>
-        void reduce_mass_flow(Kokkos::View<T *> values, bool max);
         /**
          * @brief At the first stage of each step: the transverse terms of the
          *        characteristic boundaries and their incoming waves, advanced
@@ -860,7 +859,8 @@ class Solver {
         struct AveragePressureOutlet {
             int32_t i_bc;
             Kokkos::View<uint32_t *> faces;   // Faces of owned cells
-            std::vector<uint32_t> sum_order;  // Order of the gathered faces of all ranks by global key
+            Kokkos::View<double *[2]> pA_A;   // Per face: p A, A
+            ExactSums<2> sums;                 // of pA_A over the ranks
             std::shared_ptr<const BoundaryFields> fields;  // the target p, a number or an expression of t (in timed_fields)
         };
         std::vector<AveragePressureOutlet> average_pressure_outlets;

@@ -979,20 +979,9 @@ void Solver::init_boundaries() {
             auto h_faces = Kokkos::create_mirror_view(faces);
             for (size_t i = 0; i < owned.size(); i++) h_faces(i) = owned[i];
             Kokkos::deep_copy(faces, h_faces);
-            // Sum in an order every rank count agrees on: by global cell, then by
-            // the face's position in that cell
-            std::vector<uint64_t> keys;
-            for (uint32_t f : owned) {
-                const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(f, 0));
-                uint32_t k = 0;
-                while (mesh->h_face_of_cell(c, k) != f) k++;
-                keys.push_back(mesh->h_global_cell(c) * 8 + k);  // No cell has 8 faces
-            }
-            if (is_distributed()) keys = comm::allgatherv(keys);
-            std::vector<uint32_t> order(keys.size());
-            std::iota(order.begin(), order.end(), 0u);
-            std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return keys[a] < keys[b]; });
-            average_pressure_outlets.push_back({static_cast<int32_t>(i_bc), faces, std::move(order), fields});
+            average_pressure_outlets.push_back(
+                {static_cast<int32_t>(i_bc), faces, Kokkos::View<double *[2]>("outlet_pA_A", owned.size()),
+                 ExactSums<2>(static_cast<uint32_t>(owned.size()), is_distributed(), halo.uses_nccl()), fields});
         }
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
         std::string details;
@@ -1132,7 +1121,8 @@ void Solver::init_sources(region::Regions & regions) {
     } else {
         fields.R = double(physics.R);
     }
-    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields, regions);
+    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields, regions,
+                                                         is_distributed() && halo.uses_nccl());
     if (!terms->empty()) {
         for (const auto & item : terms->summary()) source_summary.push_back(item);
         source_terms = std::move(terms);
@@ -1215,7 +1205,7 @@ void Solver::sum_mass_flow_terms() {
             m = Kokkos::fmax(m, Kokkos::fabs(terms(c, k)));
         }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(mass_flow_largest.data() + k)));
     }
-    reduce_mass_flow(mass_flow_largest, true);
+    if (is_distributed()) comm::allreduce_device(mass_flow_largest, comm::Op::MAX, halo.uses_nccl());
     const Kokkos::View<double *> largest = mass_flow_largest;
     const double unit = mass_flow_unit;
     for (int k = 0; k < 2; k++) {
@@ -1223,30 +1213,12 @@ void Solver::sum_mass_flow_terms() {
             if (largest(k) > 0.0) sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * (unit / largest(k))));
         }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(mass_flow_sums.data() + k)));
     }
-    reduce_mass_flow(mass_flow_sums, false);
+    if (is_distributed()) comm::allreduce_device(mass_flow_sums, comm::Op::SUM, halo.uses_nccl());
     const Kokkos::View<int64_t *> sums = mass_flow_sums;
     const Kokkos::View<double *> totals = mass_flow_totals;
     Kokkos::parallel_for("mass_flow_totals", 1, KOKKOS_LAMBDA(const int) {
         for (int k = 0; k < 2; k++) totals(k) = largest(k) > 0.0 ? static_cast<double>(sums(k)) / (unit / largest(k)) : 0.0;
     });
-}
-
-template <typename T>
-void Solver::reduce_mass_flow(const Kokkos::View<T *> values, const bool max) {
-    if (!is_distributed()) return;
-    if (recording_step) {
-#ifdef Mallard_HAS_NCCL
-        const ncclDataType_t type = std::is_same_v<T, double> ? ncclDouble : ncclInt64;
-        if (ncclAllReduce(values.data(), values.data(), values.extent(0), type, max ? ncclMax : ncclSum, comm::nccl(),
-                          Kokkos::DefaultExecutionSpace().cuda_stream()) != ncclSuccess) {
-            throw std::runtime_error("NCCL: mass flow reduction failed");
-        }
-        return;
-#endif
-    }
-    const auto host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
-    comm::allreduce(std::span<T>(host.data(), host.extent(0)), max ? comm::Op::MAX : comm::Op::SUM);
-    Kokkos::deep_copy(values, host);
 }
 
 void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
@@ -1299,33 +1271,26 @@ double Solver::get_mass_flow_force() const {
 
 void Solver::update_average_pressure_outlets(StateView solution) {
     const Euler phys = physics;
+    const Kokkos::View<int32_t *[2]> cells_of_face = mesh->cells_of_face;
+    const Kokkos::View<rtype *> face_area = mesh->face_measure;
+    const Kokkos::View<BoundaryCondition *> bcs = boundary_data.bcs;
     for (const auto & outlet : average_pressure_outlets) {
-        Kokkos::View<uint32_t *> faces = outlet.faces;
-        Kokkos::View<int32_t *[2]> cells_of_face = mesh->cells_of_face;
-        Kokkos::View<rtype *> face_area = mesh->face_measure;
-        Kokkos::View<rtype *[2], Kokkos::LayoutRight> pA_A("outlet_pA_A", faces.extent(0));
+        const Kokkos::View<uint32_t *> faces = outlet.faces;
+        const Kokkos::View<double *[2]> pA_A = outlet.pA_A;
         Kokkos::parallel_for("outlet_average_pressure", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
             const uint32_t f = faces(k);
             const int32_t c = cells_of_face(f, 0);
             rtype U[N_CONSERVATIVE], W[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE U[i] = solution(c, i);
             phys.compute_W_from_conservatives(W, U);
-            pA_A(k, 0) = W[N_DIM + 1] * face_area(f);
-            pA_A(k, 1) = face_area(f);
+            pA_A(k, 0) = static_cast<double>(W[N_DIM + 1]) * static_cast<double>(face_area(f));
+            pA_A(k, 1) = static_cast<double>(face_area(f));
         });
-        auto h_pA_A = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), pA_A);
-        std::vector<rtype> local(h_pA_A.data(), h_pA_A.data() + h_pA_A.size());
-        const std::vector<rtype> all = is_distributed() ? comm::allgatherv(local) : local;
-        rtype pA = 0.0, A = 0.0;
-        for (uint32_t k : outlet.sum_order) {
-            pA += all[2 * k];
-            A += all[2 * k + 1];
-        }
-        const Kokkos::View<BoundaryCondition *> bcs = boundary_data.bcs;
+        outlet.sums.sum(pA_A);
+        const Kokkos::View<double *> sums = outlet.sums.sums();
         const int32_t i_bc = outlet.i_bc;
-        const rtype mean = pA / A;
         Kokkos::parallel_for("outlet_average_offset", 1, KOKKOS_LAMBDA(const int) {
-            bcs(i_bc).data[0] = bcs(i_bc).data[N_DIM + 1] - mean;
+            bcs(i_bc).data[0] = bcs(i_bc).data[N_DIM + 1] - static_cast<rtype>(sums(0) / sums(1));
         });
     }
 }

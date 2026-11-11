@@ -15,6 +15,8 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "comm.h"
+
 #ifdef Mallard_HAS_NCCL
 #include <nccl.h>
 #endif
@@ -37,6 +39,15 @@ ncclComm_t nccl();
 /** @brief Destroy the communicator, if any (before MPI_Finalize). */
 void finalize_nccl();
 #endif
+
+/**
+ * @brief Reduce values over the ranks in place, after the work enqueued so far
+ *        on the default execution space: with NCCL on its stream, without
+ *        blocking the host (capturable in a CUDA graph), else through the host
+ *        with MPI. Defined for double, float and int64_t.
+ */
+template <typename T>
+void allreduce_device(const Kokkos::View<T *> & values, Op op, bool use_nccl);
 
 /**
  * @brief Make the work enqueued later on waiter wait for the work enqueued so

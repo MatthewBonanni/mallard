@@ -324,6 +324,44 @@ TEST(MPITest, NavierStokesWithBoundaryConditionsMatchesSerial) {
         25));
 }
 
+TEST(MPITest, OutletAndSourceAveragesMatchSerialWithAndWithoutStepGraphs) {
+    // Average-pressure outlets and sources of domain averages sum over the
+    // ranks in fixed point on the device, with NCCL inside the step's CUDA
+    // graph or with MPI through the host: the same sums in every case
+    const std::string outlet = box_input(
+        "cartesian", "type = \"MUSCL\"\n", NS,
+        bcs("type = \"dirichlet\"\nrho = \"1.0\"\nu = [\"0.3\", \"0.0\"]\np = \"1.0\"\n",
+            "type = \"outlet_pressure\"\naverage = true\np = \"1.0 + 0.05 * sin(20 * t)\"\n",
+            "type = \"wall_adiabatic\"\n", "type = \"outlet_pressure\"\naverage = true\np = 0.95\n"),
+        25);
+    const std::string forcing = box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                          bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",
+                                              "type = \"symmetry\"\n"),
+                                          25) +
+                                "[[sources]]\nrhou = [\"(1 - mean_ke / mean_rho) * rho * u_x\", \"0\"]\n"
+                                "rhoE = \"(1 - mean_ke / mean_rho) * rho * u_x^2\"\n";
+    for (const bool graphs : {true, false}) {
+        for (const std::string & input : {outlet, forcing}) {
+            std::string text = input;
+            text.insert(text.find("[run]\n") + 6, std::string("cuda_graphs = ") + (graphs ? "true" : "false") + "\n");
+            SCOPED_TRACE(text);
+            expect_matches_serial(text, [&](const Solver & s) {
+#ifdef KOKKOS_ENABLE_CUDA
+                const std::string why = s.step_graph_unsupported();
+                if (graphs) {
+                    EXPECT_TRUE(why.empty() || why == "halo exchanged with MPI") << why;
+                    EXPECT_EQ(s.get_graph_steps() > 0, why.empty()) << why;
+                } else {
+                    EXPECT_EQ(s.get_graph_steps(), 0u);
+                }
+#else
+                EXPECT_EQ(s.get_graph_steps(), 0u);
+#endif
+            });
+        }
+    }
+}
+
 TEST(MPITest, IntegralsOfAnUndistributedSolverAreThoseOfItsOwnMesh) {
     // A serial reference on every rank integrates its whole mesh once, not once per rank
     const std::string input = box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,

@@ -76,7 +76,7 @@ Its options: [`mallard check`](guide/cli.md#mallard-check). The report, with an 
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never) |
-| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, average-pressure outlets, characteristic boundaries, sources of domain averages, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
+| `cuda_graphs` | CUDA builds: run each step (time-step reduction, halo exchanges, stages) as one CUDA graph, so the host launches one graph and waits once per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel where the host takes part in the step: gas mixtures, LES models, characteristic boundaries, synthetic inflow turbulence, and halos exchanged with MPI (`[parallel] halo_exchange`); the run log says which |
 
 At least one stop condition is required.
 
@@ -1385,7 +1385,7 @@ Source terms per unit volume (or integrated totals over a region), any number
 of them, added up with `[source]`. Each is evaluated on the device: entries of
 position alone once, entries of `t`, the solution or domain averages at every
 Runge-Kutta stage, in one kernel without host round trips (steps stay CUDA
-graphs, except with domain averages, which need a global sum per stage).
+graphs; domain averages add an exact global sum per stage, on the device).
 
 | Key | Default | Description |
 |---|---|---|
