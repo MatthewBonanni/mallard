@@ -660,7 +660,9 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
         {"MEAN_<A>", "A's", "time average of A", "[statistics] fields with A, or [[probes]] averaging A",
          "write_data, probes"},
         {"SOURCE_<A>", "A's s-1", "source of A, per second", "[[sources]] or [source]", "write_data"},
-        {"SKEWNESS", "dimensionless", "largest face skewness", "mallard check or info --quality", "-"},
+        {"SKEWNESS", "dimensionless", "largest face skewness", "every case", "write_data"},
+        {"DELTA_OVER_ETA", "dimensionless", "cell size over the estimated Kolmogorov length",
+         "mallard check --mesh-fields (resolution estimates)", "-"},
     };
     for (const auto & row : catalog_rows) EXPECT_TRUE(has_row(catalog.out, row)) << row[0] << "\n" << catalog.out;
     EXPECT_TRUE(contains(catalog.out, "MEAN_<A>")) << catalog.out;
