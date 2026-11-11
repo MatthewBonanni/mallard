@@ -28,10 +28,6 @@ namespace stencils {
 
 namespace {
 
-constexpr const char * FORMAT = "mallard-stencils";
-constexpr int VERSION = 1;
-constexpr uint8_t NO_FACE = 255;
-
 /**
  * @brief 2-norm condition number of the least-squares matrix whose
  *        pseudo-inverse P (m slots of nk entries, (s, l)) is: the square root
@@ -425,6 +421,10 @@ std::vector<std::pair<std::string, std::vector<double>>> target_fields(const Tab
 #ifdef Mallard_HAS_HDF5
 
 namespace {
+
+constexpr const char * FORMAT = "mallard-stencils";
+constexpr int VERSION = 1;
+constexpr uint8_t NO_FACE = 255;
 
 /** @brief The rows of one array across the ranks, in rank order: collective, or gathered to rank 0. */
 struct Rows {

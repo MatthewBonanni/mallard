@@ -13,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -31,6 +32,8 @@ namespace {
 
 constexpr double LX = 1.5, LY = 1.0, LZ = 0.75;
 constexpr int NX = 12, NY = 8;
+// The fits round in the build's precision, and the condition number's iterations stop at 1e-10
+const double FIT_TOLERANCE = std::max(1e-9, 100.0 * double(std::numeric_limits<rtype>::epsilon()));
 
 /** @brief A box periodic in x (and z), with a wall at the bottom and a symmetry plane on top. */
 std::string box(const std::string & recon, const std::string & extra = "",
@@ -167,7 +170,7 @@ TEST(Stencils, SecondAndFirstOrderStencilsAreTheFaceNeighbors) {
             EXPECT_EQ(degree[c], muscl ? 1.0 : 0.0);
             // MUSCL: the face fit on cubes of equal sides, ghosts mirrored, weighs every direction alike
             if (muscl) {
-                EXPECT_NEAR(condition[c], 1.0, 1e-9) << "cell " << c;
+                EXPECT_NEAR(condition[c], 1.0, FIT_TOLERANCE) << "cell " << c;
             } else {
                 EXPECT_EQ(condition[c], 0.0);
             }
@@ -212,9 +215,9 @@ TEST(Stencils, MUSCLWeightsDifferentiateLinearFieldsExactly) {
                 }
             }
             for (size_t a = 0; a < N_DIM; a++) {
-                for (size_t b = 0; b < N_DIM; b++) EXPECT_NEAR(J[a][b], a == b ? 1.0 : 0.0, 1e-9) << "cell " << cells[t];
+                for (size_t b = 0; b < N_DIM; b++) EXPECT_NEAR(J[a][b], a == b ? 1.0 : 0.0, FIT_TOLERANCE) << "cell " << cells[t];
             }
-            EXPECT_GE(condition[cells[t]], 1.0 - 1e-9);
+            EXPECT_GE(condition[cells[t]], 1.0 - FIT_TOLERANCE);
             n_vertex_fit += offsets[t + 1] - offsets[t] > 1 + 2 * N_DIM;
         }
         // The outlet's cells take the vertex fit, whose stencils are wider
