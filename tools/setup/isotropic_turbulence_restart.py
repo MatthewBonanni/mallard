@@ -110,17 +110,35 @@ def write_restart(path, fields, t=0.0, step=0):
 
 
 def read_restart(path):
-    """(fields by name, t, step) of a version-2 double-precision restart file."""
+    """(fields by name, t, step) of an uncompressed double-precision restart file, versions 2-7."""
     with open(path, "rb") as f:
         if f.read(16) != b"MALLARD-RESTART\0":
             raise SystemExit(f"{path}: not a Mallard restart file")
         version, real_size, n_cells, n_vars, step, t = struct.unpack("<IIQQQd", f.read(40))
-        if version != 2 or real_size != 8:
-            raise SystemExit(f"{path}: expected a double-precision restart file of version 2")
-        names = []
-        for _ in range(n_vars):
+        if not 2 <= version <= 7 or real_size != 8:
+            raise SystemExit(f"{path}: expected a double-precision restart file of version 2-7")
+
+        def name():
             (length,) = struct.unpack("<I", f.read(4))
-            names.append(f.read(length).decode())
+            return f.read(length).decode()
+        names = [name() for _ in range(n_vars)]
+        if version >= 3:
+            (n_attributes,) = struct.unpack("<Q", f.read(8))
+            for _ in range(n_attributes):
+                name()
+                f.read(8)
+        if version >= 4:
+            f.read(12)  # face count and values per face
+        if version >= 5:
+            _, chunk_cells = struct.unpack("<IQ", f.read(12))
+            if chunk_cells > 0:
+                raise SystemExit(f"{path}: compressed restart files are not supported (write with compression = \"none\")")
+        if version >= 6:
+            (n_arrays,) = struct.unpack("<Q", f.read(8))
+            for _ in range(n_arrays):
+                name()
+                (n,) = struct.unpack("<Q", f.read(8))
+                f.read(8 * n)
         data = np.fromfile(f, dtype="<f8", count=n_cells * n_vars).reshape(n_vars, n_cells)
     return dict(zip(names, data)), t, step
 
