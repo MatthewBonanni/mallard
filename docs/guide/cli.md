@@ -116,6 +116,9 @@ Commands:
   Post
     mallard post extract      Probes, region integrals and snapshots of existing
                               output, as the run would have written them
+    mallard post derive       Derived fields of existing output (MACH, P0,
+                              Q_CRITERION, ...), as the run would have written
+                              them
     mallard post convergence  Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -783,12 +786,15 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard post <command> [options]
 
-Commands on a run's output: probes, integrals and snapshots of it, and the grid
-convergence of several runs.
+Commands on a run's output: probes, integrals, snapshots and derived fields of
+it, and the grid convergence of several runs.
 
 Commands:
   mallard post extract        Probes, region integrals and snapshots of existing
                               output, as the run would have written them
+  mallard post derive         Derived fields of existing output (MACH, P0,
+                              Q_CRITERION, ...), as the run would have written
+                              them
   mallard post convergence    Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
