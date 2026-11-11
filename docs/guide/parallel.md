@@ -64,9 +64,9 @@ In NCCL builds every communication between ranks during the steps goes through N
 - the time step with the run-control requests (stop, checkpoint, commands), and the step error of `[numerics.error_control]`;
 - the sums of average-pressure outlets, sources of domain averages, held mass flow, the dynamic LES constant and the dynamic thickened-flame efficiency;
 - chemistry load balancing (`[chemistry] load_balance`): the gathered loads and the cells sent to other ranks and back; and the chemistry failure count;
-- the count of `check_nan`, and the signal of triggered phase averages (`[statistics.phase]`).
+- the count of `check_nan`, the signal of triggered phase averages (`[statistics.phase]`), and the transposes and plane sums of spectra statistics (`[statistics.spectra]`).
 
-Sums that feed the solution are exact in fixed point, so NCCL, MPI and serial runs agree bit for bit. Setup, partitioning, output (probes, monitors, snapshots, restarts, progress and health reports) and run control between steps (triggers, control files) communicate with MPI, as do the transposes of spectra statistics (`[statistics.spectra]`).
+Sums that feed the solution are exact in fixed point, so NCCL, MPI and serial runs agree bit for bit. Setup, partitioning, output (probes, monitors, snapshots, restarts, progress and health reports) and run control between steps (triggers, control files) communicate with MPI.
 
 Every rank builds the same stencils as a serial run and sums each cell's face fluxes in a fixed order, so the solution is bitwise identical on any number of ranks: after 100 steps of the 2D Riemann problem on 400 × 400 quadrilaterals with fifth-order TENO-E, the restart files of runs on 1 and 3 ranks are byte for byte the same. Sums over the whole domain that are written to output files, such as force monitors, are reduced across ranks and can differ in the last digits.
 

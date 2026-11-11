@@ -13,6 +13,7 @@
 #ifndef DEVICE_COMM_H
 #define DEVICE_COMM_H
 
+#include <cstdint>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -59,6 +60,25 @@ void allreduce_device(const Kokkos::View<T *> & values, Op op, bool use_nccl);
  */
 template <typename T>
 void allgather_device(const Kokkos::View<T *> & values, const Kokkos::View<T *> & all, bool use_nccl);
+
+/**
+ * @brief Send send_counts[q] values of send, in rank order, to each rank q, and
+ *        receive recv_counts[q] values from each into recv, in rank order: with
+ *        NCCL on the default execution space's stream, else through the host
+ *        with MPI. Defined for double and float.
+ */
+template <typename T>
+void alltoallv_device(const Kokkos::View<T *> & send, const std::vector<uint64_t> & send_counts,
+                      const Kokkos::View<T *> & recv, const std::vector<uint64_t> & recv_counts, bool use_nccl);
+
+/**
+ * @brief Gather every rank's values into all, in rank order, counts[q] values
+ *        from rank q: with NCCL on the default execution space's stream, else
+ *        through the host with MPI. Defined for double.
+ */
+template <typename T>
+void allgatherv_device(const Kokkos::View<T *> & values, const Kokkos::View<T *> & all,
+                       const std::vector<uint64_t> & counts, bool use_nccl);
 
 /** @brief A message of device memory to or from another rank. */
 struct DeviceMessage {
