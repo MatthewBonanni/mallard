@@ -424,7 +424,7 @@ TEST(StepQueueTest, OutputsByStep) {
     c.run = "n_steps = 30\ncfl = 0.5\n";
     c.extra = "check_interval = 3\n"
               "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 7\n"
-              "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 5\nvariables = [\"RHO\", \"P\"]\n"
+              "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 5\nfields = [\"RHO\", \"P\"]\n"
               "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 5\n"
               "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 3\n"
               "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n"
@@ -442,7 +442,7 @@ TEST(StepQueueTest, OutputsByTimeAndTStop) {
     c.run = "t_stop = 0.1\ncfl = 0.3\n";
     c.extra = "check_interval = 2\n"
               "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ntime_interval = 0.03\n"
-              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ntime_interval = 0.017\nvariables = [\"RHO\"]\n"
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ntime_interval = 0.017\nfields = [\"RHO\"]\n"
               "point = " + point_of("0.5", "0.5", "0.2") + "\n";
     const Outcome o = expect_queue_invariant("by_time", c);
     EXPECT_EQ(o.t, 0.1_r);
