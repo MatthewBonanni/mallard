@@ -447,7 +447,7 @@ TEST(CliTest, InfoAndDiffSayWhetherProbeValuesArePointValuesOrOfCells) {
           << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n";
     for (const char * sampling : {"cell", "point"}) {
         input << "[[probes]]\nname = \"" << sampling << "\"\nsampling = \"" << sampling << "\"\nformat = \"vtp\"\n"
-              << "file = \"case/" << sampling << ".pvd\"\nvariables = [\"RHO\", \"P\"]\nn_points = 5\n"
+              << "file = \"case/" << sampling << ".pvd\"\nfields = [\"RHO\", \"P\"]\nn_points = 5\n"
               << "start = " << (three ? "[0.1, 0.3, 0.4]" : "[0.1, 0.3]") << "\nend = "
               << (three ? "[0.9, 0.3, 0.4]" : "[0.9, 0.3]") << "\ninterval = 2\n";
     }
