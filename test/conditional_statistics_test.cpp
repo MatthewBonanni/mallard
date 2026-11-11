@@ -292,7 +292,7 @@ TEST(ConditionalStatisticsTest, HeatReleaseOnTemperatureIsTheCellsHeatRelease) {
     // and MEAN_HRR, are those of the rates the run writes
     std::ostringstream s;
     s << "[run]\nn_steps = 1\ndt = 1.0e-8\n[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 4\nLx = 1.0e-3\nLy = 1.0e-3\n";
-    if (N_DIM == 3) s << "Nz = 2\nLz = 1.0e-3\n";
+    if (N_DIM == 3) s << "Nz = 3\nLz = 1.0e-3\n";
     s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n";
     if (N_DIM == 3) s << "[[periodic]]\nzones = [\"back\", \"front\"]\n";
     s << "[initialize]\ntype = \"analytical\"\np = \"101325.0\"\nT = \"1100.0 + 400.0 * sin(pi * x / 1.0e-3)\"\n"

@@ -133,6 +133,9 @@ void ConditionalStatistics::init(const Input & entry, uint32_t index, const std:
         if (bins[v] < 1 || bins[v] > (1 << 16)) throw InputError(key + ".bins: each count must be from 1 to 65536.");
         n_bins[v] = static_cast<uint32_t>(bins[v]);
     }
+    if (uint64_t(n_bins[0]) * n_bins[1] > (uint64_t(1) << 20)) {
+        throw InputError(key + ".bins: at most 1048576 bins in all (1024 x 1024 for two variables).");
+    }
 
     // range = [lo, hi] for one variable, [[lo, hi], [lo, hi]] for two; each in its variable's units
     if (const auto * t = input_detail::table_of(entry)) {
@@ -294,7 +297,7 @@ void ConditionalStatistics::sample_at(const rtype * t_device, const CellSampler 
     const Kokkos::View<double *> big = largest;
     const Kokkos::View<int64_t *> s = sums;
     const double top = std::ldexp(1.0, bits), lo_scale = std::ldexp(1.0, bits + 1);
-    Kokkos::deep_copy(s, int64_t(0));
+    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), s, int64_t(0));
     const uint32_t slots = B * Q * 2;
     // A cell's limbs of quantity q at scale 2^bits / largest(q)
     const auto add = KOKKOS_LAMBDA(const uint32_t c, int64_t * hist) {

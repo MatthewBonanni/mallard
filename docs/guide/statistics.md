@@ -19,7 +19,7 @@ t_start = 40.0
 interval = 10
 ```
 
-*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 2 more.
+*Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les) and 3 more.
 
 `[statistics]` keeps running time averages and covariances per cell, on the
 device, without communication: bitwise the same on any number of ranks, and
@@ -212,6 +212,8 @@ bins = 50
 fields = ["T", "HRR", "Y_OH"]    # their conditional means and variances
 weight = "mass"                  # density-weighted (Favre); default "volume"
 ```
+
+*Used in:* [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
 
 Use these for flame DNS and LES: the PDF of the mixture fraction (Bilger) or
 of the progress variable, joint PDFs of two variables, and the mean and

@@ -1045,7 +1045,7 @@ the same bit for bit on any number of ranks, and every rank holds them.
 | Key | Description |
 |---|---|
 | `on` | One variable (a PDF) or an array of two (a joint PDF): any of the `[statistics]` fields. Required |
-| `bins` | Equal bins of each range: an integer for every variable, or an array of one per variable, 1 to 65536 (default 50) |
+| `bins` | Equal bins of each range: an integer for every variable, or an array of one per variable, 1 to 65536 and at most 1048576 in all (default 50) |
 | `range` | `[low, high]` of the variable (`[[low, high], [low, high]]` for two), in its units; default `[0.0, 1.0]` for `MIXTURE_FRACTION` and `PROGRESS_VARIABLE`, required for other variables. The upper end falls in the last bin |
 | `fields` | Variables whose conditional mean and variance to keep: any of the `[statistics]` fields (default none: the PDF only) |
 | `weight` | `"volume"` (default) or `"mass"`: density-weighted (Favre) PDFs and moments |
