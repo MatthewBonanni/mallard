@@ -1541,7 +1541,7 @@ Regions defined by the solution, `where` and `isosurface` and the booleans and
 boundaries that use them, follow the solution: in `[[sources]]` and
 `[[sponges]]` at every stage, in `[[probes]]` and `[[write_data]]` at every
 write, and in `mallard post extract` on the state of the output it reads. They
-take no transforms, `repeat` or `edge`; averaged probes and probes of `n_points` on isosurfaces,
+take no transforms, `repeat` or `edge`; probes of `n_points` on isosurfaces,
 `[[initialize.regions]]` and `[[initialize.data]]` are errors.
 
 The outermost region may also have `edge`, the width of a smooth edge: the

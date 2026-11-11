@@ -2049,6 +2049,69 @@ TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMe
     comm::barrier();
 }
 
+TEST(ProbesTest, TimeAveragesOfIsosurfacesAreTheirMeanIntegralsOverTheirMeanMeasures) {
+    // A density front carried across the box: the isosurface rho = 1.1, extracted anew at each sample, moves
+    // by more than a cell. The averaging probe's integrals are the time-weighted means of those of the probe
+    // written at every sample, its measure their mean measure, its means the ratio, and its extremes within the
+    // samples'; a restarted run continues the averages bit for bit
+    const std::string dir = fresh_dir("isosurface_average");
+    auto probe = [&](const std::string & name, const std::string & keys) {
+        return "[[probes]]\nname = \"" + name + "\"\nregion = {type = \"isosurface\", field = \"RHO\", value = 1.1}\n"
+               "fields = [\"RHO\", \"P\", \"MASS_FLUX\"]\nsampling = \"point\"\n"
+               "reductions = [\"integral\", \"mean\", \"min\", \"max\"]\nreductions_file = \"" + dir + "/" + name +
+               ".csv\"\n" + keys;
+    };
+    const std::string stats = "[statistics]\ninterval = 1\nt_start = 0.02\n";
+    const std::string probes = stats + probe("every", "") + probe("averaged", "average = true\ninterval = 4\n");
+    const std::string steps = "n_steps = 12\ndt = 0.02\n";
+    const std::string teno = "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n";
+    Solver straight;
+    straight.init(parse_toml(box_case(16, SINE_RHO, teno, probes + "[[write_data]]\nprefix = \"" + dir +
+                                                               "/r\"\nformat = \"restart\"\ninterval = 6\n", steps)));
+    run(straight);
+    const std::string measure = N_DIM == 2 ? "length" : "area";
+    std::vector<std::map<std::string, double>> averaged;
+    if (comm::is_root()) {
+        expect_time_averages(dir + "/every.csv", dir + "/averaged.csv", {"integral_RHO", "integral_P", "integral_MASS_FLUX"},
+                             "", 1, 0.02);
+        const auto every = read_csv(dir + "/every.csv");
+        averaged = read_csv(dir + "/averaged.csv");
+        ASSERT_EQ(averaged.size(), 3u);
+        for (const auto & mean : averaged) {
+            double weight = 0.0, sum = 0.0, t_prev = 0.02, lo = std::numeric_limits<double>::infinity(), hi = -lo;
+            for (const auto & row : every) {
+                if (row.at("step") > mean.at("step") || !(row.at("t") > 0.02)) continue;
+                weight += row.at("t") - t_prev;
+                sum += (row.at("t") - t_prev) * row.at(measure);
+                t_prev = row.at("t");
+                lo = std::min(lo, row.at("min_MASS_FLUX"));
+                hi = std::max(hi, row.at("max_MASS_FLUX"));
+            }
+            const double tol = precision_tol<double>(1e-12, 1e-6);
+            EXPECT_NEAR(mean.at(measure), sum / weight, tol * mean.at(measure)) << "step " << mean.at("step");
+            EXPECT_NEAR(mean.at("mean_MEAN_RHO") * mean.at(measure), mean.at("integral_MEAN_RHO"),
+                        tol * mean.at("integral_MEAN_RHO"));
+            EXPECT_GE(mean.at("min_MEAN_MASS_FLUX"), lo - tol);
+            EXPECT_LE(mean.at("max_MEAN_MASS_FLUX"), hi + tol);
+        }
+        // The front moved: the measures of the samples differ
+        EXPECT_NE(every.at(1).at(measure), every.at(12).at(measure));
+    }
+    comm::barrier();
+    std::string input = box_case(16, SINE_RHO, teno, probes, steps);
+    input.replace(input.find("[initialize]\n"), input.find("[numerics]") - input.find("[initialize]\n"),
+                  "[initialize]\ntype = \"restart\"\nfile = \"" + dir + "/r_000006.restart\"\n");
+    Solver continued;
+    continued.init(parse_toml(input));
+    run(continued);
+    if (comm::is_root()) {
+        const auto both = rows_at(dir + "/averaged.csv", 12);
+        ASSERT_EQ(both.size(), 2u);
+        EXPECT_EQ(both[0], both[1]);
+    }
+    comm::barrier();
+}
+
 TEST(ProbesTest, MovingRegionsMeasureWhereTheyAreAtEachWriteAndCopiesReportEach) {
     // Two disks (spheres) moving across the periodic boundary at x = 1: each
     // copy's probe measures its part in the domain where it is at each write
@@ -2409,6 +2472,9 @@ TEST(ProbesTest, RejectsPointSamplingAndGridsOfMovingAndSolutionRegionsAndUnknow
     EXPECT_NE(error_of(solution + "sampling = \"point\"\n").find("defined by the solution"), std::string::npos);
     EXPECT_NE(error_of(solution + "n_points = " + numbers3("4", "4", "4") + "\n").find("defined by the solution"),
               std::string::npos);
+    const std::string iso = error_of("region = {type = \"isosurface\", field = \"P\", value = 0.5}\nn_points = [4, 4]\n");
+    EXPECT_NE(iso.find("no parameters"), std::string::npos) << iso;
+    EXPECT_NE(iso.find("[[write_data]]"), std::string::npos) << iso;
     const std::string cells = error_of("start = " + numbers3("0.1", "0.1", "0.5") + "\nend = " + numbers3("0.9", "0.9", "0.5") +
                                        "\nn_points = \"faces\"\n");
     EXPECT_NE(cells.find("n_points = \"cells\""), std::string::npos) << cells;
