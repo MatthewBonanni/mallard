@@ -115,7 +115,7 @@
     ["mpi", "mixture", "navier_stokes", "chemistry", "simpler", "muscl", "hllc", "ssprk3"],
     ["mpi", "mixture", "navier_stokes", "muscl", "hllc", "rdpk3sp35", "error_control"],
 ]
-"MPITest.ChemistryLoadBalancingMatchesSerial" = [
+"MPITest.ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs" = [
     ["mpi", "mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3"],
     ["mpi", "mixture", "navier_stokes", "chemistry", "les", "muscl", "hllc", "ssprk3"],
     ["mpi", "mixture", "navier_stokes", "chemistry", "simpler", "les", "muscl", "hllc", "ssprk3"],
