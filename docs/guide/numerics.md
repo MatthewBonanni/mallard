@@ -193,6 +193,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 | `n_steps` | none | Stop after this many steps |
 | `t_wall_stop` | none | Stop after this many seconds of wall time |
 | `cuda_graphs` | `true` | CUDA builds: launch each step as one CUDA graph where possible (same results) |
+| `step_queue` | 3 | Steps the host enqueues ahead of the GPU; 1 waits for each step, 0 has the host take each step (same results) |
 
 With a [numerics preset](#presets) `cfl` may be left out: the preset sets it.
 

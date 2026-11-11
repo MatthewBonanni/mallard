@@ -22,25 +22,14 @@ Writes, with Cantera:
 """
 import argparse
 import os
-import struct
+import sys
 
 import cantera as ct
 import numpy as np
 from scipy.integrate import solve_ivp
 
-
-def read_restart(path):
-    with open(path, "rb") as f:
-        raw = f.read()
-    _, _, n, nv, _, _ = struct.unpack_from("<IIQQQd", raw, 16)
-    off = 16 + struct.calcsize("<IIQQQd")
-    names = []
-    for _ in range(nv):
-        (ln,) = struct.unpack_from("<I", raw, off)
-        names.append(raw[off + 4:off + 4 + ln].decode())
-        off += 4 + ln
-    data = np.frombuffer(raw, "<f8", n * nv, off).reshape(nv, n)
-    return dict(zip(names, data))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from mallard import restart  # noqa: E402
 
 
 def homogeneous(gas, T, p, Y, t_end):
@@ -135,7 +124,7 @@ def main():
     print(f"dtau/dT at T0: {np.interp(args.T0, Ts, np.gradient(taus, Ts)) * 1e6:.2f} us/K")
 
     for path in args.restart:
-        f = read_restart(path)
+        f = restart.read(path)
         T = np.sort(f["T_SEED"])
         rho = f["RHO"][np.argsort(f["T_SEED"])]
         # Equal-mass zones: mass-weighted mean temperature of each mass slice

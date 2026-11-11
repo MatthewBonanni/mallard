@@ -9,7 +9,9 @@ python ../../tools/post/animate.py solut riemann
 ```
 
 Each example's `card.toml` gives its build (`2d`, `3d`) and what it demonstrates, for its card on the
-website's [Examples](https://matthewbonanni.github.io/mallard/docs/examples/) page; the run times below name the
+website's [Examples](https://matthewbonanni.github.io/mallard/docs/examples/) page, and, for a case of the
+[validation page](https://matthewbonanni.github.io/mallard/validation/), its section and the regime it
+validates (`validation`, read by the [feature matrix](../docs/guide/features.md)); the run times below name the
 hardware they were measured on.
 
 ## Shocks and compressible flow

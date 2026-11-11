@@ -20,12 +20,14 @@ Cells are numbered as Mallard numbers the generated box: (i * Ny + j) * Nz + k
 for cell i, j, k along x, y, z.
 """
 import argparse
-import struct
+import os
+import sys
 import tomllib
 
 import numpy as np
 
-NAMES = ["RHO", "RHOU_X", "RHOU_Y", "RHOU_Z", "RHOE"]
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from mallard import restart  # noqa: E402
 
 
 def nodes(n, L, beta):
@@ -48,42 +50,6 @@ def grid(inp, n=None):
     edges = [nodes(n[d], L[d], beta[d]) for d in range(3)]
     centers = [0.5 * (e[1:] + e[:-1]) for e in edges]
     return n, L, centers
-
-
-def read_restart(path):
-    with open(path, "rb") as f:
-        magic = f.read(16)
-        version, real_size = struct.unpack("<II", f.read(8))
-        n_cells, n_vars, step = struct.unpack("<QQQ", f.read(24))
-        (t,) = struct.unpack("<d", f.read(8))
-        if not magic.startswith(b"MALLARD-RESTART") or version not in (2, 3):
-            raise SystemExit(f"{path}: expected a restart file of version 2 or 3")
-
-        def name():
-            (length,) = struct.unpack("<I", f.read(4))
-            return f.read(length).decode()
-
-        names = [name() for _ in range(n_vars)]
-        if version == 3:  # named scalar attributes (statistics), not needed here
-            (n_attributes,) = struct.unpack("<Q", f.read(8))
-            for _ in range(n_attributes):
-                name()
-                f.read(8)
-        dtype = "<f8" if real_size == 8 else "<f4"
-        fields = np.fromfile(f, dtype=dtype, count=n_vars * n_cells).reshape(n_vars, n_cells)
-    return step, t, {name: fields[v].astype(float) for v, name in enumerate(names)}
-
-
-def write_restart(path, step, t, fields):
-    n_cells = fields[NAMES[0]].size
-    with open(path, "wb") as f:
-        f.write(b"MALLARD-RESTART\0")
-        f.write(struct.pack("<II", 2, 8))
-        f.write(struct.pack("<QQQ", n_cells, len(NAMES), step))
-        f.write(struct.pack("<d", t))
-        for name in NAMES:
-            f.write(struct.pack("<I", len(name)) + name.encode())
-        np.stack([fields[name].ravel() for name in NAMES]).astype("<f8").tofile(f)
 
 
 def curl(A, centers):
@@ -147,7 +113,7 @@ def main():
     with open(args.input, "rb") as f:
         inp = tomllib.load(f)
     n, L, centers = grid(inp)
-    write_restart(args.out, 0, 0.0, fresh(inp, n, L, centers, args.seed, args.perturbation))
+    restart.write(args.out, fresh(inp, n, L, centers, args.seed, args.perturbation))
     print(f"{args.out}: {np.prod(n)} cells ({n[0]} x {n[1]} x {n[2]})")
 
 

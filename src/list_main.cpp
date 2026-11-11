@@ -26,7 +26,9 @@
 #include "input.h"
 #include "json.h"
 #include "log.h"
+#include "mesh_quality.h"
 #include "solver/solver.h"
+#include "stencils.h"
 
 namespace {
 
@@ -103,7 +105,12 @@ std::vector<std::string> available(const std::string & pattern, const std::strin
     }
     const auto either = [&](auto && takes) { return takes(name) || takes(name + "_X"); };
     std::vector<std::string> out;
-    if (group != "surface probes" && group != "mesh quality" && name != "DIVERGED") out.emplace_back("write_data");
+    const auto in = [&](const auto & names) { return std::find(names.begin(), names.end(), name) != names.end(); };
+    const bool mesh_field = group == "mesh quality" || group == "stencils";
+    if (group != "surface probes" && name != "DIVERGED" &&
+        (!mesh_field || in(MeshQuality::FIELDS) || in(stencils::FIELDS))) {
+        out.emplace_back("write_data");
+    }
     if (group == "statistics" ? name.rfind("SOURCE_", 0) != 0
                               : either([&](const std::string & n) { return probe::samples(n, species); })) {
         out.emplace_back("probes");

@@ -26,6 +26,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "archive.h"
 #include "build_info.h"
 #include "cli.h"
 #include "comm.h"
@@ -490,7 +491,7 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     SKIP_UNDER_MPI();
     const std::string mesh =
         source_dir() + (Mallard_DIM == 3 ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh");
-    const Result r = run({"info", "--quality", "quality", mesh}, true);
+    const Result r = run({"info", "--mesh-fields", "quality", mesh}, true);
     EXPECT_EQ(r.status, 0) << r.err;
     const std::vector<std::vector<std::string>> rows = {
         {"Format", "Gmsh"},
@@ -509,9 +510,137 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     }
     EXPECT_EQ(written, 1u);
     const Result not_a_mesh =
-        run({"info", "--quality", "quality", source_dir() + "/test/data/formats/gas.toml"}, true);
+        run({"info", "--mesh-fields", "quality", source_dir() + "/test/data/formats/gas.toml"}, true);
     EXPECT_EQ(not_a_mesh.status, 2);
-    EXPECT_TRUE(contains(not_a_mesh.err, "--quality takes a mesh file")) << not_a_mesh.err;
+    EXPECT_TRUE(contains(not_a_mesh.err, "--mesh-fields takes a mesh file")) << not_a_mesh.err;
+}
+
+namespace {
+
+/** @brief The working directory moved to dir while it lives. */
+struct InDirectory {
+    fs::path previous = fs::current_path();
+    explicit InDirectory(const fs::path & dir) { fs::current_path(dir); }
+    ~InDirectory() { fs::current_path(previous); }
+};
+
+/** @brief A flow past a cylinder whose mesh is outside its run directory, and whose probe points are inside it. */
+void write_pack_case() {
+    const bool three = Mallard_DIM == 3;
+    fs::create_directories("study/data");
+    fs::create_directories("study/run");
+    fs::copy_file(source_dir() + (three ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh"),
+                  "study/data/cyl.msh");
+    std::ofstream("study/run/points.txt") << (three ? "0.6 0.0 0.5\n0.0 0.7 0.5\n" : "0.6 0.0\n0.0 0.7\n");
+    const std::string u = three ? "[0.2, 0.0, 0.0]" : "[0.2, 0.0]";
+    std::ofstream input("study/run/input.toml");
+    input << "[run]\nn_steps = 4\ncfl = 0.5\n[mesh]\ntype = \"file\"\nfilename = \"../data/cyl.msh\"\n"
+          << "[initialize]\ntype = \"analytical\"\nT = \"0.7142857142857143\"\np = \"0.7142857142857143 * (1 + "
+             "0.1 * x)\"\nu = "
+          << (three ? "[\"0.2\", \"0.05 * y\", \"0.0\"]" : "[\"0.2\", \"0.05 * y\"]") << "\n"
+          << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 0.7142857142857143\nT_ref = 0.7142857142857143\n"
+          << "rho_ref = 1.0\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n";
+    for (const char * zone : {"inlet", "outlet"}) {
+        input << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"farfield\"\nu = " << u
+              << "\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+    }
+    for (const std::string zone : {"walls", "cylinder", "back", "front"}) {
+        if (three || (zone != "back" && zone != "front")) input << "[[boundaries]]\nname = \"" << zone << "\"\ntype = \"symmetry\"\n";
+    }
+    input << "[[forces]]\nzone = \"cylinder\"\ninterval = 1\nfile = \"solut/forces.csv\"\n"
+          << "[[probes]]\nname = \"pts\"\ntype = \"points\"\npoints_file = \"points.txt\"\ninterval = 1\n"
+          << "variables = [\"RHO\"]\n"
+          << "[[write_data]]\nprefix = \"solut/flow\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\"]\n"
+          << "[[write_data]]\nprefix = \"solut/restart\"\nformat = \"restart\"\ninterval = 2\n";
+}
+
+std::vector<std::string> words_of(const std::string & command) {
+    std::istringstream in(command);
+    std::vector<std::string> out;
+    for (std::string w; in >> w;) out.push_back(w);
+    return out;
+}
+
+/** @brief The manifest's files of a role, by path. */
+std::vector<std::string> paths_of(const json::Value & manifest, const std::string & role) {
+    std::vector<std::string> out;
+    for (const auto & f : manifest["files"].array) {
+        if (f["role"].string == role) out.push_back(f["path"].string);
+    }
+    return out;
+}
+
+} // namespace
+
+TEST(CliTest, PackReproducesARunBitForBit) {
+    SKIP_UNDER_MPI();
+    if (std::system("tar --version > /dev/null 2>&1") != 0) GTEST_SKIP() << "no tar";
+    write_pack_case();
+    {
+        // A run, then one continued from its restart file given on the command line
+        const InDirectory in("study/run");
+        ASSERT_EQ(run({"-i", "input.toml", "--kokkos-num-threads=1"}, true).status, 0) << read_file("err.txt");
+        const Result continued =
+            run({"-i", "input.toml", "--restart", "solut/restart_000002.restart", "--kokkos-num-threads=1"}, true);
+        ASSERT_EQ(continued.status, 0) << continued.err;
+    }
+    const std::string name = std::string("study") + (archive::have_gzip() ? ".tar.gz" : ".tar");
+    const Result packed = run({"pack", "study/run", "-o", name}, true);
+    ASSERT_EQ(packed.status, 0) << packed.err;
+    const Result verified = run({"pack", "--verify", name}, true);
+    EXPECT_EQ(verified.status, 0) << verified.out << verified.err;
+    EXPECT_TRUE(has_row(verified.out, {"Against the run", "4 files checked against the SHA-256 the run recorded"}))
+        << verified.out;
+
+    fs::create_directories("elsewhere");
+    ASSERT_EQ(std::system(("tar -xf " + name + " -C elsewhere").c_str()), 0);
+    const json::Value manifest = json::parse(read_file("elsewhere/study/manifest.json"));
+    // The mesh is one level up, so the case keeps the run directory's name below the layout around it
+    EXPECT_EQ(manifest["rerun"]["directory"].string, "case/run");
+    EXPECT_EQ(manifest["rerun"]["command"].string,
+              "mallard -i input.toml --restart solut/restart_000002.restart");
+    EXPECT_EQ(paths_of(manifest, "mesh"), std::vector<std::string>{"case/data/cyl.msh"});
+    std::vector<std::string> read = paths_of(manifest, "read");
+    std::sort(read.begin(), read.end());
+    EXPECT_EQ(read, (std::vector<std::string>{"case/run/points.txt", "case/run/solut/restart_000002.restart"}));
+    // Small outputs: the CSV files, not the snapshots
+    const std::vector<std::string> outputs = paths_of(manifest, "output");
+    EXPECT_EQ(outputs, (std::vector<std::string>{"output/solut/forces.csv", "output/probe_pts.csv"}));
+
+    {
+        const InDirectory in("elsewhere/study/case/run");
+        std::vector<std::string> command = words_of(manifest["rerun"]["command"].string);
+        command.erase(command.begin());
+        command.push_back("--kokkos-num-threads=1");
+        const Result rerun = run(command, true);
+        ASSERT_EQ(rerun.status, 0) << rerun.err;
+        const fs::path original = fs::path("../../../../study/run/solut");
+        for (const char * file : {"restart_000004.restart", "flow_000004.vtu"}) {
+            const Result same = run({"diff", (original / file).string(), (fs::path("solut") / file).string()}, true);
+            EXPECT_EQ(same.status, 0) << file << "\n" << same.out << same.err;
+        }
+    }
+
+    // A file changed since the archive was made, and one added, are found; so is one changed since the run read it
+    {
+        std::fstream points("elsewhere/study/case/run/points.txt", std::ios::in | std::ios::out | std::ios::binary);
+        points.seekp(0);
+        points.put('1');
+    }
+    ASSERT_EQ(std::system("cd elsewhere && COPYFILE_DISABLE=1 tar -cf ../tampered.tar study"), 0);
+    const Result tampered = run({"pack", "--verify", "tampered.tar"}, true);
+    EXPECT_EQ(tampered.status, 1);
+    EXPECT_TRUE(has_row(tampered.out, {"case/run/points.txt", "its SHA-256 differs from the manifest's"}))
+        << tampered.out;
+    EXPECT_TRUE(has_row(tampered.out, {"case/run/points.txt", "differs from what the run read (its run block's SHA-256)"}))
+        << tampered.out;
+    EXPECT_TRUE(has_row(tampered.out, {"case/run/mallard.jsonl", "not in the manifest"})) << tampered.out;
+    std::ofstream("study/run/points.txt", std::ios::app) << "\n";
+    const Result changed = run({"pack", "study/run", "-o", "changed.tar"}, true);
+    EXPECT_EQ(changed.status, 1);
+    EXPECT_TRUE(contains(changed.err, "changed since the run read it")) << changed.err;
+    EXPECT_FALSE(fs::exists("changed.tar"));
+    EXPECT_FALSE(fs::exists("changed.tar.partial"));
 }
 
 TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {

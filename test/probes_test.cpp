@@ -1722,5 +1722,5 @@ TEST(ProbesTest, WallCoefficientsTakeTheOutputReferenceUnlessTheProbeGivesOne) {
     const std::vector<double> denser =
         cf(reference, "reference = {rho = 2.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n");
     ASSERT_EQ(denser.size(), own.size());
-    for (size_t i = 0; i < own.size(); i++) EXPECT_DOUBLE_EQ(denser[i], 0.5 * own[i]);
+    for (size_t i = 0; i < own.size(); i++) EXPECT_EQ(rtype(denser[i]), rtype(0.5) * rtype(own[i]));
 }

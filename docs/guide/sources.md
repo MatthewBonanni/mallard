@@ -155,7 +155,8 @@ Pitfalls:
   if the energy should follow.
 - Mixtures take mass through `rhoY` only; give the enthalpy of injected mass in
   `rhoE` yourself.
-- Domain averages cost a global sum per stage and keep steps out of CUDA graphs.
+- Domain averages cost a global sum per stage (exact, so the same on any number
+  of ranks; on the GPU's stream with NCCL, inside the step's CUDA graph).
 
 Example: `examples/source_regions` heats a ring with an exact Gaussian pulse
 and pushes the gas with a tilted fan; a probe of the same named region records

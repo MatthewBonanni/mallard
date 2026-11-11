@@ -142,12 +142,20 @@ other fields.
 |  | `SPECIES_FLUX_<s>` | `kg m-2 s-1` | normal mass flux of species s | a mixture; [[probes]] on a surface or boundary zone | probes |
 |  | `SPECIES_DIFFUSIVE_FLUX_<s>` | `kg m-2 s-1` | normal diffusive mass flux of species s | a mixture; [[probes]] on a surface or boundary zone | probes |
 |  | `SPECIES_TOTAL_FLUX_<s>` | `kg m-2 s-1` | normal total mass flux of species s | a mixture; [[probes]] on a surface or boundary zone | probes |
-| mesh quality | `NON_ORTHOGONALITY` | `degree` | largest face non-orthogonality | mallard check or info --quality | - |
-|  | `SKEWNESS` | `1` | largest face skewness | mallard check or info --quality | - |
-|  | `ASPECT_RATIO` | `1` | cell aspect ratio | mallard check or info --quality | - |
-|  | `VOLUME_RATIO` | `1` | largest volume ratio to a neighbor | mallard check or info --quality | - |
-|  | `DELTA_OVER_ETA` | `1` | cell size over the estimated Kolmogorov length | mallard check --quality (resolution estimates) | - |
-|  | `CELLS_PER_DELTA_L` | `1` | cells across the laminar flame thickness | mallard check --quality (resolution estimates) with [les.combustion] (TFLES) | - |
+| mesh quality | `NON_ORTHOGONALITY` | `degree` | largest face non-orthogonality | every case | write_data |
+|  | `SKEWNESS` | `1` | largest face skewness | every case | write_data |
+|  | `ASPECT_RATIO` | `1` | cell aspect ratio | every case | write_data |
+|  | `VOLUME_RATIO` | `1` | largest volume ratio to a neighbor | every case | write_data |
+|  | `DELTA_OVER_ETA` | `1` | cell size over the estimated Kolmogorov length | mallard check --mesh-fields (resolution estimates) | - |
+|  | `CELLS_PER_DELTA_L` | `1` | cells across the laminar flame thickness | mallard check --mesh-fields (resolution estimates) with [les.combustion] (TFLES) | - |
+| stencils | `STENCIL_SIZE` | `1` | cells in the central stencil | every case | write_data |
+|  | `STENCIL_SECTORS` | `1` | sector stencils kept (TENO) | every case | write_data |
+|  | `STENCIL_DEGREE` | `1` | degree of the central reconstruction polynomial | every case | write_data |
+|  | `STENCIL_CONDITION` | `1` | condition number of the central least-squares fit | every case | write_data |
+|  | `STENCIL_WALL` | `1` | 1 where a stencil reaches a wall | every case | write_data |
+|  | `STENCIL_SEAM` | `1` | 1 where a stencil reaches across a periodic seam | every case | write_data |
+|  | `STENCIL_PARTITION` | `1` | 1 where a stencil reaches cells of another rank | every case | write_data |
+|  | `STENCIL_<id>` | `1` | membership in the stencils of cell id | mallard check --mesh-fields with --cells or --region | - |
 <!-- END GENERATED fields -->
 
 ### Derived fields

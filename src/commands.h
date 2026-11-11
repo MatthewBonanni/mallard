@@ -66,6 +66,9 @@ int convergence_main(const cli::Args & args);
 /** @brief The work of `mallard post convergence`, with Kokkos started (tests call it). */
 int post_convergence(const cli::Args & args);
 
+/** @brief `mallard pack RUN_DIR`: one archive that reproduces a run; `--verify ARCHIVE` checks one. */
+int pack_main(const cli::Args & args);
+
 /** @brief `mallard mesh convert INPUT OUTPUT.h5`. */
 int mesh_convert_main(const cli::Args & args);
 
