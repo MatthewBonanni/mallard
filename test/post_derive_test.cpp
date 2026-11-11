@@ -138,7 +138,9 @@ TEST(PostDeriveTest, FieldsThatNeedInputTheRunLacksSayHowToGiveIt) {
     comm::barrier();
     std::string errors;
     EXPECT_EQ(derive({run + "/restart_000004.restart", "--fields", "CP", "-o", fresh_dir("lacking")}, &errors), 1);
-    if (comm::is_root()) EXPECT_NE(errors.find("--reference"), std::string::npos) << errors;
+    if (comm::is_root()) {
+        EXPECT_NE(errors.find("--reference"), std::string::npos) << errors;
+    }
     EXPECT_EQ(derive({run + "/restart_000004.restart", "--fields", "MACHH"}, &errors), 2);
     // With the reference given, CP = (p - p_inf) / q_inf of the stored state, whose divergence-free flow keeps p = 1
     const std::string out = fresh_dir("given");
