@@ -59,19 +59,96 @@ fields = ["P", "T"]
 
 **Fields:** `mallard list fields input.toml` lists exactly those of a case, and
 `mallard list fields` all of them with their units and what each needs
-([Command line](cli.md#mallard-list-fields)).
+([Command line](cli.md#mallard-list-fields)); the table below is the latter.
+Its last column says where each field can be had: written by
+`[[write_data]]`, sampled by [`[[probes]]`](probes.md), averaged by
+[`[statistics]`](statistics.md), or derived from restart files and snapshots
+after the run by [`mallard post derive`](#derived-fields-after-the-run).
+Vectors (`U`, `RHOU`, `VORTICITY` in 3D) also go by their components
+`<name>_X`, `_Y`, `_Z`; `<s>` is a species of the mechanism, `<A>` and `<B>`
+other fields.
 
-| Group | Names |
-|---|---|
-| Conservative | `RHO`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `RHOU` (vector) |
-| Primitive | `U_X`, `U_Y`, `U_Z`, `U` (vector), `P`, `T`, `H` |
-| Derived | `CFL`, `VORTICITY`, `MACH`, `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN`, `P0`, `T0`, `H0`, `SOUND_SPEED`, `ENTROPY`, `DILATATION`, `HELICITY` (3D), `ENSTROPHY`, `STRAIN_RATE`, `CP` ([below](#derived-fields)) |
-| TENO | `TENO_SIGMA` (troubled-cell indicator) |
-| Mixtures | `Y_<s>`, `X_<s>`, `RHOY_<s>`; viscous: `MU`, `LAMBDA`, `D_<s>` (and `DT_<s>` with `soret`); `MIXTURE_FRACTION`, `PROGRESS_VARIABLE`, `FLAME_INDEX`, `SCALAR_DISSIPATION` ([below](#mixture-fields)) |
-| Chemistry, radiation | `HRR`, `OMEGA_<s>`, `CHEM_COST`, `QRAD` |
-| LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
-| Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
-| [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
+<!-- BEGIN GENERATED fields -->
+| Group | Field | Units | Description | Needs | Available in |
+|---|---|---|---|---|---|
+| conservative | `RHO` | `kg m-3` | density | every case | write_data, probes, statistics |
+|  | `RHOE` | `kg m-1 s-2` | total energy density | every case | write_data, probes, statistics |
+|  | `RHOU` | `kg m-2 s-1` | momentum density (vector) | every case | write_data, probes, statistics |
+|  | `RHOY_<s>` | `kg m-3` | partial density of species s | a mixture | write_data, probes, statistics |
+| primitive | `P` | `kg m-1 s-2` | pressure | every case | write_data, probes, statistics |
+|  | `T` | `K` | temperature | every case | write_data, probes, statistics |
+|  | `H` | `m2 s-2` | specific enthalpy | every case | write_data, probes, statistics |
+|  | `U` | `m s-1` | velocity (vector) | every case | write_data, probes, statistics |
+| derived | `MACH` | `1` | Mach number | every case | write_data, post derive |
+|  | `Q_CRITERION` | `s-2` | Q-criterion | every case | write_data, post derive |
+|  | `LAMBDA2` | `s-2` | lambda2 vortex criterion | every case | write_data, post derive |
+|  | `SCHLIEREN` | `kg m-4` | density gradient magnitude | every case | write_data, post derive |
+|  | `P0` | `kg m-1 s-2` | stagnation pressure | every case | write_data, post derive |
+|  | `T0` | `K` | stagnation temperature | every case | write_data, post derive |
+|  | `H0` | `m2 s-2` | stagnation (total) specific enthalpy | every case | write_data, post derive |
+|  | `SOUND_SPEED` | `m s-1` | speed of sound | every case | write_data, post derive |
+|  | `ENTROPY` | `m2 s-2 K-1` | specific entropy | every case | write_data, post derive |
+|  | `DILATATION` | `s-1` | dilatation (velocity divergence) | every case | write_data, post derive |
+|  | `HELICITY` | `m s-2` | helicity density | a 3D build (in 2D the vorticity is normal to the velocity) | write_data, post derive |
+|  | `ENSTROPHY` | `s-2` | enstrophy | every case | write_data, post derive |
+|  | `STRAIN_RATE` | `s-1` | strain-rate magnitude | every case | write_data, post derive |
+|  | `CP` | `1` | pressure coefficient | [output] reference = {rho, u, p} | write_data, probes, post derive |
+|  | `CFL` | `1` | local CFL number | every case | write_data |
+|  | `P_MAX` | `kg m-1 s-2` | largest pressure seen | every case | write_data |
+|  | `TENO_SIGMA` | `1` | TENO troubled-cell indicator | face_reconstruction type = "TENO" | write_data |
+|  | `REGION_FRACTION` | `1` | volume fraction of the region in the cell | a [[write_data]] region, which writes it | write_data |
+|  | `DIVERGED` | `1` | 1 in the cells that became invalid | a run that diverges, whose divergence report snapshot writes it | - |
+|  | `VORTICITY` | `s-1` | vorticity (vector) | every case | write_data |
+| transport | `MU` | `kg m-1 s-1` | dynamic viscosity | a mixture with navier_stokes | write_data |
+|  | `LAMBDA` | `kg m s-3 K-1` | thermal conductivity | a mixture with navier_stokes | write_data |
+|  | `D_<s>` | `m2 s-1` | diffusion coefficient of species s | a mixture with navier_stokes | write_data |
+|  | `DT_<s>` | `kg m-1 s-1` | thermal diffusion coefficient of species s | a mixture with navier_stokes and soret = true | write_data |
+| mixture | `MIXTURE_FRACTION` | `1` | Bilger mixture fraction | a mixture with [output.mixture] fuel and oxidizer | write_data, post derive |
+|  | `PROGRESS_VARIABLE` | `1` | progress variable | a mixture with [output.mixture] progress | write_data, post derive |
+|  | `FLAME_INDEX` | `1` | Takeno flame index | a mixture with [output.mixture] fuel and oxidizer, or fuel_species and oxidizer_species | write_data, post derive |
+|  | `SCALAR_DISSIPATION` | `s-1` | scalar dissipation rate of the mixture fraction | a mixture with navier_stokes and [output.mixture] fuel and oxidizer | write_data, post derive |
+|  | `T_SEED` | `K` | temperature guess of the thermodynamic state | a mixture | write_data |
+|  | `Y_<s>` | `1` | mass fraction of species s | a mixture | write_data, probes, statistics |
+|  | `X_<s>` | `1` | mole fraction of species s | a mixture | write_data |
+| chemistry | `HRR` | `kg m-1 s-3` | heat release rate | a mixture with [chemistry] | write_data |
+|  | `CHEM_H` | `s` | last chemistry sub-step | a mixture with [chemistry] | write_data |
+|  | `CHEM_COST` | `1` | chemistry sub-steps in the last step | a mixture with [chemistry] | write_data |
+|  | `QRAD` | `kg m-1 s-3` | radiative heat source | [radiation] | write_data |
+|  | `OMEGA_<s>` | `kg m-3 s-1` | net production rate of species s | a mixture with [chemistry] | write_data |
+| LES | `MU_T` | `kg m-1 s-1` | eddy viscosity | [les] | write_data |
+|  | `TF_F` | `1` | flame thickening factor | [les.combustion] (TFLES) | write_data |
+|  | `TF_E` | `1` | flame wrinkling efficiency | [les.combustion] (TFLES) | write_data |
+|  | `TF_OMEGA` | `1` | flame sensor | [les.combustion] (TFLES) | write_data |
+|  | `PASR_KAPPA` | `1` | PaSR reacting fraction | [les.combustion] model = "pasr" | write_data |
+| sources | `SOURCE_<A>` | `A's s-1` | source of A, per second | [[sources]] or [source] | write_data |
+| statistics | `MEAN_<A>` | `A's` | time average of A | [statistics] fields with A, or [[probes]] averaging A | write_data, probes |
+|  | `COV_<A>_<B>` | `A's times B's` | covariance of A and B | [statistics] products with A*B | write_data, probes |
+|  | `PHASE_<bin>_<A>` | `A's` | phase average of A in a bin | [statistics.phase] | write_data, probes |
+| surface probes | `MASS_FLUX` | `kg m-2 s-1` | normal mass flux | [[probes]] on a surface or boundary zone | probes |
+|  | `ENTHALPY_FLUX` | `kg s-3` | normal total enthalpy flux | [[probes]] on a surface or boundary zone | probes |
+|  | `TAU_W` | `kg m-1 s-2` | wall shear stress magnitude | [[probes]] on a wall zone | probes |
+|  | `CF` | `1` | skin friction coefficient | [[probes]] on a wall zone | probes |
+|  | `Q_W` | `kg s-3` | wall heat flux into the fluid | [[probes]] on a wall zone | probes |
+|  | `U_TAU` | `m s-1` | friction velocity | [[probes]] on a wall zone | probes |
+|  | `Y_PLUS` | `1` | first-cell y+ | [[probes]] on a wall zone | probes |
+|  | `ENERGY_DIFFUSIVE_FLUX` | `kg s-3` | normal diffusive energy flux (conduction, viscous work, species enthalpy) | [[probes]] on a surface or boundary zone | probes |
+|  | `ENERGY_TOTAL_FLUX` | `kg s-3` | normal total energy flux (convective and diffusive) | [[probes]] on a surface or boundary zone | probes |
+|  | `WALL_MODEL_U` | `m s-1` | wall model exchange-point tangential speed | [[probes]] on a wall zone | probes |
+|  | `WALL_MODEL_T` | `K` | wall model exchange-point temperature | [[probes]] on a wall zone | probes |
+|  | `WALL_MODEL_H` | `m` | wall model exchange-point height | [[probes]] on a wall zone | probes |
+|  | `MOMENTUM_FLUX` | `kg m-1 s-2` | normal momentum flux (vector) | [[probes]] on a surface or boundary zone | probes |
+|  | `TRACTION_PRESSURE` | `kg m-1 s-2` | pressure traction on the boundary (vector) | [[probes]] on a wall zone | probes |
+|  | `TRACTION_VISCOUS` | `kg m-1 s-2` | viscous traction on the boundary (vector) | [[probes]] on a wall zone | probes |
+|  | `SPECIES_FLUX_<s>` | `kg m-2 s-1` | normal mass flux of species s | a mixture; [[probes]] on a surface or boundary zone | probes |
+|  | `SPECIES_DIFFUSIVE_FLUX_<s>` | `kg m-2 s-1` | normal diffusive mass flux of species s | a mixture; [[probes]] on a surface or boundary zone | probes |
+|  | `SPECIES_TOTAL_FLUX_<s>` | `kg m-2 s-1` | normal total mass flux of species s | a mixture; [[probes]] on a surface or boundary zone | probes |
+| mesh quality | `NON_ORTHOGONALITY` | `degree` | largest face non-orthogonality | mallard check or info --quality | - |
+|  | `SKEWNESS` | `1` | largest face skewness | mallard check or info --quality | - |
+|  | `ASPECT_RATIO` | `1` | cell aspect ratio | mallard check or info --quality | - |
+|  | `VOLUME_RATIO` | `1` | largest volume ratio to a neighbor | mallard check or info --quality | - |
+|  | `DELTA_OVER_ETA` | `1` | cell size over the estimated Kolmogorov length | mallard check --quality (resolution estimates) | - |
+|  | `CELLS_PER_DELTA_L` | `1` | cells across the laminar flame thickness | mallard check --quality (resolution estimates) with [les.combustion] (TFLES) | - |
+<!-- END GENERATED fields -->
 
 ### Derived fields
 

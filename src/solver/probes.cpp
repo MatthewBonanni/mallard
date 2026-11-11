@@ -1051,6 +1051,15 @@ ProbeReference read_reference(const Input & ref, const std::string & key) {
     return out;
 }
 
+bool samples(const std::string & name, const std::vector<std::string> & species_names) {
+    try {
+        variable_code(name, species_names, "");
+        return true;
+    } catch (const InputError &) {
+        return false;
+    }
+}
+
 namespace {
 
 // Probe types that are regions too: points, curves and cut planes with the probe keys

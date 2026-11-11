@@ -577,11 +577,14 @@ constexpr Command COMMANDS[] = {
         .description =
             "Without an input file, lists every field the [[write_data]], [[probes]] and [statistics] fields "
             "take, by group, with its units, its description and what a case needs to have it, and the patterns "
-            "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).\n"
+            "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...). Its \"available in\" column says where each one can be had: "
+            "written by [[write_data]], sampled by [[probes]], averaged by [statistics], or derived after the run "
+            "by mallard post derive.\n"
             "\n"
             "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
             "lists exactly the fields [[write_data]] fields accept for it: its species, its physics, chemistry, "
-            "LES and statistics, and its dimension; then the common fields it does not have, with what they need.",
+            "LES and statistics, and its dimension, with where each one can be had; then the common fields it "
+            "does not have, with what they need.",
         .options = LIST_OPTIONS,
         .arguments = OPTIONAL_INPUT,
         .examples = "$ mallard list fields\n"
