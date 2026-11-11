@@ -88,8 +88,8 @@ solver's reconstruction, gradients and gas model, in parallel with MPI and on
 GPUs: they run in the solver, so they read in C++. A second reader in Python
 would duplicate every format and drift from it.
 
-The Python package ([Python](../guide/python.md), `tools/mallard`) therefore
-reads through this reader. `-DMallard_ENABLE_PYTHON=ON` builds
+The Python package ([Python](../guide/python.md), `tools/mallard`; its layout
+in [The Python package](python_package.md)) therefore reads through this reader. `-DMallard_ENABLE_PYTHON=ON` builds
 `libmallard2d`/`libmallard3d`, a shared library of `src/io/reader_c_api.h`: a
 C interface over `open`, `read`, `read_all`, `read_geometry` and `run_files`,
 with `Contents` passed as the JSON of `to_json`, values as arrays of doubles,

@@ -284,4 +284,4 @@ verdicts. `mallard.command` runs any other command that has `--format json`:
 - [Output](output.md): what a run writes, units, run block and snapshot metadata
 - [Command line](cli.md): `mallard info`, `mallard diff`, `mallard post extract`, `mallard post convergence`
 - [Tools](../../tools/README.md): the plotting and animation scripts in `tools/`
-- Design notes: [Reading output](../design/output_reader.md)
+- Design notes: [Reading output](../design/output_reader.md), [The Python package](../design/python_package.md)
