@@ -16,6 +16,11 @@
 #include <string>
 #include <type_traits>
 
+#include <Kokkos_Sort.hpp>
+#ifdef KOKKOS_ENABLE_CUDA
+#include <cub/device/device_radix_sort.cuh>
+#endif
+
 #include "chemistry_balance.h"
 #include "launch_bounds.h"
 #include "memory_tracker.h"
@@ -186,25 +191,6 @@ struct QueueFunctor {
         if (final && i + 1 == n) range(2) = offset;
     }
 };
-
-/**
- * @brief Cost classes of the queue's binning, most expensive first: four per
- *        octave of the last cost from 1 up, then the cells of cost below 1. The
- *        classes from WIDE_TEAM_COST up come first, those of the wide teams.
- */
-constexpr uint32_t N_COST_BINS = 81, WIDE_BINS = 64;
-static_assert(WIDE_TEAM_COST == 16.0f, "the wide teams' cost classes start at 2^4");
-
-KOKKOS_INLINE_FUNCTION
-uint32_t cost_bin(const float key) {
-    const float v = -key;
-    if (!(v >= 1.0f)) return N_COST_BINS - 1;
-    const uint32_t u = v < float(1u << 20) ? static_cast<uint32_t>(v) : (1u << 20) - 1u;
-    uint32_t e = 0;
-    while ((u >> (e + 1)) != 0) e++;
-    const uint32_t quarter = ((u << 2) >> e) - 4;
-    return N_COST_BINS - 2 - (4 * e + quarter);
-}
 
 /**
  * @brief Advances the cells of a queue over dt, writes their partial
@@ -549,11 +535,7 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
     previous_cost = Kokkos::View<float *>("chem_previous_cost", n_cells);
     local_range = Kokkos::View<uint32_t *>("chem_queue_range", 3);
     tally = Kokkos::View<uint64_t *>("chem_tally", N_TALLIES);
-    if (bin_by_cost) {
-        bins = Kokkos::View<uint32_t *>("chem_bins", 2 * N_COST_BINS);
-        bin_queue_out = Kokkos::View<uint32_t *>("chem_bin_queue", n_cells);
-        bin_cost_out = Kokkos::View<float *>("chem_bin_cost", n_cells);
-    }
+    if (bin_by_cost) size_sort_scratch(n_cells);
 }
 
 void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
@@ -614,7 +596,7 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
         t(LAST_ACTIVE) = range(2);
         t(ACTIVE) += range(2);
     });
-    if (bin_by_cost) bin_queue(queue, cost, n, range);
+    if (bin_by_cost) sort_queue(queue, cost, n, range);
     const ChemistryCells cells{U,      rhoY,     T_seed,      chem_h,        chem_cost,
                                previous_cost, time_scale, forcing ? forcing->rate.species : SpeciesView(),
                                U_end,  rhoY_end, cell_volume, cell_repaired};
@@ -624,7 +606,7 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
         balance->receive(cells, queue, [&](const ChemistryCells & guests, const Kokkos::View<uint32_t *> & q,
                                            const Kokkos::View<float *> & c, const uint32_t m,
                                            const Kokkos::View<uint32_t *> & r) {
-            if (bin_by_cost) bin_queue(q, c, m, r);
+            if (bin_by_cost) sort_queue(q, c, m, r);
             integrate(guests, q, m, r, dt);
         });
     }
@@ -639,37 +621,69 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
     }
 }
 
-void CellChemistry::bin_queue(const Kokkos::View<uint32_t *> & queued, const Kokkos::View<float *> & queued_cost,
-                              const uint32_t n, const Kokkos::View<uint32_t *> & range) {
-    // A counting sort by cost class: the order within a class does not matter, as no cell's result depends on it
-    if (bin_queue_out.extent(0) < n) {
-        throw std::logic_error("CellChemistry::bin_queue: more cells than its scratch holds.");
-    }
-    const Kokkos::View<uint32_t *> count = bins, r = range, q = queued, q_out = bin_queue_out;
-    const Kokkos::View<float *> key = queued_cost, key_out = bin_cost_out;
+void CellChemistry::size_sort_scratch(const size_t n) {
+#ifdef KOKKOS_ENABLE_CUDA
+    if (sorted_queue.extent(0) >= n) return;
+    sorted_queue = Kokkos::View<uint32_t *>("chem_sorted_queue", n);
+    sorted_cost = Kokkos::View<float *>("chem_sorted_cost", n);
+    size_t bytes = 0;
+    const cudaError_t err = cub::DeviceRadixSort::SortPairs(
+        nullptr, bytes, static_cast<const float *>(nullptr), static_cast<float *>(nullptr),
+        static_cast<const uint32_t *>(nullptr), static_cast<uint32_t *>(nullptr), static_cast<int>(n), 0,
+        static_cast<int>(8 * sizeof(float)));
+    if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+    sort_scratch = Kokkos::View<uint8_t *>("chem_sort_scratch", bytes);
+#else
+    (void)n;
+#endif
+}
+
+void CellChemistry::sort_queue(const Kokkos::View<uint32_t *> & queued, const Kokkos::View<float *> & queued_cost,
+                               const uint32_t n, const Kokkos::View<uint32_t *> & range) {
+    // A stable sort of the slots [0, n) by key, the empty ones last: cells of equal cost keep the order of the mesh,
+    // so that a warp's neighboring cells take similar paths through the integrator
+    const Kokkos::View<uint32_t *> r = range, q = queued;
+    const Kokkos::View<float *> key = queued_cost;
     const uint32_t wide_max = n_wide_threads > 0 ? WIDE_CELLS : 0u;
-    Kokkos::parallel_for("chemistry_bins_clear", 2 * N_COST_BINS, KOKKOS_LAMBDA(const uint32_t b) { count(b) = 0; });
-    Kokkos::parallel_for("chemistry_bins_count", n, KOKKOS_LAMBDA(const uint32_t i) {
-        if (i < r(2)) Kokkos::atomic_inc(&count(cost_bin(key(i))));
+    Kokkos::parallel_for("chemistry_sort_keys", n, KOKKOS_LAMBDA(const uint32_t i) {
+        if (i >= r(2)) key(i) = Kokkos::Experimental::finite_max_v<float>;
     });
-    Kokkos::parallel_for("chemistry_bins_offsets", 1, KOKKOS_LAMBDA(const int) {
-        uint32_t at = 0;
-        for (uint32_t b = 0; b < N_COST_BINS; b++) {
-            count(N_COST_BINS + b) = at;
-            at += count(b);
-            if (b + 1 == WIDE_BINS) r(1) = Kokkos::min(at, wide_max);
+    if (n > 0) {
+#ifdef KOKKOS_ENABLE_CUDA
+        // Into scratch sized beforehand: captured in a step's graph
+        if (sorted_queue.extent(0) < n) {
+            throw std::logic_error("CellChemistry::sort_queue: more cells than its scratch holds.");
         }
-    });
-    Kokkos::parallel_for("chemistry_bins_scatter", n, KOKKOS_LAMBDA(const uint32_t i) {
-        if (i >= r(2)) return;
-        const uint32_t at = Kokkos::atomic_fetch_inc(&count(N_COST_BINS + cost_bin(key(i))));
-        q_out(at) = q(i);
-        key_out(at) = key(i);
-    });
-    Kokkos::parallel_for("chemistry_bins_copy", n, KOKKOS_LAMBDA(const uint32_t i) {
-        if (i >= r(2)) return;
-        q(i) = q_out(i);
-        key(i) = key_out(i);
+        const Kokkos::View<uint32_t *> q_out = sorted_queue;
+        const Kokkos::View<float *> key_out = sorted_cost;
+        size_t bytes = sort_scratch.extent(0);
+        const cudaError_t err = cub::DeviceRadixSort::SortPairs(
+            sort_scratch.data(), bytes, key.data(), key_out.data(), q.data(), q_out.data(), static_cast<int>(n), 0,
+            static_cast<int>(8 * sizeof(float)), Kokkos::DefaultExecutionSpace().cuda_stream());
+        if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+        Kokkos::parallel_for("chemistry_sort_copy", n, KOKKOS_LAMBDA(const uint32_t i) {
+            if (i >= r(2)) return;
+            q(i) = q_out(i);
+            key(i) = key_out(i);
+        });
+#else
+        const auto slots = Kokkos::make_pair(0u, n);
+        Kokkos::Experimental::sort_by_key(Kokkos::DefaultExecutionSpace(), Kokkos::subview(key, slots),
+                                          Kokkos::subview(q, slots));
+#endif
+    }
+    Kokkos::parallel_for("chemistry_sort_wide", 1, KOKKOS_LAMBDA(const int) {
+        // The keys rise: the queued cells of the wide teams' costs come first
+        uint32_t lo = 0, hi = r(2);
+        while (lo < hi) {
+            const uint32_t mid = lo + (hi - lo) / 2;
+            if (key(mid) <= -WIDE_TEAM_COST) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        r(1) = Kokkos::min(lo, wide_max);
     });
 }
 
@@ -710,12 +724,8 @@ void CellChemistry::begin_step() {
 
 bool CellChemistry::adapt_balance() {
     if (!balance || !balance->adapt()) return false;
-    // Guests are binned in the same scratch as the queue
-    const size_t m = std::max<size_t>(queue.extent(0), balance->guests_capacity());
-    if (bin_queue_out.extent(0) < m) {
-        bin_queue_out = Kokkos::View<uint32_t *>("chem_bin_queue", m);
-        bin_cost_out = Kokkos::View<float *>("chem_bin_cost", m);
-    }
+    // Guests are sorted in the same scratch as the queue
+    if (bin_by_cost) size_sort_scratch(std::max<size_t>(queue.extent(0), balance->guests_capacity()));
     return true;
 }
 

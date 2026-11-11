@@ -207,11 +207,12 @@ class CellChemistry {
 
     public:
         // Public because nvcc rejects device lambdas in non-public member functions
-        void bin_queue(const Kokkos::View<uint32_t *> & queued, const Kokkos::View<float *> & queued_cost, uint32_t n,
-                       const Kokkos::View<uint32_t *> & range);
+        void sort_queue(const Kokkos::View<uint32_t *> & queued, const Kokkos::View<float *> & queued_cost, uint32_t n,
+                        const Kokkos::View<uint32_t *> & range);
         void add_failures(const Kokkos::View<uint32_t> & failures) const;
 
     private:
+        void size_sort_scratch(size_t n);
 
         std::shared_ptr<ChemistryBalance> balance;
         Mixture gas;
@@ -233,8 +234,9 @@ class CellChemistry {
         Kokkos::View<float *> cost;  // binning: minus the last cost of each queued cell
         // The queue's ranges on the device, [0, wide teams, end): local cells, then guests from other ranks
         Kokkos::View<uint32_t *> local_range, guest_range;
-        Kokkos::View<uint32_t *> bins, bin_queue_out;  // binning: cells per cost class and their offsets; scratch queue
-        Kokkos::View<float *> bin_cost_out;
+        Kokkos::View<uint32_t *> sorted_queue;  // binning on CUDA: the sort's output and scratch
+        Kokkos::View<float *> sorted_cost;
+        Kokkos::View<uint8_t *> sort_scratch;
         Kokkos::View<uint64_t *> tally;
         Kokkos::View<float *> previous_cost;  // (cell)
         RepairRecorder clip_recorder;
