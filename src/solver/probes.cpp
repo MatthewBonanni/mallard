@@ -884,9 +884,9 @@ std::string Probes::Probe::sampling_json() const {
     } else {
         std::string requested = "[", cell = "[", centroid = "[", distance = "[";
         auto point_json = [](const probe::Point & x) {
-            std::string out = "[";
-            for (size_t d = 0; d < N_DIM; d++) out += (d ? "," : "") + json::number(x[d]);
-            return out + "]";
+            std::string s = "[";
+            for (size_t d = 0; d < N_DIM; d++) s += (d ? "," : "") + json::number(x[d]);
+            return s + "]";
         };
         double max_distance = 0.0, sum = 0.0;
         for (size_t i = 0; i < locations.size(); i++) {
