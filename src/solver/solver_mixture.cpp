@@ -109,14 +109,18 @@ struct ResetEnergyFunctor {
     Kokkos::View<rtype *> volume;      // repair audit: the change of rho E V and the changed cells, else empty
     Kokkos::View<uint8_t *> touched;
 
+    // One array reduction, [change, changed cells], into a device view: combined reducers wait for the host
+    using value_type = double[];
+    const unsigned value_count = 2;
+
     KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t c, double & change, uint64_t & changed) const {
+    void operator()(const uint32_t c, double sums[]) const {
         const rtype before = U(c, N_DIM + 1);
         (*this)(c);
         const rtype after = U(c, N_DIM + 1);
         if (after != before) {
-            change += static_cast<double>(volume(c)) * (static_cast<double>(after) - static_cast<double>(before));
-            changed++;
+            sums[0] += static_cast<double>(volume(c)) * (static_cast<double>(after) - static_cast<double>(before));
+            sums[1] += 1.0;
             touched(c) = 3;
         }
     }
@@ -444,14 +448,11 @@ void Solver::reset_energy() {
     const RepairRecorder recorder = run_health.repairs.recorder(run_health.reset_site);
     functor.volume = mesh->cell_measure;
     functor.touched = recorder.touched;
-    const Kokkos::View<double> change = run_health.reset_change;
-    const Kokkos::View<uint64_t> changed = run_health.reset_cells;
-    Kokkos::parallel_reduce("reset_energy", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor,
-                            Kokkos::Sum<double, Kokkos::DefaultExecutionSpace::memory_space>(change),
-                            Kokkos::Sum<uint64_t, Kokkos::DefaultExecutionSpace::memory_space>(changed));
+    const Kokkos::View<double *> sums = run_health.reset_sums;
+    Kokkos::parallel_reduce("reset_energy", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor, sums);
     Kokkos::parallel_for("reset_energy_record", 1, KOKKOS_LAMBDA(const int) {
-        recorder.change(0) += change();
-        recorder.activations(0) += changed();
+        recorder.change(0) += sums(0);
+        recorder.activations(0) += static_cast<uint64_t>(sums(1));
     });
 }
 
@@ -632,7 +633,7 @@ void Solver::launch_double_flux_functor() {
     }
 }
 
-rtype Solver::calc_dt_cfl1_mixture() {
+rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
     if (les_on && les.dynamic) {
         eddy_viscosity_of_state(mesh->n_owned());
         update_dynamic_constant();
@@ -659,8 +660,9 @@ rtype Solver::calc_dt_cfl1_mixture() {
                                    axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data,
                                    mesh->periodic_maps(), mesh->face_shift};
     Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor,
-                            Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(dt_reduce_slot()));
-    return reduce_dt();
+                            Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(
+                                on_device.data() ? on_device : dt_reduce_slot()));
+    return on_device.data() ? 0.0_r : reduce_dt();
 }
 
 void Solver::update_primitives_mixture() {

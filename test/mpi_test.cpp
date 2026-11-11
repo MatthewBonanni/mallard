@@ -148,7 +148,7 @@ TEST(MPITest, LowStorageIntegratorsAndErrorControlMatchSerial) {
     }
 }
 
-TEST(MPITest, GasMixtureMatchesSerial) {
+TEST(MPITest, GasMixtureMatchesSerialWithAndWithoutStepGraphs) {
     // Species and the temperature seeds of halo cells follow the same history
     // as their owners'; with TENO also the troubled cells' stencil choices and
     // the scalars' bound-preserving factors, and with double flux the frozen
@@ -164,9 +164,17 @@ TEST(MPITest, GasMixtureMatchesSerial) {
                                                    "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\n[radiation]\n", "navier_stokes"},
                                                   {"", "type = \"MUSCL\"\n", "[chemistry]\ncoupling = \"simpler\"\n",
-                                                   "navier_stokes"}};
+                                                   "navier_stokes"},
+                                                  {"time_integrator = \"RDPK3Sp35\"\n"
+                                                   "[numerics.error_control]\ntolerance = 1e-4\n",
+                                                   "type = \"MUSCL\"\n", "", "navier_stokes"}};
+    // Without chemistry, the steps also run in the CUDA graph
     for (const auto & [extra, reconstruction, chemistry, type] : schemes) {
-        expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
+        if (chemistry.empty()) {
+            expect_matches_serial_with_and_without_step_graphs(mixture_input(extra, reconstruction, chemistry, type));
+        } else {
+            expect_matches_serial(mixture_input(extra, reconstruction, chemistry, type));
+        }
     }
 }
 
