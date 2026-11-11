@@ -99,6 +99,18 @@ endif()
 message(STATUS "Mallard: Dimension: ${${PROJECT_NAME}_DIM}")
 add_compile_definitions(${PROJECT_NAME}_DIM=${${PROJECT_NAME}_DIM})
 
+# libmallard2d/3d: the output reader as a C library for the Python package (tools/mallard), so
+# every library it links is compiled position independent
+option(${PROJECT_NAME}_ENABLE_PYTHON "Build libmallard${${PROJECT_NAME}_DIM}d, the reader the Python package loads" OFF)
+if(${PROJECT_NAME}_ENABLE_PYTHON)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    file(STRINGS ${CMAKE_SOURCE_DIR}/tools/mallard/_version.py python_version REGEX "^__version__ = ")
+    if(NOT python_version STREQUAL "__version__ = \"${PROJECT_VERSION}\"")
+        message(FATAL_ERROR "tools/mallard/_version.py has ${python_version}, not Mallard's version "
+                            "${PROJECT_VERSION}: set it to \"${PROJECT_VERSION}\"")
+    endif()
+endif()
+
 option(${PROJECT_NAME}_ENABLE_MPI "Distributed memory parallelism with MPI" OFF)
 if(${PROJECT_NAME}_ENABLE_MPI)
     find_package(MPI REQUIRED COMPONENTS CXX)
@@ -282,6 +294,9 @@ endif()
 include(GNUInstallDirs)
 # OPTIONAL: an install after building only some targets (e.g. --target mallard)
 install(TARGETS mallard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+if(${PROJECT_NAME}_ENABLE_PYTHON)
+    install(TARGETS MallardReader LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
+endif()
 # mallard links to either solver; installs of both dimensions share it
 install(CODE "
     set(bin \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\")
