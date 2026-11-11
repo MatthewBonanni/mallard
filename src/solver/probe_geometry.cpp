@@ -25,6 +25,7 @@
 
 #include "expression.h"
 #include "input.h"
+#include "provenance.h"
 
 namespace probe {
 
@@ -348,6 +349,7 @@ Transform Transform::read(const Input & entry, const std::string & key) {
 std::vector<Point> read_points(const std::string & file, const std::string & key) {
     std::ifstream in(file);
     if (!in.good()) throw InputError(key + ": could not open " + file + ".");
+    provenance::read_file("probe_points", file);
     std::vector<Point> points;
     std::string line;
     uint64_t row = 0;

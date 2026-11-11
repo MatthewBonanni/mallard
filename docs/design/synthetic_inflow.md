@@ -65,7 +65,12 @@ face then:
 3. multiplies by the lower Cholesky factor `a` of the local `R_ij`
    ([Lund et al. 1998](../references.md#lund-1998)): `u' = a v`, so that
    `<u'u'^T> = a a^T = R`;
-4. adds the mean velocity.
+4. adds the mean velocity: the face's fixed mean, or, for a `u` of `t`, the
+   target that `TimedInletTargets` wrote just before at the same time from
+   the compiled expressions of `u` (on the device, inside the stage). The
+   statistics are those of `u'` alone, so they do not depend on the mean;
+   only `U_c`, which fixes the plane spacing `dt_g` and so the stateless
+   plane index `t / dt_g`, is taken from the mean at `t = 0` unless given.
 
 The grid spacing is the smallest transverse length over 6
 (`points_per_length`), and `dt_g` is the smallest streamwise length over
@@ -89,6 +94,11 @@ index alone:
 - **Cost.** Each new plane costs one random plane plus three filter passes on
   the auxiliary grid, about once per time step; the face kernel
   interpolates four points (two in 2D) per component.
+- **Step graphs.** Which planes to compute is decided on the device, from
+  the time on the device: a one-thread kernel compares the planes the time
+  needs with those already filtered and cached, and the filter kernels skip
+  the slots with nothing to do. Every launch is the same at every step, so
+  CUDA graphs capture them, and the planes are the same as without a graph.
 
 ### Zero net flux
 
@@ -136,8 +146,8 @@ the generator has no state, so turbulent inlets restart bitwise.
 
 ## Mean profile and statistics from a precursor
 
-`u` of `inlet_state` with `nscbc` takes expressions in `x`, `y`, `z`. For turbulence,
-`reynolds_stress` takes numbers or expressions, or `profile` reads a CSV of
+`u` of `inlet_state` with `nscbc` takes expressions in `x`, `y`, `z` and `t`. For turbulence,
+`reynolds_stress` takes numbers or expressions in `x`, `y`, `z`, or `profile` reads a CSV of
 plane averages as `tools/post/plane_average.py` writes it from a precursor's
 `[statistics]` (`MEAN_U_*`, `COV_U_*_U_*`), interpolated along its
 coordinate. Pivots of the Cholesky factor that round-off makes slightly

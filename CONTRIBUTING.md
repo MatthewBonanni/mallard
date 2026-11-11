@@ -107,12 +107,29 @@ that adds or changes behavior includes:
 
 1. **Code**, in `src/`, following the style above. New input keys are read through
    `Input` with explicit defaults.
+   Communication between ranks during the run (exchanges, reductions, gathers on
+   the step path) needs an NCCL path on the device stream that the step's CUDA
+   graph can capture (`comm::allreduce_device`, `HaloExchange`), MPI as the
+   fallback in builds without NCCL, and a test comparing the two bit for bit
+   (`expect_matches_serial` runs both); setup, partitioning and I/O collectives
+   are exempt.
+   Work on the step path is capturable in the step CUDA graph: no host work per
+   step (no host reads of device results, allocations, fences or host branches on
+   the solution; time-dependent values come from the device step time), with a
+   test asserting that the step is graphed in CUDA builds
+   (`expect_matches_serial_with_and_without_step_graphs`). On every backend that
+   test also runs the code the capture records under Kokkos Tools callbacks
+   (`StepGraphGuard`), which fail it on a fence, an allocation or a copy through
+   pageable host memory there; MPI's host-staged fallbacks mark themselves with
+   `comm::HostStaged`.
 2. **Tests** in `test/` (GoogleTest, registered in
    [test/CMakeLists.txt](test/CMakeLists.txt)). Each test must fail for a plausible
    regression: prefer checks against an exact solution, a design order of
    accuracy, conservation, symmetry or an independent reference (an exact
    Riemann solver, Cantera) over restating the implementation. If you cannot name
-   the bug a test would catch, it is not worth keeping.
+   the bug a test would catch, it is not worth keeping. A test that runs a
+   combination of features lists them in [test/features.toml](test/features.toml)
+   for the [feature matrix](docs/guide/features.md).
 3. **Documentation**, following [docs/design/documentation.md](docs/design/documentation.md):
    - the user-facing explanation (when to use it, a minimal TOML snippet, keys with
      defaults, pitfalls) in the topic's page of `docs/guide/`;
@@ -155,13 +172,14 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   failure, and its *Details* link shows every job and its log. `main` requires a
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors and runs the full suite in 2D and 3D, with
-  OpenMP, serial, MPI on 1 to 4 ranks and single precision, plus a single-precision
-  Clang build and the tutorials and case templates. Each job also shows on the PR as
+  OpenMP, serial, MPI on 1 to 4 ranks and single precision, with every supported
+  compiler on x86-64 and arm64, on macOS, and through Spack on RHEL 8 and 9, plus the
+  tutorials and case templates. Each job also shows on the PR as
   its own status, `CI / <job>`. Documentation-only changes skip the build jobs (the
   run takes about a minute). `main` runs CI on every merge.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only
   what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
-  only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `fuzz`; any other name
+  only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `spack`, `fuzz`; any other name
   fails the run). The `CI` status records the subset. A resolution in build files,
   shared headers or anything the whole suite exercises needs the full run.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
@@ -180,7 +198,14 @@ fix and a `fixed` fragment; a documentation fix needs neither.
 - Sanitizers (AddressSanitizer and UndefinedBehaviorSanitizer) run nightly on
   `main`.
 - **Support matrix.** [Supported platforms](docs/guide/support.md) lists every CI job and
-  what it builds and runs; a PR that adds, removes or renames a job updates it (CI checks).
+  what it builds and runs; a PR that adds, removes or renames a job updates it and the
+  [supported-platforms table](docs/installation.md#supported-platforms) (CI checks both).
+- **Support policy.** Mallard supports the two newest major releases of GCC and of
+  Clang, the current Xcode, the two newest CUDA minor releases, and the latest ROCm and
+  oneAPI, each tested in CI ([supported platforms](docs/installation.md#supported-platforms)).
+  When GCC or LLVM releases a new major version, one PR adds it and drops the oldest:
+  the CI jobs, the minimums in `CMakeLists.txt` and the Spack package's `conflicts`, and
+  the docs, together. CUDA, ROCm and oneAPI releases move the device jobs the same way.
 
 By contributing, you agree that your contributions are licensed under the
 [Apache License, Version 2.0](LICENSE).

@@ -21,6 +21,7 @@
 
 #include <Kokkos_Core.hpp>
 #include "common.h"
+#include "exact_sums.h"
 #include "kexpr.h"
 #include "input.h"
 #include "log.h"
@@ -105,9 +106,11 @@ class SourceTerms {
          * @param species Species names (empty for a single gas).
          * @param fields The cell fields the expressions read.
          * @param regions The regions of the run, on mesh.
+         * @param use_nccl Whether domain averages sum over the ranks with NCCL (comm::allreduce_device).
          */
         SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh,
-                    const std::vector<std::string> & species, const CellFields & fields, region::Regions & regions);
+                    const std::vector<std::string> & species, const CellFields & fields, region::Regions & regions,
+                    bool use_nccl);
 
         bool empty() const { return m_empty; }
         /** @brief Whether some expression reads t (the stage time must be set on the device). */
@@ -149,6 +152,7 @@ class SourceTerms {
         Kokkos::View<double **, Kokkos::LayoutRight> weights;      // (row, cell)
         Kokkos::View<double *> means;
         Kokkos::View<double *[N_MEANS + 1]> mean_terms;  // (cell, [volume, mean integrands])
+        ExactSums<N_MEANS + 1> mean_sums;
         logging::Items m_summary;
 
 };

@@ -175,6 +175,12 @@ class Probes {
 
         /** @brief Whether a probe or a snapshot is due now. */
         bool due(uint64_t step, rtype t) const;
+        /**
+         * @brief Lowers step_limit and t_limit to the first step after step, and
+         *        the time, from which a probe, a snapshot or an average sample may be due: a step s at time t can
+         *        be due only if s >= step_limit or t >= t_limit.
+         */
+        void due_limits(uint64_t step, uint64_t & step_limit, rtype & t_limit) const;
         bool probes_due(uint64_t step, rtype t) const;
         bool snapshots_due(uint64_t step, rtype t) const;
         bool snapshots_need_transport() const;
@@ -331,6 +337,8 @@ class Probes {
             std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
 
             bool due(uint64_t step, rtype t) const;
+            /** @brief With a time interval: due once t is at least this. */
+            rtype due_time() const;
             bool due_or_forced(uint64_t step, rtype t, bool force) const {
                 return due(step, t) || (force && snapshot && step != step_last);
             }

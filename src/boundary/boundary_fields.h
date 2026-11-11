@@ -23,8 +23,10 @@
 #include "boundary.h"
 #include "kexpr.h"
 #include "input.h"
-#include "synthetic_inflow.h"
 #include "thermo.h"
+
+/** @brief Point in space. */
+using Point = std::array<double, N_DIM>;
 
 /** @brief A number of a [[boundaries]] entry, or an expression of x, y, z and t, compiled. */
 class BoundaryValue {
@@ -50,6 +52,38 @@ class BoundaryValue {
 };
 
 /**
+ * @brief The `direction` of a [[boundaries]] entry: N_DIM numbers, or N_DIM
+ *        components of which some are expressions of x, y, z, t, normalized
+ *        where they are evaluated.
+ */
+class DirectionKey {
+    public:
+        DirectionKey() = default;
+        /** @brief Read entry.direction, which must be present. */
+        DirectionKey(const Input & entry, const std::string & where);
+
+        /** @brief Whether entry.direction has an expression among its components. */
+        static bool is_expression(const Input & entry);
+
+        bool constant() const { return components.empty(); }
+        bool depends_on_time() const;
+
+        /** @brief The unit direction at x and t; an error if it is zero there. */
+        Point at(const Point & x, double t) const;
+
+        /** @brief The unit direction at x and t, checked to point into the domain at a face of inward normal n_in. */
+        Point inward(const Point & x, double t, const Point & n_in) const;
+
+        /** @brief The compiled components (expressions only). */
+        const std::vector<BoundaryValue> & programs() const { return components; }
+
+    private:
+        std::string where;
+        Point value{};                          // unit, if constant
+        std::vector<BoundaryValue> components;  // if some component is an expression
+};
+
+/**
  * @brief A vector key of a [[boundaries]] entry (u, mass_flux): N_DIM
  *        components, each a number or an expression, or one number or
  *        expression, a magnitude along `direction` (the inward normal of each
@@ -59,13 +93,15 @@ struct VectorKey {
     std::vector<Input> items;  // the components, or the magnitude alone
     bool speed = false;        // a magnitude along direction
     bool directed = false;     // direction given (else the inward normal)
-    Point direction{};         // unit
+    DirectionKey direction;
 
     /** @brief Read entry.key; empty items if absent. */
     VectorKey(const Input & entry, const std::string & key, const std::string & where);
 
-    /** @brief The unit direction of the magnitude at a face of inward normal n_in. */
-    Point direction_at(const Point & n_in) const { return directed ? direction : n_in; }
+    /** @brief The unit direction of the magnitude at x and t on a face of inward normal n_in. */
+    Point direction_at(const Point & x, double t, const Point & n_in) const {
+        return directed ? direction.at(x, t) : n_in;
+    }
 };
 
 /**
@@ -95,10 +131,10 @@ class BoundaryFields {
 
         /**
          * @brief Whether the faces' conditions differ even when no number is an
-         *        expression: a speed along the normal, a mass flux vector.
+         *        expression: a speed along the normal or a varying direction, a mass flux vector.
          */
         bool per_face() const {
-            return (vector == Vector::SPEED && !directed) ||
+            return (vector == Vector::SPEED && (!directed || !direction.constant())) ||
                    (type == BoundaryType::INLET_MASS_FLOW && vector == Vector::COMPONENTS);
         }
 
@@ -120,11 +156,16 @@ class BoundaryFields {
         Vector get_vector() const { return vector; }
         const std::string & get_where() const { return where; }
 
-        /** @brief Whether a speed has a direction of its own (else it is along the inward normal). */
+        /** @brief Whether the condition has a direction of its own (else a speed is along the inward normal). */
         bool is_directed() const { return directed; }
 
-        /** @brief The fixed unit direction of a speed (with is_directed). */
-        const Point & get_direction() const { return direction; }
+        /** @brief The direction (with is_directed). */
+        const DirectionKey & get_direction() const { return direction; }
+
+        /** @brief The direction of a speed at x and t on a face of inward normal n_in. */
+        Point speed_direction(const Point & x, double t, const Point & n_in) const {
+            return directed ? direction.at(x, t) : n_in;
+        }
 
         /** @brief The value in slot s, null if the condition has none there. */
         const BoundaryValue * slot(int s) const;
@@ -137,7 +178,7 @@ class BoundaryFields {
         std::string where;
         Vector vector = Vector::NONE;
         bool directed = false;
-        Point direction{};
+        DirectionKey direction;
         std::vector<BoundaryValue> u;  // components, or the speed alone; empty if absent
         BoundaryValue p, T, flux;
         bool has_p = false, has_T = false, has_flux = false;
@@ -161,11 +202,25 @@ struct CompositionPrograms {
 };
 
 /**
+ * @brief The `profile` (1 if none) and `mdot` of an inlet_mass_flow, one of
+ *        them of t, and every face of the inlet on all ranks, in the order of
+ *        its area integral.
+ */
+struct MassFlowProfile {
+    std::string where;
+    std::shared_ptr<const kexpr::Program> shape;
+    std::shared_ptr<const kexpr::Program> mdot;  // of t only
+    std::vector<Point> x;          // face centers
+    std::vector<double> measure;   // face measures as the flux integral weighs them
+};
+
+/**
  * @brief The conditions of the faces whose numbers depend on t, evaluated on
  *        the device at the stage time held in a device scalar, so that a
  *        captured CUDA graph replays them: velocities, densities and
  *        pressures, and for gas mixtures the composition, the thermodynamic
- *        surrogates [gamma, e0] and the transport values (T, X).
+ *        surrogates [gamma, e0] and the transport values (T, X); and the
+ *        mass fluxes of inlet_mass_flow profiles of t.
  */
 class TimedBoundaryFields {
     public:
@@ -178,10 +233,20 @@ class TimedBoundaryFields {
         void add(uint32_t i_bc, const Point & x, const Point & n_in, const std::shared_ptr<const BoundaryFields> & fields,
                  const std::shared_ptr<const CompositionPrograms> & composition, bool at_face = true);
 
+        /**
+         * @brief The mass flux of conditions `bcs` at x on this rank: mdot(t) spread over the whole inlet by
+         *        `profile`, at each stage. Every rank integrates the profile over every face in the same
+         *        order, so the fluxes are the same on any rank count with no communication.
+         */
+        void add(const MassFlowProfile & profile, const std::vector<uint32_t> & bcs, const std::vector<Point> & x);
+
         /** @brief Copy what add() gathered to the device; call once, after the last add(). */
         void finish();
 
-        bool empty() const { return faces_host.empty(); }
+        bool empty() const { return faces_host.empty() && profiles.empty(); }
+
+        /** @brief The errors of mass-flow profiles found on the device. */
+        enum ProfileError { NEGATIVE_PROFILE, ZERO_INTEGRAL, NEGATIVE_MDOT };
 
         /** @brief The gas of the conditions: the gas constant R of a single gas, or the mixture's tables. */
         struct Gas {
@@ -216,16 +281,45 @@ class TimedBoundaryFields {
         Kokkos::View<uint32_t *> face_bc;
         Kokkos::View<uint32_t *> face_set;
         Kokkos::View<double *[3]> face_x;
-        Kokkos::View<double *[N_DIM]> face_direction;  // the speed's direction, or the normal of a mass flux vector
+        // The speed's direction, or the inward normal (of a mass flux vector, or of a direction of t)
+        Kokkos::View<double *[N_DIM]> face_direction;
         Kokkos::View<uint8_t *[2]> set_type;            // type, Vector
         Kokkos::View<int32_t *[BoundaryFields::N_SLOTS]> set_slot;  // program, -1 if none
         Kokkos::View<int32_t *[4]> set_composition;                 // first, count, balance, mole
+        Kokkos::View<int32_t *[N_DIM]> set_direction;               // programs of a direction of t, -1 if none
         Kokkos::View<uint32_t *> composition_species;
         Kokkos::View<uint32_t *> composition_program;
         kexpr::ProgramTable<> programs;
         std::vector<const kexpr::Program *> program_list;  // host, in the table's order
         Kokkos::View<int32_t> error_face;   // 1 + the first face whose number was not positive, 0 if none
-        Kokkos::View<double[3]> error;      // its time, value and slot
+        Kokkos::View<double[3]> error;      // its time, value and slot (N_SLOTS: composition, N_SLOTS + 1: direction)
+
+        // Mass-flow profiles: all inlet faces of profile p are [first(p), first(p + 1)), summed in chunks
+        // of CHUNK in order; the faces of this rank take the scale times their value
+        static constexpr uint32_t CHUNK = 256;
+        std::vector<MassFlowProfile> profiles;
+        // This rank's faces: condition, center and profile
+        std::vector<uint32_t> profile_bc_host;
+        std::vector<Point> profile_x_host;
+        std::vector<uint32_t> profile_of_host;
+        std::vector<uint32_t> first;            // first inlet face of each profile, then the total
+        Kokkos::View<uint32_t *> profile_program;
+        Kokkos::View<uint32_t *> profile_mdot;    // program
+        Kokkos::View<double *[3]> inlet_x;
+        Kokkos::View<double *> inlet_measure;
+        Kokkos::View<uint32_t *[3]> chunk_range;  // profile, first and end face
+        Kokkos::View<uint32_t *> profile_chunks;  // first chunk of each profile, then the total
+        Kokkos::View<double *> chunk_sum;
+        Kokkos::View<double *> profile_scale;
+        Kokkos::View<uint32_t *> profile_bc;
+        Kokkos::View<uint32_t *> profile_of;
+        Kokkos::View<double *[3]> profile_x;
+        Kokkos::View<int32_t> profile_error;          // 1 + the inlet face or profile of the first error, 0 if none
+        Kokkos::View<double[3]> profile_error_value;  // its time, value and ProfileError
+
+        void finish_profiles(std::vector<const kexpr::Program *> & all);
+        void apply_profiles(const Kokkos::View<rtype> & time, const Kokkos::View<BoundaryCondition *> & bcs) const;
+        void check_profiles() const;
 };
 
 /**
@@ -244,6 +338,7 @@ class DirichletStates {
         void finish(const Kokkos::View<rtype *[N_DIM + 2]> & face_state);
 
         bool depends_on_time() const { return n_timed > 0; }
+        bool empty() const { return faces_host.empty(); }
 
         /** @brief The states that depend on t, at the time held in `time`. */
         void apply(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM + 2]> & face_state) const;
@@ -274,7 +369,7 @@ class DirichletStates {
  */
 class TimedInletTargets {
     public:
-        /** @brief Whether the velocity u of a [[boundaries]] entry (a VectorKey) depends on t. */
+        /** @brief Whether the velocity u of a [[boundaries]] entry (a VectorKey, with its direction) depends on t. */
         static bool depends_on_time(const Input & entry, const std::string & where);
 
         /** @brief Characteristic faces `chars` with centers x and inward normals n_in take the entry's velocity u. */
@@ -286,23 +381,30 @@ class TimedInletTargets {
 
         bool empty() const { return host_chars.empty(); }
 
-        void fill(double t, const Kokkos::View<rtype *[N_DIM]> & target) const;
+        /** @brief The targets at the time on the device (kernels only, capturable in a step graph). */
+        void fill(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM]> & target) const;
 
-        /** @brief Throw the InputError of an expression stopped at the iteration limit, if any was. */
+        /** @brief Throw the InputError of an expression stopped at the iteration limit, or of a direction of t
+         *         that was zero or pointed out of the domain, if any was. */
         void check() const;
 
     private:
         std::vector<std::shared_ptr<kexpr::Program>> host_programs;
         std::vector<std::array<uint32_t, N_DIM>> host_slots;
-        std::vector<Point> host_scale;  // 1, or the direction of a speed
+        std::vector<std::array<int32_t, N_DIM>> host_direction;  // programs of a direction of t, -1 if none
+        std::vector<Point> host_scale;  // 1, the direction of a speed, or the inward normal for a direction of t
         std::vector<int32_t> host_chars;
         std::vector<Point> host_x;
+        std::vector<std::string> host_where;  // per face
 
         Kokkos::View<int32_t *> chars;
         Kokkos::View<double *[3]> x;
         Kokkos::View<uint32_t *[N_DIM]> slots;
+        Kokkos::View<int32_t *[N_DIM]> direction;
         Kokkos::View<double *[N_DIM]> scale;
         kexpr::ProgramTable<> programs;
+        Kokkos::View<int32_t> error_face;  // 1 + the first face whose direction was zero or outward, 0 if none
+        Kokkos::View<double[2]> error;     // its time and value along the inward normal
 };
 
 #endif // BOUNDARY_FIELDS_H

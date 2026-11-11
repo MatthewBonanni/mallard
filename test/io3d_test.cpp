@@ -309,7 +309,7 @@ TEST(IO3DTest, VolumeOutputFollowsVTKCellConventions) {
     CellFields fields(mesh->n_cells, {"RHO", "U_X", "U_Y", "U_Z"});
     DataWriter writer;
     writer.init(parse_toml("prefix = \"" + dir + "/flow\"\nformat = \"vtu\"\ninterval = 1\n"
-                           "variables = [\"RHO\", \"U\"]\n"), fields.data, mesh);
+                           "fields = [\"RHO\", \"U\"]\n"), fields.data, mesh);
     writer.write(0, 0.0);
     comm::barrier();  // Rank 0 writes the files
 
@@ -380,7 +380,7 @@ TEST(IO3DTest, HDF5OutputHoldsTheVTUCellsAsAnXDMFMixedTopology) {
     for (const char * format : {"vtu", "xdmf"}) {
         DataWriter writer;
         writer.init(parse_toml("prefix = \"" + dir + "/" + format + "\"\nformat = \"" + format +
-                               "\"\ninterval = 1\nvariables = [\"RHO\", \"U\"]\n"),
+                               "\"\ninterval = 1\nfields = [\"RHO\", \"U\"]\n"),
                     fields.data, mesh);
         writer.write(0, 0.0);
     }
@@ -429,7 +429,7 @@ TEST(IO3DTest, VTKHDFHoldsTheVTUCells) {
     for (const char * format : {"vtu", "vtkhdf"}) {
         DataWriter writer;
         writer.init(parse_toml("prefix = \"" + dir + "/" + format + "\"\nformat = \"" + format +
-                               "\"\ninterval = 1\nvariables = [\"RHO\", \"U\"]\n"),
+                               "\"\ninterval = 1\nfields = [\"RHO\", \"U\"]\n"),
                     fields.data, mesh);
         writer.write(0, 0.0);
     }
@@ -475,7 +475,7 @@ TEST(IO3DTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
             "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
             "[output]\ncheck_interval = 1000000\n"
-            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 1\nvariables = [\"RHO\"]\n"));
+            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 1\nfields = [\"RHO\"]\n"));
         solver.run();
         const std::string out = dir + "/f_000000.vtkhdf";
         const auto points = h5_values<double>(out, "VTKHDF/Points");
@@ -555,7 +555,7 @@ TEST(IO3DTest, RegionOutputWritesItsCellsAndOnlyTheirNodes) {
     ASSERT_FALSE(prisms.cells.empty());
     ASSERT_LT(nodes.size(), size_t(mesh->n_nodes));
     DataWriter writer;
-    writer.init(parse_toml("prefix = \"" + dir + "/p\"\nformat = \"vtu\"\ninterval = 1\nvariables = [\"RHO\"]\n"),
+    writer.init(parse_toml("prefix = \"" + dir + "/p\"\nformat = \"vtu\"\ninterval = 1\nfields = [\"RHO\"]\n"),
                 fields.data, mesh, {}, &prisms);
     writer.write(0, 0.0);
     comm::barrier();  // Rank 0 writes the files

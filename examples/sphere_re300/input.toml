@@ -109,13 +109,13 @@ file = "./solut/forces_sphere.csv"
 [[write_data]]
 prefix = "./solut/sphere"
 time_interval = 100.0
-variables = ["RHO", "U", "P", "Q_CRITERION"]
+fields = ["RHO", "U", "P", "Q_CRITERION"]
 
 [[write_data]]
 prefix = "./solut/wall"
 region = "sphere"
 time_interval = 5.0
-variables = ["P"]
+fields = ["P"]
 
 [[write_data]]
 prefix = "./restart/sphere"

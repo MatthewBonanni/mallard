@@ -265,8 +265,9 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
             FOR_I_DIM bc.data[1 + i] = static_cast<rtype>(u[i]);
         }
     }
+    // A direction with expressions is BoundaryFields', per face
     if ((bc.type == BoundaryType::INLET_STAGNATION || bc.type == BoundaryType::INLET_MASS_FLOW) &&
-        present("direction")) {
+        present("direction") && !DirectionKey::is_expression(input)) {
         const std::vector<rtype> dv = find_real_vector(input, "direction", dim::none);
         rtype norm = 0.0_r;
         for (const rtype c : dv) norm += c * c;

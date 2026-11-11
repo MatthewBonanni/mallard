@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot the mesh-quality fields of `mallard check --quality PREFIX` (2D).
+"""Plot the mesh-quality fields of `mallard check --mesh-fields PREFIX` (2D).
 
     plot_mesh_quality.py PREFIX_000000.vtkhdf OUT.png [--fields NON_ORTHOGONALITY SKEWNESS] [--worst 10]
         [--xlim X0 X1] [--ylim Y0 Y1]
@@ -26,7 +26,7 @@ LABELS = {"NON_ORTHOGONALITY": "non-orthogonality [deg]", "SKEWNESS": "skewness"
 
 
 def read_quality(path):
-    """Cell polygons (2D) and the quality fields of a --quality file (.vtkhdf, or .vtu without HDF5)."""
+    """Cell polygons (2D) and the quality fields of a --mesh-fields file (.vtkhdf, or .vtu without HDF5)."""
     pts, conn, offs, types, arrays = read_vtu_cells(path)
     polys = [None] * len(types)
     for sel, cells in outlines(conn, offs, types):
@@ -36,7 +36,7 @@ def read_quality(path):
 
 
 def draw_quality(ax, polys, values, n_worst, highlight, edges, cmap="viridis", fontsize=8, among=None):
-    """The cells coloured by values, the n_worst largest (of the cells among, a mask) circled and numbered;
+    """The cells colored by values, the n_worst largest (of the cells among, a mask) circled and numbered;
     returns the cells' collection."""
     cells = PolyCollection(polys, array=values, cmap=cmap, edgecolors=edges, linewidths=0.15, rasterized=True)
     ax.add_collection(cells)

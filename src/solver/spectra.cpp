@@ -22,6 +22,7 @@
 #include <sstream>
 
 #include "comm.h"
+#include "device_comm.h"
 #include "common_io.h"
 #include "field_units.h"
 #include "input.h"
@@ -105,7 +106,8 @@ bool Spectra::homogeneous(size_t axis) const {
 }
 
 void Spectra::init(const Input & table, const Input & input, const std::vector<std::string> & species_names,
-                   const Mesh & mesh, uint64_t interval_in, rtype t_start_in) {
+                   const Mesh & mesh, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
+    use_nccl = use_nccl_;
     const std::string key = "statistics.spectra";
     interval = find_value_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
@@ -324,6 +326,8 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     work = Kokkos::View<Complex *>("spectra_work", n_work);
     send_buffer = Kokkos::View<rtype *>("spectra_send", std::max(to_first.send_from.extent(0),
                                                                2 * to_second.send_from.extent(0)));
+    recv_buffer = Kokkos::View<rtype *>("spectra_recv", std::max(to_first.recv_to.extent(0),
+                                                               2 * to_second.recv_to.extent(0)));
 
     for (size_t d : directions) {
         factors[d] = prime_factors(N[d]);
@@ -343,6 +347,10 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     const uint32_t rows = two_stage ? last.count : static_cast<uint32_t>(uint64_t(last.count) * n_pos / N[last.axis]);
     partial = Kokkos::View<double **, Kokkos::LayoutRight>("spectra_partial", rows,
                                                            spec_width + F + pairs.size() * n_shells);
+    partial_counts = {partial.size()};
+    if (distributed) partial_counts = comm::allgatherv(partial_counts);
+    gathered = Kokkos::View<double *>("spectra_gathered", std::accumulate(partial_counts.begin(), partial_counts.end(),
+                                                                          uint64_t(0)));
     acc_spec.assign(size_t(n_pos) * spec_width, 0.0);
     acc_mean.assign(size_t(n_pos) * F, 0.0);
     acc_shell.assign(pairs.size() * n_shells, 0.0);
@@ -368,21 +376,11 @@ void Spectra::move(const Route & route, uint32_t width, const rtype * src_ptr, r
     });
     Kokkos::View<rtype *> recv = send;
     if (distributed) {
-        const auto h_send = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), send);
-        std::vector<std::vector<rtype>> out(route.send_counts.size());
-        size_t at = 0;
-        for (size_t q = 0; q < out.size(); q++) {
-            out[q].assign(h_send.data() + at, h_send.data() + at + route.send_counts[q] * width);
-            at += route.send_counts[q] * width;
-        }
-        const std::vector<std::vector<rtype>> in = comm::alltoallv(out);
-        std::vector<rtype> flat;
-        flat.reserve(n_recv * width);
-        for (size_t q = 0; q < in.size(); q++) {
-            if (in[q].size() != route.recv_counts[q] * width) throw std::logic_error("spectra: unexpected message size");
-            flat.insert(flat.end(), in[q].begin(), in[q].end());
-        }
-        recv = to_device(flat, "spectra_recv");
+        std::vector<uint64_t> send_counts = route.send_counts, recv_counts = route.recv_counts;
+        for (auto & n : send_counts) n *= width;
+        for (auto & n : recv_counts) n *= width;
+        recv = recv_buffer;
+        comm::alltoallv_device(send, send_counts, recv, recv_counts, use_nccl);
     }
     Kokkos::parallel_for("spectra_unpack", n_recv, KOKKOS_LAMBDA(const size_t i) {
         for (uint32_t k = 0; k < width; k++) dst_ptr[size_t(to(i)) * width + k] = recv(i * width + k);
@@ -601,9 +599,9 @@ void Spectra::sample(uint64_t step, rtype t, const CellSampler & sampler) {
     sum_planes(two_stage ? second : first);
 
     // Rows of every rank in plane order
-    const auto h_partial = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), partial);
-    std::vector<double> local(h_partial.data(), h_partial.data() + h_partial.size());
-    const std::vector<double> all = distributed ? comm::allgatherv(local) : local;
+    const Kokkos::View<double *> local(partial.data(), partial.size());
+    if (distributed) comm::allgatherv_device(local, gathered, partial_counts, use_nccl);
+    const auto all = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), distributed ? gathered : local);
     const size_t width = partial.extent(1);
     const size_t rows = all.size() / width;
     const double norm2 = 1.0 / (double(n_modes) * double(n_modes));

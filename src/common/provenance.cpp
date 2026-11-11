@@ -13,10 +13,13 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <random>
+#include <sstream>
 #include <type_traits>
 #include <vector>
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <Kokkos_Core.hpp>
@@ -38,6 +41,7 @@
 #include "comm.h"
 #include "common_typedef.h"
 #include "git_version.h"
+#include "input.h"
 #include "json.h"
 #include "log.h"
 #include "sha256_hw.h"
@@ -172,6 +176,11 @@ std::string build_block() {
 #else
     constexpr bool hdf5 = false;
 #endif
+#if defined(Mallard_HAS_HDF5) && defined(H5_HAVE_PARALLEL)
+    constexpr bool hdf5_parallel = true;
+#else
+    constexpr bool hdf5_parallel = false;
+#endif
 #ifdef Mallard_HAS_KAMINPAR
     constexpr bool kaminpar = true;
 #else
@@ -196,6 +205,7 @@ std::string build_block() {
         .add("gpu_aware_mpi", gpu_aware_mpi)
         .add("nccl", nccl)
         .add("hdf5", hdf5)
+        .add("hdf5_parallel", hdf5_parallel)
         .add("kaminpar", kaminpar)
         .add("species_layout", species_layout);
     return b.str();
@@ -267,11 +277,30 @@ std::string code_block() {
     return c.str();
 }
 
+/** @brief A file the run read: hashed (small), by the identity it carries (from a run), or by size and time. */
+struct ReadFile {
+    enum class How { HASHED, IDENTITY, SIZE } how = How::HASHED;
+    std::string kind, path;
+    std::string run_id, directory, run_log;  // IDENTITY: of the run that wrote it
+    std::uint64_t step = 0;
+    double t = 0.0;
+
+    static ReadFile of(How how, const std::string & kind, const std::string & path) {
+        ReadFile f;
+        f.how = how;
+        f.kind = kind;
+        f.path = path;
+        return f;
+    }
+};
+
 struct State {
     std::string run;    // JSON object, or empty
     std::string run_id;
     std::string restart_of = "null";  // JSON object or null
     bool has_input = false;
+    std::vector<ReadFile> reads;  // this rank's
+    std::string files;  // JSON array, or empty
     std::string input_file, input_text, resolved;
     std::string mesh;   // JSON object, or empty
     std::string preset; // JSON object or null, or empty
@@ -310,6 +339,7 @@ void rebuild() {
         p.raw("input", i.str());
     }
     if (!s.mesh.empty()) p.raw("mesh", s.mesh);
+    if (!s.files.empty()) p.raw("files", s.files);
     if (!s.preset.empty()) p.raw("preset", s.preset);
     s.text = p.str();
 }
@@ -447,6 +477,154 @@ void set_input(const std::string & file, const std::string & text) {
     rebuild();
 }
 
+namespace {
+
+/** @brief Modification time of a file, UTC ("2026-11-09T18:20:31Z"), or "" if unknown. */
+std::string modified(const std::string & path) {
+    struct stat st {};
+    if (::stat(path.c_str(), &st) != 0) return "";
+    char text[32] = {};
+    std::strftime(text, sizeof(text), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&st.st_mtime));
+    return text;
+}
+
+/** @brief The size and SHA-256 that the writing run's output record gives a file, if its run log has one. */
+std::optional<std::pair<uint64_t, std::string>> recorded(const ReadFile & f) {
+    namespace fs = std::filesystem;
+    if (f.run_id.empty() || f.directory.empty()) return std::nullopt;
+    const fs::path log = fs::path(f.directory) / f.run_log;
+    std::ifstream in(log);
+    std::error_code error;
+    const fs::path file = fs::weakly_canonical(f.path, error);
+    for (std::string line; std::getline(in, line);) {
+        if (line.find("\"type\":\"output\"") == std::string::npos) continue;
+        try {
+            const json::Value record = json::parse(line);
+            const json::Value * run_id = record.find("run_id");
+            const json::Value * files = record.find("files");
+            if (!run_id || run_id->string != f.run_id || !files) continue;
+            for (const json::Value & w : files->array) {
+                const json::Value * path = w.find("path");
+                const json::Value * sha = w.find("sha256");
+                const json::Value * bytes = w.find("bytes");
+                if (!path || !sha || !bytes) continue;
+                if (fs::weakly_canonical(fs::path(f.directory) / path->string, error) == file) {
+                    return std::make_pair(static_cast<uint64_t>(bytes->number), sha->string);
+                }
+            }
+        } catch (const std::exception &) {
+            // A line cut short by a killed run
+        }
+    }
+    return std::nullopt;
+}
+
+std::string read_file_json(const ReadFile & f) {
+    namespace fs = std::filesystem;
+    std::error_code error;
+    json::Object o;
+    o.add("kind", f.kind).add("path", f.path).add("resolved", fs::weakly_canonical(f.path, error).string());
+    const auto size = fs::file_size(f.path, error);
+    const uint64_t bytes = error ? 0 : uint64_t(size);
+    if (error) {
+        o.raw("bytes", "null");
+    } else {
+        o.add("bytes", bytes);
+    }
+    if (f.how == ReadFile::How::HASHED) {
+        const std::string hash = sha256_file(f.path);
+        if (hash.empty()) {
+            o.raw("sha256", "null");
+        } else {
+            o.add("sha256", hash);
+        }
+        return o.str();
+    }
+    if (f.how == ReadFile::How::IDENTITY) {
+        if (f.run_id.empty()) {
+            o.raw("run_id", "null");
+        } else {
+            o.add("run_id", f.run_id);
+        }
+        o.add("step", f.step).add("t", f.t);
+    }
+    const auto record = f.how == ReadFile::How::IDENTITY ? recorded(f) : std::nullopt;
+    if (record && record->first == bytes) {
+        o.add("sha256", record->second).add("sha256_from", "the output record of the run that wrote it");
+    } else {
+        o.raw("sha256", "null").add("modified", modified(f.path));
+        o.add("note", record ? "not hashed (its size differs from its output record: changed since written)"
+                             : "not hashed (no output record)");
+    }
+    return o.str();
+}
+
+} // namespace
+
+void read_file(const std::string & kind, const std::string & path) {
+    state().reads.push_back(ReadFile::of(ReadFile::How::HASHED, kind, path));
+}
+
+void read_start_file(const std::string & kind, const std::string & path, const std::string & run_block,
+                     std::uint64_t step, double t) {
+    ReadFile f = ReadFile::of(ReadFile::How::IDENTITY, kind, path);
+    f.step = step;
+    f.t = t;
+    if (!run_block.empty()) {
+        try {
+            const json::Value block = json::parse(run_block);
+            if (const json::Value * run = block.find("run")) {
+                if (const json::Value * id = run->find("run_id")) f.run_id = id->string;
+                if (const json::Value * dir = run->find("directory")) f.directory = dir->string;
+            }
+            f.run_log = "mallard.jsonl";
+            if (const json::Value * input = block.find("input"); input && input->find("resolved")) {
+                const Input resolved = parse_input_string(input->find("resolved")->string, "the resolved input");
+                f.run_log = find_value_or<std::string>(resolved, "output", "run_log", f.run_log);
+            }
+        } catch (const std::exception &) {
+            // A block this build cannot read: the file is recorded by its size and time
+        }
+    }
+    state().reads.push_back(std::move(f));
+}
+
+void read_large_file(const std::string & kind, const std::string & path) {
+    state().reads.push_back(ReadFile::of(ReadFile::How::SIZE, kind, path));
+}
+
+void set_read_files() {
+    namespace fs = std::filesystem;
+    State & s = state();
+    std::vector<ReadFile> reads = s.reads;
+    // Small files read on some ranks only; the files runs start from are read on every rank
+    std::string mine;
+    for (const ReadFile & f : s.reads) {
+        if (f.how == ReadFile::How::HASHED) mine += f.kind + "\n" + f.path + "\n";
+    }
+    const std::vector<std::string> all = comm::size() > 1 ? comm::allgather(mine) : std::vector<std::string>{};
+    if (!comm::is_root()) return;
+    for (size_t r = 1; r < all.size(); r++) {
+        std::istringstream in(all[r]);
+        for (std::string kind, path; std::getline(in, kind) && std::getline(in, path);) {
+            reads.push_back(ReadFile::of(ReadFile::How::HASHED, kind, path));
+        }
+    }
+    std::vector<std::string> seen;
+    std::string list = "[";
+    for (const ReadFile & f : reads) {
+        std::error_code error;
+        // Each snapshot of a file of several, read by its identity, counts once
+        std::string resolved = fs::weakly_canonical(f.path, error).string();
+        if (f.how == ReadFile::How::IDENTITY) resolved += "\n" + std::to_string(f.step);
+        if (std::find(seen.begin(), seen.end(), resolved) != seen.end()) continue;
+        seen.push_back(resolved);
+        list += (list.size() > 1 ? "," : "") + read_file_json(f);
+    }
+    s.files = seen.empty() ? "" : list + "]";
+    rebuild();
+}
+
 void set_resolved(const std::string & toml) {
     state().resolved = toml;
     rebuild();
@@ -461,7 +639,8 @@ void set_mesh(const std::string & type, const std::string & file, const std::str
     rebuild();
 }
 
-void set_preset(const std::string & name, const std::vector<std::tuple<std::string, std::string, bool>> & settings) {
+void set_preset(const std::string & name, bool is_default,
+                const std::vector<std::tuple<std::string, std::string, bool>> & settings) {
     if (name.empty()) {
         state().preset = "null";
     } else {
@@ -470,7 +649,8 @@ void set_preset(const std::string & name, const std::vector<std::tuple<std::stri
             if (list.size() > 1) list += ',';
             list += json::Object().add("key", key).add("value", value).add("from_preset", from_preset).str();
         }
-        state().preset = json::Object().add("name", name).raw("settings", list + "]").str();
+        state().preset =
+            json::Object().add("name", name).add("default", is_default).raw("settings", list + "]").str();
     }
     rebuild();
 }

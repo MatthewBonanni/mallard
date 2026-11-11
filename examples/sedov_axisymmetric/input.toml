@@ -72,4 +72,4 @@ check_interval = 500
 [[write_data]]
 prefix = "./solut/sedov"
 time_interval = 0.1
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]

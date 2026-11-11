@@ -321,6 +321,17 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="jeong-hussain-1995"></a>J. Jeong and F. Hussain, On the identification of a vortex, *J. Fluid Mech.* 285, 69–94 (1995). [doi:10.1017/S0022112095000462](https://doi.org/10.1017/S0022112095000462)
   Used in: the `LAMBDA2` output field, the middle eigenvalue of S² + Ω² by Jacobi rotations (`src/solver/derived_fields.h`).
 
+## Grid convergence and discretization error
+
+- <a id="roache-1994"></a>P. J. Roache, Perspective: a method for uniform reporting of grid refinement studies, *J. Fluids Eng.* 116, 405–413 (1994). [doi:10.1115/1.2910291](https://doi.org/10.1115/1.2910291)
+  Used in: the grid convergence index (GCI) of `mallard post convergence` (`src/common/convergence.cpp`).
+- <a id="roache-1998"></a>P. J. Roache, *Verification and Validation in Computational Science and Engineering*, Hermosa Publishers, Albuquerque (1998).
+  Used in: the GCI's factors of safety, 1.25 with an order observed on three or more grids and 3 with two grids and an assumed order (`mallard post convergence`).
+- <a id="celik-2008"></a>I. B. Celik, U. Ghia, P. J. Roache, C. J. Freitas, H. Coleman and P. E. Raad, Procedure for estimation and reporting of uncertainty due to discretization in CFD applications, *J. Fluids Eng.* 130, 078001 (2008). [doi:10.1115/1.2960953](https://doi.org/10.1115/1.2960953)
+  Used in: the procedure of `mallard post convergence` (eqs. 1–7: the representative cell size, the observed order by fixed-point iteration, the extrapolated value, the approximate and extrapolated relative errors, the fine-grid GCI; oscillatory convergence when e32 / e21 < 0); its Table 1 is a test (`test/post_convergence_test.cpp`).
+- <a id="nparc-spatial-convergence"></a>NPARC Alliance, Examination of spatial grid convergence, NASA Glenn Research Center, CFD Verification and Validation website. [grc.nasa.gov](https://www.grc.nasa.gov/www/wind/valid/tutorial/spatconv.html)
+  Used in: a test of `mallard post convergence`, its worked example of inlet pressure recovery on three grids (`test/post_convergence_test.cpp`).
+
 ## Statistics of time series
 
 - <a id="white-1997"></a>K. P. White Jr., An effective truncation heuristic for bias reduction in simulation output, *Simulation* 69, 323–334 (1997). [doi:10.1177/003754979706900601](https://doi.org/10.1177/003754979706900601)

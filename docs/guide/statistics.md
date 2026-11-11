@@ -31,8 +31,8 @@ carried across restarts.
 | `interval` | 1 | Sample every this many steps (weighted by the time since the last sample) |
 | `reset` | `false` | Start afresh on a restart |
 
-Write them with `variables = ["MEAN_*", "COV_*"]`, sample them with
-[probes](probes.md#time-averages) (`variables = ["MEAN_P"]`), and average further over
+Write them with `fields = ["MEAN_*", "COV_*"]`, sample them with
+[probes](probes.md#time-averages) (`fields = ["MEAN_P"]`), and average further over
 homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of a
 channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)).
@@ -107,7 +107,7 @@ level = 0.0
 *Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder).
 
 Per-cell means over the samples whose phase in a periodic cycle falls in each
-of `bins` bins, output as `PHASE_<bin>_<field>` (`variables = ["PHASE_*"]`).
+of `bins` bins, output as `PHASE_<bin>_<field>` (`fields = ["PHASE_*"]`).
 The phase comes from a fixed `period`, or from the upward crossings of a
 level by a variable at a probe point.
 

@@ -16,6 +16,7 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength` | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output | [Probes](probes.md#probes-of-existing-output) |
+| `mallard check` `--mesh-fields` `--region` | a [region](#regions) or its [name](#named-regions): the cells whose stencils to write | [Mesh and stencil fields](output.md#mesh-and-stencil-fields) |
 | `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file of them | [Checking regions](#checking-regions) |
 | `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
@@ -81,7 +82,7 @@ region = "burner"
 
 [[probes]]
 name = "burner"
-variables = ["RHO", "T"]
+fields = ["RHO", "T"]
 region = "burner"
 reductions = ["integral", "mean", "max"]
 ```
@@ -161,12 +162,12 @@ fractions below on a coarse triangle mesh, with the exact outline drawn over the
 # Total mass, and the temperature away from the heater
 [[probes]]
 name = "total"
-variables = ["RHO"]
+fields = ["RHO"]
 region = "domain"
 
 [[probes]]
 name = "away"
-variables = ["T"]
+fields = ["T"]
 region = {type = "difference", regions = ["domain", {type = "sphere", center = [0, 0, 0], radius = 0.05}]}
 ```
 
@@ -305,7 +306,7 @@ a boundary zone in a box with a flipped ellipse, on a mesh with a hole:
 # The area of a sphere's surface and the mean pressure on it
 [[probes]]
 name = "shell"
-variables = ["P"]
+fields = ["P"]
 region = {type = "sphere", center = [0, 0, 0], radius = 0.1, filled = false}
 reductions = ["integral", "mean"]
 ```
@@ -524,7 +525,7 @@ origin).
 ```toml
 [[probes]]
 name = "wake"
-variables = ["U", "P"]
+fields = ["U", "P"]
 type = "arc"
 center = [0.0, 0.0]
 radius = 5.0

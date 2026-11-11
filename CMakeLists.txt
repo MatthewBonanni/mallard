@@ -1,6 +1,19 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 4.2)
 project(Mallard VERSION 0.9.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
+
+set(mallard_compiler_minimums GNU 15 Clang 22 AppleClang 21)
+list(FIND mallard_compiler_minimums "${CMAKE_CXX_COMPILER_ID}" index)
+if(index GREATER_EQUAL 0)
+    math(EXPR index "${index} + 1")
+    list(GET mallard_compiler_minimums ${index} minimum)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS minimum)
+        message(FATAL_ERROR
+            "Mallard needs ${CMAKE_CXX_COMPILER_ID} ${minimum} or newer; this is "
+            "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} (${CMAKE_CXX_COMPILER}). See "
+            "https://github.com/MatthewBonanni/mallard/blob/main/docs/installation.md#if-your-compiler-is-too-old")
+    endif()
+endif()
 
 find_package(Git QUIET)
 
@@ -53,29 +66,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT Kokkos_ENABLE_CUDA)
     add_compile_options(-ffp-contract=off)
 endif()
 
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
-    set(MALLARD_THIRD_PARTY SYSTEM)
-endif()
-# add_subdirectory and FetchContent take SYSTEM from CMake 3.25; before, the bundled
-# libraries' targets give their headers to Mallard's targets as system headers here
-function(mallard_system_headers)
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.25)
-        return()
-    endif()
-    foreach(target IN LISTS ARGN)
-        if(NOT TARGET ${target})
-            continue()
-        endif()
-        get_target_property(aliased ${target} ALIASED_TARGET)
-        if(aliased)
-            set(target ${aliased})
-        endif()
-        get_target_property(dirs ${target} INTERFACE_INCLUDE_DIRECTORIES)
-        if(dirs)
-            set_property(TARGET ${target} APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${dirs})
-        endif()
-    endforeach()
-endfunction()
 
 # libFuzzer harnesses of the input and mesh readers (test/fuzz), with every
 # target built with the sanitizers of Mallard_FUZZ_SANITIZERS
@@ -130,7 +120,7 @@ if(${PROJECT_NAME}_ENABLE_MPI)
             GIT_REPOSITORY https://github.com/KaHIP/KaMinPar.git
             GIT_TAG v3.7.3
             EXCLUDE_FROM_ALL
-            ${MALLARD_THIRD_PARTY})
+            SYSTEM)
         set(KAMINPAR_BUILD_DISTRIBUTED ON CACHE BOOL "" FORCE)
         set(KAMINPAR_BUILD_APPS OFF CACHE BOOL "" FORCE)
         set(KAMINPAR_BUILD_IO OFF CACHE BOOL "" FORCE)
@@ -140,7 +130,6 @@ if(${PROJECT_NAME}_ENABLE_MPI)
         set(KAMINPAR_64BIT_NODE_IDS ON CACHE BOOL "" FORCE)
         set(KAMINPAR_64BIT_EDGE_IDS ON CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(KaMinPar)
-        mallard_system_headers(KaMinPar::dKaMinPar)
     endif()
 endif()
 
@@ -157,9 +146,8 @@ if(${PROJECT_NAME}_ENABLE_HDF5)
     else()
         message(STATUS "Using external HDF5 from submodule")
         set(HDF5_ENABLE_PARALLEL ${${PROJECT_NAME}_ENABLE_MPI} CACHE BOOL "" FORCE)
-        add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5 ${MALLARD_THIRD_PARTY})
+        add_subdirectory(src/external/hdf5 ${CMAKE_BINARY_DIR}/external/hdf5 SYSTEM)
         set(HDF5_C_LIBRARIES hdf5-static)
-        mallard_system_headers(hdf5-static)
     endif()
 endif()
 
@@ -190,6 +178,16 @@ if(${PROJECT_NAME}_ENABLE_CGNS)
             target_link_libraries(mallard_cgns INTERFACE ${CGNS_LIBRARY})
             set(MALLARD_CGNS_LIBRARY mallard_cgns)
         endif()
+        # Ubuntu's CGNS package links HDF5's CMake target hdf5-shared, but its HDF5
+        # package installs no CMake package that would define it
+        if(MALLARD_CGNS_LIBRARY MATCHES "^CGNS::" AND NOT TARGET hdf5-shared)
+            get_target_property(_cgns_links ${MALLARD_CGNS_LIBRARY} INTERFACE_LINK_LIBRARIES)
+            if(_cgns_links MATCHES "hdf5-shared")
+                find_package(HDF5 REQUIRED COMPONENTS C)
+                add_library(hdf5-shared INTERFACE IMPORTED)
+                target_link_libraries(hdf5-shared INTERFACE ${HDF5_C_LIBRARIES})
+            endif()
+        endif()
         message(STATUS "Mallard: CGNS ${MALLARD_CGNS_LIBRARY} ${CGNS_VERSION}${CGNS_LIBRARY}")
     else()
         include(FetchContent)
@@ -197,7 +195,7 @@ if(${PROJECT_NAME}_ENABLE_CGNS)
             GIT_REPOSITORY https://github.com/CGNS/CGNS.git
             GIT_TAG v4.5.0
             EXCLUDE_FROM_ALL
-            ${MALLARD_THIRD_PARTY})
+            SYSTEM)
         set(CGNS_ENABLE_HDF5 ON CACHE BOOL "" FORCE)
         set(CGNS_ENABLE_FORTRAN OFF CACHE BOOL "" FORCE)
         set(CGNS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
@@ -205,7 +203,6 @@ if(${PROJECT_NAME}_ENABLE_CGNS)
         set(CGNS_BUILD_SHARED OFF CACHE BOOL "" FORCE)
         set(CGNS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(cgns)
-        mallard_system_headers(cgns_static)
         # A parallel HDF5's headers include mpi.h
         if(${PROJECT_NAME}_ENABLE_MPI)
             target_link_libraries(cgns_static PUBLIC MPI::MPI_CXX)
@@ -220,8 +217,7 @@ option(USE_SYSTEM_KOKKOS "Use system-installed Kokkos" ON)
 if(USE_SYSTEM_KOKKOS)
     find_package(Kokkos 5 REQUIRED)
 else()
-    add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos ${MALLARD_THIRD_PARTY})
-    mallard_system_headers(kokkoscore kokkoscontainers kokkosalgorithms kokkossimd)
+    add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos SYSTEM)
 endif()
 
 # Cantera YAML mechanism files
@@ -234,13 +230,12 @@ else()
         GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
         GIT_TAG yaml-cpp-0.9.0
         EXCLUDE_FROM_ALL
-        ${MALLARD_THIRD_PARTY})
+        SYSTEM)
     set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
     set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
     set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(yaml-cpp)
-    mallard_system_headers(yaml-cpp)
     # yaml-cpp has no device code, and nvcc cannot compile its bundled dragonbox:
     # Kokkos' nvcc_wrapper passes it to the host compiler
     if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
@@ -332,6 +327,8 @@ install(DIRECTORY templates examples mechanisms tools tutorials
     USE_SOURCE_PERMISSIONS
     PATTERN __pycache__ EXCLUDE
     PATTERN solut EXCLUDE)
+# The key catalog of mallard list keys
+install(FILES docs/input-keys.json DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/docs)
 install(FILES LICENSE NOTICE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(DIRECTORY licenses DESTINATION ${CMAKE_INSTALL_DOCDIR})
 

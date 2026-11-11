@@ -135,7 +135,7 @@ file = "forces_top.csv"
 [[write_data]]
 prefix = "./stats/channel"
 time_interval = 50.0
-variables = ["MEAN_*", "COV_*"]
+fields = ["MEAN_*", "COV_*"]
 
 [[write_data]]
 prefix = "./restart/channel"
