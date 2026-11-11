@@ -107,6 +107,7 @@ std::pair<cudaGraphNode_t, cudaGraph_t> add_if_node(cudaGraph_t graph, const std
 void set_condition(const cudaGraphConditionalHandle handle, const uint32_t * flag) {
     Kokkos::parallel_for("step_condition", 1, KOKKOS_LAMBDA(const int) {
         KOKKOS_IF_ON_DEVICE((cudaGraphSetConditional(handle, *flag ? 1u : 0u);))
+        KOKKOS_IF_ON_HOST(((void)handle; (void)flag;))
     });
 }
 #endif
@@ -676,6 +677,7 @@ void Solver::mark_chemistry_time(const bool start) {
                 L.chemistry_ns += now - L.chemistry_start;
             }
         ))
+        KOKKOS_IF_ON_HOST(((void)start; (void)loop;))
     });
 #else
     const comm::HostStaged staged;

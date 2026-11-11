@@ -408,6 +408,9 @@ class Solver {
         /** @brief Run-control requests (and the wall time) to the device's next step reductions. */
         void post_requests();
         void count_nonfinite();
+        /** @brief Enqueues a progress row's local values into progress_device and progress_totals. */
+        void progress_reductions();
+        void health_reductions();
         /** @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step). */
         void after_step(Kokkos::Timer & step_timer, bool on_device);
         /** @brief Whether the device writes progress rows' local values, which the host reports later. */
@@ -710,9 +713,6 @@ class Solver {
         void print_setup(const ResolvedInput & resolved) const;
         void print_progress();
         void print_progress(const step_queue::ProgressLocals & locals, const std::vector<double> & totals);
-        /** @brief Enqueues a progress row's local values into progress_device and progress_totals. */
-        void progress_reductions();
-        void health_reductions();
         step_queue::ProgressLocals progress_locals(std::vector<double> & totals);
         void report_health(const step_queue::ProgressLocals & locals, const std::vector<double> & totals);
         void print_summary(const RunEnd & end) const;
