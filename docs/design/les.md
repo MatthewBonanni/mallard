@@ -684,10 +684,22 @@ the reconstructed states. Tests: `HybridFlux.*` in `test/les_test.cpp` (exact pr
 `cell_averages` and `ke_conservative` with TENO states on simplices, the stable flux's sign, the
 correction's heating of both cells, conservation over steps). Single gas only for now.
 
-Evaluation (results below as they come): inviscid Taylor-Green at 32³ (bounded to $t = 20$,
-kinetic energy), Sod and Shu-Osher (shocks still captured by the sensor), then CBC at 64³ and
-128³ against MUSCL + hybrid and TENO5 + HLLC with the metrics of section 3.1, and Taylor-Green
-at Re = 1600 against the DNS.
+**Shocks** (`examples/sod` and `examples/shu_osher`, TENO5 on 200 cells, the examples'
+Riemann solvers; L1 density error against the exact solution and against TENO5 on 3,200
+cells): the sensor keeps the Riemann solver at the shocks with every central flux, and none
+oscillates.
+
+| Flux | Sod | Shu-Osher |
+|---|---|---|
+| Riemann solver | 0.00259 | 0.694 |
+| hybrid, `reconstructed` | 0.00239 | 0.651 |
+| hybrid, `cell_averages` | 0.00447 | 0.992 |
+| hybrid, `ke_stable` | 0.00283 | 0.645 |
+| hybrid, `ke_conservative` | 0.00320 | 0.653 |
+
+`cell_averages` costs the accuracy of TENO's reconstruction wherever the sensor is off (1.7
+times the Riemann solver's error on Sod's contact and expansion, 1.4 times on the entropy wave
+behind Shu-Osher's shock); the corrected fluxes keep it.
 
 ## 5. Implementation: SGS fluxes in the solver
 
