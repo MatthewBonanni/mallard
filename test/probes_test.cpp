@@ -1238,7 +1238,9 @@ TEST(ProbesTest, FluxesThroughIsosurfacesFollowTheDivergence) {
     for (size_t i = 1; i < area_errors.size(); i++) {
         EXPECT_GT(std::log2(area_errors[i - 1] / area_errors[i]), 1.7) << area_errors[i - 1] << " " << area_errors[i];
         // 3D: the flux error is near 1e-3 already on the coarsest mesh, where other errors than the surface's compete
-        if (N_DIM == 2) EXPECT_GT(std::log2(flux_errors[i - 1] / flux_errors[i]), 1.7) << flux_errors[i - 1] << " " << flux_errors[i];
+        if (N_DIM == 2) {
+            EXPECT_GT(std::log2(flux_errors[i - 1] / flux_errors[i]), 1.7) << flux_errors[i - 1] << " " << flux_errors[i];
+        }
     }
     EXPECT_LT(area_errors.back(), 0.01);
     EXPECT_LT(flux_errors.back(), 2e-3);
