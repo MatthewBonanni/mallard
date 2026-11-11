@@ -464,7 +464,7 @@ RestartData read_state(const output::Contents & c, const Selected & e, const Mes
                                   count(n_global) + ": give the input of the run that wrote it (-i)");
     };
     if (c.kind == output::Kind::restart) {
-        RestartData data = read_restart(c.path, distributed ? &mesh.h_global_cell_id : nullptr);
+        RestartData data = read_restart(c.path, mesh.h_global_cell_id.empty() ? nullptr : &mesh.h_global_cell_id);
         if (data.n_cells != n_global) throw wrong_mesh(data.n_cells);
         return data;
     }
