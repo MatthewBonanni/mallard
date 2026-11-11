@@ -118,4 +118,38 @@ inline void expect_matches_serial(const std::string & input,
     }
 }
 
+/**
+ * @brief Each run of input, with step graphs on and off, matches the serial run (NCCL and MPI exchanges in NCCL
+ *        builds). In CUDA builds the runs with graphs on take their steps in the graph, but over MPI's exchanges;
+ *        on every backend the code their capture records issues no fence, allocation or host copy.
+ */
+inline void expect_matches_serial_with_and_without_step_graphs(const std::string & input) {
+    for (const bool graphs : {true, false}) {
+        std::string text = input;
+        text.insert(text.find("[run]\n") + 6, std::string("cuda_graphs = ") + (graphs ? "true" : "false") + "\n");
+        SCOPED_TRACE(text);
+        const StepGraphGuard guard;
+        expect_matches_serial(
+            text,
+            [&](const Solver & s) {
+                const std::string why = s.step_graph_unsupported();
+                if (graphs) {
+                    EXPECT_TRUE(why.empty() || why == "halo exchanged with MPI") << why;
+                }
+#ifdef KOKKOS_ENABLE_CUDA
+                EXPECT_EQ(s.get_graph_steps() > 0, graphs && why.empty()) << why;
+#else
+                EXPECT_EQ(s.get_graph_steps(), 0u);
+#endif
+            },
+            graphs);
+        if (graphs) {
+            EXPECT_GT(guard.captures(), 0u);
+        } else {
+            EXPECT_EQ(guard.captures(), 0u);
+        }
+        for (const std::string & v : guard.violations()) ADD_FAILURE() << "in a step graph's capture: " << v;
+    }
+}
+
 #endif // MPI_COMPARE_H
