@@ -540,7 +540,7 @@ TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerialWithAndWithoutStepGra
 TEST(MPITest, SourcesInRegionsMatchSerial) {
     // Totals over regions are normalized by integrals summed in global cell
     // order, domain averages by exact sums; sources of t and of the solution
-    // are local to each cell
+    // are local to each cell, and so are the levels of regions of the solution
     const std::string ring =
         "[[sources]]\ntotal = true\nrhoE = \"2 + sin(20 * t)\"\n"
         "region = {type = \"annulus\", center = [0.4, 0.4], radius = 0.25, inner_radius = 0.1, edge = 0.05}\n";
@@ -550,7 +550,8 @@ TEST(MPITest, SourcesInRegionsMatchSerial) {
     const std::string plain = "[[sources]]\nrhoE = \"0.1 * x\"\n";
     const std::string forcing = "[[sources]]\nrhou = [\"(1 - mean_ke / mean_rho) * rho * u_x\", \"0\"]\n"
                                 "rhoE = \"(1 - mean_ke / mean_rho) * rho * u_x^2\"\n";
-    for (const std::string & sources : {plain, ring, relax, forcing}) {
+    const std::string hot = "[[sources]]\ntotal = true\nrhoE = 2.0\nregion = {type = \"where\", condition = \"P > 2.0\"}\n";
+    for (const std::string & sources : {plain, ring, relax, forcing, hot}) {
         SCOPED_TRACE(sources);
         expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", "type = \"euler\"\n",
                                         bcs("type = \"symmetry\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n",

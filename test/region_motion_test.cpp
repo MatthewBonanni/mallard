@@ -15,6 +15,8 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
+#include <numbers>
 #include <memory>
 #include <string>
 #include <vector>
@@ -85,6 +87,52 @@ std::unique_ptr<Solver> solver_on(const std::string & mesh, const std::vector<st
     return solver;
 }
 
+
+/** @brief A unit square of right triangles (unit cube of tetrahedra), n cells per side. */
+std::shared_ptr<Mesh> simplex_mesh(const uint32_t n) {
+    auto mesh = std::make_shared<Mesh>();
+#if N_DIM == 2
+    mesh->init_cart_tri(n, n, 1.0, 1.0);
+#else
+    mesh->init_cart_3d(n, n, n, 1.0, 1.0, 1.0, MeshType::CARTESIAN_TET);
+#endif
+    mesh->copy_host_to_device();
+    return mesh;
+}
+
+/** @brief The cell fields of a gas at rest, R = 1 and density 1, with the pressure p(x) at each cell centroid. */
+template <typename F>
+region::CellFields gas_with_pressure(const Mesh & mesh, F p) {
+    region::CellFields fields;
+    fields.coords = mesh.cell_coords;
+    fields.R = 1.0;
+    fields.W = Kokkos::View<rtype *[N_CONSERVATIVE]>("W", mesh.n_cells);
+    const auto W = Kokkos::create_mirror_view(fields.W);
+    const auto x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh.cell_coords);
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        const double at[3] = {double(x(c, 0)), double(x(c, 1)), N_DIM == 3 ? double(x(c, N_DIM - 1)) : 0.0};
+        W(c, 0) = 1.0;
+        W(c, N_DIM + 1) = static_cast<rtype>(p(at));
+    }
+    Kokkos::deep_copy(fields.W, W);
+    return fields;
+}
+
+/** @brief The measure of a solution-defined region on the mesh: the integral of its fractions, or its elements' total. */
+double solution_measure(const Mesh & mesh, const std::string & table, const region::CellFields & fields) {
+    const region::Region r = read(table);
+    const auto levels = std::make_shared<const region::SolutionLevels>(mesh, r.conditions(), std::vector<std::string>{}, fields);
+    if (r.dimension() == N_DIM) {
+        const region::MovingFractions moving(mesh, r, levels);
+        moving.update(0.0);
+        return integral(mesh, host(moving));
+    }
+    levels->update(0.0);
+    const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), levels->levels());
+    double total = 0.0;
+    for (const double m : region::elements(mesh, r, h).measure) total += m;
+    return total;
+}
 } // namespace
 
 TEST(RegionMotionTest, ARepeatIsTheUnionOfItsCopies) {
@@ -223,6 +271,52 @@ TEST(RegionMotionTest, MovingFractionsFollowCurvedWalls) {
     }
 }
 #endif
+
+TEST(RegionMotionTest, ConditionsOfLinearFieldsCoverTheirExactVolume) {
+    // Each cell's level is linear and exact for a linear field, and its fraction its exact clip
+    const auto mesh = unit_mesh();
+    const auto fields = gas_with_pressure(*mesh, [](const double * x) { return 1.0 + x[0] + 0.5 * x[1]; });
+    const double tol = std::max(1e-13, 16.0 * double(std::numeric_limits<rtype>::epsilon()));
+    EXPECT_NEAR(solution_measure(*mesh, "{type = \"where\", condition = \"P < 1.6\"}", fields), 0.35, tol);
+    EXPECT_NEAR(solution_measure(*mesh, "{type = \"where\", condition = \"1.6 < P\"}", fields), 0.65, tol);
+    // The same field as a temperature, T = p / rho R
+    EXPECT_NEAR(solution_measure(*mesh, "{type = \"where\", condition = \"T < 1.6\"}", fields), 0.35, tol);
+    // Booleans with regions of the mesh: here the half-plane is cut at x = 0.4 by a face of no cell
+    EXPECT_NEAR(solution_measure(*mesh, "{type = \"intersection\", regions = [{type = \"where\", condition = "
+                                        "\"P < 1.6\"}, {type = \"implicit\", f = \"y - 0.6\"}]}", fields),
+                0.6 * 0.6 - 0.25 * 0.36, 2e-3);
+}
+
+TEST(RegionMotionTest, ConditionVolumesAndIsosurfaceAreasConvergeAtSecondOrder) {
+    // p = 1 + r^2: where p < 1 + R^2 is the disk (ball) of radius R, and its isosurface the circle (sphere)
+    const double R = 0.3, pi = std::numbers::pi;
+    const double volume = N_DIM == 2 ? pi * R * R : 4.0 / 3.0 * pi * R * R * R;
+    const double area = N_DIM == 2 ? 2.0 * pi * R : 4.0 * pi * R * R;
+    const std::string value = std::to_string(1.0 + R * R);
+    const std::string where = "{type = \"where\", condition = \"P < " + value + "\"}";
+    const std::string surface = "{type = \"isosurface\", field = \"P\", value = " + value + "}";
+    const std::string inner = "{type = \"boundary\", of = " + where + "}";
+    std::vector<double> volume_errors, area_errors;
+    for (const uint32_t n : N_DIM == 2 ? std::vector<uint32_t>{10, 20, 40} : std::vector<uint32_t>{6, 12, 24}) {
+        const auto mesh = simplex_mesh(n);
+        const auto fields = gas_with_pressure(*mesh, [](const double * x) {
+            double r2 = 0.0;
+            for (int d = 0; d < N_DIM; d++) r2 += (x[d] - 0.5) * (x[d] - 0.5);
+            return 1.0 + r2;
+        });
+        volume_errors.push_back(std::fabs(solution_measure(*mesh, where, fields) - volume));
+        const double a = solution_measure(*mesh, surface, fields);
+        area_errors.push_back(std::fabs(a - area));
+        // The boundary of a where region is its isosurface
+        EXPECT_NEAR(solution_measure(*mesh, inner, fields), a, 1e-12 * area) << n;
+    }
+    for (size_t i = 1; i < volume_errors.size(); i++) {
+        EXPECT_GT(std::log2(volume_errors[i - 1] / volume_errors[i]), 1.7) << volume_errors[i - 1] << " " << volume_errors[i];
+        EXPECT_GT(std::log2(area_errors[i - 1] / area_errors[i]), 1.7) << area_errors[i - 1] << " " << area_errors[i];
+    }
+    EXPECT_LT(volume_errors.back(), 0.01 * volume);
+    EXPECT_LT(area_errors.back(), 0.01 * area);
+}
 
 TEST(RegionMotionTest, DeviceSumsAreTheExactSums) {
     const uint32_t n = 1000;

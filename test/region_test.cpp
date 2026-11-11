@@ -408,6 +408,29 @@ TEST(RegionTest, RejectsInvalidRegions) {
     }
 }
 
+TEST(RegionTest, RejectsRegionsOfTheSolutionThatAreNotComparisons) {
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"{type = \"where\"}", "needs condition"},
+        {"{type = \"where\", condition = \"T\"}", "is not a comparison"},
+        {"{type = \"where\", condition = \"T == 1500\"}", "uses =="},
+        {"{type = \"where\", condition = \"1 < T < 2\"}", "chains comparisons"},
+        {"{type = \"where\", condition = \"T > \"}", "lacks a side"},
+        {"{type = \"where\", condition = \"T > 1\", translate = [0.1, 0, 0]}", "transforms do not move"},
+        {"{type = \"isosurface\", field = \"T\"}", "needs value"}};
+    for (const auto & [table, message] : cases) {
+        try {
+            make_region(table);
+            ADD_FAILURE() << table << " was accepted";
+        } catch (const InputError & e) {
+            EXPECT_NE(std::string(e.what()).find(message), std::string::npos) << table << ": " << e.what();
+        }
+    }
+    const region::Region r = make_region("{type = \"isosurface\", field = \"T\", value = 1500}");
+    EXPECT_EQ(r.dimension(), N_DIM - 1);
+    EXPECT_TRUE(r.solution());
+    EXPECT_FALSE(r.rigid());
+}
+
 TEST(RegionTest, EachTypeHasOneDimension) {
     const std::string c = N_DIM == 2 ? "center = [0.5, 0.5]" : "center = [0.5, 0.5, 0.5], normal = [0, 0, 1]";
     const std::vector<std::pair<std::string, int>> cases = {

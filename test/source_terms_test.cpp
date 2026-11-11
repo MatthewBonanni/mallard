@@ -487,3 +487,28 @@ TEST(SourceTermsTest, MovingRegionsMatchWithAndWithoutStepGraphs) {
     }
     EXPECT_EQ(U[0], U[1]);
 }
+
+TEST(SourceTermsTest, RegionsOfTheSolutionFollowItWithAndWithoutStepGraphs) {
+    // A total over where the heated gas is hot: its fractions from the levels of
+    // each stage's solution, in the captured step as in the uncaptured one
+    const std::string sources = "[[sources]]\nrhoE = \"5 * x\"\n[[sources]]\ntotal = true\nrho = 0.5\n"
+                                "region = {type = \"where\", condition = \"T > 1.05\"}\n";
+    std::vector<rtype> U[2];
+    for (const int graphs : {0, 1}) {
+        std::string input = closed_box(sources);
+        input.replace(input.find("n_steps = 1\n"), 12,
+                      std::string("n_steps = 10\ncuda_graphs = ") + (graphs ? "true" : "false") + "\n");
+        Solver solver;
+        solver.init(parse_toml(input));
+        solver.run();
+        solver.copy_device_to_host();
+        double mass = 0.0;
+        for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+            FOR_I_CONSERVATIVE U[graphs].push_back(solver.h_conservatives(c, i));
+            mass += double(solver.h_conservatives(c, 0) * solver.get_mesh()->h_cell_measure(c));
+        }
+        // The region is empty at first: the gas, of mass 1, gains mass only once some of it is hot
+        EXPECT_GT(mass, 1.0 + 1e-3);
+    }
+    EXPECT_EQ(U[0], U[1]);
+}
