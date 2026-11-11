@@ -63,13 +63,37 @@ reductions = ["mean", "rms"]
 | `fields` | required | `[statistics]` fields; `U`, `RHOU`, `Y_*` and `RHOY_*` expand to all components and species |
 | `type` | from the keys | `point`, `points` (`points` or `points_file`), `line`, `polyline`, `circle`, `arc`, `curve` (`x`, `y`, `z` of `s`), `cut_plane` (`point`, `normal`, optional `bounds`); 3D `surface` (`x`, `y`, `z` of `u`, `v`) |
 | `region` | none | Instead of `type`: a [region](geometry.md#regions) or its name, reduced over its cells ([below](#region-probes)) |
-| `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample |
+| `n_points` | per type | Samples on a curve; `"cells"`: one per cell it crosses ([below](#curves-on-their-cells)); `[n_u, n_v]` on a surface; on a region, a grid ([below](#grids-in-regions)) |
+| `sampling` | `cell` | `cell`: the average of the cell holding each sample; `point`: the reconstruction's value at the sample (a filled region: its integral over the region, [below](#region-probes)) |
 | `interval` / `time_interval` | 1 step | Output times; `time_interval` shortens the step to land on them |
 | `format` | `csv` | `csv`, `hdf5` (one extensible file), `vtkhdf` (one VTKHDF file of every output, which ParaView opens as a time series) or `vtp` (one file per output and a `.pvd` series) |
 | `reductions` | none (`region`: `integral`, `mean`, `min`, `max`) | `integral`, `mean`, `favre`, `min`, `max`, `rms` over the geometry; boundaries also `moment` (about `moment_center`, default the origin) |
 | `samples` | `true` | `false` writes only the reductions |
 | `spectra` | none | Time spectra of the samples or reductions ([below](#time-spectra)) |
 | `scale`, `rotate`, `pivot`, `translate` | none | Move the geometry (scale, then rotate, about `pivot`, then translate) |
+
+### Curves on their cells
+
+With `n_points = "cells"`, a `line`, `polyline`, `circle`, `arc` or `curve` is
+cut exactly by the cells it crosses: one sample per cell and crossing, at the
+middle of its length in the cell, weighing that length. The samples are
+written as segments with their values as cell data, and each crossing
+integrates with three Gauss points, so the `integral` of a line is exact for
+the reconstruction polynomials up to degree 5, on any mesh and resolution. A
+curve along a face between two cells is sampled once, in one of them; one along
+a boundary face, in its cell. Curved cells cut it by their curved shapes.
+
+```toml
+[[probes]]
+name = "cut"
+type = "line"
+start = [0.0, -1.0]
+end = [0.0, 1.0]
+n_points = "cells"
+fields = ["U", "MASS_FLUX"]
+sampling = "point"
+reductions = ["integral"]
+```
 
 ### Cut planes and surfaces
 
@@ -196,7 +220,8 @@ Pitfalls:
   ones are the scheme's own (molecular: without the SGS part of LES); walls
   carry no species flux, outflows without an image face none at all.
 - Reductions of points weigh each point 1 (`integral` is a sum); curves
-  integrate with three Gauss points per element between samples.
+  integrate with three Gauss points per element between samples, or per
+  crossing of a cell with `n_points = "cells"`.
 
 ### Samples outside the domain
 
@@ -430,6 +455,36 @@ isosurface's elements, extracted anew from the cells' levels. The reductions
 file's measure column is the region's at that time, and its `measures` are
 `null`. Isosurfaces take no `n_points` or `average`.
 
+**Point sampling.** With `sampling = "point"`, a static filled region
+integrates the reconstruction over its own shape instead of `f V` times the
+cell averages: a cell entirely inside is one sample of its cell value weighing
+its volume (the integral of its reconstruction polynomial), and a cell the
+region's surface cuts has quadrature points over its part inside, high-order
+for curved surfaces and fitted to a few points of the reconstruction's
+degree. `integral` is then exact for the reconstruction polynomials, and the
+third column is the volume of that quadrature: the region's part in the
+domain to round-off for a smooth surface.
+
+### Grids in regions
+
+A filled region with `n_points = [n_x, n_y]` (3D: `[n_x, n_y, n_z]`, each at
+least 2) also writes samples at the nodes of a grid over the box around the
+region and the mesh, those inside both, in grid order: the same values as
+`points` probes at those nodes, in `format` (`csv`, `hdf5`, `vtkhdf` or `vtp`,
+as vertices) with `sampling` as for points. Its reductions stay those of the
+region's cells.
+
+```toml
+[[probes]]
+name = "plume"
+region = {type = "sphere", center = [0.5, 0.5, 0.5], radius = 0.2}
+n_points = [32, 32, 32]
+fields = ["T"]
+sampling = "point"
+format = "vtkhdf"
+time_interval = 0.01
+```
+
 Give the region by name to measure exactly where a source or sponge acts:
 
 **Control-volume balances.** The conserved variables and the flux variables
@@ -460,10 +515,15 @@ region = "heater"
 
 Pitfalls:
 
-- Values are cell averages, so `min` and `max` are those of the cells, not of
-  the field inside them, and include cells the region only touches.
-- A region probe has no samples: `type`, `sampling`, `format`, `file` and
-  `samples` do not apply to it.
+- Values are cell averages (with `sampling = "point"`, point values at the
+  quadrature points and cell values inside), so `min` and `max` are those of
+  the samples, not of the field between them; with cell averages they
+  include cells the region only touches.
+- Only a surface or a filled region with `n_points` has samples: otherwise
+  `type`, `format`, `file` and `samples` do not apply to a region probe.
+- A [moving](geometry.md#moving-regions) region and one
+  [defined by the solution](geometry.md#regions-defined-by-the-solution) take
+  neither `sampling = "point"` nor `n_points`.
 
 ### Probes of existing output
 

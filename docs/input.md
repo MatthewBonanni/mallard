@@ -1044,12 +1044,11 @@ ranks. A probe that is not due costs nothing.
 | `name` | Probe name |
 | `fields` | Any of the `[statistics]` fields, `U` and `RHOU` for all components, `Y_*` and `RHOY_*` for every species; and the averages `[statistics]` keeps (`MEAN_<A>`, `MEAN_U`, `COV_<A>_<B>`, `PHASE_<bin>_<A>`), each sample's the value of its cell in both `sampling` modes |
 | `type` | `point`, `points`, `line`, `polyline`, `circle`, `arc`, `curve`, `cut_plane`, and in 3D `surface` (below); without it, `point` or `start`/`end` select a point or a line |
-| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples (below). Default none |
+| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions) or of the mesh, whose cells the probe reduces (below): weighted by `f V` for a filled region, or with `sampling = "point"` the reconstruction integrated over each cell's part inside; a surface, curve or points at its quadrature points (with `sampling`, and fluxes through surfaces, 2D curves); a 3D surface with `n_points` on a grid of samples, and a filled region with `n_points` samples at the nodes of a grid inside it too (below). Default none |
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
-| `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
 | `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
-| `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
+| `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below); for a filled region, the reconstruction integrated over the region (below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
 | `file` | Output file, default `probe_<name>.csv`, `.h5`, `.vtkhdf` or `.pvd` |
@@ -1075,6 +1074,8 @@ Types (`[x, y(, z)]` points):
 | `curve` | `x`, `y`(, `z`): expressions of the parameter `s` over `s_range = [s0, s1]` (default `[0, 1]`), `n_points` evenly spaced in `s` |
 | `cut_plane` | `point`, `normal`: the exact intersection of the plane (a line in 2D) with the mesh, one sample per cut cell; optional `bounds = [[lo...], [hi...]]` keeps the part inside that box |
 | `surface` (3D) | `x`, `y`, `z`: expressions of `u` and `v` over `u_range`, `v_range` (default `[0, 1]`), `n_points = [n_u, n_v]` |
+
+The curves (`line`, `polyline`, `circle`, `arc`, `curve`) take `n_points = "cells"` instead of a number: one sample per cell the curve crosses (below).
 
 **Point values.** With TENO, `sampling = "point"` evaluates each cell's
 central reconstruction polynomial at the sample (order-consistent: the error
@@ -1106,7 +1107,15 @@ area, and integrates with a degree-5 rule on the triangles where the plane cuts
 the cell's tetrahedra (three Gauss points per cut segment in 2D), so its
 integrals are exact for the reconstruction polynomials up to degree 5 (and its
 area exact); a plane through mesh faces takes each face once. Its normal is
-`normal`. In 2D, curves are the surfaces: their normal points to the right of
+`normal`. With `n_points = "cells"`, a curve is cut exactly by the cells it
+crosses (straight pieces at the cells' faces, others at the roots of the
+faces' distance along the curve; curved cells by their curved shapes): one
+sample per cell and crossing, at the middle of its length in the cell and
+weighing that length (the `area` column), written as segments with their
+values as cell data, and three Gauss points on each crossing, so its
+integrals are exact for the reconstruction polynomials up to degree 5 along
+straight pieces. A curve along a face between two cells is sampled once, in one
+of them; one along a boundary face, in its cell. In 2D, curves are the surfaces: their normal points to the right of
 the direction of travel (outward for a counterclockwise `circle`). Surfaces,
 cut planes and 2D curves have the flux variables of boundary probes
 (`MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*`) along their
@@ -1319,8 +1328,22 @@ fraction `f`: `integral` is `sum f V q`, `mean` `sum f V q / sum f V`, `favre`
 rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
 radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
 in global cell order, so they are the same bit for bit on any number of ranks.
-A region probe has no samples: `type`, `sampling`, `format`, `file` and
-`samples` do not apply. The region must cover part of some cell. A filled
+With `sampling = "point"` (static filled regions), each sum is over the
+reconstruction instead: a cell entirely inside is one sample of its cell
+value weighing `V` (the integral of its polynomial, whose mean is that value),
+and a cell the region's surface cuts has quadrature points over its part
+inside (a high-order quadrature on the cell's simplices, spectrally accurate
+for smooth surfaces and exact for planes, fitted to a few points that
+integrate polynomials of the reconstruction's degree alike), so `integral` is
+exact for the reconstruction polynomials, curved surfaces included, and the
+third column is the measure of that quadrature. With `n_points = [n_x, n_y]`
+(3D: `[n_x, n_y, n_z]`, each at least 2), a filled region also writes samples
+at the nodes of a grid over the box around it and the mesh, those inside both,
+to `file` in `format` (`csv`, `hdf5`, `vtkhdf` or `vtp`, the nodes as
+vertices), with `sampling` as for points; its reductions stay those of its
+cells. Otherwise a region probe has no samples: `type`, `format`, `file` and
+`samples` do not apply. Moving regions and regions defined by the solution take neither. The region must cover
+part of some cell. A filled
 region's own volume and surface area, and those of its part in the domain,
 are recorded in the probe sampling block that heads `reductions_file` and in
 `mallard.jsonl`, with a warning when more than 0.1% of it lies outside the
