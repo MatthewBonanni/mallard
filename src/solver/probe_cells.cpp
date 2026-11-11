@@ -400,7 +400,8 @@ CurveCells curve_cells(const Mesh & mesh, const Geometry & g, const bool distrib
         }
         if (candidates.empty()) continue;
         const double size = std::pow(static_cast<double>(mesh.h_cell_volume(c)), 1.0 / N_DIM);
-        const double tol = 1e-9 * size;
+        // The mesh's nodes are as precise as rtype: shorter crossings are of their rounding
+        const double tol = std::max(1e-9, 16.0 * double(std::numeric_limits<rtype>::epsilon())) * size;
         const bool curved = mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(c);
         const std::vector<std::vector<Plane>> pieces = curved ? std::vector<std::vector<Plane>>{} : cell_planes(mesh, c, tol);
         std::map<std::pair<uint32_t, uint32_t>, std::vector<Interval>> parts;
@@ -478,7 +479,7 @@ CurveCells curve_cells(const Mesh & mesh, const Geometry & g, const bool distrib
                 const int n_v = p.straight ? 1 : 4;
                 for (int k = 0; k < n_v; k++) vertices.push_back(p.x(iv.a + (iv.b - iv.a) * k / n_v));
             }
-            if (!(measure > 0.0)) continue;
+            if (!(measure > 16.0 * double(std::numeric_limits<rtype>::epsilon()) * size)) continue;
             vertices.push_back(curve.pieces[x.parts.back().first].x(x.parts.back().second.b));
             // The sample: at half its length
             double half = 0.5 * measure;
