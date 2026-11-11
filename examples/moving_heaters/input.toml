@@ -78,7 +78,7 @@ check_interval = 100
 
 [[probes]]
 name = "heaters"
-variables = ["RHO", "T"]
+fields = ["RHO", "T"]
 region = "heaters"
 copies = "each"
 reductions = ["integral", "mean"]
@@ -87,4 +87,4 @@ interval = 20
 [[write_data]]
 prefix = "solut/heaters"
 time_interval = 0.25
-variables = ["RHO", "U", "P", "T", "SOURCE_RHOE"]
+fields = ["RHO", "U", "P", "T", "SOURCE_RHOE"]

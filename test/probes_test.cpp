@@ -1943,7 +1943,7 @@ TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMe
                              (N_DIM == 2 ? "[\"0.3 + 1e5 * t\", 0.5]" : "[\"0.3 + 1e5 * t\", 0.5, 0.5]") +
                              ", radius = 0.15}";
     auto probe = [&](const std::string & name) {
-        return "[[probes]]\nname = \"" + name + "\"\nregion = " + disk + "\nvariables = [\"RHO\", \"P\"]\n"
+        return "[[probes]]\nname = \"" + name + "\"\nregion = " + disk + "\nfields = [\"RHO\", \"P\"]\n"
                "average = true\ninterval = 4\nreductions = [\"integral\", \"mean\", \"max\"]\n"
                "reductions_file = \"" + dir + "/" + name + ".csv\"\n";
     };
@@ -1974,7 +1974,7 @@ TEST(ProbesTest, MovingRegionsMeasureWhereTheyAreAtEachWriteAndCopiesReportEach)
                               (N_DIM == 2 ? "[\"0.7 + 2 * t\", 0.3]" : "[\"0.7 + 2 * t\", 0.3, 0.5]") +
                               ", radius = 0.15, repeat = {count = 2, translate = " +
                               (N_DIM == 2 ? "[0, 0.4]" : "[0, 0.4, 0]") + "}}";
-    const std::string probes = "[[probes]]\nname = \"disks\"\nregion = " + disks + "\nvariables = [\"RHO\"]\n"
+    const std::string probes = "[[probes]]\nname = \"disks\"\nregion = " + disks + "\nfields = [\"RHO\"]\n"
                                "copies = \"each\"\nreductions_file = \"" + dir + "/disks.csv\"\n";
     Solver solver;
     solver.init(parse_toml(box_case(16, "1.0", "type = \"MUSCL\"\n", probes, "n_steps = 4\ndt = 0.05\n")));
