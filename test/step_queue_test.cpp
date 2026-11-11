@@ -644,7 +644,7 @@ TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
     // A fence inside the step's conditional body invalidates the capture: the run warns and takes its steps
     // kernel by kernel, as the host would
     Case c;
-    c.run = "n_steps = 12\n";
+    c.run = "n_steps = 12\ncfl = 0.5\n";
     const Outcome host = run_case("failed_capture", c, 0);
     c.fence_in_step_body = true;
     const Outcome fallback = run_case("failed_capture", c, 3);
