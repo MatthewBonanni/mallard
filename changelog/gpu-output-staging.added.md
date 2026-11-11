@@ -1,0 +1,1 @@
+- Force and integral monitors are evaluated on the device and staged for the host, so steps with monitor rows no longer stop the step queue; their reductions over the ranks use NCCL in NCCL builds and the rows are the same bit for bit (#730).

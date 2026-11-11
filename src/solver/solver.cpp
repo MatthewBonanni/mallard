@@ -2224,6 +2224,9 @@ int Solver::run_loop() {
                 }
                 n_queued_steps++;
                 t_wall_stepping += step_timer.seconds();
+                Kokkos::Timer output_timer;
+                write_staged_monitors(record);
+                t_wall_output += output_timer.seconds();
                 for (auto & writer : data_writers) writer->publish_written();
                 if (record.progress) {
                     Kokkos::Timer check_timer;
@@ -3182,7 +3185,7 @@ struct ForceFunctor {
     }
 };
 
-std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
+void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) {
     // The gradients and the wall model read the halo, stale after the last stage
     update_cell_W();
     if (is_viscous()) {
@@ -3193,29 +3196,49 @@ std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t 
     ForceFunctor functor{faces, mesh->face_normals, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
                          W_cells, viscous_gradients, boundary_data, physics, is_viscous(),
                          is_mixture() ? cell_transport : Kokkos::View<rtype *[3]>(), axisymmetric, wall_model.out};
-    ForceFunctor::value_type result;
-    Kokkos::parallel_reduce("force", faces.extent(0), functor, result);
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    constexpr size_t n = 2 * N_DIM + 1;
+    const Kokkos::View<rtype *> sum = monitor_sums;
+    Kokkos::parallel_reduce("force", faces.extent(0), functor,
+                            Kokkos::View<ForceFunctor::value_type, DeviceMemory, Kokkos::MemoryUnmanaged>(
+                                reinterpret_cast<ForceFunctor::value_type *>(sum.data())));
+    if (is_distributed()) comm::allreduce_device(Kokkos::View<rtype *>(sum.data(), n), comm::Op::SUM, halo.uses_nccl());
+    Kokkos::parallel_for("force_out", 1, KOKKOS_LAMBDA(const int) {
+        for (size_t i = 0; i < n; i++) out[i] = static_cast<double>(sum(i));
+    });
+}
+
+std::array<rtype, 2 * N_DIM + 1> Solver::calc_force(const Kokkos::View<uint32_t *> & faces) {
+    allocate_monitors();
+    reduce_force(faces, monitor_results.data());
+    const auto values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
     std::array<rtype, 2 * N_DIM + 1> F;
-    for (size_t i = 0; i < 2 * N_DIM + 1; i++) F[i] = result.v[i];
-    return is_distributed() ? comm::allreduce(F, comm::Op::SUM) : F;
+    for (size_t i = 0; i < 2 * N_DIM + 1; i++) F[i] = static_cast<rtype>(values(i));
+    return F;
+}
+
+void Solver::write_force_row(ForceMonitor & monitor, const double * values) {
+    monitor.last = {"forces_" + monitor.zone, step, double(t), {}};
+    for (size_t i = 0; i < 2 * N_DIM; i++) {
+        monitor.last.values.emplace_back(std::string("F") + "xyz"[i % N_DIM] + (i < N_DIM ? "_pressure" : "_viscous"),
+                                         values[i]);
+    }
+    if (monitor.modeled) monitor.last.values.emplace_back("Q", values[2 * N_DIM]);
+    if (!monitor.out) return;
+    *monitor.out << step << "," << std::setprecision(12) << t;
+    for (size_t i = 0; i < 2 * N_DIM; i++) *monitor.out << "," << static_cast<rtype>(values[i]);
+    if (monitor.modeled) *monitor.out << "," << static_cast<rtype>(values[2 * N_DIM]);
+    *monitor.out << "\n";
+    monitor.out->flush();
 }
 
 void Solver::write_forces() {
-    for (auto & monitor : force_monitors) {
-        if (step % monitor.interval != 0) continue;
-        const auto F = calc_force(monitor.faces);
-        monitor.last = {"forces_" + monitor.zone, step, double(t), {}};
-        for (size_t i = 0; i < 2 * N_DIM; i++) {
-            monitor.last.values.emplace_back(std::string("F") + "xyz"[i % N_DIM] + (i < N_DIM ? "_pressure" : "_viscous"),
-                                             double(F[i]));
-        }
-        if (monitor.modeled) monitor.last.values.emplace_back("Q", double(F[2 * N_DIM]));
-        if (!monitor.out) continue;
-        *monitor.out << step << "," << std::setprecision(12) << t;
-        for (size_t i = 0; i < 2 * N_DIM; i++) *monitor.out << "," << F[i];
-        if (monitor.modeled) *monitor.out << "," << F[2 * N_DIM];
-        *monitor.out << "\n";
-        monitor.out->flush();
+    for (size_t k = 0; k < force_monitors.size(); k++) {
+        if (step % force_monitors[k].interval != 0) continue;
+        allocate_monitors();
+        monitor_reductions(k);
+        const auto all = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
+        write_force_row(force_monitors[k], all.data() + monitor_offsets[k]);
     }
 }
 
@@ -3316,15 +3339,30 @@ void Solver::update_cell_W() {
     update_primitives();
 }
 
-std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
+void Solver::reduce_flow_statistics(double * out) {
     update_velocity_gradients();
     FlowStatisticsFunctor functor{W_cells, primitives, viscous_gradients, mesh->cell_measure,
                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
-    FlowStatisticsFunctor::value_type result;
-    Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor, result);
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    const Kokkos::View<rtype *> sum = monitor_sums;
+    Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor,
+                            Kokkos::View<FlowStatisticsFunctor::value_type, DeviceMemory, Kokkos::MemoryUnmanaged>(
+                                reinterpret_cast<FlowStatisticsFunctor::value_type *>(sum.data())));
+    if (is_distributed()) {
+        comm::allreduce_device(Kokkos::View<rtype *>(sum.data(), N_FLOW_STATISTICS), comm::Op::SUM, halo.uses_nccl());
+    }
+    Kokkos::parallel_for("statistics_out", 1, KOKKOS_LAMBDA(const int) {
+        for (size_t i = 0; i < N_FLOW_STATISTICS; i++) out[i] = static_cast<double>(sum(i));
+    });
+}
+
+std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
+    allocate_monitors();
+    reduce_flow_statistics(monitor_results.data());
+    const auto values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
     std::array<rtype, N_FLOW_STATISTICS> sums;
-    for (size_t i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = result.v[i];
-    return is_distributed() ? comm::allreduce(sums, comm::Op::SUM) : sums;
+    for (size_t i = 0; i < N_FLOW_STATISTICS; i++) sums[i] = static_cast<rtype>(values(i));
+    return sums;
 }
 
 void Solver::update_vortex_fields() {
@@ -3351,17 +3389,23 @@ void Solver::update_derived_fields() {
 
 void Solver::write_integrals() {
     if (integral_monitor.interval == 0 || step % integral_monitor.interval != 0) return;
-    const auto sums = integrate_flow_statistics();
-    KineticEnergyBudget rates;
-    if (integral_monitor.budget) rates = kinetic_energy_budget();
-    std::vector<double> values(sums.begin(), sums.end());
+    allocate_monitors();
+    monitor_reductions(force_monitors.size());
+    const auto all = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), monitor_results);
+    write_integral_row(all.data() + monitor_offsets[force_monitors.size()]);
+}
+
+void Solver::write_integral_row(const double * monitored) {
+    std::vector<double> values;
+    for (size_t i = 0; i < N_FLOW_STATISTICS; i++) values.push_back(double(static_cast<rtype>(monitored[i])));
     if (integral_monitor.budget) {
         // The exact convective rate is the pressure work; the rest is numerical
+        const KineticEnergyBudget rates = kinetic_energy_budget();
         values.insert(values.end(), {double(rates.convective), double(rates.viscous), double(rates.sgs),
                                      double(rates.pressure_work - rates.convective), double(rates.pressure_work)});
     }
-    if (les_on && les.dynamic) values.push_back(double(les_constant()));
-    if (dynamic_efficiency()) values.push_back(tfles_beta());
+    if (les_on && les.dynamic) values.push_back(double(static_cast<rtype>(monitored[N_FLOW_STATISTICS])));
+    if (dynamic_efficiency()) values.push_back(monitored[N_FLOW_STATISTICS + 1]);
     const auto columns = integral_columns();
     integral_monitor.last = {"integrals", step, double(t), {}};
     for (size_t i = 0; i < values.size(); i++) integral_monitor.last.values.emplace_back(columns[i].first, values[i]);

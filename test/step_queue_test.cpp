@@ -437,6 +437,19 @@ TEST(StepQueueTest, OutputsByStep) {
     EXPECT_TRUE(o.files.count("restart_000028.restart"));
 }
 
+TEST(StepQueueTest, ForcesAndIntegralsAreStagedWithoutStoppingTheDevice) {
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 2\n"
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 3\n";
+    expect_queue_invariant("monitors", c);
+    // As many steps run ahead as without the monitors
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("monitors", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, OutputsByTimeAndTStop) {
     Case c;
     c.run = "t_stop = 0.1\ncfl = 0.3\n";

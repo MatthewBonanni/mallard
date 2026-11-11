@@ -380,6 +380,38 @@ void Solver::device_step_body() {
         });
     }
     if (p_max.is_allocated()) device_if(advanced, [&] { update_p_max(); });
+    if (monitors_on_device()) {
+        // Forces and integrals of steps the device goes on from, staged for the host's rows; their
+        // boundary states at the step's end, the device's t
+        recording_step = true;
+        t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+        const Kokkos::View<uint32_t *> due = monitor_due;
+        const Kokkos::View<uint64_t *> intervals = monitor_intervals;
+        const uint32_t n_monitors = static_cast<uint32_t>(monitor_due.extent(0));
+        Kokkos::parallel_for("monitors_due", 1, KOKKOS_LAMBDA(const int) {
+            const step_queue::Loop & L = loop();
+            step_queue::Record & record = records((L.seq - 1) % n_records);
+            record.monitors = 0;
+            for (uint32_t k = 0; k < n_monitors; k++) {
+                due(k) = L.active && L.advanced && intervals(k) > 0 && L.step % intervals(k) == 0;
+                if (due(k)) record.monitors |= uint64_t(1) << k;
+            }
+        });
+        for (uint32_t k = 0; k < n_monitors; k++) {
+            device_if(&monitor_due.data()[k], [&] {
+                monitor_reductions(k);
+                const Kokkos::View<double *> values = monitor_results;
+                const Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged = monitor_staging;
+                const size_t first = monitor_offsets[k], last = monitor_offsets[k + 1];
+                Kokkos::parallel_for("monitor_staged", 1, KOKKOS_LAMBDA(const int) {
+                    const uint64_t slot = (loop().seq - 1) % n_records;
+                    for (size_t i = first; i < last; i++) staged(slot, i) = values(i);
+                });
+            });
+        }
+        t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
+        recording_step = false;
+    }
     device_if(&step_loop.data()->progress, [&] {
         progress_reductions();
         const Kokkos::View<step_queue::ProgressLocals> p = progress_device;
@@ -410,6 +442,48 @@ void Solver::captured_launch() {
         throw;
     }
     section.stop();
+}
+
+bool Solver::monitors_on_device() const {
+    // The kinetic-energy budget is the host's; fused chemistry is advanced by the host before a monitor reads the state
+    return (!force_monitors.empty() || integral_monitor.interval > 0) && !integral_monitor.budget && !defer_chemistry &&
+           force_monitors.size() + 1 <= 64;
+}
+
+void Solver::allocate_monitors() {
+    if (monitor_results.is_allocated()) return;
+    monitor_offsets.assign(1, 0);
+    for (size_t k = 0; k < force_monitors.size(); k++) monitor_offsets.push_back(monitor_offsets.back() + 2 * N_DIM + 1);
+    monitor_offsets.push_back(monitor_offsets.back() + N_FLOW_STATISTICS + 2);
+    monitor_results = Kokkos::View<double *>("step_monitor_results", monitor_offsets.back());
+    monitor_sums = Kokkos::View<rtype *>("step_monitor_sums", std::max<size_t>(2 * N_DIM + 1, N_FLOW_STATISTICS));
+}
+
+void Solver::monitor_reductions(const size_t k) {
+    double * const out = monitor_results.data() + monitor_offsets[k];
+    if (k < force_monitors.size()) {
+        reduce_force(force_monitors[k].faces, out);
+        return;
+    }
+    reduce_flow_statistics(out);
+    // The LES constant and TFLES beta of the dynamic procedures, as les_constant() and tfles_beta() read them
+    const Kokkos::View<double *> state = les_state;
+    const bool has_state = les_state.is_allocated();
+    const double C = static_cast<double>(les.C);
+    Kokkos::parallel_for("integrals_les", 1, KOKKOS_LAMBDA(const int) {
+        out[N_FLOW_STATISTICS] = has_state ? state(0) : C;
+        out[N_FLOW_STATISTICS + 1] = has_state ? state(2) : 0.0;
+    });
+}
+
+void Solver::write_staged_monitors(const step_queue::Record & record) {
+    if (record.monitors == 0) return;
+    const uint64_t slot = (record.seq - 1) % step_records.extent(0);
+    const double * const staged = &monitor_staging(slot, 0);
+    for (size_t k = 0; k < force_monitors.size(); k++) {
+        if (record.monitors >> k & 1) write_force_row(force_monitors[k], staged + monitor_offsets[k]);
+    }
+    if (record.monitors >> force_monitors.size() & 1) write_integral_row(staged + monitor_offsets[force_monitors.size()]);
 }
 
 void Solver::step_prologue() {
@@ -508,6 +582,18 @@ void Solver::begin_device_steps() {
     if (progress_values.extent(0) != n_values) progress_values = Kokkos::View<double *>("step_progress_values", n_values);
     progress_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
         "step_progress_staging", n_records, n_values);
+    allocate_monitors();
+    if (monitors_on_device()) {
+        const size_t n_monitors = force_monitors.size() + 1;
+        monitor_due = Kokkos::View<uint32_t *>("step_monitor_due", n_monitors);
+        monitor_intervals = Kokkos::View<uint64_t *>("step_monitor_intervals", n_monitors);
+        const auto intervals = Kokkos::create_mirror_view(monitor_intervals);
+        for (size_t k = 0; k < force_monitors.size(); k++) intervals(k) = force_monitors[k].interval;
+        intervals(force_monitors.size()) = integral_monitor.interval;
+        Kokkos::deep_copy(monitor_intervals, intervals);
+        monitor_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
+            "step_monitor_staging", n_records, monitor_offsets.back());
+    }
     n_launched = n_taken = 0;
 #ifdef KOKKOS_ENABLE_CUDA
     for (uint32_t i = 0; i < n_records; i++) {
@@ -532,8 +618,10 @@ step_queue::Horizon Solver::step_horizon() const {
     h.at_multiple(step, control_file_interval);
     if (!progress_on_device()) h.at_multiple(step, check_interval);
     if (!triggers.empty()) h.at_step(step + 1);
-    for (const auto & monitor : force_monitors) h.at_multiple(step, monitor.interval);
-    h.at_multiple(step, integral_monitor.interval);
+    if (!monitors_on_device()) {
+        for (const auto & monitor : force_monitors) h.at_multiple(step, monitor.interval);
+        h.at_multiple(step, integral_monitor.interval);
+    }
     for (const auto & writer : data_writers) writer->due_limits(step, h.step_limit, h.t_limit);
     probes.due_limits(step, h.step_limit, h.t_limit);
     statistics.due_limits(step, h.step_limit);
