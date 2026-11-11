@@ -486,6 +486,30 @@ TEST(StepQueueTest, BoundaryOfTOutOfRangeStopsAtTheHostsRow) {
     EXPECT_EQ(o.step % 4, 0u);
 }
 
+TEST(StepQueueTest, TimeAndAveragedProbesAreStagedWithoutStoppingTheDevice) {
+    // A probe written by time (the device shortens the steps to its output times) and a line's time averages
+    // with reductions; the restart carries their clocks and averages
+    Case c;
+    c.run = "n_steps = 24\ncfl = 0.5\n";
+    const std::string restart = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 24\n";
+    c.extra = "check_interval = 1000\n" + restart +
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ntime_interval = 0.013\nfields = [\"RHO\", \"P\"]\n"
+              "point = " + point_of("0.5", "0.5", "0.2") + "\n"
+              "[[probes]]\nname = \"mean_line\"\nfile = \"{dir}/mean_line.csv\"\ninterval = 5\naverage = true\n"
+              "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") +
+              "\nn_points = 5\nfields = [\"RHO\", \"P\"]\nreductions = [\"integral\", \"rms\"]\n"
+              "reductions_file = \"{dir}/mean_line_reductions.csv\"\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("time_probes", c);
+    if (comm::is_root()) {
+        EXPECT_GT(std::count(o.files.at("pt.csv").begin(), o.files.at("pt.csv").end(), '\n'), 5);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n" + restart;
+    EXPECT_EQ(run_case("time_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, OutputsByTimeAndTStop) {
     Case c;
     c.run = "t_stop = 0.1\ncfl = 0.3\n";

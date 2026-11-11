@@ -137,9 +137,10 @@ struct Record {
     int32_t reduced;      // of every rank
     uint32_t tries;       // rejections of this step so far
     uint32_t progress;    // progress holds the step's progress row
-    uint64_t chemistry_ns;  // of the step's chemistry calls, on the device's clock
-    uint64_t monitors;      // bit k: monitor k (forces of each zone, then the integrals) staged its row
-    uint64_t probes;        // bit k: staged probe k staged its values
+    uint64_t chemistry_ns;   // of the step's chemistry calls, on the device's clock
+    uint64_t monitors;       // bit k: monitor k (forces of each zone, then the integrals) staged its row
+    uint64_t probes;         // bit k: staged probe k is written
+    uint64_t probe_samples;  // bit k: staged averaging probe k staged a sample for its averages
     ProgressLocals progress_locals;
 };
 
