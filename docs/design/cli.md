@@ -21,7 +21,7 @@ Maintain  mallard test | completion | --version
 | `--restart latest` | Run | available |
 | `new`, `input upgrade`, `input resolve` | Set up | available |
 | `check input.toml` | Inspect | available |
-| `check --view DIR`, `info MESH --view DIR` (the case view) | Inspect | available: ParaView file and annotated images; particle injectors with the sprays ([#291](https://github.com/MatthewBonanni/mallard/issues/291)) |
+| `check --view DIR`, `info MESH --view DIR` (the case view) | Inspect | available: ParaView file and annotated images; particle injectors with them ([#759](https://github.com/MatthewBonanni/mallard/issues/759)) |
 | `check` with no input (the environment) | Inspect | available |
 | `info <file>`, `info <run-dir>` | Inspect | available; on the [output reader](output_reader.md) |
 | `info <run-dir> --html` (the run report) | Inspect | planned ([#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
