@@ -1107,6 +1107,8 @@ void Solver::init_boundaries() {
         stage_time = Kokkos::View<rtype>("stage_time");
     }
     init_inlets(input_boundaries, inlets);
+    const bool timed = !timed_fields.empty() || !dirichlet_states.empty() || !timed_inlets.empty();
+    timed_boundaries = comm::allreduce(static_cast<int>(timed), comm::Op::MAX) > 0;
 }
 
 void Solver::init_sources(region::Regions & regions) {

@@ -764,6 +764,7 @@ class Solver {
         }
         /** @brief Throws, on every rank, the error of a time-dependent boundary value that went out of range on any. */
         void check_timed_boundaries() const;
+        bool timed_boundaries = false;  // on any rank, so every rank's steps stop at the same rows
 
         // Steps on the device (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs

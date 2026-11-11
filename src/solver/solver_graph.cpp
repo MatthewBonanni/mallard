@@ -124,13 +124,16 @@ std::string Solver::step_graph_unsupported() const {
     if (!uncaptured_step_graphs) return "not a CUDA build";
 #endif
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
-    if (is_distributed() && !halo.uses_nccl() && !uncaptured_step_graphs) return "halo exchanged with MPI";
+#ifdef KOKKOS_ENABLE_CUDA
+    // MPI calls cannot be captured; uncaptured step graphs exist only off CUDA
+    if (is_distributed() && !halo.uses_nccl()) return "halo exchanged with MPI";
+#endif
     return device_steps_unsupported();
 }
 
 bool Solver::progress_on_device() const {
     // Rows of runs whose timed boundaries can fail are checked by the host at each row
-    return !reacting && timed_fields.empty() && dirichlet_states.empty() && timed_inlets.empty();
+    return !reacting && !timed_boundaries;
 }
 
 void Solver::record_step() {
