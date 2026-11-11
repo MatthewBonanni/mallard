@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "comm.h"
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "region_input.h"
@@ -508,7 +509,7 @@ TEST(SourceTermsTest, RegionsOfTheSolutionFollowItWithAndWithoutStepGraphs) {
             mass += double(solver.h_conservatives(c, 0) * solver.get_mesh()->h_cell_measure(c));
         }
         // The region is empty at first: the gas, of mass 1, gains mass only once some of it is hot
-        EXPECT_GT(mass, 1.0 + 1e-3);
+        EXPECT_GT(comm::allreduce(mass, comm::Op::SUM), 1.0 + 1e-3);
     }
     EXPECT_EQ(U[0], U[1]);
 }

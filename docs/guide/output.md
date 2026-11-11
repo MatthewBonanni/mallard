@@ -43,7 +43,7 @@ region = "cylinder"           # a boundary zone, a slice, a volume: any region (
 fields = ["P", "T"]
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 49 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 50 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -366,7 +366,7 @@ input.toml --mesh-fields mesh` shows that of 8 ranks.
 check_interval = 100   # a progress row every 100 steps
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 49 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 50 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, summaries of mesh, physics (with the case's units, `physics.units`),
@@ -514,7 +514,7 @@ it all off.
 | `margins_run` | The smallest of each at any progress row so far |
 | `activity` | Fractions of cells, over the domain (`all`) and the least and most active rank (`rank_min`, `rank_max`): `troubled_cells` (TENO's troubled-cell indicator), `limited_cells` (MUSCL cells whose limiter is below one in some variable), `upwind_fraction` (the hybrid flux's mean upwind fraction) |
 | `chemistry` | Since the previous row: `substeps` and `rejected_substeps` of the Rosenbrock integration, `failures`, `reacting_cells` (fraction of the last call), `wall` (seconds of the slowest rank) and `imbalance` (the slowest rank's chemistry time over the ranks' mean) |
-| `timing` | Per step since the previous row, `all` (mean), `rank_min`, `rank_max` over ranks: `output_sync` (the run's own output time) and `output_async` (time of the background writers). The step's own wall time and throughput are the row's `wall_per_step` and `cells_per_second` |
+| `timing` | Per step since the previous row, `all` (mean), `rank_min`, `rank_max` over ranks: `output_sync` (the run's own output time), `output_async` (time of the background writers) and, with probes of [regions defined by the solution](geometry.md#regions-defined-by-the-solution), `regions` (the part of `output_sync` spent placing them on the solution). The step's own wall time and throughput are the row's `wall_per_step` and `cells_per_second` |
 | `repairs`, `repairs_run` | Each [numerical repair](#numerical-repairs), since the previous row and since the start: `activations`, `cells` (distinct owned cells) and `change`, the integrated change of each quantity it changes |
 | `balance`, `balance_run` | The [conservation ledger](#conservation-ledger), since the previous row and since the first row |
 | `element_drift` | Mixtures with chemistry: the largest change of a rank's element mass over one chemistry call, beyond the recorded repairs, relative to the rank's mass (round-off) |

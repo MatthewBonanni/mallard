@@ -149,10 +149,9 @@ SolutionLevels::SolutionLevels(const Mesh & mesh, const std::vector<Condition> &
     for (const auto & p : programs) all.push_back(&p);
     table = kexpr::ProgramTable<>(all);
     m_centroids = mesh.cell_coords;
-    offsets_faces_of_cell = mesh.offsets_faces_of_cell;
-    faces_of_cell = mesh.faces_of_cell;
-    cells_of_face = mesh.cells_of_face;
-    face_shift = mesh.face_shift;
+    offsets_cells_of_cell = mesh.offsets_cells_of_cell;
+    cells_of_cell = mesh.cells_of_cell;
+    cells_of_cell_shift = mesh.cells_of_cell_shift;
     periodic = mesh.periodic_maps();
     host_time = Kokkos::View<rtype>("region_levels_time");
     m_levels = Kokkos::View<double **[N_DIM + 1]>("region_levels", n_cells, n_conditions);
@@ -162,10 +161,9 @@ void SolutionLevels::update(const Kokkos::View<const rtype> & time) const {
     const kexpr::ProgramTable<> programs_ = table;
     const CellFields f = fields;
     const auto x_c = m_centroids;
-    const auto offsets = offsets_faces_of_cell;
-    const auto faces = faces_of_cell;
-    const auto cells = cells_of_face;
-    const auto shift = face_shift;
+    const auto offsets = offsets_cells_of_cell;
+    const auto neighbors = cells_of_cell;
+    const auto shift = cells_of_cell_shift;
     const PeriodicMaps maps = periodic;
     const auto out = m_levels;
     const uint32_t owned = n_owned, n_k = n_conditions, n_sp = n_species;
@@ -180,21 +178,12 @@ void SolutionLevels::update(const Kokkos::View<const rtype> & time) const {
             double M[3][3] = {}, b[3] = {};
             if (c < owned) {
                 for (uint32_t q = offsets(c); q < offsets(c + 1); q++) {
-                    const uint32_t face = faces(q);
-                    const int32_t c0 = cells(face, 0), c1 = cells(face, 1);
-                    if (c1 < 0) continue;
-                    const bool from_0 = c0 == static_cast<int32_t>(c);
-                    const uint32_t j = static_cast<uint32_t>(from_0 ? c1 : c0);
+                    const uint32_t j = neighbors(q);
                     rtype x_j[N_DIM], y[N_DIM], W_j[N_CONSERVATIVE];
                     for (int d = 0; d < N_DIM; d++) x_j[d] = x_c(j, d);
                     for (int i = 0; i < N_CONSERVATIVE; i++) W_j[i] = f.W(j, i);
-                    const uint8_t s = shift.extent(0) > 0 ? shift(face) : 0;
-                    if (from_0) {
-                        maps.forward(s, x_j, y);
-                    } else {
-                        maps.backward(s, x_j, y);
-                    }
-                    if (maps.rotated()) maps.rotate_state(s, W_j, !from_0);
+                    maps.forward(shift(q), x_j, y);
+                    if (maps.rotated()) maps.rotate_state(shift(q), W_j);
                     double xn[3] = {0.0, 0.0, 0.0}, Wn[N_CONSERVATIVE], dx[3] = {0.0, 0.0, 0.0};
                     for (int d = 0; d < N_DIM; d++) {
                         xn[d] = static_cast<double>(y[d]);

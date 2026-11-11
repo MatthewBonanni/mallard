@@ -1477,6 +1477,8 @@ units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
 | `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
 | `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
+| `where` | `condition`: comparisons (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the solution's `RHO`, `U_X`, `U_Y`, `U_Z` (3D), `P`, `T` and `Y_<species>` (SI units), joined by `and`, `or`, `not` and parentheses, e.g. `"T > 1500 and Y_OH > 1e-3"` | filled: where the condition holds on the solution ([Regions defined by the solution](guide/geometry.md#regions-defined-by-the-solution)) |
+| `isosurface` | `field`: one of the variables of `where`; `value`, in the field's units (`"1500 K"`) | surface (2D: curve) where `field` equals `value`, facing toward increasing `field` (`flip = true`: decreasing): the boundary of `{type = "where", condition = "<field> < <value>"}` |
 | `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
 | `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b`: filled regions, or a surface or curve `a` clipped to outside filled ones |
 | `boundary` | `of`: a region or its name | one dimension lower: a filled region's closed surface (2D: curve), a flat surface's edge curve, the edges of open boundary zones |
@@ -1511,6 +1513,14 @@ move, in `[[sources]]`, `[[sponges]]` and `[[probes]]`; elsewhere, and for
 surfaces, curves and points, a moving region is an error. On a mesh with
 `[[periodic]]` boundaries, a region that crosses one wraps into the domain
 ([Periodic boundaries](guide/geometry.md#periodic-boundaries)).
+
+Regions defined by the solution, `where` and `isosurface` and the booleans and
+boundaries that use them, follow the solution: in `[[sources]]` and
+`[[sponges]]` at every stage, in `[[probes]]` at every write, and in
+`mallard post extract` on the state of the output it reads. They take no
+transforms, `repeat` or `edge`; snapshots of them (`[[write_data]]`),
+averaged probes and probes of `n_points` on isosurfaces,
+`[[initialize.regions]]` and `[[initialize.data]]` are errors.
 
 The outermost region may also have `edge`, the width of a smooth edge: the
 indicator falls from 1 to 0 as the smoothstep `s^2 (3 - 2 s)` across the band

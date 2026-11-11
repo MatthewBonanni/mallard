@@ -438,7 +438,7 @@ class Parser {
                 p = boundary(std::move(p), where, line_of(t, "filled"));
                 p.text = text + ", filled = false";
             }
-            if (t.contains("flip") && find_value<bool>(t, "flip")) {
+            if (find_value_or<bool>(t, "flip", false)) {
                 if (p.dimension == N_DIM || p.dimension == 0) {
                     fail(where + ".flip", line_of(t, "flip"),
                          "reverses the side a surface or curve faces, and this region is " + dimension_name(p.dimension),

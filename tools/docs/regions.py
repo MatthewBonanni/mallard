@@ -3,7 +3,8 @@ that Mallard computes on coarse unstructured meshes, read back from runs of
 one step whose source is 1 per unit volume over the region (SOURCE_RHOE is
 then the fraction), with the exact outline drawn over them; and the density
 of an initial state built layer by layer ([[initialize.data]] and
-[[initialize.regions]]) on the same mesh.
+[[initialize.regions]]) on the same mesh; and regions defined by the solution,
+with the probes' measures of them under refinement.
 
     python tools/docs/regions.py --mallard build/src/mallard [--mallard3d build-3d/src/mallard] [names...]
 
@@ -1192,6 +1193,92 @@ def region_curved_wall_3d(P, args):
     return fig
 
 
+# Regions defined by the solution: two hot spots, and a field whose isosurface is a circle
+HOT_T = "1 + exp(-30 * ((x - 0.4)^2 + (y - 0.45)^2)) + 0.8 * exp(-40 * ((x - 0.68)^2 + (y - 0.62)^2))"
+SOLUTION_NS = (10, 20, 40, 80)
+
+
+def hot_t(x, y):
+    return 1 + np.exp(-30 * ((x - 0.4) ** 2 + (y - 0.45) ** 2)) + 0.8 * np.exp(-40 * ((x - 0.68) ** 2 + (y - 0.62) ** 2))
+
+
+def solution_run(binary, work, name, mesh_table, T, probes="", region=None, zones=("left", "right", "bottom", "top")):
+    """A one-step run on a gas at rest of temperature T; SOURCE_RHOE is the fraction of region, if given."""
+    source = f'[[sources]]\nrhoE = 1\nregion = {region}\n[[write_data]]\nprefix = "{name}"\nformat = "vtu"\n' \
+             f'interval = 1\nfields = ["SOURCE_RHOE"]\n' if region else ""
+    boundaries = "".join(f'[[boundaries]]\nname = "{z}"\ntype = "symmetry"\n' for z in zones)
+    (work / f"{name}.toml").write_text(f"""[run]
+n_steps = 1
+dt = 1e-9
+[mesh]
+{mesh_table}[initialize]
+type = "analytical"
+u = ["0", "0"]
+p = "1"
+T = "{T}"
+{boundaries}[output]
+check_interval = 1000000
+{source}{probes}{PHYSICS}""")
+    subprocess.run([str(binary), "-i", f"{name}.toml", "--kokkos-num-threads=2"], cwd=work, check=True,
+                   stdout=subprocess.DEVNULL)
+
+
+def reductions_row(path):
+    lines = [l for l in Path(path).read_text().splitlines() if l and not l.startswith("#")]
+    names = lines[0].split(",")
+    return dict(zip(names, map(float, lines[1].split(","))))
+
+
+@functools.cache
+def data_solution(mallard):
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "square.msh"
+    triangle_mesh(mesh, n=16)
+    solution_run(mallard, work, "hot", f'type = "file"\nfilename = "{mesh.name}"\n', HOT_T,
+                 region='{type = "where", condition = "T > 1.5"}', zones=("wall",))
+    pts, conn, offs, _, data = read_vtu_cells(str(work / "hot_000000.vtu"))
+    starts = np.concatenate([[0], offs[:-1]])
+    hot = (pts, [conn[a:b] for a, b in zip(starts, offs)], data["SOURCE_RHOE"])
+    # T = 1 + r^2: where T < 1.09 is the disk of radius 0.3, its isosurface the circle
+    errors = []
+    for n in SOLUTION_NS:
+        probes = ('[[probes]]\nname = "disk"\nfields = ["T"]\nregion = {type = "where", condition = "T < 1.09"}\n'
+                  '[[probes]]\nname = "circle"\nfields = ["T"]\nregion = {type = "isosurface", field = "T", value = 1.09}\n')
+        solution_run(mallard, work, f"n{n}", f'type = "cartesian_tri"\nNx = {n}\nNy = {n}\nLx = 1.0\nLy = 1.0\n',
+                     "1 + (x - 0.5)^2 + (y - 0.5)^2", probes)
+        area = reductions_row(work / "probe_disk_reductions.csv")["area"]
+        length = reductions_row(work / "probe_circle_reductions.csv")["length"]
+        errors.append((abs(area - np.pi * 0.09) / (np.pi * 0.09), abs(length - 2 * np.pi * 0.3) / (2 * np.pi * 0.3)))
+    return hot, np.array(errors)
+
+
+def region_solution(P, args):
+    """The fractions of where T > 1.5 over two hot spots on the triangle mesh, with the exact isotherm; and the
+    errors of a where region's area and of its isosurface's length under refinement."""
+    hot, errors = data_solution(args.mallard)
+    fig = plt.figure(figsize=(10.4, 4.3))
+    ax = fig.add_axes([0.02, 0.06, 0.4, 0.84])
+    panel(ax, P, *hot, lambda x, y: hot_t(x, y) > 1.5, 'where, condition = "T > 1.5"')
+    colorbar(fig, [ax], P)
+    cv = fig.add_axes([0.6, 0.16, 0.37, 0.72])
+    h = 1.0 / np.array(SOLUTION_NS)
+    for k, (text, color) in enumerate((("area of where T < 1 + R\u00b2 (a disk)", P["blue"]),
+                                       ("length of its isosurface (a circle)", P["flame"]))):
+        e = errors[:, k]
+        cv.loglog(h, e, "o-", color=color, ms=6, label=f"{text}: order {np.log2(e[-2] / e[-1]):.1f}")
+    ref = errors[0].max() * 1.6 * (h / h[0]) ** 2
+    cv.loglog(h, ref, ls=":", color=P["muted"], lw=1.0)
+    cv.text(h[-1] * 0.93, ref[-1], "2", color=P["muted"], fontsize=10, ha="right", va="center")
+    cv.set_xticks(h, [f"1/{n}" for n in SOLUTION_NS])
+    cv.minorticks_off()
+    cv.invert_xaxis()
+    cv.set_xlabel("cell size h (T = 1 + r\u00b2, R = 0.3, triangles)")
+    cv.set_ylabel("relative error")
+    cv.legend(loc="lower left", fontsize=9)
+    cv.grid(True, which="major", color=P["faint"], lw=0.7)
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -1207,7 +1294,7 @@ FIGURES = {"region_primitives": primitives_2d, "region_booleans": booleans_2d, "
            "initial_layers": initial_layers, "region_curved_wall": region_curved_wall,
            "region_control_surface": region_control_surface, "region_outside": region_outside,
            "region_curved_wall_3d": region_curved_wall_3d, "region_arrays": region_arrays,
-           "region_arrays_3d": region_arrays_3d}
+           "region_arrays_3d": region_arrays_3d, "region_solution": region_solution}
 
 
 def figures(mallard, mallard3d=None, names=()):

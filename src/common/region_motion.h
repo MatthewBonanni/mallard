@@ -32,8 +32,8 @@ namespace region {
 /**
  * @brief The levels of a region's conditions in every cell, from the
  *        solution: each one's value at the cell's centroid and its gradient,
- *        by inverse-distance-squared least squares over the face neighbors
- *        (across periodic faces, their images; boundary faces add nothing).
+ *        by inverse-distance-squared least squares over the cells sharing a
+ *        node with it (across periodic boundaries, their images).
  *        A condition's cell fractions and isosurfaces are cut from this
  *        linear reconstruction, exact for a linear level. Halo cells get
  *        their value and no gradient.
@@ -61,9 +61,8 @@ class SolutionLevels {
         kexpr::ProgramTable<> table;
         CellFields fields;
         Kokkos::View<rtype *[N_DIM]> m_centroids;
-        Kokkos::View<uint32_t *> offsets_faces_of_cell, faces_of_cell;
-        Kokkos::View<int32_t *[2]> cells_of_face;
-        Kokkos::View<uint8_t *> face_shift;
+        Kokkos::View<uint32_t *> offsets_cells_of_cell, cells_of_cell;
+        Kokkos::View<uint8_t *> cells_of_cell_shift;
         PeriodicMaps periodic;
         Kokkos::View<rtype> host_time;
         Kokkos::View<double **[N_DIM + 1]> m_levels;

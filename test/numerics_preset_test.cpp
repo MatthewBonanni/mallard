@@ -230,6 +230,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"shu_osher/input.toml", "high_order", 2, "", {}, ""},
     {"sod/input.toml", "high_order", 2, "", {}, ""},
     {"source_regions/input.toml", "second_order", 2, "", {}, ""},
+    {"hot_gas_regions/input.toml", "second_order", 2, "", {}, ""},
     {"sphere_axisymmetric/input.toml", "high_order", 2, "",
      {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "axis"}, {"cylinder", "cylinder"}}, ""},
     {"triple_flame/input.toml", "reacting", 2, "", {}, ""},
