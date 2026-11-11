@@ -367,8 +367,8 @@ void expect_same(const Outcome & a, const Outcome & b, const std::string & what)
 
 /**
  * @brief The run stepped by the host (step_queue = 0), one step per launch
- *        (1) and enqueued ahead (3): the same state, files and log. Runs with
- *        triggers stop for the host after every step.
+ *        (1) and enqueued ahead (3): the same state, files and log. Runs the
+ *        host stops at every step (runs_ahead false) take no step ahead.
  */
 Outcome expect_queue_invariant(const std::string & name, const Case & c, const bool runs_ahead = true) {
     const Outcome host = run_case(name, c, 0);
