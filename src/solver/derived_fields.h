@@ -261,16 +261,16 @@ void scalar_gradients(const Settings & settings, const Kokkos::View<rtype **, Ko
 
 /** @brief The cell values a derived field is computed from. */
 struct Inputs {
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W;                  ///< rho, u, p of each cell
-    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;   ///< d W_k / d x_i
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W{};                ///< rho, u, p of each cell
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients{}; ///< d W_k / d x_i
     rtype gamma = 1.4_r;                                      ///< ratio of specific heats, without cell_gamma
-    Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;   ///< mixtures: each cell's (frozen) gamma
-    Kokkos::View<rtype *[N_DIM]> radius_coords;               ///< axisymmetric runs: cell centers, radius second
-    Kokkos::View<rtype *[N_PRIMITIVE]> primitives;            ///< u, p, T, h of each cell
-    Kokkos::View<rtype **, Kokkos::LayoutRight> Y;            ///< mixtures: (cell, [Y_1 .. Y_Ns, ...])
-    chemistry::ThermoTable<> thermo;                          ///< mixtures: species thermodynamics
-    Kokkos::View<rtype *[3]> transport;                       ///< viscous mixtures: (cell, [mu, lambda, -])
-    Kokkos::View<rtype ***, Kokkos::LayoutRight> scalar_gradients;  ///< Workspace::gradients
+    Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma{}; ///< mixtures: each cell's (frozen) gamma
+    Kokkos::View<rtype *[N_DIM]> radius_coords{};             ///< axisymmetric runs: cell centers, radius second
+    Kokkos::View<rtype *[N_PRIMITIVE]> primitives{};          ///< u, p, T, h of each cell
+    Kokkos::View<rtype **, Kokkos::LayoutRight> Y{};          ///< mixtures: (cell, [Y_1 .. Y_Ns, ...])
+    chemistry::ThermoTable<> thermo{};                        ///< mixtures: species thermodynamics
+    Kokkos::View<rtype *[3]> transport{};                     ///< viscous mixtures: (cell, [mu, lambda, -])
+    Kokkos::View<rtype ***, Kokkos::LayoutRight> scalar_gradients{};  ///< Workspace::gradients
 };
 
 /**
