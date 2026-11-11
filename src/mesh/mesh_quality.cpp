@@ -198,7 +198,7 @@ std::string write_quality(std::shared_ptr<Mesh> mesh, const MeshQuality & qualit
     Input writer_input(Input::table_type{});
     writer_input.as_table()["prefix"] = prefix;
     writer_input.as_table()["interval"] = 1;
-    writer_input.as_table()["variables"] = names;
+    writer_input.as_table()["fields"] = names;
     set_output_files_enabled(true);
     DataWriter writer;
     writer.init(writer_input, quality_data, mesh);

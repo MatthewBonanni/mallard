@@ -588,17 +588,22 @@ Placement this_placement() {
     return p;
 }
 
-void report() {
-    if (comm::size() == 1) return;
+std::vector<Placement> placements() {
     const std::string mine = serialize(this_placement());
 #ifdef Mallard_HAS_MPI
     const std::vector<std::string> lines = gather(mine);
 #else
     const std::vector<std::string> lines = {mine};
 #endif
-    if (!comm::is_root()) return;
     std::vector<Placement> ranks;
     for (const std::string & line : lines) ranks.push_back(deserialize(line));
+    return ranks;
+}
+
+void report() {
+    if (comm::size() == 1) return;
+    const std::vector<Placement> ranks = placements();
+    if (!comm::is_root()) return;
     logging::section("Ranks");
     print_table(ranks);
     for (const std::string & warning : check(ranks)) logging::warning(warning);

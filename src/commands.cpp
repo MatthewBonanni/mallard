@@ -72,8 +72,8 @@ constexpr Option CHECK_OPTIONS[] = {
 
 constexpr Option LIST_OPTIONS[] = {
     {"--format", "", "text|json",
-     "text: one table per group, with the units of every field; json: the same as one JSON object, for "
-     "scripts. Default: text."},
+     "text: one table per group (of fields) or table (of keys), with units; json: the same as one JSON "
+     "object, for scripts. Default: text."},
     KOKKOS,
 };
 
@@ -155,7 +155,7 @@ constexpr Option EXTRACT_OPTIONS[] = {
      "The name of the --region probe and of --snapshot: probe_NAME.csv, probe_NAME_reductions.csv, "
      "NAME_<step>.vtkhdf. Default: extract."},
     {"--fields", "", "LIST",
-     "The variables of --region and --snapshot, separated by commas, as [[probes]] and [[write_data]] take "
+     "The fields of --region and --snapshot, separated by commas, as [[probes]] and [[write_data]] take "
      "them (RHO,U,P,T,MASS_FLUX). Default: RHO,U,P,T."},
     {"--reductions", "", "LIST",
      "The reductions of --region, separated by commas: integral, mean, favre, rms, min, max. Default: integral, "
@@ -218,6 +218,7 @@ constexpr std::string_view FILES_ARGUMENTS[] = {"FILE", "[FILE...]"};
 constexpr std::string_view CONVERT_ARGUMENTS[] = {"INPUT", "OUTPUT.h5"};
 constexpr std::string_view OPTIONAL_INPUT[] = {"[INPUT]"};
 constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
+constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
@@ -427,8 +428,9 @@ constexpr Command COMMANDS[] = {
     {
         .name = "check",
         .group = "Inspect",
-        .summary = "Set up a case without running it and report on it: keys, mesh, time step, memory, cost",
-        .synopsis = "mallard check input.toml [options]",
+        .summary = "Set up a case without running it and report on it: keys, mesh, time step, memory, cost, environment",
+        .synopsis = "mallard check input.toml [options]\n"
+                    "mallard check [--format text|json]",
         .description =
             "Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial solution) without "
             "time stepping and without writing any file, then reports: unknown or unused keys, boundary zones "
@@ -437,15 +439,24 @@ constexpr Command COMMANDS[] = {
             "error or warning a stable code (E-REGION-OUTSIDE, W-CFL-LIMIT) and the docs that explain it. It lists "
             "every region the case uses and the mesh's own (domain, boundary zones, cell zones) with its dimension, measure and cells, "
             "and whether a surface or curve is exact or extracted; a region that covers no cell is an error. Under "
-            "mpirun -n N it checks the run on N ranks.",
+            "mpirun -n N it checks the run on N ranks.\n"
+            "\n"
+            "Without an input, checks the environment only; with one, the report ends with the same Environment "
+            "section: the build (dimension, precision, the solvers installed), Kokkos and its execution spaces, "
+            "every rank's host, device and memory, CPUs and threads, MPI (library, ranks per host), GPU-aware MPI "
+            "and NCCL (built, and whether the run uses them), HDF5 (serial or parallel), CGNS, zlib and KaMinPar. "
+            "Each problem is a diagnostic with its fix: ranks sharing a GPU or cores, OpenMP threads free to "
+            "migrate, a GPU-aware build on an MPI that cannot read device memory (an error), device halos "
+            "staged through host memory. Run it under the job's launcher (srun, mpirun) to check its nodes.",
         .options = CHECK_OPTIONS,
         .arguments = CHECK_ARGUMENTS,
         .examples = "$ mallard check input.toml\n"
+                    "$ srun -N 2 --ntasks-per-node 4 mallard check   # the environment of a job\n"
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
                     "$ mpirun -n 4 mallard check input.toml --quality quality\n"
                     "$ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView",
         .exit_status = "0  no errors (there may be warnings)\n"
-                       "1  errors: in the input, the mesh or the setup\n"
+                       "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
         .dim = Case::input,
         .run = check_main,
@@ -498,12 +509,12 @@ constexpr Command COMMANDS[] = {
         .summary = "The output fields there are, or exactly those of one case",
         .synopsis = "mallard list fields [INPUT] [--format text|json]",
         .description =
-            "Without an input file, lists every field the [[write_data]] variables, [[probes]] and [statistics] "
+            "Without an input file, lists every field the [[write_data]], [[probes]] and [statistics] fields "
             "take, by group, with its units, its description and what a case needs to have it, and the patterns "
             "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).\n"
             "\n"
             "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
-            "lists exactly the fields [[write_data]] variables accept for it: its species, its physics, chemistry, "
+            "lists exactly the fields [[write_data]] fields accept for it: its species, its physics, chemistry, "
             "LES and statistics, and its dimension; then the common fields it does not have, with what they need.",
         .options = LIST_OPTIONS,
         .arguments = OPTIONAL_INPUT,
@@ -533,6 +544,34 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::input,
         .run = list_species_main,
+    },
+    {
+        .name = "list keys",
+        .group = "Inspect",
+        .summary = "The input keys there are, or exactly those of one case: type, units, default, values",
+        .synopsis = "mallard list keys [SECTION] [INPUT] [--format text|json]",
+        .description =
+            "Without an input file, lists the key catalog docs/input-keys.json: every key the examples and "
+            "tutorials read, by table, with its type, units (of a number with a physical dimension), default "
+            "(or required) and accepted values; (2D) or (3D) marks a key only that dimension reads.\n"
+            "\n"
+            "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
+            "lists the keys its setup reads, the same columns and whether the input sets each: what mallard check "
+            "--catalog writes, as tables.\n"
+            "\n"
+            "SECTION keeps the keys of one table (numerics, [numerics], write_data) or of one key path "
+            "(numerics.face_reconstruction). An argument that ends in .toml or names a file is the input.",
+        .options = LIST_OPTIONS,
+        .arguments = KEYS_ARGUMENTS,
+        .examples = "$ mallard list keys\n"
+                    "$ mallard list keys numerics\n"
+                    "$ mallard list keys write_data input.toml\n"
+                    "$ mallard list keys input.toml --format json",
+        .exit_status = "0  listed\n"
+                       "1  the case cannot be set up (the errors are printed), or the catalog is not found\n"
+                       "2  usage error, or a section with no key",
+        .dim = Case::input_file,
+        .run = list_keys_main,
     },
     {
         .name = "list templates",
@@ -709,7 +748,7 @@ constexpr Command COMMANDS[] = {
 
 constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
-    {"list", "Catalogs: the fields, species and case templates there are."},
+    {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
     {"post", "Commands on a run's output: probes, integrals and snapshots of it."},
 };

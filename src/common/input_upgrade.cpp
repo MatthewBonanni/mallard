@@ -56,6 +56,7 @@ std::vector<std::string> periodic_zones(const std::string & direction, const std
 const Rules & rules() {
     static const std::string TYPES = "boundary types name their kind first, and options are keys";
     static const std::string NSCBC = "the characteristic parameters are the nscbc table";
+    static const std::string FIELDS = "[[write_data]], [[probes]] and [statistics] all name their output fields";
     // Deprecate before removing: `removed` is at least one minor release after `since`.
     // Keys removed before this policy (0.9.0) have since == removed.
     static const Rules table = {
@@ -83,6 +84,8 @@ const Rules & rules() {
              all_to_domain},
             {"mesh.curved[].shape", "mesh.curved[].type", "0.9.0", "0.10.0",
              "type selects the kind of every region; a curved zone lies on a surface (2D: a curve)"},
+            {"write_data[].variables", "write_data[].fields", "0.10.0", "0.11.0", FIELDS},
+            {"probes[].variables", "probes[].fields", "0.10.0", "0.11.0", FIELDS},
         },
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},

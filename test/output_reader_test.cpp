@@ -59,10 +59,10 @@ std::string every_format(const std::string & dir, bool hdf5 = have_hdf5()) {
     auto writer = [&](const std::string & prefix, const std::string & keys) {
         s << "[[write_data]]\nprefix = \"" << dir << "/" << prefix << "\"\ninterval = 2\n" << keys;
     };
-    const std::string fields = "variables = [\"RHO\", \"U\", \"P\"]\n";
+    const std::string fields = "fields = [\"RHO\", \"U\", \"P\"]\n";
     writer("restart", "format = \"restart\"\n");
     writer("flow", "format = \"vtu\"\n" + fields);
-    writer("near", "format = \"vtu\"\nregion = " + REGION + "\nvariables = [\"RHO\"]\n");
+    writer("near", "format = \"vtu\"\nregion = " + REGION + "\nfields = [\"RHO\"]\n");
     if (compression::have_zlib()) {
         writer("zlib/restart", "format = \"restart\"\ncompression = \"zlib\"\nchunk_cells = 64\n");
         writer("zlib/flow", "format = \"vtu\"\ncompression = \"zlib\"\n" + fields);
@@ -72,14 +72,14 @@ std::string every_format(const std::string & dir, bool hdf5 = have_hdf5()) {
         writer("flow", "format = \"vtkhdf\"\n" + fields);
         writer("flow", "format = \"xdmf\"\n" + fields);
         writer("series", "series = true\n" + fields);
-        writer("region", "region = " + REGION + "\nvariables = [\"RHO\"]\n");
+        writer("region", "region = " + REGION + "\nfields = [\"RHO\"]\n");
         if (compression::have_zlib()) writer("zlib/flow", "compression = \"zlib\"\n" + fields);
         probe_formats.insert(probe_formats.end(), {"hdf5", "vtkhdf"});
     }
     for (const std::string & format : probe_formats) {
         s << "[[probes]]\nname = \"" << format << "\"\nformat = \"" << format << "\"\nstart = "
           << coords("0.13", "0.27", "0.41") << "\nend = " << coords("0.88", "0.62", "0.55")
-          << "\nn_points = 6\nvariables = [\"RHO\", \"U\"]\n";
+          << "\nn_points = 6\nfields = [\"RHO\", \"U\"]\n";
         if (format == "csv") s << "file = \"" << dir << "/probe_csv.csv\"\n";
         if (format == "vtp") s << "file = \"" << dir << "/probe_vtp.pvd\"\n";
         if (format == "hdf5") s << "file = \"" << dir << "/probe_hdf5.h5\"\n";

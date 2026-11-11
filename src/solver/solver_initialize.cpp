@@ -245,7 +245,7 @@ void Solver::apply_output_state(RestartData state) {
             throw std::runtime_error(
                 "holds neither the conservative variables (" + list + ") nor " +
                 (is_mixture() ? "P, T, U and the mass fractions Y_*" : "RHO and P (or one of them and T) and U") +
-                " (missing: " + missing + "). Write them in [[write_data]] variables, or extract from a restart file.");
+                " (missing: " + missing + "). Write them in [[write_data]] fields, or extract from a restart file.");
         }
         const std::vector<rtype> * u[N_DIM];
         FOR_I_DIM u[i] = state.find(needed[i]);

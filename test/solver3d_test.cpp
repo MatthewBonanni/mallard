@@ -494,7 +494,7 @@ TEST(Solver3DValidation, QCriterionAndVorticityOutputOfALinearVelocityField) {
     c.set_all_bcs("type = \"dirichlet\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n");
     c.init = "type = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"2.0\"\n";
     c.extra = "[[write_data]]\nprefix = \"" + (scratch_dir() / "mallard_vortex").string() +
-              "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"Q_CRITERION\", \"VORTICITY\"]\n";
+              "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"Q_CRITERION\", \"VORTICITY\"]\n";
     auto solver = init_case(c);
     solver->copy_device_to_host();
     const double omega[3] = {-2.0, -6.0, -4.0};

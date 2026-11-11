@@ -395,8 +395,8 @@ bool writes_variable(const Input & input, const std::string & name) {
     if (!input.contains("write_data")) return false;
     const auto outputs = find_value<std::vector<Input>>(input, "write_data");
     for (const auto & output : outputs) {
-        if (!output.contains("variables")) continue;
-        const auto variables = find_value<std::vector<std::string>>(output, "variables");
+        if (!output.contains("fields")) continue;
+        const auto variables = find_value<std::vector<std::string>>(output, "fields");
         if (std::find(variables.begin(), variables.end(), name) != variables.end()) return true;
     }
     return false;

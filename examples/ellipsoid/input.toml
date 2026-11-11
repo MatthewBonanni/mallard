@@ -129,7 +129,7 @@ file = "./solut/forces_ellipsoid.csv"
 prefix = "./solut/ellipsoid"
 format = "vtu"
 time_interval = 10.0
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 
 # The wall and the meridian plane y = 0, often enough for an animation
 [[write_data]]
@@ -137,11 +137,11 @@ prefix = "./solut/wall"
 format = "vtu"
 region = "ellipsoid"
 time_interval = 0.25
-variables = ["P"]
+fields = ["P"]
 
 [[write_data]]
 prefix = "./solut/y0"
 format = "vtu"
 region = "symmetry_y"
 time_interval = 0.25
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]

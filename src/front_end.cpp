@@ -211,6 +211,11 @@ Need command_need(const cli::Command * command, const std::vector<std::string> &
             if (file.empty()) return dimension_free();
             return {input_dimension(file), file};
         }
+        case cli::Case::input_file:
+            for (const std::string & a : parsed.positional) {
+                if (a.ends_with(".toml") || fs::is_regular_file(a)) return {input_dimension(a), a};
+            }
+            return dimension_free();
         case cli::Case::template_name: {
             if (first.empty() || parsed.has("--list")) return dimension_free();
             try {
@@ -314,6 +319,15 @@ Dimension output_dimension(const std::string & path) {
     }
 }
 
+std::vector<int> solvers() {
+    const fs::path bin = executable_path().parent_path();
+    std::vector<int> installed;
+    for (const int d : {2, 3}) {
+        if (fs::exists(solver(bin, d))) installed.push_back(d);
+    }
+    return installed;
+}
+
 bool invoked(const char * argv0) { return fs::path(argv0).filename() == "mallard"; }
 
 int test_main(const cli::Args & args) {
@@ -352,11 +366,7 @@ int main(int argc, char ** argv) {
         return cli::main(static_cast<int>(command_argv.size()) - 1, command_argv.data());
     }
     const fs::path bin = executable_path().parent_path();
-
-    std::vector<int> installed;
-    for (const int d : {2, 3}) {
-        if (fs::exists(solver(bin, d))) installed.push_back(d);
-    }
+    const std::vector<int> installed = solvers();
     if (installed.empty()) {
         std::cerr << "mallard: neither mallard2d nor mallard3d is in " << bin.string() << ".\n";
         return 1;

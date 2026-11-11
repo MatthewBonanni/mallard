@@ -160,7 +160,7 @@ TEST(ErrorMessages, GeneratedMeshOfTheOtherDimensionNamesTheSolverToRun) {
 TEST(ErrorMessages, OutputThatCannotBeWrittenSaysWhatToCheck) {
     const std::filesystem::path blocker = write_temp("a_file_not_a_directory", "x");
     const std::string input = box() + "[[write_data]]\nprefix = \"" + (blocker / "flow").string() +
-                              "\"\nformat = \"vtu\"\ninterval = 5\nvariables = [\"P\"]\n";
+                              "\"\nformat = \"vtu\"\ninterval = 5\nfields = [\"P\"]\n";
     expect_parts(run_error(input), {"cannot write the output " + (blocker / "flow").string(), "directory exists"});
 }
 

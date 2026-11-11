@@ -69,7 +69,7 @@ The wake probe also computes the spectrum of its `U_Y` while the run goes
 
 ```toml
 [probes.spectra]
-variables = ["U_Y"]
+fields = ["U_Y"]
 t_start = 60.0
 length = 140.0
 strouhal = {length = 1.0, velocity = 0.2}
@@ -109,7 +109,7 @@ level = 0.0
 prefix = "./solut/box"
 region = "box"
 time_interval = 200.0
-variables = ["U_X", "U_Y", "P", "MEAN_*", "COV_*", "PHASE_*"]
+fields = ["U_X", "U_Y", "P", "MEAN_*", "COV_*", "PHASE_*"]
 ```
 
 From t = 60, `[statistics]` keeps each cell's running means and covariances, and
