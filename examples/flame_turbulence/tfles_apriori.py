@@ -37,8 +37,8 @@ import sys
 import numpy as np
 from scipy import ndimage
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/setup"))
-from isotropic_turbulence_restart import read_restart  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from mallard.restart import read as read_restart  # noqa: E402
 
 DELTA_L, S_L = 3.301397619449605e-04, 2.33237442
 Y_U, Y_B = 2.85223875e-02, 1.16716361e-03
@@ -129,7 +129,8 @@ def main():
             dynamic_apriori(path, [int(v) for v in args.ratios.split(",")], args.n_res)
         return
     args.restart = args.restart[0]
-    f, t, _ = read_restart(args.restart)
+    r = read_restart(args.restart)
+    f, t = r.fields, r.t
     shape = tuple(int(v) for v in args.shape.split(","))
     h = DELTA_L / 10.0
     rho = f["RHO"].reshape(shape)

@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <ctime>
+#include <set>
 #include <stdexcept>
 
 #include "json.h"
@@ -176,7 +177,11 @@ Block make(uint64_t step, double t, const std::string & reason, const std::strin
 #else
     b.solver_precision = "single";
 #endif
-    for (const Field & f : fields) b.averaged = b.averaged || is_averaged(f.name);
+    std::set<std::string> names;
+    for (const Field & f : fields) {
+        if (!names.insert(f.name).second) throw std::logic_error("snapshot_block: the field " + f.name + " is listed twice");
+        b.averaged = b.averaged || is_averaged(f.name);
+    }
     if (b.averaged) {
         b.average_start = averages().start;
         b.average_end = averages().end;

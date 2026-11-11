@@ -178,6 +178,30 @@ struct LSQGradientFunctor {
         lsq.solve(g);
         FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) gradients(i_cell, i, d) = g[i][d];
     }
+
+    /**
+     * @brief The weights of operator()'s fit: its gradient is the sum over the
+     *        cell's faces k of out(k) (W_k - W_i), W_k the state across face k
+     *        (neighbor, image or ghost), aligned with faces_of_cell.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void weights(const uint32_t i_cell, const Kokkos::View<rtype *[N_DIM]> & out) const {
+        rtype W_i[N_CONSERVATIVE], zero[N_CONSERVATIVE] = {}, unit[N_CONSERVATIVE] = {};
+        FOR_I_CONSERVATIVE W_i[i] = W(i_cell, i);
+        unit[0] = 1.0_r;
+        const uint32_t k0 = offsets_faces_of_cell(i_cell), k1 = offsets_faces_of_cell(i_cell + 1);
+        for (uint32_t k = k0; k < k1; k++) {
+            LSQSystem lsq;
+            for (uint32_t j = k0; j < k1; j++) {
+                rtype dx[N_DIM], W_j[N_CONSERVATIVE];
+                neighbor(i_cell, faces_of_cell(j), W_i, dx, W_j);
+                lsq.add(dx, zero, j == k ? unit : zero);
+            }
+            rtype g[N_CONSERVATIVE][N_DIM];
+            lsq.solve(g);
+            FOR_I_DIM out(k, i) = g[0][i];
+        }
+    }
 };
 
 /**

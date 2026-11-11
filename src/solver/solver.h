@@ -62,6 +62,7 @@
 #include "run_status.h"
 #include "input_upgrade.h"
 #include "region_input.h"
+#include "stencils.h"
 
 struct ForceMonitor {
     std::string zone;
@@ -126,6 +127,9 @@ struct RunEnd {
 struct ViscousFluxFunctor;
 template <typename T_riemann_solver>
 struct ConvectiveFluxFunctor;
+
+/** @brief Whether some [[write_data]] of the input writes the variable. */
+bool writes_variable(const Input & input, const std::string & name);
 
 class Solver {
     public:
@@ -592,6 +596,15 @@ class Solver {
         std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
         void setup_from_input();
         void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
+        /** @brief The rank owning each local cell. */
+        std::vector<int> cell_owners() const;
+        /** @brief The stencils of the owned cells, with the members of targets (stencils::build). */
+        stencils::Table stencil_table(const std::vector<uint32_t> & targets, bool weights) const;
+        /**
+         * @brief The mesh and stencil fields [[write_data]] asks for, once, and
+         *        the stencil file of [output] write_stencils.
+         */
+        void init_mesh_fields();
         /** @brief The mesh against the case's physical scales; the fields of where it falls short. */
         CheckFields check_resolution(CheckReport & report);
         void check_viscous_scales(CheckReport & report, CheckFields & fields, const std::vector<double> & delta,
@@ -987,6 +1000,9 @@ class Solver {
         chemistry::OpticallyThinRadiation radiation;
         Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_source_values;  // output: (cell, SOURCE_*)
+        // Output: the mesh and stencil fields [[write_data]] asks for, constant over the run
+        std::vector<std::string> mesh_field_names;
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_mesh_fields;  // (cell, field)
 
         // Source terms
         bool has_gravity = false;

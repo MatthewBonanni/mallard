@@ -18,6 +18,7 @@ its progress on the terminal and in a machine-readable run record.
 | Wall forces | `forces_<zone>.csv` | `[[forces]]` | [Wall forces](probes.md#wall-forces-forces) |
 | Domain integrals | `integrals.csv` | `[integrals]` | [Domain integrals](probes.md#domain-integrals-integrals) |
 | Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files; probe columns `MEAN_<variable>` with `average = true` | `[statistics]`, `[statistics.phase]`, `[[probes]]` | [Statistics](statistics.md), [Probes](probes.md#time-averages) |
+| Mesh and stencil fields | `PREFIX_000000.vtkhdf`, `PREFIX_stencils.h5`; in a run, fields of the snapshots and a stencil file | `mallard check --mesh-fields`; `[[write_data]]` fields, `[output] write_stencils` | [Mesh and stencil fields](#mesh-and-stencil-fields) |
 | Spectra and two-point correlations | `spectra.csv` | `[statistics.spectra]` | [Spectra](statistics.md#spectra-and-two-point-correlations-statisticsspectra) |
 | Time spectra of probes | `probe_<name>_spectra.csv`, `probe_<name>_reductions_spectra.csv` | `[[probes]]` with `spectra` | [Time spectra](probes.md#time-spectra) |
 
@@ -71,6 +72,7 @@ fields = ["P", "T"]
 | Chemistry, radiation | `HRR`, `OMEGA_<s>`, `CHEM_COST`, `QRAD` |
 | LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
+| [Mesh and stencils](#mesh-and-stencil-fields) | `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`; `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION` |
 | [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
 
 ### Derived fields
@@ -256,6 +258,104 @@ Pitfalls:
 - Regions are written as `vtkhdf` or `vtu` only, not as `xdmf`.
 - `compression` on a region of lower dimension, alone in its entry, is an
   unused key: those files are small and written uncompressed.
+
+## Mesh and stencil fields
+
+Where a mesh is poor, and which cells each cell's reconstruction reads, as
+fields to view in ParaView and a file of every stencil. Use them when a run
+diverges or loses accuracy near a cell, before a long run on a new mesh, and to
+see what a wall, a periodic seam or a partition does to the stencils.
+
+```sh
+mallard check input.toml --mesh-fields mesh                    # mesh_000000.vtkhdf: quality and stencil fields
+mallard check input.toml --mesh-fields mesh --cells 120,4031   # and those cells' stencils: fields and mesh_stencils.h5
+mallard check input.toml --mesh-fields mesh --region '{type = "disk", center = [0.5, 0], radius = 0.05}'
+mallard check input.toml --mesh-fields mesh --stencils all --weights   # every cell's stencils, with their weights
+mallard info mesh.msh --mesh-fields mesh                       # the quality fields of a mesh file alone
+```
+
+`--mesh-fields PREFIX` writes `PREFIX_000000.vtkhdf` (`.vtu` in builds without
+HDF5), one value per cell of each field below, the
+[resolution](input_files.md#resolution) fields of the case, and with `--cells`
+or `--region` a field `STENCIL_<id>` per selected cell (the first 64): 1 on the
+cells of its central stencil only, 2 of a sector stencil only, 3 of both, 4 on
+the cell itself. `--cells` takes global cell ids (from 0, as `mallard check`
+reports cells), `--region` a [region](geometry.md#regions), inline or by name,
+whose cells to select. With one of `--stencils all`, `--cells` or `--region`, it
+also writes those cells' stencils to `PREFIX_stencils.h5` (builds with HDF5).
+The stencils are those the case's run builds: its reconstruction, after the
+partition, with the mirror images of its boundaries and the reduced degree of
+`curved_wall_degree`. A run writes the same: the fields with `[[write_data]]`,
+and every cell's stencils with `[output] write_stencils`:
+
+```toml
+[output]
+write_stencils = "stencils.h5"   # every cell's stencils, once, at the setup
+
+[[write_data]]
+prefix = "solut/flow"
+interval = 100
+fields = ["RHO", "P", "NON_ORTHOGONALITY", "STENCIL_CONDITION"]
+```
+
+| Field | Units | Meaning |
+|---|---|---|
+| `NON_ORTHOGONALITY` | `degree` | The largest over the cell's faces ([Mesh quality](meshes.md#mesh-quality)) |
+| `SKEWNESS`, `VOLUME_RATIO` | `1` | The largest over the cell's faces |
+| `ASPECT_RATIO` | `1` | The cell's |
+| `STENCIL_SIZE` | `1` | Members of the central stencil: the cell itself, its mirror and periodic images included |
+| `STENCIL_SECTORS` | `1` | Sector stencils kept (TENO; 0 otherwise) |
+| `STENCIL_DEGREE` | `1` | Degree of the central reconstruction polynomial: the scheme's, lower where `curved_wall_degree` reduces it; 1 with MUSCL, 0 first order |
+| `STENCIL_CONDITION` | `1` | 2-norm condition number of the central least-squares fit (TENO) or of the gradient fit (MUSCL): how much the fit amplifies rounding and noise in the cell values. 0 at first order, which fits nothing |
+| `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION` | `1` | 1 where a stencil reaches a wall, a periodic image, or a cell of another rank |
+
+![Non-orthogonality, the condition number of the central fit, and the central stencil of one triangle next to a symmetry boundary (with its five mirror images, hatched) on a mesh of quadrilaterals and triangles, from mallard check --mesh-fields](../images/guide/mesh_fields-light.svg#gh-light-mode-only)
+![Non-orthogonality, the condition number of the central fit, and the central stencil of one triangle next to a symmetry boundary (with its five mirror images, hatched) on a mesh of quadrilaterals and triangles, from mallard check --mesh-fields](../images/guide/mesh_fields-dark.svg#gh-dark-mode-only)
+
+![Non-orthogonality on the surface cells of a mesh of hexahedra and prisms, and the central stencil of one cell](../images/guide/mesh_fields_3d-light.svg#gh-light-mode-only)
+![Non-orthogonality on the surface cells of a mesh of hexahedra and prisms, and the central stencil of one cell](../images/guide/mesh_fields_3d-dark.svg#gh-dark-mode-only)
+
+**The stencil file** (HDF5) lists, for each selected cell in global order, its
+stencils' members, compressed-row style: target `t`'s members are rows
+`offsets[t]` to `offsets[t + 1]` of `/stencils/members`.
+
+| Dataset | Per | Holds |
+|---|---|---|
+| `/stencils/cells` | target | Global id of the target cell |
+| `/stencils/offsets` | target, plus one | Its first member row |
+| `/stencils/degree`, `condition` | target | As the fields `STENCIL_DEGREE` and `STENCIL_CONDITION` |
+| `/stencils/sizes` | target × (1 + faces) | Cells of the central stencil, then of the sector stencil of each face (0 for faces it lacks) |
+| `/stencils/reach` | target | Bits: 1 a wall, 2 a periodic image |
+| `/stencils/members/cell` | member | Global id of the member cell |
+| `/stencils/members/stencil` | member | 0 the central stencil, 1 + k the sector stencil of face k (TENO) |
+| `/stencils/members/role` | member | Bits: 1 a mirror image across a boundary face (MUSCL: the boundary's ghost or image value), 2 a periodic image |
+| `/stencils/members/face_cell`, `face` | member | The boundary face of a mirror image: the global id of its cell (-1 for none) and its place among that cell's faces (255 for none) |
+| `/stencils/members/weights` | member × coefficients | With `--weights`: the member's row of the central or sector fit's pseudo-inverse (TENO), its contribution to each polynomial coefficient (a sector fit's quadratic ones, then zeros), or its weight in each gradient component (MUSCL), each times the member's value minus the cell's (a mirror's: its ghost or image value). First order has none |
+| `/partition/rank`, `member_rank` | target, member | The rank that owns each target and member |
+
+Root attributes: `format` (`"mallard-stencils"`), `version` (1), `dimension`,
+`scheme` (`TENO`, `MUSCL` or `first_order`), `n_cells` of the mesh,
+`weights_width` (coefficients per weight row, 0 without `--weights`) and the
+[run block](#run-block) (`mallard_run`). Every dataset but `/partition` is the
+same whatever the number of ranks. `tools/mallard/stencils.py` reads it:
+
+```python
+import sys; sys.path.insert(0, "tools")
+from mallard.stencils import MIRROR, read_stencils
+s = read_stencils("mesh_stencils.h5")
+st = s.stencil(120)                          # cell 120's members, by name
+st["cell"][st["stencil"] == 0]               # its central stencil
+st["cell"][(st["role"] & MIRROR) != 0]       # the cells mirrored across a boundary
+s.sectors(120)                               # {face: its sector stencil's cells}
+```
+
+Pitfalls: a member's `cell` is the cell its value comes from, so a mirror
+image or a periodic image has the id of a cell already in the stencil, or far
+from it; `role` and `face_cell` say which. The file of every cell is large:
+about 1.5 kB per cell in 2D at fifth order, 8 kB with `--weights`, and more in 3D; select cells
+with `--cells` or `--region` on large meshes. `STENCIL_PARTITION` and `/partition`
+show the partition of the check's or run's ranks: `mpirun -n 8 mallard check
+input.toml --mesh-fields mesh` shows that of 8 ranks.
 
 ## Run progress
 
@@ -479,8 +579,8 @@ error, so neither is a repair.
 
 ### Units
 
-Every value Mallard writes is in SI units (the mesh-quality angle of
-`mallard check` excepted, in degrees), and every output file says which,
+Every value Mallard writes is in SI units (the mesh-quality angle
+`NON_ORTHOGONALITY` excepted, in degrees), and every output file says which,
 as metadata in the way its format's tools expect; field names never change.
 Restart files are the exception: they hold the conservative variables, in SI
 units by definition, for Mallard to read back.
@@ -521,7 +621,7 @@ those of `A` per second.
 | `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
 | `Q_CRITERION`, `LAMBDA2` | `s-2` | `CFL`, `MACH`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
-| `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
+| `NON_ORTHOGONALITY` | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `STENCIL_*`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
 | `MASS_FLUX`, `SPECIES_FLUX_<s>`, `SPECIES_DIFFUSIVE_FLUX_<s>`, `SPECIES_TOTAL_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `ENERGY_DIFFUSIVE_FLUX`, `ENERGY_TOTAL_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
 | `CF`, `CP`, `Y_PLUS` | `1` | `REGION_FRACTION` (regions) | `1` |
@@ -644,7 +744,7 @@ build reads. It is never misread.
 
 | File | Version, where | Versions (written from) | Read by |
 |---|---|---|---|
-| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), 7: the [snapshot block](#snapshot-metadata) trailer (0.10) | Mallard: all |
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), 7: the [snapshot block](#snapshot-metadata) trailer (0.10) | Mallard: all; `tools/mallard/restart.py`: 2 on |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |

@@ -353,7 +353,7 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     CheckOptions options;
-    options.quality_file = (dir / "quality" / "mesh").string();
+    options.mesh_fields = (dir / "quality" / "mesh").string();
     const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
                                     "[[write_data]]\nprefix = \"" + (dir / "out" / "flow").string() +
                                         "\"\nformat = \"vtu\"\ninterval = 5\nfields = [\"RHO\"]\n[[forces]]\n"

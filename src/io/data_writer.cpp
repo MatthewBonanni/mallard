@@ -683,7 +683,6 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
         }
         list.push_back(std::move(f));
     }
-    if (fraction) list.push_back({"REGION_FRACTION", "1", "volume fraction of the region", stored, 0.0});
     const int64_t version = format == DataFormat::RESTART  ? file_format::RESTART.version
                             : format == DataFormat::HDF5   ? file_format::HDF5_OUTPUT.version
                             : format == DataFormat::VTKHDF ? file_format::VTKHDF_OUTPUT.version
