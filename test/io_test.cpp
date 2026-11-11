@@ -106,7 +106,7 @@ TEST(IOTest, FixedTimeStepIsOnlyShortenedToLandOnOutputs) {
         "[numerics.face_reconstruction]\ntype = \"FO\"\n"
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n"
-        "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\ntime_interval = 0.015\nvariables = [\"RHO\"]\n";
+        "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\ntime_interval = 0.015\nfields = [\"RHO\"]\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(input));
@@ -138,7 +138,7 @@ TEST(IOTest, ResumedHDF5SeriesKeepsTheSnapshotsUpToTheRestartTime) {
     Kokkos::View<rtype **>::host_mirror_type values("values", mesh->n_cells, 1);
     std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
     const std::string input = "prefix = \"" + dir + "/f\"\nformat = \"xdmf\"\ntime_interval = 0.1\n"
-                              "variables = [\"RHO\"]\n";
+                              "fields = [\"RHO\"]\n";
     {
         DataWriter first;
         first.init(parse_toml(input), data, mesh);
@@ -208,19 +208,19 @@ std::string output_case(const std::string & dir, const std::string & output_keys
       << "[statistics]\nfields = [\"P\"]\n"
       << "[output]\ncheck_interval = 1000000\n" << output_keys
       << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ninterval = 4\n"
-      << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
+      << "fields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
       << "[[write_data]]\nprefix = \"" << dir << "/near\"\nformat = \"vtu\"\ninterval = 4\n"
-      << "region = {type = \"disk\", center = [0.4, 0.5], radius = 0.3}\nvariables = [\"P\"]\n" << snapshot_keys
+      << "region = {type = \"disk\", center = [0.4, 0.5], radius = 0.3}\nfields = [\"P\"]\n" << snapshot_keys
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 6\n" << restart_keys;
     if (have_hdf5()) {
         s << "[[write_data]]\nprefix = \"" << dir << "/h5/flow\"\nformat = \"xdmf\"\ninterval = 4\n"
-          << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
+          << "fields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
           << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/flow\"\nformat = \"vtkhdf\"\ninterval = 4\n"
-          << "variables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
+          << "fields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
           << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/series\"\nseries = true\ninterval = 4\n"
-          << "variables = [\"RHO\", \"U\"]\n" << snapshot_keys
+          << "fields = [\"RHO\", \"U\"]\n" << snapshot_keys
           << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/near\"\ninterval = 4\n"
-          << "region = {type = \"disk\", center = [0.4, 0.5], radius = 0.3}\nvariables = [\"P\"]\n" << snapshot_keys;
+          << "region = {type = \"disk\", center = [0.4, 0.5], radius = 0.3}\nfields = [\"P\"]\n" << snapshot_keys;
     }
     return s.str();
 }
@@ -309,7 +309,7 @@ TEST(IOTest, FinalSnapshotAtTStopOnTheSnapshotGridIsWrittenOnce) {
         "[numerics.face_reconstruction]\ntype = \"FO\"\n"
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n"
-        "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\ntime_interval = 0.03\nvariables = [\"RHO\"]\n"));
+        "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\ntime_interval = 0.03\nfields = [\"RHO\"]\n"));
     solver.run();
     EXPECT_TRUE(std::filesystem::exists(dir + "/f_000011.vtu"));
     EXPECT_FALSE(std::filesystem::exists(dir + "/f_000012.vtu"));
@@ -335,10 +335,10 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
         "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n"
         "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\n"
-        "interval = 1\nvariables = [\"CFL\"]\n"
+        "interval = 1\nfields = [\"CFL\"]\n"
         "[[write_data]]\nprefix = \"" + dir + "/wall\"\nformat = \"vtu\"\nregion = \"bottom\"\n"
-        "interval = 1\nvariables = [\"P\", \"CFL\"]\n"
-        "[[write_data]]\nprefix = \"" + dir + "/slice\"\nformat = \"vtu\"\ninterval = 1\nvariables = [\"P\", \"CFL\"]\n"
+        "interval = 1\nfields = [\"P\", \"CFL\"]\n"
+        "[[write_data]]\nprefix = \"" + dir + "/slice\"\nformat = \"vtu\"\ninterval = 1\nfields = [\"P\", \"CFL\"]\n"
         "region = {type = \"cut_plane\", point = [0.3, 0.5], normal = [1.0, 0.0]}\n";
     Solver solver;
     solver.set_distributed(false);
@@ -411,7 +411,7 @@ TEST(IOTest, AWriterGoingAwayFinishesItsFileFirst) {
     for (bool async : {false, true}) {
         DataWriter writer;
         writer.init(parse_toml("prefix = \"" + dir + (async ? "/a" : "/s") + "\"\nformat = \"vtu\"\ninterval = 1\n"
-                               "variables = [\"RHO\"]\n"),
+                               "fields = [\"RHO\"]\n"),
                     data, mesh);
         writer.set_async(async);
         writer.write(0, 0.0_r);
@@ -585,12 +585,12 @@ TEST(IOTest, VTKHDFIsTheDefaultFormatWithHDF5) {
     std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
     DataWriter writer;
     writer.init(parse_toml("prefix = \"" + (scratch_dir() / "default_format").string() +
-                           "\"\ninterval = 1\nvariables = [\"RHO\"]\n"),
+                           "\"\ninterval = 1\nfields = [\"RHO\"]\n"),
                 data, mesh);
     EXPECT_EQ(writer.get_format(), have_hdf5() ? DataFormat::VTKHDF : DataFormat::VTU);
     DataWriter vtu;
     EXPECT_THROW(vtu.init(parse_toml("prefix = \"x\"\nformat = \"vtu\"\nseries = true\ninterval = 1\n"
-                                     "variables = [\"RHO\"]\n"),
+                                     "fields = [\"RHO\"]\n"),
                           data, mesh),
                  InputError);
 }
@@ -650,7 +650,7 @@ TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
                               Data("U_Y", Kokkos::subview(values, Kokkos::ALL(), 2))};
     DataWriter writer;
     writer.init(parse_toml("prefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 5\n"
-                           "variables = [\"RHO\", \"U\"]\n"),
+                           "fields = [\"RHO\", \"U\"]\n"),
                 data, mesh);
     writer.write(10, 0.25_r);
     writer.finish();
@@ -698,7 +698,7 @@ TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {
     std::vector<Data> data = {Data("RHO", Kokkos::subview(values, Kokkos::ALL(), 0))};
     for (bool one_file : {true, false}) {
         const std::string input = "prefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ntime_interval = 0.1\n"
-                                  "variables = [\"RHO\"]\nseries = " + (one_file ? "true" : "false") + "\n";
+                                  "fields = [\"RHO\"]\nseries = " + (one_file ? "true" : "false") + "\n";
         {
             DataWriter first;
             first.init(parse_toml(input), data, mesh);
@@ -749,7 +749,7 @@ TEST(IOTest, VTKHDFSeriesAppendsAcrossARestart) {
     std::vector<Data> other_data = {Data("RHO", Kokkos::subview(other_values, Kokkos::ALL(), 0))};
     DataWriter third;
     third.init(parse_toml("prefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ntime_interval = 0.1\n"
-                          "variables = [\"RHO\"]\nseries = true\n"),
+                          "fields = [\"RHO\"]\nseries = true\n"),
                other_data, other);
     third.resume(10, 0.1_r);
     EXPECT_THROW(third.write(25, 0.2_r), std::runtime_error);
@@ -805,7 +805,7 @@ TEST(IOTest, ResumedRunsContinueSnapshotNumberingAndSeries) {
           << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 4\n";
         for (const auto & o : outputs) {
             s << "[[write_data]]\nprefix = \"" << dir << "/" << o.prefix << "\"\nformat = \"" << o.format
-              << "\"\ntime_interval = 0.25\nvariables = [\"RHO\"]\n";
+              << "\"\ntime_interval = 0.25\nfields = [\"RHO\"]\n";
             if (o.prefix.starts_with("region")) s << "region = {type = \"disk\", center = [0.5, 0.5], radius = 0.4}\n";
         }
         return s.str();
@@ -890,7 +890,7 @@ TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
             "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
             "[output]\ncheck_interval = 1000000\n"
-            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 1\nvariables = [\"RHO\"]\n"));
+            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 1\nfields = [\"RHO\"]\n"));
         solver.run();
         const VtkhdfGrid grid(dir + "/f_000000.vtkhdf");
         const uint8_t quadratic = triangles ? 69 : 70, linear = triangles ? 5 : 9;

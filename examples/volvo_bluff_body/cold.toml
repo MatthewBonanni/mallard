@@ -137,9 +137,9 @@ time_interval = 0.02
 [[write_data]]
 prefix = "stats/cold"
 time_interval = 0.1
-variables = ["MEAN_*", "COV_*", "MU_T"]
+fields = ["MEAN_*", "COV_*", "MU_T"]
 
 [[write_data]]
 prefix = "snap/cold"
 time_interval = 0.15
-variables = ["U", "Q_CRITERION", "MU_T"]
+fields = ["U", "Q_CRITERION", "MU_T"]

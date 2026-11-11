@@ -223,7 +223,7 @@ check_interval = 2000
 [[write_data]]
 prefix = "./solut/flame"
 time_interval = {t_stop / args.outputs:.17g}
-variables = ["RHO", "U", "T", "HRR", "Y_H2", "Y_O2", "Y_H2O", "Y_N2"]
+fields = ["RHO", "U", "T", "HRR", "Y_H2", "Y_O2", "Y_H2O", "Y_N2"]
 
 [[write_data]]
 prefix = "./restart/flame"

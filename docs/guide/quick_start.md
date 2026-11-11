@@ -1,7 +1,7 @@
 # Quick start
 
-Build Mallard on a CPU and run your first case in three commands (a C++20 compiler, CMake 3.22 or
-newer and git are all it needs):
+Build Mallard on a CPU and run your first case in three commands (GCC 15, Clang 22 or Apple Clang 21
+or newer, CMake 4.2 or newer and git are all it needs; see [supported platforms](../installation.md#supported-platforms)):
 
 ```bash
 git clone --recursive https://github.com/MatthewBonanni/mallard.git && cd mallard

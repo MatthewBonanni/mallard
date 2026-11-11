@@ -80,7 +80,7 @@ check_interval = 50
 prefix = "solut/dmr"
 format = "vtu"
 time_interval = 0.05
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 
 [[write_data]]
 prefix = "restart"

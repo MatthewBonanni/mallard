@@ -207,9 +207,10 @@
 "PeriodicFile3D.ZonePairsJoinAJitteredGmshMeshOfHexahedraAndPrisms" = ["euler", "teno3", "hllc", "ssprk3", "periodic"]
 
 [preset_validation_test]
-"PresetValidation.RobustKeepsTheNohImplosionPositive" = ["axisymmetric", "euler", "muscl", "rhll", "ssprk3"]
-"PresetValidation.RobustResolvesSodsProblem" = ["euler", "muscl", "rhll", "ssprk3"]
-"PresetValidation.AccurateConvergesAtHighOrderForSmoothFlow" = ["euler", "teno5", "hllc", "ssprk3"]
+"PresetValidation.SecondOrderKeepsTheNohImplosionPositive" = ["axisymmetric", "euler", "muscl", "rhll", "ssprk3"]
+"PresetValidation.FirstOrderKeepsTheNohImplosionPositive" = ["axisymmetric", "euler", "fo", "hll", "ssprk3"]
+"PresetValidation.SecondOrderResolvesSodsProblem" = ["euler", "muscl", "rhll", "ssprk3"]
+"PresetValidation.HighOrderConvergesAtHighOrderForSmoothFlow" = ["euler", "teno5", "hllc", "ssprk3"]
 "PresetValidation.LesLeavesTheTaylorGreenDecayToViscosity" = ["navier_stokes", "muscl", "hllc", "hybrid", "ssprk3"]
 "PresetValidation.ReactingPropagatesAPremixedFlameAtCanterasSpeed" = ["mixture", "navier_stokes", "chemistry", "muscl", "hllc", "ssprk3"]
 

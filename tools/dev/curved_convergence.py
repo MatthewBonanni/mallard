@@ -78,7 +78,7 @@ check_interval = 1000
 prefix = "./solut/annulus"
 format = "vtu"
 time_interval = {t_out}
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 """
 
 SHAPES = """

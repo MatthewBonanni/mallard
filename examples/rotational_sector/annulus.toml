@@ -51,4 +51,4 @@ check_interval = 100
 [[write_data]]
 prefix = "./solut/annulus"
 time_interval = 0.5
-variables = ["RHO", "RHOU", "RHOE", "P"]
+fields = ["RHO", "RHOU", "RHOE", "P"]

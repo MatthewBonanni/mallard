@@ -60,4 +60,4 @@ check_interval = 1000
 [[write_data]]
 prefix = "./solut/closed_upt"
 time_interval = 2.0e-4
-variables = ["RHO", "U_X", "P", "T"]
+fields = ["RHO", "U_X", "P", "T"]

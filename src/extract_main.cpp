@@ -23,6 +23,7 @@
 #include "cli.h"
 #include "commands.h"
 #include "input.h"
+#include "input_upgrade.h"
 #include "json.h"
 #include "log.h"
 #include "output_reader.h"
@@ -226,8 +227,8 @@ std::string probe_extension(const Input::table_type & entry) {
 bool time_averaged(const Input & entry) {
     const auto & t = entry.as_table().entries();
     if (t.contains("average") && t.at("average").is_boolean() && t.at("average").as_boolean()) return true;
-    if (!t.contains("variables") || !t.at("variables").is_array()) return false;
-    for (const Input & v : t.at("variables").as_array()) {
+    if (!t.contains("fields") || !t.at("fields").is_array()) return false;
+    for (const Input & v : t.at("fields").as_array()) {
         if (v.is_string() && (v.as_string().starts_with("MEAN_") || v.as_string().starts_with("COV_"))) return true;
     }
     return false;
@@ -291,7 +292,7 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
         Input::table_type entry;
         entry["name"] = Input(name);
         entry["region"] = region_value(args.value_or("--region", ""));
-        entry["variables"] = string_array(fields);
+        entry["fields"] = string_array(fields);
         if (args.has("--reductions")) entry["reductions"] = string_array(split_list(args.value_or("--reductions", "")));
         if (args.has("--sampling")) entry["sampling"] = Input(args.value_or("--sampling", ""));
         if (std::find(kept.begin(), kept.end(), name) != kept.end()) {
@@ -339,7 +340,7 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
         Input::table_type entry;
         plan.snapshot_prefix = under(dir, name);
         entry["prefix"] = Input(plan.snapshot_prefix);
-        entry["variables"] = string_array(fields);
+        entry["fields"] = string_array(fields);
         entry["interval"] = Input(1);
         entry["format"] = Input(format);
         if (args.has("--region")) entry["region"] = region_value(args.value_or("--region", ""));
@@ -562,6 +563,9 @@ int extract(const cli::Args & args) {
         case_from = std::string(resolved ? "the resolved input" : "the input as written") + " in the run block of " +
                     files[0].path;
         input = parse_input_string(text, files[0].path + " (its run block)");
+    }
+    for (const auto & finding : input_upgrade::apply(input)) {
+        if (comm::is_root()) logging::warning(input_upgrade::advice(finding));
     }
     const Plan plan = prepare(input, args, dir);
 

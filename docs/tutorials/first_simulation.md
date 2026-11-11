@@ -1,6 +1,6 @@
 # First simulation
 
-This walk-through takes about ten minutes: build Mallard on a CPU, run the Sod shock tube, check the result against the exact solution, and then change the case. It assumes a C++20 compiler, CMake 3.22 or newer, git, and Python 3.
+This walk-through takes about ten minutes: build Mallard on a CPU, run the Sod shock tube, check the result against the exact solution, and then change the case. It assumes GCC 15, Clang 22 or Apple Clang 21 or newer ([supported platforms](../installation.md#supported-platforms)), CMake 4.2 or newer, git, and Python 3.
 
 With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` where the commands below run `build/src/mallard` or `build3d/src/mallard`; it runs the 2D or 3D solver a case needs (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
 
@@ -66,7 +66,7 @@ The input file, `input.toml`, has one table per part of the problem; the comment
 | `[mesh]` | A generated 200 × 4 quadrilateral strip on [0, 1] × [0, 0.02] |
 | `[initialize]` | Density and pressure as expressions in `x`: (1, 1) left of x = 0.5, (0.125, 0.1) right of it, at rest |
 | `[[boundaries]]` | Symmetry (slip walls) on all four sides, which makes the strip one-dimensional |
-| `[numerics]` | HLLC flux, SSPRK3 time integration, fifth-order TENO-E reconstruction: the `accurate` preset, spelled out |
+| `[numerics]` | HLLC flux, SSPRK3 time integration, fifth-order TENO-E reconstruction: the `high_order` preset, the default, spelled out |
 | `[physics]` | Euler equations, γ = 1.4 |
 | `[[write_data]]` | Snapshots of density, velocity, pressure and temperature every 0.02 |
 
@@ -87,10 +87,10 @@ Edit `input.toml` and run again:
 
     ```toml
     [numerics]
-    preset = "accurate"
+    preset = "high_order"
     ```
 
-    The result is identical: the preset sets exactly the keys the example spells out, and the terminal output lists them. `preset = "robust"` (MUSCL, RHLL, CFL 0.5) is the one to start any new case with; it runs on every mesh and through the strongest shocks. The [Numerics](../guide/numerics.md#presets) page lists the four presets and what each is for; any key you set yourself overrides the preset.
+    The result is identical: the preset sets exactly the keys the example spells out, and the terminal output lists them. Deleting those tables altogether gives the same again, since `high_order` is the default. `preset = "second_order"` (MUSCL, RHLL, CFL 0.5) is the one for the strongest shocks and blasts; it runs on every mesh without a stencil setup. The [Numerics](../guide/numerics.md#presets) page lists the five presets and what each is for; any key you set yourself overrides the preset.
 - **Scheme.** Replace the reconstruction with second-order MUSCL,
 
     ```toml

@@ -170,6 +170,24 @@ A vector together with `direction` is an error. A wall speed needs its
 takes a vector only. A `mass_flux` vector `m` flows along `m / |m|` with the
 flux `m . n_in` at each face; `mdot` stays a scalar total.
 
+`direction` (of a speed `u`, and the flow direction of `inlet_stagnation`
+and `inlet_mass_flow`) may have expressions of `x`, `y`, `z`, `t` among its
+components. It is normalized at each face, and at inlets it must point into
+the domain at every face and time: at setup the run stops with the first
+face where it does not, and a direction of `t` that turns outward or to zero
+later stops the run at the next progress check with the face, time and
+value. A swirling inflow about the axis of a circular inlet in the x = 0
+plane, with a swirl angle of 30°:
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "inlet_mass_flow"
+mass_flux = 50.0
+T = 300.0
+direction = [1.0, "-0.577 * z / sqrt(y * y + z * z + 1e-12)", "0.577 * y / sqrt(y * y + z * z + 1e-12)"]
+```
+
 ### Time-dependent conditions
 
 Expressions of `x`, `y`, `z` are evaluated once at each face center, so each
@@ -239,7 +257,6 @@ Pitfalls:
 - With `nscbc`, the boundary point advances once per step, so its forcing
   converges at first order in `dt`; the other inlets at the integrator's
   order.
-- Synthetic turbulence takes a mean velocity of `x`, `y`, `z` only.
 - With `average = true`, `p` is one target for the whole outlet: it may
   depend on `t`, not on `x`, `y`, `z`.
 
@@ -252,7 +269,7 @@ the three types differ in what they impose on the energy equation.
 | Key | Default | Meaning |
 |---|---|---|
 | `u` | at rest | Wall velocity [m/s]: a vector, or a speed along `direction`; numbers or expressions of x, y, z, t (a rotating wall: `u = ["-omega * y", "omega * x"]`) |
-| `direction` | — | With a speed `u`: the direction the wall moves in |
+| `direction` | — | With a speed `u`: the direction the wall moves in (numbers or expressions of x, y, z, t) |
 | `wall_model` | none | A [wall model](#wall-models-wall_model) for this wall, with its own model and parameters |
 
 A wall moving along its own normal (blowing, suction) is not supported yet:
@@ -399,7 +416,7 @@ sees the Riemann flux against the prescribed state; it is not an outlet.
 | Key | Default | Meaning |
 |---|---|---|
 | `u` | required | Velocity [m/s]: a vector, or a speed along `direction` |
-| `direction` | inward normal | With a speed `u` |
+| `direction` | inward normal | With a speed `u`: numbers or expressions of x, y, z, t, into the domain at every face and time |
 | `p`, `T` | required | Pressure and temperature |
 | `X` / `Y`, `balance` | required for mixtures | Composition |
 | `nscbc` | none | [Non-reflecting treatment](#nscbc-characteristic-boundaries) |
@@ -447,7 +464,7 @@ Mixtures use their own `h(T)` and `s(T, p)`, not a constant `gamma`.
 | Key | Default | Meaning |
 |---|---|---|
 | `p0`, `T0` | required | Stagnation pressure and temperature |
-| `direction` | inward normal | Flow direction; must point into the domain at every face |
+| `direction` | inward normal | Flow direction (numbers or expressions of x, y, z, t); must point into the domain at every face and time |
 | `X` / `Y`, `balance` | required for mixtures | Composition |
 
 ![Nozzle: Mach number, pressure and stagnation pressure against the quasi-one-dimensional solution](../images/guide/nozzle_validation-light.svg#gh-light-mode-only)
@@ -505,10 +522,10 @@ fixes the velocity instead, and its mass flow drifts with the inlet density).
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mass_flux` or `mdot` | one required | Mass flux `rho u . n_in` [kg/(m^2 s)] (a number or expression of x, y, z, t, or a vector, which gives the direction too), or the total mass flow through the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs] |
-| `profile` | uniform | With `mdot`: the shape of the mass flux along the inlet (an expression of x, y, z, non-negative), scaled to `mdot` |
+| `mass_flux` or `mdot` | one required | Mass flux `rho u . n_in` [kg/(m^2 s)] (a number or expression of x, y, z, t, or a vector, which gives the direction too), or the total mass flow through the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs] (a number or expression of t, non-negative) |
+| `profile` | uniform | With `mdot`: the shape of the mass flux along the inlet (an expression of x, y, z, t, non-negative), scaled to `mdot` at every stage |
 | `T` | required | Inflow temperature |
-| `direction` | inward normal | Flow direction; must point into the domain at every face; not with a `mass_flux` vector |
+| `direction` | inward normal | Flow direction (numbers or expressions of x, y, z, t); must point into the domain at every face and time; not with a `mass_flux` vector |
 | `X` / `Y`, `balance` | required for mixtures | Composition |
 
 ![A closed duct fed through a mass-flow inlet and heated: the mass in the duct grows by exactly mdot t, while inlet_state's drifts](../images/guide/mass_flow_held-light.svg#gh-light-mode-only)
@@ -530,12 +547,35 @@ within 1e-6.*
 
 **Use** for combustors, jets and any inflow whose mass flow is given.
 
+**A mass flow or profile that depends on `t`.** `mdot` may be an expression
+of `t` (not of `x`, `y`, `z`: it is a total; its shape across the inlet is the
+`profile`), and so may the `profile`. Either is evaluated on the device at
+every Runge-Kutta stage, and the faces carry exactly `mdot(t)`, the same on
+any number of ranks. A jet pulsating at 200 Hz whose peak also sweeps across
+the inlet:
+
+```toml
+[[boundaries]]
+name = "inlet"
+type = "inlet_mass_flow"
+mdot = "0.02 * (1 + 0.3 * sin(2 * pi * 200 * t))"       # kg/s: 30% pulsation
+profile = "1 + 0.8 * sin(2 * pi * 100 * t) * y / 0.05"  # tilts back and forth at 100 Hz
+T = 300.0
+```
+
+`mdot` and the profile must stay non-negative at every face and time: a run
+where either turns negative stops at the next progress check, with the time
+and value (and the face, for the profile).
+
 Pitfalls:
 
 - The inlet is for subsonic inflow: it takes the pressure from the
   interior. For supersonic inflow use `inlet_state`.
 - `mdot` is divided among the entry's faces by their areas (times `profile`);
   in 2D it is per unit depth.
+- A `profile` of `t` moves the flow across the inlet, not its total: the
+  total is `mdot`, renormalized at every stage. For a total that changes in
+  time, make `mdot` an expression of `t`.
 - Like `inlet_state`, it reflects acoustic waves (it holds the mass flux, not
   the velocity or the pressure); pair it with an `nscbc` outlet or a sponge
   where reflections matter.
@@ -838,10 +878,34 @@ bitwise the same on any number of ranks and across restarts.
 | `reynolds_stress` | required (or `profile`) | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions |
 | `profile` | — | Instead of `u` and `reynolds_stress`: a CSV of plane averages from a precursor run (`tools/post/plane_average.py`) |
 | `length_scale` | required | Integral length: one number, one per direction, or one list per component |
-| `convection_velocity` | mean inflow speed | `U_c` of Taylor's hypothesis |
+| `convection_velocity` | mean inflow speed (at `t = 0`) | `U_c` of Taylor's hypothesis |
 | `seed` | 1 | Random seed |
 | `zero_net_flux` | `true` | Remove the area mean of the normal fluctuation (no plane acoustic wave) |
 | `points_per_length` | 6 | Generator grid points per smallest integral length |
+
+**A mean that depends on `t`.** `u` may be an expression of `t`: the
+fluctuations are added on the device, at every stage, to the mean evaluated
+there, like any other inlet of `t`. The Reynolds stresses and length scales
+are those of the fluctuations alone, set at setup in `x`, `y`, `z`; they do
+not follow the mean. The convection velocity of Taylor's hypothesis sets the
+time between the generator's planes, so it stays fixed: by default the mean
+inflow speed at `t = 0`. Set `convection_velocity` when the mean starts at
+rest or changes widely. A ramped inlet with turbulence:
+
+```toml
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = ["10 * min(t / 0.01, 1)", 0.0, 0.0]   # from rest to 10 m/s over 10 ms
+p = 1.0e5
+T = 300.0
+nscbc = { L = 1.0 }
+
+[boundaries.turbulence]
+reynolds_stress = [1.0, 0.5, 0.5, 0.0, 0.0, 0.0]   # (1 m/s)^2 streamwise from the start
+length_scale = 0.01
+convection_velocity = 10.0   # the mean at t = 0 is 0, so give it
+```
 
 The inlet must be planar and normal to a coordinate axis. Examples:
 `turbulent_inflow_duct`, `channel_inflow_retau180` (statistics from the

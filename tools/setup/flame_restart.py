@@ -207,7 +207,7 @@ check_interval = 2000
 [[write_data]]
 prefix = "./solut/flame"
 time_interval = {t_stop / args.outputs:.17g}
-variables = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"{', "QRAD"' if args.radiation else ''}]
+fields = ["RHO", "U_X", "P", "T", "HRR", "Y_*", "OMEGA_*"{', "QRAD"' if args.radiation else ''}]
 """)
     print(f"{args.run_dir}: {nx} x {ny} cells of {dx * 1e6:.3f} um, delta = {delta * 1e3:.4f} mm, S_L = {S_L:.5f} m/s, "
           f"t_stop = {t_stop:.4e} s")

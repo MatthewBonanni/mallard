@@ -37,6 +37,7 @@ REGISTRY = ROOT / "test" / "features.toml"
 RESULTS = ROOT / "docs" / "verification" / "results.json"
 SUPPORT = ROOT / "docs" / "guide" / "support.md"
 PRESETS = ROOT / "src" / "solver" / "numerics_preset.cpp"
+PRESETS_HEADER = ROOT / "src" / "solver" / "numerics_preset.h"
 VALIDATION = "https://matthewbonanni.github.io/mallard/validation/"
 
 
@@ -382,12 +383,17 @@ def presets(problems):
         out[name] = entries
     if not out:
         problem(problems, f"{PRESETS.relative_to(ROOT)}: no presets found")
+    default = re.search(r'DEFAULT = "(\w+)"', PRESETS_HEADER.read_text())
+    if not default or default[1] not in out:
+        problem(problems, f"{PRESETS_HEADER.relative_to(ROOT)}: no DEFAULT preset found")
+    else:
+        out[None] = out[default[1]]
     return out
 
 
 def with_preset(t, table):
     name = numerics(t).get("preset")
-    if not name:
+    if not name and "face_reconstruction" in numerics(t):
         return t
     entries = table.get(name, {})
     out = json.loads(json.dumps(t))
