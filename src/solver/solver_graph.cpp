@@ -138,9 +138,28 @@ std::string Solver::step_graph_unsupported() const {
 }
 
 bool Solver::progress_on_device() const {
-    // Rows of runs whose timed boundaries can fail are checked by the host at each row, and rows of runs with fused
-    // chemistry follow the half step the host completes first
-    return !defer_chemistry && !timed_boundaries;
+    // Rows of runs with fused chemistry follow the half step the host completes first
+    return !defer_chemistry;
+}
+
+void Solver::flag_timed_boundaries() {
+    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), boundary_failed, 0.0);
+    timed_fields.flag_error(boundary_failed);
+    dirichlet_states.flag_error(boundary_failed);
+    timed_inlets.flag_error(boundary_failed);
+    if (is_distributed()) comm::allreduce_device(boundary_failed, comm::Op::MAX, halo.uses_nccl());
+    const Kokkos::View<step_queue::Loop> loop = step_loop;
+    const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
+    const uint64_t n_records = step_records.extent(0);
+    const Kokkos::View<double *> failed = boundary_failed;
+    Kokkos::parallel_for("step_boundary_check", 1, KOKKOS_LAMBDA(const int) {
+        step_queue::Loop & L = loop();
+        if (!L.progress || failed(0) == 0.0) return;
+        // The host's check at this row throws
+        records((L.seq - 1) % n_records).reasons |= step_queue::BOUNDARY;
+        L.active = 0;
+        L.progress = 0;
+    });
 }
 
 void Solver::record_step() {
@@ -466,6 +485,7 @@ void Solver::device_step_body() {
         recording_step = false;
     }
     device_if(&step_loop.data()->progress, [&] {
+        if (timed_boundaries) flag_timed_boundaries();
         progress_reductions();
         const Kokkos::View<step_queue::ProgressLocals> p = progress_device;
         const Kokkos::View<double *> values = progress_values;
@@ -649,6 +669,7 @@ void Solver::begin_device_steps() {
     progress_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
         "step_progress_staging", n_records, n_values);
     if (statistics_on_device()) statistics_due = Kokkos::View<uint32_t>("step_statistics_due");
+    if (timed_boundaries) boundary_failed = Kokkos::View<double *>("step_boundary_failed", 1);
     allocate_monitors();
     if (monitors_on_device()) {
         const size_t n_monitors = force_monitors.size() + 1;

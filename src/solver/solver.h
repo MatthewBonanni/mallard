@@ -793,7 +793,10 @@ class Solver {
         }
         /** @brief Throws, on every rank, the error of a time-dependent boundary value that went out of range on any. */
         void check_timed_boundaries() const;
+        /** @brief At a row on the device: stops it where check_timed_boundaries would throw on any rank. */
+        void flag_timed_boundaries();
         bool timed_boundaries = false;  // on any rank, so every rank's steps stop at the same rows
+        Kokkos::View<double *> boundary_failed;  // [any timed boundary failed], over the ranks
 
         // Steps on the device (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs
