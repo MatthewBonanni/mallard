@@ -13,6 +13,7 @@
 #include <fstream>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <numbers>
 
 #include <Kokkos_Core.hpp>
@@ -682,6 +683,86 @@ std::string condition_text(const ResolvedInput & resolved, const size_t i, const
     return text;
 }
 
+/**
+ * @brief A boundary zone's block with its curved faces on their curved geometry: in 2D as polylines, in 3D as
+ *        polygons whose edges are sampled. The faces are found by their nodes, which the block's cells hold.
+ */
+void follow_curved_faces(const Mesh & mesh, case_view::Block & block) {
+    const curved::Geometry & geometry = *mesh.curved_geometry;
+    using Point = std::array<double, 3>;
+    auto node = [&](const uint32_t n) {
+        Point x = {0.0, 0.0, 0.0};
+        for (size_t i = 0; i < N_DIM; i++) x[i] = double(mesh.h_node_coords(n, i));
+        return x;
+    };
+    std::map<std::vector<Point>, uint32_t> curved_faces;
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        if (!geometry.face_is_curved(f) || mesh.h_cells_of_face(f, 1) >= 0) continue;
+        std::vector<Point> nodes;
+        for (uint32_t k = 0; k < mesh.h_n_nodes_of_face(f); k++) nodes.push_back(node(mesh.h_node_of_face(f, k)));
+        std::sort(nodes.begin(), nodes.end());
+        curved_faces.emplace(std::move(nodes), f);
+    }
+    if (curved_faces.empty()) return;
+    constexpr size_t PIECES = N_DIM == 2 ? 8 : 4;  // per edge
+    case_view::Block out = block;
+    out.points.clear();
+    out.offsets = {0};
+    out.connectivity.clear();
+    out.types.clear();
+    for (size_t c = 0; c < block.n_cells(); c++) {
+        std::vector<Point> v;
+        for (int64_t k = block.offsets[c]; k < block.offsets[c + 1]; k++) {
+            v.push_back(block.points[size_t(block.connectivity[size_t(k)])]);
+        }
+        std::vector<Point> key = v;
+        std::sort(key.begin(), key.end());
+        const auto it = curved_faces.find(key);
+        if (it == curved_faces.end() || v.size() > 4) {
+            out.add_cell(block.types[c], v);
+            continue;
+        }
+        const uint32_t f = it->second;
+        // The face's corners in its reference coordinates, in its node order
+        std::vector<std::array<double, 2>> corners;
+        if (N_DIM == 2) {
+            corners = {{-1.0, 0.0}, {1.0, 0.0}};
+        } else if (v.size() == 3) {
+            corners = {{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}};
+        } else {
+            corners = {{-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}};
+        }
+        const size_t n_edges = N_DIM == 2 ? 1 : corners.size();
+        std::vector<Point> sampled;
+        for (size_t e = 0; e < n_edges; e++) {
+            const auto & a = corners[e];
+            const auto & b = corners[(e + 1) % corners.size()];
+            for (size_t k = 0; k < PIECES + size_t(N_DIM == 2); k++) {
+                const double t = double(k) / double(PIECES);
+                const double xi[2] = {a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])};
+                curved::Vec3 x;
+                geometry.eval(f, xi, x, nullptr);
+                sampled.push_back(x);
+            }
+        }
+        // The cell's vertices run as the face's nodes from node r, forward or backward
+        const size_t n = v.size();
+        size_t r = 0;
+        while (r + 1 < n && v[0] != node(mesh.h_node_of_face(f, uint32_t(r)))) r++;
+        if (N_DIM == 2) {
+            if (r == 1) std::reverse(sampled.begin(), sampled.end());
+        } else {
+            const bool forward = v[1] == node(mesh.h_node_of_face(f, uint32_t((r + 1) % n)));
+            const size_t total = sampled.size();
+            std::vector<Point> turned(total);
+            for (size_t j = 0; j < total; j++) turned[j] = sampled[(r * PIECES + (forward ? j : total - j)) % total];
+            sampled = std::move(turned);
+        }
+        out.add_cell(N_DIM == 2 ? case_view::POLY_LINE : case_view::POLYGON, sampled);
+    }
+    block = std::move(out);
+}
+
 } // namespace
 
 MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, const bool outlines) {
@@ -693,6 +774,7 @@ MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, con
         if (name == "domain") v.domain = m.box;
         const bool zone = std::binary_search(automatic.boundary_zones.begin(), automatic.boundary_zones.end(), name);
         m.block.kind = name == "domain" ? case_view::Kind::MESH : zone ? case_view::Kind::BOUNDARY : case_view::Kind::CELL_ZONE;
+        if (zone && mesh.curved_geometry) follow_curved_faces(mesh, m.block);
         v.regions.push_back(entry(mesh, name, region, m, true));
         v.blocks.push_back(std::move(m.block));
     }

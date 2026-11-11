@@ -248,6 +248,11 @@ void add_cells(Shape & s, const Block & b, const bool areas) {
         } else if (b.types[c] == case_view::LINE) {
             s.segments.push_back({v.front(), v.back()});
             if (areas) segments.push_back(edge(points.id(v.front()), points.id(v.back())));
+        } else if (b.types[c] == case_view::POLY_LINE) {
+            for (size_t k = 0; k + 1 < v.size(); k++) {
+                s.segments.push_back({v[k], v[k + 1]});
+                if (areas) segments.push_back(edge(points.id(v[k]), points.id(v[k + 1])));
+            }
         } else if (b.types[c] == case_view::POLYGON && N_DIM == 3) {
             s.surface.add(v);
         }
@@ -450,13 +455,16 @@ double panel(std::ostringstream & out, const std::vector<Item> & items, const Vi
                 << logging::real(it.style.fill) << "\" fill-rule=\"evenodd\" stroke=\"none\"/>\n";
         }
     }
+    // A region's outlines as one path, so that the outlines inside others are its holes
     for (const Item & it : items) {
+        if (it.shape.areas.empty()) continue;
+        std::string d;
         for (const auto & area : it.shape.areas) {
-            std::string d;
             for (size_t k = 0; k < area.size(); k++) d += (k ? " L" : "M") + point(area[k]);
-            out << "<path d=\"" << d << "Z\" fill=\"" << it.style.color << "\" fill-opacity=\""
-                << logging::real(it.style.fill) << "\" stroke=\"none\"/>\n";
+            d += "Z";
         }
+        out << "<path d=\"" << d << "\" fill=\"" << it.style.color << "\" fill-opacity=\""
+            << logging::real(it.style.fill) << "\" fill-rule=\"evenodd\" stroke=\"none\"/>\n";
     }
     // Lines: curves, outlines, and the surfaces' borders, feature edges and silhouettes
     const double feature = std::cos(30.0 * std::numbers::pi / 180.0);

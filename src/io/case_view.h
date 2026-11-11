@@ -23,7 +23,7 @@
 namespace case_view {
 
 /** @brief VTK cell types the view uses. */
-enum CellType : uint8_t { VERTEX = 1, LINE = 3, POLYGON = 7 };
+enum CellType : uint8_t { VERTEX = 1, LINE = 3, POLY_LINE = 4, POLYGON = 7 };
 
 /** @brief What a block shows, which sets how the images draw it. */
 enum class Kind : uint8_t { MESH, BOUNDARY, CELL_ZONE, REGION, PROBE, SNAPSHOT, PERIODIC };

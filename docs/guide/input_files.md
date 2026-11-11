@@ -646,7 +646,9 @@ at a glance. It writes, without running the case:
   units complete it. In 2D, the mesh's edges are drawn up to 10,000 cells. In
   3D, an isometric view sits over three orthographic ones (x-y, x-z, z-y);
   surfaces are drawn as their outlines, sharp edges and silhouettes over
-  translucent faces, and only the isometric view is labeled.
+  translucent faces, and only the isometric view is labeled. Boundary zones
+  curved by [curved boundaries](meshes.md#curved-boundaries) are drawn on
+  their curved geometry, in the ParaView file too.
 - `view/case.vtkhdf` (builds without HDF5: `view/case.vtm` with its `.vtu`
   files) for ParaView 5.12 or later: one named block each for the mesh's cells
   (`domain`), every boundary zone and cell zone, every region the case uses

@@ -23,6 +23,7 @@
 #include "json.h"
 #include "mesh_block.h"
 #include "data_paths.h"
+#include "gmsh_fixtures.h"
 #include "test_fixtures.h"
 #include "case_image.h"
 #include "check.h"
@@ -789,6 +790,54 @@ TEST(CaseView, PeriodicFacesAndTheirImagesLieOnThePairsZones) {
     }
 }
 
+// A wall projected onto a circle (3D: a sphere) is drawn on it, not on its faces' chords, in the faces' own order
+TEST(CaseView, CurvedWallsLieOnTheirShapes) {
+    const std::string shapes = N_DIM == 2 ? "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                                          : "[[mesh.curved]]\nzone = \"inner\"\ntype = \"sphere\"\nfilled = false\n"
+                                            "center = [0.0, 0.0, 0.0]\nradius = 1.0\n";
+    std::vector<std::string> files;
+#if N_DIM == 2
+    files.push_back(write_temp("case_view_annulus.msh", annulus_gmsh(2, 12)));
+#else
+    for (const bool prisms : {false, true}) {
+        files.push_back(write_temp(prisms ? "case_view_shell_prisms.msh" : "case_view_shell.msh", shell_gmsh(2, 1, prisms, false)));
+    }
+#endif
+    for (const std::string & file : files) {
+        auto inner = [&](Mesh & mesh, const bool curved) {
+            const std::string input = "[mesh]\nfilename = \"" + file + "\"\n";
+            mesh.init(parse_input_string(input));
+            if (curved) mesh.apply_curved(curved::surfaces_of_mesh(mesh, parse_input_string(input + shapes)));
+            mesh.copy_host_to_device();
+            for (case_view::Block & b : mesh_view(mesh, region::MeshRegions(mesh)).blocks) {
+                if (b.name == "inner") return b;
+            }
+            return case_view::Block{};
+        };
+        Mesh straight_mesh, curved_mesh;
+        const case_view::Block straight = inner(straight_mesh, false), curved = inner(curved_mesh, true);
+        ASSERT_GT(straight.n_cells(), 0u) << file;
+        ASSERT_EQ(curved.n_cells(), straight.n_cells()) << file;
+        ASSERT_EQ(curved.fields.size(), straight.fields.size());
+        for (size_t f = 0; f < curved.fields.size(); f++) EXPECT_EQ(curved.fields[f].values, straight.fields[f].values);
+        for (size_t c = 0; c < curved.n_cells(); c++) {
+            const int64_t n = straight.offsets[c + 1] - straight.offsets[c], m = curved.offsets[c + 1] - curved.offsets[c];
+            ASSERT_GT(m, 2 * n) << "cell " << c << " of " << file;
+            for (int64_t k = 0; k < m; k++) {
+                const auto & x = curved.points[size_t(curved.connectivity[size_t(curved.offsets[c] + k)])];
+                EXPECT_NEAR(std::hypot(x[0], x[1], x[2]), 1.0, 1e-9) << "cell " << c << " of " << file;
+            }
+            // The corners where the straight face has them: every (m - 1) / (n - 1)-th point in 2D, m / n-th in 3D
+            const int64_t step = N_DIM == 2 ? (m - 1) / (n - 1) : m / n;
+            for (int64_t k = 0; k < n; k++) {
+                const auto & a = straight.points[size_t(straight.connectivity[size_t(straight.offsets[c] + k)])];
+                const auto & b = curved.points[size_t(curved.connectivity[size_t(curved.offsets[c] + k * step)])];
+                for (size_t i = 0; i < 3; i++) EXPECT_NEAR(a[i], b[i], 1e-12) << "corner " << k << " of cell " << c;
+            }
+        }
+    }
+}
+
 namespace {
 
 /** @brief The titled groups of an SVG image (each block, legend entry, scale bar and extent): title -> contents. */
@@ -895,6 +944,29 @@ TEST(CaseView, TheImagesDrawEveryBlockInItsLegendColorAndToScale) {
         }
     }
     EXPECT_NE(wall_color["light"], wall_color["dark"]);
+}
+
+// The 2D image is deterministic: the same case draws the same file, byte for byte. After a deliberate change of
+// the drawing, MALLARD_UPDATE_GOLDEN=1 rewrites the expected image (then look at it and review its diff).
+TEST(CaseView, The2DImageMatchesTheGoldenImage) {
+    if (N_DIM != 2 || sizeof(rtype) != 8 || comm::size() > 1) {
+        GTEST_SKIP() << "the golden image is of a serial 2D double-precision check";
+    }
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_view_golden";
+    std::filesystem::remove_all(dir);
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const CheckReport r = check(view_case(), options);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    const std::string svg = read_file(dir / "case-light.svg");
+    const std::filesystem::path golden =
+        std::filesystem::path(source_dir()) / "test" / "data" / "check" / "case_view_2d.svg";
+    if (const char * update = std::getenv("MALLARD_UPDATE_GOLDEN"); update && std::string(update) == "1") {
+        std::ofstream(golden) << svg;
+    }
+    const std::string expected = read_file(golden);
+    ASSERT_FALSE(expected.empty()) << golden;
+    EXPECT_EQ(svg, expected) << "the image differs from " << golden << "; MALLARD_UPDATE_GOLDEN=1 updates it";
 }
 
 namespace {

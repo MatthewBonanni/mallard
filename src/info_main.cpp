@@ -26,6 +26,7 @@
 #include "check.h"
 #include "comm.h"
 #include "commands.h"
+#include "input.h"
 #include "json.h"
 #include "log.h"
 #include "mesh.h"
@@ -727,6 +728,7 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
     }
     std::vector<std::string> view;
     if (const std::string dir = args.value_or("--view", ""); !dir.empty()) {
+        if (!mesh->high_order_faces.empty()) mesh->apply_curved(curved::surfaces_of_mesh(*mesh, parse_input_string("")));
         view = case_view::write_view(dir, mesh_view(*mesh, region::MeshRegions(*mesh)).blocks,
                                      std::filesystem::path(path).filename().string());
     }
