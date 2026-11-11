@@ -394,7 +394,9 @@ TEST(MPITest, StepReductionsKernelByKernelMatchSerial) {
                                      "model = \"pasr\"\n"));
     expect_matches_serial(graphs_off(mixture_input("", "type = \"MUSCL\"\n", chemistry, "euler")),
                           [](const Solver & s) {
-                              if (s.is_distributed()) EXPECT_GT(s.chemistry_cells_sent(), 0.0);
+                              if (s.is_distributed()) {
+                                  EXPECT_GT(s.chemistry_cells_sent(), 0.0);
+                              }
                           });
 }
 
