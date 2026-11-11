@@ -60,8 +60,12 @@ void end_capture(cudaGraph_t graph) {
     cuda_check(cudaStreamEndCapture(step_stream(), &graph), "cudaStreamEndCapture");
 }
 
-/** @brief Ends a capture that failed, if the stream still captures. */
-void abandon_capture() {
+/**
+ * @brief Ends a capture that failed, if the stream still captures.
+ * @return Whether the capture was invalidated: the driver may then have destroyed graphs it captured into, the
+ *         conditional nodes' bodies of the graph being captured among them, so that graph cannot be destroyed.
+ */
+bool abandon_capture() {
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
     cudaStreamIsCapturing(step_stream(), &status);
     if (status != cudaStreamCaptureStatusNone) {
@@ -69,6 +73,7 @@ void abandon_capture() {
         cudaStreamEndCapture(step_stream(), &graph);
     }
     cudaGetLastError();
+    return status == cudaStreamCaptureStatusInvalidated;
 }
 #endif
 
@@ -439,8 +444,7 @@ void Solver::capture_step_graph() {
         step_graph_exec = exec;
         cudaGraphDestroy(graph);
     } catch (const std::exception & e) {
-        abandon_capture();
-        if (graph) cudaGraphDestroy(graph);
+        if (!abandon_capture() && graph) cudaGraphDestroy(graph);
         capture_graph = nullptr;
         halo_current = false;
         recording_step = false;
@@ -471,7 +475,7 @@ bool Solver::conditional_nodes_work() {
             end_capture(graph);
             cuda_check(cudaGraphInstantiate(&exec, graph, 0), "cudaGraphInstantiate");
         } catch (const std::exception & e) {
-            abandon_capture();
+            if (abandon_capture()) graph = nullptr;
             works = false;
             logging::warning(std::string("NCCL under a CUDA graph conditional node failed (") + e.what() +
                              "); one step per launch");
