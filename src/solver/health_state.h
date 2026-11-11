@@ -36,8 +36,7 @@ struct HealthState {
     RepairAudit repairs;
     size_t clip_site = NONE, reset_site = NONE;
     Kokkos::View<uint8_t *> clip_flags;
-    Kokkos::View<double> reset_change;  // of one call of reset_energy
-    Kokkos::View<uint64_t> reset_cells;
+    Kokkos::View<double *> reset_sums;  // of one call of reset_energy: [change of rho E V, changed cells]
     State source_scratch;  // the ledger's evaluation of [[sources]]
     LedgerMutation mutation;
 

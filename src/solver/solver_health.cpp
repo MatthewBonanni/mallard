@@ -163,8 +163,7 @@ void Solver::init_health() {
     }
     if (double_flux) {
         run_health.reset_site = run_health.repairs.add_site("energy_reset", {"energy"}, mesh->n_cells);
-        run_health.reset_change = Kokkos::View<double>("reset_energy_change");
-        run_health.reset_cells = Kokkos::View<uint64_t>("reset_energy_cells");
+        run_health.reset_sums = Kokkos::View<double *>("reset_energy_sums", 2);
     }
 
     // The ledger: boundary faces of owned cells, and the components it cannot close
