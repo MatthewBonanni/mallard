@@ -212,6 +212,7 @@ struct Shape {
     Surface surface;                      // 3D
     std::vector<V3> points;
     std::vector<Segment> normals;         // 2D curves: (point, unit normal)
+    std::vector<std::vector<V3>> polygons;  // 3D, until they are added to the surface
     bool empty() const { return segments.empty() && areas.empty() && surface.faces.empty() && points.empty(); }
 };
 
@@ -239,7 +240,7 @@ double tolerance(const Block & b) {
 
 /** @brief A block's points, curves and (3D) surfaces into s; 2D curves of a filled region also as its areas. */
 void add_cells(Shape & s, const Block & b, const bool areas) {
-    Points & points = s.surface.points;
+    Points points = s.surface.points;  // empty: the surface's points are added in canonical order
     std::vector<Edge> segments;
     for (size_t c = 0; c < b.n_cells(); c++) {
         const std::vector<V3> v = cell_points(b, c);
@@ -254,7 +255,7 @@ void add_cells(Shape & s, const Block & b, const bool areas) {
                 if (areas) segments.push_back(edge(points.id(v[k]), points.id(v[k + 1])));
             }
         } else if (b.types[c] == case_view::POLYGON && N_DIM == 3) {
-            s.surface.add(v);
+            s.polygons.push_back(v);
         }
     }
     for (const auto & loop : chains(segments, points.xs.size())) {
@@ -262,6 +263,39 @@ void add_cells(Shape & s, const Block & b, const bool areas) {
         for (const uint32_t i : loop) area.push_back(points.xs[i]);
         s.areas.push_back(std::move(area));
     }
+}
+
+/**
+ * @brief A loop or chain in an order of its own, whatever the order of the cells it came from: a closed loop
+ *        from its least point, toward the lesser of its neighbors (polygons, whose direction is their normal's:
+ *        from their least point); an open chain from its lesser end.
+ */
+void canonical(std::vector<V3> & loop, const bool keep_direction = false) {
+    if (loop.size() < 2) return;
+    const bool closed = loop.front() == loop.back() && loop.size() > 2;
+    if (!closed && !keep_direction) {
+        if (loop.back() < loop.front()) std::reverse(loop.begin(), loop.end());
+        return;
+    }
+    if (closed) loop.pop_back();
+    std::rotate(loop.begin(), std::min_element(loop.begin(), loop.end()), loop.end());
+    if (!keep_direction && loop.back() < loop[1]) std::reverse(loop.begin() + 1, loop.end());
+    if (closed) loop.push_back(loop.front());
+}
+
+/** @brief The shape in an order that depends on its geometry only, not on the order of the block's cells. */
+void canonical(Shape & s) {
+    for (Segment & g : s.segments) {
+        if (g[1] < g[0]) std::swap(g[0], g[1]);
+    }
+    std::sort(s.segments.begin(), s.segments.end());
+    std::sort(s.points.begin(), s.points.end());
+    for (auto & area : s.areas) canonical(area);
+    std::sort(s.areas.begin(), s.areas.end());
+    for (auto & polygon : s.polygons) canonical(polygon, true);
+    std::sort(s.polygons.begin(), s.polygons.end());
+    for (const auto & polygon : s.polygons) s.surface.add(polygon);
+    s.polygons.clear();
 }
 
 Shape shape_of(const Block & b) {
@@ -276,6 +310,7 @@ Shape shape_of(const Block & b) {
             for (size_t k = 0; k < v.size(); k++) edges[edge(points.id(v[k]), points.id(v[(k + 1) % v.size()]))]++;
         }
         for (const auto & [e, n] : edges) s.segments.push_back({points.xs[e.first], points.xs[e.second]});
+        canonical(s);
         return s;
     }
     s.surface.points = Points(tolerance(b));
@@ -287,15 +322,19 @@ Shape shape_of(const Block & b) {
     for (size_t c = 0; c < b.n_cells(); c++) {
         if (b.types[c] == case_view::LINE) lines.push_back(c);
     }
+    auto middle = [&](const size_t c) {
+        const std::vector<V3> v = cell_points(b, c);
+        return V3{(v.front()[0] + v.back()[0]) / 2, (v.front()[1] + v.back()[1]) / 2, 0.0};
+    };
+    std::sort(lines.begin(), lines.end(), [&](const size_t x, const size_t y) { return middle(x) < middle(y); });
     if (N_DIM == 2 && normal && !lines.empty() && b.kind != Kind::BOUNDARY && b.kind != Kind::PERIODIC) {
         constexpr size_t ARROWS = 12;
         for (size_t k = 0; k < std::min(ARROWS, lines.size()); k++) {
             const size_t c = lines[k * lines.size() / std::min(ARROWS, lines.size())];
-            const std::vector<V3> v = cell_points(b, c);
-            const V3 mid = {(v.front()[0] + v.back()[0]) / 2, (v.front()[1] + v.back()[1]) / 2, 0.0};
-            s.normals.push_back({mid, {normal->values[3 * c], normal->values[3 * c + 1], 0.0}});
+            s.normals.push_back({middle(c), {normal->values[3 * c], normal->values[3 * c + 1], 0.0}});
         }
     }
+    canonical(s);
     s.surface.group();
     return s;
 }

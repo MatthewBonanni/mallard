@@ -15,6 +15,7 @@
 #include <map>
 #include <numeric>
 #include <numbers>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -946,27 +947,68 @@ TEST(CaseView, TheImagesDrawEveryBlockInItsLegendColorAndToScale) {
     EXPECT_NE(wall_color["light"], wall_color["dark"]);
 }
 
-// The 2D image is deterministic: the same case draws the same file, byte for byte. After a deliberate change of
-// the drawing, MALLARD_UPDATE_GOLDEN=1 rewrites the expected image (then look at it and review its diff).
-TEST(CaseView, The2DImageMatchesTheGoldenImage) {
+namespace {
+
+/** @brief Where two images differ, beyond one step of their numbers' last digit (0.1 px), or empty. */
+std::string image_difference(const std::string & a, const std::string & b) {
+    // Numbers, and colors (#7b3f6e), which are text
+    const std::regex number(R"(#[0-9a-fA-F]+|-?[0-9]+(\.[0-9]+)?)");
+    auto split = [&](const std::string & s, std::vector<std::string> & text, std::vector<double> & values) {
+        size_t at = 0;
+        for (auto it = std::sregex_iterator(s.begin(), s.end(), number); it != std::sregex_iterator(); ++it) {
+            if (it->str()[0] == '#') continue;
+            text.push_back(s.substr(at, size_t(it->position()) - at));
+            values.push_back(std::stod(it->str()));
+            at = size_t(it->position() + it->length());
+        }
+        text.push_back(s.substr(at));
+    };
+    std::vector<std::string> ta, tb;
+    std::vector<double> va, vb;
+    split(a, ta, va);
+    split(b, tb, vb);
+    if (va.size() != vb.size()) return std::to_string(va.size()) + " numbers vs " + std::to_string(vb.size());
+    for (size_t k = 0; k < ta.size(); k++) {
+        if (ta[k] != tb[k]) return "text \"" + ta[k] + "\" vs \"" + tb[k] + "\" after number " + std::to_string(k);
+    }
+    for (size_t k = 0; k < va.size(); k++) {
+        if (std::abs(va[k] - vb[k]) > 0.1 + 1e-9) {
+            return "number " + std::to_string(k) + ": " + std::to_string(va[k]) + " vs " + std::to_string(vb[k]) +
+                   " after \"" + ta[k] + "\"";
+        }
+    }
+    return "";
+}
+
+} // namespace
+
+// The 2D image is the same whatever the order of the cells (the device backends number them otherwise), up to the
+// rounding of its numbers. After a deliberate change of the drawing, MALLARD_UPDATE_GOLDEN=1 rewrites the expected
+// image (then look at it and review its diff).
+TEST(CaseView, The2DImageMatchesTheGoldenImageInAnyCellOrder) {
     if (N_DIM != 2 || sizeof(rtype) != 8 || comm::size() > 1) {
         GTEST_SKIP() << "the golden image is of a serial 2D double-precision check";
     }
-    const std::filesystem::path dir = scratch_dir() / "mallard_check_view_golden";
-    std::filesystem::remove_all(dir);
-    CheckOptions options;
-    options.view_dir = dir.string();
-    const CheckReport r = check(view_case(), options);
-    ASSERT_TRUE(r.ok()) << (first_error(r));
-    const std::string svg = read_file(dir / "case-light.svg");
     const std::filesystem::path golden =
         std::filesystem::path(source_dir()) / "test" / "data" / "check" / "case_view_2d.svg";
-    if (const char * update = std::getenv("MALLARD_UPDATE_GOLDEN"); update && std::string(update) == "1") {
-        std::ofstream(golden) << svg;
+    for (const std::string order : {"input", "hilbert"}) {
+        const std::filesystem::path dir = scratch_dir() / ("mallard_check_view_golden_" + order);
+        std::filesystem::remove_all(dir);
+        CheckOptions options;
+        options.view_dir = dir.string();
+        std::string input = view_case();
+        input.replace(input.find("[mesh]\n"), 7, "[mesh]\ncell_order = \"" + order + "\"\n");
+        const CheckReport r = check(input, options);
+        ASSERT_TRUE(r.ok()) << (first_error(r));
+        const std::string svg = read_file(dir / "case-light.svg");
+        if (const char * update = std::getenv("MALLARD_UPDATE_GOLDEN"); update && std::string(update) == "1" && order == "input") {
+            std::ofstream(golden) << svg;
+        }
+        const std::string expected = read_file(golden);
+        ASSERT_FALSE(expected.empty()) << golden;
+        EXPECT_EQ(image_difference(svg, expected), "")
+            << "cell order " << order << ": the image differs from " << golden << "; MALLARD_UPDATE_GOLDEN=1 updates it";
     }
-    const std::string expected = read_file(golden);
-    ASSERT_FALSE(expected.empty()) << golden;
-    EXPECT_EQ(svg, expected) << "the image differs from " << golden << "; MALLARD_UPDATE_GOLDEN=1 updates it";
 }
 
 namespace {
