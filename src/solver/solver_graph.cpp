@@ -63,8 +63,9 @@ void end_capture(cudaGraph_t graph) {
 
 /**
  * @brief Ends a capture that failed, if the stream still captures.
- * @return Whether the capture was invalidated: the driver may then have destroyed graphs it captured into, the
- *         conditional nodes' bodies of the graph being captured among them, so that graph cannot be destroyed.
+ * @return Whether the capture was invalidated. The driver then destroys the graph it captured into: the step graph,
+ *         or a conditional node's body, which leaves the step graph holding a destroyed body. Destroying the step
+ *         graph or that node then crashes in the driver, so the step graph is left to the process (once per run).
  */
 bool abandon_capture() {
     cudaStreamCaptureStatus status = cudaStreamCaptureStatusNone;
@@ -545,7 +546,10 @@ void Solver::captured_launch() {
     section.start();
     try {
         step_prologue();
-        device_if(&step_loop.data()->active, [&] { device_step_body(); });
+        device_if(&step_loop.data()->active, [&] {
+            if (fence_in_step_body) Kokkos::fence("fence_in_step_body");
+            device_step_body();
+        });
     } catch (...) {
         section.stop();
         throw;
