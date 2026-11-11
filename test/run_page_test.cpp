@@ -273,7 +273,9 @@ TEST(RunPageTest, ARunRecordsTheCheckAtSetupAsMallardCheckMeasuresIt) {
     for (const CheckEstimate & e : checked.resolution) {
         const json::Value & recorded = check["resolution"][e.id];
         EXPECT_EQ(recorded["quantity"].string, e.quantity);
-        if (!std::isnan(e.value)) EXPECT_EQ(recorded["value"].number, e.value) << e.id;
+        if (!std::isnan(e.value)) {
+            EXPECT_EQ(recorded["value"].number, e.value) << e.id;
+        }
     }
     EXPECT_EQ(check["time_step"]["cfl_limit"].number, 1.2);
     EXPECT_EQ(check["status"].string, "warning");
