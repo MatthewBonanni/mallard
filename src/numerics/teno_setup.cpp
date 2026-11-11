@@ -74,32 +74,6 @@ double det3(const double * a, const double * b, const double * c) {
     return a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
 }
 
-/** @brief Local node k of local face j of a cell with n_nodes nodes (Gmsh/VTK order, outward). */
-KOKKOS_INLINE_FUNCTION
-int local_face_node(const uint32_t n_nodes, const int j, const int k) {
-    const int tet[4][3] = {{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}};
-    const int pyramid[5][4] = {{0, 3, 2, 1}, {0, 1, 4, -1}, {1, 2, 4, -1}, {2, 3, 4, -1}, {3, 0, 4, -1}};
-    const int prism[5][4] = {{0, 2, 1, -1}, {3, 4, 5, -1}, {0, 1, 4, 3}, {1, 2, 5, 4}, {2, 0, 3, 5}};
-    const int hex[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
-    switch (n_nodes) {
-        case 4: return tet[j][k];
-        case 5: return pyramid[j][k];
-        case 6: return prism[j][k];
-        default: return hex[j][k];
-    }
-}
-
-KOKKOS_INLINE_FUNCTION
-int local_face_count(const uint32_t n_nodes) { return n_nodes == 4 ? 4 : (n_nodes == 8 ? 6 : 5); }
-
-KOKKOS_INLINE_FUNCTION
-int local_face_size(const uint32_t n_nodes, const int j) {
-    if (n_nodes == 4) return 3;
-    if (n_nodes == 8) return 4;
-    if (n_nodes == 5) return j == 0 ? 4 : 3;
-    return j < 2 ? 3 : 4;
-}
-
 /** @brief f(std::integral_constant<int, k>) for k = B .. E - 1, unrolled at compile time. */
 template <int B, int E, class F>
 KOKKOS_FORCEINLINE_FUNCTION void static_for(F && f) {
@@ -2891,6 +2865,32 @@ template <int NM, class Space>
 struct MomentsTask {
     Geometry<Space> g;
     int n_moments = 0;
+
+    /** @brief Local node k of local face j of a cell with n_nodes nodes (Gmsh/VTK order, outward). */
+    KOKKOS_INLINE_FUNCTION
+    static int local_face_node(const uint32_t n_nodes, const int j, const int k) {
+        const int tet[4][3] = {{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}};
+        const int pyramid[5][4] = {{0, 3, 2, 1}, {0, 1, 4, -1}, {1, 2, 4, -1}, {2, 3, 4, -1}, {3, 0, 4, -1}};
+        const int prism[5][4] = {{0, 2, 1, -1}, {3, 4, 5, -1}, {0, 1, 4, 3}, {1, 2, 5, 4}, {2, 0, 3, 5}};
+        const int hex[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}};
+        switch (n_nodes) {
+            case 4: return tet[j][k];
+            case 5: return pyramid[j][k];
+            case 6: return prism[j][k];
+            default: return hex[j][k];
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    static int local_face_count(const uint32_t n_nodes) { return n_nodes == 4 ? 4 : (n_nodes == 8 ? 6 : 5); }
+
+    KOKKOS_INLINE_FUNCTION
+    static int local_face_size(const uint32_t n_nodes, const int j) {
+        if (n_nodes == 4) return 3;
+        if (n_nodes == 8) return 4;
+        if (n_nodes == 5) return j == 0 ? 4 : 3;
+        return j < 2 ? 3 : 4;
+    }
 
     KOKKOS_INLINE_FUNCTION
     void add(const double w, const double * x, double * m) const {
