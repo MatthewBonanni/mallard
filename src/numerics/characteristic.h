@@ -128,12 +128,14 @@ struct CharacteristicStateFunctor {
     Kokkos::View<rtype **[2][2]> face_thermo;  // Gas mixtures: [gamma, e0]; empty for a single gas
     Kokkos::View<rtype *> quad_weights;        // 2D
     Kokkos::View<rtype **> face_weights;       // 3D: (face, q)
-    rtype dt;
+    rtype dt_host;
     bool initialize;
+    const rtype * dt_device = nullptr;  // the step's dt on the device, inside a step graph
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t k) const {
         using Relax = BoundaryCondition::Relax;
+        const rtype dt = dt_device ? *dt_device : dt_host;
         constexpr uint8_t E = N_DIM + 1;
         const uint32_t f = boundaries.char_faces(k);
         const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(f));

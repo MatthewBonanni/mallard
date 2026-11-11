@@ -380,7 +380,8 @@ class TimedInletTargets {
 
         bool empty() const { return host_chars.empty(); }
 
-        void fill(double t, const Kokkos::View<rtype *[N_DIM]> & target) const;
+        /** @brief The targets at the time on the device (kernels only, capturable in a step graph). */
+        void fill(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM]> & target) const;
 
         /** @brief Throw the InputError of an expression stopped at the iteration limit, or of a direction of t
          *         that was zero or pointed out of the domain, if any was. */

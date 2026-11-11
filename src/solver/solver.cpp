@@ -1104,7 +1104,7 @@ void Solver::init_boundaries() {
         dirichlet_states.add(d.W, states, x);
     }
     dirichlet_states.finish(boundary_data.face_state);
-    if ((!timed_fields.empty() || dirichlet_states.depends_on_time()) && !stage_time.is_allocated()) {
+    if (!stage_time.is_allocated()) {
         stage_time = Kokkos::View<rtype>("stage_time");
     }
     init_inlets(input_boundaries, inlets);
@@ -1342,7 +1342,7 @@ void Solver::apply_boundary_fields() {
 
 void Solver::update_boundary_states(const rtype t_eval, const rtype c) {
     update_boundary_fields(t_eval, c);
-    update_inflow(t_eval);
+    update_inflow(t_eval, c);
 }
 
 void Solver::init_numerics() {

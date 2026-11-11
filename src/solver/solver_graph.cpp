@@ -53,15 +53,16 @@ std::string Solver::step_graph_unsupported() const {
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
     if (is_distributed() && !halo.uses_nccl() && !uncaptured_step_graphs) return "halo exchanged with MPI";
     if (is_mixture()) return "gas mixture";
-    if (boundary_data.char_faces.extent(0) > 0) return "characteristic boundaries";
     if (!inflows.empty()) return "synthetic inflow turbulence";
     return "";
 }
 
 void Solver::record_step() {
     const Kokkos::DefaultExecutionSpace exec;
-    // Stage times come from step_scalars from here on, also in calc_dt's boundary updates (LES)
+    // Stage times come from step_scalars from here on, also in calc_dt's boundary updates (LES), and no target
+    // or wave the host advanced before stands for one of the graph's
     recording_step = true;
+    t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
     Kokkos::deep_copy(exec, Kokkos::subview(step_scalars, Kokkos::make_pair(0, 2)),
                       Kokkos::subview(step_io, Kokkos::make_pair(0, 2)));
     // The run-control requests ride along the time-step reduction
@@ -70,10 +71,7 @@ void Solver::record_step() {
     // calc_dt, with the boundary conditions of t at the step's start as calc_dt has them
     halo.exchange(state());
     halo_current = true;
-    if (!timed_fields.empty() || dirichlet_states.depends_on_time()) {
-        record_stage_time(0.0_r);
-        apply_boundary_fields();
-    }
+    update_boundary_states(t);
     calc_dt_cfl1(Kokkos::View<rtype>(step_reduce.data()));
     if (is_distributed()) comm::allreduce_device(step_reduce, comm::Op::MIN, halo.uses_nccl());
     const Kokkos::View<rtype *> r = step_reduce;
@@ -104,6 +102,8 @@ void Solver::record_step() {
     time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func, step_scalars.data() + DT_SCALES);
     recording_step = false;
     halo_current = false;
+    // The graph advances them at the device time: the host knows neither
+    t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
     Kokkos::deep_copy(exec, Kokkos::subview(step_io, IO_DT), Kokkos::subview(step_scalars, STEP_DT));
     Kokkos::deep_copy(exec, Kokkos::subview(step_io, Kokkos::make_pair(IO_REDUCED, N_STEP_IO)), step_reduce);
     if (controlled) {
@@ -134,6 +134,8 @@ void Solver::record_stage_time(const rtype c) {
 }
 
 const rtype * Solver::step_dt_device() const { return step_scalars.data() + STEP_DT; }
+
+const rtype * Solver::step_time_device() const { return step_scalars.data() + T; }
 
 void Solver::graph_step() {
     const bool record = !step_graph_exec && step_scalars.is_allocated();
