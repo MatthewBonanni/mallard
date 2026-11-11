@@ -908,7 +908,7 @@ void Solver::drain_device_steps() {
 }
 
 void Solver::pull_trigger_states() {
-    if (!trigger_states.is_allocated() || n_launched == 0) return;
+    if (!trigger_states.is_allocated() || n_launched == 0 || triggers_evaluated_by_host) return;
     // The states of the last step the device went on from, for the host's next evaluation
     std::vector<Triggers::DeviceState> states(trigger_states.extent(0));
     Kokkos::deep_copy(Kokkos::View<Triggers::DeviceState *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
