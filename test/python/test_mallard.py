@@ -19,7 +19,7 @@ FORMATS = os.path.join(HERE, "..", "data", "formats")
 def run(tmp_path_factory):
     d = tmp_path_factory.mktemp("run")
     shutil.copy(os.path.join(FORMATS, "snapshots.toml"), d)
-    subprocess.run([mallard.commands._lib.executable(), "-i", "snapshots.toml", "--kokkos-num-threads=2"], cwd=d,
+    subprocess.run([mallard._lib.executable(), "-i", "snapshots.toml", "--kokkos-num-threads=2"], cwd=d,
                    check=True, capture_output=True)
     return d
 
@@ -112,3 +112,10 @@ def test_command_errors(run):
     with pytest.raises(mallard.CommandError) as e:
         mallard.post.extract(run / "snapshots_000001.restart", no_such_option=True, cwd=run)
     assert e.value.returncode == 2
+
+
+def test_diff_reports_differences_as_a_result(run):
+    same = mallard.diff(run / "snapshots_vtkhdf_000001.vtkhdf", run / "snapshots_xdmf_000001.h5")
+    assert same["exit_status"] == 0 and all(f["absolute"]["linf"] == 0 for f in same["fields"])
+    changed = mallard.diff(run / "snapshots_vtkhdf_000000.vtkhdf", run / "snapshots_vtkhdf_000001.vtkhdf")
+    assert changed["exit_status"] == 1 and changed["fields"][0]["absolute"]["linf"] > 0
