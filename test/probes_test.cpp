@@ -1956,8 +1956,8 @@ TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMe
         ASSERT_EQ(rows.size(), 1u);
         const auto & row = rows.at(0);
         const char * volume = N_DIM == 2 ? "area" : "volume";
-        EXPECT_NEAR(row.at("mean_MEAN_P"), 1.0, 1e-9);
-        EXPECT_NEAR(row.at("integral_MEAN_P"), row.at(volume), 1e-9 * row.at(volume));
+        EXPECT_NEAR(row.at("mean_MEAN_P"), 1.0, rounding_or(1e-9));
+        EXPECT_NEAR(row.at("integral_MEAN_P"), row.at(volume), rounding_or(1e-9) * row.at(volume));
         EXPECT_NEAR(row.at("integral_MEAN_RHO"), row.at("mean_MEAN_RHO") * row.at(volume), 1e-12);
         EXPECT_NEAR(row.at("mean_MEAN_RHO"), 1.0 + 0.5 * 0.55, 2e-3);
         EXPECT_LT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.15) + 1e-2);

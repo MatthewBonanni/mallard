@@ -180,7 +180,8 @@ TEST(RegionMotionTest, MovingFractionsAreTheFractionsOfTheRegionWhereItIs) {
         const region::Region r = read(table);
         ASSERT_TRUE(r.moving()) << table;
         const region::MovingFractions moving(*mesh, r);
-        for (const double t : {0.0, 0.7}) {
+        // Times the device holds exactly: its time is an rtype, as the solver's
+        for (const double t : {0.0, static_cast<double>(static_cast<rtype>(0.7))}) {
             moving.update(t);
             const std::vector<double> expected = region::cell_fractions(*mesh, r.at(t)), got = host(moving);
             ASSERT_EQ(got.size(), expected.size());
