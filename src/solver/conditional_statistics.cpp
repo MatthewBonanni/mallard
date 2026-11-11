@@ -136,8 +136,7 @@ void ConditionalStatistics::init(const Input & entry, uint32_t index, const std:
 
     // range = [lo, hi] for one variable, [[lo, hi], [lo, hi]] for two; each in its variable's units
     if (const auto * t = input_detail::table_of(entry)) {
-        t->record_use("range", input_detail::real_use("array", dim::none, "[0, 1] for MIXTURE_FRACTION and "
-                                                      "PROGRESS_VARIABLE", false));
+        t->record_use("range", input_detail::real_use("array", dim::none, "[0.0, 1.0]", false));
     }
     for (uint32_t v = 0; v < n_on; v++) {
         const bool unit_range = on[v] == "MIXTURE_FRACTION" || on[v] == "PROGRESS_VARIABLE";
