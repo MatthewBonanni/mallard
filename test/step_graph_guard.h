@@ -113,7 +113,10 @@ class StepGraphGuard {
             // Device builds only: pageable host memory cannot take part in a capture
             const bool dst_host = std::strcmp(dst_space.name, "Host") == 0;
             const bool src_host = std::strcmp(src_space.name, "Host") == 0;
-            if (dst_host != src_host) {
+            // deep_copy(exec, view, value) fills on the execution space (a memset or a kernel on its stream), and
+            // Kokkos reports the value as a host source "(none)"; fills that must fence are reported as fences
+            const bool fill = src_host && std::strcmp(src_label, "(none)") == 0;
+            if (dst_host != src_host && !fill) {
                 record(std::string("copy \"") + src_label + "\" (" + src_space.name + ") to \"" + dst_label + "\" (" +
                        dst_space.name + ")");
             }
