@@ -1,1 +1,0 @@
-- `examples/cbc_les/cbc_les.py rescale` reads the restart files current builds write (version 7); it rejected every file written since version 3.
