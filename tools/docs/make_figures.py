@@ -14,6 +14,7 @@ import sys
 import domains
 import effective_resolution
 import geometry
+import high_order_cost
 import inlets
 import probes
 import regions
@@ -35,6 +36,7 @@ def main():
     theory.figures()
     teno.figures()
     effective_resolution.figures()
+    high_order_cost.figures()
     geometry.figures(args.mallard, args.mallard3d)
     if args.mallard:
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]

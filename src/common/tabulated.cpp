@@ -20,6 +20,7 @@
 #include "box_tree.h"
 #include "common_io.h"
 #include "input.h"
+#include "provenance.h"
 
 namespace tabulated {
 
@@ -89,6 +90,7 @@ int32_t Csv::column(const std::string & name) const {
 Csv read_csv(const std::string & file) {
     std::ifstream in(file);
     if (!in) throw cannot_read("data file", file);
+    provenance::read_file("table", file);
     Csv csv;
     std::string line;
     size_t line_number = 0;

@@ -51,7 +51,7 @@ std::string case_input(const std::string & dir, const std::string & physics, con
       << "[numerics.face_reconstruction]\ntype = \"TENO\"\n" << physics
       << "[output]\ncheck_interval = 1000000\nrun_log = \"\"\n" << output
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\nvariables = [" << fields
+      << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\nfields = [" << fields
       << "]\ninterval = 2\n";
     return s.str();
 }

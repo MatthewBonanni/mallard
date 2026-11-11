@@ -137,7 +137,7 @@ double point_error(uint32_t n, const std::string & recon, const std::string & sa
         }
         points << "]";
     }
-    const std::string probe = "[[probes]]\nname = \"p\"\nfile = \"" + dir + "/p.csv\"\nvariables = [\"RHO\", \"T\"]\n"
+    const std::string probe = "[[probes]]\nname = \"p\"\nfile = \"" + dir + "/p.csv\"\nfields = [\"RHO\", \"T\"]\n"
                               "sampling = \"" + sampling + "\"\ntype = \"points\"\npoints = [" + points.str() + "]\n";
     Solver solver;
     solver.init(parse_toml(box_case(n, SINE_RHO, recon, probe)));
@@ -267,7 +267,7 @@ TEST(ProbesTest, CurveReductionsAreExactForPolynomialFields) {
     const char * rho = "2.0 + 0.3 * x - 0.2 * y + 0.25 * x^2 + 0.15 * x * y - 0.1 * y^2";
     auto f = [](double x, double y) { return 2.0 + 0.3 * x - 0.2 * y + 0.25 * x * x + 0.15 * x * y - 0.1 * y * y; };
     const std::string dir = fresh_dir("exact");
-    const std::string probe = "[[probes]]\nname = \"poly\"\nfile = \"" + dir + "/poly.csv\"\nvariables = [\"RHO\", \"P\"]\n"
+    const std::string probe = "[[probes]]\nname = \"poly\"\nfile = \"" + dir + "/poly.csv\"\nfields = [\"RHO\", \"P\"]\n"
                               "sampling = \"point\"\ntype = \"polyline\"\nvertices = [" +
                               numbers3("0.35", "0.42", "0.45") + ", " + numbers3("0.62", "0.57", "0.45") + ", " +
                               numbers3("0.48", "0.66", "0.45") + "]\nn_points = 4\n"
@@ -315,8 +315,8 @@ TEST(ProbesTest, RegionReductionsAreFractionWeightedIntegralsOfTheCellAverages) 
                                        : "{type = \"box\", center = [0.45, 0.45, 0.5], size = [0.5, 0.3, 0.6]}";
     const std::string ball = "{type = \"sphere\", center = " + numbers3("0.5", "0.5", "0.5") + ", radius = 0.27}";
     const std::string probes =
-        "[[probes]]\nname = \"box\"\nvariables = [\"RHO\", \"P\"]\nregion = " + box + "\nreductions_file = \"" + dir +
-        "/box.csv\"\n[[probes]]\nname = \"ball\"\nvariables = [\"P\"]\nregion = " + ball +
+        "[[probes]]\nname = \"box\"\nfields = [\"RHO\", \"P\"]\nregion = " + box + "\nreductions_file = \"" + dir +
+        "/box.csv\"\n[[probes]]\nname = \"ball\"\nfields = [\"P\"]\nregion = " + ball +
         "\nreductions = [\"integral\", \"mean\", \"rms\"]\nreductions_file = \"" + dir + "/ball.csv\"\n";
     Solver solver;
     solver.init(parse_toml(box_case(20, "1 + x + 2 * y + 0.5 * x^2", "type = \"MUSCL\"\n", probes)));
@@ -368,7 +368,7 @@ TEST(ProbesTest, RegionReductionsAreTheSameOnAnyNumberOfRanks) {
         (N_DIM == 2 ? "25" : "{axis = [1, 2, 3], angle = 25}") + "}\n";
     auto input = [&](const std::string & file) {
         return box_case(12, SINE_RHO, "type = \"MUSCL\"\n",
-                        extra + "[[probes]]\nname = \"ball\"\nvariables = [\"RHO\", \"U\", \"P\", \"T\"]\n"
+                        extra + "[[probes]]\nname = \"ball\"\nfields = [\"RHO\", \"U\", \"P\", \"T\"]\n"
                                 "region = \"ball\"\nreductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", "
                                 "\"max\"]\nreductions_file = \"" + dir + "/" + file + "\"\n",
                         "n_steps = 4\ncfl = 0.4\n");
@@ -404,7 +404,7 @@ TEST(ProbesTest, RegionsOfTheMeshAreTheSameOnAnyNumberOfRanks) {
             {"cut", "{type = \"difference\", regions = [\"domain\", {type = \"disk\", center = [0.4, 0.6], "
                     "radius = 0.25}]}"}};
         for (const auto & [name, region] : probes) {
-            s += "[[probes]]\nname = \"" + name + "\"\nvariables = [\"RHO\", \"P\"]\nregion = " + region +
+            s += "[[probes]]\nname = \"" + name + "\"\nfields = [\"RHO\", \"P\"]\nregion = " + region +
                  "\nreductions_file = \"" + dir + "/" + name + "_" + suffix + ".csv\"\n";
         }
         return s;
@@ -439,7 +439,7 @@ TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
         std::string probes;
         for (const auto & [name, region] : std::vector<std::pair<std::string, std::string>>{{"shell", shell}, {"ring", ring}}) {
             if (name == "ring" && N_DIM == 2) continue;
-            probes += "[[probes]]\nname = \"" + name + "\"\nvariables = [\"RHO\", \"P\"]\nregion = " + region +
+            probes += "[[probes]]\nname = \"" + name + "\"\nfields = [\"RHO\", \"P\"]\nregion = " + region +
                       "\nreductions_file = \"" + dir + "/" + name + "_" + suffix + ".csv\"\n";
         }
         return box_case(10, SINE_RHO, "type = \"MUSCL\"\n", probes, "n_steps = 2\ncfl = 0.4\n");
@@ -473,14 +473,14 @@ TEST(ProbesTest, RejectsRegionProbesWithSampleKeys) {
                                   "file = \"x.csv\"\n", "type = \"circle\"\n"}) {
         Solver solver;
         EXPECT_ANY_THROW(solver.init(parse_toml(
-            box_case(8, "1.0", "type = \"MUSCL\"\n", "[[probes]]\nname = \"r\"\nvariables = [\"P\"]\n" + region + key))))
+            box_case(8, "1.0", "type = \"MUSCL\"\n", "[[probes]]\nname = \"r\"\nfields = [\"P\"]\n" + region + key))))
             << key;
     }
 }
 
 TEST(ProbesTest, TimeIntervalsLandOnTheirTimes) {
     const std::string dir = fresh_dir("times");
-    const std::string probe = "[[probes]]\nname = \"t\"\nfile = \"" + dir + "/t.csv\"\nvariables = [\"P\"]\n"
+    const std::string probe = "[[probes]]\nname = \"t\"\nfile = \"" + dir + "/t.csv\"\nfields = [\"P\"]\n"
                               "point = " + numbers3("0.5", "0.5", "0.5") + "\ntime_interval = 0.0123\n";
     Solver solver;
     solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"MUSCL\"\n", probe, "t_stop = 0.05\ncfl = 0.5\n")));
@@ -494,7 +494,7 @@ TEST(ProbesTest, VtpAndHdf5HoldTheCsvSamplesAndRestartsCutThemBack) {
     const std::string dir = fresh_dir("formats");
     const std::string geometry = "type = \"circle\"\ncenter = " + numbers3("0.5", "0.5", "0.5") +
                                  "\nradius = 0.3\nn_points = 12\n" + (N_DIM == 3 ? "normal = [1.0, 1.0, 1.0]\n" : "") +
-                                 "variables = [\"RHO\", \"U\"]\nsampling = \"point\"\ninterval = 2\n";
+                                 "fields = [\"RHO\", \"U\"]\nsampling = \"point\"\ninterval = 2\n";
     auto probes = [&](const std::string & sub) {
         std::string text = "[[probes]]\nname = \"csv\"\nfile = \"" + dir + "/" + sub + "/c.csv\"\n" + geometry +
                            "[[probes]]\nname = \"vtp\"\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub + "/v.pvd\"\n" +
@@ -637,7 +637,7 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
     for (uint32_t n : {8u, 16u, 32u}) {
         const std::string dir = fresh_dir("couette");
         const std::string probe = "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/walls.csv\"\nboundary_type = \"wall\"\n"
-                                  "variables = [\"CF\", \"TAU_W\", \"TAU_W_X\", \"Q_W\", \"U_TAU\", \"Y_PLUS\", \"T\", \"U_X\", \"RHO\", "
+                                  "fields = [\"CF\", \"TAU_W\", \"TAU_W_X\", \"Q_W\", \"U_TAU\", \"Y_PLUS\", \"T\", \"U_X\", \"RHO\", "
                                   "\"ENERGY_DIFFUSIVE_FLUX\", \"ENERGY_TOTAL_FLUX\"]\n"
                                   "reference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") + ", p = 1.0}\n";
         Solver solver;
@@ -696,7 +696,7 @@ TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
         const std::string dir = fresh_dir(axisymmetric ? "forces_axisymmetric" : "forces");
         const std::string extra = "[[forces]]\nzone = \"top\"\nfile = \"" + dir + "/forces.csv\"\n"
                                   "[[probes]]\nname = \"top\"\nboundary = \"top\"\nsamples = false\n"
-                                  "variables = [\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\nreductions = [\"integral\"]\n"
+                                  "fields = [\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\nreductions = [\"integral\"]\n"
                                   "reductions_file = \"" + dir + "/top.csv\"\n";
         std::string input = couette_case(2, extra, "n_steps = 4\ncfl = 0.5\n");
         const std::string u = "\"0.5 * y\"";
@@ -749,7 +749,7 @@ TEST(ProbesTest, InletAndOutletFluxesHaveTheBoundaryStates) {
       << "[output]\ncheck_interval = 1000000\n";
     for (const char * zone : {"left", "right"}) {
         s << "[[probes]]\nname = \"" << zone << "\"\nboundary = \"" << zone << "\"\nsampling = \"point\"\nsamples = false\n"
-          << "variables = [\"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENTHALPY_FLUX\"]\nreductions = [\"integral\"]\n"
+          << "fields = [\"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENTHALPY_FLUX\"]\nreductions = [\"integral\"]\n"
           << "reductions_file = \"" << dir << "/" << zone << ".csv\"\n";
     }
     Solver solver;
@@ -781,7 +781,7 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
     for (const char * zone : {"inner", "outer"}) {
         for (const char * sampling : {"cell", "point"}) {
             probes += std::string("[[probes]]\nname = \"") + zone + "_" + sampling + "\"\nboundary = \"" + zone +
-                      "\"\nsampling = \"" + sampling + "\"\nvariables = [\"P\", \"MASS_FLUX\"]\nfile = \"" + dir + "/" +
+                      "\"\nsampling = \"" + sampling + "\"\nfields = [\"P\", \"MASS_FLUX\"]\nfile = \"" + dir + "/" +
                       zone + "_" + sampling + ".csv\"\n";
         }
     }
@@ -838,11 +838,11 @@ TEST(ProbesTest, Hdf5ProbesAndAsynchronousHdf5OutputShareTheLibrary) {
     const std::string dir = fresh_dir("async");
     const uint64_t n_steps = 40;
     const std::string extra = "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" + dir + "/h.h5\"\n"
-                              "variables = [\"RHO\", \"U\", \"P\"]\ntype = \"circle\"\ncenter = " +
+                              "fields = [\"RHO\", \"U\", \"P\"]\ntype = \"circle\"\ncenter = " +
                               numbers3("0.5", "0.5", "0.5") + "\nradius = 0.3\nn_points = 64\n" +
                               (N_DIM == 3 ? "normal = [0.0, 0.0, 1.0]\n" : "") +
                               "[[write_data]]\nprefix = \"" + dir + "/s\"\nformat = \"xdmf\"\ninterval = 1\n"
-                              "variables = [\"RHO\", \"P\"]\n";
+                              "fields = [\"RHO\", \"P\"]\n";
     std::string input = box_case(12, SINE_RHO, "type = \"MUSCL\"\n", extra,
                                  "n_steps = " + std::to_string(n_steps) + "\ncfl = 0.3\n");
     input.replace(input.find("check_interval"), 0, "async = true\n");
@@ -869,7 +869,7 @@ TEST(ProbesTest, CutPlaneIntegralsAreExactForPolynomialFields) {
                                          : "point = [0.5, 0.5, 0.47]\nnormal = [0.0, 0.0, 1.0]\n"
                                            "bounds = [[0.3, 0.32, 0.3], [0.7, 0.68, 0.7]]\n";
     const std::string probe = "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\n" + plane +
-                              "variables = [\"RHO\", \"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
+                              "fields = [\"RHO\", \"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
                               "reductions = [\"integral\", \"favre\"]\nreductions_file = \"" + dir + "/cut.csv\"\n";
     Solver solver;
     solver.init(parse_toml(box_case(20, rho, "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probe)));
@@ -912,20 +912,20 @@ TEST(ProbesTest, AxisymmetricRunsKeepPerRadianIntegralsOnBoundaries) {
     };
     const std::string cut = "type = \"cut_plane\"\npoint = [0.5, 0.5]\nnormal = [1.0, 0.0]\n";
     const std::string circle = "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n";
-    for (const std::string & rejected : {cut + "variables = [\"MASS_FLUX\"]\n", circle + "variables = [\"MASS_FLUX\"]\n",
-                                         cut + "variables = [\"P\"]\nreductions = [\"integral\"]\n"}) {
+    for (const std::string & rejected : {cut + "fields = [\"MASS_FLUX\"]\n", circle + "fields = [\"MASS_FLUX\"]\n",
+                                         cut + "fields = [\"P\"]\nreductions = [\"integral\"]\n"}) {
         Solver solver;
         EXPECT_THROW(solver.init(parse_toml(input(rejected))), InputError) << rejected;
     }
     Solver solver;
-    EXPECT_NO_THROW(solver.init(parse_toml(input(cut + "variables = [\"P\"]\n"))));
+    EXPECT_NO_THROW(solver.init(parse_toml(input(cut + "fields = [\"P\"]\n"))));
 }
 
 TEST(ProbesTest, CutPlanesTakeFacesOnTheirPlaneOnce) {
     // A plane through mesh faces cuts each column of cells once: the plane's whole area
     const std::string dir = fresh_dir("cut_faces");
     const std::string probe = "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\npoint = " + numbers3("0.5", "0", "0") +
-                              "\nnormal = " + numbers3("1", "0", "0") + "\nvariables = [\"P\"]\nfile = \"" + dir +
+                              "\nnormal = " + numbers3("1", "0", "0") + "\nfields = [\"P\"]\nfile = \"" + dir +
                               "/cut.csv\"\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/red.csv\"\n";
     Solver solver;
     solver.init(parse_toml(box_case(8, SINE_RHO, "type = \"MUSCL\"\n", probe)));
@@ -947,10 +947,10 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [0.5, 0.5], radius = 0.2}"
                                            : "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}";
     const std::string probe = "[[probes]]\nname = \"closed\"\n" + shape +
-                              "variables = [\"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
+                              "fields = [\"MASS_FLUX\"]\nsampling = \"point\"\nsamples = false\n"
                               "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/closed.csv\"\n"
                               "[[probes]]\nname = \"region\"\nregion = " + surface + "\n"
-                              "variables = [\"MASS_FLUX\"]\nsampling = \"point\"\nreductions = [\"integral\"]\n"
+                              "fields = [\"MASS_FLUX\"]\nsampling = \"point\"\nreductions = [\"integral\"]\n"
                               "reductions_file = \"" + dir + "/region.csv\"\n";
     std::string input = box_case(16, "1.0", "type = \"TENO\"\norder = 3\ntroubled_threshold = 1.0\n", probe);
     const std::string u = "u = " + vector3("0.3", "-0.1", "0.2");
@@ -986,9 +986,9 @@ TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMassMomentumAndEnergy) {
     auto residuals = [&](uint32_t n) {
         const std::string dir = fresh_dir("balance");
         const std::string probes = "[[probes]]\nname = \"content\"\nregion = " + region +
-                                   "\nvariables = [\"RHO\", \"RHOU_X\", \"RHOE\"]\nreductions = [\"integral\"]\n"
+                                   "\nfields = [\"RHO\", \"RHOU_X\", \"RHOE\"]\nreductions = [\"integral\"]\n"
                                    "reductions_file = \"" + dir + "/content.csv\"\n[[probes]]\nname = \"flux\"\n" +
-                                   surface + "variables = [\"MASS_FLUX\", \"MOMENTUM_FLUX_X\", \"ENTHALPY_FLUX\"]\n"
+                                   surface + "fields = [\"MASS_FLUX\", \"MOMENTUM_FLUX_X\", \"ENTHALPY_FLUX\"]\n"
                                    "sampling = \"point\"\nsamples = false\nreductions = [\"integral\"]\n"
                                    "reductions_file = \"" + dir + "/flux.csv\"\n";
         const double dt = 0.25 / n;
@@ -1174,7 +1174,7 @@ TEST(ProbesTest, ModeledWallsTakeTheWallModelsStressHeatFluxAndExchangeState) {
     auto input = [&](const std::string & sub) {
         const std::string extra = "[[forces]]\nzone = \"bottom\"\nfile = \"" + dir + "/forces.csv_" + sub + "\"\n"
                                   "[[probes]]\nname = \"bottom\"\nboundary = \"bottom\"\nfile = \"" + dir + "/bottom.csv_" + sub +
-                                  "\"\nvariables = [\"TRACTION_VISCOUS\", \"Q_W\", \"TAU_W\", \"U_TAU\", \"WALL_MODEL_U\", "
+                                  "\"\nfields = [\"TRACTION_VISCOUS\", \"Q_W\", \"TAU_W\", \"U_TAU\", \"WALL_MODEL_U\", "
                                   "\"WALL_MODEL_T\", \"WALL_MODEL_H\"]\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
                                   "/bottom_red.csv_" + sub + "\"\n";
         std::string s = couette_case(8, extra, "n_steps = 3\ncfl = 0.4\n");
@@ -1240,7 +1240,7 @@ TEST(ProbesTest, SpeciesDiffusiveFluxesAreFicksLawThroughTransmissiveBoundaries)
           << "\"\ntransport = \"mixture_averaged\"\n[numerics]\nriemann_solver = \"HLLC\"\n"
           << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n[output]\ncheck_interval = 1000000\n"
           << "[[probes]]\nname = \"ends\"\nboundary = [\"left\", \"right\"]\nfile = \"" << dir << "/ends.csv_" << sub
-          << "\"\nvariables = [\"SPECIES_DIFFUSIVE_FLUX_*\", \"SPECIES_TOTAL_FLUX_*\", \"SPECIES_FLUX_*\", "
+          << "\"\nfields = [\"SPECIES_DIFFUSIVE_FLUX_*\", \"SPECIES_TOTAL_FLUX_*\", \"SPECIES_FLUX_*\", "
           << "\"ENERGY_DIFFUSIVE_FLUX\"]\nreductions = [\"integral\"]\nreductions_file = \"" << dir << "/ends_red.csv_"
           << sub << "\"\n";
         return s.str();
@@ -1291,7 +1291,7 @@ TEST(ProbesTest, MomentsOfTractionsHaveTheirClosedForm) {
     s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n[numerics.face_reconstruction]\n"
       << "type = \"MUSCL\"\n" << PERFECT_GAS << "[output]\ncheck_interval = 1000000\n"
       << "[[probes]]\nname = \"box\"\nboundary_type = \"wall\"\nsamples = false\n"
-      << "variables = [\"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"moment\"]\nmoment_center = "
+      << "fields = [\"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"moment\"]\nmoment_center = "
       << numbers3("0.1", "0.7", "0.4") << "\nreductions_file = \"" << dir << "/box.csv\"\n";
     Solver solver;
     solver.init(parse_toml(s.str()));
@@ -1321,10 +1321,10 @@ TEST(ProbesTest, StatisticsAveragesAreProbeVariablesAtTheirSamplesCells) {
         "[statistics]\nfields = [\"P\", \"U_X\", \"U_Y\"" + std::string(N_DIM == 3 ? ", \"U_Z\"" : "") +
         "]\nproducts = [\"RHO*P\"]\n"
         "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/line.csv\"\n" + ends +
-        "n_points = 9\nvariables = [\"MEAN_P\", \"MEAN_U\", \"COV_RHO_P\", \"P\"]\ninterval = 5\n"
+        "n_points = 9\nfields = [\"MEAN_P\", \"MEAN_U\", \"COV_RHO_P\", \"P\"]\ninterval = 5\n"
         "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/line_reductions.csv\"\n"
         "[[probes]]\nname = \"first\"\nfile = \"" + dir + "/first.csv\"\n" + ends +
-        "n_points = 5\nvariables = [\"P\", \"MEAN_P\"]\ninterval = 1\nsamples = false\n"
+        "n_points = 5\nfields = [\"P\", \"MEAN_P\"]\ninterval = 1\nsamples = false\n"
         "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/first_reductions.csv\"\n";
     Solver solver;
     solver.set_distributed(false);
@@ -1363,7 +1363,7 @@ TEST(ProbesTest, AveragedProbesAreTimeWeightedMeansOfTheirSamples) {
     const std::string dir = fresh_dir("averaged");
     auto probe = [&](const std::string & name, const std::string & keys) {
         return "[[probes]]\nname = \"" + name + "\"\nfile = \"" + dir + "/" + name + ".csv\"\nboundary_type = \"wall\"\n"
-               "variables = [\"CF\", \"TAU_W\", \"Q_W\"]\nreference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") +
+               "fields = [\"CF\", \"TAU_W\", \"Q_W\"]\nreference = {rho = 1.0, u = " + numbers3("0.5", "0.0", "0.0") +
                ", p = 1.0}\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + name +
                "_reductions.csv\"\n" + keys;
     };
@@ -1392,7 +1392,7 @@ TEST(ProbesTest, AveragedProbesOfModeledWallsAreTheMeansOfTheirSamples) {
     const std::string dir = fresh_dir("averaged_wall_model");
     auto probe = [&](const std::string & name, const std::string & keys) {
         return "[[probes]]\nname = \"" + name + "\"\nfile = \"" + dir + "/" + name + ".csv\"\nboundary = \"bottom\"\n"
-               "variables = [\"TAU_W\", \"Q_W\", \"WALL_MODEL_U\"]\n" + keys;
+               "fields = [\"TAU_W\", \"Q_W\", \"WALL_MODEL_U\"]\n" + keys;
     };
     std::string s = started_couette("[statistics]\ninterval = 2\n" + probe("every", "") +
                                         probe("averaged", "average = true\ninterval = 4\n"),
@@ -1416,7 +1416,7 @@ TEST(ProbesTest, AveragedProbeOfMassFluxesThroughACutIsTheMeanOfItsSamples) {
                                          : "point = [0.5, 0.5, 0.47]\nnormal = [0.0, 0.3, 1.0]\n";
     auto probe = [&](const std::string & name, const std::string & keys) {
         return "[[probes]]\nname = \"" + name + "\"\nfile = \"" + dir + "/" + name + ".csv\"\ntype = \"cut_plane\"\n" +
-               plane + "variables = [\"MASS_FLUX\", \"P\"]\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
+               plane + "fields = [\"MASS_FLUX\", \"P\"]\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
                "/" + name + "_reductions.csv\"\n" + keys;
     };
     const std::string extra = probe("every", "") + probe("averaged", "average = true\ninterval = 3\n");
@@ -1436,7 +1436,7 @@ TEST(ProbesTest, RestartedRunsContinueTheTimeAveragesBitwise) {
     const std::string dir = fresh_dir("averaged_restart");
     auto probe = [&](const std::string & file) {
         return "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/" + file + "\"\nboundary_type = \"wall\"\n"
-               "variables = [\"TAU_W\", \"Q_W\", \"MASS_FLUX\"]\naverage = true\ninterval = 3\n"
+               "fields = [\"TAU_W\", \"Q_W\", \"MASS_FLUX\"]\naverage = true\ninterval = 3\n"
                "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/red_" + file + "\"\n";
     };
     const std::string stats = "[statistics]\nt_start = 0.003\n";
@@ -1471,7 +1471,7 @@ TEST(ProbesTest, RestartedRunsContinueTheTimeAveragesBitwise) {
 
 TEST(ProbesTest, RejectsAveragesOfAverages) {
     const std::string extra = "[statistics]\nfields = [\"P\"]\n[[probes]]\nname = \"p\"\ntype = \"point\"\npoint = " +
-                              numbers3("0.3", "0.3", "0.3") + "\nvariables = [\"MEAN_P\"]\naverage = true\n";
+                              numbers3("0.3", "0.3", "0.3") + "\nfields = [\"MEAN_P\"]\naverage = true\n";
     Solver solver;
     try {
         solver.init(parse_toml(box_case(8, "1.0", "type = \"MUSCL\"\n", extra)));
@@ -1601,9 +1601,9 @@ TEST(ProbesTest, SpectraOfAnAdvectedWavePeakAtItsFrequency) {
     const std::string dir = fresh_dir("spectra");
     const std::string extra =
         "[[probes]]\nname = \"p\"\nfile = \"" + dir + "/p.csv\"\ntype = \"points\"\npoints = [" +
-        numbers3("0.5", "0.1", "0.3") + ", " + numbers3("0.25", "0.6", "0.7") + "]\nvariables = [\"RHO\", \"P\"]\n"
+        numbers3("0.5", "0.1", "0.3") + ", " + numbers3("0.25", "0.6", "0.7") + "]\nfields = [\"RHO\", \"P\"]\n"
         "time_interval = 0.25\nreductions = [\"max\"]\nreductions_file = \"" + dir + "/p_reductions.csv\"\n"
-        "[probes.spectra]\nvariables = [\"RHO\", \"max_RHO\"]\nlength = 10.0\nfile = \"" + dir + "/s.csv\"\n"
+        "[probes.spectra]\nfields = [\"RHO\", \"max_RHO\"]\nlength = 10.0\nfile = \"" + dir + "/s.csv\"\n"
         "reductions_file = \"" + dir + "/rs.csv\"\nstrouhal = {length = 2.0, velocity = 0.3}\n";
     Solver solver;
     solver.init(parse_toml(advected_wave(extra, "10.0")));
@@ -1647,8 +1647,8 @@ TEST(ProbesTest, RestartedRunsContinueTheSpectraHistoriesBitwise) {
     const std::string dir = fresh_dir("spectra_restart");
     auto probe = [&](const std::string & name) {
         return "[[probes]]\nname = \"p\"\nfile = \"" + dir + "/" + name + ".csv\"\ntype = \"point\"\npoint = " +
-               numbers3("0.5", "0.1", "0.3") + "\nvariables = [\"RHO\", \"U_X\"]\ntime_interval = 0.25\n"
-               "spectra = {variables = [\"RHO\", \"U_X\"], length = 4.0, segments = 3, time_interval = 1.0, file = \"" +
+               numbers3("0.5", "0.1", "0.3") + "\nfields = [\"RHO\", \"U_X\"]\ntime_interval = 0.25\n"
+               "spectra = {fields = [\"RHO\", \"U_X\"], length = 4.0, segments = 3, time_interval = 1.0, file = \"" +
                dir + "/" + name + "_spectra.csv\"}\n";
     };
     Solver straight;
@@ -1675,7 +1675,7 @@ TEST(ProbesTest, RestartedRunsContinueTheSpectraHistoriesBitwise) {
     }
     comm::barrier();
     // Another history: other variables
-    input.replace(input.find("variables = [\"RHO\", \"U_X\"], length"), 30, "variables = [\"RHO\"], length");
+    input.replace(input.find("fields = [\"RHO\", \"U_X\"], length"), 31, "fields = [\"RHO\"], length");
     Solver other;
     EXPECT_THROW(other.init(parse_toml(input)), InputError);
 }
@@ -1683,7 +1683,7 @@ TEST(ProbesTest, RestartedRunsContinueTheSpectraHistoriesBitwise) {
 TEST(ProbesTest, RejectsSpectraOfUnevenSamplesAndOfUnknownVariables) {
     auto message = [](const std::string & keys) {
         const std::string extra = "[[probes]]\nname = \"p\"\ntype = \"point\"\npoint = " + numbers3("0.3", "0.3", "0.3") +
-                                  "\nvariables = [\"P\"]\n" + keys;
+                                  "\nfields = [\"P\"]\n" + keys;
         Solver solver;
         try {
             solver.init(parse_toml(box_case(8, "1.0", "type = \"MUSCL\"\n", extra)));
@@ -1692,11 +1692,11 @@ TEST(ProbesTest, RejectsSpectraOfUnevenSamplesAndOfUnknownVariables) {
         }
         return std::string("accepted");
     };
-    EXPECT_NE(message("interval = 2\nspectra = {variables = [\"P\"], length = 1.0}\n").find("time_interval"),
+    EXPECT_NE(message("interval = 2\nspectra = {fields = [\"P\"], length = 1.0}\n").find("time_interval"),
               std::string::npos);
-    EXPECT_NE(message("time_interval = 0.1\nspectra = {variables = [\"RHO\"], length = 1.0}\n").find("List one of: P"),
+    EXPECT_NE(message("time_interval = 0.1\nspectra = {fields = [\"RHO\"], length = 1.0}\n").find("List one of: P"),
               std::string::npos);
-    EXPECT_NE(message("time_interval = 0.1\nspectra = {variables = [\"P\"], length = 0.2}\n").find("at least 4"),
+    EXPECT_NE(message("time_interval = 0.1\nspectra = {fields = [\"P\"], length = 0.2}\n").find("at least 4"),
               std::string::npos);
 }
 
@@ -1706,7 +1706,7 @@ TEST(ProbesTest, WallCoefficientsTakeTheOutputReferenceUnlessTheProbeGivesOne) {
     const auto cf = [&](const std::string & output, const std::string & own) {
         const std::string dir = fresh_dir("output_reference");
         const std::string probe = output + "[[probes]]\nname = \"walls\"\nfile = \"" + dir +
-                                  "/walls.csv\"\nboundary_type = \"wall\"\nvariables = [\"CF\", \"CP\"]\n" + own;
+                                  "/walls.csv\"\nboundary_type = \"wall\"\nfields = [\"CF\", \"CP\"]\n" + own;
         Solver solver;
         solver.init(parse_toml(couette_case(8, probe)));
         run(solver);

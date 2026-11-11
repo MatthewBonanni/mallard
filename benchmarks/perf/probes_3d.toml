@@ -73,7 +73,7 @@ name = "cut"
 type = "cut_plane"
 point = [1.0, 1.5, 1.6]
 normal = [1.0, 0.3, 0.2]
-variables = ["P", "MASS_FLUX"]
+fields = ["P", "MASS_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral", "mean"]
@@ -82,7 +82,7 @@ reductions = ["integral", "mean"]
 name = "sphere"
 region = {type = "sphere", center = [1.57, 1.57, 1.57], radius = 0.8, filled = false}
 n_points = [48, 96]
-variables = ["P", "MASS_FLUX"]
+fields = ["P", "MASS_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral"]
@@ -90,16 +90,16 @@ reductions = ["integral"]
 [[probes]]
 name = "wall"
 boundary = "bottom"
-variables = ["P", "MASS_FLUX", "TAU_W"]
+fields = ["P", "MASS_FLUX", "TAU_W"]
 samples = false
 reductions = ["integral", "max"]
 
 [[probes]]
 name = "ball"
 region = {type = "sphere", center = [1.57, 1.57, 1.57], radius = 0.8}
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 
 [[probes]]
 name = "shell"
 region = {type = "sphere", center = [1.57, 1.57, 1.57], radius = 0.8, filled = false}
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]

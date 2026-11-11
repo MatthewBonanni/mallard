@@ -136,69 +136,69 @@ std::string channel(const std::string & dir) {
       << "[integrals]\nfile = \"" << dir << "/integrals.csv\"\n"
       << "[[forces]]\nzone = \"bottom\"\nfile = \"" << dir << "/forces.csv\"\n"
       << "[[probes]]\nname = \"point\"\nfile = \"" << dir << "/point.csv\"\npoint = " << SIDE_POINT
-      << "\nvariables = [\"RHO\", \"U\", \"P\", \"T\", \"H\"]\nreductions = [\"integral\", \"mean\"]\n"
+      << "\nfields = [\"RHO\", \"U\", \"P\", \"T\", \"H\"]\nreductions = [\"integral\", \"mean\"]\n"
       << "reductions_file = \"" << dir << "/point_reductions.csv\"\n"
       << "[[probes]]\nname = \"line\"\nfile = \"" << dir << "/line.csv\"\nstart = "
       << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = " << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]")
-      << "\nn_points = 4\nvariables = [\"RHO\", \"P\"]\nreductions = [\"integral\", \"rms\"]\n"
+      << "\nn_points = 4\nfields = [\"RHO\", \"P\"]\nreductions = [\"integral\", \"rms\"]\n"
       << "reductions_file = \"" << dir << "/line_reductions.csv\"\n"
       << "[[probes]]\nname = \"vtp\"\nformat = \"vtp\"\nfile = \"" << dir << "/vtp.pvd\"\nstart = "
       << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = " << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]")
-      << "\nn_points = 4\nvariables = [\"RHO\", \"T\"]\n"
+      << "\nn_points = 4\nfields = [\"RHO\", \"T\"]\n"
       << "[[probes]]\nname = \"wall\"\nfile = \"" << dir << "/wall.csv\"\nboundary = \"bottom\"\n"
-      << "variables = [\"P\", \"CP\", \"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENTHALPY_FLUX\", \"TRACTION_PRESSURE\"]\n"
+      << "fields = [\"P\", \"CP\", \"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENTHALPY_FLUX\", \"TRACTION_PRESSURE\"]\n"
       << "reference = {rho = 1.0, u = " << (N_DIM == 3 ? "[0.5, 0.0, 0.0]" : "[0.5, 0.0]") << ", p = 1.0}\n"
       << "reductions = [\"integral\", \"mean\"]\nreductions_file = \"" << dir << "/wall_reductions.csv\"\n"
       << "[[probes]]\nname = \"wall_vtp\"\nformat = \"vtp\"\nfile = \"" << dir << "/wall_vtp.pvd\"\n"
-      << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\", \"TRACTION_PRESSURE\"]\n";
+      << "boundary = \"bottom\"\nfields = [\"P\", \"MASS_FLUX\", \"TRACTION_PRESSURE\"]\n";
     for (const std::string format : {"csv", "vtp"}) {
         const std::string suffix = format == "vtp" ? "_vtp.pvd" : ".csv";
         s << "[[probes]]\nname = \"cut_" << format << "\"\nformat = \"" << format << "\"\nfile = \"" << dir << "/cut"
           << suffix << "\"\ntype = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = "
-          << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]") << "\nvariables = [\"P\", \"MASS_FLUX\"]\n"
+          << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]") << "\nfields = [\"P\", \"MASS_FLUX\"]\n"
           << "reductions = [\"integral\"]\nreductions_file = \"" << dir << "/cut_" << format << "_reductions.csv\"\n"
           << "[[probes]]\nname = \"surface_" << format << "\"\nformat = \"" << format << "\"\nfile = \"" << dir
           << "/surface" << suffix << "\"\n"
           << (N_DIM == 3 ? "region = {type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}\nn_points = [8, 16]\n"
                          : "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n")
-          << "variables = [\"MASS_FLUX\"]\nreductions = [\"integral\"]\nreductions_file = \"" << dir << "/surface_"
+          << "fields = [\"MASS_FLUX\"]\nreductions = [\"integral\"]\nreductions_file = \"" << dir << "/surface_"
           << format << "_reductions.csv\"\n";
     }
     const std::string variables =
-        "variables = [\"RHO\", \"RHOU\", \"RHOE\", \"U\", \"U_X\", \"P\", \"T\", \"H\", \"CFL\", \"VORTICITY\", "
+        "fields = [\"RHO\", \"RHOU\", \"RHOE\", \"U\", \"U_X\", \"P\", \"T\", \"H\", \"CFL\", \"VORTICITY\", "
         "\"MACH\", \"Q_CRITERION\", \"LAMBDA2\", \"SCHLIEREN\", \"MEAN_*\", \"COV_*\"]\n";
     s << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 2\n" << variables
       << "[[write_data]]\nprefix = \"" << dir << "/wall\"\nformat = \"vtu\"\nregion = \"bottom\"\ninterval = 2\n"
-      << "variables = [\"P\", \"U\"]\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/near\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"P\"]\n"
+      << "fields = [\"P\", \"U\"]\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/near\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"P\"]\n"
       << "region = {type = \"sphere\", center = " << SIDE_POINT << ", radius = 0.3}\n";
 #ifdef Mallard_HAS_HDF5
     if (comm::size() == 1 || have_parallel_hdf5()) {
         s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"xdmf\"\ninterval = 2\n" << variables
           << "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/probe.h5\"\nstart = "
           << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
-          << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nvariables = [\"RHO\", \"U\"]\n"
+          << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nfields = [\"RHO\", \"U\"]\n"
           << "[[probes]]\nname = \"wall_h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/wall_probe.h5\"\n"
-          << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\"]\n"
+          << "boundary = \"bottom\"\nfields = [\"P\", \"MASS_FLUX\"]\n"
           << "[[probes]]\nname = \"cut_h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/cut_probe.h5\"\n"
           << "type = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
-          << "\nvariables = [\"MASS_FLUX\"]\n"
+          << "\nfields = [\"MASS_FLUX\"]\n"
           << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\ninterval = 2\n" << variables
           << "[[write_data]]\nprefix = \"" << dir << "/ks\"\nformat = \"vtkhdf\"\nseries = true\ninterval = 2\n"
           << variables << "[[write_data]]\nprefix = \"" << dir << "/kwall\"\nformat = \"vtkhdf\"\n"
-          << "region = \"bottom\"\ninterval = 2\nvariables = [\"P\", \"U\"]\n"
+          << "region = \"bottom\"\ninterval = 2\nfields = [\"P\", \"U\"]\n"
           << "[[probes]]\nname = \"vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/probe.vtkhdf\"\nstart = "
           << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
-          << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nvariables = [\"RHO\", \"U\"]\n"
+          << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 4\nfields = [\"RHO\", \"U\"]\n"
           << "[[probes]]\nname = \"wall_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/wall_probe.vtkhdf\"\n"
-          << "boundary = \"bottom\"\nvariables = [\"P\", \"MASS_FLUX\"]\n"
+          << "boundary = \"bottom\"\nfields = [\"P\", \"MASS_FLUX\"]\n"
           << "[[probes]]\nname = \"cut_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/cut_probe.vtkhdf\"\n"
           << "type = \"cut_plane\"\npoint = " << SIDE_POINT << "\nnormal = " << (N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]")
-          << "\nvariables = [\"MASS_FLUX\"]\n"
+          << "\nfields = [\"MASS_FLUX\"]\n"
           << "[[probes]]\nname = \"surface_vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/surface_probe.vtkhdf\"\n"
           << (N_DIM == 3 ? "region = {type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2, filled = false}\nn_points = [8, 16]\n"
                          : "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\nn_points = 16\n")
-          << "variables = [\"MASS_FLUX\"]\n";
+          << "fields = [\"MASS_FLUX\"]\n";
     }
 #endif
     return s.str();
@@ -517,7 +517,7 @@ TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
       << "[integrals]\nfile = \"" << dir << "/integrals.csv\"\n"
       << "[[forces]]\nzone = \"top\"\nfile = \"" << dir << "/forces.csv\"\n"
       << "[[probes]]\nname = \"top\"\nboundary = \"top\"\nfile = \"" << dir << "/top.csv\"\n"
-      << "variables = [\"P\", \"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"mean\"]\n"
+      << "fields = [\"P\", \"TRACTION_PRESSURE\"]\nreductions = [\"integral\", \"mean\"]\n"
       << "reductions_file = \"" << dir << "/top_reductions.csv\"\n";
     {
         Solver solver;
@@ -569,7 +569,7 @@ TEST(FieldUnitsTest, EveryFieldACaseListsIsWrittenAndNoOther) {
     Solver writing;
     writing.set_distributed(false);
     writing.init(parse_toml(base + "[[write_data]]\nprefix = \"" + dir + "/all\"\nformat = \"vtu\"\ninterval = 1\n"
-                            "variables = " + variables + "]\n"));
+                            "fields = " + variables + "]\n"));
     writing.run();
     std::vector<std::string> written;
     for (const auto & f : output::open(dir + "/all_000001.vtu").fields) written.push_back(f.name);
@@ -581,7 +581,7 @@ TEST(FieldUnitsTest, EveryFieldACaseListsIsWrittenAndNoOther) {
     Solver unlisted;
     unlisted.set_distributed(false);
     EXPECT_THROW(unlisted.init(parse_toml(base + "[[write_data]]\nprefix = \"" + dir + "/mu\"\nformat = \"vtu\"\n"
-                                          "variables = [\"MU_T\"]\n")),
+                                          "fields = [\"MU_T\"]\n")),
                  InputError);
 }
 

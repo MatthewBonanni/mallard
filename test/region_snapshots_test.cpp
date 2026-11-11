@@ -175,7 +175,7 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsAreWrittenAsTheir
         s << name << " = {" << inline_keys.substr(0, inline_keys.size() - 2) << "}\n";
         names += ", \"" + name + "\"";
     }
-    const std::string variables = "variables = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n";
+    const std::string variables = "fields = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n";
     s << "[[write_data]]\nprefix = \"" << dir << "/s/s\"\nformat = \"vtu\"\nregions = [" << names << "]\n" << variables;
     auto probe = [&](const std::string & name, const std::string & format, const std::string & where) {
         const std::string sub = format == "vtp" ? "p" : "pk";
@@ -227,12 +227,12 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsDoNotDependOnTheR
             names += ", \"" + name + "\"";
         }
         s << "[[write_data]]\nprefix = \"" << dir << "/" << sub << "/v\"\nformat = \"vtu\"\ninterval = 2\n"
-          << "variables = [\"RHO\", \"U\", \"MASS_FLUX\", \"CFL\"]\nregions = [\"bottom\", \"slice\"" << (N_DIM == 3 ? ", \"surf\"" : "")
+          << "fields = [\"RHO\", \"U\", \"MASS_FLUX\", \"CFL\"]\nregions = [\"bottom\", \"slice\"" << (N_DIM == 3 ? ", \"surf\"" : "")
           << "]\n[[write_data]]\nprefix = \"" << dir << "/" << sub << "/c\"\nformat = \"vtu\"\ninterval = 2\n"
-          << "variables = [\"RHO\", \"P\"]\nregions = [" << names << "]\n";
+          << "fields = [\"RHO\", \"P\"]\nregions = [" << names << "]\n";
 #ifdef Mallard_HAS_HDF5
         s << "[[write_data]]\nprefix = \"" << dir << "/" << sub << "/k\"\nformat = \"vtkhdf\"\ninterval = 2\n"
-          << "variables = [\"RHO\", \"P\"]\nregions = [" << names << "]\n";
+          << "fields = [\"RHO\", \"P\"]\nregions = [" << names << "]\n";
 #endif
         return box_case(N_DIM == 3 ? "cartesian_tet" : "cartesian_tri", "type = \"MUSCL\"\n", s.str());
     };
@@ -272,7 +272,7 @@ TEST(RegionSnapshotsTest, AVolumeIsTheFullSnapshotRestrictedToTheCellsItCovers) 
     const std::string dir = fresh_dir("volume");
     const std::string ball = std::string("{type = \"sphere\", center = ") + point(0.45, 0.5, 0.5) +
                              ", radius = 0.3, edge = 0.1}";
-    const std::string variables = "variables = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n";
+    const std::string variables = "fields = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n";
     std::string writers = "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\n" + variables +
                           "[[write_data]]\nprefix = \"" + dir + "/near\"\nformat = \"vtu\"\nregion = " + ball + "\n" + variables;
 #ifdef Mallard_HAS_HDF5
@@ -355,7 +355,7 @@ TEST(RegionSnapshotsTest, RegionsWriteOneSeriesEachAndTheLastStateToo) {
     const std::string dir = fresh_dir("list");
     const std::string writers =
         "[regions]\nslice = {type = \"cut_plane\", point = " + point(0.5, 0.5, 0.5) + ", normal = " + point(0.0, 1.0, 0.0) +
-        "}\n[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"vtu\"\ninterval = 3\nvariables = [\"P\"]\n"
+        "}\n[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"vtu\"\ninterval = 3\nfields = [\"P\"]\n"
         "regions = [\"slice\", {type = \"" + std::string(N_DIM == 3 ? "box" : "rectangle") + "\", center = " + point(0.25, 0.25, 0.25) + ", size = " + point(0.5, 0.5, 0.5) +
         "}, \"domain\", \"top\"]\n";
     Solver solver;
@@ -389,7 +389,7 @@ TEST(RegionSnapshotsTest, SurfacesAndCurvesOfRegionsHaveASampleAtEachElement) {
                                          : "{type = \"circle\", center = [0.5, 0.5], radius = 0.3}";
     run_case(box_case("cartesian", "type = \"MUSCL\"\n",
                       "[regions]\nshell = " + shell + "\n[[write_data]]\nprefix = \"" + dir +
-                          "/e\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"P\", \"MASS_FLUX\"]\nregion = \"shell\"\n"));
+                          "/e\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"P\", \"MASS_FLUX\"]\nregion = \"shell\"\n"));
     if (!comm::is_root()) return;
     const std::string text = read_all(dir + "/e_000002.vtp");
     const std::string marker = "<AppendedData encoding=\"raw\">";
@@ -426,7 +426,7 @@ TEST(RegionSnapshotsTest, SurfacesAndCurvesOfRegionsHaveASampleAtEachElement) {
 
 TEST(RegionSnapshotsTest, KeysThatDoNotFitTheRegionAreErrors) {
     const std::string dir = fresh_dir("errors");
-    const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/e\"\ninterval = 1\nvariables = [\"P\"]\n";
+    const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/e\"\ninterval = 1\nfields = [\"P\"]\n";
     const std::string slice = "{type = \"cut_plane\", point = " + point(0.5, 0.5, 0.5) + ", normal = " + point(1, 0, 0) + "}";
     const std::string ball = "{type = \"sphere\", center = " + point(0.5, 0.5, 0.5) + ", radius = 0.2}";
     auto message = [&](const std::string & keys) {

@@ -2,8 +2,8 @@
  * @file preset_validation_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief One short validation case per numerics preset, run with the preset
- *        alone: the Noh implosion and Sod's problem (robust), the convergence
- *        of a smooth wave (accurate), the decay of a Taylor-Green vortex
+ *        alone: the Noh implosion and Sod's problem (second_order and first_order), the convergence
+ *        of a smooth wave (high_order), the decay of a Taylor-Green vortex
  *        (les) and the speed of a premixed flame (reacting).
  * @version 0.1
  * @date 2026-10-16
@@ -122,12 +122,10 @@ double taylor_green_excess_decay(const std::string & preset, uint32_t n) {
     return std::log(ke1 / ke0) / (-4.0 * nu * k * k * t_end) - 1.0;
 }
 
-} // namespace
-
-TEST(PresetValidation, RobustKeepsTheNohImplosionPositive) {
-    // examples/noh_axisymmetric at 60 x 60 to t = 0.6: the shock is at r = 0.2
-    // with rho = 64 behind it
-    Input input = example_under_preset({"noh_axisymmetric/input.toml", "robust", 2, "", {}, ""}, 1, 60);
+/** @brief examples/noh_axisymmetric at 60 x 60 to t = 0.6 (the shock at r = 0.2, rho = 64 behind it): the lowest
+ *         pressure and the mean density over 0.05 < r < 0.15. */
+std::pair<double, double> noh(const std::string & preset) {
+    Input input = example_under_preset({"noh_axisymmetric/input.toml", preset, 2, "", {}, ""}, 1, 60);
     input.as_table()["run"] = Input::table_type{{"t_stop", 0.6}};
     auto solver = run_input(input);
     const auto & m = *solver->get_mesh();
@@ -140,39 +138,57 @@ TEST(PresetValidation, RobustKeepsTheNohImplosionPositive) {
             vol += double(m.h_cell_volume(i));
         }
     }
-    EXPECT_GT(p_min, 0.0);
-    EXPECT_NEAR(rho_sum / vol, 64.0, 0.1 * 64.0);
+    return {p_min, rho_sum / vol};
 }
 
-TEST(PresetValidation, RobustResolvesSodsProblem) {
-    const double e1 = sod_error("robust", 100);
-    const double e2 = sod_error("robust", 200);
+} // namespace
+
+TEST(PresetValidation, SecondOrderKeepsTheNohImplosionPositive) {
+    const auto [p_min, plateau] = noh("second_order");
+    EXPECT_GT(p_min, 0.0);
+    EXPECT_NEAR(plateau, 64.0, 0.1 * 64.0);
+}
+
+TEST(PresetValidation, FirstOrderKeepsTheNohImplosionPositive) {
+    EXPECT_GT(noh("first_order").first, 0.0);
+}
+
+TEST(PresetValidation, SecondOrderResolvesSodsProblem) {
+    const double e1 = sod_error("second_order", 100);
+    const double e2 = sod_error("second_order", 200);
     EXPECT_LT(e2, 0.004);
     EXPECT_LT(e2, 0.7 * e1);
 }
 
-TEST(PresetValidation, AccurateConvergesAtHighOrderForSmoothFlow) {
+TEST(PresetValidation, HighOrderConvergesAtHighOrderForSmoothFlow) {
     SKIP_IN_SINGLE_PRECISION("the error on the finer mesh is near the single-precision floor");
-    const double e1 = wave_error("accurate", 16);
-    const double e2 = wave_error("accurate", 32);
+    const double e1 = wave_error("high_order", 16);
+    const double e2 = wave_error("high_order", 32);
     EXPECT_GT(std::log2(e1 / e2), 4.0) << e1 << " " << e2;
-    EXPECT_LT(e2, 0.05 * wave_error("robust", 32));
+    EXPECT_LT(e2, 0.05 * wave_error("second_order", 32));
 }
 
 TEST(PresetValidation, LesLeavesTheTaylorGreenDecayToViscosity) {
     const double excess_les = taylor_green_excess_decay("les", 16);
-    const double excess_robust = taylor_green_excess_decay("robust", 16);
+    const double excess_second_order = taylor_green_excess_decay("second_order", 16);
     EXPECT_LT(std::abs(excess_les), 0.01) << excess_les;
-    EXPECT_GT(excess_robust, 0.04) << excess_robust;
+    EXPECT_GT(excess_second_order, 0.04) << excess_second_order;
 }
 
-TEST(PresetValidation, ReactingPropagatesAPremixedFlameAtCanterasSpeed) {
-    // Stoichiometric H2/air at 700 K and 1 atm (Cantera 3.2 FreeFlame,
-    // mechanisms/h2o2.yaml, mixture-averaged: S_L = 9.7473 m/s, thermal
-    // thickness 0.4775 mm, T_b = 2574 K), from a tanh profile to Cantera's
-    // burnt state, burning toward a closed end through gas at rest: the
-    // 1000 K isotherm moves at S_L. 6 cells per thermal thickness.
-    const double S_L = 9.7473, delta = 4.775e-4, tau = delta / S_L;
+namespace {
+
+const double FLAME_SPEED = 9.7473;
+
+/**
+ * @brief Speed of a stoichiometric H2/air flame at 700 K and 1 atm (Cantera 3.2
+ *        FreeFlame, mechanisms/h2o2.yaml, mixture-averaged: S_L = 9.7473 m/s,
+ *        thermal thickness 0.4775 mm, T_b = 2574 K), from a tanh profile to
+ *        Cantera's burnt state, burning toward a closed end through gas at
+ *        rest: the speed of the 1000 K isotherm. 6 cells per thermal
+ *        thickness, the reacting preset plus the numerics keys numerics_extra.
+ */
+double flame_speed(const std::string & numerics_extra) {
+    const double S_L = FLAME_SPEED, delta = 4.775e-4, tau = delta / S_L;
     const int n = 60;
     const double dx = 10 * delta / n;
     const std::string s = "0.5 * (1 + tanh((x - 3.34e-3) / 1.2e-4))";
@@ -188,7 +204,7 @@ TEST(PresetValidation, ReactingPropagatesAPremixedFlameAtCanterasSpeed) {
        << "[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 101325.0\n"
        << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
        << "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
-       << numerics("reacting")
+       << numerics("reacting") << numerics_extra
        << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" << source_dir()
        << "/mechanisms/h2o2.yaml\"\nphase = \"ohmech\"\ntransport = \"mixture_averaged\"\n"
        << "[chemistry]\nrtol = 1.0e-6\natol = 1.0e-10\n"
@@ -230,6 +246,20 @@ TEST(PresetValidation, ReactingPropagatesAPremixedFlameAtCanterasSpeed) {
         stt += t[i] * t[i];
         stx += t[i] * x[i];
     }
-    const double speed = -(n_t * stx - st * sx) / (n_t * stt - st * st);
-    EXPECT_NEAR(speed, S_L, 0.03 * S_L);
+    return -(n_t * stx - st * sx) / (n_t * stt - st * st);
+}
+
+} // namespace
+
+TEST(PresetValidation, ReactingPropagatesAPremixedFlameAtCanterasSpeed) {
+    EXPECT_NEAR(flame_speed(""), FLAME_SPEED, 0.03 * FLAME_SPEED);
+}
+
+TEST(PresetValidation, BoundPreservingTENOKeepsASmoothFlamesSpeed) {
+    // TENO3 alone is within 0.1% here. Bound preservation once clipped the
+    // pressure of troubled flame cells at smooth extrema 1e-4 of the pressure
+    // in size, and the flame ran 4% fast
+    const double speed =
+        flame_speed("[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\nbound_preserving = true\n");
+    EXPECT_NEAR(speed, FLAME_SPEED, 0.01 * FLAME_SPEED);
 }

@@ -22,11 +22,10 @@ Maintain  mallard test | completion | --version
 | `new`, `input upgrade`, `input resolve` | Set up | available |
 | `check input.toml` | Inspect | available |
 | `check --view DIR` (the case view) | Inspect | regions and boundary zones available; the rest planned ([#546](https://github.com/MatthewBonanni/mallard/issues/546)) |
-| `check` with no input | Inspect | planned ([#508](https://github.com/MatthewBonanni/mallard/issues/508)) |
+| `check` with no input (the environment) | Inspect | available |
 | `info <file>`, `info <run-dir>` | Inspect | available; on the [output reader](output_reader.md) |
 | `info <run-dir> --html` (the run report) | Inspect | planned ([#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
-| `list fields\|species\|templates` | Inspect | available (`new --list` is a deprecated alias of `list templates`) |
-| `list keys` | Inspect | planned ([#502](https://github.com/MatthewBonanni/mallard/issues/502), on the key record of [#509](https://github.com/MatthewBonanni/mallard/issues/509)) |
+| `list fields\|species\|templates\|keys` | Inspect | available (`new --list` is a deprecated alias of `list templates`) |
 | `diff` | Inspect | available; on the [output reader](output_reader.md), `--remap` on the [remap](remap.md) |
 | `mesh convert` | Mesh | available |
 | `mesh extrude` | Mesh | planned |
@@ -34,7 +33,7 @@ Maintain  mallard test | completion | --version
 | `post derive` | Post | available; on `post extract`'s case setup, with the in-run [derived fields](../guide/output.md#derived-fields) |
 | `post average` | Post | available; on `post extract`'s case setup, with the in-run [statistics](../guide/statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | Reacting-flow analysis | Post | planned ([#513](https://github.com/MatthewBonanni/mallard/issues/513)) |
-| `post convergence` | Post | planned ([#514](https://github.com/MatthewBonanni/mallard/issues/514)) |
+| `post convergence` | Post | available (scalars and `--exact` norms); norms against the finest run planned |
 | `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
 | `pack` | Share | planned |
 | `test`, `completion`, `--version` | Maintain | available |

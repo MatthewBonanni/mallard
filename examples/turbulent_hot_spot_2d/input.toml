@@ -83,4 +83,4 @@ file = "integrals.csv"
 [[write_data]]
 prefix = "solut/hot_spot"
 time_interval = 0.25
-variables = ["RHO", "U", "T", "VORTICITY"]
+fields = ["RHO", "U", "T", "VORTICITY"]

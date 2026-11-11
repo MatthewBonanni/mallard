@@ -245,11 +245,11 @@ void Settings::require(const Field f, const Input & input) const {
     const uint16_t n = FIELDS[f].needs;
     const auto needs = [&](uint16_t bit) { return (n & bit) != 0; };
     const std::string name = FIELDS[f].name;
-    Diagnostic d{.key = "write_data.variables", .docs = DOCS};
+    Diagnostic d{.key = "write_data.fields", .docs = DOCS};
     for (const Input & entry : input.at("write_data").as_array()) {
-        if (!entry.is_table() || !entry.contains("variables") || !entry.at("variables").is_array()) continue;
-        for (const Input & v : entry.at("variables").as_array()) {
-            if (v.is_string() && v.as_string() == name && d.line == 0) d.line = line_of(entry, "variables");
+        if (!entry.is_table() || !entry.contains("fields") || !entry.at("fields").is_array()) continue;
+        for (const Input & v : entry.at("fields").as_array()) {
+            if (v.is_string() && v.as_string() == name && d.line == 0) d.line = line_of(entry, "fields");
         }
     }
     if (needs(need::THREE_D) && N_DIM != 3) {

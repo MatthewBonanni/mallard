@@ -72,7 +72,8 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
 
     depends_on("c", type="build")
     depends_on("cxx", type="build")
-    depends_on("cmake@3.22:", type="build")
+    depends_on("cmake@4.2:", type="build")
+    depends_on("cuda@13.4:", when="+cuda")
 
     depends_on("kokkos@5: cxxstd=20")
     depends_on("kokkos+openmp", when="+openmp")
@@ -104,6 +105,10 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     conflicts("+cuda", when="cuda_arch=none", msg="Set cuda_arch, e.g. cuda_arch=80 for A100")
     conflicts("+rocm", when="amdgpu_target=none", msg="Set amdgpu_target, e.g. gfx90a")
     conflicts("+cgns", when="~hdf5", msg="CGNS meshes need +hdf5")
+    _too_old = "Mallard supports GCC 15, Clang 22 and Apple Clang 21 or newer"
+    conflicts("%gcc@:14", msg=_too_old)
+    conflicts("%llvm@:21", msg=_too_old)
+    conflicts("%apple-clang@:20", msg=_too_old)
 
     def setup_run_environment(self, env):
         env.set("MALLARD_SHARE", join_path(self.prefix.share, "mallard"))

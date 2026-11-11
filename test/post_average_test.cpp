@@ -70,9 +70,9 @@ void run_case(const std::string & dir, bool axisymmetric = false) {
       << "[output]\ncheck_interval = 1000000\nrun_log = \"\"\n"
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n"
       << "[[write_data]]\nprefix = \"" << dir << "/stats\"\nformat = \"" << (have_hdf5() ? "vtkhdf" : "vtu")
-      << "\"\nvariables = [\"MEAN_*\", \"COV_*\"]\n"
+      << "\"\nfields = [\"MEAN_*\", \"COV_*\"]\n"
       << "interval = 2\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\nvariables = [\"MACH\"]\ninterval = 2\n";
+      << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\nfields = [\"MACH\"]\ninterval = 2\n";
     {
         Solver solver;
         solver.init(parse_toml(s.str()));

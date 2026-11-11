@@ -352,7 +352,9 @@ density or pressure anywhere falls back to first order. With
 `bound_preserving = true`, troubled cells first scale their deviation from
 the cell average by the largest $\theta\in[0, 1]$ that keeps every face value
 $\overline{v}_i + \theta(v_q - \overline{v}_i)$ within $[m, M]$, for $v = \rho, p$
-and the extrema $m$, $M$ of the cell and its face neighbors
+and the extrema $m$, $M$ of the cell and its face neighbors, widened by
+$10^{-3}\,|\overline{v}_i|$ so that smooth extrema of a nearly uniform field
+(the pressure of a low-Mach flame) stay high order
 ([Zhang & Shu 2010](../references.md#zhang-shu-2010)).
 
 Admissible face values do not make the update admissible: a troubled cell's

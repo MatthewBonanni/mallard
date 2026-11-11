@@ -148,7 +148,7 @@ std::string shared_regions(const bool named, const std::string & dir) {
                              : "";
     text += "[[sources]]\ntotal = true\nrhoE = 0.5\nregion = " + both + "\n[[sources]]\nrho = 0.1\nregion = " + ring +
             "\n[[sponges]]\nstrength = \"2 + x\"\nu = " + vector_of("0") + "\np = 1.3\nT = 1.0\nregion = " + box +
-            "\n[[probes]]\nname = \"ring\"\nvariables = [\"RHO\", \"P\"]\nregion = " + ring + "\nreductions_file = \"" +
+            "\n[[probes]]\nname = \"ring\"\nfields = [\"RHO\", \"P\"]\nregion = " + ring + "\nreductions_file = \"" +
             dir + "/" + (named ? "named" : "inline") + ".csv\"\n";
     return text;
 }

@@ -33,13 +33,13 @@ Mallard's readers take step, time and run from what the files record.
 [[write_data]]
 prefix = "solut/flow"         # directories are created
 time_interval = 0.01          # or interval = 100 (steps)
-variables = ["RHO", "U", "P", "T", "VORTICITY"]
+fields = ["RHO", "U", "P", "T", "VORTICITY"]
 
 [[write_data]]                # several entries write independently
 prefix = "solut/wall"
 interval = 50
 region = "cylinder"           # a boundary zone, a slice, a volume: any region (below)
-variables = ["P", "T"]
+fields = ["P", "T"]
 ```
 
 *Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
@@ -50,14 +50,14 @@ variables = ["P", "T"]
 | `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, with a `.vtkhdf.series` index), `vtu` (ParaView, with a `.pvd` time series), `xdmf` (XDMF indexes over HDF5 files) or `restart`; see [which format](#which-format). Builds without HDF5 write `vtu`, with a warning |
 | `series` | `false` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf` |
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
-| `variables` | required (all but `restart`) | Variables to write, below; `Y_*` selects every variable with that prefix |
+| `fields` | required (all but `restart`) | Fields to write, below (`mallard list fields input.toml` lists those of a case); `Y_*` selects every field with that prefix |
 | `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (removed in 0.10.0; `mallard input upgrade` rewrites it) |
 | `regions` | none | Instead of `region`: a list of regions, each written as its own series, `PREFIX_<name>` (inline ones: `PREFIX_<place in the list>`) |
 | `compression` | `"none"` | `"zlib"`: lossless compression of `vtkhdf`, `vtu`, `xdmf` and `restart` files (below) |
 | `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `xdmf` with `compression = "zlib"`: lossy, each cell value within this relative error |
 | `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
 
-**Variables:** `mallard list fields input.toml` lists exactly those of a case, and
+**Fields:** `mallard list fields input.toml` lists exactly those of a case, and
 `mallard list fields` all of them with their units and what each needs
 ([Command line](cli.md#mallard-list-fields)).
 
@@ -89,7 +89,7 @@ reference = {rho = 1.2, u = [30.0, 0.0], p = 101325.0}   # for CP only
 [[write_data]]
 prefix = "solut/jet"
 interval = 500
-variables = ["RHO", "U", "P", "MACH", "P0", "Q_CRITERION", "LAMBDA2", "SCHLIEREN", "CP"]
+fields = ["RHO", "U", "P", "MACH", "P0", "Q_CRITERION", "LAMBDA2", "SCHLIEREN", "CP"]
 ```
 
 | Name | Units | Definition |
@@ -142,7 +142,7 @@ progress = {species = ["CO2", "CO"], burnt = 0.15}
 [[write_data]]
 prefix = "solut/flame"
 interval = 200
-variables = ["T", "HRR", "MIXTURE_FRACTION", "PROGRESS_VARIABLE", "FLAME_INDEX", "SCALAR_DISSIPATION"]
+fields = ["T", "HRR", "MIXTURE_FRACTION", "PROGRESS_VARIABLE", "FLAME_INDEX", "SCALAR_DISSIPATION"]
 ```
 
 | Name | Units | Definition |
@@ -194,7 +194,7 @@ give them for runs that set none, or replace them.
 | `format` | Opens in | Files |
 |---|---|---|
 | `vtkhdf` (default) | ParaView 5.12+, PyVista, h5py | One file per snapshot, or one for the series (`series = true`) |
-| `xdmf` | VisIt, meshio, ParaView of any version; h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
+| `xdmf` | VisIt, meshio, ParaView of any version ([open by a path with a directory](#xdmf-in-paraview)); h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
 | `vtu` | Anything with a VTK XML reader (e.g. Tecplot); builds without HDF5 | One file per rank per snapshot, with a `.pvtu` and a `.pvd` series |
 | `restart` | Mallard, to continue or remap a run | One file per snapshot |
 
@@ -231,6 +231,17 @@ once (`PREFIX_mesh.h5`), one HDF5 file of fields per snapshot and XDMF
 indexes (`PREFIX.xmf` for the series), all in global cell order; read it in
 Python with `tools/mallard/h5.py`.
 
+<a id="xdmf-in-paraview"></a>**XDMF in ParaView.** The `.xmf` files name their
+HDF5 files relative to themselves, as XDMF allows. ParaView's XDMF reader
+(ParaView 6.0.1, Xdmf3) gets this wrong when it is given a bare file name, as in
+`pvpython script.py flow.xmf` or `OpenDataFile("flow.xmf")`: it fails to open
+`flow.xmfflow_mesh.h5` and aborts with a misleading error about the number of
+dimensions. Give it a path with a directory in it: `./flow.xmf`,
+`solut/flow.xmf` or an absolute path. The ParaView GUI passes absolute paths, so
+files opened from it are not affected. VTKHDF does not have this problem.
+Mallard does not write absolute paths into the `.xmf` files, because then a run
+directory could no longer be moved or copied.
+
 **Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
 
 ```toml
@@ -240,7 +251,7 @@ io_threads = 8              # async = true is the default
 [[write_data]]
 prefix = "solut/flow"
 interval = 500
-variables = ["RHO", "U", "P", "T"]
+fields = ["RHO", "U", "P", "T"]
 compression = "zlib"       # lossless; readable by any ParaView
 relative_error = 1e-4       # optional: lossy, |x' - x| <= 1e-4 |x| per value
 ```
@@ -269,19 +280,19 @@ x3 = {type = "cut_plane", point = [0.04, 0, 0], normal = [1, 0, 0]}
 prefix = "solut/near"
 time_interval = 1e-4
 region = "near_field"
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 
 [[write_data]]                # three slices: solut/x_x1.vtkhdf, solut/x_x2.vtkhdf, solut/x_x3.vtkhdf
 prefix = "solut/x"
 time_interval = 2e-5
 regions = ["x1", "x2", "x3"]
-variables = ["U", "P", "MASS_FLUX"]
+fields = ["U", "P", "MASS_FLUX"]
 
 [[write_data]]                # a boundary zone, by its name
 prefix = "solut/wall"
 interval = 50
 region = "cylinder"
-variables = ["P", "T"]
+fields = ["P", "T"]
 ```
 
 ![A disk's cells with their REGION_FRACTION, and their pressure with three slices across the field, on a triangle mesh](../images/guide/region_snapshots-light.svg#gh-light-mode-only)
@@ -302,7 +313,7 @@ A volume is written by every rank in global order, like the whole mesh;
 zone, cut plane, surface, curve or points is written as a probe writes it, by
 the same code: `vtkhdf` writes one PolyData file `PREFIX.vtkhdf` of every
 snapshot (`series` is always on), `vtu` one VTK PolyData file per snapshot,
-`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `variables` are sampled
+`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `fields` are sampled
 as [`[[probes]]`](probes.md) sample them (`U` writes `U_X`, `U_Y`, `U_Z`);
 any other variable of a snapshot (`HRR`, `P_MAX`, `MEAN_P`, ...) takes the value
 of the cell holding each sample. Either kind is
@@ -636,11 +647,12 @@ after it are that run's), and the run record's `start` record.
 | `schema`, `version` | `"mallard-run"`, 3 |
 | `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
 | `dependencies` | Versions of `compiler`, `kokkos`, `mpi` (the library's own string and the standard), `hdf5`, `cgns`, `zlib`, `nccl`, `gpu_runtime` and `gpu_driver` (CUDA or HIP); `null` for those not built in |
-| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
+| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `hdf5_parallel` (HDF5 built with MPI), `kaminpar`, `species_layout` |
 | `run` | `run_id` (a random UUID, new for every run, restarts included), `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run record's `placement`), `restart_of` (as the run record's: `run_id`, `file`, `step`; `null` for a fresh start) |
 | `input` | `file`, `sha256` of its bytes, its `text`, and `resolved`: the input with every key explicit, as the run used it ([the resolved input](input_files.md#the-resolved-input), what `mallard input resolve` writes) |
 | `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
-| `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, its `value` in the resolved input (as TOML: `"\"HLLC\""`, `0.5`) and `from_preset` (`false` where the input overrides it) |
+| `files` | Each other file the run read, once (absent if none): `kind` (`mechanism`, `table`, `inflow_profile`, `probe_points`, `restart`, `remap_source`, `remap_mesh`), `path` as given, `resolved`, `bytes`, and `sha256` of its bytes. A restart file or remap source is not hashed again: it records the `run_id`, `step` and `t` of the run that wrote it, and the `sha256` from that run's [output record](#run-record-mallardjsonl) of the file (`sha256_from`). Where there is none (a copied or moved file, a run before 0.10, a changed file) and for a remap source mesh, `sha256` is `null`, with the file's `modified` time and a `note` saying why |
+| `preset` | The `[numerics] preset` (`null` without one): `name`, `default` (`true` when the input names no preset and gets the default, `high_order`), and per key it covers its `key`, its `value` in the resolved input (as TOML: `"\"HLLC\""`, `0.5`) and `from_preset` (`false` where the input overrides it) |
 
 Before 0.10 the block was named the provenance block: schema
 `"mallard-provenance"`, the comment `<!-- provenance {...} -->`, the attribute
@@ -782,6 +794,10 @@ the run would have written them ([Probes of existing output](probes.md#probes-of
 the series, per cell or over homogeneous directions, as `[statistics]` keeps
 them ([Averages of saved snapshots](statistics.md#averages-of-saved-snapshots-mallard-post-average)).
 
+`mallard post convergence` compares runs of a case at several resolutions:
+the observed order, the extrapolated value and the grid convergence index of
+their forces, integrals and probes ([Grid convergence](convergence.md)).
+
 ### Comparing two solutions: `mallard diff`
 
 `mallard diff A B` tells whether two files hold the same solution and, if not,
@@ -880,6 +896,7 @@ ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` 
 
 - [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output)
 - [Probes and monitors](probes.md): probes, wall forces, domain integrals
+- [Grid convergence](convergence.md): discretization error from runs at several resolutions
 - [Statistics](statistics.md): time averages, spectra and correlations, phase averages
 - [Initialization and restarts](initialization.md): restart files and their format
 - [Running](running.md): run control of a running case

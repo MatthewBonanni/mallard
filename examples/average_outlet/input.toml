@@ -74,4 +74,4 @@ check_interval = 1000
 prefix = "./solut/outlet"
 format = "vtu"
 time_interval = 2.5e-4
-variables = ["RHO", "U_X", "P", "T"]
+fields = ["RHO", "U_X", "P", "T"]

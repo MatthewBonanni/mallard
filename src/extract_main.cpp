@@ -29,6 +29,7 @@
 #include "favre_average.h"
 #include "homogeneous_average.h"
 #include "input.h"
+#include "input_upgrade.h"
 #include "json.h"
 #include "log.h"
 #include "mesh_block.h"
@@ -233,8 +234,8 @@ std::string probe_extension(const Input::table_type & entry) {
 bool time_averaged(const Input & entry) {
     const auto & t = entry.as_table().entries();
     if (t.contains("average") && t.at("average").is_boolean() && t.at("average").as_boolean()) return true;
-    if (!t.contains("variables") || !t.at("variables").is_array()) return false;
-    for (const Input & v : t.at("variables").as_array()) {
+    if (!t.contains("fields") || !t.at("fields").is_array()) return false;
+    for (const Input & v : t.at("fields").as_array()) {
         if (v.is_string() && (v.as_string().starts_with("MEAN_") || v.as_string().starts_with("COV_"))) return true;
     }
     return false;
@@ -298,7 +299,7 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
         Input::table_type entry;
         entry["name"] = Input(name);
         entry["region"] = region_value(args.value_or("--region", ""));
-        entry["variables"] = string_array(fields);
+        entry["fields"] = string_array(fields);
         if (args.has("--reductions")) entry["reductions"] = string_array(split_list(args.value_or("--reductions", "")));
         if (args.has("--sampling")) entry["sampling"] = Input(args.value_or("--sampling", ""));
         if (std::find(kept.begin(), kept.end(), name) != kept.end()) {
@@ -346,7 +347,7 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
         Input::table_type entry;
         plan.snapshot_prefix = under(dir, name);
         entry["prefix"] = Input(plan.snapshot_prefix);
-        entry["variables"] = string_array(fields);
+        entry["fields"] = string_array(fields);
         entry["interval"] = Input(1);
         entry["format"] = Input(format);
         if (args.has("--region")) entry["region"] = region_value(args.value_or("--region", ""));
@@ -430,7 +431,7 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
     Input::table_type entry;
     plan.snapshot_prefix = under(dir, args.value_or("--name", "derived"));
     entry["prefix"] = Input(plan.snapshot_prefix);
-    entry["variables"] = string_array(variables);
+    entry["fields"] = string_array(variables);
     entry["interval"] = Input(1);
     entry["format"] = Input(format);
     if (args.has("--region")) entry["region"] = region_value(args.value_or("--region", ""));
@@ -633,19 +634,25 @@ std::vector<output::Contents> open_files(const cli::Args & args, const std::stri
 
 /** @brief The case's input: -i, else the input in the first file's run block; case_from says which. */
 Input case_input(const cli::Args & args, const output::Contents & first, std::string & case_from) {
+    Input input;
     if (args.has("-i")) {
         case_from = args.value_or("-i", "");
-        return parse_input(case_from);
+        input = parse_input(case_from);
+    } else {
+        bool resolved = false;
+        const std::string text = recorded_input(first, resolved);
+        if (text.empty()) {
+            throw std::runtime_error(first.path + " records no input (files of Mallard 0.9 and later do, in their "
+                                     "run block): give the input file with -i");
+        }
+        case_from = std::string(resolved ? "the resolved input" : "the input as written") + " in the run block of " +
+                    first.path;
+        input = parse_input_string(text, first.path + " (its run block)");
     }
-    bool resolved = false;
-    const std::string text = recorded_input(first, resolved);
-    if (text.empty()) {
-        throw std::runtime_error(first.path + " records no input (files of Mallard 0.9 and later do, in their "
-                                 "run block): give the input file with -i");
+    for (const auto & finding : input_upgrade::apply(input)) {
+        if (comm::is_root()) logging::warning(input_upgrade::advice(finding));
     }
-    case_from = std::string(resolved ? "the resolved input" : "the input as written") + " in the run block of " +
-                first.path;
-    return parse_input_string(text, first.path + " (its run block)");
+    return input;
 }
 
 int extract(const cli::Args & args, const bool derive) {
@@ -877,7 +884,7 @@ Plan prepare_average(Input & input, const cli::Args & args, const std::string & 
     Input::table_type entry;
     plan.snapshot_prefix = under(dir, args.value_or("--name", "average"));
     entry["prefix"] = Input(plan.snapshot_prefix);
-    entry["variables"] = string_array(a.variables());
+    entry["fields"] = string_array(a.variables());
     entry["interval"] = Input(1);
     entry["format"] = Input(format);
     if (args.has("--region")) entry["region"] = region_value(args.value_or("--region", ""));

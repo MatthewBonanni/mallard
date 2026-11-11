@@ -264,6 +264,17 @@ most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
 it are zero, so the run-time kernels are unchanged.
 
+**Meshes one cell thick.** A cell whose central-stencil candidates (mirror
+images aside) all lie level with it along a coordinate axis, as on a 2D strip
+or a 3D slab or pencil one cell thick, has no data across that axis: its
+mirror images only repeat its own column, and every monomial in that
+coordinate makes the fit rank deficient. Its central and sector fits (`flat_axes`,
+`fit_columns`) take only the monomials of the other axes, in a polynomial of
+the same degree (so the design order holds along the strip), from
+$\lceil f N'\rceil$ entries for their number $N'$; the coefficients of the
+dropped monomials are zero, so the run-time kernels are unchanged. A strip
+not aligned with an axis is not detected and still fails as below.
+
 If no size has full rank, the setup stops ("could not build a full-rank
 large stencil"), unless the search was cut off by the halo of an MPI
 partition, in which case the cell is redone once the halo is deep enough.
@@ -463,8 +474,14 @@ $$
 
 over the face points $q$ and $v \in \{\rho, p\}$, where $m_v$ and $M_v$ are
 the extrema of $v$ over the cell and its face neighbors (boundary faces add
-none). The scaled values are checked again, and an inadmissible cell still
-falls back to first order.
+none), widened by $10^{-3}\,|v_i|$ (`teno::BOUND_SLACK`). A smooth extremum
+overshoots its neighbors' averages; where a quantity barely varies, such as
+the pressure of a low-Mach flame (ripples of $10^{-4}\,p$), that overshoot is
+small against the quantity but not against its range, and without the
+widening $\theta$ fell to 0 in such cells: first order in the flame made it
+4-6% too fast. The overshoot at a shock is a fraction of the jump, which the
+widening leaves limited. The scaled values are checked again, and an
+inadmissible cell still falls back to first order.
 
 Admissible face values do not make the cell update admissible, since a
 troubled cell's face values come from different stencils and do not average

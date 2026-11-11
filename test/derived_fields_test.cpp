@@ -53,7 +53,7 @@ std::unique_ptr<Solver> init_flow(const std::string & rho, const std::string & u
       << "[numerics.face_reconstruction]\ntype = \"FO\"\n"
       << (physics.empty() ? "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n" : physics)
       << "[output]\ncheck_interval = 1000000\n" << output << "[[write_data]]\nprefix = \""
-      << (scratch_dir() / "mallard_derived").string() << "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = ["
+      << (scratch_dir() / "mallard_derived").string() << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = ["
       << variables << "]\n";
     auto solver = std::make_unique<Solver>();
     solver->set_distributed(false);
@@ -314,7 +314,7 @@ TEST(DerivedFields, MachOfAUniformArgonFlowTakesTheMixtureGamma) {
     s << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n" << mixture
       << "[output]\ncheck_interval = 1000000\n[[write_data]]\nprefix = \""
       << (scratch_dir() / "mallard_derived_argon").string()
-      << "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"MACH\"]\n";
+      << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"MACH\"]\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(s.str()));
@@ -405,7 +405,7 @@ std::unique_ptr<Solver> init_mixture(const std::string & Y, const std::string & 
       << source_dir() << "/mechanisms/h2o2.yaml\"\n"
       << (viscous ? "transport = \"unity_lewis\"\n" : "") << "[output]\ncheck_interval = 1000000\n"
       << mixture << "[[write_data]]\nprefix = \"" << (scratch_dir() / prefix).string()
-      << "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [" << variables << "]\n";
+      << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [" << variables << "]\n";
     auto solver = std::make_unique<Solver>();
     solver->set_distributed(false);
     solver->init(parse_toml(s.str()));
@@ -462,7 +462,7 @@ TEST(DerivedFields, MixtureFractionStreamsFromBoundaries) {
       << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
       << "[output]\ncheck_interval = 1000000\n[output.mixture]\nfuel = \"left\"\noxidizer = \"right\"\n"
       << "[[write_data]]\nprefix = \"" << (scratch_dir() / "mallard_derived_streams").string()
-      << "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"MIXTURE_FRACTION\"]\n";
+      << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"MIXTURE_FRACTION\"]\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(s.str()));
@@ -538,7 +538,7 @@ TEST(DerivedFields, MixtureEntropyOfMixingAndPressure) {
           << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/h2o2.yaml\"\n"
           << "[output]\ncheck_interval = 1000000\n[[write_data]]\nprefix = \""
           << (scratch_dir() / "mallard_derived_entropy").string()
-          << "\"\nformat = \"vtu\"\ninterval = 1000000\nvariables = [\"ENTROPY\"]\n";
+          << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"ENTROPY\"]\n";
         Solver solver;
         solver.set_distributed(false);
         solver.init(parse_toml(s.str()));
