@@ -686,9 +686,10 @@ struct InletTargetsFunctor {
     Kokkos::View<rtype *[N_DIM]> target;
     Kokkos::View<int32_t> error_face;
     Kokkos::View<double[2]> error;
-    double t;
+    Kokkos::View<rtype> time;
 
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k) const {
+        const double t = static_cast<double>(time());
         const double vars[4] = {x(k, 0), x(k, 1), x(k, 2), t};
         const kexpr::ArrayVariables variables{vars};
         double factor[N_DIM];
@@ -1044,8 +1045,9 @@ void TimedInletTargets::check() const {
                      "nonzero vector into the domain at every face and time.");
 }
 
-void TimedInletTargets::fill(const double t, const Kokkos::View<rtype *[N_DIM]> & target) const {
+void TimedInletTargets::fill(const Kokkos::View<rtype> & time, const Kokkos::View<rtype *[N_DIM]> & target) const {
     if (host_chars.empty()) return;
     Kokkos::parallel_for("timed_inlet_targets", static_cast<uint32_t>(host_chars.size()),
-                         InletTargetsFunctor{chars, x, slots, direction, scale, programs, target, error_face, error, t});
+                         InletTargetsFunctor{chars, x, slots, direction, scale, programs, target, error_face, error,
+                                             time});
 }

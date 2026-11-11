@@ -46,8 +46,8 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/setup"))
-from isotropic_turbulence_restart import read_restart, write_restart  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from mallard import restart  # noqa: E402
 
 M = 0.0508
 U0 = 10.0
@@ -136,7 +136,7 @@ def init(args):
     for d, name in enumerate(["RHOU_X", "RHOU_Y", "RHOU_Z"]):
         fields[name] = RHO * u[d].ravel()
     fields["RHOE"] = p / (GAMMA - 1.0) + 0.5 * RHO * (u ** 2).sum(axis=0).ravel()
-    write_restart(args.out, fields)
+    restart.write(args.out, fields)
     T = 300.0
     print(f"wrote {args.out}: {n}^3 cells of side {L / n:.6g} m, k_c = {np.pi * n / L:.6g} 1/m, seed {args.seed}")
     print(f"u_rms = {np.sqrt(uu / 3):.6g} m/s, c = {c:.6g} m/s")
@@ -147,7 +147,7 @@ def init(args):
 
 def rescale(args):
     """The velocity of a snapshot with each shell rescaled to the spectrum of station 1, at t = 0."""
-    fields, _, _ = read_restart(args.input)
+    fields = restart.read(args.input).fields
     n = round(len(fields["RHO"]) ** (1 / 3))
     u = np.stack([fields[f"RHOU_{x}"] / fields["RHO"] for x in "XYZ"]).reshape(3, n, n, n)
     kx, ky, kz = integer_waves(n)
@@ -174,12 +174,13 @@ def rescale(args):
     for d, name in enumerate(["RHOU_X", "RHOU_Y", "RHOU_Z"]):
         out[name] = RHO * u[d].ravel()
     out["RHOE"] = p / (GAMMA - 1.0) + 0.5 * RHO * (u ** 2).sum(axis=0).ravel()
-    write_restart(args.output, out)
+    restart.write(args.output, out)
     print(f"wrote {args.output}: u_rms = {np.sqrt((u ** 2).sum(axis=0).mean() / 3):.6g} m/s, p = {p:.10g}")
 
 
 def spectrum(path):
-    fields, t, step = read_restart(path)
+    r = restart.read(path)
+    fields, t, step = r.fields, r.t, r.step
     n = round(len(fields["RHO"]) ** (1 / 3))
     u = np.stack([fields[f"RHOU_{x}"] / fields["RHO"] for x in "XYZ"]).reshape(3, n, n, n)
     kx, ky, kz = integer_waves(n)

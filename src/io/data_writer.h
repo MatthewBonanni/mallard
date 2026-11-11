@@ -246,6 +246,12 @@ class DataWriter {
          * @brief Whether a snapshot is due at this step/time.
          */
         bool due(uint64_t step, rtype t) const;
+        /**
+         * @brief Lowers step_limit and t_limit to the first step after step, and
+         *        the time, from which a snapshot may be due: a step s at time t can
+         *        be due only if s >= step_limit or t >= t_limit.
+         */
+        void due_limits(uint64_t step, uint64_t & step_limit, rtype & t_limit) const;
 
         /**
          * @brief Write a snapshot if due (or forced); restart files also store
@@ -262,6 +268,8 @@ class DataWriter {
          *        (infinity for step-based writers).
          */
         rtype next_time() const;
+        /** @brief Time-based writers: due once t is at least this. */
+        rtype due_time() const;
 
         /**
          * @brief Continue numbering and the .pvd (.xmf) series of a previous

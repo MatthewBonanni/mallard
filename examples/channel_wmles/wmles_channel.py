@@ -44,7 +44,9 @@ import urllib.request
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/setup"))
-from channel_init import fresh, grid, nodes, write_restart  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from channel_init import fresh, grid, nodes  # noqa: E402
+from mallard import restart  # noqa: E402
 
 LM_URL = "https://turbulence.oden.utexas.edu/channel2015/data/LM_Channel_{0}_mean_prof.dat"
 REFERENCES = {
@@ -96,7 +98,7 @@ def init(args):
     scale = (weights * rho * u).sum() / weights.sum()
     u, v, w = u / scale, v / scale, w / scale
     E = p / (gamma - 1) + 0.5 * rho * (u**2 + v**2 + w**2)
-    write_restart(args.out, 0, 0.0, {"RHO": rho, "RHOU_X": rho * u, "RHOU_Y": rho * v, "RHOU_Z": rho * w, "RHOE": E})
+    restart.write(args.out, {"RHO": rho, "RHOU_X": rho * u, "RHOU_Y": rho * v, "RHOU_Z": rho * w, "RHOE": E})
     print(f"{args.out}: {np.prod(n)} cells, M_b = {M_b:.3f}, T_c / T_w = {T_c / T_w:.3f}, p = {p:.5g}")
 
 

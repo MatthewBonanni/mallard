@@ -50,7 +50,7 @@ const std::string BOX = N_DIM == 3 ? "{type = \"box\", center = [0.5, 0.5, 0.5],
 std::string case_input(const std::string & dir, uint32_t n) {
     std::ostringstream s;
     s << "[run]\nn_steps = 4\ndt = 1.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = " << n
-      << "\nLx = 1.0\nLy = 1.0\n";
+      << "\nLx = 1.0\nLy = 1.0\ncell_order = \"hilbert\"\n";
     if (N_DIM == 3) s << "Nz = 4\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
     s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * sin(2 * pi * x) * sin(2 * pi * y)\"\n"

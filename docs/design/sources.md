@@ -149,8 +149,9 @@ inside a capture a one-thread kernel sets the device stage time to
 `t_n + c dt` from the step's device scalars; otherwise it copies the host
 stage time. For FE, SSPRK3 and RK4 `c dt` is exact, so both give the same
 bits as the host's `t + c dt`. A step with time-dependent sources is a CUDA
-graph like any other; only domain averages (`mean_*`), which need a global sum
-on the host per stage, keep it out.
+graph like any other, also with domain averages (`mean_*`): their global sum
+per stage is an `ExactSums` on the device, reduced over the ranks with NCCL on
+the step's stream.
 
 ## Evaluation
 

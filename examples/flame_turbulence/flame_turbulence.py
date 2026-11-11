@@ -52,9 +52,8 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/setup"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
-from isotropic_turbulence_restart import read_restart, write_restart  # noqa: E402
+from mallard import restart  # noqa: E402
 
 # Fresh H2/air at phi = 1, 300 K, 1 atm (mechanisms/h2o2.yaml, Cantera 3.2, mixture-averaged)
 RHO_U = 0.8494721085515865
@@ -101,7 +100,7 @@ def hit(args):
     for d, name in enumerate(["RHOU_X", "RHOU_Y", "RHOU_Z"]):
         fields[name] = RHO_U * u[d].ravel()
     fields["RHOE"] = P0 / (GAMMA_U - 1.0) + 0.5 * RHO_U * (u ** 2).sum(axis=0).ravel()
-    write_restart(args.out, fields)
+    restart.write(args.out, fields)
     nu = MU_U / RHO_U
     eps = 0.5 * args.urms ** 3 / args.lt
     print(f"{args.out}: {n}^3, L = {length * 1e3:.4f} mm, u' = {args.urms:.3f} m/s, l_t = {args.lt * 1e3:.3f} mm, "
@@ -147,7 +146,7 @@ def init(args):
     n, nx, r = args.n, args.nx + args.extend, args.ratio
     if n % r or nx % r:
         raise SystemExit("--ratio must divide --n and --nx")
-    fields, _, _ = read_restart(args.hit)
+    fields = restart.read(args.hit).fields
     if fields["RHO"].size != n ** 3:
         raise SystemExit(f"{args.hit}: expected {n}^3 cells")
     ut = np.stack([(fields[f"RHOU_{c}"] / fields["RHO"]).reshape(n, n, n) for c in "XYZ"])
@@ -208,7 +207,7 @@ def init(args):
     for k, s in enumerate(prof["species"]):
         out[f"RHOY_{s}"] = block_average(np.broadcast_to(rhoY[k][:, None, None], (nx, n, n)), r)
     out["T_SEED"] = block_average(np.broadcast_to(col["T"][:, None, None], (nx, n, n)), r)
-    write_restart(args.out, {k: np.ascontiguousarray(v).ravel() for k, v in out.items()})
+    restart.write(args.out, {k: np.ascontiguousarray(v).ravel() for k, v in out.items()})
     urms = np.sqrt((ut ** 2).mean())
     print(f"{args.out}: {nx // r} x {n // r} x {n // r} cells of {h * r * 1e6:.3f} um (DNS h = {h * 1e6:.3f} um), "
           f"Lx = {nx * h * 1e3:.4f} mm, L = {n * h * 1e3:.4f} mm, "

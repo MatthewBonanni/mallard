@@ -390,8 +390,20 @@ bool DataWriter::due(uint64_t step, rtype t) const {
     if (interval > 0) {
         return step % interval == 0;
     }
+    return t >= due_time();
+}
+
+rtype DataWriter::due_time() const {
     // Relative tolerance absorbs round-off in accumulated time
-    return t >= next_time() - precision_tol(1e-9, 1e-5) * time_interval;
+    return next_time() - precision_tol(1e-9, 1e-5) * time_interval;
+}
+
+void DataWriter::due_limits(const uint64_t step, uint64_t & step_limit, rtype & t_limit) const {
+    if (interval > 0) {
+        step_limit = std::min(step_limit, (step / interval + 1) * interval);
+    } else {
+        t_limit = std::min(t_limit, due_time());
+    }
 }
 
 rtype DataWriter::next_time() const {
@@ -683,7 +695,6 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
         }
         list.push_back(std::move(f));
     }
-    if (fraction) list.push_back({"REGION_FRACTION", "1", "volume fraction of the region", stored, 0.0});
     const int64_t version = format == DataFormat::RESTART  ? file_format::RESTART.version
                             : format == DataFormat::HDF5   ? file_format::HDF5_OUTPUT.version
                             : format == DataFormat::VTKHDF ? file_format::VTKHDF_OUTPUT.version
