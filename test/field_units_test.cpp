@@ -20,7 +20,9 @@
 #include "comm.h"
 #include "field_units.h"
 #include "output_reader.h"
+#include "provenance.h"
 #include "scratch.h"
+#include "snapshot_block.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #ifdef Mallard_HAS_HDF5
@@ -100,6 +102,19 @@ void expect_vtk_units(const std::string & path, const std::map<std::string, std:
         EXPECT_EQ(units[i], units_of(names[i])) << path << ": " << names[i];
         EXPECT_EQ(long_names[i], field_units::describe(names[i]).long_name) << path << ": " << names[i];
     }
+}
+
+/** @brief A VTK XML snapshot's block lists each of its arrays once, with its table units and long name. */
+void expect_snapshot_block(const std::string & path) {
+    const std::string text = read_file(path);
+    const snapshot_block::Block block = snapshot_block::parse(provenance::parse_comment(text, snapshot_block::NAME));
+    std::vector<std::string> names;
+    for (const auto & f : block.fields) {
+        names.push_back(f.name);
+        EXPECT_EQ(f.units, units_of(f.name)) << path << ": " << f.name;
+        EXPECT_EQ(f.long_name, field_units::describe(f.name).long_name) << path << ": " << f.name;
+    }
+    EXPECT_EQ(names, vtk_arrays(text.substr(0, text.find("<AppendedData")))) << path;
 }
 
 /** @brief A CSV file's units line follows its header, one entry per column. */
@@ -261,6 +276,18 @@ TEST(FieldUnitsTest, DerivedFieldsTakeTheirUnitsFromTheirFields) {
     EXPECT_EQ(units_of("FAVRE_COV_U_X_U_Y"), "m2 s-2");
     EXPECT_EQ(units_of("RMS_P"), "kg m-1 s-2");
     EXPECT_EQ(field_units::describe("COV_U_X_P").long_name, "covariance of x component of velocity and pressure");
+    // Every product of two sampled scalars, though U and RHOU are fields and Y_ starts a species name
+    std::vector<std::string> scalars(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+    scalars.insert(scalars.end(), PRIMITIVE_NAMES.begin(), PRIMITIVE_NAMES.end());
+    scalars.insert(scalars.end(), {"Y_O2", "Y_C2H4", "RHOY_O2", "RHOY_N2"});
+    for (const std::string & a : scalars) {
+        for (const std::string & b : scalars) {
+            const FieldDescription da = field_units::describe(a), db = field_units::describe(b);
+            const FieldDescription cov = field_units::describe("COV_" + a + "_" + b);
+            EXPECT_EQ(cov.units(), da.dimension.times(db.dimension).udunits()) << a << "*" << b;
+            EXPECT_EQ(cov.long_name, "covariance of " + da.long_name + " and " + db.long_name) << a << "*" << b;
+        }
+    }
     EXPECT_EQ(units_of("PHASE_03_P"), "kg m-1 s-2");
     EXPECT_EQ(field_units::describe("PHASE_03_P").long_name, "phase average of pressure in bin 03");
 }
@@ -288,6 +315,7 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
     for (const std::string & vtu : comm::size() > 1 ? std::vector<std::string>{"f_000002_p0000.vtu", "near_000002_p0000.vtu"}
                                                     : std::vector<std::string>{"f_000002.vtu", "near_000002.vtu"}) {
         expect_vtk_units(dir + "/" + vtu);
+        expect_snapshot_block(dir + "/" + vtu);
     }
     const auto record = string_arrays(read_file(dir + (comm::size() > 1 ? "/f_000002_p0000.vtu" : "/f_000002.vtu")));
     const auto & names = record.at("MALLARD_FIELD_NAMES");

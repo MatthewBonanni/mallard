@@ -100,7 +100,7 @@ class PhaseAverage {
     public:
         /** @brief Read [statistics.phase] (table), sampling every interval steps from t_start. */
         void init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
-                  uint32_t n_cells, uint64_t interval, rtype t_start);
+                  uint32_t n_cells, uint64_t interval, rtype t_start, bool use_nccl);
 
         bool enabled() const { return !fields.empty(); }
         /** @brief Triggered phases follow the signal before t_start too. */
@@ -139,6 +139,8 @@ class PhaseAverage {
         int32_t trigger_cell = NO_TRIGGER;  // owned cell of this rank, -1 if another rank's
         int32_t trigger_code = 0;
         bool distributed = false;
+        bool use_nccl = false;
+        Kokkos::View<double *> signal;  // [the trigger's signal], summed over the ranks
 
         Kokkos::View<int32_t *> codes;
         Kokkos::View<rtype **, Kokkos::LayoutLeft> mean;
@@ -192,6 +194,10 @@ class Statistics {
         bool due(uint64_t step, rtype t) const {
             return (means_enabled() && step % interval == 0 && t > t_start) || spectra.due(step, t) || phase.due(step, t) ||
                    std::any_of(conditional.begin(), conditional.end(), [&](const auto & c) { return c.due(step, t); });
+        }
+        /** @brief Lowers step_limit to the first step after step at which a sample may be due. */
+        void due_limits(uint64_t step, uint64_t & step_limit) const {
+            if (enabled()) step_limit = std::min(step_limit, (step / interval + 1) * interval);
         }
 
         /** @brief Add the sample at (step, t) of cells [0, n_owned) to whatever is due (collective). */

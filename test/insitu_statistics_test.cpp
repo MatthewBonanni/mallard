@@ -25,6 +25,8 @@
 
 #include "comm.h"
 #include "compression.h"
+#include "device_comm.h"
+#include "mpi_compare.h"
 #include "solver.h"
 #include "provenance.h"
 #include "scratch.h"
@@ -423,8 +425,8 @@ std::vector<double> gather_phase(Solver & solver) {
 TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
     // Both slab paths (a periodic box: x slabs transposed to y slabs; a
     // channel: y slabs) and a triggered phase average equal the serial run's
-    // bitwise on any number of ranks, also continued on one rank from a
-    // restart file written by all
+    // bitwise on any number of ranks, with NCCL's and MPI's transposes, also
+    // continued on one rank from a restart file written by all
     const std::string dir = (scratch_dir() / "mallard_mpi_insitu").string();
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
@@ -447,6 +449,13 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
         distributed.init(parse_toml(box(periodic, beta, 8, extra("distributed", true))));
         distributed.run();
         distributed.copy_device_to_host();
+        Solver over_mpi;
+        const bool both = comm::nccl_available() && comm::size() > 1;
+        if (both) {
+            over_mpi.init(parse_toml(with_halo_exchange(box(periodic, beta, 8, extra("over_mpi", false)), "mpi")));
+            over_mpi.run();
+            over_mpi.copy_device_to_host();
+        }
         comm::barrier();
         std::string input = box(periodic, beta, 8, extra("continued", false));
         const size_t a = input.find("[initialize]\n"), b = input.find("[numerics]\n");
@@ -458,7 +467,9 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
         continued.copy_device_to_host();
 
         const Spectra & ref = serial.get_statistics().get_spectra();
-        for (const Solver * other : {&distributed, &continued}) {
+        std::vector<const Solver *> others = {&distributed, &continued};
+        if (both) others.push_back(&over_mpi);
+        for (const Solver * other : others) {
             const Spectra & s = other->get_statistics().get_spectra();
             ASSERT_EQ(s.samples(), ref.samples());
             for (uint32_t pos = 0; pos < ref.n_positions(); pos++) {
@@ -476,6 +487,9 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
         const auto phase_ref = gather_phase(serial);
         EXPECT_EQ(gather_phase(distributed), phase_ref);
         EXPECT_EQ(gather_phase(continued), phase_ref);
+        if (both) {
+            EXPECT_EQ(gather_phase(over_mpi), phase_ref);
+        }
         comm::barrier();
     }
 
@@ -495,6 +509,13 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
     EXPECT_GT(serial.get_statistics().get_phase().samples(), 0u);
     EXPECT_EQ(distributed.get_statistics().get_phase().samples(), serial.get_statistics().get_phase().samples());
     EXPECT_EQ(gather_phase(distributed), gather_phase(serial));
+    if (comm::nccl_available() && comm::size() > 1) {
+        Solver over_mpi;
+        over_mpi.init(parse_toml(with_halo_exchange(oscillating(240, trigger), "mpi")));
+        over_mpi.run();
+        over_mpi.copy_device_to_host();
+        EXPECT_EQ(gather_phase(over_mpi), gather_phase(serial));
+    }
     comm::barrier();
     if (comm::is_root()) std::filesystem::remove_all(dir);
 }

@@ -645,8 +645,8 @@ outlet's area-averaged pressure stays within 0.05% of `p` while the pressure
 varies by 6% across it, where a local outlet (`local.toml`) ends 2% above `p`
 (`check_average_outlet.py`).*
 
-The average runs over all ranks in a
-fixed order, so results do not depend on the rank count. Not with gas
+The average is an exact sum over all
+ranks (in fixed point), so results do not depend on the rank count. Not with gas
 mixtures, and not with `nscbc` (both planned in
 [#565](https://github.com/MatthewBonanni/mallard/issues/565)).
 

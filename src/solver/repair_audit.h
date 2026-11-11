@@ -40,6 +40,11 @@ struct RepairRecorder {
     }
 };
 
+/** @brief Owned cells of a site repaired since the last report and since the start. */
+struct RepairCells {
+    uint64_t n[2];
+};
+
 class RepairAudit {
     public:
         /**
@@ -54,16 +59,23 @@ class RepairAudit {
         /** @brief Marks cells flagged elsewhere (e.g. on another rank, returned with the results) as repaired. */
         void touch(size_t site, const Kokkos::View<uint8_t *> & flags) const;
 
+        /** @brief Values of local_values: per site, its activations, owned cells repaired since the last call and
+         *         since the start, and its change by component. */
+        uint32_t n_values() const;
+        /**
+         * @brief Enqueues the rank's values into out (n_values()) on the device,
+         *        and starts the next interval's cells.
+         */
+        void local_values(uint32_t n_owned, const Kokkos::View<double *> & out) const;
+
         /**
          * @brief Since the previous report and since the start, over all ranks
-         *        (collective): activations, distinct owned cells, and the
-         *        change of each component, with derived components appended
-         *        by derive (e.g. element masses from species masses).
+         *        (collective), from the rank's local_values: activations,
+         *        distinct owned cells, and the change of each component, with
+         *        derived components appended by derive (e.g. element masses
+         *        from species masses).
          */
-        void report(uint32_t n_owned, std::vector<health::Repair> & interval, std::vector<health::Repair> & run);
-
-        /** @brief Total change of a site's components since the start, all ranks (collective). */
-        std::vector<double> run_change(size_t site);
+        void report(const double * local, std::vector<health::Repair> & interval, std::vector<health::Repair> & run);
 
         using Derive = std::function<std::vector<std::pair<std::string, double>>(const std::vector<double> &)>;
         void set_derive(size_t site, Derive d) { sites[site].derive = std::move(d); }
@@ -73,6 +85,7 @@ class RepairAudit {
             std::string name;
             std::vector<std::string> components;
             RepairRecorder recorder;
+            Kokkos::View<RepairCells> cells;
             std::vector<double> last_change;  // global, at the previous report
             uint64_t last_activations = 0;
             Derive derive;

@@ -1740,7 +1740,24 @@ void Probes::resume([[maybe_unused]] uint64_t step, rtype t) {
 bool Probes::Probe::due(uint64_t step, rtype t) const {
     if (step == step_last) return false;
     if (interval > 0) return step % interval == 0;
-    return t >= static_cast<rtype>(n_written) * time_interval - precision_tol(1e-9, 1e-5) * time_interval;
+    return t >= due_time();
+}
+
+rtype Probes::Probe::due_time() const {
+    return static_cast<rtype>(n_written) * time_interval - precision_tol(1e-9, 1e-5) * time_interval;
+}
+
+void Probes::due_limits(const uint64_t step, uint64_t & step_limit, rtype & t_limit) const {
+    bool average = false;
+    for (const auto & p : probes) {
+        if (p->interval > 0) {
+            step_limit = std::min(step_limit, (step / p->interval + 1) * p->interval);
+        } else {
+            t_limit = std::min(t_limit, p->due_time());
+        }
+        average = average || p->average;
+    }
+    if (average) step_limit = std::min(step_limit, (step / average_interval + 1) * average_interval);
 }
 
 bool Probes::due(uint64_t step, rtype t) const {

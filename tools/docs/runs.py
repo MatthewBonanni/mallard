@@ -1,5 +1,5 @@
 """Figures of the user guide drawn from short Mallard runs (seconds each, on a
-CPU build): TENO-E stencils read back from a stencil cache, the Sod shock
+CPU build): TENO-E stencils read back from mallard check's stencil file, the Sod shock
 tube with each reconstruction (through a line probe), MPI partitions, a
 mallard reactor ignition, a sector against the full annulus (rotational
 periodicity), the mesh-import fixtures as Mallard reads them
@@ -14,7 +14,6 @@ Partitions need an MPI build.
 import argparse
 import csv
 import functools
-import struct
 import subprocess
 import sys
 import tempfile
@@ -33,6 +32,7 @@ from figstyle import bare, label
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "tools"), str(ROOT / "tools" / "mesh"), str(ROOT / "examples" / "sod"),
                 str(ROOT / "examples" / "rotational_sector")]
+from mallard.stencils import read_stencils  # noqa: E402
 from mallard.vtu import read_vtu_cells, snapshot  # noqa: E402
 from plot_mesh_quality import LABELS, draw_quality, read_quality  # noqa: E402
 from plot_sod import exact_sod  # noqa: E402
@@ -56,35 +56,6 @@ def polygons(path):
 
 
 # ------------------------------------------------------------- TENO stencils
-
-def read_teno_cache(path, nk, nk_small=5, n_faces=4):
-    """Stencils of a 2D, double-precision TENO cache (src/numerics/teno.cpp, save_cache)."""
-    raw = open(path, "rb").read()
-    off = 16 + 16 + 8 + 8 + 1
-    (n_cells,) = struct.unpack_from("<I", raw, off)
-    off += 4
-    cells = []
-    for _ in range(n_cells):
-        off += 1 + 8
-        (n_large,) = struct.unpack_from("<H", raw, off)
-        off += 2
-        small = struct.unpack_from(f"<{n_faces}H", raw, off)
-        off += 2 * n_faces
-        off += 8 * nk + 8 * (nk * (nk + 1) // 2)
-        large = struct.unpack_from(f"<{n_large}i", raw, off)
-        off += 4 * n_large
-        large_faces = struct.unpack_from(f"<{n_large}i", raw, off)
-        off += 4 * n_large + 8 * n_large * nk
-        n_small = sum(small)
-        small_cells = struct.unpack_from(f"<{n_small}i", raw, off)
-        off += 4 * n_small
-        small_faces = struct.unpack_from(f"<{n_small}i", raw, off)
-        off += 4 * n_small + 8 * n_small * nk_small
-        cells.append(dict(large=large, large_faces=large_faces, small=small, small_cells=small_cells,
-                          small_faces=small_faces))
-    assert off == len(raw), "unexpected TENO cache layout"
-    return cells
-
 
 @functools.cache
 def teno_data(args):
@@ -117,42 +88,38 @@ type = "symmetry"
 [numerics.face_reconstruction]
 type = "TENO"
 order = 5
-cache_file = "teno.cache"
-[[write_data]]
-prefix = "mesh"
-format = "vtu"
-interval = 1
-fields = ["RHO"]
 {PHYSICS}"""
-    run(args.mallard, toml, work)
-    polys, _ = polygons(work / "mesh_000000.vtu")
-    return polys, read_teno_cache(work / "teno.cache", nk=14)
+    (work / "input.toml").write_text(toml)
+    subprocess.run([str(args.mallard), "check", "input.toml", "--mesh-fields", "mesh", "--stencils", "all",
+                    "--kokkos-num-threads=2"], cwd=work, check=True, stdout=subprocess.DEVNULL)
+    polys, _ = read_quality(snapshot(str(work / "mesh_000000")))
+    return polys, read_stencils(work / "mesh_stencils.h5")
 
 
 def teno_stencils(P, args):
     polys, stencils = teno_data(args)
     target = min(range(len(polys)), key=lambda c: np.linalg.norm(polys[c].mean(axis=0) - [0.5, 0.5]))
-    s = stencils[target]
+    s = stencils.stencil(target)
+    central = s["cell"][s["stencil"] == 0]
     fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.9), gridspec_kw=dict(wspace=0.06))
     colors = [P["teal"], P["flame"], P["blue"], P["plum"]]
     for k, ax in enumerate(axes):
         for poly in polys:
             ax.add_patch(Polygon(poly, closed=True, facecolor="none", edgecolor=P["mesh"], lw=0.8))
         if k == 0:
-            for c in s["large"]:
+            for c in central:
                 ax.add_patch(Polygon(polys[c], closed=True, facecolor=P["teal"], alpha=0.35, edgecolor=P["teal"],
                                      lw=0.8))
-            ax.set_title(f"central stencil: {len(s['large'])} cells", fontsize=12)
+            ax.set_title(f"central stencil: {len(central)} cells", fontsize=12)
         else:
-            start = 0
-            for f, n in enumerate(s["small"]):
-                for c in s["small_cells"][start:start + n]:
+            sectors = stencils.sectors(target)
+            for f, cells in sectors.items():
+                for c in cells:
                     if c == target:
                         continue
                     ax.add_patch(Polygon(polys[c], closed=True, facecolor=colors[f + 1], alpha=0.38,
                                          edgecolor=colors[f + 1], lw=0.8))
-                start += n
-            n_sectors = sum(1 for n in s["small"] if n)
+            n_sectors = len(sectors)
             ax.set_title(f"{n_sectors} sector stencils, one per face", fontsize=12)
         ax.add_patch(Polygon(polys[target], closed=True, facecolor=P["fg"], edgecolor=P["fg"], lw=1))
         bare(ax)
@@ -360,7 +327,7 @@ def mesh_quality_data(args):
     subprocess.run([sys.executable, str(ROOT / "examples" / "mallard" / "make_mallard_mesh.py"), str(work / "mallard.msh"),
                     "--h-wall", "0.02", "--h-far", "0.1"], check=True, stdout=subprocess.DEVNULL)
     (work / "input.toml").write_text((ROOT / "examples" / "mallard" / "input.toml").read_text())
-    subprocess.run([str(args.mallard), "check", "input.toml", "--quality", "quality",
+    subprocess.run([str(args.mallard), "check", "input.toml", "--mesh-fields", "quality",
                     "--kokkos-num-threads=2"], cwd=work, check=True, stdout=subprocess.DEVNULL)
     return read_quality(snapshot(str(work / "quality_000000")))
 
