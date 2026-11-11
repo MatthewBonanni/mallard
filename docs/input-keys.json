@@ -3727,6 +3727,15 @@
   "set_in": [],
   "type": "string"
  },
+ "output.write_stencils": {
+  "default": "\"\"",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "string"
+ },
  "parallel": {
   "dims": [
    2,
@@ -5324,6 +5333,15 @@
  },
  "run.n_steps": {
   "default": "0",
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [],
+  "type": "integer"
+ },
+ "run.step_queue": {
+  "default": "3",
   "dims": [
    2,
    3

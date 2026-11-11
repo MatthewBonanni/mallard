@@ -212,9 +212,10 @@ TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     expect_matches_serial(input);
 }
 
-TEST(MPI3DTest, SyntheticTurbulenceInletMatchesSerial) {
+TEST(MPI3DTest, SyntheticTurbulenceInletMatchesSerialWithAndWithoutStepGraphs) {
     // The inflow field is a function of the time and the inlet's geometry alone,
-    // and its zero-net-flux correction sums over the whole inlet in a fixed order
+    // and its zero-net-flux correction sums over the whole inlet in a fixed order;
+    // a step graph picks and filters its planes at the device's times
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
     input.replace(input.find(from), from.size(), "name = \"right\"\ntype = \"outlet_pressure\"\np = 1.0\nnscbc.L = 1.0\n");
@@ -223,7 +224,7 @@ TEST(MPI3DTest, SyntheticTurbulenceInletMatchesSerial) {
                   "name = \"left\"\ntype = \"inlet_state\"\nu = [\"0.3 + 0.1 * y\", 0.0, 0.0]\np = 1.0\nT = 1.0\nnscbc.L = 1.0\n"
                   "[boundaries.turbulence]\nreynolds_stress = [0.004, 0.002, 0.002, -0.001, 0.0, 0.0]\n"
                   "length_scale = [0.3, 0.15, 0.1]\n");
-    expect_matches_serial(input);
+    expect_matches_serial_with_and_without_step_graphs(input);
 }
 
 TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {

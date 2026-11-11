@@ -2,3 +2,4 @@
 # time come from examples/README.md, its settings from the input file.
 build = "2d"
 demonstrates = ["premixed flame against Cantera", "mixture-averaged transport"]
+validation = [{anchor = "flame-speed", regime = "laminar H2/air flame speeds, against Cantera"}]

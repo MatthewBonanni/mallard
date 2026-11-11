@@ -41,7 +41,9 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/setup"))
-from isotropic_turbulence_restart import cell_average_factor, parameters, read_restart, wavenumbers  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
+from isotropic_turbulence_restart import cell_average_factor, parameters, wavenumbers  # noqa: E402
+from mallard import restart  # noqa: E402
 
 
 def fft(f):
@@ -204,7 +206,8 @@ def main():
             os.makedirs(d, exist_ok=True)
 
     for path in args.restart:
-        cons, t, step = read_restart(path)
+        r = restart.read(path)
+        cons, t, step = r.fields, r.t, r.step
         n = round(len(cons["RHO"]) ** (1 / 3))
         rho, u, p, T = point_fields(cons, n, par["gamma"], not args.no_deconvolve)
         del cons

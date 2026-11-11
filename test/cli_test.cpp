@@ -491,7 +491,7 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     SKIP_UNDER_MPI();
     const std::string mesh =
         source_dir() + (Mallard_DIM == 3 ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh");
-    const Result r = run({"info", "--quality", "quality", mesh}, true);
+    const Result r = run({"info", "--mesh-fields", "quality", mesh}, true);
     EXPECT_EQ(r.status, 0) << r.err;
     const std::vector<std::vector<std::string>> rows = {
         {"Format", "Gmsh"},
@@ -510,9 +510,9 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     }
     EXPECT_EQ(written, 1u);
     const Result not_a_mesh =
-        run({"info", "--quality", "quality", source_dir() + "/test/data/formats/gas.toml"}, true);
+        run({"info", "--mesh-fields", "quality", source_dir() + "/test/data/formats/gas.toml"}, true);
     EXPECT_EQ(not_a_mesh.status, 2);
-    EXPECT_TRUE(contains(not_a_mesh.err, "--quality takes a mesh file")) << not_a_mesh.err;
+    EXPECT_TRUE(contains(not_a_mesh.err, "--mesh-fields takes a mesh file")) << not_a_mesh.err;
 }
 
 namespace {

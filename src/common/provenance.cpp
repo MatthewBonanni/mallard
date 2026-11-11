@@ -603,7 +603,9 @@ void set_read_files() {
     std::string list = "[";
     for (const ReadFile & f : reads) {
         std::error_code error;
-        const std::string resolved = fs::weakly_canonical(f.path, error).string();
+        // Each snapshot of a file of several, read by its identity, counts once
+        std::string resolved = fs::weakly_canonical(f.path, error).string();
+        if (f.how == ReadFile::How::IDENTITY) resolved += "\n" + std::to_string(f.step);
         if (std::find(seen.begin(), seen.end(), resolved) != seen.end()) continue;
         seen.push_back(resolved);
         list += (list.size() > 1 ? "," : "") + read_file_json(f);
