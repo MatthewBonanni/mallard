@@ -55,6 +55,11 @@ namespace {
 
 const std::string PERFECT_GAS = "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
 
+/** @brief A relative tolerance, no tighter than the rounding of single-precision fields and mesh geometry. */
+double rounding_or(const double tolerance) {
+    return std::max(tolerance, 64.0 * static_cast<double>(std::numeric_limits<rtype>::epsilon()));
+}
+
 std::string numbers3(const char * x, const char * y, const char * z) {
     return std::string("[") + x + ", " + y + (N_DIM == 3 ? std::string(", ") + z : "") + "]";
 }
@@ -757,7 +762,7 @@ TEST(ProbesTest, RegionsPartlyOutsideTheDomainRecordTheShareOutside) {
     const double tol = N_DIM == 2 ? 1e-4 : 1e-3;
     EXPECT_NEAR(b["measures"]["in_domain"][volume].number, own - outside, tol * own);
     // The surface: exact patches split 30 (3D: 6) times where the domain's boundary crosses them
-    EXPECT_NEAR(b["measures"]["in_domain"][area].number, surface, (N_DIM == 2 ? 1e-6 : 1e-4) * surface);
+    EXPECT_NEAR(b["measures"]["in_domain"][area].number, surface, rounding_or(N_DIM == 2 ? 1e-6 : 1e-4) * surface);
     EXPECT_NEAR(b["clipped"][std::string(volume) + "_fraction"].number, outside / own, tol);
     EXPECT_NE(warned.find("probes[name = \"ball\"].region: "), std::string::npos) << warned;
     EXPECT_NE(warned.find("% of its " + std::string(volume) + " lies outside the domain"), std::string::npos) << warned;
@@ -1023,14 +1028,14 @@ TEST(ProbesTest, RegionsCutByCurvedWallsMeasureAndBalanceTheirPartInTheDomain) {
     testing::internal::GetCapturedStderr();
     run(expanding);
     if (!comm::is_root()) return;
-    EXPECT_NEAR(read_csv(dir + "/surface.csv").front().at("integral_MASS_FLUX"), 0.2 * area, 1e-8 * area);
+    EXPECT_NEAR(read_csv(dir + "/surface.csv").front().at("integral_MASS_FLUX"), 0.2 * area, rounding_or(1e-8) * area);
     const auto disk = read_csv(dir + "/disk.csv").front();
     const auto & surface = steady;
     EXPECT_NEAR(disk.at("area"), area, 1e-5 * area);
     EXPECT_NEAR(surface.at("length"), perimeter, 1e-5 * perimeter);
     // The mass flow in and out across the disk's diameter
     const double through = 0.3 * (1.384 * 1.384 - 1.084 * 1.084) / 2.0;
-    EXPECT_NEAR(surface.at("integral_MASS_FLUX"), 0.0, 1e-10 * through);
+    EXPECT_NEAR(surface.at("integral_MASS_FLUX"), 0.0, rounding_or(1e-10) * through);
     const json::Value b = json::parse(output::open(dir + "/disk.csv").sampling);
     EXPECT_EQ(b["measures"]["region"]["area"].number, own);
     EXPECT_EQ(b["measures"]["region"]["perimeter"].number, 2.0 * pi * rho_r);
