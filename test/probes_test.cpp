@@ -2300,7 +2300,7 @@ TEST(ProbesTest, GridsInRegionsSampleAsPointProbesAtTheirNodes) {
     }
 }
 
-TEST(ProbesTest, RejectsPointSamplingAndGridsOfMovingRegionsAndUnknownCurveCounts) {
+TEST(ProbesTest, RejectsPointSamplingAndGridsOfMovingAndSolutionRegionsAndUnknownCurveCounts) {
     auto error_of = [](const std::string & probe) {
         try {
             Solver solver;
@@ -2314,6 +2314,10 @@ TEST(ProbesTest, RejectsPointSamplingAndGridsOfMovingRegionsAndUnknownCurveCount
                                ", radius = 0.2}\n";
     EXPECT_NE(error_of(moving + "sampling = \"point\"\n").find("moving region"), std::string::npos);
     EXPECT_NE(error_of(moving + "n_points = " + numbers3("4", "4", "4") + "\n").find("moving region"), std::string::npos);
+    const std::string solution = "region = {type = \"where\", condition = \"P > 0.5\"}\n";
+    EXPECT_NE(error_of(solution + "sampling = \"point\"\n").find("defined by the solution"), std::string::npos);
+    EXPECT_NE(error_of(solution + "n_points = " + numbers3("4", "4", "4") + "\n").find("defined by the solution"),
+              std::string::npos);
     const std::string cells = error_of("start = " + numbers3("0.1", "0.1", "0.5") + "\nend = " + numbers3("0.9", "0.9", "0.5") +
                                        "\nn_points = \"faces\"\n");
     EXPECT_NE(cells.find("n_points = \"cells\""), std::string::npos) << cells;
