@@ -7,8 +7,8 @@
 # images). CUDA_ARCHS lists the GPU compute capabilities to build for, lowest first
 # (80 A100, 86 RTX 30xx/A40, 89 L40S/RTX 40xx, 90 H100): one fat binary with machine
 # code for each, and PTX of the lowest for newer GPUs.
-ARG CUDA=12.9.1
-FROM nvidia/cuda:${CUDA}-devel-ubuntu24.04 AS build
+ARG CUDA=13.5.0
+FROM nvidia/cuda:${CUDA}-devel-ubuntu26.04 AS build
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates libopenmpi-dev openmpi-bin libhdf5-openmpi-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -43,14 +43,14 @@ RUN set -eu; \
         done; \
     done
 
-FROM nvidia/cuda:${CUDA}-runtime-ubuntu24.04
+FROM nvidia/cuda:${CUDA}-runtime-ubuntu26.04
 LABEL org.opencontainers.image.title="Mallard" \
       org.opencontainers.image.description="High-order finite volume solver for compressible reacting flows (NVIDIA GPUs: CUDA + MPI)" \
       org.opencontainers.image.source="https://github.com/MatthewBonanni/mallard" \
       org.opencontainers.image.licenses="Apache-2.0"
 # OpenSSH for mpirun across the pods of a Kubernetes MPIJob; sshd makes its host keys where it runs
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        libgomp1 openmpi-bin libopenmpi3t64 libhdf5-openmpi-103-1t64 \
+        libgomp1 openmpi-bin libopenmpi40 libhdf5-openmpi-310 \
         python3 python3-numpy python3-scipy python3-matplotlib python3-h5py openssh-client openssh-server \
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*
 # Mallard's executables only, not the bundled Kokkos's tools

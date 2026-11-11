@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   fuzz:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +59,7 @@ jobs:
         if: steps.changed.outputs.skip != 'true'
         run: >
           sh tools/dev/apt_install.sh
-          libclang-rt-18-dev libhdf5-dev libcgns-dev ccache
+          libclang-rt-22-dev libhdf5-dev libcgns-dev ccache
       - name: Restore compiler cache
         if: steps.changed.outputs.skip != 'true'
         uses: actions/cache/restore@v4
@@ -78,7 +78,7 @@ jobs:
         if: steps.changed.outputs.skip != 'true'
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_ENABLE_SERIAL=ON -DMallard_WARNINGS_AS_ERRORS=ON
           -DMallard_ENABLE_FUZZING=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Fails if the support matrix (docs/guide/support.md) and the GitHub workflows
-disagree: every test or build job must appear in the matrix as `<workflow>/<job>`,
-and every such reference must name a job that exists. A job with a matrix of named
-entries (ci.yml's backends, HIP and SYCL) counts once per entry. Used by the first
-job of ci.yml.
+"""Fails if the support matrix (docs/guide/support.md) or the supported-platforms table
+of docs/installation.md disagrees with the GitHub workflows: every test or build job
+must appear on each page as `<workflow>/<job>`, and every such reference must name a
+job that exists. A job with a matrix of named entries (ci.yml's backends, CUDA, HIP and
+SYCL, the UBI jobs) counts once per entry. Used by the first job of ci.yml.
 
-    python3 tools/dev/check_support_matrix.py [WORKFLOW_DIR] [MATRIX_PAGE]
+    python3 tools/dev/check_support_matrix.py [WORKFLOW_DIR] [PAGE...]
 """
 import json
 import pathlib
@@ -62,15 +62,19 @@ def workflow_jobs(directory):
 
 def main():
     directory = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".github/workflows")
-    page = pathlib.Path(sys.argv[2] if len(sys.argv) > 2 else "docs/guide/support.md")
+    pages = [pathlib.Path(p) for p in sys.argv[2:]] or [pathlib.Path("docs/guide/support.md"),
+                                                       pathlib.Path("docs/installation.md")]
     jobs = workflow_jobs(directory)
-    documented = set(REFERENCE.findall(page.read_text()))
-    problems = [f"{job}: a CI job missing from {page}" for job in sorted(jobs - documented)]
-    problems += [f"{job}: in {page}, but no workflow has this job" for job in sorted(documented - jobs)]
+    problems = []
+    for page in pages:
+        documented = set(REFERENCE.findall(page.read_text()))
+        problems += [f"{job}: a CI job missing from {page}" for job in sorted(jobs - documented)]
+        problems += [f"{job}: in {page}, but no workflow has this job" for job in sorted(documented - jobs)]
     for problem in problems:
         print(problem)
     if problems:
-        print(f"Update the support matrix ({page}) with what the job builds and runs, and when.")
+        print("Update the support matrix (docs/guide/support.md) with what the job builds and runs, and when,")
+        print("and the supported-platforms table of docs/installation.md with its platform.")
     return 1 if problems else 0
 
 
