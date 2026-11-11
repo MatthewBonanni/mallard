@@ -104,37 +104,6 @@ struct UpwindSensorFunctor {
 };
 
 /**
- * @brief Corrects an interior face's central flux F (mass, momentum, energy;
- *        any common scale) so that the kinetic energy it produces in its two
- *        cells, P = du . F_m - d(|u|^2 / 2) F_rho with du = u_1 - u_0 from the
- *        cell values, does not exceed (KE_STABLE) or equals (KE_CONSERVATIVE)
- *        the pressure work mean(p) du . N, N the face's normal times the same
- *        scale. The correction is a momentum diffusion -alpha du with its
- *        work -alpha du . mean(u) in the energy flux, so both cells gain the
- *        removed kinetic energy as internal energy, alpha |du|^2 / 2 each,
- *        and the total energy stays conserved. Faces with |du| at round-off
- *        are left alone: there P - pressure work is itself round-off.
- */
-KOKKOS_INLINE_FUNCTION
-void ke_correct(rtype * F, const rtype * W_0, const rtype * W_1, const rtype * N, const bool conservative) {
-    constexpr uint8_t E = N_DIM + 1;
-    rtype du[N_DIM], u_mean[N_DIM];
-    FOR_I_DIM {
-        du[i] = W_1[1 + i] - W_0[1 + i];
-        u_mean[i] = 0.5_r * (W_0[1 + i] + W_1[1 + i]);
-    }
-    const rtype du2 = dot<N_DIM>(du, du);
-    const rtype u2 = dot<N_DIM>(W_0 + 1, W_0 + 1) + dot<N_DIM>(W_1 + 1, W_1 + 1);
-    const rtype eps = precision_tol<rtype>(1e-14, 1e-6);
-    if (!(du2 > eps * u2)) return;
-    const rtype excess = dot<N_DIM>(du, F + 1) - dot<N_DIM>(du, u_mean) * F[0] -
-                         0.5_r * (W_0[E] + W_1[E]) * dot<N_DIM>(du, N);
-    const rtype alpha = (conservative ? excess : Kokkos::fmax(0.0_r, excess)) / du2;
-    FOR_I_DIM F[1 + i] -= alpha * du[i];
-    F[E] -= alpha * dot<N_DIM>(du, u_mean);
-}
-
-/**
  * @brief Integrates the convective flux over every face into face_flux, the
  *        rate of change it causes in cells_of_face(:, 0) (cells_of_face(:, 1)
  *        receives its negative). Boundary faces use the boundary ghost state
@@ -161,7 +130,7 @@ struct ConvectiveFluxFunctor {
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell (UpwindSensorFunctor), else empty
     Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
     CentralFlux central_flux = CentralFlux::RECONSTRUCTED;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;  // the cells' W, read unless central_flux is RECONSTRUCTED
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;  // the cells' W, read when central_flux is CELL_AVERAGES
     PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
 
@@ -191,8 +160,8 @@ struct ConvectiveFluxFunctor {
         const rtype phi =
             hybrid ? face_upwind_fraction(upwind, boundaries, cells_of_face(i_face, 0), c1, i_face) : 1.0_r;
         // Interior faces whose central part reads the cell values, W_1 in the face's (cell 0's) frame
-        const bool cell_central = hybrid && c1 >= 0 && central_flux != CentralFlux::RECONSTRUCTED;
-        rtype W_0[N_CONSERVATIVE], W_1[N_CONSERVATIVE], N_sum[N_DIM] = {};
+        const bool cell_central = hybrid && c1 >= 0 && central_flux == CentralFlux::CELL_AVERAGES;
+        rtype W_0[N_CONSERVATIVE], W_1[N_CONSERVATIVE];
         if (cell_central) {
             FOR_I_CONSERVATIVE {
                 W_0[i] = W_cells(cells_of_face(i_face, 0), i);
@@ -202,7 +171,6 @@ struct ConvectiveFluxFunctor {
         }
 
         rtype total[N_CONSERVATIVE] = {};
-        rtype central_total[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
             rtype n_q[N_DIM];
             const rtype * n_point = quad_normal(quad_normals, i_face, i_quad, n_unit, n_q);
@@ -221,15 +189,9 @@ struct ConvectiveFluxFunctor {
                 boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, face_solution, W_r);
                 if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) FOR_I_CONSERVATIVE W_l[i] = W_r[i];
             }
+            rtype central[N_CONSERVATIVE] = {};
             if (hybrid) {
-                rtype central[N_CONSERVATIVE];
-                if (cell_central && central_flux == CentralFlux::CELL_AVERAGES) {
-                    riemann::KEEP::calc_flux(central, n_point, W_0, W_1, gamma);
-                } else {
-                    riemann::KEEP::calc_flux(central, n_point, W_l, W_r, gamma);
-                }
-                FOR_I_CONSERVATIVE central_total[i] += w_q * central[i];
-                FOR_I_DIM N_sum[i] += w_q * n_point[i];
+                riemann::KEEP::calc_flux(central, n_point, cell_central ? W_0 : W_l, cell_central ? W_1 : W_r, gamma);
             }
             if (phi > 0.0_r) {
                 if (low_mach_cutoff < 1.0_r &&
@@ -237,15 +199,11 @@ struct ConvectiveFluxFunctor {
                     low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
                 }
                 T_riemann_solver::calc_flux(flux_q, n_point, W_l, W_r, gamma);
-                FOR_I_CONSERVATIVE total[i] += w_q * flux_q[i];
+                if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = central[i] + phi * (flux_q[i] - central[i]);
+            } else {
+                FOR_I_CONSERVATIVE flux_q[i] = central[i];
             }
-        }
-        if (hybrid) {
-            // phi is constant over the face, so blending the face integrals is the pointwise blend
-            if (cell_central && central_flux != CentralFlux::CELL_AVERAGES) {
-                ke_correct(central_total, W_0, W_1, N_sum, central_flux == CentralFlux::KE_CONSERVATIVE);
-            }
-            FOR_I_CONSERVATIVE total[i] = central_total[i] + phi * (total[i] - central_total[i]);
+            FOR_I_CONSERVATIVE total[i] += w_q * flux_q[i];
         }
 
         // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D), on curved faces

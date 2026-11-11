@@ -498,9 +498,8 @@ was ruled out. `gradients = "reconstruction"` stays opt-in and experimental:
 it helps TENO on coarse meshes (32³) and hurts from 64³ on. For high-order
 LES, the constant is not the problem: TENO5 with an upwind flux is limited by
 the scheme from 64³ on (0.19 / 0.22 at 128³, against 0.063 / 0.085 for
-MUSCL + hybrid), and TENO with the hybrid flux feeds energy into the resolved
-field (section 8.1). Which flux TENO should use for LES is an open question
-for 0.10.0. Section 8.1's advice stands: $C = 1.5$-$1.8$ for Sigma when
+MUSCL + hybrid). With the hybrid flux, TENO takes KEEP on the cell values
+(section 4.4). Section 8.1's advice stands: $C = 1.5$-$1.8$ for Sigma when
 $k_c$ lies in the inertial range, checked against the budget and the spectrum.
 
 ## 4. Keeping the model's dissipation dominant
@@ -657,32 +656,30 @@ is KEEP's means: its kinetic-energy identity holds for the two cells' values, an
 reconstructed states each face produces kinetic energy
 $e_f = \Delta u \cdot F_m - \Delta(|u|^2/2) F_\rho - \bar{p}\, \Delta u \cdot n A$ (cell
 values $u_0, u_1$, $\Delta u = u_1 - u_0$) of either sign, whose size grows with the
-correction the reconstruction adds to the mean of the cells. `[numerics.hybrid] central`
-(experimental; the default `reconstructed` is unchanged) selects:
+correction the reconstruction adds to the mean of the cells. `[numerics.hybrid] central` selects the states KEEP is fed:
 
-- **`cell_averages`**: KEEP on the two cells' values, the Riemann part on the reconstructed
-  states (as for the low-dissipation unstructured schemes of
+- **`cell_averages`** (the default with TENO): KEEP on the two cells' values, the Riemann part
+  on the reconstructed states (as for the low-dissipation unstructured schemes of
   [Subbareddy & Candler 2009](../references.md#subbareddy-candler-2009) and
   [Modesti & Pirozzoli 2017](../references.md#modesti-pirozzoli-2017)). Every interior face
   changes the kinetic energy by exactly the pressure work, on any mesh, but the central part is
   second order: in smooth flow TENO sets only the dissipation near shocks.
-- **`ke_stable`**: KEEP on the reconstructed states, then per interior face a momentum
-  diffusion $-\alpha \Delta u$, with its work $-\alpha \Delta u \cdot \bar{u}$ in the energy
-  flux, $\alpha = \max(0, e_f) / |\Delta u|^2$: no face produces kinetic energy beyond the
-  pressure work, faces that remove it keep doing so, and both cells receive the removed energy
-  as heat, $\alpha |\Delta u|^2 / 2$ each (total energy stays conserved). Faces with
-  $|\Delta u|^2$ at round-off relative to $|u_0|^2 + |u_1|^2$ are left alone.
-- **`ke_conservative`**: the same with $\alpha = e_f / |\Delta u|^2$, so every face changes the
-  kinetic energy by exactly the pressure work (anti-diffusive where $e_f < 0$); for tests and
-  comparison.
+- **`reconstructed`** (the default with MUSCL, first order and gas mixtures): KEEP on the
+  reconstructed face states.
 
-The correction is the kinetic-energy form of the entropy correction of
-[Abgrall 2018](../references.md#abgrall-2018), which
-[Abgrall, Öffner & Ranocha 2022](../references.md#abgrall-offner-ranocha-2022) extend to kinetic
-energy for residual distribution and DG schemes; here it is applied per finite-volume face to
-the reconstructed states. Tests: `HybridFlux.*` in `test/les_test.cpp` (exact pressure work for
-`cell_averages` and `ke_conservative` with TENO states on simplices, the stable flux's sign, the
-correction's heating of both cells, conservation over steps). Single gas only for now.
+A third candidate was evaluated and not adopted: KEEP on the reconstructed states plus, per
+interior face, a momentum diffusion $-\alpha \Delta u$ with its work
+$-\alpha \Delta u \cdot \bar{u}$ in the energy flux, $\alpha = \max(0, e_f) / |\Delta u|^2$,
+so that no face produces kinetic energy beyond the pressure work and both cells receive the
+removed energy as heat: the kinetic-energy form of the entropy correction of Abgrall
+([2018](https://doi.org/10.1016/j.jcp.2018.06.031); Abgrall, Öffner & Ranocha
+[2022](https://doi.org/10.1016/j.jcp.2022.110955)), applied per finite-volume face. It is the
+"KE correction" of the tables below.
+
+Tests: `HybridFlux.TENOsCentralFluxChangesKineticEnergyOnlyByThePressureWork` (TENO states on
+simplices; `reconstructed` departs from it), `HybridFlux.CellAverageCentralFluxConservesMassMomentumAndEnergy`,
+and `MPITest.HybridConvectiveFluxMatchesSerial` with TENO (the halo cells' values). Single gas
+only (#801).
 
 **Shocks** (`examples/sod` and `examples/shu_osher`, TENO5 on 200 cells, the examples'
 Riemann solvers; L1 density error against the exact solution and against TENO5 on 3,200
@@ -694,12 +691,11 @@ oscillates.
 | Riemann solver | 0.00259 | 0.694 |
 | hybrid, `reconstructed` | 0.00239 | 0.651 |
 | hybrid, `cell_averages` | 0.00447 | 0.992 |
-| hybrid, `ke_stable` | 0.00283 | 0.645 |
-| hybrid, `ke_conservative` | 0.00320 | 0.653 |
+| hybrid, KE correction | 0.00283 | 0.645 |
 
 `cell_averages` costs the accuracy of TENO's reconstruction wherever the sensor is off (1.7
 times the Riemann solver's error on Sod's contact and expansion, 1.4 times on the entropy wave
-behind Shu-Osher's shock); the corrected fluxes keep it.
+behind Shu-Osher's shock); the KE correction keeps it.
 
 **Inviscid Taylor-Green vortex** (32³, Euler, the initial field of `examples/taylor_green_3d`,
 SSPRK3, CFL 0.8, HLLC as the Riemann solver; resolved kinetic energy over its initial value,
@@ -712,11 +708,11 @@ central flux on reconstructed states adds it, with TENO5 and with MUSCL (the `le
 | TENO5 + HLLC | 0.892 / 0.485 / 0.341 / 0.275 | 1.04 | 0% |
 | TENO5, hybrid, `reconstructed` | 0.989 / 1.268 / 1.775 / 2.512 | -2.11 | 77% |
 | TENO5, hybrid, `cell_averages` | 1.000 / 0.962 / 0.825 / 0.692 | 0.49 | 18% (at least -0.012) |
-| TENO5, hybrid, `ke_stable` | 0.885 / 0.518 / 0.318 / 0.215 | 1.22 | 0% |
+| TENO5, hybrid, KE correction | 0.885 / 0.518 / 0.318 / 0.215 | 1.22 | 0% |
 | MUSCL, hybrid, `reconstructed` | 0.980 / 1.044 / 1.319 / 1.851 | -1.21 | 62% |
 
 `cell_averages`' dissipation comes once the vortex breaks down, from the Riemann solver
-where the sensor fires; before that $\varepsilon_\mathrm{num}$ stays at round-off. `ke_stable`
+where the sensor fires; before that $\varepsilon_\mathrm{num}$ stays at round-off. The KE correction
 is stable but removes more energy than HLLC early on ($\varepsilon_\mathrm{num}$ 0.17 / 0.38 /
 0.63 at t = 0.5 / 2 / 3, against 0.04 / 0.26 / 0.49).
 
@@ -731,19 +727,19 @@ at stations 2 / 3, budget shares averaged to station 3; one A100 per run):
 | 64³ | TENO5 + HLLC | 0.117 / 0.140 | 1.06 / 1.01 | 0.531 | 0.335 | 0.134 |
 | 64³ | TENO5, hybrid, `reconstructed` | 0.146 / 0.124 | 1.34 / 1.11 | -0.157 | 0.813 | 0.345 |
 | 64³ | TENO5, hybrid, `cell_averages` | 0.173 / 0.143 | 1.35 / 1.14 | 0.007 | 0.704 | 0.289 |
-| 64³ | TENO5, hybrid, `ke_stable` | **0.056 / 0.081** | 1.03 / 0.93 | 0.440 | 0.394 | 0.166 |
+| 64³ | TENO5, hybrid, KE correction | **0.056 / 0.081** | 1.03 / 0.93 | 0.440 | 0.394 | 0.166 |
 | 128³ | MUSCL, hybrid, `reconstructed` | 0.063 / 0.085 | 1.03 / 0.91 | -0.003 | 0.534 | 0.470 |
 | 128³ | MUSCL, hybrid, `cell_averages` | 0.076 / 0.056 | 1.07 / 0.91 | 0.003 | 0.537 | 0.460 |
 | 128³ | TENO5 + HLLC | 0.187 / 0.222 | 1.00 / 0.93 | 0.446 | 0.296 | 0.258 |
 | 128³ | TENO5, hybrid, `reconstructed` | **0.058 / 0.083** | 1.03 / 0.88 | -0.047 | 0.558 | 0.489 |
 | 128³ | TENO5, hybrid, `cell_averages` | 0.076 / **0.056** | 1.07 / 0.91 | 0.004 | 0.537 | 0.460 |
-| 128³ | TENO5, hybrid, `ke_stable` | 0.165 / 0.195 | 0.93 / 0.88 | 0.402 | 0.314 | 0.285 |
+| 128³ | TENO5, hybrid, KE correction | 0.165 / 0.195 | 0.93 / 0.88 | 0.402 | 0.314 | 0.285 |
 
 Findings:
 
 - **`reconstructed` with TENO is not stable**: it adds energy at both resolutions (-16% and
   -5% of the dissipation), as in section 8.1, although at 128³ its spectrum is the closest.
-- **`ke_stable` is an upwind scheme in disguise.** Its correction removes 40-44% of the
+- **The KE correction acts as an upwind scheme.** Its correction removes 40-44% of the
   dissipation at both resolutions, as much as HLLC does; that happens to be the right amount
   at 64³ (the best spectrum of all runs, where every central scheme with the model alone piles
   energy up) and far too much at 128³, where it shares HLLC's error floor.
@@ -753,8 +749,15 @@ Findings:
   found for every central scheme at C = 1.35 (energy 1.35 at station 2).
 - **With `cell_averages`, TENO plays no part in smooth flow**: TENO5 and MUSCL give the same
   spectra and budgets to three digits (the sensor upwinds 0.1-0.2% of the cells, and TENO
-  flags none troubled), at ten times the cost
-  per step (309 against 33 ms at 128³ on an A100).
+  flags none troubled), at ten times the cost per step (309 against 33 ms at 128³ on an
+  A100).
+
+**Decision.** `cell_averages` is the default with TENO and the hybrid flux: of the fluxes
+evaluated it is the only one that never adds kinetic energy and stays low-dissipation from 64³
+to 128³. MUSCL keeps `reconstructed`, the `les` preset validated in section 8; that it adds
+energy without a model (inviscid Taylor-Green above) is #825. For LES of smooth turbulence
+MUSCL with the `les` preset stays the recommendation: TENO with `cell_averages` gives the same
+result at ten times the cost, and earns it only where shocks need TENO.
 
 ## 5. Implementation: SGS fluxes in the solver
 
@@ -1088,10 +1091,11 @@ Findings:
   coarser mesh. Recommendation: keep `C = 1.35` (the default), use 1.5-1.8
   when `k_c` lies in the inertial range, and check with the budget and the
   spectrum. The channel (8.2) brackets the same range.
-- **TENO-E with the hybrid flux** ($32^3$) gave `eps_num = -0.22`: the
-  nonlinear stencil selection feeds energy into the resolved field when
-  nothing upwinds it. Use MUSCL without limiter (or a linear reconstruction)
-  with the hybrid flux; TENO stays for shocks with the Riemann flux.
+- **TENO-E with KEEP on its reconstructed states** ($32^3$) gave `eps_num = -0.22`:
+  the nonlinear stencil selection feeds energy into the resolved field when
+  nothing upwinds it. TENO with the hybrid flux therefore feeds KEEP the cell
+  values (section 4.4), which matches MUSCL without limiter at ten times the
+  cost; MUSCL stays the scheme for LES of smooth turbulence.
 - The targets of this section (15% for every `k <= 2/3 k_c`) are met in the
   mean (0.06 decades = 15%) but not point by point: the largest single-shell
   deviation is 31-47%, at the lowest shells (few modes, realization noise of

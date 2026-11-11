@@ -23,7 +23,6 @@
 
 #include "data_paths.h"
 #include "exact_riemann.h"
-#include "flux_functor.h"
 #include "input.h"
 #include "les.h"
 #include "solver.h"
@@ -834,13 +833,15 @@ TEST(HybridFlux, BudgetPressureWorkMatchesTheSchemeWithOpenBoundaries) {
 
 namespace {
 
-/** @brief The convective kinetic-energy rate and the pressure work of a TENO box with the given central flux, and their scale. */
-std::array<double, 3> central_budget(const std::string & central) {
+/** @brief The convective kinetic-energy rate and the pressure work of a TENO box with the given [numerics.hybrid], and their scale. */
+std::array<double, 3> central_budget(const std::string & hybrid) {
     const uint32_t n = N_DIM == 2 ? 12 : 6;
-    const std::string box = periodic_box(MESH, n, "", "", "n_steps = 0\ncfl = 0.5\n");
+    // One step first: on the initial field the reconstructed states' faces cancel in the sum
+    const std::string box = periodic_box(MESH, n, "", "", "n_steps = 1\ncfl = 0.5\n");
     // A threshold of 1 never selects the Riemann solver
     auto solver = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"TENO\"\norder = 3\n") +
-                              "[numerics.hybrid]\nsensor_threshold = 1.0\ncentral = \"" + central + "\"\n");
+                              "[numerics.hybrid]\nsensor_threshold = 1.0\n" + hybrid);
+    solver->run();
     solver->copy_device_to_host();
     double scale = 0.0;
     for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
@@ -852,95 +853,18 @@ std::array<double, 3> central_budget(const std::string & central) {
 
 } // namespace
 
-TEST(HybridFlux, CellAverageAndKEConservativeCentralFluxesChangeKineticEnergyOnlyByThePressureWork) {
-    for (const char * central : {"cell_averages", "ke_conservative"}) {
-        const auto [convective, work, scale] = central_budget(central);
-        EXPECT_NEAR(convective, work, precision_tol<double>(1e-12, 1e-5) * scale) << central;
-    }
+TEST(HybridFlux, TENOsCentralFluxChangesKineticEnergyOnlyByThePressureWork) {
+    const auto [convective, work, scale] = central_budget("");
+    EXPECT_NEAR(convective, work, precision_tol<double>(1e-12, 1e-5) * scale);
+    const auto [reconstructed, work_r, scale_r] = central_budget("central = \"reconstructed\"\n");
+    EXPECT_GT(std::abs(reconstructed - work_r), 1e-3 * scale_r);
 }
 
-TEST(HybridFlux, KEStableCentralFluxRemovesOnlyTheExcessOverThePressureWork) {
-    const auto [reconstructed, work, scale] = central_budget("reconstructed");
-    const auto [stable, work_s, scale_s] = central_budget("ke_stable");
-    const double tol = precision_tol<double>(1e-12, 1e-5) * scale;
-    EXPECT_LE(stable, work + tol);
-    EXPECT_LE(stable, reconstructed + tol);
-    // The reconstructed states produce kinetic energy on some faces and remove it on others (here they
-    // cancel in the sum by the field's symmetry); the stable flux keeps only the removal
-    EXPECT_LT(stable, work - 1e-2 * scale);
-    (void)work_s;
-    (void)scale_s;
-}
-
-TEST(HybridFlux, KECorrectionHeatsBothCellsByHalfTheRemovedKineticEnergy) {
-    constexpr uint8_t E = N_DIM + 1;
-    rtype W_0[N_CONSERVATIVE] = {}, W_1[N_CONSERVATIVE] = {}, N[N_DIM] = {}, F[N_CONSERVATIVE] = {};
-    W_0[0] = 1.0_r;
-    W_1[0] = 1.2_r;
-    W_0[E] = 1.0_r;
-    W_1[E] = 1.3_r;
-    FOR_I_DIM {
-        W_0[1 + i] = 0.3_r + 0.1_r * rtype(i);
-        W_1[1 + i] = -0.2_r + 0.25_r * rtype(i);
-        N[i] = rtype(i + 1) / rtype(N_DIM);
-    }
-    // A central flux producing kinetic energy beyond the pressure work
-    F[0] = 0.4_r;
-    FOR_I_DIM F[1 + i] = -0.7_r + 0.2_r * rtype(i);
-    F[E] = 0.9_r;
-    auto excess = [&](const rtype * f) {
-        double e = 0.0, p = 0.5 * double(W_0[E] + W_1[E]);
-        FOR_I_DIM {
-            const double du = double(W_1[1 + i] - W_0[1 + i]), u = 0.5 * double(W_0[1 + i] + W_1[1 + i]);
-            e += du * (double(f[1 + i]) - u * double(f[0])) - p * du * double(N[i]);
-        }
-        return e;
-    };
-    ASSERT_GT(excess(F), 0.1);
-    for (const bool conservative : {false, true}) {
-        rtype G[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE G[i] = F[i];
-        ke_correct(G, W_0, W_1, N, conservative);
-        EXPECT_NEAR(excess(G), 0.0, precision_tol<double>(1e-13, 1e-5));
-        EXPECT_EQ(G[0], F[0]);
-        // Flux g from cell 0 to cell 1: cell 0 gains -g, cell 1 gains g. Internal-energy rate of each cell: dE - u . dm
-        double removed = 0.0, heat_0 = 0.0, heat_1 = 0.0;
-        heat_0 = -(double(G[E]) - double(F[E]));
-        heat_1 = double(G[E]) - double(F[E]);
-        FOR_I_DIM {
-            const double dm = double(G[1 + i]) - double(F[1 + i]);
-            heat_0 -= double(W_0[1 + i]) * -dm;
-            heat_1 -= double(W_1[1 + i]) * dm;
-            removed -= double(W_1[1 + i] - W_0[1 + i]) * dm;
-        }
-        EXPECT_NEAR(removed, excess(F), precision_tol<double>(1e-13, 1e-5));
-        EXPECT_NEAR(heat_0, 0.5 * removed, precision_tol<double>(1e-13, 1e-5));
-        EXPECT_NEAR(heat_1, 0.5 * removed, precision_tol<double>(1e-13, 1e-5));
-    }
-    // A face producing less than the pressure work (F_m = mean(u) F_rho + mean(p) N - du): the stable correction leaves it alone
-    FOR_I_DIM {
-        F[1 + i] = 0.5_r * (W_0[1 + i] + W_1[1 + i]) * F[0] + 0.5_r * (W_0[E] + W_1[E]) * N[i] - (W_1[1 + i] - W_0[1 + i]);
-    }
-    ASSERT_LT(excess(F), -0.1);
-    {
-        rtype G[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE G[i] = F[i];
-        ke_correct(G, W_0, W_1, N, false);
-        FOR_I_CONSERVATIVE EXPECT_EQ(G[i], F[i]);
-    }
-    // Equal velocities: nothing to diffuse, and nothing to correct
-    FOR_I_DIM W_1[1 + i] = W_0[1 + i];
-    rtype G[N_CONSERVATIVE];
-    FOR_I_CONSERVATIVE G[i] = F[i];
-    ke_correct(G, W_0, W_1, N, true);
-    FOR_I_CONSERVATIVE EXPECT_EQ(G[i], F[i]);
-}
-
-TEST(HybridFlux, KEStableCentralFluxConservesMassMomentumAndEnergy) {
+TEST(HybridFlux, CellAverageCentralFluxConservesMassMomentumAndEnergy) {
     const uint32_t n = N_DIM == 2 ? 12 : 6;
     const std::string box = periodic_box(MESH, n, "", "", "n_steps = 10\ncfl = 0.5\n");
     auto solver = make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"TENO\"\norder = 3\n") +
-                              "[numerics.hybrid]\nsensor_threshold = 1.0\ncentral = \"ke_stable\"\n");
+                              "[numerics.hybrid]\nsensor_threshold = 1.0\n");
     auto totals = [&] {
         solver->copy_device_to_host();
         std::array<double, N_CONSERVATIVE> t{};
@@ -957,7 +881,7 @@ TEST(HybridFlux, KEStableCentralFluxConservesMassMomentumAndEnergy) {
 
 TEST(HybridFlux, CentralKeyNeedsTheHybridFluxAndAKnownValue) {
     const std::string box = periodic_box(MESH, 4, "", "", "n_steps = 0\ncfl = 0.5\n");
-    EXPECT_THROW(make_solver(box + "[numerics.hybrid]\ncentral = \"ke_stable\"\n"), InputError);
+    EXPECT_THROW(make_solver(box + "[numerics.hybrid]\ncentral = \"cell_averages\"\n"), InputError);
     EXPECT_THROW(make_solver(with_flux(box, "convective_flux = \"hybrid\"\n", "type = \"FO\"\n") +
                              "[numerics.hybrid]\ncentral = \"keep\"\n"),
                  InputError);
