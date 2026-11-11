@@ -52,6 +52,10 @@
 "LESReconstructionGradients.TroubledCellsKeepTheLeastSquaresGradients" = ["les", "navier_stokes", "teno3", "hllc", "ssprk3", "periodic"]
 "LESMixture.SchmidtNumberActsOnCompositionGradientsOnly" = ["les", "navier_stokes", "mixture", "muscl", "hllc", "ssprk3"]
 "HybridFlux.CentralFluxChangesKineticEnergyOnlyByThePressureWork" = ["hybrid", "navier_stokes", "fo", "hllc", "ssprk3", "periodic"]
+"HybridFlux.MixtureCellAverageCentralFluxChangesKineticEnergyOnlyByThePressureWork" = [
+    ["hybrid", "mixture", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"],
+    ["hybrid", "mixture", "navier_stokes", "double_flux", "muscl", "hllc", "ssprk3", "periodic"],
+]
 
 [mixture_test]
 "MixtureEquivalence.ConstantCpSingleSpeciesReproducesPerfectGas" = [

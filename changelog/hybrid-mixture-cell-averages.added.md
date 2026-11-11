@@ -1,0 +1,1 @@
+- `[numerics.hybrid] central = "cell_averages"` works with gas mixtures, double flux included: KEEP on the two cells' values with each cell's `gamma` and `e0`, so the kinetic energy changes by exactly the pressure work (#801).

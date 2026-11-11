@@ -127,6 +127,7 @@ struct RunEnd {
 struct ViscousFluxFunctor;
 template <typename T_riemann_solver>
 struct ConvectiveFluxFunctor;
+struct CentralStates;
 
 /** @brief Whether some [[write_data]] of the input writes the variable. */
 bool writes_variable(const Input & input, const std::string & name);
@@ -781,6 +782,7 @@ class Solver {
 
         template <typename T_riemann_solver>
         ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
+        CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
         template <typename T_riemann_solver>
         void launch_flux_functor();
         /**
