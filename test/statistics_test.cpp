@@ -142,10 +142,10 @@ TEST(StatisticsTest, SnapshotsRecordWhatEachAveragedFieldAverages) {
         "[statistics]\nt_start = 0.25\ninterval = 2\nfields = [\"RHO\", \"P\"]\nproducts = [\"P*U_X\"]\n"
         "[statistics.phase]\nfields = [\"P\"]\nbins = 4\nperiod = 1.0\n"
         "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\ninterval = 160\n"
-        "variables = [\"MEAN_*\", \"COV_*\", \"PHASE_*\"]\n";
+        "fields = [\"MEAN_*\", \"COV_*\", \"PHASE_*\"]\n";
     if (have_hdf5()) {
         input += "[[write_data]]\nprefix = \"" + dir + "/flow\"\ninterval = 160\n"
-                 "variables = [\"MEAN_*\", \"COV_*\", \"PHASE_*\"]\n";
+                 "fields = [\"MEAN_*\", \"COV_*\", \"PHASE_*\"]\n";
     }
     Solver solver;
     solver.set_distributed(false);
@@ -205,7 +205,7 @@ TEST(StatisticsTest, AveragedProbesRecordTheirOwnWindow) {
     std::filesystem::remove_all(dir);
     const std::string extra = "[statistics]\nt_start = 0.02\ninterval = 2\n[[probes]]\nname = \"p\"\nformat = \"vtp\"\n"
                               "file = \"" + dir + "/p.pvd\"\npoint = " + numbers3("0.45", "0.55", "0.5") +
-                              "\nvariables = [\"P\"]\naverage = true\ninterval = 10\n";
+                              "\nfields = [\"P\"]\naverage = true\ninterval = 10\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml("[run]\nn_steps = 20\ndt = 0.0078125\n" + box(6, true) + "[initialize]\n" + BLOB +
