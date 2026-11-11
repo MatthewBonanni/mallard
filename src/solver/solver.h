@@ -483,7 +483,20 @@ class Solver {
          * @brief Counts the active and sent cells of a chemistry call; throws if any cell failed on
          *        any rank.
          */
-        void check_chemistry(const CellChemistry::Statistics & stats);
+        void check_chemistry();
+        /** @brief Throws if more cells failed than the last check saw (chem_io, written by the device). */
+        void check_chemistry_failures();
+        /** @brief The chemistry call over chem_dt(), with the repair audit; capturable in a step graph. */
+        void run_chemistry(const ChemistryForcing * forcing);
+        void set_chemistry_dt(double dt_chem);
+        /** @brief chem_io's failed cells, over the ranks, from the device. */
+        void reduce_chemistry_failures();
+        /** @brief SIMPLER's transport half step's rhs: T(U) + c. */
+        RHSFunction simpler_transport_rhs();
+        /** @brief Inside a captured step: marks the start or end of a chemistry call (CUDA events). */
+        void mark_chemistry_time(bool start);
+        /** @brief Seconds of the chemistry calls of the last step graph. */
+        double step_chemistry_seconds();
         void update_heat_release_rate();
         /** @brief Over all ranks: owned cells advanced in the last chemistry call, max sub-steps of a cell in the last step. */
         std::pair<uint64_t, double> chemistry_statistics();
@@ -542,7 +555,9 @@ class Solver {
         void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
-        double chemistry_cells_sent() const { return comm::allreduce(chem_cells_sent, comm::Op::SUM); }
+        double chemistry_cells_sent() const {
+            return comm::allreduce(double(cell_chemistry.statistics().sent), comm::Op::SUM);
+        }
         const Distribution & get_distribution() const { return distribution; }
 
         /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
@@ -1000,10 +1015,15 @@ class Solver {
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_production;
         uint32_t chemistry_lanes = 0;     // vector lanes per cell, 0: automatic
         CellChemistry cell_chemistry;
-        uint64_t chem_active_cells = 0;   // owned cells advanced in the last chemistry call
         double t_wall_chemistry = 0.0;    // this rank's
-        double chem_cells_integrated = 0.0, chem_cells_sent = 0.0;  // over calls, this rank's; sent: load balancing
-        Kokkos::View<int64_t *> chem_failures;  // [failures] of a chemistry call, reduced over the ranks
+        Kokkos::View<int64_t *> chem_failures;  // [failed cells of every call so far], reduced over the ranks
+        Kokkos::View<double> chem_dt;           // the chemistry call's time, on the device
+        // [chemistry_pending at the step's start (in), failed cells so far over the ranks (out)]
+        Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> chem_io;
+        uint64_t chem_failures_seen = 0;
+        bool simpler_half_step = false;         // inside a captured step: stage times of SIMPLER's transport half step
+        std::vector<void *> chemistry_events;   // cudaEvent_t pairs around a step graph's chemistry calls
+        size_t chemistry_marks = 0, step_chemistry_marks = 0;
         bool chemistry_load_balance = false;
         bool fuse_chemistry = false;      // run(): fuse consecutive half steps
         bool simpler = false;             // SIMPLER balanced splitting instead of Strang

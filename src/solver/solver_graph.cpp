@@ -31,10 +31,12 @@
 
 namespace {
 
-// step_scalars: [t, t_target, dt_scales]; step_reduce: [dt_cfl1, requests];
+// step_scalars: [t, t_target, dt_scales, SIMPLER's t + dt / 2 and dt / 2's scales]; step_reduce: [dt_cfl1, requests];
 // step_io: [t, t_target, requests of this rank, dt, accepted, then step_reduce reduced]
 constexpr int N_REDUCE = 1 + run_control::N_REQUESTS;
-[[maybe_unused]] constexpr int T = 0, T_TARGET = 1, DT_SCALES = 2, STEP_DT = DT_SCALES + int(DT), N_STEP_SCALARS = DT_SCALES + int(N_DT_SCALES);
+[[maybe_unused]] constexpr int T = 0, T_TARGET = 1, DT_SCALES = 2, STEP_DT = DT_SCALES + int(DT),
+                               T_HALF = DT_SCALES + int(N_DT_SCALES), HALF_SCALES = T_HALF + 1,
+                               HALF_DT = HALF_SCALES + int(DT), N_STEP_SCALARS = HALF_SCALES + int(N_DT_SCALES);
 [[maybe_unused]] constexpr int IO_T = 0, IO_T_TARGET = 1, IO_REQUESTS = 2, IO_DT = IO_REQUESTS + run_control::N_REQUESTS,
                                IO_ACCEPTED = IO_DT + 1, IO_REDUCED = IO_ACCEPTED + 1, N_STEP_IO = IO_REDUCED + N_REDUCE;
 
@@ -52,7 +54,6 @@ std::string Solver::step_graph_unsupported() const {
 #endif
     if (!cuda_graphs) return "off ([run] cuda_graphs)";
     if (is_distributed() && !halo.uses_nccl() && !uncaptured_step_graphs) return "halo exchanged with MPI";
-    if (reacting) return "chemistry";
     return "";
 }
 
@@ -97,13 +98,50 @@ void Solver::record_step() {
     Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
         c(i) = s(STEP_DT) / c(i);
     });
-    // take_step; the halo is current from calc_dt for double flux's frozen halo cells
-    if (double_flux) {
-        freeze_thermodynamics();
-        cells_frozen = true;
+    // take_step
+    chemistry_marks = 0;
+    if (reacting) {
+        cell_chemistry.begin_step();
+        Kokkos::deep_copy(exec, chem_cost, 0.0_r);
     }
-    time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func, step_scalars.data() + DT_SCALES);
-    recording_step = false;
+    const Kokkos::View<double> chem = chem_dt;
+    const Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> io = chem_io;
+    if (simpler) {
+        // take_simpler_step, at the device's t and dt
+        calc_rhs(state(), transport_rate, t);
+        Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { chem() = static_cast<double>(s(STEP_DT)); });
+        const ChemistryForcing forcing{transport_rate, rhs_vec[0]};
+        run_chemistry(&forcing);
+        halo_current = false;
+        Kokkos::parallel_for("simpler_half_step", 1, KOKKOS_LAMBDA(const int) {
+            const rtype step_half = 0.5_r * s(STEP_DT);
+            s(T_HALF) = s(T) + step_half;
+            dt_scales(step_half, &s(HALF_SCALES));
+        });
+        simpler_half_step = true;
+        const rtype half_dt = 0.5_r * dt;
+        time_integrator->take_step(t + half_dt, half_dt, solution_vec, rhs_vec, simpler_transport_rhs(),
+                                   step_scalars.data() + HALF_SCALES);
+        simpler_half_step = false;
+    } else {
+        if (reacting) {
+            Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) {
+                chem() = io(0) + 0.5 * static_cast<double>(s(STEP_DT));
+            });
+            run_chemistry(nullptr);
+            halo_current = false;
+        }
+        if (double_flux) {
+            // The halo cells' [gamma, e0] are frozen from their owners' states after the chemistry
+            if (halo.active() && !halo_current) {
+                halo.exchange(state());
+                halo_current = true;
+            }
+            freeze_thermodynamics();
+            cells_frozen = true;
+        }
+        time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func, step_scalars.data() + DT_SCALES);
+    }
     halo_current = false;
     // The graph advances them at the device time: the host knows neither
     t_characteristic = t_inflow = -std::numeric_limits<rtype>::infinity();
@@ -123,6 +161,13 @@ void Solver::record_step() {
         cells_frozen = false;
         reset_energy();
     }
+    if (reacting && !simpler && !defer_chemistry) {
+        Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { chem() = 0.5 * static_cast<double>(s(STEP_DT)); });
+        run_chemistry(nullptr);
+    }
+    if (reacting) reduce_chemistry_failures();
+    step_chemistry_marks = chemistry_marks;
+    recording_step = false;
 }
 
 void Solver::set_stage_time(const rtype t_stage, const rtype c) {
@@ -137,7 +182,8 @@ void Solver::set_stage_time(const rtype t_stage, const rtype c) {
 void Solver::record_stage_time(const rtype c) {
     const Kokkos::View<rtype> st = stage_time;
     const Kokkos::View<rtype *> s = step_scalars;
-    Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = s(T) + c * s(STEP_DT); });
+    const int origin = simpler_half_step ? T_HALF : T, h = simpler_half_step ? HALF_DT : STEP_DT;
+    Kokkos::parallel_for("stage_time", 1, KOKKOS_LAMBDA(const int) { st() = s(origin) + c * s(h); });
 }
 
 const rtype * Solver::step_dt_device() const { return step_scalars.data() + STEP_DT; }
@@ -186,6 +232,7 @@ void Solver::graph_step() {
 #endif
     step_io(IO_T) = t;
     step_io(IO_T_TARGET) = next_target_time();
+    if (reacting) chem_io(0) = chemistry_pending;
     control_contributed = run_control::pending();
     for (int k = 0; k < run_control::N_REQUESTS; k++) {
         step_io(IO_REQUESTS + k) = (control_contributed >> k) & 1 ? rtype(-1) : rtype(0);
@@ -227,6 +274,12 @@ void Solver::graph_step() {
     if (last_good.flow.is_allocated()) note_last_good();
     dt = step_io(IO_DT);
     run_health.ledger.end_step(static_cast<double>(dt));
+    if (reacting) {
+        t_wall_chemistry += step_chemistry_seconds();
+        check_chemistry_failures();
+        chemistry_pending = defer_chemistry && !simpler ? 0.5 * static_cast<double>(dt) : 0.0;
+        if (cell_chemistry.adapt_balance()) destroy_step_graph();
+    }
     if (!(dt > 0.0_r)) {
         throw std::runtime_error("Invalid dt: " + std::to_string(dt) + ".");
     }
@@ -253,4 +306,39 @@ void Solver::destroy_step_graph() {
     if (step_graph_exec) cudaGraphExecDestroy(static_cast<cudaGraphExec_t>(step_graph_exec));
 #endif
     step_graph_exec = nullptr;
+}
+
+void Solver::mark_chemistry_time([[maybe_unused]] const bool start) {
+#ifdef KOKKOS_ENABLE_CUDA
+    if (!recording_step) return;
+    if (chemistry_marks == chemistry_events.size()) {
+        cudaEvent_t event;
+        cuda_check(cudaEventCreate(&event), "cudaEventCreate");
+        chemistry_events.push_back(event);
+    }
+    const cudaEvent_t event = static_cast<cudaEvent_t>(chemistry_events[chemistry_marks++]);
+    const cudaStream_t stream = Kokkos::DefaultExecutionSpace().cuda_stream();
+    cudaStreamCaptureStatus status;
+    cuda_check(cudaStreamIsCapturing(stream, &status), "cudaStreamIsCapturing");
+    // In a capture, an event record node of its own, timed when the graph runs
+    cuda_check(status == cudaStreamCaptureStatusActive ? cudaEventRecordWithFlags(event, stream, cudaEventRecordExternal)
+                                                       : cudaEventRecord(event, stream),
+               "cudaEventRecord");
+#endif
+}
+
+double Solver::step_chemistry_seconds() {
+    double seconds = 0.0;
+#ifdef KOKKOS_ENABLE_CUDA
+    for (size_t k = 0; k + 1 < step_chemistry_marks; k += 2) {
+        float ms = 0.0f;
+        if (cudaEventElapsedTime(&ms, static_cast<cudaEvent_t>(chemistry_events[k]),
+                                 static_cast<cudaEvent_t>(chemistry_events[k + 1])) == cudaSuccess) {
+            seconds += 1e-3 * double(ms);
+        } else {
+            cudaGetLastError();
+        }
+    }
+#endif
+    return seconds;
 }

@@ -123,7 +123,8 @@ inline void expect_matches_serial(const std::string & input,
  *        builds). In CUDA builds the runs with graphs on take their steps in the graph, but over MPI's exchanges;
  *        on every backend the code their capture records issues no fence, allocation or host copy.
  */
-inline void expect_matches_serial_with_and_without_step_graphs(const std::string & input) {
+inline void expect_matches_serial_with_and_without_step_graphs(
+    const std::string & input, const std::function<void(const Solver &)> & check_distributed = {}) {
     for (const bool graphs : {true, false}) {
         std::string text = input;
         text.insert(text.find("[run]\n") + 6, std::string("cuda_graphs = ") + (graphs ? "true" : "false") + "\n");
@@ -141,6 +142,7 @@ inline void expect_matches_serial_with_and_without_step_graphs(const std::string
 #else
                 EXPECT_EQ(s.get_graph_steps(), 0u);
 #endif
+                if (check_distributed) check_distributed(s);
             },
             graphs);
         if (graphs) {

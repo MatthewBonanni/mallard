@@ -318,7 +318,7 @@ void Solver::report_health() {
         report.chemistry = {{"substeps", double(substeps[0] - run_health.substeps_last[0])},
                             {"rejected_substeps", double(substeps[1] - run_health.substeps_last[1])},
                             {"failures", 0.0},
-                            {"reacting_cells", double(comm::allreduce(chem_active_cells, comm::Op::SUM)) /
+                            {"reacting_cells", double(comm::allreduce(cell_chemistry.statistics().last_active, comm::Op::SUM)) /
                                                    double(std::max<uint64_t>(n_cells_global, 1))},
                             {"wall", wall}};
         report.chemistry.emplace_back("imbalance", mean > 0.0 ? wall / mean : 1.0);

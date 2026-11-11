@@ -104,7 +104,10 @@ class StepGraphGuard {
             if (std::strstr(name, "Kokkos Profile Tool Fence")) return;
             record(std::string("fence \"") + name + "\"");
         }
-        static void allocate(const Kokkos::Profiling::SpaceHandle space, const char * label, const void *, uint64_t) {
+        static void allocate(const Kokkos::Profiling::SpaceHandle space, const char * label, const void *,
+                             const uint64_t size) {
+            // Kokkos sizes a team kernel's level-1 scratch at every launch until it is not empty: 0 bytes is no allocation
+            if (size == 0) return;
             record(std::string("allocation \"") + label + "\" in " + space.name);
         }
         static void begin_deep_copy(const Kokkos::Profiling::SpaceHandle dst_space, const char * dst_label, const void *,
@@ -113,7 +116,10 @@ class StepGraphGuard {
             // Device builds only: pageable host memory cannot take part in a capture
             const bool dst_host = std::strcmp(dst_space.name, "Host") == 0;
             const bool src_host = std::strcmp(src_space.name, "Host") == 0;
-            if (dst_host != src_host) {
+            // deep_copy(exec, view, value) fills on the execution space (a memset or a kernel on its stream), and
+            // Kokkos reports the value as a host source "(none)"; fills that must fence are reported as fences
+            const bool fill = src_host && std::strcmp(src_label, "(none)") == 0;
+            if (dst_host != src_host && !fill) {
                 record(std::string("copy \"") + src_label + "\" (" + src_space.name + ") to \"" + dst_label + "\" (" +
                        dst_space.name + ")");
             }

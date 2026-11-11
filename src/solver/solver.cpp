@@ -2522,8 +2522,9 @@ void Solver::print_summary(const RunEnd & end) const {
                  .rejected_counted = step_controller.enabled(),
                  .rejected = n_rejected};
     if (reacting && comm::size() > 1) {
-        const auto sums = comm::allreduce(std::array<double, 3>{t_wall_chemistry, chem_cells_integrated, chem_cells_sent},
-                                          comm::Op::SUM);
+        const CellChemistry::Statistics totals = cell_chemistry.statistics();
+        const auto sums = comm::allreduce(
+            std::array<double, 3>{t_wall_chemistry, double(totals.active), double(totals.sent)}, comm::Op::SUM);
         s.chemistry_slowest = comm::allreduce(t_wall_chemistry, comm::Op::MAX);
         s.chemistry_mean = sums[0] / comm::size();
         if (chemistry_load_balance && sums[1] > 0.0) s.chemistry_sent = sums[2] / sums[1];
@@ -2746,14 +2747,17 @@ ProbeFields Solver::probe_fields(ProbeFluxes & fluxes) {
 
 void Solver::take_step() {
     if (simpler) {
+        cell_chemistry.begin_step();
         take_simpler_step();
         halo_current = false;
         Kokkos::fence();
+        if (cell_chemistry.adapt_balance()) destroy_step_graph();
         step++;
         t += dt;
         return;
     }
     if (reacting) {
+        cell_chemistry.begin_step();
         Kokkos::deep_copy(chem_cost, 0.0_r);
         advance_chemistry(chemistry_pending + 0.5 * static_cast<double>(dt));
         chemistry_pending = 0.0;
@@ -2789,6 +2793,7 @@ void Solver::take_step() {
     }
     halo_current = false;
     Kokkos::fence();
+    if (reacting && cell_chemistry.adapt_balance()) destroy_step_graph();
     step++;
     t += dt;
 }
