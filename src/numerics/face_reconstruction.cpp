@@ -155,8 +155,18 @@ void FaceReconstruction::set_boundaries(const BoundaryData & boundaries_in) {
 
 void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     const uint32_t n_faces = mesh->n_faces;
-    std::vector<std::vector<std::array<double, 3>>> points(n_faces);
-    std::vector<std::vector<double>> weights(n_faces);
+    // Every face's points and weights, face f's from offsets[f]
+    std::vector<std::array<double, 3>> points;
+    std::vector<double> weights;
+    std::vector<size_t> offsets(n_faces + 1, 0);
+    std::vector<std::array<double, 3>> v, pts;
+    std::vector<double> w;
+    auto add_face = [&](const uint32_t f) {
+        points.insert(points.end(), pts.begin(), pts.end());
+        weights.insert(weights.end(), w.begin(), w.end());
+        offsets[f + 1] = points.size();
+    };
+    auto n_points = [&](const uint32_t f) { return offsets[f + 1] - offsets[f]; };
     const uint8_t tri_rule = (degree <= 2) ? degree : (degree <= 4 ? 4 : 5);
     const int n_gp = std::min(3, std::max(1, (degree + 1) / 2));
     const TriangleDunavant tri(std::max<uint8_t>(tri_rule, 1));
@@ -166,12 +176,12 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     std::vector<std::vector<curved::Vec3>> curved_normals(geometry ? n_faces : 0);
     for (uint32_t f = 0; f < n_faces; f++) {
         const uint32_t n = mesh->h_n_nodes_of_face(f);
-        std::vector<std::array<double, 3>> v(n);
+        v.resize(n);
         for (uint32_t k = 0; k < n; k++) {
             FOR_I_DIM v[k][i] = double(mesh->h_node_coords(mesh->h_node_of_face(f, k), i));
         }
-        auto & pts = points[f];
-        auto & w = weights[f];
+        pts.clear();
+        w.clear();
         if (geometry && degree > 1 && geometry->face_is_curved(f)) {
             // The flat rule mapped onto the curved face; weights twice its area elements over face_area
             std::vector<std::array<double, 2>> ref;
@@ -197,6 +207,7 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
             }
             curved_normals[f] = nq;
             n_max = std::max(n_max, pts.size());
+            add_face(f);
             continue;
         }
         if (degree <= 1) {
@@ -240,6 +251,7 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         for (double x : w) sum += x;
         for (double & x : w) x *= 2.0 / sum;
         n_max = std::max(n_max, pts.size());
+        add_face(f);
     }
     face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_faces, n_max, N_DIM);
     face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_faces, n_max);
@@ -247,9 +259,9 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     auto h_weights = Kokkos::create_mirror_view(face_quad_weights);
     for (uint32_t f = 0; f < n_faces; f++) {
         for (size_t q = 0; q < n_max; q++) {
-            const size_t qq = std::min(q, points[f].size() - 1);
-            FOR_I_DIM h_points(f, q, i) = static_cast<rtype>(points[f][qq][i]);
-            h_weights(f, q) = static_cast<rtype>((q < points[f].size()) ? weights[f][q] : 0.0);
+            const size_t qq = offsets[f] + std::min(q, n_points(f) - 1);
+            FOR_I_DIM h_points(f, q, i) = static_cast<rtype>(points[qq][i]);
+            h_weights(f, q) = static_cast<rtype>((q < n_points(f)) ? weights[offsets[f] + q] : 0.0);
         }
     }
     Kokkos::deep_copy(face_quad_points, h_points);
@@ -278,13 +290,13 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
         const int32_t g_index = h_image_face(f);
         if (g_index < 0) continue;
         const uint32_t g = static_cast<uint32_t>(g_index);
-        for (size_t q = 0; q < points[f].size() && q < h_image_quad.extent(1); q++) {
+        for (size_t q = 0; q < n_points(f) && q < h_image_quad.extent(1); q++) {
             double best = std::numeric_limits<double>::max();
-            for (size_t r = 0; r < points[g].size(); r++) {
+            for (size_t r = 0; r < n_points(g); r++) {
                 double d2 = 0.0;
                 FOR_I_DIM {
                     const double t = double(mesh->h_face_coords(g, i)) - double(mesh->h_face_coords(f, i));
-                    d2 += std::pow(points[g][r][i] - points[f][q][i] - t, 2);
+                    d2 += std::pow(points[offsets[g] + r][i] - points[offsets[f] + q][i] - t, 2);
                 }
                 if (d2 < best) {
                     best = d2;

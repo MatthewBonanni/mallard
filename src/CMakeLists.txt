@@ -18,7 +18,10 @@ add_library(MallardCore STATIC
     common/json.cpp
     common/log.cpp
     common/report.cpp
+    common/convergence.cpp
     common/provenance.cpp
+    common/sha256_hw.cpp
+    common/snapshot_block.cpp
     common/run_control.cpp
     common/run_health.cpp
     common/run_log.cpp
@@ -62,14 +65,17 @@ add_library(MallardCore STATIC
     solver/chemistry_balance.cpp
     solver/chemistry_benchmark.cpp
     solver/conservation_ledger.cpp
+    solver/derived_fields.cpp
     solver/numerics_preset.cpp
     solver/repair_audit.cpp
     solver/probe_geometry.cpp
     solver/probe_surface.cpp
+    solver/probe_spectra.cpp
     solver/probes.cpp
     solver/solver.cpp
     solver/solver_check.cpp
     solver/check_report.cpp
+    solver/run_report.cpp
     solver/solver_resolution.cpp
     solver/solver_chemistry.cpp
     solver/solver_control.cpp
@@ -78,6 +84,8 @@ add_library(MallardCore STATIC
     solver/solver_graph.cpp
     solver/solver_health.cpp
     solver/solver_step_control.cpp
+    solver/solver_triggers.cpp
+    solver/triggers.cpp
     solver/initial_state.cpp
     solver/synthetic_turbulence.cpp
     solver/solver_initialize.cpp
@@ -169,6 +177,10 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(numerics/teno_setup.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
+# CPU SHA intrinsics, which nvcc's front end need not parse
+if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER MATCHES "nvcc_wrapper")
+    set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
+endif()
 target_link_libraries(MallardCore PRIVATE yaml-cpp::yaml-cpp)
 mallard_target_warnings(MallardCore)
 
@@ -224,7 +236,7 @@ if(Mallard_ENABLE_CGNS)
 endif()
 
 # The commands of the mallard executable (cli.h), which the test suite also runs
-add_library(MallardCommands STATIC cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp)
+add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp)
 target_link_libraries(MallardCommands PUBLIC MallardCore)
 mallard_target_warnings(MallardCommands)
 

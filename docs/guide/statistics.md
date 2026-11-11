@@ -27,12 +27,12 @@ carried across restarts.
 |---|---|---|
 | `fields` | none | `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T`, `H`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `Y_<s>`, `RHOY_<s>` |
 | `products` | none | Pairs `"A*B"` whose covariance to keep |
-| `t_start` | 0 | Start averaging after this time |
+| `t_start` | 0 | Start averaging after this time; or let a [trigger](running.md#triggers) start them (`do = "start statistics"`) once a condition holds |
 | `interval` | 1 | Sample every this many steps (weighted by the time since the last sample) |
 | `reset` | `false` | Start afresh on a restart |
 
-Write them with `variables = ["MEAN_*", "COV_*"]`, sample them with
-[probes](probes.md#time-averages) (`variables = ["MEAN_P"]`), and average further over
+Write them with `fields = ["MEAN_*", "COV_*"]`, sample them with
+[probes](probes.md#time-averages) (`fields = ["MEAN_P"]`), and average further over
 homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of a
 channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)).
@@ -70,7 +70,8 @@ products = ["U_X*U_Y"]           # cross spectra and correlations
 On a generated `cartesian` mesh, spectra and two-point correlations along the
 homogeneous (periodic, unstretched) directions, at each position of the
 others: per y of a channel, or shell spectra of a periodic box. Computed by
-FFTs on the device, bitwise the same on any number of ranks.
+FFTs on the device, bitwise the same on any number of ranks. Spectra in time
+of a probe's signal, on any mesh, are [time spectra](probes.md#time-spectra) of probes.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -106,7 +107,7 @@ level = 0.0
 *Used in:* [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder).
 
 Per-cell means over the samples whose phase in a periodic cycle falls in each
-of `bins` bins, output as `PHASE_<bin>_<field>` (`variables = ["PHASE_*"]`).
+of `bins` bins, output as `PHASE_<bin>_<field>` (`fields = ["PHASE_*"]`).
 The phase comes from a fixed `period`, or from the upward crossings of a
 level by a variable at a probe point.
 

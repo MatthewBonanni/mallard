@@ -96,7 +96,7 @@ budget = true
 [[write_data]]
 prefix = "./solut/flame"
 time_interval = 2.5e-5
-variables = ["T", "HRR", "Q", "Y_H2", "OMEGA_H2"]
+fields = ["T", "HRR", "Q_CRITERION", "Y_H2", "OMEGA_H2"]
 
 [[write_data]]
 prefix = "./restart/flame"

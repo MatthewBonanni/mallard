@@ -152,9 +152,9 @@ time_interval = 0.01
 [[write_data]]
 prefix = "stats/reacting"
 time_interval = 0.05
-variables = ["MEAN_*", "COV_*"]
+fields = ["MEAN_*", "COV_*"]
 
 [[write_data]]
 prefix = "snap/reacting"
 time_interval = 0.125
-variables = ["U", "T", "HRR", "Q", "TF_F", "TF_E", "MU_T"]
+fields = ["U", "T", "HRR", "Q_CRITERION", "TF_F", "TF_E", "MU_T"]

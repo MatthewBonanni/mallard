@@ -67,6 +67,7 @@ order = 5
 
 [physics]
 type = "euler"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 1.0
 T_ref = 1.0
@@ -79,7 +80,7 @@ check_interval = 50
 prefix = "solut/dmr"
 format = "vtu"
 time_interval = 0.05
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 
 [[write_data]]
 prefix = "restart"

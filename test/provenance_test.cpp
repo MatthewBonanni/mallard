@@ -21,9 +21,11 @@
 #include "data_writer.h"
 #include "json.h"
 #include "mesh_block.h"
+#include "output_reader.h"
 #include "provenance.h"
 #include "run_log.h"
 #include "scratch.h"
+#include "sha256_hw.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #ifdef Mallard_HAS_HDF5
@@ -60,13 +62,13 @@ std::string box(const std::string & dir, uint32_t n_steps, const std::string & i
       << "[output]\ncheck_interval = 2\nrun_log = \"" << dir << "/run.jsonl\"\n"
       << "[integrals]\ninterval = 2\nfile = \"" << dir << "/integrals.csv\"\n"
       << "[[probes]]\nname = \"p\"\nfile = \"" << dir << "/probe.csv\"\ninterval = 2\n"
-      << "point = " << (N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]") << "\nvariables = [\"RHO\"]\n"
+      << "point = " << (N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]") << "\nfields = [\"RHO\"]\n"
       << "[[probes]]\nname = \"line\"\nformat = \"vtp\"\nfile = \"" << dir << "/line.pvd\"\ninterval = 2\n"
       << "start = " << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = "
-      << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 5\nvariables = [\"RHO\"]\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 4\nvariables = [\"RHO\"]\n"
+      << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") << "\nn_points = 5\nfields = [\"RHO\"]\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 4\nfields = [\"RHO\"]\n"
       << "[[write_data]]\nprefix = \"" << dir << "/r\"\nformat = \"restart\"\ninterval = 4\n";
-    if (hdf5) s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"xdmf\"\ninterval = 4\nvariables = [\"RHO\"]\n";
+    if (hdf5) s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"xdmf\"\ninterval = 4\nfields = [\"RHO\"]\n";
     return s.str();
 }
 
@@ -77,11 +79,12 @@ const std::string UNIFORM = "type = \"analytical\"\nrho = \"1.0\"\np = \"1.0\"\n
 bool writes_hdf5() { return have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()); }
 
 /** @brief Runs the box from an input file in dir, as the executable does; returns the input file's path. */
-std::string run_box(const std::string & dir, uint32_t n_steps, const std::string & initialize) {
+std::string run_box(const std::string & dir, uint32_t n_steps, const std::string & initialize,
+                    const std::string & extra = "") {
     const std::string input = dir + "/input_" + std::to_string(n_steps) + ".toml";
     if (comm::is_root()) {
         std::filesystem::create_directories(dir);
-        std::ofstream(input) << box(dir, n_steps, initialize, writes_hdf5());
+        std::ofstream(input) << box(dir, n_steps, initialize, writes_hdf5()) << extra;
     }
     comm::barrier();
     Solver solver;
@@ -99,14 +102,25 @@ std::set<std::string> key_set(const Value & v) {
 } // namespace
 
 TEST(ProvenanceTest, Sha256MatchesTheStandardDigests) {
-    // FIPS 180-4 examples, including messages that fill the last block past its length field
-    EXPECT_EQ(provenance::sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    EXPECT_EQ(provenance::sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    EXPECT_EQ(provenance::sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
-              "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
-    EXPECT_EQ(provenance::sha256(std::string(1000000, 'a')),
-              "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+    // FIPS 180-4 examples, including messages that fill the last block past its length field, on
+    // the CPU's SHA instructions where it has them and on the portable compression
+    const bool hardware = sha256_hw::enabled();
+    for (const bool on : {true, false}) {
+        sha256_hw::set_enabled(on);
+        SCOPED_TRACE(sha256_hw::enabled() ? "SHA instructions" : "portable");
+        EXPECT_EQ(provenance::sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        EXPECT_EQ(provenance::sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        EXPECT_EQ(provenance::sha256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+                  "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+        EXPECT_EQ(provenance::sha256("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmno"
+                                     "ijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"),
+                  "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1");
+        EXPECT_EQ(provenance::sha256(std::string(1000000, 'a')),
+                  "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
+    }
+    sha256_hw::set_enabled(hardware);
 }
+
 
 TEST(ProvenanceTest, FileHashesCoverContentsAndDirectoryLayout) {
     if (!comm::is_root()) return;
@@ -147,10 +161,12 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
     for (const auto & line : lines(dir + "/run.jsonl")) records.push_back(json::parse(line));
     ASSERT_GE(records.size(), 4u);
 
-    // The first record names the format and holds the provenance
+    // The first record names the format, the run and what it restarted from, and holds the run block
     const Value & start = records.front();
-    EXPECT_EQ(key_set(start),
-              (std::set<std::string>{"type", "schema", "version", "provenance", "placement", "setup_phases"}));
+    EXPECT_EQ(key_set(start), (std::set<std::string>{"type", "schema", "version", "run_id", "restart_of", "provenance",
+                                                     "placement", "setup_phases"}));
+    EXPECT_EQ(start["run_id"].string, provenance::run_id());
+    EXPECT_TRUE(start["restart_of"].is_null());
     EXPECT_EQ(start["placement"].array.size(), static_cast<size_t>(comm::size()));
     EXPECT_EQ(start["placement"].array[0]["rank"].number, 0.0);
     EXPECT_TRUE(start["setup_phases"].has("mesh"));
@@ -167,7 +183,7 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
         "health"};
     std::vector<double> steps;
     double last_progress = 0.0;
-    std::set<std::string> events;
+    std::set<std::pair<std::string, double>> outputs;
     for (const auto & r : records) {
         const std::string type = r["type"].string;
         if (type == "progress") {
@@ -188,22 +204,48 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
             EXPECT_EQ(r["wall_per_step"].type == Value::Type::NUMBER, timed);
             EXPECT_EQ(r["cells_per_second"].type == Value::Type::NUMBER, timed);
             EXPECT_EQ(r["eta"].type == Value::Type::NUMBER, timed);
-        } else if (type == "event") {
-            EXPECT_EQ(key_set(r), (std::set<std::string>{"type", "step", "t", "kind", "text"}));
-            events.insert(r["kind"].string);
+        } else if (type == "output") {
+            // The output index: every file completely written, by step, time, writer and reason, with its size and hash
+            EXPECT_EQ(key_set(r), (std::set<std::string>{"type", "step", "t", "kind", "path", "reason", "writer",
+                                                         "run_id", "complete", "bytes", "files"}));
+            EXPECT_EQ(r["run_id"].string, provenance::run_id());
+            EXPECT_EQ(r["reason"].string, r["step"].number == 0 ? "start" : "interval") << r["path"].string;
+            EXPECT_TRUE(std::filesystem::exists(r["path"].string)) << r["path"].string;
+            EXPECT_TRUE(r["complete"].boolean);
+            ASSERT_FALSE(r["files"].array.empty()) << r["path"].string;
+            double bytes = 0.0;
+            for (const Value & f : r["files"].array) {
+                const std::string file = f["path"].string;
+                EXPECT_FALSE(std::filesystem::exists(file + ".partial")) << file;
+                EXPECT_EQ(f["bytes"].number, double(std::filesystem::file_size(file))) << file;
+                EXPECT_EQ(f["sha256"].string, provenance::sha256_file(file)) << file;
+                bytes += f["bytes"].number;
+            }
+            EXPECT_EQ(r["bytes"].number, bytes);
+            outputs.insert({r["kind"].string, r["step"].number});
         }
     }
     EXPECT_EQ(steps, (std::vector<double>{0, 2, 4}));
-    EXPECT_TRUE(events.count("vtu") && events.count("restart")) << "file writes are events";
+    for (const char * kind : {"vtu", "restart"}) {
+        EXPECT_TRUE(outputs.count({kind, 0.0}) && outputs.count({kind, 4.0})) << kind;
+    }
     EXPECT_EQ(last_progress, 1.0);
 
     const Value & end = records.back();
     EXPECT_EQ(end["type"].string, "end");
-    EXPECT_EQ(key_set(end), (std::set<std::string>{"type", "reason", "step", "t", "steps", "wall", "wall_setup",
-                                                   "wall_stepping", "wall_diagnostics", "wall_output",
-                                                   "cells_per_second"}));
+    EXPECT_EQ(key_set(end), (std::set<std::string>{"type", "outcome", "cause", "reason", "step", "t", "last_snapshot",
+                                                   "last_restart", "steps", "wall", "wall_setup", "wall_stepping",
+                                                   "wall_diagnostics", "wall_output", "cells_per_second"}));
     EXPECT_EQ(end["step"].number, 4);
+    EXPECT_EQ(end["outcome"].string, "finished");
+    EXPECT_EQ(end["cause"].string, "n_steps");
     EXPECT_NE(end["reason"].string.find("n_steps"), std::string::npos);
+    EXPECT_EQ(end["last_restart"]["path"].string, dir + "/r_000004.restart");
+    for (const char * last : {"last_snapshot", "last_restart"}) {
+        EXPECT_EQ(end[last]["step"].number, 4) << last;
+        EXPECT_EQ(end[last]["t"].number, end["t"].number) << last;
+        EXPECT_TRUE(std::filesystem::exists(end[last]["path"].string)) << last;
+    }
     std::filesystem::remove_all(dir);
 }
 
@@ -214,7 +256,7 @@ TEST(ProvenanceTest, Hdf5ProbeFilesCarryTheRunsProvenance) {
     const std::string point = N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]";
     std::string input = box(dir, 2, UNIFORM, false);
     input = input.substr(0, input.find("[[write_data]]")) + "[[probes]]\nname = \"ph\"\nformat = \"hdf5\"\nfile = \"" +
-            dir + "/probe.h5\"\ninterval = 2\npoint = " + point + "\nvariables = [\"RHO\"]\n";
+            dir + "/probe.h5\"\ninterval = 2\npoint = " + point + "\nfields = [\"RHO\"]\n";
     Solver solver;
     solver.init(parse_toml(input));
     solver.run();
@@ -222,7 +264,7 @@ TEST(ProvenanceTest, Hdf5ProbeFilesCarryTheRunsProvenance) {
     if (!comm::is_root()) return;
     h5::Handle file(H5Fopen((dir + "/probe.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "probe.h5");
     h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-    EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), provenance::json());
+    EXPECT_EQ(h5::read_strings_attribute(root, provenance::ATTRIBUTE).at(0), provenance::json());
 }
 #endif
 
@@ -274,7 +316,7 @@ TEST(ProvenanceTest, EveryOutputFileCarriesTheRunsProvenance) {
         if (!writes_hdf5()) break;
         h5::Handle file(H5Fopen((dir + h5).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, h5);
         h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-        EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), expected) << h5;
+        EXPECT_EQ(h5::read_strings_attribute(root, provenance::ATTRIBUTE).at(0), expected) << h5;
     }
     if (writes_hdf5()) {
         EXPECT_EQ(provenance::parse_comment(read_file(dir + "/h.xmf")), expected);
@@ -288,23 +330,102 @@ TEST(ProvenanceTest, ContinuedRunsAppendTheirProvenance) {
     if (comm::is_root()) std::filesystem::remove_all(dir);
     run_box(dir, 4, UNIFORM);
     const std::string first = provenance::json();
-    run_box(dir, 8, "type = \"restart\"\nfile = \"" + dir + "/r_000004.restart\"\n");
+    const std::string first_id = provenance::run_id();
+    const std::string restart = dir + "/r_000004.restart";
+    run_box(dir, 8, "type = \"restart\"\nfile = \"" + restart + "\"\n");
     const std::string second = provenance::json();
+    const std::string second_id = provenance::run_id();
     if (!comm::is_root()) return;
     EXPECT_NE(first, second);
+    EXPECT_NE(first_id, second_id);
+    // The second run names the run and the snapshot it continued, in its run block and in each snapshot's
+    const Value restart_of = json::parse(second)["run"]["restart_of"];
+    EXPECT_EQ(restart_of["run_id"].string, first_id);
+    EXPECT_EQ(restart_of["file"].string, restart);
+    EXPECT_EQ(restart_of["step"].number, 4);
+    EXPECT_TRUE(json::parse(first)["run"]["restart_of"].is_null());
+    std::vector<std::string> files = {dir + "/f.pvd", dir + "/line.pvd", dir + "/integrals.csv", dir + "/probe.csv"};
+    if (writes_hdf5()) files.push_back(dir + "/h.xmf");
+    for (const std::string & name : files) {
+        const output::Contents c = output::open(name);
+        ASSERT_FALSE(c.snapshots.empty()) << name;
+        for (const output::Snapshot & s : c.snapshots) {
+            EXPECT_EQ(s.run_id, s.step <= 4 ? first_id : second_id) << name << " step " << s.step;
+            if (!s.has_block) continue;
+            EXPECT_EQ(s.block.restarted, s.step > 4) << name << " step " << s.step;
+            if (s.step > 4) {
+                EXPECT_EQ(s.block.restart_of_run_id, first_id) << name;
+                EXPECT_EQ(s.block.restart_of_step, 4) << name;
+            }
+        }
+        EXPECT_EQ(c.snapshots.back().step, 8) << name;
+    }
+    const output::Contents last = output::open(dir + "/r_000008.restart");
+    ASSERT_TRUE(last.snapshots.at(0).has_block);
+    EXPECT_EQ(last.snapshots[0].block.run_id, second_id);
+    EXPECT_EQ(last.snapshots[0].block.restart_of_file, restart);
     // Each part of a monitor file follows the provenance of the run that wrote it
     std::vector<std::string> blocks;
     for (const auto & row : lines(dir + "/integrals.csv")) {
-        if (row.rfind("# provenance ", 0) == 0) blocks.push_back(provenance::parse_comment(row));
+        if (row.rfind("# mallard-run ", 0) == 0) blocks.push_back(provenance::parse_comment(row));
     }
     EXPECT_EQ(blocks, (std::vector<std::string>{first, second}));
     std::vector<std::string> starts;
     for (const auto & line : lines(dir + "/run.jsonl")) {
         const Value r = json::parse(line);
-        if (r["type"].string == "start") starts.push_back(r["provenance"]["input"]["file"].string);
+        if (r["type"].string == "start") {
+            starts.push_back(r["provenance"]["input"]["file"].string);
+            EXPECT_EQ(r["run_id"].string, starts.size() == 1 ? first_id : second_id);
+            EXPECT_EQ(r["restart_of"].is_null(), starts.size() == 1);
+        }
     }
     EXPECT_EQ(starts, (std::vector<std::string>{dir + "/input_4.toml", dir + "/input_8.toml"}));
     EXPECT_EQ(read_restart(dir + "/r_000008.restart").provenance, second);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(ProvenanceTest, RecordsTheFilesTheRunRead) {
+    const std::string dir = (scratch_dir() / "mallard_provenance_read_files").string();
+    const std::string points = dir + "/points.txt";
+    if (comm::is_root()) {
+        std::filesystem::remove_all(dir);
+        std::filesystem::create_directories(dir);
+        std::ofstream(points) << (N_DIM == 3 ? "0.25 0.25 0.5\n0.75 0.75 0.5\n" : "0.25 0.25\n0.75 0.75\n");
+    }
+    const std::string probe = "[[probes]]\nname = \"pts\"\ntype = \"points\"\npoints_file = \"" + points +
+                              "\"\nfile = \"" + dir + "/pts.csv\"\ninterval = 2\nvariables = [\"RHO\"]\n";
+    run_box(dir, 4, UNIFORM, probe);
+    const std::string first_id = provenance::run_id();
+    const Value first = json::parse(provenance::json());
+    const std::string restart = dir + "/r_000004.restart";
+    run_box(dir, 8, "type = \"restart\"\nfile = \"" + restart + "\"\n");
+    const Value second = json::parse(provenance::json());
+    const std::string copy = dir + "/copy.restart";
+    if (comm::is_root()) std::filesystem::copy_file(restart, copy);
+    run_box(dir, 12, "type = \"restart\"\nfile = \"" + copy + "\"\n");
+    const Value third = json::parse(provenance::json());
+    if (!comm::is_root()) return;
+
+    // A small input file is hashed, once whichever ranks read it
+    ASSERT_EQ(first["files"].array.size(), 1u);
+    const Value & read = first["files"].array[0];
+    EXPECT_EQ(read["kind"].string, "probe_points");
+    EXPECT_EQ(read["path"].string, points);
+    EXPECT_EQ(read["sha256"].string, provenance::sha256_file(points));
+    // A restart file is not hashed again: its run, step and the SHA-256 of that run's output record
+    ASSERT_EQ(second["files"].array.size(), 1u);
+    const Value & start = second["files"].array[0];
+    EXPECT_EQ(start["kind"].string, "restart");
+    EXPECT_EQ(start["run_id"].string, first_id);
+    EXPECT_EQ(start["step"].number, 4);
+    EXPECT_EQ(start["sha256"].string, provenance::sha256_file(restart));
+    EXPECT_EQ(start["bytes"].number, double(std::filesystem::file_size(restart)));
+    // A copy has no output record of its own: its size and time instead
+    const Value & copied = third["files"].array.at(0);
+    EXPECT_EQ(copied["run_id"].string, first_id);
+    EXPECT_TRUE(copied["sha256"].is_null());
+    EXPECT_EQ(copied["note"].string, "not hashed (no output record)");
+    EXPECT_FALSE(copied["modified"].string.empty());
     std::filesystem::remove_all(dir);
 }
 
@@ -323,7 +444,8 @@ TEST(RunLogTest, ResumedRunsAppendAndMarkRewinds) {
         if (r["type"].string == "start") {
             starts.push_back(r);
             steps.emplace_back();
-        } else if (r.has("step")) {
+        } else if (r.has("step") && r["type"].string != "output") {
+            // Output records follow the completion of their write, not the step
             ASSERT_FALSE(steps.empty());
             steps.back().push_back(r["step"].number);
         }
@@ -349,13 +471,14 @@ TEST(RunLogTest, ResumedRunsAppendAndMarkRewinds) {
 TEST(ProvenanceTest, RecordsTheResolvedNumericsPreset) {
     const std::string dir = (scratch_dir() / "mallard_provenance_preset").string();
     std::string input = box(dir, 1, UNIFORM, false);
-    input.replace(input.find("[numerics]\n"), 11, "[numerics]\npreset = \"robust\"\n");
+    input.replace(input.find("[numerics]\n"), 11, "[numerics]\npreset = \"second_order\"\n");
     Solver solver;
     solver.init(parse_toml(input));
     const Value p = json::parse(provenance::json());
     const auto & resolved = solver.get_numerics_preset();
     const ResolvedInput records = resolve_input(solver.resolved_input());
-    EXPECT_EQ(p["preset"]["name"].string, "robust");
+    EXPECT_EQ(p["preset"]["name"].string, "second_order");
+    EXPECT_FALSE(p["preset"]["default"].boolean);
     ASSERT_EQ(p["preset"]["settings"].array.size(), resolved.settings.size());
     bool overridden = false;
     for (size_t i = 0; i < resolved.settings.size(); i++) {
@@ -371,6 +494,17 @@ TEST(ProvenanceTest, RecordsTheResolvedNumericsPreset) {
         }
     }
     EXPECT_TRUE(overridden);
+
+    // Without a preset or a reconstruction, the default, marked as such
+    std::string bare = box(dir, 1, UNIFORM, false);
+    const size_t recon = bare.find("[numerics.face_reconstruction]");
+    ASSERT_NE(recon, std::string::npos);
+    bare.erase(recon, bare.find("[", recon + 1) - recon);
+    Solver by_default;
+    by_default.init(parse_toml(bare));
+    const Value q = json::parse(provenance::json());
+    EXPECT_EQ(q["preset"]["name"].string, "high_order");
+    EXPECT_TRUE(q["preset"]["default"].boolean);
     if (comm::is_root()) std::filesystem::remove_all(dir);
 }
 
@@ -438,7 +572,7 @@ TEST(ProvenanceTest, LargeProvenanceFitsInHdf5Attributes) {
     if (!comm::is_root()) return;
     h5::Handle file(H5Fopen((dir + "/h_000004.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "h5");
     h5::Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-    EXPECT_EQ(h5::read_strings_attribute(root, "provenance").at(0), provenance::json());
+    EXPECT_EQ(h5::read_strings_attribute(root, provenance::ATTRIBUTE).at(0), provenance::json());
     EXPECT_GT(provenance::json().size(), 100000u);
     std::filesystem::remove_all(dir);
 #endif

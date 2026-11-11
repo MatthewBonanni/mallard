@@ -14,10 +14,11 @@ page is [Command line](../guide/cli.md#mallard-info).
 - the mesh it holds or refers to: cell and point counts, cell types, bounds,
   boundary and cell zones;
 - its snapshots (time, step where recorded, and the file and index holding
-  each), so a series index (`.vtkhdf.series`, `.pvd`, `.xmf`), a series file
-  (`series = true`) and a probe file read the same way;
+  each, each with its snapshot block and run id), so a series index
+  (`.vtkhdf.series`, `.pvd`, `.xmf`), a series file (`series = true`), a
+  probe file and a table read the same way;
 - its fields, with components, units and long names as the file records them;
-- its provenance block.
+- its run block (`Contents::run`).
 
 `output::read(file, field, snapshot)` loads a field's values as doubles,
 whatever precision wrote them, and `read_ranges` their extrema.
@@ -35,6 +36,45 @@ restart files are read by the same header parser as `read_restart`
 Output files are read whatever the build's dimension and precision; only
 mesh files go through this build's mesh readers, so the front end runs
 `mallard info mesh.msh` on the solver of the mesh's dimension.
+
+## Step, time and run: recorded, never parsed from names
+
+Every snapshot's step, time and run come from what the file records: the
+snapshot block (`snapshot_block.h`: one JSON object per snapshot, in the
+format's own slot, [Snapshot metadata](../guide/output.md#snapshot-metadata)),
+else the format's own slots (field data `TIME` and `STEP`, the `Steps` group,
+the index's `timestep` and `step`, XDMF's `<Time>` and `step` information,
+the restart header, CSV columns). The reader never parses a file name: an
+XDMF grid's file comes from its data items, a series' members from its index,
+the mesh file of XDMF output from its root attribute `mesh`, and a run
+directory's members and mesh files from the indexes and XDMF files that name
+them. The run's own consumers follow the same rule: `--restart latest` takes
+the restart files of each writer from the run record's output index (and
+falls back to listing `<prefix>_*.restart`, ordered by what they record, for
+records before 0.10), and the writers resume a series from their own index.
+
+Two blocks, because they answer different questions. The run block is the
+same in every file of a run (code, build, input, mesh, where and when it
+started, its `run_id` and what it restarted from); the snapshot block is
+this snapshot's (step, time, reason, when it was written, by which run, its
+fields' units and stored precision, the averaging window). Keeping them apart
+keeps the run block identical across a run's files, so comparing it tells
+whether two files come from the same run, and lets a series continued by
+several runs say which run wrote each snapshot.
+
+Older files fall back explicitly, and `Contents::notes` says how: a run block
+under its earlier name (`provenance`, schema `mallard-provenance`) is read as
+one, with a note that it records no run id; a file without snapshot blocks
+takes step and time from the format's slots, and where it records no step
+(VTU, VTKHDF and the indexes before 0.10) its snapshots are numbered by their
+position from 0 and their step is -1. Rows of a CSV file belong to the run
+whose `# mallard-run` line precedes them; samples of a probe HDF5 file to the
+run its `mallard_runs` attribute names from their first row.
+
+The schema leaves room for what later issues add to it: a field's sampling
+(cell average or point value, #671), its averaging kind (Reynolds or Favre,
+#672) and a probe's requested and actual location (#673) are further keys of
+`fields` entries or of the block, which readers ignore until they know them.
 
 ## Why C++, and Python on top
 
@@ -57,22 +97,26 @@ and times for every format a run writes.
   output of the whole mesh). Such values map onto the case's mesh cell by
   cell, as `post derive` needs to evaluate fields with the solver's
   reconstruction. VTU pieces and region snapshots are in their own order.
-- **The case.** Provenance version 2 records the resolved input
+- **The case.** Run blocks from version 2 on record the resolved input
   (`input.resolved`, every key explicit) and the mesh's SHA-256: enough to
   set the case up again (`Solver::init`), check that its mesh is the file's,
   and fill its state from `read()` of the conservative variables (restart
   files) or `RHO`, `U`, `P` and the species (snapshots). Version 1 blocks hold
   the input as written (`input.text`), which a run of the same release
   resolves the same way.
-- **Partial reads.** `read()` loads a whole field. Reading only a rank's
-  cells (as `read_restart` does for its `cells`) is added with the first
-  MPI-parallel command, behind the same interface.
+- **Partial reads.** `read()` loads a whole field, and `post extract` takes
+  each rank's cells from it: memory per rank of one field of the whole mesh.
+  Reading only a rank's cells (as `read_restart` does for its `cells`) goes
+  behind the same interface when a mesh needs it.
 
 ## `mallard info`
 
 `mallard info FILE` prints `open()`'s contents and the ranges of the last
-snapshot; `--format json` the same as one object; `--input` the input of the
-file's provenance. On a mesh file it also reports mesh quality from
+snapshot; `--format json` the same as one object (`run`, and per snapshot its
+`snapshot` block and `run_id`); `--input` the input of the file's run block.
+The text has two metadata sections: **Run** (the run block, the same for
+every file of the run) and **This snapshot** (the last snapshot's block,
+with units). On a mesh file it also reports mesh quality from
 `mallard check`'s summary (`--quality PREFIX` writes the fields). The text
 follows the output principles of #657: tables rather than sentences, units
 on every dimensional quantity (column headers included) and `dimensionless`
@@ -89,10 +133,51 @@ formats compare, and matches cells by `Contents::global_order`: two files in
 the mesh's global order compare cell by cell, two in their own order value by
 value, and a mix is refused rather than silently misaligned. Restart files are
 compared bit for bit through their `RestartHeader` (attributes, arrays, face
-records read raw from `faces_offset`); the provenance trailer is left out.
+records read raw from `faces_offset`); the run block and snapshot blocks are left out.
 The mesh, for `--remap` and for the coordinates of the largest differences, is
-set up from the provenance's recorded input (`[mesh]` and `[[periodic]]`, a
+set up from the run block's recorded input (`[mesh]` and `[[periodic]]`, a
 mesh file relative to `run.directory` and checked against `mesh.sha256`) with
 `remap::source_mesh`, and `remap::Source` maps B onto A's cells. It runs on
 one rank: reading is whole-field (see Partial reads), and the remap is only
 collective over ranks that each hold part of both meshes.
+
+## `mallard post extract`
+
+`post extract` writes the probes of a run on the state of its output, so that
+a probe added after the run, or a region given on the command line, means what
+it would have meant during the run. It does not reimplement sampling: it sets
+the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
+`[[write_data]]` writers write at each snapshot.
+
+- **The case.** The input is `-i`'s, else the resolved input of the file's
+  run block. The command rewrites it before the setup: it keeps the probes
+  chosen (`--probe`) and adds the `--region` probe, every one written each
+  time (`interval = 1`) to the output directory under the file names the
+  input gives; it replaces `[[write_data]]` by the `--snapshot` writer and
+  drops `[[forces]]`, `[integrals]`, `[statistics]`, the run log and
+  `[initialize]`. Keys the rewrite leaves unread (a named region only a
+  dropped writer used) are not an error.
+- **The state.** `Solver::set_state_reader` gives `init` a function that
+  reads each snapshot on the local cells instead of `[initialize]`: a restart
+  file through `read_restart`, as a restart does; a snapshot through `read()`,
+  mapped by global cell id (`Contents::global_order`). The solver takes the
+  conservative variables where the file holds them, else computes them from
+  `RHO` or `P` and `T`, `U` and the mass fractions with its own gas model.
+  `write_output_of_state` then loads the next snapshot and writes, so the
+  mesh, regions, probe geometry and sample locations are set up once for a
+  whole series.
+- **Memory.** With a state reader the setup allocates no time stepping:
+  `allocate_time_stepping()` (face states and fluxes, the integrator's stages
+  and right-hand sides, the last good state) is the one call it skips, and the
+  rewrite turns off `[output] health`, whose ledger follows steps. The
+  reconstruction stays the run's, because point samples, gradients and
+  `Q`/`VORTICITY` read its polynomials.
+- **Steps.** Each snapshot's step and time are those the reader finds
+  recorded (`Snapshot::step` and `t`: the snapshot block, a restart file's
+  header), never the file name; only the snapshots of files written before
+  0.10 that record no step are numbered by position, as the report says.
+- **Same values.** A probe's samples are evaluated and gathered as in the run,
+  so restart files give the run's probe rows bit for bit on any number of
+  ranks (`PostExtractTest`); snapshots of primitives agree to rounding.
+- **The front end** runs it on the solver of `-i`'s dimension, else of the
+  file's (restart files) or its run block's build (`Case::output_case`).

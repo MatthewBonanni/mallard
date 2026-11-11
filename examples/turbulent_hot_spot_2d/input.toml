@@ -65,6 +65,7 @@ order = 5
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 0.7142857142857143
 T_ref = 0.7142857142857143
@@ -82,4 +83,4 @@ file = "integrals.csv"
 [[write_data]]
 prefix = "solut/hot_spot"
 time_interval = 0.25
-variables = ["RHO", "U", "T", "VORTICITY"]
+fields = ["RHO", "U", "T", "VORTICITY"]

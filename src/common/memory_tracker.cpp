@@ -37,7 +37,8 @@ constexpr Rule RULES[] = {
     {"W_cells", false, C::STATE}, {"cfl_local", false, C::STATE}, {"solution", true, C::STATE},
     {"rhs_faces", false, C::MESH}, {"rhs", true, C::STATE}, {"last_good", true, C::STATE}, {"T_seed", false, C::STATE},
     {"cell_scalars", false, C::STATE}, {"cell_molar_mass", false, C::STATE}, {"p_max", false, C::STATE},
-    {"vortex_fields", false, C::STATE}, {"positivity_kappa", false, C::STATE}, {"cell_upwind", false, C::STATE},
+    {"vortex_fields", false, C::STATE}, {"derived_fields", false, C::STATE},
+    {"positivity_kappa", false, C::STATE}, {"cell_upwind", false, C::STATE},
     {"frozen_thermo", false, C::STATE}, {"stage_time", false, C::STATE}, {"step_", true, C::STATE},
     {"geometric_source", false, C::STATE}, {"cell_mu", false, C::STATE}, {"rhoY", false, C::STATE},
     // Faces, gradients and reconstruction buffers
@@ -72,7 +73,7 @@ constexpr Rule RULES[] = {
     {"sponge_", true, C::MODELS}, {"source_", true, C::MODELS}, {"SOURCE", false, C::MODELS},
     {"les_", true, C::MODELS}, {"dynamic_halo", true, C::HALO}, {"dynamic_", true, C::MODELS},
     {"tfles_halo", true, C::HALO}, {"tfles_", true, C::MODELS}, {"budget_", true, C::MODELS}, {"mass_flow_", true, C::MODELS},
-    {"inflow_", true, C::MODELS}, {"wall_", true, C::MODELS}, {"expr_", true, C::MODELS},
+    {"profile_", true, C::MODELS}, {"inflow_", true, C::MODELS}, {"wall_", true, C::MODELS}, {"expr_", true, C::MODELS},
     // Chemistry, thermodynamics and transport
     {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", false, C::WORK}, {"chem_pivot", false, C::WORK}, {"chem_", true, C::CHEMISTRY},
     {"chemistry_", true, C::CHEMISTRY}, {"thermo_", true, C::CHEMISTRY}, {"transport_", true, C::CHEMISTRY},

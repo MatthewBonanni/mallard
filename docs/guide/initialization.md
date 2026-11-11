@@ -334,7 +334,7 @@ the total.
   continuing them.
 - Probes and force monitors append to their files on a restart.
 - A restart file is written as `<name>.restart.partial` (in the background with `[output] async`) and renamed to `<name>.restart` once every rank has written its part and it is flushed to storage, so a `.restart` file is always complete. A `.partial` file is what a run killed while writing left behind; resume from the newest `.restart` file instead, as `--restart latest` does.
-- A restart on a mesh file whose contents differ from those the file was written on (the hashes in the files' [provenance](output.md#provenance)) warns, even with as many cells; the log's *Initial state* says when the input differs from the one that wrote the file.
+- A restart on a mesh file whose contents differ from those the file was written on (the hashes in the files' [run blocks](output.md#run-block)) warns, even with as many cells; the log's *Initial state* says when the input differs from the one that wrote the file.
 
 ### Resuming from the newest restart
 
@@ -347,12 +347,15 @@ starts it from `[initialize]` if there is none, so the same command starts a
 run and continues it after every stop, as the [job scripts](parallel.md#job-scripts)
 do. `mallard check input.toml --restart latest` checks the run it would start.
 
-- It looks at the files `<prefix>_<step>.restart` of the input's
-  `[[write_data]]` writers with `format = "restart"` (not those of a region),
-  or at `restart_<step>.restart`, where restarts on request go, if there is
-  none. `.partial` files are ignored.
+- It looks at the restart files of the input's `[[write_data]]` writers with
+  `format = "restart"` (not those of a region), or of `restart`, where
+  restarts on request go, if there is none: those the run record's [output
+  index](output.md#run-record-mallardjsonl) lists for each writer. For a
+  writer it lists none of (a run record before 0.10, or none), it looks at
+  the files `<prefix>_*.restart` instead, and says so. `.partial` files are
+  ignored. Step and time are those the files record, never their names.
 - Newest is the file of the run that started last (the start time in the
-  files' provenance), then of the highest step, then of the first writer: after
+  files' [run blocks](output.md#run-block)), then of the highest step, then of the first writer: after
   a rewind, it resumes from the rewound run's files, not from higher steps
   the abandoned run left behind. Modification times do not count.
 - A file that does not read completely (cut short by a full disk or a copy)

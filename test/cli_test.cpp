@@ -331,7 +331,7 @@ Result small_run() {
         << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.3 * x\"\n"
         << (three ? "u = [\"0.3\", \"0.0\", \"0.0\"]\n" : "u = [\"0.3\", \"0.0\"]\n")
         << "p = \"1.0\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-        << "[[write_data]]\nprefix = \"case/flow\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\", \"U\"]\n"
+        << "[[write_data]]\nprefix = \"case/flow\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"RHO\", \"U\"]\n"
         << "[[write_data]]\nprefix = \"case/restart\"\nformat = \"restart\"\ninterval = 2\n";
     return run({"-i", "small.toml", "--kokkos-num-threads=1"}, true);
 }
@@ -348,7 +348,9 @@ TEST(CliTest, InfoOfAPastReleasesRestartFileSaysWhatIsInIt) {
         {"Format", "restart, version 2"},
         {"Values", "2D, double precision"},
         {"Simulated time", "t = 0.0288616582 s, step 2"},
-        {"Note", "no provenance: written before Mallard 0.9, or not by Mallard"},
+        {"Note", "no run block: written before Mallard 0.9, or not by Mallard"},
+        {"Note", "no snapshot block (written before Mallard 0.10): step and time are the format's own records; "
+                 "reason, run and stored precision are unknown"},
         {"cells"},
         {"30"},
         {"field", "units", "components", "min", "max", "description"},
@@ -358,7 +360,8 @@ TEST(CliTest, InfoOfAPastReleasesRestartFileSaysWhatIsInIt) {
     for (const auto & row : rows) EXPECT_TRUE(has_row(r.out, row)) << row[0] << "\n" << r.out;
     const Result input = run({"info", "--input", file}, true);
     EXPECT_EQ(input.status, 1);
-    EXPECT_TRUE(contains(input.err, "has no provenance block")) << input.err;
+    EXPECT_TRUE(contains(input.err, "has no run block")) << input.err;
+    EXPECT_FALSE(contains(r.out, "This snapshot")) << r.out;
 }
 
 TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
@@ -376,17 +379,29 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
     ASSERT_EQ(text.status, 0) << text.err;
     const std::vector<std::vector<std::string>> rows = {
         {"Kind", "snapshot"},
-        {"Simulated time", "t = " + printed_time(2.0e-3) + " s"},
+        {"Simulated time", "t = " + printed_time(2.0e-3) + " s, step 2"},
         {"cells", "points"},
         {Mallard_DIM == 3 ? "36" : "12"},
         {"axis", "min [m]", "max [m]"},
         {"x", "0", "1"},
+        {"field", "units", "components", "min", "max", "stored", "description"},
         {"RHO", "kg m-3", "1"},
         {"U", "m s-1", "3"},
         {"Input file", "small.toml"},
         {"Input recorded", "resolved; mallard info --input prints it"},
+        {"Restarted from", "no: a fresh start"},
+        {"Step", "2"},
+        {"Time", printed_time(2.0e-3) + " s"},
+        {"Reason", "interval"},
+        {"Format", "vtu, version 1"},
     };
     for (const auto & row : rows) EXPECT_TRUE(has_row(text.out, row)) << row[0] << "\n" << text.out;
+    // The run's block and this snapshot's, in that order, each its own section
+    const size_t run_section = text.out.find("Run ="), snapshot_section = text.out.find("This snapshot =");
+    ASSERT_NE(run_section, std::string::npos) << text.out;
+    ASSERT_NE(snapshot_section, std::string::npos) << text.out;
+    EXPECT_LT(run_section, snapshot_section);
+    EXPECT_TRUE(contains(text.out, "same for every file of the run")) << text.out;
     EXPECT_TRUE(contains(text.out, "ranges at t = " + printed_time(2.0e-3) + " s")) << text.out;
     EXPECT_EQ(run({"info", "--format", "yaml", "case/flow_000002.vtu"}, true).status, 2);
 
@@ -405,7 +420,13 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
     EXPECT_EQ(fields[1]["name"].string, "U");
     EXPECT_EQ(fields[1]["components"].number, 3);
     EXPECT_NEAR(fields[0]["min"].number, 1.0, 0.1);
-    EXPECT_EQ(v["provenance"]["input"]["file"].string, "small.toml");
+    EXPECT_EQ(v["run"]["input"]["file"].string, "small.toml");
+    const json::Value & snapshot = v["snapshots"].array.at(0);
+    EXPECT_EQ(snapshot["step"].number, 2);
+    EXPECT_EQ(snapshot["snapshot"]["step"].number, 2);
+    EXPECT_EQ(snapshot["snapshot"]["reason"].string, "interval");
+    EXPECT_EQ(snapshot["run_id"].string, v["run"]["run"]["run_id"].string);
+    EXPECT_EQ(snapshot["snapshot"]["run_id"].string, v["run"]["run"]["run_id"].string);
 }
 
 TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {
@@ -414,16 +435,55 @@ TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {
     const Result r = run({"info", "."}, true);
     EXPECT_EQ(r.status, 0) << r.err;
     const std::vector<std::vector<std::string>> rows = {
-        {"Ended", "n_steps = 2 reached"},
+        {"Ended", "finished: n_steps = 2 reached"},
         {"Last step", "2"},
+        {"Last snapshot", "case/flow_000002.vtu, step 2, t = 0.002 s"},
+        {"Last restart", "case/restart_000002.restart, step 2, t = 0.002 s"},
         {"Simulated time", "t = 0.002 s at the end"},
         {"file", "kind", "times", "first t [s]", "last t [s]", "last step", "fields", "format"},
-        {"case/flow.pvd", "snapshot", "2", "0", printed_time(2.0e-3), "-", "2", "PVD series index (VTU snapshots)"},
+        {"case/flow.pvd", "snapshot", "2", "0", printed_time(2.0e-3), "2", "2", "PVD series index (VTU snapshots)"},
         {"case/restart_000002.restart", "restart", "1", printed_time(2.0e-3), printed_time(2.0e-3), "2", Mallard_DIM == 3 ? "5" : "4", "restart"},
     };
     for (const auto & row : rows) EXPECT_TRUE(has_row(r.out, row)) << row[0] << "\n" << r.out;
-    EXPECT_FALSE(contains(r.out, "flow_000002.vtu")) << r.out;
+    // A series is listed by its index, not its snapshots
+    EXPECT_FALSE(has_row(r.out, {"case/flow_000002.vtu"})) << r.out;
     EXPECT_EQ(run({"info", "--input", "."}, true).out, run({"input", "resolve", "small.toml"}, true).out);
+}
+
+TEST(CliTest, InfoOfARunDirectoryChecksItsFilesAgainstTheirRecords) {
+    SKIP_UNDER_MPI();
+    ASSERT_EQ(small_run().status, 0);
+    const Result clean = run({"info", "--verify", "."}, true);
+    EXPECT_EQ(clean.status, 0) << clean.out;
+    EXPECT_TRUE(has_row(clean.out, {"Recorded files", "all present, as written"})) << clean.out;
+
+    // Same size, other contents: only the hash tells
+    const std::string vtu = "case/flow_000000.vtu";
+    {
+        std::fstream f(vtu, std::ios::in | std::ios::out | std::ios::binary);
+        f.seekg(-2, std::ios::end);
+        const char c = static_cast<char>(f.get());
+        f.seekp(-2, std::ios::end);
+        f.put(c == 'x' ? 'y' : 'x');
+    }
+    EXPECT_EQ(run({"info", "."}, true).status, 0);
+    const Result changed = run({"info", "--verify", "."}, true);
+    EXPECT_EQ(changed.status, 1);
+    EXPECT_TRUE(has_row(changed.out, {vtu, "its contents differ from what the run wrote (SHA-256)"})) << changed.out;
+
+    const std::string restart = "case/restart_000002.restart";
+    fs::resize_file(restart, fs::file_size(restart) - 8);
+    const Result cut = run({"info", "."}, true);
+    EXPECT_EQ(cut.status, 1);
+    EXPECT_TRUE(contains(cut.out, "the run wrote")) << cut.out;
+    EXPECT_TRUE(contains(cut.out, "changed or cut short since")) << cut.out;
+
+    // A file whose write did not finish keeps its temporary name, and is refused
+    fs::copy_file("case/flow_000002.vtu", "case/flow_000004.vtu.partial");
+    const Result partial = run({"info", "case/flow_000004.vtu.partial"}, true);
+    EXPECT_EQ(partial.status, 1);
+    EXPECT_TRUE(contains(partial.err, "its write did not finish")) << partial.err;
+    EXPECT_TRUE(contains(run({"info", "."}, true).out, "its write did not finish"));
 }
 
 TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
@@ -485,7 +545,7 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
     EXPECT_EQ(v["dim"].number, Mallard_DIM);
     std::vector<std::string> names;
     for (const auto & f : v["fields"].array) names.push_back(f["name"].string);
-    for (const char * name : {"RHO", "U_X", "P", "Q", "P_MAX"}) {
+    for (const char * name : {"RHO", "U_X", "P", "Q_CRITERION", "MACH", "LAMBDA2", "SCHLIEREN", "P_MAX"}) {
         EXPECT_NE(std::find(names.begin(), names.end(), name), names.end()) << name;
     }
     EXPECT_EQ(std::count(names.begin(), names.end(), "U_Z"), Mallard_DIM == 3 ? 1 : 0);
@@ -524,6 +584,61 @@ TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
     EXPECT_EQ(broken.status, 1);
 }
 
+TEST(CliTest, CheckWithoutAnInputChecksTheEnvironment) {
+    SKIP_UNDER_MPI();
+    const Result text = run({"check", "--kokkos-num-threads=1"}, true);
+    ASSERT_EQ(text.status, 0) << text.err;
+    EXPECT_TRUE(contains(text.out, "== Environment")) << text.out;
+    EXPECT_FALSE(contains(text.out, "== Input")) << text.out;
+    for (const char * check : {"Kokkos", "MPI", "GPU-aware MPI", "NCCL", "HDF5", "CGNS", "zlib", "KaMinPar"}) {
+        EXPECT_TRUE(has_row(text.out, {"ok", check})) << check << "\n" << text.out;
+    }
+    EXPECT_TRUE(has_row(text.out, {"rank", "host", "device", "GPU", "CPUs", "threads", "binding"})) << text.out;
+    EXPECT_TRUE(has_row(text.out, {"0"})) << text.out;
+    EXPECT_EQ(run({"check", "--ranks", "4"}, true).status, 2);
+
+    // One source for the build: the run block of every output file
+    ASSERT_EQ(small_run().status, 0);
+    const Result listed = run({"check", "small.toml", "--format", "json", "--kokkos-num-threads=1"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value environment = json::parse(listed.out)["environment"];
+    const json::Value file = json::parse(run({"info", "--format", "json", "case/flow_000002.vtu"}, true).out);
+    EXPECT_EQ(environment["build"].keys(), file["run"]["build"].keys());
+    EXPECT_EQ(environment["build"]["dim"].number, file["run"]["build"]["dim"].number);
+    EXPECT_EQ(environment["dependencies"]["mpi"].string, file["run"]["dependencies"]["mpi"].string);
+    EXPECT_EQ(environment["placement"].array.size(), 1u);
+    EXPECT_EQ(environment["placement"].array[0]["threads"].number, 1);
+}
+
+TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
+    SKIP_UNDER_MPI();
+    const Result numerics = run({"list", "keys", "numerics"}, true);
+    ASSERT_EQ(numerics.status, 0) << numerics.err;
+    EXPECT_TRUE(contains(numerics.out, "== Keys: [numerics]")) << numerics.out;
+    EXPECT_TRUE(has_row(numerics.out, {"key", "type", "units", "default", "values"})) << numerics.out;
+    EXPECT_TRUE(has_row(numerics.out, {"numerics.riemann_solver", "string", "\"HLLC\"", "HLL, HLLC, RHLL, Roe, Rusanov"}))
+        << numerics.out;
+    EXPECT_FALSE(contains(numerics.out, "mesh.Nx")) << numerics.out;
+    const Result typo = run({"list", "keys", "numerix"}, true);
+    EXPECT_EQ(typo.status, 2);
+    EXPECT_TRUE(contains(typo.err, "did you mean \"numerics\"")) << typo.err;
+
+    ASSERT_EQ(small_run().status, 0);
+    const Result text = run({"list", "keys", "[write_data]", "small.toml"}, true);
+    ASSERT_EQ(text.status, 0) << text.err;
+    EXPECT_TRUE(has_row(text.out, {"key", "set", "type", "units", "default", "values"})) << text.out;
+    EXPECT_TRUE(has_row(text.out, {"write_data.fields", "yes", "array"})) << text.out;
+    EXPECT_FALSE(contains(text.out, "physics.gamma")) << text.out;
+    // The same keys mallard check --catalog writes
+    ASSERT_EQ(run({"check", "small.toml", "--catalog", "keys.json"}, true).status, 0);
+    const Result listed = run({"list", "keys", "small.toml", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value keys = json::parse(listed.out)["keys"];
+    EXPECT_EQ(keys.keys(), json::parse(read_file("keys.json")).keys());
+    EXPECT_TRUE(keys["physics.gamma"]["set"].boolean);
+    EXPECT_FALSE(keys["run.cfl"]["set"].boolean);
+}
+
 TEST(CliTest, ListTemplatesIsWhatNewListShowedWhichStillWorks) {
     SKIP_UNDER_MPI();
     const Result listed = run({"list", "templates"});
@@ -559,22 +674,9 @@ Result diff_case(const std::string & dir, uint32_t n, const std::string & rho, i
         << "[initialize]\ntype = \"analytical\"\nrho = \"" << rho << "\"\n"
         << (three ? "u = [\"0.3\", \"0.0\", \"0.0\"]\n" : "u = [\"0.3\", \"0.0\"]\n")
         << "p = \"1.0\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
-        << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\", \"U\"]\n"
+        << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"RHO\", \"U\"]\n"
         << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
     return run({"-i", dir + "/input.toml", "--kokkos-num-threads=1"}, true);
-}
-
-/** @brief The column at which a line holding text has it, or npos. */
-size_t column_of(const std::string & out, const std::string & text) {
-    std::istringstream in(out);
-    for (std::string line; std::getline(in, line);) {
-        const size_t at = line.find(text);
-        if (at == std::string::npos) continue;
-        size_t columns = 0;
-        for (size_t i = 0; i < at; i++) columns += (static_cast<unsigned char>(line[i]) & 0xC0) != 0x80;
-        return columns;
-    }
-    return std::string::npos;
 }
 
 } // namespace
@@ -585,15 +687,14 @@ TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
     const std::string first = dir + "v0.8.0/gas_000000.restart", later = dir + "v0.8.0/gas_000002.restart";
     const Result same = run({"diff", later, dir + "v0.7.0/gas_000002.restart"}, true);
     EXPECT_EQ(same.status, 0) << same.err;
-    EXPECT_TRUE(has_row(same.out, {"Result", "✓ identical: the same state, bit for bit"})) << same.out;
-    EXPECT_TRUE(has_row(same.out, {"✓", "RHOE", "kg m-1 s-2", "0 of 30", "0", "0", "0"})) << same.out;
-    EXPECT_EQ(column_of(same.out, "field   units"), column_of(same.out, "RHOE    kg m-1 s-2")) << same.out;
+    EXPECT_TRUE(contains(same.out, "Result: ok, identical, the same state bit for bit (exit status 0)")) << same.out;
+    EXPECT_TRUE(has_row(same.out, {"ok", "RHOE", "kg m-1 s-2", "0 of 30", "0", "0", "0"})) << same.out;
 
     const Result differ = run({"diff", first, later, "--format", "json"}, true);
     EXPECT_EQ(differ.status, 1) << differ.err;
     const json::Value v = json::parse(differ.out);
-    EXPECT_EQ(v["result"].string, "beyond_tolerance");
-    EXPECT_EQ(v["time"]["status"].string, "beyond_tolerance");
+    EXPECT_EQ(v["result"].string, "error");
+    EXPECT_EQ(v["time"]["status"].string, "error");
     ASSERT_EQ(v["fields"].array.size(), 4u);
     for (const json::Value & f : v["fields"].array) {
         SCOPED_TRACE(f["name"].string);
@@ -601,11 +702,12 @@ TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
         EXPECT_GT(linf, 0.0);
         EXPECT_DOUBLE_EQ(f["absolute"]["linf"].number, linf);
         EXPECT_EQ(f["max_at"]["index"].number, static_cast<double>(cell));
-        EXPECT_EQ(f["status"].string, "beyond_tolerance");
+        EXPECT_EQ(f["status"].string, "error");
     }
     const Result loose = run({"diff", first, later, "--tol", "1"}, true);
     EXPECT_EQ(loose.status, 0) << loose.err;
-    EXPECT_TRUE(has_row(loose.out, {"Result", "⚠ within tolerance: differences, none beyond it"})) << loose.out;
+    EXPECT_TRUE(contains(loose.out, "Result: WARN, within tolerance, differences but none beyond it (exit status 0)"))
+        << loose.out;
     EXPECT_EQ(run({"diff", first, later, "--tol", "1,RHOE=1e-6"}, true).status, 1);
     EXPECT_EQ(run({"diff", first, later, "--tol", "small"}, true).status, 2);
 
@@ -614,10 +716,11 @@ TEST(CliTest, DiffOfRestartFilesSaysWhetherAndWhereTheirStatesDiffer) {
     EXPECT_EQ(faces.status, 0) << faces.err;
     const json::Value f = json::parse(faces.out)["restart"]["faces"];
     EXPECT_EQ(f["values"].number, static_cast<double>(output::open(nscbc).restart.n_faces));
-    EXPECT_EQ(f["status"].string, "identical");
+    EXPECT_EQ(f["status"].string, "ok");
     const Result no_faces = run({"diff", dir + "v0.8.0/nscbc_000000.restart", nscbc}, true);
     EXPECT_EQ(no_faces.status, 1);
-    EXPECT_TRUE(has_row(no_faces.out, {"✗", "face records", "0 faces in A, 10 in B"})) << no_faces.out;
+    EXPECT_TRUE(has_row(no_faces.out, {"ERROR", "face records", "0 faces in A, 10 in B"})) << no_faces.out;
+    EXPECT_TRUE(contains(no_faces.out, "Result: ERROR, beyond tolerance: RHO, RHOU_X, RHOU_Y, RHOE (exit status 1)")) << no_faces.out;
 
     const Result mesh = run({"diff", dir + "annulus.msh", later}, true);
     EXPECT_EQ(mesh.status, 3);

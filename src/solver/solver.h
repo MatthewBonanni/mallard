@@ -39,8 +39,10 @@
 #include "radiation.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
+#include "derived_fields.h"
 #include "probes.h"
 #include "statistics.h"
+#include "triggers.h"
 #include "health_state.h"
 #include "divergence_report.h"
 #include "synthetic_inflow.h"
@@ -109,6 +111,18 @@ struct DivergedError : std::exception {
 /** @brief Exit status of a run stopped on request (signal, `mallard ctl stop`, STOP file) after writing a restart. */
 constexpr int EXIT_STOPPED = 3;
 
+/** @brief How a run ended, as its end record gives it. */
+struct RunEnd {
+    std::string outcome;  // finished, stopped, signal, wall_time_limit, diverged or error; empty while running
+    std::string cause;    // finished: n_steps or t_stop; stopped: stop_file, mallard_ctl or trigger; signal: its name
+    std::string reason;   // in words
+    std::string trigger;  // the trigger that stopped the run
+    RunEnd() = default;
+    RunEnd(std::string outcome_, std::string cause_, std::string reason_, std::string trigger_ = {})
+        : outcome(std::move(outcome_)), cause(std::move(cause_)), reason(std::move(reason_)), trigger(std::move(trigger_)) {}
+    bool empty() const { return outcome.empty(); }
+};
+
 struct ViscousFluxFunctor;
 template <typename T_riemann_solver>
 struct ConvectiveFluxFunctor;
@@ -146,6 +160,21 @@ class Solver {
          *        tells about the run (see check.h).
          */
         CheckReport check(const Input & input, const CheckOptions & options);
+
+        /**
+         * @brief Post-processing of output (`mallard post extract`), set before init(): the
+         *        state comes from reader instead of [initialize], and init() does not fail on unused
+         *        keys. reader gives a state on the mesh's local cells: a restart file's data, or a
+         *        snapshot's fields (vectors by component, U_X, U_Y, ...) with its step and time.
+         */
+        void set_state_reader(std::function<RestartData(const Mesh &)> reader) { state_reader = std::move(reader); }
+
+        /**
+         * @brief Post-processing: with next, takes the next state from the reader; then writes
+         *        every [[write_data]] snapshot and probe of the input at its step and time, as a run
+         *        writes them, and waits for the files.
+         */
+        void write_output_of_state(bool next);
 
         /**
          * @brief Run until a stop condition is reached.
@@ -245,8 +274,14 @@ class Solver {
          */
         void update_cell_W();
 
-        /** @brief Q = (|Omega|^2 - |S|^2) / 2 and the vorticity of each owned cell, into vortex_fields. */
+        /**
+         * @brief The vorticity of each owned cell, into vortex_fields, after
+         *        update_velocity_gradients.
+         */
         void update_vortex_fields();
+
+        /** @brief The written derived fields of each owned cell, into derived_fields, after update_velocity_gradients. */
+        void update_derived_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
         /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
@@ -313,6 +348,7 @@ class Solver {
         void restore_last_good();
         std::string describe_invalid_cells();
         [[noreturn]] void diverged();
+        int run_loop();  // run() but for the end record of an error
         /**
          * @brief The divergence report's evidence (collective): what failed in each local cell of the failing
          *        state, then, with the last valid state in place (if has_valid), its neighborhood.
@@ -328,6 +364,11 @@ class Solver {
         RestartAttributes restart_attributes() const;
         void write_checkpoint();
         void poll_control_files();
+        // Triggers (see triggers.h)
+        void init_triggers();
+        /** @brief The monitored values triggers read, in the order of init_triggers' names. */
+        std::vector<double> trigger_values() const;
+        void act_on_triggers();
         void publish_status();
         std::string stop_conditions() const;
 
@@ -532,9 +573,13 @@ class Solver {
         Kokkos::View<rtype *[N_PRIMITIVE]>::host_mirror_type h_primitives;
         Kokkos::View<rtype *> p_max;  // largest pressure of each cell so far, if P_MAX is written
         Kokkos::View<rtype *>::host_mirror_type h_p_max;
-        // Q, then the vorticity (one component in 2D), if any of them is written
+        // The vorticity (one component in 2D), if written
         Kokkos::View<rtype **> vortex_fields;
         Kokkos::View<rtype **>::host_mirror_type h_vortex_fields;
+        // MACH, Q_CRITERION, LAMBDA2 and SCHLIEREN, those written, in the columns of derived_selection
+        derived::Selection derived_selection;
+        Kokkos::View<rtype **> derived_fields;
+        Kokkos::View<rtype **>::host_mirror_type h_derived_fields;
 
     protected:
         void init_mesh();
@@ -574,6 +619,8 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
+        /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*. */
+        void apply_output_state(RestartData state);
         void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
                          const std::vector<std::pair<size_t, std::vector<uint32_t>>> & inlets);
@@ -586,23 +633,27 @@ class Solver {
          * @brief Mass fluxes of the faces of an inlet_mass_flow entry: per
          *        face for a mass_flux expression or an mdot with a profile,
          *        else empty (an mdot without profile sets bc's uniform flux).
+         *        A profile of t gives the fluxes at t = 0 and fills `timed`.
          */
         std::vector<double> mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
-                                                   BoundaryCondition & bc) const;
+                                                   BoundaryCondition & bc, MassFlowProfile & timed) const;
         void init_sources(region::Regions & regions);
         void init_sponges(region::Regions & regions);
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
         std::vector<std::vector<double>> composition_at_cells(const Input & table, const std::string & where,
                                                               const std::vector<uint32_t> & cells) const;
         void allocate_memory();
+        void allocate_time_stepping();  // Stages and face buffers of the right-hand side
         void register_data();
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
-        std::string stop_reason() const;  // Empty while no stop condition holds
+        RunEnd stop_reason() const;       // Empty while no stop condition holds
         bool state_needed() const;        // Whether output, checks or the end of the run read the state now
         double progress() const;          // Fraction of the run done, by the first stop condition to hit
         void print_setup(const ResolvedInput & resolved) const;
         void print_progress();
-        void print_summary(const std::string & stop) const;
+        void print_summary(const RunEnd & end) const;
+        /** @brief The run log's end record: how the run ended, its last snapshot and restart, its timings. */
+        void write_end_record(const RunEnd & end);
         /** @brief The status at this step, throughput since the last progress row; no diagnostics or memory. */
         RunStatus run_status() const;
         void record_mesh_provenance() const;
@@ -612,7 +663,6 @@ class Solver {
         void init_health();
         /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
-        void health_summary() const;
         /** @brief The columns of the integrals file after step and t, and their dimensions. */
         std::vector<std::pair<std::string, Dimension>> integral_columns() const;
         /** @brief Dimension of the cell measure: m^N_DIM (per unit depth in 2D); m^3 rad^-1 in axisymmetric runs. */
@@ -628,7 +678,10 @@ class Solver {
         /** @brief The named arrays of restart files: averaged spectra and probes (collective). */
         RestartArrays restart_arrays() const;
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
-        ProbeFields probe_fields();
+        /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
+        ProbeFields probe_fields(ProbeFluxes & fluxes);
+        /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
+        void update_probe_gradients();
 
     private:
         /**
@@ -665,7 +718,9 @@ class Solver {
         int control_contributed = 0;             // this rank's requests in the last time-step reduction
         int control_reduced = 0;                 // every rank's
         bool checkpoint_requested = false;
-        std::string control_stop;                // why a request stopped the run, else empty
+        RunEnd control_stop;                     // a request that stopped the run, else empty
+        bool wall_time_reached = false;          // on some rank, so on every rank at the same step
+        bool end_recorded = false;
         std::string stop_file_note;
         std::vector<run_control::Command> checkpoint_replies, stop_replies;
         std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
@@ -739,6 +794,7 @@ class Solver {
 
         Input input;
         bool check_only = false;  // within check()
+        std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
         numerics_preset::Resolution preset;
         std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
@@ -975,6 +1031,8 @@ class Solver {
         IntegralMonitor integral_monitor;
         Statistics statistics;
         Probes probes;
+        Triggers triggers;
+        RunEnd trigger_stop;  // a trigger that stopped the run, else empty
         HealthState run_health;
 };
 

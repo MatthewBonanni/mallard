@@ -29,6 +29,7 @@
 #include "mesh.h"
 #include "mesh_block.h"
 #include "provenance.h"
+#include "snapshot_block.h"
 #include "statistics.h"
 
 namespace {
@@ -635,7 +636,7 @@ void Spectra::sample(uint64_t step, rtype t, const CellSampler & sampler) {
         const std::filesystem::path path(file);
         name << (path.parent_path() / path.stem()).string() << "_" << std::setw(6) << std::setfill('0') << step
              << path.extension().string();
-        if (comm::is_root()) write_file(name.str(), step, t);
+        if (comm::is_root()) write_file(name.str(), step, t, snapshot_block::reason::INTERVAL);
         return;
     }
     const double w = double(t - t_last);
@@ -728,19 +729,23 @@ RestartArrays Spectra::arrays() const {
     return a;
 }
 
-void Spectra::write(uint64_t step, rtype t) const {
+void Spectra::write(uint64_t step, rtype t, const std::string & reason) const {
     if (!enabled() || !average || !comm::is_root()) return;
-    write_file(file, step, t);
+    write_file(file, step, t, reason);
 }
 
-void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const {
+void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const std::string & reason) const {
     create_parent_directories("the spectra file", name);
-    std::ofstream out(name);
+    std::ofstream out(partial_name(name));
     if (!out.good()) throw cannot_write("the spectra file", name);
     out << provenance::csv_comment() << "\n";
+    snapshot_block::Block block = snapshot_block::make(step, double(t), reason, "spectra", -1, {});
+    block.averaged = true;
+    block.average_start = average ? double(t_last) - weight : double(t);
+    block.average_end = average ? double(t_last) : double(t);
+    block.samples = average ? static_cast<int64_t>(n_samples) : 1;
+    out << provenance::csv_comment(snapshot_block::NAME, block.json()) << "\n";
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
-    out << "# step = " << step << ", t = " << double(t) << ", samples = " << n_samples << ", weight = " << weight
-        << ", t_last = " << double(t_last) << "\n";
     std::vector<size_t> inhomogeneous;
     for (size_t d = 0; d < N_DIM; d++) {
         if (!homogeneous(d)) inhomogeneous.push_back(d);
@@ -798,11 +803,15 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t) const
                 << pair_units[p] << "\n";
         }
     }
+    out.close();
+    if (!out) throw cannot_write("the spectra file", name);
+    publish_file("the spectra file", name);
+    logging::written(step, double(t), "spectra", name, reason, file);
 }
 
 std::string Spectra::summary() const {
     std::string text = std::string(average ? "averaged" : "per sample") + " every " + logging::count(interval) +
-                       " steps from t = " + logging::real(double(t_start)) + " along ";
+                       " steps from t = " + units::with(logging::real(double(t_start)), "s") + " along ";
     for (size_t h = 0; h < directions.size(); h++) text += (h ? ", " : "") + std::string(1, AXES[directions[h]]);
     text += ": ";
     for (size_t p = 0; p < pairs.size(); p++) {

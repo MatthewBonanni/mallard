@@ -38,8 +38,7 @@ Vec3 average(const std::vector<Vec3> & p) {
     return c;
 }
 
-double signed_volume(const std::vector<Vec3> & nodes) {
-    std::vector<std::array<Vec3, 4>> tets;
+double signed_volume(const std::vector<Vec3> & nodes, std::vector<std::array<Vec3, 4>> & tets) {
     cell_tetrahedra(nodes, tets);
     double v = 0.0;
     for (const auto & t : tets) v += dot3(sub(t[1], t[0]), cross(sub(t[2], t[0]), sub(t[3], t[0]))) / 6.0;
@@ -81,19 +80,23 @@ void cell_tetrahedra(const std::vector<std::array<double, 3>> & nodes,
     tets.clear();
     const Vec3 o = average(nodes);
     for (const auto & face : cell_local_faces(static_cast<uint32_t>(nodes.size()))) {
-        std::vector<Vec3> p;
-        for (uint8_t k : face) p.push_back(nodes[k]);
-        if (p.size() == 3) {
-            tets.push_back({o, p[0], p[1], p[2]});
+        const size_t n = face.size();
+        if (n == 3) {
+            tets.push_back({o, nodes[face[0]], nodes[face[1]], nodes[face[2]]});
             continue;
         }
-        const Vec3 c = average(p);
-        for (size_t k = 0; k < p.size(); k++) tets.push_back({o, c, p[k], p[(k + 1) % p.size()]});
+        Vec3 c = {0.0, 0.0, 0.0};
+        for (uint8_t k : face) {
+            for (size_t i = 0; i < 3; i++) c[i] += nodes[k][i];
+        }
+        for (size_t i = 0; i < 3; i++) c[i] /= static_cast<double>(n);
+        for (size_t k = 0; k < n; k++) tets.push_back({o, c, nodes[face[k]], nodes[face[(k + 1) % n]]});
     }
 }
 
 void Mesh::h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<double, 3>, 4>> & tets) const {
-    std::vector<Vec3> p(h_n_nodes_of_cell(i_cell));
+    thread_local std::vector<Vec3> p;
+    p.resize(h_n_nodes_of_cell(i_cell));
     for (uint32_t k = 0; k < p.size(); k++) {
         const uint32_t node = h_node_of_cell(i_cell, k);
         for (size_t i = 0; i < 3; i++) p[k][i] = (i < N_DIM) ? double(h_node_coords(node, i)) : 0.0;
@@ -118,12 +121,13 @@ void Mesh::compute_geometry() {
     };
     // Faces: area vector and centroid from a triangle fan around the vertex
     // average, which stays exact for warped quadrilaterals and closes every cell
+    std::vector<Vec3> p, a;
     for (uint32_t f = 0; f < n_faces; f++) {
-        std::vector<Vec3> p(h_n_nodes_of_face(f));
+        p.resize(h_n_nodes_of_face(f));
         for (uint32_t k = 0; k < p.size(); k++) p[k] = coords(h_node_of_face(f, k));
         const Vec3 c = average(p);
         Vec3 A = {0.0, 0.0, 0.0};
-        std::vector<Vec3> a(p.size());
+        a.resize(p.size());
         for (size_t k = 0; k < p.size(); k++) {
             a[k] = cross(sub(p[k], c), sub(p[(k + 1) % p.size()], c));
             for (size_t i = 0; i < 3; i++) A[i] += 0.5 * a[k][i];
@@ -169,6 +173,7 @@ void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
     offsets.assign(1, 0);
     cell_nodes.clear();
     std::vector<Vec3> p;
+    std::vector<std::array<Vec3, 4>> tets;
     for (const auto & c : cells) {
         cell_local_faces(static_cast<uint32_t>(c.size()));
         p.clear();
@@ -177,7 +182,7 @@ void Mesh::orient_cells_3d(const std::vector<std::array<rtype, N_DIM>> & nodes,
             FOR_I_DIM x[i] = double(nodes[node][i]);
             p.push_back(x);
         }
-        if (signed_volume(p) < 0.0) {
+        if (signed_volume(p, tets) < 0.0) {
             const auto r = reflected(c);
             cell_nodes.insert(cell_nodes.end(), r.begin(), r.end());
         } else {

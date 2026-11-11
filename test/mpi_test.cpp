@@ -366,6 +366,21 @@ TEST(MPITest, InletsMatchSerial) {
                                         "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n"),
                                     25));
+    // mdot and profile of t: every rank integrates the profile over all the inlet's faces at every stage
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"inlet_mass_flow\"\nmdot = \"0.5 * (1 + 0.3 * sin(60 * t))\"\n"
+                                        "profile = \"1 + y * (1 + sin(40 * t))\"\n"
+                                        "T = 1.0\n",
+                                        "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n"),
+                                    25));
+    // Directions of x, y and t, per face and per stage, at an inlet and a moving wall
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", NS,
+                                    bcs("type = \"inlet_stagnation\"\np0 = 1.5\nT0 = 1.1\n"
+                                        "direction = [1.0, \"0.3 * y * (1 + sin(30 * t))\"]\n",
+                                        "type = \"outlet_pressure\"\np = 1.0\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\nu = 0.2\ndirection = [\"cos(10 * t)\", \"0\"]\n"),
+                                    25));
 }
 
 TEST(MPITest, LargeEddySimulationMatchesSerial) {
@@ -644,7 +659,7 @@ TEST(MPITest, AsynchronousAndCompressedRestartFilesDoNotDependOnTheRankCount) {
                 const std::string bytes_d((std::istreambuf_iterator<char>(a)), std::istreambuf_iterator<char>());
                 const std::string bytes_s((std::istreambuf_iterator<char>(b)), std::istreambuf_iterator<char>());
                 EXPECT_FALSE(bytes_s.empty()) << s;
-                EXPECT_TRUE(without_provenance(bytes_d) == without_provenance(bytes_s)) << d << " on " << comm::size() << " ranks";
+                EXPECT_TRUE(without_run_metadata(bytes_d) == without_run_metadata(bytes_s)) << d << " on " << comm::size() << " ranks";
             }
         }
         std::string input = restart_case(20, "");
@@ -743,13 +758,13 @@ TEST(MPITest, StatisticsAndProbesDoNotDependOnTheRankCount) {
     comm::barrier();
     const std::string stats = "[statistics]\ninterval = 2\nfields = [\"P\"]\nproducts = [\"U_X*U_Y\", \"RHO*RHO\"]\n";
     auto probe = [&](const std::string & file) {
-        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nvariables = [\"RHO\", \"P\", "
+        return "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/" + file + "\"\nfields = [\"RHO\", \"P\", "
                "\"MEAN_P\", \"COV_U_X_U_Y\"]\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\n"
-               "[[probes]]\nname = \"mean_line\"\nfile = \"" + dir + "/mean_" + file + "\"\nvariables = [\"RHO\", "
+               "[[probes]]\nname = \"mean_line\"\nfile = \"" + dir + "/mean_" + file + "\"\nfields = [\"RHO\", "
                "\"P\", \"MASS_FLUX\"]\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 13\naverage = true\n"
                "interval = 5\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/mean_red_" + file + "\"\n"
                "[[probes]]\nname = \"outflow\"\nfile = \"" + dir + "/out_" + file + "\"\n"
-               "boundary_type = \"outlet_extrapolation\"\nvariables = [\"MASS_FLUX\", \"ENTHALPY_FLUX\"]\n"
+               "boundary_type = \"outlet_extrapolation\"\nfields = [\"MASS_FLUX\", \"ENTHALPY_FLUX\"]\n"
                "average = true\ninterval = 5\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
                "/out_red_" + file + "\"\n";
     };
@@ -805,7 +820,7 @@ TEST(MPITest, EveryRankWritesRankZerosProvenance) {
     comm::barrier();
     Solver solver;
     solver.init(parse_toml(restart_case(2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
-                                                  "interval = 2\nvariables = [\"RHO\"]\n"
+                                                  "interval = 2\nfields = [\"RHO\"]\n"
                                                   "[[write_data]]\nprefix = \"" + dir + "/r\"\nformat = \"restart\"\n"
                                                   "interval = 2\n")));
     solver.run();
@@ -832,11 +847,11 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
     comm::barrier();
     auto probes = [&](const std::string & sub) {
         const std::string at = "file = \"" + dir + "/" + sub;
-        return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nvariables = [\"RHO\", \"U\", \"T\", \"H\"]\n"
+        return "[[probes]]\nname = \"circle\"\n" + at + "/circle.csv\"\nfields = [\"RHO\", \"U\", \"T\", \"H\"]\n"
                "sampling = \"point\"\ntype = \"circle\"\ncenter = [0.43, 0.37]\nradius = 0.21\nn_points = 29\n"
                "interval = 5\nreductions = [\"integral\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_" + at +
                "/circle_red.csv\"\n"
-               "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nvariables = [\"P\"]\n"
+               "[[probes]]\nname = \"line\"\nformat = \"vtp\"\n" + at + "/line.pvd\"\nfields = [\"P\"]\n"
                "sampling = \"point\"\nstart = [0.0, 0.4]\nend = [1.0, 0.4]\nn_points = 31\ninterval = 10\n";
     };
     auto input = [&](const std::string & sub) {
@@ -862,16 +877,17 @@ TEST(MPITest, PointProbesAndReductionsDoNotDependOnTheRankCount) {
             return ss.str();
         };
         for (const char * file : {"circle.csv", "circle_red.csv", "line.pvd", "line_000020.vtp"}) {
-            const std::string a = without_provenance(read(dir + "/serial/" + file));
+            const std::string a = without_run_metadata(read(dir + "/serial/" + file));
             EXPECT_FALSE(a.empty()) << file;
-            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+            EXPECT_EQ(without_run_metadata(read(dir + "/ranks/" + file)), a) << file;
         }
     }
     comm::barrier();
 }
 
 TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
-    // Wall polylines chained across ranks, face states and wall gradients
+    // Wall polylines chained across ranks, face states, wall gradients, the
+    // scheme's diffusive fluxes and the moments summed on rank 0
     const std::string dir = io_dir() + "_boundary_probes";
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
@@ -881,14 +897,16 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
                              "type = \"wall_isothermal\"\nT = 1.2\n"),
                          10) +
                "[[probes]]\nname = \"walls\"\nboundary_type = \"wall\"\nsampling = \"point\"\nfile = \"" + dir + "/" +
-               sub + "/walls.csv\"\nvariables = [\"P\", \"T\", \"CF\", \"Q_W\", \"Y_PLUS\"]\ninterval = 5\n"
-               "reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}\n"
+               sub + "/walls.csv\"\nfields = [\"P\", \"T\", \"CF\", \"Q_W\", \"Y_PLUS\", \"ENERGY_DIFFUSIVE_FLUX\", "
+               "\"TRACTION_PRESSURE\", \"TRACTION_VISCOUS\"]\ninterval = 5\n"
+               "reference = {rho = 1.0, u = [1.0, 0.0], p = 1.0}\nreductions = [\"integral\", \"moment\"]\n"
+               "moment_center = [0.3, 0.2]\nreductions_file = \"" + dir + "/" + sub + "/walls_red.csv\"\n"
                "[[probes]]\nname = \"cut\"\ntype = \"cut_plane\"\npoint = [0.5, 0.4]\nnormal = [1.0, 0.7]\n"
-               "sampling = \"point\"\nvariables = [\"RHO\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub +
+               "sampling = \"point\"\nfields = [\"RHO\", \"MASS_FLUX\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" + sub +
                "/cut.pvd\"\ninterval = 10\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + sub +
                "/cut.csv\"\n"
                "[[probes]]\nname = \"open\"\nboundary = [\"left\", \"right\"]\nformat = \"vtp\"\nfile = \"" + dir + "/" +
-               sub + "/open.pvd\"\nvariables = [\"MASS_FLUX\", \"MOMENTUM_FLUX\"]\ninterval = 10\n"
+               sub + "/open.pvd\"\nfields = [\"MASS_FLUX\", \"MOMENTUM_FLUX\", \"ENERGY_TOTAL_FLUX\"]\ninterval = 10\n"
                "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/" + sub + "/open.csv\"\n";
     };
     Solver reference;
@@ -906,10 +924,11 @@ TEST(MPITest, BoundaryProbesDoNotDependOnTheRankCount) {
             ss << in.rdbuf();
             return ss.str();
         };
-        for (const char * file : {"walls.csv", "open.csv", "open.pvd", "open_000010.vtp", "cut.csv", "cut_000010.vtp"}) {
-            const std::string a = without_provenance(read(dir + "/serial/" + file));
+        for (const char * file : {"walls.csv", "walls_red.csv", "open.csv", "open.pvd", "open_000010.vtp", "cut.csv",
+                                  "cut_000010.vtp"}) {
+            const std::string a = without_run_metadata(read(dir + "/serial/" + file));
             EXPECT_FALSE(a.empty()) << file;
-            EXPECT_EQ(without_provenance(read(dir + "/ranks/" + file)), a) << file;
+            EXPECT_EQ(without_run_metadata(read(dir + "/ranks/" + file)), a) << file;
         }
     }
     comm::barrier();
@@ -921,7 +940,7 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     comm::barrier();
     Solver solver;
     solver.init(parse_toml(restart_case(2, "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtu\"\n"
-                                                  "interval = 2\nvariables = [\"RHO\"]\n")));
+                                                  "interval = 2\nfields = [\"RHO\"]\n")));
     solver.run();
     comm::barrier();
     const uint64_t n_global = solver.get_mesh()->n_global_cells ? solver.get_mesh()->n_global_cells
@@ -951,6 +970,50 @@ TEST(MPITest, EveryCellIsInExactlyOneOutputPiece) {
     EXPECT_NE(read(dir + "/f.pvd").find("f_000002.pvtu"), std::string::npos);
 }
 
+TEST(MPITest, OutputRecordsListEveryRanksPieceWithItsSizeAndHash) {
+    const std::string dir = io_dir() + "_records";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    Solver solver;
+    // run_log continues box_input's [output] table
+    solver.init(parse_toml(restart_case(2, "run_log = \"" + dir + "/run.jsonl\"\n[[write_data]]\nprefix = \"" + dir +
+                                                  "/f\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"RHO\"]\n")));
+    solver.run();
+    comm::barrier();
+    if (!comm::is_root()) return;
+    const bool pieces = comm::size() > 1;
+    std::ifstream in(dir + "/run.jsonl");
+    size_t records = 0;
+    for (std::string line; std::getline(in, line);) {
+        const json::Value r = json::parse(line);
+        if (r["type"].string != "output" || r["step"].number != 2.0) continue;
+        records++;
+        std::set<std::string> names;
+        std::set<double> piece_sizes;
+        for (const json::Value & f : r["files"].array) {
+            const std::string file = f["path"].string;
+            names.insert(std::filesystem::path(file).filename().string());
+            EXPECT_EQ(f["bytes"].number, double(std::filesystem::file_size(file))) << file;
+            EXPECT_EQ(f["sha256"].string, provenance::sha256_file(file)) << file;
+            if (file.ends_with(".vtu")) piece_sizes.insert(f["bytes"].number);
+        }
+        std::set<std::string> expected;
+        for (int rank = 0; rank < comm::size(); rank++) {
+            std::ostringstream piece;
+            piece << "f_000002";
+            if (pieces) piece << "_p" << std::setw(4) << std::setfill('0') << rank;
+            expected.insert(piece.str() + ".vtu");
+        }
+        if (pieces) expected.insert("f_000002.pvtu");
+        EXPECT_EQ(names, expected);
+        // Ranks' pieces of different sizes, each recorded with its own
+        if (comm::size() == 3) {
+            EXPECT_GT(piece_sizes.size(), 1u);
+        }
+    }
+    EXPECT_EQ(records, 1u);
+}
+
 TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     // Cells and nodes of every rank land at their global ids: triangles and
     // quads, vectors, statistics and species
@@ -964,11 +1027,11 @@ TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     const std::string generated = "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     expect_hdf5_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
-                                      "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
+                                      "interval = 3\nfields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n",
                                       io_dir() + "_hdf5", {0, 3, 6});
     std::string mixture = mixture_input("", "type = \"MUSCL\"\n", "", "euler");
     mixture.replace(mixture.find("n_steps = 20"), 12, "n_steps = 4");
-    expect_hdf5_output_matches_serial(mixture, "interval = 4\nvariables = [\"T\", \"Y_*\"]\n",
+    expect_hdf5_output_matches_serial(mixture, "interval = 4\nfields = [\"T\", \"Y_*\"]\n",
                                       io_dir() + "_hdf5_species", {0, 4});
 #endif
 }
@@ -988,12 +1051,12 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
     const std::string zlib = have_hdf5_deflate() ? "compression = \"zlib\"\n" : "";
     expect_vtkhdf_output_matches_serial(input + "[statistics]\ninterval = 2\nfields = [\"P\"]\n",
-                                        "interval = 3\nvariables = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
+                                        "interval = 3\nfields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" + zlib,
                                         io_dir() + "_vtkhdf", {"_000000", "_000003", "_000006"});
-    expect_vtkhdf_output_matches_serial(input, "interval = 3\nseries = true\nvariables = [\"RHO\", \"U\"]\n",
+    expect_vtkhdf_output_matches_serial(input, "interval = 3\nseries = true\nfields = [\"RHO\", \"U\"]\n",
                                         io_dir() + "_vtkhdf_series", {""});
     expect_vtkhdf_output_matches_serial(input,
-                                        "interval = 3\nvariables = [\"P\", \"U\"]\n" + zlib +
+                                        "interval = 3\nfields = [\"P\", \"U\"]\n" + zlib +
                                             "regions = [{type = \"disk\", center = [0.5, 0.4], radius = 0.25}, \"bottom\", "
                                             "{type = \"cut_plane\", point = [0.45, 0.4], normal = [1.0, 0.3]}]\n",
                                         io_dir() + "_vtkhdf_regions", {"_0_000000", "_0_000006", "_bottom", "_2"});
@@ -1007,7 +1070,7 @@ TEST(MPITest, VTKHDFOutputDoesNotDependOnTheRankCount) {
         "type = \"symmetry\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\n"
         "type = \"MUSCL\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
         "[output]\ncheck_interval = 1000000\n",
-        "interval = 2\nvariables = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
+        "interval = 2\nfields = [\"RHO\"]\n", io_dir() + "_vtkhdf_curved", {"_000000", "_000002"});
 #endif
 }
 

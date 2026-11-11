@@ -63,7 +63,7 @@ order = 5
 [[write_data]]                  # snapshots for ParaView (VTKHDF)
 prefix = "solut/sod"
 time_interval = 0.02
-variables = ["RHO", "U_X", "P", "T"]
+fields = ["RHO", "U_X", "P", "T"]
 ```
 
 | Table | Required | Topic |
@@ -197,9 +197,23 @@ in an expression that fails to parse is pointed out in the error.
 
 **Nondimensional runs.** Single gases are scale-free: the reference state
 (`p_ref`, `T_ref`, `rho_ref`) sets the gas constant, so nondimensional inputs
-(`p_ref = T_ref = rho_ref = 1`) work as plain numbers. Units then make no
-sense; write them only in dimensional inputs. Gas mixtures read real
-thermochemistry and are always dimensional.
+(`p_ref = T_ref = rho_ref = 1`) work as plain numbers. Say so with
+`units = "nondimensional"` in `[physics]`: the terminal output then states it
+and labels no number with an SI unit (the progress table's units row shows
+`-`), instead of calling a time of 0.2 "0.2 s". Units in the input make no
+sense then; write them only in dimensional inputs. Gas mixtures read real
+thermochemistry and are always dimensional, so `units = "nondimensional"` is
+an error with `gas = "mixture"`.
+
+```toml
+[physics]
+type = "euler"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+```
 
 ## Expressions
 
@@ -254,6 +268,16 @@ Keys and options changed so far:
 | `[[mesh.curved]]` `shape` | `type`: the zone lies on a [surface region](geometry.md#regions); `"sphere"` and `"cylinder"` (3D) get `filled = false`, their surface | 0.9.0 | 0.10.0 |
 | `[[write_data]]` `geometry = "<zone>"` | `region = "<zone>"`, and `geometry = "all"` becomes `region = "domain"` ([any region](output.md#snapshots-of-regions)) | 0.9.0 | 0.10.0 |
 | `[mesh]` `periodic = ["x", "z"]` | `[[periodic]]` `zones = ["left", "right"]` and `zones = ["back", "front"]` (`y`: `bottom`/`top`, `theta`: `start`/`end`); `[initialize.mesh]` `periodic` likewise becomes `[[initialize.periodic]]` | 0.9.0 | 0.10.0 |
+| `[[write_data]]` `variables`, `[[probes]]` `variables` | `fields`, as `[statistics]` names them ([`mallard list fields`](cli.md#mallard-list-fields)) | 0.10.0 | 0.11.0 |
+| `[numerics]` `preset = "robust"`, `"accurate"` | `"second_order"`, `"high_order"`: presets are named by their order ([presets](numerics.md#presets)) | 0.10.0 | 0.11.0 |
+
+A changed default is not a deprecated key, and `mallard input upgrade`
+leaves the file as it is: it only prints a note, which does not change the
+exit status of `--check`. In 0.10.0 the default without a `[numerics] preset`
+or `[numerics.face_reconstruction]` became the `high_order` preset, not first
+order; add `[numerics.face_reconstruction]` `type = "FO"` to reproduce older
+first-order results. Before 1.0, these rules keep old inputs running, not
+their results identical.
 
 Changes before 0.9.0 were not deprecated first. Since 0.9.0, every rename
 of a key or option that a release shipped appears in this table and in `src/common/input_upgrade.cpp`, which is the
@@ -296,7 +320,16 @@ Errors during the run name the step, the time and the cells or faces involved
 `mallard check input.toml` runs the whole setup of the run (mesh,
 partition, boundaries, numerics, initial solution) without time stepping and
 without writing any file, then reports on it; the exit status is 1 if there
-is an error. Run it under `mpirun -n N` to check a run on N ranks.
+is an error. Run it under `mpirun -n N` (or `srun`) to check a run on N ranks.
+
+`mallard check` without an input checks the environment only: what a run
+would run on, with what to fix. Under the launcher of a real job it checks
+that job's ranks, nodes and devices before the run waits in the queue again:
+
+```sh
+mpirun -n 8 mallard check                # the environment of 8 ranks
+mallard check --format json | python3 -c "import json, sys; print(json.load(sys.stdin)['environment']['build'])"
+```
 
 ```text
 $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality quality --view view
@@ -407,7 +440,7 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --quality
           most GPUs with halo < 10% of owned  4          GPUs                  doubling from the fewest
           wall time per unit simulated time   21.0       s                     on 4 GPUs at 50.0M cells/s each
 
-== Cost ====================================================================================
+== Cost ===================================================================================
   On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:
   ranks times wall hours.
   period                   simulated time [s]  steps   wall time  rank-hours
@@ -437,6 +470,7 @@ The report opens and closes with the result, and the exit status is 1 if there i
 | Memory | Kokkos allocations per rank (device memory on GPUs) of the rank with the largest peak: after setup, once the data only the setup reads is freed (what the time steps hold), and at the peak (the setup's, and the timed steps' with `--steps`), with that rank's owned and halo cells. With `--ranks N` in a serial check, a second row is scaled to the owned and halo cells of the largest part the run's partitioner would make. On a GPU, the peak as a share of the device's memory. Then the same rank by category, at the setup's peak and after setup (at the steps' peak with `--steps`), in total and per owned and halo cell; the setup's workspace and work memory sized by the device are not proportional to the cells. On GPUs, also the device memory outside Kokkos: CUDA's context and the local memory of kernels with large stacks, 1.5 GB (2D) to 2.1 GB (3D) on an A100 |
 | GPU sizing | With `--memory SIZE` or `--memory GPU` (by default the GPU's own memory in GPU builds; `Rank sizing` in CPU builds): the memory, the 5% kept free and the memory outside Kokkos per GPU, the most owned and halo cells per GPU, the fewest GPUs the mesh fits on (from the parts the run's partitioner makes, in a serial check) with the largest part's predicted peak, up to how many GPUs the halo stays below 10% of the owned cells, and the wall time per unit simulated time there. The peak is the larger of the setup's and the steady state's. The memory outside Kokkos is measured on the GPU with `--steps` (the step kernels reserve their local memory at their first launch), else it is the typical 1.6 GB (2D) or 2.2 GB (3D). On an A100 the prediction is within -1.0% to +3.3% of the measured peak, extrapolating CPU checks of 4 to 16 times fewer cells ([performance](../design/performance.md#8-memory-sizing-in-mallard-check-550)) |
 | Cost | With `--throughput R` (cells/s per rank, the `Throughput` of a run's summary divided by its ranks) or `--steps N` (timed over N steps after an untimed one): simulated time, steps, wall time and GPU-hours (rank-hours on CPUs) per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude), to `run.t_stop` and for `run.n_steps`. It assumes the throughput per rank and the initial time step hold on N ranks |
+| Environment | What the run runs on, with or without an input: the build (dimension, precision, build type, compiler, from the same `build` block as every output file's [run block](output.md#run-block)) and the solvers installed with it; Kokkos and its execution spaces; MPI (the library, ranks, hosts, the most ranks on one host); GPU-aware MPI (built or not, whether the MPI library says it reads device memory, whether this run uses it); NCCL (built or not, whether halo exchanges use it: `[parallel] halo_exchange`, on several ranks); HDF5 (serial or parallel), CGNS, zlib and KaMinPar. Then a row per rank: host, device (GPU and memory, else the CPU), the GPU's index among those it sees, its CPUs, threads and whether OpenMP binds them. The placement checks are the run's own (`Ranks` at the start of a run on several ranks) |
 | Diagnostics | Every error, then every warning: its code, what is wrong with its numbers and the fix, then the anchor below that explains it |
 
 ### Diagnostics
@@ -463,6 +497,10 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | <a id="w-dns-eta"></a>`W-DNS-ETA` | A case without `[les]` (DNS) whose mean cell is more than 2 Kolmogorov lengths. The dissipation is not resolved | Refine to the cell size the message gives, or model the small scales (`[les]`) ([Resolution](#resolution)) |
 | <a id="w-sizing-fixed"></a>`W-SIZING-FIXED` | With `--memory` (or a GPU's own), even the memory that does not grow with the cells does not fit in the memory per rank | Size for a larger memory |
 | <a id="w-sizing-parts"></a>`W-SIZING-PARTS` | No partition into a few thousand parts fits in the memory per rank | Size for a larger memory, or coarsen the mesh |
+| <a id="e-env-gpu-aware-mpi"></a>`E-ENV-GPU-AWARE-MPI` | The build passes device buffers to MPI (`-DMallard_GPU_AWARE_MPI=ON`), but the MPI library says it cannot read device memory (Open MPI's `MPIX_Query_cuda_support`, `MPIX_Query_rocm_support`): the run would crash or read garbage | Load an MPI built with CUDA or ROCm support, or rebuild with `-DMallard_GPU_AWARE_MPI=OFF` ([MPI](parallel.md#mpi)) |
+| <a id="w-env-host-staging"></a>`W-ENV-HOST-STAGING` | A GPU run on several ranks whose halo exchanges copy device buffers to host memory and back: neither NCCL (`[parallel] halo_exchange = "nccl"`) nor GPU-aware MPI | Use NCCL, or rebuild with `-DMallard_ENABLE_NCCL=ON` or `-DMallard_GPU_AWARE_MPI=ON` |
+| <a id="w-env-placement"></a>`W-ENV-PLACEMENT` | Ranks placed so that they waste hardware: several ranks on a GPU, more ranks than GPUs on a node, an idle GPU while others are shared, ranks on CPUs away from their GPU's NUMA node; on CPUs, more threads than cores on a node, or pinned threads of ranks that share cores | One rank per GPU, each bound to the cores next to it ([Running on clusters](parallel.md#running-on-clusters)) |
+| <a id="w-env-thread-binding"></a>`W-ENV-THREAD-BINDING` | OpenMP builds: ranks with several threads but neither `OMP_PROC_BIND` nor `OMP_PLACES` set, so their threads may migrate between cores | Set `OMP_PROC_BIND=spread` and `OMP_PLACES=threads` |
 
 ### The report as JSON
 
@@ -470,7 +508,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 
 | Member | Holds |
 |---|---|
-| `version`, `status` (`ok`, `warning`, `error`), `errors`, `warnings`, `input_file`, `setup_done`, `dim` | The result |
+| `version`, `status` (`ok`, `warning`, `error`), `errors`, `warnings`, `input_file` (`null` without an input), `setup_done`, `dim` | The result |
 | `diagnostics` | `[{severity, code, message, docs}]`, in the order found |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
@@ -480,6 +518,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ...): `{quantity, value, units, target, status, basis, x}` |
 | `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, and by category `at_setup_peak` and `steady` |
 | `sizing` | `name`, `gpu`, `memory`, `margin`, `outside_kokkos`, `bytes_per_cell`, `fixed_bytes`, `max_local_cells`, `min_ranks`, `min_owned`, `min_halo`, `min_peak`, `halo_ranks`, ... |
+| `environment` | `build` and `dependencies` (the run block's), `solvers` (the dimensions installed), `ranks`, `hosts`, `ranks_per_host`, `gpu_aware_mpi` (`library`: what the MPI library says, `null` if it does not; `used`), `nccl` (`used`), `placement`: `[{rank, host, device, threads, cpus, omp_bind, gpu, gpu_index, gpu_numa, gpus_visible}]` |
 | `cost` | `cells`, `ranks`, `throughput` (cells/s per rank), `wall_per_time` (wall seconds per unit simulated time), `flow_through_time`, `t_stop`, `n_steps` |
 
 ```sh
@@ -580,6 +619,16 @@ tutorial, in 2D and 3D, into
 reads; CI checks that it is up to date, and `tools/dev/input_catalog.py docs`
 that the defaults this reference states match it.
 
+`mallard list keys` shows that catalog as tables, one per input table, with
+each key's type, units, default and accepted values; `mallard list keys
+input.toml` shows the catalog of one case (what `--catalog` writes, with
+whether the input sets each key), and a section keeps one table or key path:
+
+```bash
+mallard list keys numerics                  # every [numerics] key there is
+mallard list keys write_data input.toml     # the [[write_data]] keys this case reads
+```
+
 ## The resolved input
 
 An input sets the keys that matter for its case; the run uses many more, at
@@ -607,10 +656,10 @@ full.toml` runs bitwise the same as `input.toml`, and resolves to `full.toml`
 again, so comparing two resolved inputs (`diff`) shows every setting in which
 two runs differ.
 
-Every output file's [provenance](output.md#provenance) holds the same text,
+Every output file's [run block](output.md#run-block) holds the same text,
 `input.resolved`, next to the input file's own text: the results of a run carry
 the input that reproduces them. The resolved input, the key catalog above and
-the preset's keys in the provenance are all made from the same record, the
+the preset's keys in the run block are all made from the same record, the
 setup's accessors, so they cannot disagree.
 
 ## The other commands

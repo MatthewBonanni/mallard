@@ -67,7 +67,7 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
 
     table["run"] = Input::table_type{{"n_steps", static_cast<Input::integer_type>(n_steps)}};
     table["output"] = Input::table_type{{"check_interval", 1000000}};
-    for (const char * key : {"write_data", "probes", "statistics", "forces"}) table.erase(key);
+    for (const char * key : {"write_data", "probes", "statistics", "forces", "triggers"}) table.erase(key);
 
     auto & mesh = input.at("mesh").as_table();
     if (mesh.at("type").as_string() == "file") {

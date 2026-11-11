@@ -1,8 +1,10 @@
 /**
  * @file output_reader.h
  * @brief Reads any file Mallard writes or reads: what it holds (mesh, fields
- *        with units, times, provenance) and its field values. The one reader
- *        of every format, for mallard info and the post-processing commands.
+ *        with units, its snapshots and their snapshot blocks, the run block)
+ *        and its field values. The one reader of every format, for mallard
+ *        info and the post-processing commands. Step, time and run come from
+ *        what the files record, never from their names.
  *
  * Design: docs/design/output_reader.md.
  *
@@ -21,6 +23,7 @@
 
 #include "data_writer.h"
 #include "mesh_block.h"
+#include "snapshot_block.h"
 
 namespace output {
 
@@ -47,12 +50,20 @@ struct Field {
     double max = std::numeric_limits<double>::quiet_NaN();
 };
 
-/** @brief One time of a file: a snapshot, a row block of a table. */
+/**
+ * @brief One time of a file: a snapshot, a row block of a table. t and step
+ *        are what the file records (block, or the format's own slot); where
+ *        it records no step (written before Mallard 0.10), step is -1 and the
+ *        file's notes say how its snapshots are numbered instead.
+ */
 struct Snapshot {
     double t = 0.0;
     int64_t step = -1;  ///< -1 where the file does not record it
     std::string file;   ///< the file holding it: the file itself, or a series member
     uint64_t index = 0; ///< its index in that file (series files, probe files, tables)
+    bool has_block = false;          ///< whether the file records its snapshot block
+    snapshot_block::Block block;     ///< that block: reason, written_at, run, fields' stored precision, ...
+    std::string run_id;              ///< of the run that wrote it, from its block or the run block; "" if unknown
 };
 
 /** @brief The mesh a file holds or refers to. */
@@ -88,7 +99,13 @@ struct Contents {
      */
     bool global_order = false;
     std::string mesh_file;        ///< XDMF output: its mesh file
-    std::string provenance;       ///< the provenance block (JSON), empty if the file has none
+    /**
+     * @brief The run block (JSON): the code, build, input, mesh and start of
+     *        the run that wrote the file (the last one, for a file continued
+     *        by restarted runs), the same in every file of that run; empty if
+     *        the file has none. Blocks of version 2 and before were named "provenance".
+     */
+    std::string run;
     RestartHeader restart;        ///< restart files: the header
     std::vector<std::string> notes;  ///< what a reader of the file should know (no units, newer provenance, ...)
 
@@ -138,7 +155,8 @@ void read_ranges(Contents & file, size_t snapshot);
 /**
  * @brief The output files of a run directory: its series indexes and the
  *        snapshots no index lists, restart files, probe and CSV files, sorted
- *        by name; directories one level down (solut/) included.
+ *        by name; directories one level down (solut/) included, and files whose
+ *        write did not finish (NAME.partial), which open() refuses.
  */
 std::vector<std::string> run_files(const std::string & dir);
 

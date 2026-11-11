@@ -9,7 +9,9 @@ python ../../tools/post/animate.py solut riemann
 ```
 
 Each example's `card.toml` gives its build (`2d`, `3d`) and what it demonstrates, for its card on the
-website's [Examples](https://matthewbonanni.github.io/mallard/docs/examples/) page; the run times below name the
+website's [Examples](https://matthewbonanni.github.io/mallard/docs/examples/) page, and, for a case of the
+[validation page](https://matthewbonanni.github.io/mallard/validation/), its section and the regime it
+validates (`validation`, read by the [feature matrix](../docs/guide/features.md)); the run times below name the
 hardware they were measured on.
 
 ## Shocks and compressible flow
@@ -52,7 +54,7 @@ hardware they were measured on.
 
 | Case | What it shows | Cells | Run time |
 |---|---|---|---|
-| `source_regions` | `[[sources]]` in regions: an annulus with a smooth edge releases a Gaussian heat pulse of exact total energy (`total = true`), a rotated rectangle pushes the gas with a body force and its work; a probe of the same named region records the mass and temperature in the ring, and probes of the mesh's region `domain` the total mass and the gas away from the ring | 51,200 triangles | ~2 minutes on 4 CPU threads |
+| `source_regions` | `[[sources]]` in regions: an annulus with a smooth edge releases a Gaussian heat pulse of exact total energy (`total = true`), a rotated rectangle pushes the gas with a body force and its work; a probe of the same named region records the mass and temperature in the ring, and probes of the mesh's region `domain` the total mass and the gas away from the ring; a [trigger](../docs/guide/running.md#triggers) writes a snapshot and a restart once the ring has cooled back below a temperature | 51,200 triangles | ~2 minutes on 4 CPU threads |
 
 ## Viscous flows
 

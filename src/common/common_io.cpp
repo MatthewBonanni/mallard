@@ -14,6 +14,7 @@
 #include <stdexcept>
 
 #include "common_typedef.h"
+#include "provenance.h"
 
 #include <cerrno>
 #include <cstring>
@@ -104,4 +105,19 @@ void create_parent_directories(const std::string & what, const std::string & fil
         errno = ec.value();
         throw cannot_write(what, file);
     }
+}
+
+void publish_file(const std::string & what, const std::string & file) {
+    std::error_code ec;
+    std::filesystem::rename(partial_name(file), file, ec);
+    if (ec) {
+        errno = ec.value();
+        throw cannot_write(what, file);
+    }
+}
+
+WrittenFile written_file(const std::string & path, bool contents) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    return {path, ec ? 0 : uint64_t(size), contents ? provenance::sha256_file(path) : std::string()};
 }

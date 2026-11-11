@@ -488,3 +488,21 @@ std::string expression_unit_hint(const std::string & expression) {
     }
     return "";
 }
+
+namespace units {
+
+namespace {
+System current = System::SI;
+} // namespace
+
+void set_system(const System s) { current = s; }
+
+System system() { return current; }
+
+std::string column(const std::string & si) { return current == System::SI ? si : "-"; }
+
+std::string with(const std::string & number, const std::string & si) {
+    return current == System::SI && !si.empty() ? number + " " + si : number;
+}
+
+} // namespace units

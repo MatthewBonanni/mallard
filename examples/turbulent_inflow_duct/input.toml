@@ -82,6 +82,7 @@ limiter = "none"
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 17.857142857142858
 T_ref = 1.0
@@ -99,7 +100,7 @@ check_interval = 1000
 
 [[probes]]
 name = "x0"
-variables = ["P", "U_X"]
+fields = ["P", "U_X"]
 start = [0.0078125, 0.0078125, 1.0]
 end = [0.0078125, 1.9921875, 1.0]
 n_points = 32
@@ -107,7 +108,7 @@ interval = 4
 
 [[probes]]
 name = "x1"
-variables = ["P", "U_X"]
+fields = ["P", "U_X"]
 start = [1.0, 0.0078125, 1.0]
 end = [1.0, 1.9921875, 1.0]
 n_points = 32
@@ -115,7 +116,7 @@ interval = 4
 
 [[probes]]
 name = "x3"
-variables = ["P", "U_X"]
+fields = ["P", "U_X"]
 start = [3.0, 0.0078125, 1.0]
 end = [3.0, 1.9921875, 1.0]
 n_points = 32
@@ -123,7 +124,7 @@ interval = 4
 
 [[probes]]
 name = "x5"
-variables = ["P", "U_X"]
+fields = ["P", "U_X"]
 start = [5.5, 0.0078125, 1.0]
 end = [5.5, 1.9921875, 1.0]
 n_points = 32
@@ -137,4 +138,4 @@ interval = 10000
 [[write_data]]
 prefix = "stats/duct"
 time_interval = 11.0
-variables = ["MEAN_*", "COV_*", "U", "P"]
+fields = ["MEAN_*", "COV_*", "U", "P"]

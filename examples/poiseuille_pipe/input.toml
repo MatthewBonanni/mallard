@@ -46,6 +46,7 @@ type = "MUSCL"
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 axisymmetric = true
 gamma = 1.4
 p_ref = 0.7142857142857143
@@ -63,4 +64,4 @@ check_interval = 5000
 [[write_data]]
 prefix = "./solut/pipe"
 time_interval = 30.0
-variables = ["RHO", "U_X", "U_Y", "P", "T"]
+fields = ["RHO", "U_X", "U_Y", "P", "T"]

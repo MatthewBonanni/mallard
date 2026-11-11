@@ -93,7 +93,7 @@ check_interval = 1000000
 prefix = "{name}"
 format = "vtu"
 interval = 1
-variables = ["SOURCE_RHOE"]
+fields = ["SOURCE_RHOE"]
 {PHYSICS}""")
     pts, conn, offs, _, data = read_vtu_cells(str(work / f"{name}_000000.vtu"))
     starts = np.concatenate([[0], offs[:-1]])
@@ -522,7 +522,7 @@ def probe_inputs(probes, dim):
     for k, entry in enumerate(probes):
         name, keys = entry[0], entry[1]
         kind = name.split(",")[0]
-        out += (f'[[probes]]\nname = "p{k}"\nvariables = ["RHO"]\ntype = "{kind}"\n{keys}\n'
+        out += (f'[[probes]]\nname = "p{k}"\nfields = ["RHO"]\ntype = "{kind}"\n{keys}\n'
                 f'file = "p{k}.csv"\n')
     return out
 
@@ -664,7 +664,7 @@ check_interval = 1000000
 [[probes]]
 name = "p"
 file = "{name}.csv"
-variables = ["RHO"]
+fields = ["RHO"]
 sampling = "{sampling}"
 type = "points"
 points = [{pts}]

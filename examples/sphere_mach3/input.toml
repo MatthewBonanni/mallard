@@ -77,6 +77,7 @@ bound_preserving = true
 
 [physics]
 type = "euler"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 1.0
 T_ref = 1.0
@@ -93,7 +94,7 @@ file = "forces_sphere.csv"
 [[write_data]]
 prefix = "./solut/sphere"
 time_interval = 1.0
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 
 # The symmetry planes are meridian slices of the axisymmetric flow, and the
 # sphere surface carries the wall pressure; written often for animation
@@ -102,21 +103,21 @@ prefix = "./slices/y0"
 region = "symmetry_y"
 format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.02
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 
 [[write_data]]
 prefix = "./slices/z0"
 region = "symmetry_z"
 format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.02
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 
 [[write_data]]
 prefix = "./slices/wall"
 region = "sphere"
 format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.02
-variables = ["P"]
+fields = ["P"]
 
 [[write_data]]
 prefix = "./restart/sphere"

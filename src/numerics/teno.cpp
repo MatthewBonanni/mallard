@@ -1636,17 +1636,25 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
             return entries;
         };
 
-        // Least-squares system rows: mean of psi_l over each stencil entry
+        // Least-squares system rows: mean of psi_l over each stencil entry, for
+        // the monomials of the axes the cell's neighbors span (flat, set below)
+        uint8_t flat = 0;
         auto build_pinv = [&](const std::vector<Entry> & stencil, uint8_t deg, std::vector<double> & P) {
             const uint8_t n = teno::n_dof(deg);
+            const teno_setup::FitColumns fit = teno_setup::fit_columns(flat, n);
+            const size_t nf = size_t(fit.n);
             const size_t m = stencil.size();
-            std::vector<double> A(m * n);
+            std::vector<double> A(m * nf);
             std::vector<double> means;
             for (size_t s = 0; s < m; s++) {
                 monomial_means(stencil[s], deg, means);
-                for (uint8_t l = 0; l < n; l++) A[s * n + l] = means[l] - mean0[l];
+                for (size_t j = 0; j < nf; j++) A[s * nf + j] = means[fit.col[j]] - mean0[fit.col[j]];
             }
-            return pseudo_inverse(A, m, n, P, double(max_condition));
+            std::vector<double> P_fit;
+            if (!pseudo_inverse(A, m, nf, P_fit, double(max_condition))) return false;
+            P.assign(size_t(n) * m, 0.0);
+            for (size_t j = 0; j < nf; j++) std::copy_n(&P_fit[j * m], m, &P[size_t(fit.col[j]) * m]);
+            return true;
         };
 
         // The map from cell i's frame to that of face f (its cell 0's)
@@ -1690,6 +1698,16 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         // rank (anisotropic cells can have too few distinct rows/columns) and
         // is well conditioned
         std::vector<Entry> candidates = gather(ns_max, 64);
+        std::vector<const Entry *> neighbors;
+        for (const Entry & e : candidates) {
+            if (e.face < 0) neighbors.push_back(&e);
+        }
+        teno_setup::FlatAxes spanned;
+        for (const Entry * e : neighbors) {
+            const double offset[3] = {(e->x - x0) / h, (e->y - y0) / h, 0.0};
+            spanned.add(offset);
+        }
+        flat = spanned.axes();
         std::vector<double> P;
         bool ok = false;
         // Never split a group of equidistant candidates: keeps stencils
@@ -1709,6 +1727,10 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
                 r_fit = curved_wall_degree;
                 n_start = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(r_fit)));
             }
+        }
+        // Sized for the monomials of the spanned axes
+        if (flat != 0) {
+            n_start = static_cast<uint16_t>(std::ceil(stencil_factor * rtype(teno_setup::fit_columns(flat, teno::n_dof(r_fit)).n)));
         }
         // The smallest stencil within MAX_LEBESGUE_2D, else the best conditioned one
         uint16_t n_used = n_start;
@@ -1837,13 +1859,12 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
         }
     };
     // Outer halo cells are never reconstructed; their neighborhoods are cut off
-    Kokkos::Timer timer;
     if (subset == nullptr) {
         largest_stencil = precompute_in_chunks(*this, mesh->n_reconstructed(), precompute, n_failed_large, n_invalid_small);
     } else {
         rebuild_in_chunks(*this, *subset, precompute, n_failed_large, n_invalid_small);
     }
-    setup_status = logging::format("host, %.2f s", timer.seconds());
+    setup_status = "on the host (timed in Setup as numerics)";
 
     if (n_failed_large > 0) {
         throw std::runtime_error("TENO: could not build a full-rank large stencil for " +
@@ -1881,7 +1902,6 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
                                      std::to_string(teno::MAX_FACES) + " faces.");
         }
     }
-    Kokkos::Timer timer;
     teno_setup::Options options;
     options.degree = degree;
     options.nk = n_dof_large;
@@ -1894,6 +1914,7 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
     options.curved_mirrors = curved_mirrors;
     options.curved_wall_degree = curved_wall_degree;
     options.wall_ns = static_cast<uint16_t>(std::ceil(stencil_factor * teno::n_dof(curved_wall_degree)));
+    options.stencil_factor = double(stencil_factor);
     teno_setup::Setup3DHandle setup(*mesh, boundaries, face_quad_points, face_quad_weights, options);
 
     // Cells per batch: whole slices of the packed stencils
@@ -1941,9 +1962,9 @@ void TENO::compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset
     if (n_failed_large == 0) moments = setup.moments(static_cast<uint32_t>(scale.extent(0)));
     Kokkos::fence();
     const teno_setup::Timings & t = setup.timings();
-    setup_status = logging::format("%s, %.2f s (geometry %.2f s, tables %.2f s, packing %.2f s)",
-                                   setup_on_host ? "host" : Kokkos::DefaultExecutionSpace::name(), timer.seconds(),
-                                   t.geometry, t.tables, t_pack);
+    setup_status = logging::format("on %s; of Setup's numerics time: geometry %.2f s, tables %.2f s, packing %.2f s",
+                                   setup_on_host ? "the host" : Kokkos::DefaultExecutionSpace::name(), t.geometry,
+                                   t.tables, t_pack);
     if (t.n_host_cells > 0) {
         setup_status += logging::format(", %llu cells redone on the host in %.2f s",
                                         static_cast<unsigned long long>(t.n_host_cells), t.host_cells);
@@ -3064,7 +3085,8 @@ struct TENOFunctor {
         rtype theta = 1.0;
         if (bound_preserving) {
             // Scale the high-order deviation so density and pressure at every face
-            // point stay within the range of the cell and its face neighbors
+            // point stay within the range of the cell and its face neighbors,
+            // widened by teno::BOUND_SLACK of the cell's value
             constexpr uint8_t P = N_DIM + 1;
             rtype lo[2] = {W0[0], W0[P]}, hi[2] = {W0[0], W0[P]};
             for (uint8_t k = 0; k < n_faces; k++) {
@@ -3076,6 +3098,11 @@ struct TENOFunctor {
                 hi[0] = Kokkos::fmax(hi[0], W(nb, 0));
                 lo[1] = Kokkos::fmin(lo[1], W(nb, P));
                 hi[1] = Kokkos::fmax(hi[1], W(nb, P));
+            }
+            for (uint8_t v = 0; v < 2; v++) {
+                const rtype slack = teno::BOUND_SLACK * Kokkos::fabs(v == 0 ? W0[0] : W0[P]);
+                lo[v] -= slack;
+                hi[v] += slack;
             }
             for (uint8_t k = 0; k < n_faces; k++) {
                 const uint32_t f = faces_of_cell(f_begin + k);
@@ -3450,7 +3477,7 @@ namespace {
 // each 3D cell's moments in place of its smoothness-indicator matrix; version 11 ranks 2D candidates
 // in the mesh-spacing metric and mirrors them only across the boundary faces beneath them (#382);
 // version 12 weights the 2D smoothness-indicator matrices so that they do not depend on the axes (#436)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-12";
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-13";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {

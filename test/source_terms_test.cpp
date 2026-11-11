@@ -148,7 +148,7 @@ std::string shared_regions(const bool named, const std::string & dir) {
                              : "";
     text += "[[sources]]\ntotal = true\nrhoE = 0.5\nregion = " + both + "\n[[sources]]\nrho = 0.1\nregion = " + ring +
             "\n[[sponges]]\nstrength = \"2 + x\"\nu = " + vector_of("0") + "\np = 1.3\nT = 1.0\nregion = " + box +
-            "\n[[probes]]\nname = \"ring\"\nvariables = [\"RHO\", \"P\"]\nregion = " + ring + "\nreductions_file = \"" +
+            "\n[[probes]]\nname = \"ring\"\nfields = [\"RHO\", \"P\"]\nregion = " + ring + "\nreductions_file = \"" +
             dir + "/" + (named ? "named" : "inline") + ".csv\"\n";
     return text;
 }
@@ -185,7 +185,7 @@ TEST(SourceTermsTest, NamedRegionsActAsTheTablesTheyName) {
     for (size_t i = 0; i < r[0].values.size(); i++) EXPECT_EQ(r[0].values[i], r[1].values[i]) << "column " << i;
     EXPECT_NE(r[0].values[0], std::vector<double>(r[0].measure.size(), 0.0));
     const std::string named = read_text(dir + "/named.csv");
-    EXPECT_EQ(without_provenance(named), without_provenance(read_text(dir + "/inline.csv")));
+    EXPECT_EQ(without_run_metadata(named), without_run_metadata(read_text(dir + "/inline.csv")));
     EXPECT_NE(named.find("integral_RHO"), std::string::npos);
 }
 

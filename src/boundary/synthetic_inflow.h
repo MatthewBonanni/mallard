@@ -23,15 +23,13 @@
 #include "input.h"
 
 #include "common.h"
+#include "boundary_fields.h"
 #include "expression.h"
 
 class Mesh;
 
 /** @brief Independent components of a symmetric tensor: 2D [xx, yy, xy], 3D [xx, yy, zz, xy, xz, yz]. */
 constexpr uint8_t N_STRESS = N_DIM * (N_DIM + 1) / 2;
-
-/** @brief Point in space. */
-using Point = std::array<double, N_DIM>;
 
 /**
  * @brief Mean velocity and Reynolds stress of an `inlet_state` with `nscbc` at
@@ -68,7 +66,7 @@ class InletProfile {
         bool uniform_ = true;
         std::vector<Field> u;       // per component, or the speed alone
         bool speed = false, directed = false;
-        Point direction{};
+        DirectionKey direction;
         std::vector<Field> stress;  // per N_STRESS component, empty without turbulence
         // Profile table: coordinate axis, sorted coordinates, and N_DIM mean + N_STRESS stress columns
         int axis = -1;
@@ -111,7 +109,10 @@ class SyntheticInflow {
         SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream, const Mesh & mesh,
                         const std::vector<uint32_t> & faces, const std::vector<int32_t> & char_index);
 
-        /** @brief Write the target velocity (mean plus fluctuation) of the inlet's faces at time t into target(k). */
+        /**
+         * @brief Write the target velocity (mean plus fluctuation) of the inlet's faces at time t into target(k).
+         *        A mean of t is the one already in target, written there by TimedInletTargets at t.
+         */
         void fill(double t, const Kokkos::View<rtype *[N_DIM]> & target);
 
         /** @brief One-line description for the run log. */
@@ -149,6 +150,7 @@ class SyntheticInflow {
         double dt_plane = 0.0;      // time between planes
         double U_c = 0.0;           // convection velocity of Taylor's hypothesis
         bool zero_net_flux = true;
+        bool timed_mean = false;    // the mean depends on t: superposed on the target, not face_mean
         double area = 0.0;          // of the whole inlet
         // Filters: (component, direction: transverse ones, then time), half widths and kernels
         int32_t half_width[N_DIM][N_DIM] = {};

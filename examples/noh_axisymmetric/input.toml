@@ -68,6 +68,7 @@ bound_preserving = true
 
 [physics]
 type = "euler"
+units = "nondimensional"
 axisymmetric = true
 gamma = 1.6666666666666667
 p_ref = 1.0
@@ -80,4 +81,4 @@ check_interval = 100
 [[write_data]]
 prefix = "./solut/noh"
 time_interval = 0.1
-variables = ["RHO", "U_X", "U_Y", "P"]
+fields = ["RHO", "U_X", "U_Y", "P"]

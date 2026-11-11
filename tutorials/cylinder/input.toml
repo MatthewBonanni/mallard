@@ -47,6 +47,7 @@ order = 3
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 0.7142857142857143
 T_ref = 0.7142857142857143
@@ -65,4 +66,4 @@ file = "forces_cylinder.csv"
 [[write_data]]
 prefix = "./solut/cylinder"
 time_interval = 2.0
-variables = ["RHO", "U_X", "U_Y", "P", "VORTICITY"]
+fields = ["RHO", "U_X", "U_Y", "P", "VORTICITY"]

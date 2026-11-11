@@ -41,6 +41,11 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
 };
 
 void Solver::init_solution() {
+    if (state_reader) {
+        apply_output_state(state_reader(*mesh));
+        initial_state = "output, at step " + std::to_string(step) + ", t = " + logging::real(double(t));
+        return;
+    }
     if (!input.contains("initialize")) {
         throw InputError({.key = "initialize",
                           .message = "the [initialize] table is missing; it sets the initial flow",
@@ -101,6 +106,8 @@ void Solver::init_solution_restart() {
                           .docs = "docs/input.md#type--remap"});
     }
     apply_restart(restart, file, true);
+    provenance::read_start_file("restart", file, restart.provenance, restart.step, restart.t);
+    provenance::set_restart_of(provenance::find_string(restart.provenance, "run", "run_id"), file, step);
     initial_state = "restart from " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t));
     // The mesh file's hash is known on rank 0 only
     auto differs = [&](const char * object) {
@@ -173,8 +180,13 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     }
     step = restart.step;
     t = static_cast<rtype>(restart.t);
+    if (resume_output) {
+        triggers.restore(restart.attributes);
+        if (const auto started = triggers.statistics_started()) statistics.set_start(static_cast<rtype>(*started));
+    }
     statistics.restore(restart, file, t);
     probes.restore_averages(restart, file, t, statistics.resets());
+    probes.restore_spectra(restart, file, statistics.resets());
     if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
     if (!resume_output) return;
@@ -184,6 +196,96 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     }
     if (checkpoint_writer) checkpoint_writer->resume(step, t);
     probes.resume(step, t);
+}
+
+void Solver::apply_output_state(RestartData state) {
+    const std::vector<std::string> expected = restart_variables();
+    const auto has = [&](const std::string & name) { return state.find(name) != nullptr; };
+    const auto optional = [](const std::string & name) { return name == "T_SEED" || name == "CHEM_H" || name == "P_MAX"; };
+    const bool conservative = std::all_of(expected.begin(), expected.end(),
+                                          [&](const std::string & name) { return optional(name) || has(name); });
+    RestartData out;
+    out.step = state.step;
+    out.t = state.t;
+    out.n_cells = state.n_cells;
+    out.attributes = std::move(state.attributes);
+    out.arrays = std::move(state.arrays);
+    out.faces = std::move(state.faces);
+    const bool seeded = has("T_SEED") || has("T");
+    if (conservative) {
+        for (const std::string & name : expected) {
+            const std::vector<rtype> * values = state.find(name == "T_SEED" && !has(name) ? "T" : name);
+            if (!values && name == "T_SEED") {
+                out.names.push_back(name);
+                out.fields.emplace_back(mesh->n_cells, 0.0_r);
+            } else if (values) {
+                out.names.push_back(name);
+                out.fields.push_back(*values);
+            }
+        }
+    } else {
+        std::vector<std::string> needed;
+        for (size_t i = 0; i < N_DIM; i++) needed.push_back(std::string("U_") + "XYZ"[i]);
+        if (is_mixture()) {
+            needed.insert(needed.end(), {"P", "T"});
+            for (const auto & name : species_names) needed.push_back("Y_" + name);
+        } else if (!(has("RHO") && has("P"))) {
+            needed.insert(needed.end(), {has("RHO") ? "RHO" : "P", "T"});
+        } else {
+            needed.insert(needed.end(), {"RHO", "P"});
+        }
+        std::string missing;
+        for (const auto & name : needed) {
+            if (!has(name)) missing += (missing.empty() ? "" : ", ") + name;
+        }
+        if (!missing.empty()) {
+            std::string list;
+            for (const auto & name : expected) {
+                if (!optional(name)) list += (list.empty() ? "" : ", ") + name;
+            }
+            throw std::runtime_error(
+                "holds neither the conservative variables (" + list + ") nor " +
+                (is_mixture() ? "P, T, U and the mass fractions Y_*" : "RHO and P (or one of them and T) and U") +
+                " (missing: " + missing + "). Write them in [[write_data]] fields, or extract from a restart file.");
+        }
+        const std::vector<rtype> * u[N_DIM];
+        FOR_I_DIM u[i] = state.find(needed[i]);
+        const std::vector<rtype> * rho = state.find("RHO");
+        const std::vector<rtype> * p = state.find("P");
+        const std::vector<rtype> * T = state.find("T");
+        const size_t n_species = species_names.size();
+        std::vector<const std::vector<rtype> *> Y;
+        for (const auto & name : species_names) Y.push_back(state.find("Y_" + name));
+        out.names.assign(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+        for (const auto & name : species_names) out.names.push_back("RHOY_" + name);
+        if (is_mixture()) out.names.emplace_back("T_SEED");
+        out.fields.assign(out.names.size(), std::vector<rtype>(mesh->n_cells));
+        std::vector<double> y(n_species);
+        std::vector<rtype> rhoY(n_species);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            rtype U[N_CONSERVATIVE];
+            rtype velocity[N_DIM];
+            FOR_I_DIM velocity[i] = (*u[i])[c];
+            if (is_mixture()) {
+                for (size_t k = 0; k < n_species; k++) y[k] = static_cast<double>((*Y[k])[c]);
+                mixture_model->conservatives(static_cast<double>((*p)[c]), static_cast<double>((*T)[c]), velocity, y,
+                                             U, rhoY.data());
+                for (size_t k = 0; k < n_species; k++) out.fields[N_CONSERVATIVE + k][c] = rhoY[k];
+                out.fields.back()[c] = (*T)[c];
+            } else {
+                rtype W[N_CONSERVATIVE];
+                W[0] = rho ? (*rho)[c] : physics.get_density_from_pressure_temperature((*p)[c], (*T)[c]);
+                FOR_I_DIM W[1 + i] = velocity[i];
+                W[N_DIM + 1] = p ? (*p)[c] : physics.get_pressure_from_density_temperature((*rho)[c], (*T)[c]);
+                physics.compute_conservatives_from_W(U, W);
+            }
+            FOR_I_CONSERVATIVE out.fields[i][c] = U[i];
+        }
+    }
+    apply_restart(out, "the output file", false);
+    copy_host_to_device();
+    if (is_mixture() && !seeded) init_temperature_seed();
+    update_primitives();
 }
 
 void Solver::init_solution_constant() {

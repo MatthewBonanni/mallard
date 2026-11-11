@@ -19,9 +19,13 @@ its progress on the terminal and in a machine-readable run record.
 | Domain integrals | `integrals.csv` | `[integrals]` | [Domain integrals](probes.md#domain-integrals-integrals) |
 | Time and phase averages | `MEAN_*`, `COV_*` and `PHASE_*` fields of the snapshots and restart files; probe columns `MEAN_<variable>` with `average = true` | `[statistics]`, `[statistics.phase]`, `[[probes]]` | [Statistics](statistics.md), [Probes](probes.md#time-averages) |
 | Spectra and two-point correlations | `spectra.csv` | `[statistics.spectra]` | [Spectra](statistics.md#spectra-and-two-point-correlations-statisticsspectra) |
+| Time spectra of probes | `probe_<name>_spectra.csv`, `probe_<name>_reductions_spectra.csv` | `[[probes]]` with `spectra` | [Time spectra](probes.md#time-spectra) |
 
-Every file records its [units](#units), its [provenance](#provenance) and a
-[format version](#formats-and-compatibility).
+Every file records its [units](#units), the [run block](#run-block) of the run
+that wrote it, each snapshot's [snapshot metadata](#snapshot-metadata) (step,
+time, why it was written, by which run) and a
+[format version](#formats-and-compatibility). File names are only names:
+Mallard's readers take step, time and run from what the files record.
 
 ## Solution snapshots: `[[write_data]]`
 
@@ -29,13 +33,13 @@ Every file records its [units](#units), its [provenance](#provenance) and a
 [[write_data]]
 prefix = "solut/flow"         # directories are created
 time_interval = 0.01          # or interval = 100 (steps)
-variables = ["RHO", "U", "P", "T", "VORTICITY"]
+fields = ["RHO", "U", "P", "T", "VORTICITY"]
 
 [[write_data]]                # several entries write independently
 prefix = "solut/wall"
 interval = 50
 region = "cylinder"           # a boundary zone, a slice, a volume: any region (below)
-variables = ["P", "T"]
+fields = ["P", "T"]
 ```
 
 *Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
@@ -46,14 +50,14 @@ variables = ["P", "T"]
 | `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, with a `.vtkhdf.series` index), `vtu` (ParaView, with a `.pvd` time series), `xdmf` (XDMF indexes over HDF5 files) or `restart`; see [which format](#which-format). Builds without HDF5 write `vtu`, with a warning |
 | `series` | `false` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf` |
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
-| `variables` | required (all but `restart`) | Variables to write, below; `Y_*` selects every variable with that prefix |
+| `fields` | required (all but `restart`) | Fields to write, below (`mallard list fields input.toml` lists those of a case); `Y_*` selects every field with that prefix |
 | `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (removed in 0.10.0; `mallard input upgrade` rewrites it) |
 | `regions` | none | Instead of `region`: a list of regions, each written as its own series, `PREFIX_<name>` (inline ones: `PREFIX_<place in the list>`) |
 | `compression` | `"none"` | `"zlib"`: lossless compression of `vtkhdf`, `vtu`, `xdmf` and `restart` files (below) |
 | `relative_error` | none (lossless) | `vtkhdf`, `vtu`, `xdmf` with `compression = "zlib"`: lossy, each cell value within this relative error |
 | `chunk_cells` | 65536 | Compressed `restart` files: cells per chunk |
 
-**Variables:** `mallard list fields input.toml` lists exactly those of a case, and
+**Fields:** `mallard list fields input.toml` lists exactly those of a case, and
 `mallard list fields` all of them with their units and what each needs
 ([Command line](cli.md#mallard-list-fields)).
 
@@ -61,7 +65,7 @@ variables = ["P", "T"]
 |---|---|
 | Conservative | `RHO`, `RHOU_X`, `RHOU_Y`, `RHOU_Z`, `RHOE`, `RHOU` (vector) |
 | Primitive | `U_X`, `U_Y`, `U_Z`, `U` (vector), `P`, `T`, `H` |
-| Derived | `CFL`, `VORTICITY`, `Q` (Q-criterion) |
+| Derived | `CFL`, `VORTICITY`, `MACH`, `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN` ([below](#derived-fields)) |
 | TENO | `TENO_SIGMA` (troubled-cell indicator) |
 | Mixtures | `Y_<s>`, `X_<s>`, `RHOY_<s>`; viscous: `MU`, `LAMBDA`, `D_<s>` (and `DT_<s>` with `soret`) |
 | Chemistry, radiation | `HRR`, `OMEGA_<s>`, `CHEM_COST`, `QRAD` |
@@ -69,12 +73,48 @@ variables = ["P", "T"]
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
 | [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
 
+### Derived fields
+
+Fields that show the flow's structure, computed from the state being written
+(with the same cell gradients as `VORTICITY` and the `[integrals]` monitor:
+the TENO reconstruction polynomials, else least squares), so they cost nothing
+in steps that write none:
+
+```toml
+[[write_data]]
+prefix = "solut/jet"
+interval = 500
+fields = ["RHO", "U", "P", "MACH", "Q_CRITERION", "LAMBDA2", "SCHLIEREN"]
+```
+
+| Name | Units | Definition |
+|---|---|---|
+| `MACH` | `1` | \|u\| / c, with c = √(γ p / ρ) and, for mixtures, each cell's frozen γ |
+| `Q_CRITERION` | `s-2` | Q = (‖Ω‖² − ‖S‖²) / 2 ([Hunt, Wray & Moin 1988](../references.md#hunt-wray-moin-1988)): positive where rotation dominates strain, i.e. in vortices. Before 0.10.0 it was called `Q`, which is now an error that names `Q_CRITERION` |
+| `LAMBDA2` | `s-2` | λ₂, the middle eigenvalue of S² + Ω² ([Jeong & Hussain 1995](../references.md#jeong-hussain-1995)): negative in vortex cores |
+| `SCHLIEREN` | `kg m-4` | \|∇ρ\|, a numerical schlieren image of shocks, contact surfaces and mixing layers |
+
+S and Ω are the symmetric and antisymmetric parts of the velocity
+gradient ∂u_i/∂x_j. A 2D run treats its flow as a 3D one
+with no third velocity component and no variation along z, so that Q and
+λ₂ mean what they do in 3D; axisymmetric runs add the hoop strain
+u_r / r to the gradient. In 2D, λ₂ = −Q for an incompressible flow,
+so `LAMBDA2` adds little to `Q_CRITERION` there.
+
+Pitfalls: both vortex criteria are squares of gradients, so their magnitude
+scales with the flow's rate squared; pick isosurface levels relative to a
+reference rate (e.g. Q = 0.1 (U/D)²) rather than absolute values. On coarse
+meshes the gradients, and hence the criteria, are smoothed. `SCHLIEREN` spans
+orders of magnitude between shocks and the rest of the flow; a logarithmic
+color map or exp(−k \|∇ρ\| / max \|∇ρ\|) in
+ParaView's calculator shows both.
+
 ### Which format
 
 | `format` | Opens in | Files |
 |---|---|---|
 | `vtkhdf` (default) | ParaView 5.12+, PyVista, h5py | One file per snapshot, or one for the series (`series = true`) |
-| `xdmf` | VisIt, meshio, ParaView of any version; h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
+| `xdmf` | VisIt, meshio, ParaView of any version ([open by a path with a directory](#xdmf-in-paraview)); h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
 | `vtu` | Anything with a VTK XML reader (e.g. Tecplot); builds without HDF5 | One file per rank per snapshot, with a `.pvtu` and a `.pvd` series |
 | `restart` | Mallard, to continue or remap a run | One file per snapshot |
 
@@ -111,6 +151,17 @@ once (`PREFIX_mesh.h5`), one HDF5 file of fields per snapshot and XDMF
 indexes (`PREFIX.xmf` for the series), all in global cell order; read it in
 Python with `tools/mallard/h5.py`.
 
+<a id="xdmf-in-paraview"></a>**XDMF in ParaView.** The `.xmf` files name their
+HDF5 files relative to themselves, as XDMF allows. ParaView's XDMF reader
+(ParaView 6.0.1, Xdmf3) gets this wrong when it is given a bare file name, as in
+`pvpython script.py flow.xmf` or `OpenDataFile("flow.xmf")`: it fails to open
+`flow.xmfflow_mesh.h5` and aborts with a misleading error about the number of
+dimensions. Give it a path with a directory in it: `./flow.xmf`,
+`solut/flow.xmf` or an absolute path. The ParaView GUI passes absolute paths, so
+files opened from it are not affected. VTKHDF does not have this problem.
+Mallard does not write absolute paths into the `.xmf` files, because then a run
+directory could no longer be moved or copied.
+
 **Asynchronous and compressed output.** Writing large snapshots can take longer than many steps. By default (`[output] async = true`) each snapshot is copied out and written on a background thread while the run goes on, with the same files byte for byte as `async = false`; `io_threads` copies and compresses on several threads (GPU runs leave the host cores idle):
 
 ```toml
@@ -120,7 +171,7 @@ io_threads = 8              # async = true is the default
 [[write_data]]
 prefix = "solut/flow"
 interval = 500
-variables = ["RHO", "U", "P", "T"]
+fields = ["RHO", "U", "P", "T"]
 compression = "zlib"       # lossless; readable by any ParaView
 relative_error = 1e-4       # optional: lossy, |x' - x| <= 1e-4 |x| per value
 ```
@@ -149,19 +200,19 @@ x3 = {type = "cut_plane", point = [0.04, 0, 0], normal = [1, 0, 0]}
 prefix = "solut/near"
 time_interval = 1e-4
 region = "near_field"
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 
 [[write_data]]                # three slices: solut/x_x1.vtkhdf, solut/x_x2.vtkhdf, solut/x_x3.vtkhdf
 prefix = "solut/x"
 time_interval = 2e-5
 regions = ["x1", "x2", "x3"]
-variables = ["U", "P", "MASS_FLUX"]
+fields = ["U", "P", "MASS_FLUX"]
 
 [[write_data]]                # a boundary zone, by its name
 prefix = "solut/wall"
 interval = 50
 region = "cylinder"
-variables = ["P", "T"]
+fields = ["P", "T"]
 ```
 
 ![A disk's cells with their REGION_FRACTION, and their pressure with three slices across the field, on a triangle mesh](../images/guide/region_snapshots-light.svg#gh-light-mode-only)
@@ -182,7 +233,7 @@ A volume is written by every rank in global order, like the whole mesh;
 zone, cut plane, surface, curve or points is written as a probe writes it, by
 the same code: `vtkhdf` writes one PolyData file `PREFIX.vtkhdf` of every
 snapshot (`series` is always on), `vtu` one VTK PolyData file per snapshot,
-`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `variables` are sampled
+`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `fields` are sampled
 as [`[[probes]]`](probes.md) sample them (`U` writes `U_X`, `U_Y`, `U_Z`);
 any other variable of a snapshot (`HRR`, `P_MAX`, `MEAN_P`, ...) takes the value
 of the cell holding each sample. Either kind is
@@ -218,24 +269,50 @@ check_interval = 100   # a progress row every 100 steps
 *Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
-stage, summaries of mesh, physics, numerics, boundaries and output, then one
-progress row every `[output] check_interval` steps (default 1):
+stage, summaries of mesh, physics (with the case's units, `physics.units`),
+numerics, boundaries and output, then one progress row every
+`[output] check_interval` steps (default 1). A note above the table says what
+the columns are, and under the column names a row gives their units:
 
-| Column | Meaning |
-|---|---|
-| `step`, `t`, `dt` | Step, time and time step |
-| `done` | Fraction of the run, by whichever stop condition comes first |
-| `wall/step`, `cells/s`, `ETA` | Time-stepping wall time per step, cell updates per second, time remaining |
-| `min rho`, `min p`, `max Ma` | Positivity and Mach number at a glance |
-| `troubled` | TENO: share of cells selecting stencils (shocks) |
+```text
+       step           t        dt   done  wall/step  throughput        ETA     min rho       min p   max Ma  troubled  written
+          -           s         s      %         ms     cells/s    h:mm:ss      kg/m^3          Pa        -         %  files
+          0  0.0000e+00  8.78e-04    0.0          -           -          -   1.400e+00   1.000e+00    1.827      0.00  1 vtu, 1 restart
+         10  8.6159e-03  8.53e-04   16.7       37.9    1.90e+05    0:00:02   1.399e+00   9.991e-01    1.881      5.72  2 vtu
+         20  1.7029e-02  8.28e-04   33.3       34.2    2.10e+05    0:00:02   1.399e+00   9.990e-01    1.882      5.89  3 vtu
+         30  2.4894e-02  8.08e-04   50.0       40.5    1.78e+05    0:00:02   1.399e+00   9.989e-01    1.878      6.19  2 vtu, 1 restart
+```
 
-Chemistry adds the share of cells advanced and the largest sub-step count.
-Written files appear as rows with their step and time. The run ends with a
-summary of wall time (setup, time stepping, diagnostics, output) and
-throughput. The same information, in machine-readable form, goes to the
-[run record](#run-record-mallardjsonl). Errors go to stderr from any rank. Colors are off when the output
-is not a terminal or `NO_COLOR` is set (`CLICOLOR_FORCE=1` forces them, e.g.
-under `mpirun`).
+| Column | Units | Meaning |
+|---|---|---|
+| `step`, `t`, `dt` | -, s, s | Step, simulated time and time step |
+| `done` | % | Of the run, by whichever stop condition comes first |
+| `wall/step`, `throughput`, `ETA` | ms, cells/s, h:mm:ss | Time-stepping wall time per step and cell updates per second since the previous row, wall time to the stop |
+| `min rho`, `min p`, `max Ma` | kg/m^3, Pa, - | Positivity and Mach number at a glance, over the cells |
+| `troubled` | % | TENO: share of cells selecting stencils (shocks) |
+| `min T`, `max T`, `sum Y-1` | K, K, - | Mixtures: temperature range, and the largest \|sum of the mass fractions - 1\| |
+| `reacting`, `chem/cell` | %, steps | Chemistry: share of cells advanced, most integrator steps of a cell |
+| `written` | files | Files written since the previous row, by kind (`2 vtu, 1 restart`) |
+
+Every column keeps one unit, so a column reads straight down. In a
+nondimensional case (`physics.units = "nondimensional"`, [Units](input_files.md#units))
+the units row shows `-` for the simulated quantities. The files themselves
+are named in the [run record](#run-record-mallardjsonl) and the summary;
+`mallard -i input.toml --verbose` adds a line for each between the rows.
+Requests acted on during the run (a checkpoint, a stop, a setting changed,
+[Run control](running.md)) and a divergence print a remark between the rows:
+
+```text
+  >> step 339, t = 0.0610224: stop: stop requested by mallard ctl
+```
+
+The run ends with a **Summary**: why and where it stopped, a table of wall
+time by phase (setup, time stepping and its chemistry, diagnostics, output),
+the throughput, the bytes written and every file kind written, then the
+[run health](#run-health). The same information, in machine-readable form,
+goes to the run record. Errors go to stderr from any rank. Colors are off when
+the output is not a terminal or `NO_COLOR` is set (`CLICOLOR_FORCE=1` forces
+them, e.g. under `mpirun`).
 
 ### Run record: `mallard.jsonl`
 
@@ -258,12 +335,13 @@ Each record has a `type`:
 
 | `type` | When | Fields |
 |---|---|---|
-| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (1), `provenance` (below), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
+| `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it) |
 | `progress` | Every progress row | as below |
-| `event` | A file written, or a request acted on (the rows between progress rows) | `step`, `t`, `kind` (`vtkhdf`, `surface`, `vtu`, `xdmf`, `restart`, ...; `checkpoint`, `stop`, `set` and `diverged` from [run control](running.md)), `text` |
+| `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`; probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; no `sha256` for a [file appended to](#complete-files)) |
+| `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
 | `divergence` | A run that diverged, before its `error` record | the [divergence report](running.md#the-divergence-report): `step`, `t`, `invalid_cells`, `failed` (cells by the quantity that failed first), `box` (their extent), `last_valid` (`step`, `t`, `file`, or `null`), `causes` (most likely first: `kind` (`time_step`, `mesh`, `boundary`, `initial_state`, `chemistry`, `numerics`), `title`, `score`, `evidence`, `fix`), `cell`, `neighbors`, `others` (`id`, `rank`, `x`, `failed`, `rho`, `speed`, `p`, `T`, `cfl`, `quality`, `repaired`, `troubled`), `time_step` (`integrator`, `limit`, `dt`, `dt_cfl1`, `cfl`, `cells_over_limit`), `zones` (`name`, `type`, `near`, and where compared `inadmissible`, `ratio`, `jump`), `history` (the last progress rows), `snapshot` |
 | `warning`, `error` | A warning, or the error that ended the run | `message` |
-| `end` | The end of the run | `reason`, `step`, `t`, `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
+| `end` | The end of the run, also on a stop signal, divergence or an error (on rank 0): a run without one was killed (`SIGKILL`, a lost node) or is still running | `outcome` (`finished`, `stopped`, `signal`, `wall_time_limit`, `diverged`, `error`), `cause` (`finished`: `n_steps` or `t_stop`; `stopped`: `stop_file`, `mallard_ctl` or `trigger`; `signal`: `SIGTERM`, `SIGINT` or `SIGUSR2`), `trigger` (the [trigger](running.md#triggers) that stopped the run, by name), `reason` (in words; the error's message), `step`, `t`, `last_snapshot` and `last_restart` (the last of each recorded complete: `step`, `t`, `path`; none if the run wrote none), `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
 
 Progress records:
 
@@ -285,7 +363,37 @@ Progress records:
 
 Numbers are in SI units (seconds, bytes) and read back exactly; unknown
 values are `null`. Within a `version`, records only gain fields; renaming,
-removing or changing the meaning of one increments it.
+removing or changing the meaning of one increments it. Version 2 (0.10) added
+`run_id`, `restart_of` and the `output` records, which replace version 1's
+`event` records of written files; `--restart latest` and `mallard info DIR`
+find a run's files through them.
+
+#### Complete files
+
+A file is written under the name `NAME.partial` and gets its name `NAME`
+once complete, as restart files always were: snapshots (each rank's piece
+too), their indexes (`.pvd`, `.vtkhdf.series`, `.xmf`), XDMF data and mesh
+files, probe snapshots and spectra. A file under its own name is therefore
+never cut short by a job killed while writing it, and a `NAME.partial` left
+behind is one whose write did not finish: `mallard info`, `mallard diff` and
+`mallard post extract` refuse it and say so, and `--restart latest` never
+picks it.
+
+The `output` record of a snapshot is written once all its files are
+complete, with each file's size and SHA-256, so a snapshot without a record
+was not completely written. One thread hashes the files after their write, on
+the CPU's SHA instructions where it has them (over 1 GB/s); a run that writes
+faster than that waits for it, and the run summary says how long.
+`mallard info DIR` checks every recorded file against its record (its size;
+`--verify` also its SHA-256) and reports one that is missing or differs.
+
+Files appended to in place cannot be renamed: a series in one file
+(`series = true`), a probe's HDF5 or VTKHDF series and the CSV files of
+probes, forces and integrals. A job killed while appending can leave such a
+file damaged (HDF5 files are not safe against it) or ending in a partial
+row; the step's missing `output` record says that step was not completely
+written. Their records give the size after each step and no SHA-256, which
+would rehash the whole file at every step.
 
 ## Run health
 
@@ -412,11 +520,13 @@ those of `A` per second.
 | `T`, `T_SEED` | `K` | `HRR`, `QRAD` | `kg m-1 s-3` (W/m³) |
 | `H` | `m2 s-2` (J/kg) | `OMEGA_<s>` | `kg m-3 s-1` |
 | `VORTICITY` | `s-1` | `CHEM_H` | `s` |
-| `Q` | `s-2` | `CFL`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
+| `Q_CRITERION`, `LAMBDA2` | `s-2` | `CFL`, `MACH`, `TENO_SIGMA`, `Y_<s>`, `X_<s>`, `CHEM_COST`, `TF_F`, `TF_E`, `TF_OMEGA`, `PASR_KAPPA` | `1` |
 | `NON_ORTHOGONALITY` (`mallard check`) | `degree` | `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`, `DELTA_OVER_ETA`, `CELLS_PER_DELTA_L` (`mallard check`) | `1` |
-| `MASS_FLUX`, `SPECIES_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `Q_W` | `kg s-3` (W/m²) |
+| `MASS_FLUX`, `SPECIES_FLUX_<s>`, `SPECIES_DIFFUSIVE_FLUX_<s>`, `SPECIES_TOTAL_FLUX_<s>` (probes) | `kg m-2 s-1` | `ENTHALPY_FLUX`, `ENERGY_DIFFUSIVE_FLUX`, `ENERGY_TOTAL_FLUX`, `Q_W` | `kg s-3` (W/m²) |
 | `MOMENTUM_FLUX`, `TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `TAU_W` | `kg m-1 s-2` | `U_TAU` | `m s-1` |
 | `CF`, `CP`, `Y_PLUS` | `1` | `REGION_FRACTION` (regions) | `1` |
+| `SCHLIEREN` | `kg m-4` | | |
+| `WALL_MODEL_U` | `m s-1` | `WALL_MODEL_T`, `WALL_MODEL_H` | `K`, `m` |
 
 CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
 `point`, `face`, `cell`, `count` and the normal `nx`, `ny`, `nz` `1`; the
@@ -426,7 +536,8 @@ CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
 (`kg s-2`), and the wall model's `Q` in `W`; domain integrals carry the
 volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
 variable's units, `integral` times those of the measure (`m` along a curve,
-`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`; over a region its
+`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`; `moment` those of
+`integral` times `m`; over a region its
 `volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
 forces, integrals and region probes are per radian of the revolved domain, and their units
 say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
@@ -436,45 +547,91 @@ the product of their pair's (`U_X*U_Y`: `m2 s-2`); the `abscissa` is a
 wavenumber in `m-1` (spectra, shells) or a separation in `m` (correlations).
 Files written before Mallard 0.9 have no units; the readers return them empty.
 
-### Provenance
+### Run block
 
-Every output file records where it came from: the provenance block, one
-JSON object, is written into restart files (a trailer after the data, also of
-compressed files, which older readers skip), VTU, `.pvtu`, `.pvd`, XDMF and probe `.vtp` files (an XML comment
-`<!-- provenance {...} -->` after the XML declaration), VTKHDF and HDF5 files, probe files included (the
-string attribute `provenance` of the root group; a continued run's probe file holds the latest run's), CSV files of forces,
-integrals and probes (a line `# provenance {...}` after the header and its
-[units line](#units), and another where a continued run starts appending), and
-the run record's `start` record.
+Every output file records the run that wrote it: the run block, one JSON
+object, the same in every file of that run (where [snapshot
+metadata](#snapshot-metadata) is each snapshot's own). It is written into
+restart files (a trailer after the data, also of compressed files), VTU,
+`.pvtu`, `.pvd`, XDMF and probe `.vtp` files (an XML comment `<!-- mallard-run
+{...} -->` after the XML declaration), VTKHDF and HDF5 files, probe files
+included (the string attribute `mallard_run` of the root group; a continued
+run's file holds the latest run's), mesh quality files and the case view, CSV
+files of forces, integrals, probes, region reductions, spectra and the
+reactor (a line `# mallard-run {...}` after the header and its [units
+line](#units), and another where a continued run starts appending: the rows
+after it are that run's), and the run record's `start` record.
 
 | Field | Contents |
 |---|---|
-| `schema`, `version` | `"mallard-provenance"`, 2 |
+| `schema`, `version` | `"mallard-run"`, 3 |
 | `mallard` | `version` (`git describe`), `git_sha`, `git_dirty` (uncommitted changes in the build); `null` outside a git checkout. Taken at build time |
 | `dependencies` | Versions of `compiler`, `kokkos`, `mpi` (the library's own string and the standard), `hdf5`, `cgns`, `zlib`, `nccl`, `gpu_runtime` and `gpu_driver` (CUDA or HIP); `null` for those not built in |
-| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `kaminpar`, `species_layout` |
-| `run` | `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run record's `placement`) |
+| `build` | `dim`, `precision`, `build_type`, `compiler`, `cxx_flags`, `kokkos` (version), `backend` and `host_backend` (Kokkos execution spaces), `mpi`, `gpu_aware_mpi`, `nccl`, `hdf5`, `hdf5_parallel` (HDF5 built with MPI), `kaminpar`, `species_layout` |
+| `run` | `run_id` (a random UUID, new for every run, restarts included), `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run record's `placement`), `restart_of` (as the run record's: `run_id`, `file`, `step`; `null` for a fresh start) |
 | `input` | `file`, `sha256` of its bytes, its `text`, and `resolved`: the input with every key explicit, as the run used it ([the resolved input](input_files.md#the-resolved-input), what `mallard input resolve` writes) |
 | `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
-| `preset` | The `[numerics] preset` (`null` without one): `name`, and per key it covers its `key`, its `value` in the resolved input (as TOML: `"\"HLLC\""`, `0.5`) and `from_preset` (`false` where the input overrides it) |
+| `files` | Each other file the run read, once (absent if none): `kind` (`mechanism`, `table`, `inflow_profile`, `probe_points`, `restart`, `remap_source`, `remap_mesh`), `path` as given, `resolved`, `bytes`, and `sha256` of its bytes. A restart file or remap source is not hashed again: it records the `run_id`, `step` and `t` of the run that wrote it, and the `sha256` from that run's [output record](#run-record-mallardjsonl) of the file (`sha256_from`). Where there is none (a copied or moved file, a run before 0.10, a changed file) and for a remap source mesh, `sha256` is `null`, with the file's `modified` time and a `note` saying why |
+| `preset` | The `[numerics] preset` (`null` without one): `name`, `default` (`true` when the input names no preset and gets the default, `high_order`), and per key it covers its `key`, its `value` in the resolved input (as TOML: `"\"HLLC\""`, `0.5`) and `from_preset` (`false` where the input overrides it) |
 
-Version 1 (0.9) had no `input.resolved`, its preset values were plain text
+Before 0.10 the block was named the provenance block: schema
+`"mallard-provenance"`, the comment `<!-- provenance {...} -->`, the attribute
+`provenance` and the CSV line `# provenance {...}`, without `run_id` and
+`restart_of`. Every reader (`mallard info`, the post-processing commands,
+`tools/mallard`) reads those names too, and says so. Version 2 (0.9.1) added
+`input.resolved`; version 1 (0.9) had none, its preset values were plain text
 (`"HLLC"`), and a `setup` object held the terminal output's setup summary as
 `[key, value]` pairs per section; `resolved_input()` of `tools/mallard/vtu.py`
 returns `None` for such files.
 
 Check that a file belongs to a given input with `sha256sum input.toml`; read
-the block in Python:
-
-```python
-import json, h5py
-json.loads(h5py.File("solut/flow_000100.h5")["/"].attrs["provenance"][0])
-```
-
-or, from any other file, `provenance(path)` of `tools/mallard/vtu.py`.
+the block in Python with `run_block(path)` of `tools/mallard/vtu.py` (any
+file; `run_blocks(path)` gives each run of a continued CSV file).
 `mallard info FILE` summarizes the block, and `mallard info --input FILE`
 prints the input that produced the file, ready to run again
 ([Command line](cli.md#mallard-info)).
+
+### Snapshot metadata
+
+Every snapshot records which snapshot it is, in its format's own slot and in
+a snapshot block, one JSON object per snapshot:
+
+| Format | Step and time | Snapshot block |
+|---|---|---|
+| VTU, probe VTP | field data `TIME` (s) and `STEP` | XML comment `<!-- mallard-snapshot {...} -->` |
+| PVTU | its pieces' | XML comment, as VTU |
+| PVD index | `timestep` and `step` of each `DataSet` | its members' |
+| VTKHDF, one snapshot per file | field data `TIME` and `STEP` | dataset `mallard_snapshot` of the root group |
+| VTKHDF, `series = true`, and probe VTKHDF | `Steps/Values`, and field data `TIME` and `STEP` per step | dataset `mallard_snapshot`, one row per step |
+| `.vtkhdf.series` index | `time` and `step` of each entry | its members' |
+| XDMF | `<Time>` and `<Information Name="step">` of each grid; root attributes `time` and `step` of each `.h5` | dataset `mallard_snapshot` of each `.h5` |
+| Restart | header `step` and `t` | trailer before the run block's |
+| Probe HDF5 | datasets `time` and `step` | root attribute `mallard_runs`: each run's `run_id`, `restart_of`, `first_row`, `first_step` |
+| CSV: forces, integrals, probes, reductions | columns `step` and `t` | each run's `# mallard-run` line precedes its rows |
+| Spectra CSV | in its block | line `# mallard-snapshot {...}` |
+| Reactor CSV | columns `step` and `t` | `# mallard-run` line |
+
+The block's fields:
+
+| Field | Contents |
+|---|---|
+| `schema`, `version` | `"mallard-snapshot"`, 1 |
+| `run_id`, `restart_of` | The run that wrote it, as its [run block](#run-block)'s: a continued series holds the snapshots of each run that wrote to it |
+| `step`, `time` | Step; simulated time in s |
+| `written_at` | UTC, ISO 8601 |
+| `reason` | `interval` (its `interval` or `time_interval`), `start` (the initial state), `end` (the run's end), `stop` (a stop request or signal), `checkpoint` (a [run control](running.md) request), `divergence` (the last valid state, written as the run diverged), `trigger` (a [trigger](running.md#triggers)'s `write`) |
+| `format`, `format_version`, `solver_precision` | The file's format and its [version](#formats-and-compatibility); the precision the solver ran in (`double`, `single`) |
+| `statistics` | Snapshots of time-averaged fields (`MEAN_`, `COV_`, `PHASE_`) and spectra: `average_start`, `average_end` (s), `samples`; absent otherwise |
+| `fields` | Per field: `name`, `units`, `long_name`, `stored` (`float64`, `float32`: as written, which a single-precision build or output makes `float32`) |
+| `units` | The units of the block's own numbers (`time`: `s`) |
+
+Files written before 0.10 have no snapshot block. Readers then take step and
+time from the format's own slots, and say so: VTU, VTKHDF and the indexes had
+no step, so their snapshots are numbered by their position in the file or
+index, from 0; their run is that of the file's run block, and their reason
+and stored precision are unknown. `snapshot_blocks(path)` of
+`tools/mallard/vtu.py` reads the blocks of any file (`[]` for older files),
+and `mallard info FILE` prints the last one under **This snapshot**.
 
 ### Formats and compatibility
 
@@ -487,20 +644,21 @@ build reads. It is never misread.
 
 | File | Version, where | Versions (written from) | Read by |
 |---|---|---|---|
-| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), and that of time-averaged probes (0.10) | Mallard: all |
+| Restart (`format = "restart"`) | `uint32` after `MALLARD-RESTART` | 1 (0.1), 2: named variables (0.4), 3: `[statistics]` weights (0.6), 4: characteristic boundary states (0.7), 5: `compression = "zlib"` (0.9), 6: `[statistics.spectra]` and `[statistics.phase]` state (0.9), 7: the [snapshot block](#snapshot-metadata) trailer (0.10) | Mallard: all |
 | HDF5 mesh (`mallard mesh convert`) | root attribute `version` | 1 (0.3) | Mallard: all |
 | VTKHDF output (`format = "vtkhdf"`) | root attribute `version` (VTK's own in `/VTKHDF`'s `Version`: 2.0) | 1 (0.9) | ParaView 5.12+, `tools/mallard/vtkhdf.py` |
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard/vtu.py` |
-| Run record (`mallard.jsonl`, `[output] run_log`) | `version` of each `start` record | 1 (0.9) | Your scripts (records only gain fields within a version) |
-| Provenance block (every output file) | its `version` | 2 (0.10; 1 in 0.9) | `tools/mallard/vtu.py` (`provenance()`, `resolved_input()`, both versions); in restart files a trailer that every restart reader skips, so it changes no restart version |
+| Run record (`mallard.jsonl`, `[output] run_log`) | `version` of each `start` record | 1 (0.9), 2: `run_id`, `restart_of`, `output` records (0.10) | Your scripts (records only gain fields within a version) |
+| [Run block](#run-block) (every output file) | its `version` | 3: `mallard-run`, `run_id`, `restart_of` (0.10); as the provenance block: 2 (0.9.1), 1 (0.9) | `mallard info`, `tools/mallard/vtu.py` (`run_block()`, `resolved_input()`, every version) |
+| [Snapshot block](#snapshot-metadata) (every snapshot) | its `version` | 1 (0.10) | `mallard info`, `tools/mallard/vtu.py` (`snapshot_blocks()`) |
 | Probe output (`[[probes]]` `format = "hdf5"`, `"vtkhdf"`, `"vtp"`) | root attribute `version` (HDF5, VTKHDF), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
 
-- Restart files are written with the **lowest** version that holds their
-  contents, so a run without statistics, characteristic boundaries,
-  compression or `time_interval` snapshots (whose counts are version 3
-  attributes) still writes version 2, which every release since 0.4 reads.
+- Restart files are written with version 7 since 0.10, whose snapshot block
+  trailer earlier releases would take for a truncated file: they reject it
+  with their newer-version message. (Until 0.9 they were written with the
+  lowest version that held their contents.)
 - A restart file must also match the build's dimension and precision
   (`Mallard_DIM`, `Mallard_USE_DOUBLE`); the message says which differs.
 - Output files gain arrays and attributes within a version. A version changes
@@ -513,8 +671,9 @@ build reads. It is never misread.
 ## Post-processing
 
 `mallard info` tells what any of these files holds, without an input file:
-its kind, format version, mesh, times, fields with their units and ranges, and
-provenance; `mallard info solut` does so for each file a run wrote, one table
+its kind, format version, mesh, times, fields with their units, ranges and
+stored precision, its run block (**Run**, the same for every file of the run)
+and the last snapshot's block (**This snapshot**); `mallard info solut` does so for each file a run wrote, one table
 row each ([Command line](cli.md#mallard-info)). Every number comes in a table
 column or a labeled line that names its units (`t [s]`, `min [m]`, a field's
 units, `dimensionless`); a `-` is something the file does not record:
@@ -547,6 +706,14 @@ $ mallard info solut/flow.vtkhdf.series
 
 `--format json` prints the same as one JSON object, for scripts.
 
+`mallard post extract` evaluates probes, region integrals and snapshots of
+chosen fields on the state of restart files and snapshots after the run, as
+the run would have written them ([Probes of existing output](probes.md#probes-of-existing-output)).
+
+`mallard post convergence` compares runs of a case at several resolutions:
+the observed order, the extrapolated value and the grid convergence index of
+their forces, integrals and probes ([Grid convergence](convergence.md)).
+
 ### Comparing two solutions: `mallard diff`
 
 `mallard diff A B` tells whether two files hold the same solution and, if not,
@@ -559,17 +726,19 @@ nearest a time (`--time T`) as the files record them:
 
 ```
 $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.restart
-== mallard diff ========================================================================= ✓
-  A                  serial/solut/restart_000020.restart (restart)
-  B                  mpi/solut/restart_000020.restart (restart)
-  Compared           cell by cell, in the mesh's global cell order (768 cells)
-  Tolerance          0 (values must be equal); on max |B - A| / max |A| per field
-  Result             ✓ identical: the same state, bit for bit
+== Diff ================================================================================= ok
+  Result: ok, identical, the same state bit for bit (exit status 0)
+  A: serial/solut/restart_000020.restart (restart)
+  B: mpi/solut/restart_000020.restart (restart)
+  Compared: cell by cell, in the mesh's global cell order (768 cells)
+  Tolerance: 0 (values must be equal); on max |B - A| / max |A| per field
 ...
-== Fields ========================================== |B - A| per cell, in the field's units
-     field   units       differing cells  L1  L2  Linf
-  ✓  RHO     kg m-3      0 of 768         0   0   0
-  ✓  RHOU_X  kg m-2 s-1  0 of 768         0   0   0
+== Fields =============================================================================== ok
+  |B - A| per cell, in the field's units: L1, L2, Linf are its mean, root mean square and
+  max over the cells, not weighted by volume; differing: values not bitwise equal.
+  status  field   units       differing cells  L1  L2  Linf
+  ok      RHO     kg m-3      0 of 768         0   0   0
+  ok      RHOU_X  kg m-2 s-1  0 of 768         0   0   0
 ...
 ```
 
@@ -582,16 +751,18 @@ $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.rest
   only is an infinite difference.
 - **Restart files** are also compared in the rest of their state, bit for bit:
   scalar attributes, named arrays (statistics weights) and the face records of
-  characteristic boundaries. The provenance is not compared: it records when
-  and where each run ran.
+  characteristic boundaries. The [run block](#run-block) and snapshot blocks
+  are not compared: they record when and where each run ran.
 - **Tolerance and exit status.** A field passes if its max |B - A| / max |A|
   is at most `--tol` (default 0: any difference in value fails), and so does t,
   relative to the larger |t|; `--tol 1e-12,P=1e-6` sets one field apart. Steps
-  that differ, or fields only one file holds, are warnings. The status column
-  and the first and last lines read ✓ identical, ⚠ within tolerance or
-  ✗ beyond it; the exit status is 0, 0 and 1, and 3 when the files cannot be
+  that differ, or fields only one file holds, are warnings. As in
+  [`mallard check`](cli.md#mallard-check), the status column, each section's
+  heading and the first and last lines read `ok` (identical), `WARN` (within
+  tolerance) or `ERROR` (beyond it); the exit status is 0, 0 and 1, and 3 when the files cannot be
   compared, so `mallard diff a b --tol 1e-10 || exit 1` gates a CI job.
-  `--format json` prints the same as one object.
+  `--format json` prints the same as one object, its statuses `ok`, `warning`
+  and `error`.
 - **Cells are matched by their global index**, which restart files and VTKHDF
   or XDMF snapshots of the whole mesh keep whatever the ranks that wrote them;
   a restart file against a snapshot compares the fields both hold (RHO). VTU
@@ -602,20 +773,25 @@ $ mallard diff serial/solut/restart_000020.restart mpi/solut/restart_000020.rest
   remapped onto A's mesh by the conservative remap of
   [`[initialize] type = "remap"`](initialization.md) (degree 2, limited) and
   compared there. The meshes, and the cell coordinates of the largest
-  differences, come from the input each file's provenance records (a mesh file
+  differences, come from the input each file's run block records (a mesh file
   relative to the run's directory, checked against its SHA-256), or from
   `--mesh-a` and `--mesh-b`.
 
 ```
 $ mallard diff coarse/solut/restart_000020.restart fine/solut/restart_000020.restart --remap --tol 1e-2
 ...
-== Remap ================================================== conservative, degree 2, limited
+== Remap ============================================================================== WARN
+  Conservative, degree 2, limited. Remapped results differ from A by the remap's own error
+  too, so a remap is never identical. A cells outside B's mesh take the nearest B cell's
+  value.
   B cells  A cells  integrals kept to  A cells partly covered  A cells outside B
   3,072    768      1.2e-15            0                       0
 ...
-== Relative differences ===================== dimensionless: a norm of B - A over that of A
-     field   L1           L2           Linf         tolerance on Linf
-  ⚠  RHO     0.000213803  0.000262748  0.000440052  0.01
+== Relative differences =============================================================== WARN
+  A norm of B - A over the same norm of A; a field passes if its Linf is at most its
+  tolerance.
+  status  field   units          L1           L2           Linf         tolerance on Linf
+  WARN    RHO     dimensionless  0.000213803  0.000262748  0.000440052  0.01
 ...
 ```
 
@@ -637,6 +813,7 @@ ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` 
 
 - [Input reference: `[[write_data]]`](../input.md#write_data), [`[output]`](../input.md#output)
 - [Probes and monitors](probes.md): probes, wall forces, domain integrals
+- [Grid convergence](convergence.md): discretization error from runs at several resolutions
 - [Statistics](statistics.md): time averages, spectra and correlations, phase averages
 - [Initialization and restarts](initialization.md): restart files and their format
 - [Running](running.md): run control of a running case

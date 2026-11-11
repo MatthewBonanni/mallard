@@ -28,7 +28,85 @@ stopped at step 12415, t = 0.82239; restart: restart_012415.restart
 
 Restarts on request go to the `[[write_data]]` restart writers, or to `restart_<step>.restart` in the working directory if there is none. `mallard ctl` talks to rank 0 through the Unix-domain socket `mallard.sock` in the directory the run was started from, readable and writable by its owner only, so it must run on rank 0's node (in Kubernetes: `kubectl exec`). `[run] control_socket = false` turns the socket off.
 
-Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`), 1 on errors (including divergence) and 3 when stopped on request.
+Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`, a [trigger](#triggers)), 1 on errors (including divergence) and 3 when stopped on request. The run record's [end record](output.md#run-record-mallardjsonl) says which, as its `outcome`, with the last snapshot and restart file written; `mallard info <run-dir>` shows it. `t_wall_stop` is reached on whichever rank gets there first, and every rank stops after the same next step.
+
+## Triggers
+
+A `[[triggers]]` entry is a request the run makes of itself: a condition on
+the run, and what to do once it is true. Use one to stop a run when it has
+reached what it was for (a temperature, a force that has settled), to keep a
+restart or a snapshot of the moment something happens, or to start the
+statistics once the flow has developed.
+
+```toml
+[[probes]]
+name = "outlet"
+point = [0.9, 0.5]
+fields = ["T"]
+interval = 1
+
+[[triggers]]
+name = "ignition"
+when = "outlet_T > 1500"          # a kexpr expression
+do = ["checkpoint", "write flow"] # the prefix of a [[write_data]] entry
+
+[[triggers]]
+name = "settled"
+when = "t > 0.02 and abs(forces_cylinder_Fx_pressure) < 1e-3"
+for = 0.005                       # held this long (seconds of simulated time)
+do = "stop"
+```
+
+| Key | Meaning |
+|---|---|
+| `when` | The condition, in [kexpr](expressions.md); true when not 0. Required |
+| `do` | An action, or a list of them done in order: `"stop"`, `"checkpoint"`, `"write <prefix>"` (that `[[write_data]]` entry, now), `"start statistics"`. Required |
+| `name` | In the log, the run record and restart files; letters, digits and `_`. Default `trigger_<index>` (from 0) |
+| `for` | Seconds of simulated time the condition must hold before the trigger fires, counted from the step it last turned true. Default 0 |
+| `repeat` | `false` fires once; `true` fires again each time the condition turns true after being false. Default `false` |
+
+**Names in `when`.** `t` (s), `step`, `dt` (the last step's, s) and `wall`
+(seconds since the solver started, rank 0's), and the latest value of every
+monitored quantity, named after its file's column with the monitor's name in
+front:
+
+| Monitor | Names |
+|---|---|
+| `[integrals]` | `integrals_<column>`, e.g. `integrals_kinetic_energy` |
+| `[[forces]]` | `forces_<zone>_<column>`, e.g. `forces_cylinder_Fx_pressure`, `forces_wall_Q` |
+| `[[probes]]` reductions | `<probe>_<reduction>_<variable>`, e.g. `combustor_max_T`, `inlet_integral_MASS_FLUX` |
+| `[[probes]]` of one point | `<probe>_<variable>`, e.g. `outlet_T` |
+
+Characters other than letters, digits and `_` in these names become `_`.
+A misspelled name is an input error (also of `mallard check`) that lists
+the names the run has.
+
+**When conditions are evaluated.** After every step, once that step's
+monitors and probes are written, from the values they wrote: a monitor
+written every 10 steps keeps its value in between. A condition that reads a
+monitor before its first value is false. Evaluating costs nothing on the
+device: on several ranks rank 0 evaluates every condition and sends the
+outcome to the others, one small message per step (none when the run has no
+triggers), so every rank acts after the same step.
+
+**Actions.** `stop` ends the run after that step as `t_stop` would: the
+final output and a restart are written, the exit status is 0 and the log
+says which trigger stopped it. `checkpoint` writes a restart (as `mallard ctl
+checkpoint`). `write <prefix>` writes that `[[write_data]]` entry's file at
+once, besides its own schedule. `start statistics` discards the averages so
+far and starts them at that step, in `[statistics]` and its `spectra` and
+`phase`: they wait for the trigger, so `t_start` cannot be given as well.
+
+**Record.** Each firing is a line of the log and an `event` record of kind
+`trigger` in [`mallard.jsonl`](output.md#run-record-mallardjsonl), with the
+trigger's `name`, its `firing` (1 for the first) and the `values` its
+condition read. Restart files carry each trigger's state (fired, how many
+times, since when its condition has held), so a resumed run neither fires a
+`repeat = false` trigger again nor restarts a `for` clock.
+
+Pitfalls: a run still needs `n_steps`, `t_stop` or `t_wall_stop` in
+`[run]`, the limit if no trigger fires; `wall` is only as reproducible as
+the machine's speed; `==` on `t` rarely holds exactly (use `>=`).
 
 ## MPI launchers and Slurm
 
@@ -68,7 +146,7 @@ what the run already keeps: a healthy run does nothing more per step, and its re
   | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
   | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
   | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
-  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "robust"`) |
+  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
 
 - **Evidence:** the state of the cell closest to failing and of its face neighbors in the last valid state
   (density, speed, pressure, temperature, local CFL number), their quality metrics, the nearest boundary zone,

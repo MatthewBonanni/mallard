@@ -86,6 +86,7 @@ bound_preserving = true
 
 [physics]
 type = "euler"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 1.0
 T_ref = 1.0
@@ -97,7 +98,7 @@ check_interval = 100
 [[write_data]]
 prefix = "./solut/sedov"
 time_interval = 0.1
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 
 # Density on the three symmetry planes, for the animation
 [[write_data]]
@@ -105,21 +106,21 @@ prefix = "./planes/x0"
 region = "left"
 format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.005
-variables = ["RHO"]
+fields = ["RHO"]
 
 [[write_data]]
 prefix = "./planes/y0"
 region = "bottom"
 format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.005
-variables = ["RHO"]
+fields = ["RHO"]
 
 [[write_data]]
 prefix = "./planes/z0"
 region = "back"
 format = "vtu"            # a VTK PolyData file per snapshot, with a .pvd
 time_interval = 0.005
-variables = ["RHO"]
+fields = ["RHO"]
 
 [[write_data]]
 prefix = "./restart/sedov"

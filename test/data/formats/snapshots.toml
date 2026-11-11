@@ -1,0 +1,108 @@
+# Format fixture: snapshots in every format, probes, forces and integrals of
+# the perfect gas of gas.toml, one step. See README.md.
+[run]
+n_steps = 1
+cfl = 0.2
+
+[mesh]
+type = "cartesian"
+Nx = 6
+Ny = 5
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+rho = "1.0 + 0.3 * x + 0.2 * y * y"
+u = ["0.1 + 0.2 * y", "-0.1 * x"]
+p = "1.0 + 0.1 * x * y"
+
+[[boundaries]]
+name = "left"
+type = "outlet_extrapolation"
+
+[[boundaries]]
+name = "right"
+type = "outlet_extrapolation"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[output]
+check_interval = 1000
+run_log = "snapshots.jsonl"
+
+[[write_data]]
+prefix = "snapshots_vtkhdf"
+format = "vtkhdf"
+fields = ["RHO", "U", "P"]
+interval = 1
+
+[[write_data]]
+prefix = "snapshots_series"
+format = "vtkhdf"
+series = true
+fields = ["RHO", "U", "P"]
+interval = 1
+
+[[write_data]]
+prefix = "snapshots_vtu"
+format = "vtu"
+fields = ["RHO", "U", "P"]
+interval = 1
+
+[[write_data]]
+prefix = "snapshots_xdmf"
+format = "xdmf"
+fields = ["RHO", "U", "P"]
+interval = 1
+
+[[write_data]]
+prefix = "snapshots"
+format = "restart"
+interval = 1
+
+[[probes]]
+name = "line"
+type = "line"
+start = [0.1, 0.5]
+end = [0.9, 0.5]
+n_points = 3
+fields = ["RHO", "P"]
+file = "snapshots_probe.csv"
+
+[[probes]]
+name = "line_h5"
+type = "line"
+start = [0.1, 0.5]
+end = [0.9, 0.5]
+n_points = 3
+fields = ["RHO", "P"]
+format = "hdf5"
+file = "snapshots_probe.h5"
+
+[[forces]]
+zone = "bottom"
+file = "snapshots_forces.csv"
+
+[integrals]
+file = "snapshots_integrals.csv"

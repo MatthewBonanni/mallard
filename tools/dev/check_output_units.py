@@ -57,32 +57,39 @@ name = "line"
 start = [0.1, 0.5]
 end = [1.9, 0.5]
 n_points = 5
-variables = ["RHO", "U", "P"]
+fields = ["RHO", "U", "P"]
 reductions = ["integral", "mean"]
 [[probes]]
 name = "h5"
 format = "hdf5"
 point = [1.0, 0.5]
-variables = ["RHO", "T"]
+fields = ["RHO", "T"]
 [[write_data]]
 prefix = "flow"
 format = "vtu"
 interval = 2
-variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
+fields = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[write_data]]
 prefix = "flow"
 format = "xdmf"
 interval = 2
-variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
+fields = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[write_data]]
 prefix = "flow"
 interval = 2
-variables = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
+fields = ["RHO", "U", "P", "T", "H", "MEAN_*", "COV_*"]
 [[probes]]
 name = "vtkhdf"
 format = "vtkhdf"
 point = [1.0, 0.5]
-variables = ["RHO", "T"]
+fields = ["RHO", "T"]
+[[probes]]
+name = "tone"
+point = [1.0, 0.5]
+fields = ["U", "P"]
+time_interval = 1.0e-4
+reductions = ["mean"]
+spectra = {fields = ["U_X", "P", "mean_P"], length = 1.0e-3, strouhal = {length = 1.0, velocity = 10.0}}
 """
 
 
@@ -124,6 +131,10 @@ def main():
         assert read_csv(path("forces_bottom.csv"))[1]["Fx_pressure"] == "kg s-2"
         assert read_csv(path("integrals.csv"))[1]["kinetic_energy"] == "kg m s-2"
         assert len(read_csv(path("integrals.csv"))[0]["t"]) == 3
+        spectra = read_csv(path("probe_tone_spectra.csv"))[1]
+        assert (spectra["f"], spectra["St"], spectra["PSD_U_X"], spectra["PSD_P"]) == \
+            ("s-1", "1", "m2 s-1", "kg2 m-2 s-3"), spectra
+        assert read_csv(path("probe_tone_reductions_spectra.csv"))[1]["PSD_mean_P"] == "kg2 m-2 s-3"
 
         def info(name):
             out = subprocess.run([mallard, "info", "--format", "json", name], cwd=work, check=True, capture_output=True,
@@ -135,7 +146,8 @@ def main():
             assert info(name) == vtu, (name, info(name), vtu)
         assert info("probe_h5.h5") == {k: probe[k] for k in ("RHO", "T")}, (info("probe_h5.h5"), probe)
         assert info("probe_vtkhdf.vtkhdf") == units(path("probe_vtkhdf.vtkhdf"))
-        for name in ["probe_line.csv", "probe_line_reductions.csv", "forces_bottom.csv", "integrals.csv"]:
+        for name in ["probe_line.csv", "probe_line_reductions.csv", "forces_bottom.csv", "integrals.csv",
+                     "probe_tone_spectra.csv", "probe_tone_reductions_spectra.csv"]:
             assert info(name) == read_csv(path(name))[1], name
     print("output units: consistent across VTKHDF, VTU, HDF5, XDMF and CSV, and with mallard info")
 

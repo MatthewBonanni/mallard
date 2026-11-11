@@ -22,7 +22,9 @@
 #include "compression.h"
 #include "data_paths.h"
 #include "mesh_block.h"
+#include "json.h"
 #include "output_reader.h"
+#include "provenance.h"
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -57,10 +59,10 @@ std::string every_format(const std::string & dir, bool hdf5 = have_hdf5()) {
     auto writer = [&](const std::string & prefix, const std::string & keys) {
         s << "[[write_data]]\nprefix = \"" << dir << "/" << prefix << "\"\ninterval = 2\n" << keys;
     };
-    const std::string fields = "variables = [\"RHO\", \"U\", \"P\"]\n";
+    const std::string fields = "fields = [\"RHO\", \"U\", \"P\"]\n";
     writer("restart", "format = \"restart\"\n");
     writer("flow", "format = \"vtu\"\n" + fields);
-    writer("near", "format = \"vtu\"\nregion = " + REGION + "\nvariables = [\"RHO\"]\n");
+    writer("near", "format = \"vtu\"\nregion = " + REGION + "\nfields = [\"RHO\"]\n");
     if (compression::have_zlib()) {
         writer("zlib/restart", "format = \"restart\"\ncompression = \"zlib\"\nchunk_cells = 64\n");
         writer("zlib/flow", "format = \"vtu\"\ncompression = \"zlib\"\n" + fields);
@@ -70,14 +72,14 @@ std::string every_format(const std::string & dir, bool hdf5 = have_hdf5()) {
         writer("flow", "format = \"vtkhdf\"\n" + fields);
         writer("flow", "format = \"xdmf\"\n" + fields);
         writer("series", "series = true\n" + fields);
-        writer("region", "region = " + REGION + "\nvariables = [\"RHO\"]\n");
+        writer("region", "region = " + REGION + "\nfields = [\"RHO\"]\n");
         if (compression::have_zlib()) writer("zlib/flow", "compression = \"zlib\"\n" + fields);
         probe_formats.insert(probe_formats.end(), {"hdf5", "vtkhdf"});
     }
     for (const std::string & format : probe_formats) {
         s << "[[probes]]\nname = \"" << format << "\"\nformat = \"" << format << "\"\nstart = "
           << coords("0.13", "0.27", "0.41") << "\nend = " << coords("0.88", "0.62", "0.55")
-          << "\nn_points = 6\nvariables = [\"RHO\", \"U\"]\n";
+          << "\nn_points = 6\nfields = [\"RHO\", \"U\"]\n";
         if (format == "csv") s << "file = \"" << dir << "/probe_csv.csv\"\n";
         if (format == "vtp") s << "file = \"" << dir << "/probe_vtp.pvd\"\n";
         if (format == "hdf5") s << "file = \"" << dir << "/probe_hdf5.h5\"\n";
@@ -150,7 +152,7 @@ TEST(OutputReaderTest, RestartFilesHoldTheSolversState) {
         ASSERT_EQ(file.snapshots.size(), 1u) << name;
         EXPECT_EQ(file.snapshots[0].step, 4) << name;
         EXPECT_EQ(file.restart.n_cells, run.rho.size()) << name;
-        EXPECT_FALSE(file.provenance.empty()) << name;
+        EXPECT_FALSE(file.run.empty()) << name;
         ASSERT_TRUE(file.field("RHOE")) << name;
         EXPECT_EQ(file.field("RHO")->units, "kg m-3") << name;
         EXPECT_EQ(output::read(file, "RHO", 0), run.in_global_order(file, run.rho)) << name;
@@ -204,6 +206,104 @@ TEST(OutputReaderTest, SeriesIndexesListEverySnapshotOfTheirFiles) {
             EXPECT_EQ(run.in_global_order(file, output::read(file, "RHO", i)), output::read(restart, "RHO", 0))
                 << name << " " << i;
         }
+    }
+}
+
+TEST(OutputReaderTest, EverySnapshotFormatRecordsItsStepTimeAndRun) {
+    SKIP_UNDER_MPI();
+    const CaseRun run;
+    std::vector<std::string> files = snapshot_files(run.dir, "000004");
+    files.push_back(run.dir + "/restart_000004.restart");
+    if (compression::have_zlib()) files.push_back(run.dir + "/zlib/restart_000004.restart");
+    const std::string stored = sizeof(rtype) == 8 ? "float64" : "float32";
+    std::string run_id;
+    for (const std::string & name : files) {
+        const output::Contents file = output::open(name);
+        if (run_id.empty()) run_id = provenance::find_string(file.run, "run", "run_id");
+        EXPECT_EQ(provenance::find_string(file.run, "run", "run_id"), run_id) << name;
+        ASSERT_EQ(file.snapshots.size(), 1u) << name;
+        const output::Snapshot & s = file.snapshots[0];
+        ASSERT_TRUE(s.has_block) << name;
+        EXPECT_EQ(s.step, 4) << name;
+        EXPECT_EQ(s.block.step, 4) << name;
+        EXPECT_NEAR(s.block.time, 8.0e-3, TIME_TOLERANCE) << name;
+        EXPECT_EQ(s.run_id, run_id) << name;
+        EXPECT_EQ(s.block.reason, "interval") << name;
+        EXPECT_FALSE(s.block.restarted) << name;
+        EXPECT_FALSE(s.block.written_at.empty()) << name;
+        EXPECT_EQ(s.block.format_version, file.version) << name;
+        ASSERT_TRUE(s.block.field("RHO")) << name;
+        EXPECT_EQ(s.block.field("RHO")->units, "kg m-3") << name;
+        EXPECT_EQ(s.block.field("RHO")->stored, stored) << name;
+        for (const std::string & note : file.notes) EXPECT_EQ(note.find("before Mallard 0.10"), std::string::npos) << name;
+    }
+    ASSERT_FALSE(run_id.empty());
+    // Each snapshot of a series records its own step; the first was written at the run's start
+    std::vector<std::string> series = {run.dir + "/flow.pvd"};
+    if (have_hdf5()) series.insert(series.end(), {run.dir + "/flow.vtkhdf.series", run.dir + "/flow.xmf",
+                                                  run.dir + "/series.vtkhdf"});
+    for (const std::string & name : series) {
+        const output::Contents file = output::open(name);
+        ASSERT_EQ(file.snapshots.size(), 3u) << name;
+        for (size_t i = 0; i < 3; i++) {
+            const output::Snapshot & s = file.snapshots[i];
+            EXPECT_EQ(s.step, static_cast<int64_t>(2 * i)) << name << " " << i;
+            ASSERT_TRUE(s.has_block) << name << " " << i;
+            EXPECT_EQ(s.block.step, s.step) << name << " " << i;
+            EXPECT_EQ(s.block.reason, i == 0 ? "start" : "interval") << name << " " << i;
+            EXPECT_EQ(s.run_id, run_id) << name << " " << i;
+        }
+    }
+    std::vector<std::string> probes = {run.dir + "/probe_csv.csv", run.dir + "/probe_vtp.pvd"};
+    if (have_hdf5()) probes.insert(probes.end(), {run.dir + "/probe_hdf5.h5", run.dir + "/probe_vtkhdf.vtkhdf"});
+    for (const std::string & name : probes) {
+        const output::Contents file = output::open(name);
+        ASSERT_EQ(file.snapshots.size(), 5u) << name;
+        for (size_t i = 0; i < file.snapshots.size(); i++) {
+            EXPECT_EQ(file.snapshots[i].step, static_cast<int64_t>(i)) << name << " " << i;
+            EXPECT_EQ(file.snapshots[i].run_id, run_id) << name << " " << i;
+        }
+    }
+}
+
+TEST(OutputReaderTest, SnapshotsOfMallard091AreReadWithTheStatedFallback) {
+    // Before 0.10 the block was named "provenance" and snapshots recorded no snapshot block
+    const std::string dir = source_dir() + "/test/data/formats/v0.9.1/";
+    std::vector<std::string> files = {"snapshots_vtu.pvd", "snapshots_vtu_000001.vtu", "snapshots_000001.restart",
+                                      "snapshots_probe.csv", "snapshots_forces.csv"};
+    if (have_hdf5()) {
+        files.insert(files.end(), {"snapshots_vtkhdf.vtkhdf.series", "snapshots_series.vtkhdf", "snapshots_xdmf.xmf",
+                                   "snapshots_xdmf_000001.h5", "snapshots_probe.h5"});
+    }
+    const auto has_note = [](const output::Contents & c, const std::string & text) {
+        return std::any_of(c.notes.begin(), c.notes.end(), [&](const std::string & n) { return n.find(text) != n.npos; });
+    };
+    for (const std::string & name : files) {
+        const output::Contents c = output::open(dir + name);
+        EXPECT_EQ(json::parse(c.run)["schema"].string, provenance::LEGACY_SCHEMA) << name;
+        EXPECT_TRUE(has_note(c, "under its earlier name \"provenance\"")) << name;
+        ASSERT_FALSE(c.snapshots.empty()) << name;
+        for (const output::Snapshot & s : c.snapshots) {
+            EXPECT_FALSE(s.has_block) << name;
+            EXPECT_TRUE(s.run_id.empty()) << name;
+        }
+        EXPECT_NEAR(c.snapshots.back().t, 0.0144306461, 1e-9) << name;
+        const bool blocks = c.kind == output::Kind::snapshot || c.kind == output::Kind::restart;
+        EXPECT_EQ(has_note(c, "no snapshot block (written before Mallard 0.10)"), blocks) << name;
+    }
+    // Formats without a step slot then: numbered by position, and the note says so
+    for (const char * name : {"snapshots_vtu.pvd", "snapshots_vtu_000001.vtu"}) {
+        const output::Contents c = output::open(dir + name);
+        EXPECT_EQ(c.snapshots.back().step, -1) << name;
+        EXPECT_TRUE(has_note(c, "numbered by their position")) << name;
+    }
+    // Formats with one: the step they recorded
+    std::vector<std::string> stepped = {"snapshots_000001.restart", "snapshots_probe.csv"};
+    if (have_hdf5()) stepped.insert(stepped.end(), {"snapshots_xdmf.xmf", "snapshots_probe.h5"});
+    for (const std::string & name : stepped) {
+        const output::Contents c = output::open(dir + name);
+        EXPECT_EQ(c.snapshots.back().step, 1) << name;
+        EXPECT_FALSE(has_note(c, "numbered by their position")) << name;
     }
 }
 
@@ -307,7 +407,7 @@ TEST(OutputReaderTest, RestartFilesOfPastReleasesAreRead) {
             EXPECT_EQ(file.version, version) << path;
             EXPECT_EQ(file.dim, 2) << path;
             EXPECT_EQ(file.snapshots.at(0).step, 2) << path;
-            EXPECT_TRUE(file.provenance.empty()) << path;
+            EXPECT_TRUE(file.run.empty()) << path;
             const std::vector<double> rho = output::read(file, "RHO", 0);
             EXPECT_EQ(rho.size(), file.mesh.n_cells) << path;
             if (first.empty()) first = rho;

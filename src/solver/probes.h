@@ -14,10 +14,12 @@
 #ifndef PROBES_H
 #define PROBES_H
 
+#include <array>
 #include <cstdint>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -31,14 +33,17 @@
 #include "physics.h"
 #include "boundary.h"
 #include "probe_geometry.h"
+#include "probe_spectra.h"
 #include "probe_surface.h"
 #include "data.h"
 #include "statistics.h"
+#include "wall_exchange.h"
 
 namespace region {
 class Region;
 class Regions;
 }
+struct ProbeFluxes;
 
 /**
  * @brief The fields probes read. Point values need W of every local cell
@@ -46,7 +51,9 @@ class Regions;
  *        gradient functor that fills `gradients` from W, and the face
  *        reconstruction, whose polynomials (if any) give the point values.
  *        Wall quantities need the gradients too, and for mixtures the cell
- *        transport properties.
+ *        transport properties; on modeled walls they are the wall model's,
+ *        evaluated on the current state. Diffusive fluxes are those of the
+ *        scheme's viscous flux (molecular), from the gradients of every cell.
  */
 struct ProbeFields {
     CellSampler cells;
@@ -61,6 +68,8 @@ struct ProbeFields {
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;  // mixtures: frozen gamma per cell, else empty
     Kokkos::View<rtype *[3]> transport;                      // viscous mixtures: (cell, [mu, lambda, ...]), else empty
+    WallModelFunctor wall_model = {};                        // wall-modeled runs, else empty
+    const ProbeFluxes * fluxes = nullptr;                    // viscous runs (probe_fluxes.h)
 };
 
 /** @brief Reference state of C_f and C_p: dynamic pressure, pressure and flow direction. */
@@ -88,6 +97,9 @@ struct RegionValue {
     std::string name;                         // given by name; empty when given inline
 };
 
+/** @brief Whether a region table is a probe type (point, points, line, ..., surface), sampled like that probe. */
+bool sampled(const Input & table);
+
 /** @brief The region a key's value gives (collective); where names the key in errors. */
 RegionValue classify_region(const Input & input, region::Regions & regions, const Input & value,
                             const std::string & where);
@@ -103,6 +115,8 @@ RegionValue classify_region(const Input & input, region::Regions & regions, cons
  *        files do not depend on the number of ranks. A probe with `average`
  *        samples on the [statistics] schedule instead and writes the running
  *        time averages of its samples, accumulated on rank 0 in that order.
+ *        A probe with `spectra` keeps a history of its samples (or reductions)
+ *        on rank 0 and writes their time spectra (ProbeSpectra).
  */
 class Probes {
     public:
@@ -136,17 +150,26 @@ class Probes {
 
         /** @brief Whether an averaging probe samples now. */
         bool averages_due(uint64_t step, rtype t) const;
-        /** @brief Whether the averaging probes need point values or gradients (ProbeFields::W current), and transport. */
-        std::pair<bool, bool> average_needs() const;
+        /**
+         * @brief Whether the averaging probes need point values or gradients (ProbeFields::W current),
+         *        transport, and, as all_gradients_due, the gradients of every cell and the wall model.
+         */
+        std::tuple<bool, bool, bool> average_needs(bool wall_model) const;
         /** @brief Adds the samples at (step, t) to the time averages of the averaging probes (collective). */
         void sample_averages(uint64_t step, rtype t, const ProbeFields & fields);
         /** @brief Start the time averages afresh at time t (the first sample weighted from max(t, t_start)). */
         void start_averages(rtype t);
         /** @brief Continue the time averages of a restart file, or start them afresh if it holds none (or with reset). */
         void restore_averages(const RestartData & restart, const std::string & file, rtype t, bool reset);
+        /** @brief Continue the spectra histories of a restart file, or start them afresh (none, or reset). */
+        void restore_spectra(const RestartData & restart, const std::string & file, bool reset);
         RestartAttributes attributes() const;
-        /** @brief The running time averages, from rank 0 (collective). */
+        /** @brief The running time averages and spectra histories, from rank 0 (collective). */
         RestartArrays arrays() const;
+        /** @brief At the end of a run: writes the spectra of full histories with samples not yet written. */
+        void finish(uint64_t step, rtype t);
+        /** @brief The peaks of the spectra last written, for the run log. */
+        std::vector<MonitorValues> spectra_peaks() const;
         /** @brief Whether a probe due now reads [statistics] outputs, which must then be on the host. */
         bool statistics_due(uint64_t step, rtype t) const;
 
@@ -161,6 +184,13 @@ class Probes {
         bool any_point_values() const;
         /** @brief Whether a probe due now needs the gradients (ProbeFields::W current) / mixture transport properties. */
         bool gradients_due(uint64_t step, rtype t) const;
+        /**
+         * @brief Whether a probe or snapshot due now (or forced) needs the gradients of every cell
+         *        and the wall model on the current state: diffusive fluxes, or, with a wall model,
+         *        any wall quantity.
+         */
+        bool all_gradients_due(uint64_t step, rtype t, bool wall_model, bool snapshots = false,
+                               bool force = false) const;
         bool transport_due(uint64_t step, rtype t) const;
         bool any_gradients() const;
         /** @brief Earliest output time of the time-based probes (infinity if none). */
@@ -173,16 +203,23 @@ class Probes {
         /** @brief Changes the time interval of the probe of that name, the next output due after t. */
         std::string set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot = false);
 
+        /** @brief Names of the monitored values: <probe>_<reduction>_<variable>, and <probe>_<variable> of one-point probes. */
+        std::vector<std::string> value_names() const;
+        /** @brief The latest monitored values, as value_names(); NaN before a probe's first write. Rank 0 when distributed. */
+        std::vector<double> values() const;
+
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
         /**
-         * @brief Rank 0 adds the provenance to the files written so far: csv_line to every CSV file,
-         *        the block as the root attribute of HDF5 files (VTP and PVD files carry it as they are written).
+         * @brief Rank 0 adds the run block of a run starting at step to the files written so
+         *        far: csv_line to every CSV file, which marks where the run joins them; to HDF5
+         *        files, the block as the root attribute and the run in mallard_runs (the row it
+         *        starts at). VTP, PVD and VTKHDF files carry it as they are written.
          */
-        void annotate(const std::string & csv_line);
+        void annotate(const std::string & csv_line, uint64_t step);
 
         enum class Sampling { CELL, POINT };
-        enum class Reduction { INTEGRAL, MEAN, FAVRE, MIN, MAX, RMS };
+        enum class Reduction { INTEGRAL, MEAN, FAVRE, MIN, MAX, RMS, MOMENT };
 
         /** @brief Columns of the values filled on the host with a cell field's value in each sample's cell. */
         using CellColumns = std::vector<std::pair<uint32_t, const Data *>>;
@@ -221,11 +258,13 @@ class Probes {
             /** @brief The faces of a face set, sampled on their cell side. */
             void on_faces(const Mesh & mesh, const probe::FaceSet & set, uint32_t n_variables);
             void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
-                          const ProbeReference & reference, bool gradients);
+                          const ProbeReference & reference, bool gradients, bool diffusive = false);
             /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
-            std::vector<double> gather(const CellColumns & columns = {}) const;
+            void gather(std::vector<double> & out, const CellColumns & columns = {}) const;
 
             private:
+                // Reused across writes: fresh pages for every write cost page faults
+                mutable Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type host_values;
                 /** @brief Rank 0's row of each global sample, from the samples' ids. */
                 void order(const Mesh & mesh);
         };
@@ -248,6 +287,10 @@ class Probes {
             Kokkos::View<int32_t *> codes;       // evaluated: the written ones, then RHO if favre needs it
             bool gradients = false;              // some variable needs velocity or temperature gradients
             bool transport = false;              // some variable needs the viscosity or conductivity
+            bool diffusive = false;              // some variable is a diffusive flux
+            std::array<double, 3> moment_center = {0.0, 0.0, 0.0};
+            // moment: the vectors whose every component is a variable, and those components' columns
+            std::vector<std::pair<std::string, std::array<uint32_t, N_DIM>>> moment_vectors;
             bool average = false;                // writes the time averages of its samples
             // Averages: total weight, time of the last sample, samples, and (rank 0) the means of the
             // gathered node and quadrature values
@@ -263,20 +306,43 @@ class Probes {
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
             std::shared_ptr<std::ofstream> out, out_reductions;
-            std::vector<std::pair<double, std::string>> series;  // vtp: (t, file) of the .pvd
+            std::unique_ptr<ProbeSpectra> spectra;
+            std::shared_ptr<std::ofstream> out_spectra, out_reduction_spectra;
+            struct SeriesEntry {
+                double t = 0.0;
+                int64_t step = -1;  // -1 where an older .pvd records none
+                std::string file;
+            };
+            std::vector<SeriesEntry> series;  // vtp: the snapshots of the .pvd
             uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
+            std::string last_file;                               // vtp, vtkhdf: the file written last
+            bool point_value = false;   // one sample, evaluated at every write: its values are monitored
+            std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
+            double measure = 0.0;      // of the samples, at the latest reduction
+            std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
 
             bool due(uint64_t step, rtype t) const;
+            bool due_or_forced(uint64_t step, rtype t, bool force) const {
+                return due(step, t) || (force && snapshot && step != step_last);
+            }
             uint64_t n_evaluated() const { return codes.extent(0); }
             bool samples_nodes() const;
             bool samples_quadrature() const;
             /** @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values. */
             void sample(const ProbeFields & fields, std::vector<double> & nodes, std::vector<double> & quad);
             void write_hdf5(uint64_t step, rtype t, const std::vector<double> & values) const;
-            void write_vtp(uint64_t step, rtype t, const std::vector<double> & values);
-            void write_vtkhdf(rtype t, const std::vector<double> & values);
-            void write_reductions(uint64_t step, rtype t, const std::vector<double> & nodes,
-                                  const std::vector<double> & quad) const;
+            /** @brief The snapshot block of the samples at (step, t), written now for reason. */
+            snapshot_block::Block snapshot_of(uint64_t step, rtype t, const std::string & reason) const;
+            void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
+            void write_vtkhdf(const snapshot_block::Block & block, const std::vector<double> & values);
+            bool vtkhdf_run_written = false;  // this run's block is in the vtkhdf file
+            /** @brief Into last and measure: the reductions of the samples, by reduction then variable. */
+            void reduce(const std::vector<double> & nodes, const std::vector<double> & quad);
+            /** @brief Names of the reduced values in last: <reduction>_<variable>, moment_<vector>_<axis>. */
+            std::vector<std::string> reduction_names() const;
+            /** @brief Writes a row of the reductions in last. */
+            void write_reductions(uint64_t step, rtype t) const;
+            void write_spectra(uint64_t step, rtype t);
         };
         void add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,

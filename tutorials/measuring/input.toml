@@ -45,6 +45,7 @@ order = 3
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 0.7142857142857143
 T_ref = 0.7142857142857143
@@ -73,7 +74,7 @@ file = "forces_cylinder.csv"
 [[probes]]
 name = "wall"
 boundary = "cylinder"
-variables = ["TRACTION_PRESSURE", "TRACTION_VISCOUS"]
+fields = ["TRACTION_PRESSURE", "TRACTION_VISCOUS"]
 samples = false
 reductions = ["integral"]
 interval = 20
@@ -82,7 +83,7 @@ interval = 20
 [[probes]]
 name = "box"
 region = "box"
-variables = ["RHO", "RHOU", "RHOE"]
+fields = ["RHO", "RHOU", "RHOE"]
 reductions = ["integral"]
 interval = 20
 
@@ -90,7 +91,7 @@ interval = 20
 [[probes]]
 name = "west"
 region = "west"
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral"]
@@ -99,7 +100,7 @@ interval = 20
 [[probes]]
 name = "east"
 region = "east"
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral"]
@@ -108,7 +109,7 @@ interval = 20
 [[probes]]
 name = "south"
 region = "south"
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral"]
@@ -117,20 +118,27 @@ interval = 20
 [[probes]]
 name = "north"
 region = "north"
-variables = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
+fields = ["MASS_FLUX", "MOMENTUM_FLUX", "ENTHALPY_FLUX"]
 sampling = "point"
 samples = false
 reductions = ["integral"]
 interval = 20
 
-# A point in the wake, for the spectrum of the cross-stream velocity
+# A point in the wake, and the spectrum of its cross-stream velocity over
+# the last 140 time units, written at the end with the peak's Strouhal number
 [[probes]]
 name = "wake"
 type = "point"
 point = [3.0, 0.5]
-variables = ["U_Y", "P"]
+fields = ["U_Y", "P"]
 sampling = "point"
 time_interval = 0.5
+
+[probes.spectra]
+fields = ["U_Y"]
+t_start = 60.0
+length = 140.0
+strouhal = {length = 1.0, velocity = 0.2}
 
 # Time averages from t = 60, and phase averages in 8 bins of the shedding
 # cycle, from the upward zero crossings of U_Y on the wake axis
@@ -152,4 +160,4 @@ level = 0.0
 prefix = "./solut/box"
 region = "box"
 time_interval = 200.0
-variables = ["U_X", "U_Y", "P", "MEAN_*", "COV_*", "PHASE_*"]
+fields = ["U_X", "U_Y", "P", "MEAN_*", "COV_*", "PHASE_*"]

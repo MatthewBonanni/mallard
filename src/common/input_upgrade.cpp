@@ -56,6 +56,7 @@ std::vector<std::string> periodic_zones(const std::string & direction, const std
 const Rules & rules() {
     static const std::string TYPES = "boundary types name their kind first, and options are keys";
     static const std::string NSCBC = "the characteristic parameters are the nscbc table";
+    static const std::string FIELDS = "[[write_data]], [[probes]] and [statistics] all name their output fields";
     // Deprecate before removing: `removed` is at least one minor release after `since`.
     // Keys removed before this policy (0.9.0) have since == removed.
     static const Rules table = {
@@ -83,6 +84,8 @@ const Rules & rules() {
              all_to_domain},
             {"mesh.curved[].shape", "mesh.curved[].type", "0.9.0", "0.10.0",
              "type selects the kind of every region; a curved zone lies on a surface (2D: a curve)"},
+            {"write_data[].variables", "write_data[].fields", "0.10.0", "0.11.0", FIELDS},
+            {"probes[].variables", "probes[].fields", "0.10.0", "0.11.0", FIELDS},
         },
         {
             {"write_data[].format", "tecplot", "vtu", "0.2.0", "0.2.0", "Tecplot output was removed"},
@@ -102,6 +105,8 @@ const Rules & rules() {
              "a sphere is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
             {"mesh.curved[].shape", "cylinder", "cylinder", "0.9.0", "0.10.0",
              "a cylinder is a volume: filled = false, added, is its surface", false, 3, "filled = false"},
+            {"numerics.preset", "robust", "second_order", "0.10.0", "0.11.0", "presets are named by their order"},
+            {"numerics.preset", "accurate", "high_order", "0.10.0", "0.11.0", "presets are named by their order"},
         },
         {
             {"mesh.periodic", "periodic", "zones", "type", "0.9.0", "0.10.0",
@@ -114,6 +119,16 @@ const Rules & rules() {
 }
 
 namespace {
+
+/**
+ * @brief Parses TOML text. Not toml::parse_str: its default std::source_location
+ *        argument points at another object when GCC builds for macOS (#692).
+ */
+template <typename TC>
+toml::basic_value<TC> parse_toml(const std::string & text) {
+    std::istringstream stream(text);
+    return toml::parse<TC>(stream, "input");
+}
 
 // ---------------------------------------------------------------- paths
 
@@ -396,7 +411,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
             option_findings.push_back(option_finding(rule, key, line_of(value), version));
             if (rule.from != rule.to && !(setup && rule.kept && !option_findings.back().removed)) value = rule.to;
             if (!rule.add.empty()) {
-                const auto added = toml::parse_str<typename V::config_type>(rule.add);
+                const auto added = parse_toml<typename V::config_type>(rule.add);
                 auto & beside = entries_of(*at(root, parent(key)));
                 for (const auto & [name, v] : entries_of(added)) {
                     if (!beside.contains(name)) beside[name] = v;
@@ -416,7 +431,7 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
                 }
                 if (rule.convert) {
                     const std::string text = rule.convert(bare_text(value));
-                    value = toml::parse_str<typename V::config_type>("x = " + text).at("x");
+                    value = parse_toml<typename V::config_type>("x = " + text).at("x");
                 }
                 V * new_parent = at(root, parent(to), true);
                 if (new_parent == nullptr || !new_parent->is_table()) {
@@ -565,7 +580,7 @@ using OrderedValue = toml::ordered_value;
 
 /** @brief One textual change for the first match of a rule, or false if the rule has none left. */
 bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, bool & impossible) {
-    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    OrderedValue root = parse_toml<toml::ordered_type_config>(join_lines(lines));
     const std::vector<Concrete> found = matches(root, rule.from);
     if (found.empty()) return false;
     const Concrete & key = found.front();
@@ -644,7 +659,7 @@ bool rewrite_one_key(std::vector<std::string> & lines, const KeyRule & rule, boo
 }
 
 bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rule, bool & impossible) {
-    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    OrderedValue root = parse_toml<toml::ordered_type_config>(join_lines(lines));
     for (const Concrete & key : matches(root, rule.key)) {
         const OrderedValue & value = *at(root, key);
         if (!value.is_string() || value.as_string() != rule.from || added_already(root, rule, key)) continue;
@@ -673,7 +688,7 @@ bool rewrite_one_option(std::vector<std::string> & lines, const OptionRule & rul
 
 /** @brief The line of the first match of an array rule removed and its elements inserted, or false if none is left. */
 bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule, bool & impossible) {
-    OrderedValue root = toml::parse_str<toml::ordered_type_config>(join_lines(lines));
+    OrderedValue root = parse_toml<toml::ordered_type_config>(join_lines(lines));
     const std::vector<Concrete> found = matches(root, rule.from);
     if (found.empty()) return false;
     const Concrete & key = found.front();
@@ -712,6 +727,20 @@ bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule,
 }
 
 } // namespace
+
+std::vector<std::string> notices(const std::string & text) {
+    const Input input = parse_input_string(text);
+    const auto has = [&](const char * table, const char * key) {
+        return input.contains(table) && input.at(table).is_table() && input.at(table).contains(key);
+    };
+    std::vector<std::string> out;
+    if (input.contains("run") && !has("numerics", "preset") && !has("numerics", "face_reconstruction")) {
+        out.push_back("no preset and no [numerics.face_reconstruction]: since 0.10.0 this runs the high_order "
+                      "preset, not first order; add [numerics.face_reconstruction] type = \"FO\" to reproduce "
+                      "older first-order results");
+    }
+    return out;
+}
 
 std::string advice(const Finding & finding) {
     return describe(finding) + "; `mallard input upgrade old.toml > new.toml` rewrites the file";
@@ -761,7 +790,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
         }
     }
     reformatted = true;
-    OrderedValue ordered = toml::parse_str<toml::ordered_type_config>(text);
+    OrderedValue ordered = parse_toml<toml::ordered_type_config>(text);
     transform(ordered, table, this_release(), dim);
     return toml::format(ordered);
 }
@@ -779,6 +808,7 @@ int upgrade_file(const std::string & file, bool check, int dim, const std::strin
         bool reformatted = false;
         const std::string upgraded = upgrade_text(text, findings, reformatted, rules(), dim, unknown_dimension);
         for (const Finding & f : findings) std::cerr << file << ": " << describe(f) << "\n";
+        for (const std::string & note : notices(text)) std::cerr << file << ": note: " << note << "\n";
         if (reformatted) {
             std::cerr << file << ": a changed key is a dotted key or in an inline table, so the whole file was "
                       << "reformatted (comments are kept, layout is not)\n";

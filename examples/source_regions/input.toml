@@ -17,7 +17,10 @@
 # around the ring averages the temperature and pressure along it. The terminal output lists each source with
 # its region and measure. SOURCE_RHOE and SOURCE_RHOU_X/Y in the snapshots show
 # where they act. The total energy rises by the integral of Q, 10 sqrt(pi) 0.02
-# = 0.3545, plus the fan's work.
+# = 0.3545, plus the fan's work. The ring's mean temperature peaks near 4.9
+# at t = 0.08, then falls as the hot gas expands: a trigger writes one more
+# snapshot, and a restart, when the ring probe first finds it back below 3.5
+# (step 200, t = 0.139).
 
 [run]
 t_stop = 0.3
@@ -54,6 +57,7 @@ type = "symmetry"
 
 [physics]
 type = "euler"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 1.0
 T_ref = 1.0
@@ -86,28 +90,28 @@ check_interval = 100
 
 [[probes]]
 name = "ring"
-variables = ["RHO", "T", "P"]
+fields = ["RHO", "T", "P"]
 region = "ring"
 reductions = ["integral", "mean", "max"]
 interval = 50
 
 [[probes]]
 name = "total"
-variables = ["RHO"]
+fields = ["RHO"]
 region = "domain"
 reductions = ["integral"]
 interval = 50
 
 [[probes]]
 name = "outside"
-variables = ["T"]
+fields = ["T"]
 region = {type = "difference", regions = ["domain", {type = "disk", center = [0.3, 0.5], radius = 0.15}]}
 reductions = ["mean", "max"]
 interval = 50
 
 [[probes]]
 name = "around"
-variables = ["T", "P"]
+fields = ["T", "P"]
 region = {type = "circle", center = [0.3, 0.5], radius = 0.15}
 reductions = ["mean", "max"]
 interval = 50
@@ -115,4 +119,9 @@ interval = 50
 [[write_data]]
 prefix = "solut/sources"
 time_interval = 0.05
-variables = ["RHO", "U", "P", "SOURCE_RHOE", "SOURCE_RHOU_X", "SOURCE_RHOU_Y"]
+fields = ["RHO", "U", "P", "SOURCE_RHOE", "SOURCE_RHOU_X", "SOURCE_RHOU_Y"]
+
+[[triggers]]
+name = "ring_cooled"
+when = "t > 0.1 and ring_mean_T < 3.5"
+do = ["write solut/sources", "checkpoint"]

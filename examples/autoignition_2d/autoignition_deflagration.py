@@ -114,7 +114,7 @@ check_interval = 20000
 [[write_data]]
 prefix = "./solut/defl"
 time_interval = {args.t_stop / 30:.17g}
-variables = ["RHO", "U", "P", "T", "HRR", "Y_H2", "OMEGA_H2"]
+fields = ["RHO", "U", "P", "T", "HRR", "Y_H2", "OMEGA_H2"]
 """)
 
 

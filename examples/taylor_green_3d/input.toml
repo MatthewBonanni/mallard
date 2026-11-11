@@ -70,6 +70,7 @@ order = 5
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 71.42857142857143
 T_ref = 1.0
@@ -92,4 +93,4 @@ interval = 2000
 [[write_data]]
 prefix = "./solut/tgv"
 time_interval = 0.2
-variables = ["U"]
+fields = ["U", "Q_CRITERION", "LAMBDA2"]

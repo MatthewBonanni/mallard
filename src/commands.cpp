@@ -31,6 +31,9 @@ constexpr Option RUN_OPTIONS[] = {
      "Start from this restart file: replaces the input's [initialize] with type = \"restart\". latest: the "
      "newest complete restart file of the input's restart writers (of the run that started last, then of the "
      "highest step), or [initialize] if there is none. Default: as [initialize] says."},
+    {"--verbose", "", "",
+     "A line for every file written, between the progress rows. Default: the progress table's written column "
+     "counts them, and mallard.jsonl and the summary name them."},
     KOKKOS,
 };
 
@@ -69,8 +72,8 @@ constexpr Option CHECK_OPTIONS[] = {
 
 constexpr Option LIST_OPTIONS[] = {
     {"--format", "", "text|json",
-     "text: one table per group, with the units of every field; json: the same as one JSON object, for "
-     "scripts. Default: text."},
+     "text: one table per group (of fields) or table (of keys), with units; json: the same as one JSON "
+     "object, for scripts. Default: text."},
     KOKKOS,
 };
 
@@ -93,12 +96,15 @@ constexpr Option INFO_OPTIONS[] = {
      "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
      "scripts. Default: text."},
     {"--input", "", "",
-     "Print the input file that produced the file, from its provenance: the resolved input (every key the "
+     "Print the input file that produced the file, from its run block: the resolved input (every key the "
      "run read, defaults filled in) for files of Mallard 0.10 and later, the input as written for 0.9. For a "
      "run directory, its run's."},
     {"--quality", "", "PREFIX",
      "Mesh files: write the mesh-quality fields to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without "
      "HDF5), as mallard check --quality does. Default: none."},
+    {"--verify", "", "",
+     "Run directories: also check each file's contents against the SHA-256 its output record holds, not only "
+     "its size; reads every file once. Default: sizes only."},
     KOKKOS,
 };
 
@@ -122,11 +128,84 @@ constexpr Option DIFF_OPTIONS[] = {
     {"--remap", "", "",
      "Compare files on different meshes: B's cell values remapped conservatively onto A's mesh (as [initialize] "
      "type = \"remap\" does, degree 2, limited), then compared cell by cell. Needs both meshes: as the files' "
-     "provenance records them, or --mesh-a and --mesh-b."},
+     "run blocks record them, or --mesh-a and --mesh-b."},
     {"--mesh-a", "", "FILE",
-     "A's mesh file, where its provenance does not record it or the file has moved: for --remap and for the "
-     "coordinates of the largest differences. Default: from A's provenance."},
-    {"--mesh-b", "", "FILE", "B's mesh file, for --remap. Default: from B's provenance."},
+     "A's mesh file, where its run block does not record it or the file has moved: for --remap and for the "
+     "coordinates of the largest differences. Default: from A's run block."},
+    {"--mesh-b", "", "FILE", "B's mesh file, for --remap. Default: from B's run block."},
+    {"--format", "", "text|json",
+     "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
+     "scripts. Default: text."},
+    KOKKOS,
+};
+
+constexpr Option EXTRACT_OPTIONS[] = {
+    {"-i", "", "FILE",
+     "The input file of the case: its mesh, physics, numerics, [regions] and [[probes]]. Default: the input in "
+     "the run block of FILE (Mallard 0.10 and later record it resolved)."},
+    {"--probe", "", "NAMES",
+     "The [[probes]] of the input to extract, by name, separated by commas (--probe wake,box). Default: every "
+     "one, unless --region or --snapshot is given."},
+    {"--region", "", "REGION",
+     "Extract a region as a [[probes]] entry of --fields with this region: the name of a region of the input's "
+     "[regions] or of the mesh (domain, a boundary or cell zone), or an inline TOML table, a region "
+     "('{type = \"rectangle\", center = [0.5, 0.5], size = [0.4, 0.2]}') or a probe type ('{type = \"line\", "
+     "start = [0, 0], end = [1, 0], n_points = 50}'). Default: none."},
+    {"--name", "", "NAME",
+     "The name of the --region probe and of --snapshot: probe_NAME.csv, probe_NAME_reductions.csv, "
+     "NAME_<step>.vtkhdf. Default: extract."},
+    {"--fields", "", "LIST",
+     "The fields of --region and --snapshot, separated by commas, as [[probes]] and [[write_data]] take "
+     "them (RHO,U,P,T,MASS_FLUX). Default: RHO,U,P,T."},
+    {"--reductions", "", "LIST",
+     "The reductions of --region, separated by commas: integral, mean, favre, rms, min, max. Default: integral, "
+     "mean, min and max of a region; none of a probe type."},
+    {"--sampling", "", "cell|point",
+     "Whether --region samples cell averages or the reconstruction's point values. Default: cell."},
+    {"--snapshot", "", "vtkhdf|vtu",
+     "Also write a snapshot of --fields (of --region, if given) at each step extracted, as [[write_data]] "
+     "writes it: OUTPUT/NAME_<step>.vtkhdf, or .vtu files with a .pvd index. Default: none."},
+    {"--steps", "", "LIST",
+     "Extract the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
+    {"--times", "", "T|T1:T2",
+     "Extract the snapshot nearest to simulated time T, or every one with T1 <= t <= T2, in seconds. Default: "
+     "every snapshot."},
+    {"--every", "", "N", "Extract every Nth of the snapshots selected, starting with the first. Default: 1."},
+    {"--latest", "", "", "Extract only the last snapshot selected."},
+    {"--output", "-o", "DIR",
+     "The directory the files go to, under the names the input gives them (a probe's file and "
+     "reductions_file). Default: extract."},
+    {"--format", "", "text|json",
+     "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
+     "scripts. Default: text."},
+    KOKKOS,
+};
+
+constexpr Option CONVERGENCE_OPTIONS[] = {
+    {"--quantity", "", "NAMES",
+     "The quantities to study, separated by commas: TABLE:COLUMN (integrals:rho2, forces_wall:F_x), a column "
+     "of every table (F_x), or a table (forces_wall), as the report names them. Default: every column of every "
+     "forces, integrals and probe table that all the runs wrote."},
+    {"--time", "", "T",
+     "Take each quantity at simulated time T, in seconds (a row every run wrote), or with --field the snapshot "
+     "of time T. Default: each run's last value (snapshot)."},
+    {"--average", "", "T0:T1",
+     "Take the time average of each quantity over T0 <= t <= T1, in seconds (trapezoidal, over the rows of the "
+     "window): for unsteady flows. Default: each run's last value."},
+    {"--order", "", "P",
+     "The order of accuracy to compare the observed orders with, and the order a study of two runs assumes. "
+     "Default: the design order of the runs' reconstruction (FO 1, MUSCL 2, TENO its order)."},
+    {"--safety-factor", "", "F",
+     "The GCI's factor of safety. Default: 1.25 with three or more runs, 3 with two (Roache)."},
+    {"--sizes", "", "LIST",
+     "A representative cell size of each run, in the order given, separated by commas: for refinements that are "
+     "not uniform, or time-step studies. Default: (1 / cells)^(1/dim) from each run's cell count."},
+    {"--field", "", "NAME",
+     "Instead of quantities, the L1, L2 and Linf errors of this field of each run's last snapshot (NAME[k] for "
+     "a component of a vector) against --exact. Needs --exact."},
+    {"--exact", "", "EXPR",
+     "The exact solution of --field, an expression of x, y, z and t, averaged over each cell (quadrature exact "
+     "to degree 6) at the snapshot's time."},
     {"--format", "", "text|json",
      "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
      "scripts. Default: text."},
@@ -166,9 +245,12 @@ constexpr std::string_view NEW_ARGUMENTS[] = {"[TEMPLATE]", "[DIRECTORY]"};
 constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "status|checkpoint|stop|set", "[KEY=VALUE...]"};
 constexpr std::string_view FILE_ARGUMENTS[] = {"FILE"};
 constexpr std::string_view DIFF_ARGUMENTS[] = {"FILE_A", "FILE_B"};
+constexpr std::string_view FILES_ARGUMENTS[] = {"FILE", "[FILE...]"};
+constexpr std::string_view CONVERGENCE_ARGUMENTS[] = {"RUN_DIR", "RUN_DIR", "[RUN_DIR...]"};
 constexpr std::string_view CONVERT_ARGUMENTS[] = {"INPUT", "OUTPUT.h5"};
 constexpr std::string_view OPTIONAL_INPUT[] = {"[INPUT]"};
 constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
+constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
@@ -363,7 +445,7 @@ constexpr Command COMMANDS[] = {
             "on.\n"
             "\n"
             "The result runs bitwise the same as the input and resolves to itself. Every output file's "
-            "provenance holds the same text (input.resolved), so a run's results carry the full input that "
+            "run block holds the same text (input.resolved), so a run's results carry the full input that "
             "made them.",
         .options = RESOLVE_OPTIONS,
         .arguments = FILE_ARGUMENTS,
@@ -378,8 +460,9 @@ constexpr Command COMMANDS[] = {
     {
         .name = "check",
         .group = "Inspect",
-        .summary = "Set up a case without running it and report on it: keys, mesh, time step, memory, cost",
-        .synopsis = "mallard check input.toml [options]",
+        .summary = "Set up a case without running it and report on it: keys, mesh, time step, memory, cost, environment",
+        .synopsis = "mallard check input.toml [options]\n"
+                    "mallard check [--format text|json]",
         .description =
             "Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial solution) without "
             "time stepping and without writing any file, then reports: unknown or unused keys, boundary zones "
@@ -388,15 +471,24 @@ constexpr Command COMMANDS[] = {
             "error or warning a stable code (E-REGION-OUTSIDE, W-CFL-LIMIT) and the docs that explain it. It lists "
             "every region the case uses and the mesh's own (domain, boundary zones, cell zones) with its dimension, measure and cells, "
             "and whether a surface or curve is exact or extracted; a region that covers no cell is an error. Under "
-            "mpirun -n N it checks the run on N ranks.",
+            "mpirun -n N it checks the run on N ranks.\n"
+            "\n"
+            "Without an input, checks the environment only; with one, the report ends with the same Environment "
+            "section: the build (dimension, precision, the solvers installed), Kokkos and its execution spaces, "
+            "every rank's host, device and memory, CPUs and threads, MPI (library, ranks per host), GPU-aware MPI "
+            "and NCCL (built, and whether the run uses them), HDF5 (serial or parallel), CGNS, zlib and KaMinPar. "
+            "Each problem is a diagnostic with its fix: ranks sharing a GPU or cores, OpenMP threads free to "
+            "migrate, a GPU-aware build on an MPI that cannot read device memory (an error), device halos "
+            "staged through host memory. Run it under the job's launcher (srun, mpirun) to check its nodes.",
         .options = CHECK_OPTIONS,
         .arguments = CHECK_ARGUMENTS,
         .examples = "$ mallard check input.toml\n"
+                    "$ srun -N 2 --ntasks-per-node 4 mallard check   # the environment of a job\n"
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
                     "$ mpirun -n 4 mallard check input.toml --quality quality\n"
                     "$ mallard check input.toml --view view   # then open view/case.vtkhdf in ParaView",
         .exit_status = "0  no errors (there may be warnings)\n"
-                       "1  errors: in the input, the mesh or the setup\n"
+                       "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
         .dim = Case::input,
         .run = check_main,
@@ -406,14 +498,17 @@ constexpr Command COMMANDS[] = {
         .group = "Inspect",
         .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
         .synopsis = "mallard info FILE [--format text|json] [--input] [--quality PREFIX]\n"
-                    "mallard info RUN_DIR [--format text|json] [--input]",
+                    "mallard info RUN_DIR [--format text|json] [--input] [--verify]",
         .description =
             "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
             "version; the mesh (cells, points, cell types, bounds, boundary and cell zones); its times and steps; "
-            "its fields with their units, descriptions and ranges (of the last snapshot); the species; and its "
-            "provenance (Mallard version and commit, build, when, where and on how many ranks it ran, the input "
-            "file and mesh with their SHA-256). Files without provenance (before Mallard 0.9) or from a newer "
-            "Mallard are reported with a note.\n"
+            "its fields with their units, descriptions, ranges (of the last snapshot) and stored precision; the "
+            "species; its run block, the same for every file of the run (Mallard version and commit, build, run "
+            "id and the run it restarted from, when, where and on how many ranks it ran, the input file and mesh "
+            "with their SHA-256); and the last snapshot's block (step, time, reason, when and by which run it was "
+            "written). Step, time and run come from what the file records, never from its name. Files without a "
+            "run block (before Mallard 0.9), without snapshot blocks (before 0.10) or from a newer Mallard are "
+            "reported with a note that says what is read instead.\n"
             "\n"
             "FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5) or a series index (.vtkhdf.series, .pvd, .xmf), "
             "a restart file (compressed too), a probe file (.csv, .h5, .vtkhdf, .vtp, .pvd), a CSV file of forces "
@@ -422,7 +517,10 @@ constexpr Command COMMANDS[] = {
             "of its dimension, which also reports its quality as mallard check does.\n"
             "\n"
             "RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and every output file "
-            "in it and one level down, one table row each (the snapshots of a series as their index).",
+            "in it and one level down, one table row each (the snapshots of a series as their index). Each file the "
+            "run log records as written is checked against its record: missing, or a size (with --verify, a "
+            "SHA-256) other than the one recorded, is reported. A file still named NAME.partial is one whose write "
+            "did not finish.",
         .options = INFO_OPTIONS,
         .arguments = FILE_ARGUMENTS,
         .examples = "$ mallard info solut/flow.vtkhdf.series\n"
@@ -431,7 +529,8 @@ constexpr Command COMMANDS[] = {
                     "$ mallard info wing.msh --quality quality\n"
                     "$ mallard info runs/cylinder",
         .exit_status = "0  the file was read\n"
-                       "1  a file cannot be read (missing, not Mallard's, newer), or --input finds no provenance\n"
+                       "1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run "
+                       "directory's file differs from its output record, or --input finds no run block\n"
                        "2  usage error",
         .dim = Case::file,
         .run = info_main,
@@ -442,12 +541,12 @@ constexpr Command COMMANDS[] = {
         .summary = "The output fields there are, or exactly those of one case",
         .synopsis = "mallard list fields [INPUT] [--format text|json]",
         .description =
-            "Without an input file, lists every field the [[write_data]] variables, [[probes]] and [statistics] "
+            "Without an input file, lists every field the [[write_data]], [[probes]] and [statistics] fields "
             "take, by group, with its units, its description and what a case needs to have it, and the patterns "
             "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).\n"
             "\n"
             "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
-            "lists exactly the fields [[write_data]] variables accept for it: its species, its physics, chemistry, "
+            "lists exactly the fields [[write_data]] fields accept for it: its species, its physics, chemistry, "
             "LES and statistics, and its dimension; then the common fields it does not have, with what they need.",
         .options = LIST_OPTIONS,
         .arguments = OPTIONAL_INPUT,
@@ -479,6 +578,34 @@ constexpr Command COMMANDS[] = {
         .run = list_species_main,
     },
     {
+        .name = "list keys",
+        .group = "Inspect",
+        .summary = "The input keys there are, or exactly those of one case: type, units, default, values",
+        .synopsis = "mallard list keys [SECTION] [INPUT] [--format text|json]",
+        .description =
+            "Without an input file, lists the key catalog docs/input-keys.json: every key the examples and "
+            "tutorials read, by table, with its type, units (of a number with a physical dimension), default "
+            "(or required) and accepted values; (2D) or (3D) marks a key only that dimension reads.\n"
+            "\n"
+            "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
+            "lists the keys its setup reads, the same columns and whether the input sets each: what mallard check "
+            "--catalog writes, as tables.\n"
+            "\n"
+            "SECTION keeps the keys of one table (numerics, [numerics], write_data) or of one key path "
+            "(numerics.face_reconstruction). An argument that ends in .toml or names a file is the input.",
+        .options = LIST_OPTIONS,
+        .arguments = KEYS_ARGUMENTS,
+        .examples = "$ mallard list keys\n"
+                    "$ mallard list keys numerics\n"
+                    "$ mallard list keys write_data input.toml\n"
+                    "$ mallard list keys input.toml --format json",
+        .exit_status = "0  listed\n"
+                       "1  the case cannot be set up (the errors are printed), or the catalog is not found\n"
+                       "2  usage error, or a section with no key",
+        .dim = Case::input_file,
+        .run = list_keys_main,
+    },
+    {
         .name = "list templates",
         .group = "Inspect",
         .summary = "The case templates of mallard new",
@@ -504,7 +631,7 @@ constexpr Command COMMANDS[] = {
             "field's units) and the same relative to A's norms, and where the largest difference is (the cell, "
             "its coordinates and both values there). Restart files are also compared bit for bit in the rest of "
             "their state: step, time, scalar attributes, named arrays and the face records of characteristic "
-            "boundaries; the provenance, which records when and where each ran, is not compared.\n"
+            "boundaries; the run and snapshot blocks, which record when and where each ran, are not compared.\n"
             "\n"
             "Each field passes if its max |B - A| / max |A| is at most --tol (0 by default), and so does t; the "
             "result is identical (every value bitwise the same), within tolerance or beyond it, on the first and "
@@ -549,6 +676,84 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::mesh,
         .run = mesh_convert_main,
+    },
+    {
+        .name = "post extract",
+        .group = "Post",
+        .summary = "Probes, region integrals and snapshots of existing output, as the run would have written them",
+        .synopsis = "mallard post extract FILE... [-i input.toml] [--probe NAMES] [-o DIR]\n"
+                    "mallard post extract FILE... --region REGION [--fields LIST] [--reductions LIST]\n"
+                    "mallard post extract FILE... --snapshot vtkhdf|vtu [--fields LIST] [--region REGION]",
+        .description =
+            "Sets up the case of a restart file, snapshot or series and writes probes of its stored state, without "
+            "rerunning: the input's [[probes]] (points, curves, cut planes, surfaces with their fluxes, region "
+            "integrals, means and extremes), a region given with --region, or snapshots of chosen fields and "
+            "regions. It runs the run's own code, so a probe gives at each step what the run's probe gave there: "
+            "the same values for restart files and for snapshots of the conservative variables, the same to "
+            "rounding for snapshots of RHO, U and P.\n"
+            "\n"
+            "FILE is a restart file, a snapshot of the whole mesh (.vtkhdf, the .h5 of XDMF output) or a series "
+            "of them (.vtkhdf.series, a series file, .xmf); several files, or a glob, extract in the order given. "
+            "The case comes from -i, else from FILE's run block, and its mesh must be the file's: run it where "
+            "the run ran, so that relative paths (the mesh file) resolve. --steps, --times, --every and --latest "
+            "choose the snapshots, by the steps and times the files record (files written before 0.10 that "
+            "record no step: by their position in FILE).\n"
+            "\n"
+            "Files go to the output directory under the names the input gives them, so a run's files are never "
+            "overwritten. The report lists each file with its times and fields, and every reduction of the last "
+            "snapshot with its units. Under mpirun -n N the probes are evaluated on N ranks.",
+        .options = EXTRACT_OPTIONS,
+        .arguments = FILES_ARGUMENTS,
+        .examples = "$ mallard post extract solut/flow.vtkhdf.series      # every [[probes]] of the run\n"
+                    "$ mallard post extract solut/restart_*.restart --probe wake -o wake\n"
+                    "$ mallard post extract solut/flow.vtkhdf.series --latest --region domain --fields RHO,RHOE\n"
+                    "$ mallard post extract solut/flow.xmf --times 0.1:0.5 --fields MASS_FLUX --reductions integral \\\n"
+                    "      --region '{type = \"cut_plane\", point = [0.5, 0, 0], normal = [1, 0, 0]}'\n"
+                    "$ mallard post extract solut/flow.vtkhdf.series --latest --snapshot vtkhdf --fields P,T",
+        .exit_status = "0  every snapshot was extracted\n"
+                       "1  a file cannot be read, the case cannot be set up, or the file is not of its mesh\n"
+                       "2  usage error",
+        .dim = Case::output_case,
+        .run = extract_main,
+    },
+    {
+        .name = "post convergence",
+        .group = "Post",
+        .summary = "Order of accuracy, extrapolated value and grid convergence index (GCI) of runs at several "
+                   "resolutions",
+        .synopsis = "mallard post convergence RUN_DIR RUN_DIR [RUN_DIR...] [--quantity NAMES] [--time T | --average "
+                    "T0:T1]\n"
+                    "mallard post convergence RUN_DIR|FILE... --field NAME --exact EXPR",
+        .description =
+            "Estimates the discretization error of a case from runs of it at several resolutions: for each "
+            "quantity, the order of accuracy the runs show, the value extrapolated to zero cell size and the fine "
+            "run's grid convergence index (GCI), an error band, by the procedure of Celik et al. (2008) with "
+            "Roache's factors of safety. A quantity's verdict says in words whether it converges, and how far to "
+            "trust the band.\n"
+            "\n"
+            "Each RUN_DIR is a directory a run ran in. What identifies it is what its run record (mallard.jsonl) "
+            "records, never its name: its run, its cell count and its input. The runs are ordered by cell count, "
+            "whatever the order given, and their refinement ratios follow from it. The quantities are the columns "
+            "of the forces, integrals and probe tables each run wrote ([[forces]], [integrals], [[probes]]), by "
+            "default their last values. Inputs that differ other than in [mesh], [run], [output] and "
+            "[[write_data]] are a warning.\n"
+            "\n"
+            "Three runs give an observed order; more give one per three successive runs, which agree once the "
+            "runs are in the asymptotic range. Two runs assume the design order with a factor of safety of 3, a "
+            "warning. With --field and --exact the report is the error norms of a field against an exact solution "
+            "and their observed orders; then FILE can also be a snapshot or restart file of the whole mesh.",
+        .options = CONVERGENCE_OPTIONS,
+        .arguments = CONVERGENCE_ARGUMENTS,
+        .examples = "$ mallard post convergence coarse medium fine          # every force, integral and probe\n"
+                    "$ mallard post convergence coarse medium fine --quantity forces_cylinder:F_x\n"
+                    "$ mallard post convergence n32 n64 n128 --average 10:20 --quantity F_x,F_y\n"
+                    "$ mallard post convergence n16 n32 n64 --field RHO --exact '1 + 0.2 * sin(2 * pi * (x - t))'\n"
+                    "$ mallard post convergence coarse fine --order 2 --format json",
+        .exit_status = "0  no errors (there may be warnings: oscillating, two runs, an order far from the design's)\n"
+                       "1  a quantity diverges, a run cannot be read, or the runs are not of one case\n"
+                       "2  usage error",
+        .dim = Case::output,
+        .run = convergence_main,
     },
     {
         .name = "test",
@@ -614,8 +819,9 @@ constexpr Command COMMANDS[] = {
 
 constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
-    {"list", "Catalogs: the fields, species and case templates there are."},
+    {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
+    {"post", "Commands on a run's output: probes, integrals and snapshots of it, and the grid convergence of several runs."},
 };
 
 constexpr std::string_view GROUPS[] = {"Run", "Set up", "Inspect", "Mesh", "Post", "Share", "Maintain"};

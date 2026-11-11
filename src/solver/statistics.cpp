@@ -245,7 +245,7 @@ RestartAttributes Statistics::attributes() const {
 std::vector<std::pair<std::string, std::string>> Statistics::summary() const {
     std::vector<std::pair<std::string, std::string>> items;
     if (means_enabled()) {
-        std::string text = "every " + logging::count(interval) + " steps from t = " + logging::real(double(t_start)) + ": ";
+        std::string text = "every " + logging::count(interval) + " steps from t = " + units::with(logging::real(double(t_start)), "s") + ": ";
         for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + std::string("MEAN_") + fields[i];
         for (const auto & [i, j] : products) text += ", COV_" + fields[i] + "_" + fields[j];
         if (n_samples > 0) text += " (" + logging::count(n_samples) + " samples so far)";
@@ -457,13 +457,13 @@ RestartAttributes PhaseAverage::attributes() const {
 
 std::string PhaseAverage::summary() const {
     std::string text = logging::count(bins) + " bins every " + logging::count(interval) + " steps from t = " +
-                       logging::real(double(t_start)) + ", ";
+                       units::with(logging::real(double(t_start)), "s") + ", ";
     if (trigger_cell == NO_TRIGGER) {
-        text += "period " + logging::real(period);
+        text += "period " + units::with(logging::real(period), "s");
     } else {
         text += "upward crossings of " + trigger_variable + " = " + logging::real(level) + " at (";
         for (size_t d = 0; d < N_DIM; d++) text += (d ? ", " : "") + logging::real(trigger_point[d]);
-        text += ")";
+        text = units::with(text + ")", "m");
     }
     text += ": ";
     for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + fields[i];

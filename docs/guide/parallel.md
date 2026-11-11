@@ -130,7 +130,7 @@ For OpenMP threads, set `OMP_PROC_BIND=spread` and `OMP_PLACES=threads` (the scr
 Parallel runs list where each rank runs after the header:
 
 ```text
-== Ranks ===================================================================================
+== Ranks ==================================================================================
   rank  host    GPU  PCI bus       UUID          GPU NUMA  CPUs   CPU NUMA  threads
   0     node01  2    0000:c1:00.0  GPU-c03e7a55  0         0-15   0         16
   1     node01  3    0000:c4:00.0  GPU-71b2d9e8  0         16-31  0         16
@@ -151,6 +151,12 @@ Warnings follow the table when the placement wastes hardware:
 | `OMP_PROC_BIND/OMP_PLACES pin the threads of ranks ... to CPUs other ranks also use` | (CPU runs) Ranks share cores and OpenMP pins every rank's threads to the same ones: bind each rank to its own cores |
 
 A warning that holds on several nodes is printed once, with the number of other nodes.
+
+`mallard check` without an input makes the same checks before a run, under
+the job's launcher (`srun mallard check`, `mpirun -n 8 mallard check`), as
+`W-ENV-PLACEMENT` warnings, and adds what the build and the MPI library give
+the run: GPU-aware MPI, NCCL, unbound OpenMP threads
+([Checking an input](input_files.md#checking-an-input)).
 
 ## Multi-GPU scaling
 

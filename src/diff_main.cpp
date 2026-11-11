@@ -36,6 +36,7 @@
 #include "output_reader.h"
 #include "provenance.h"
 #include "remap.h"
+#include "report.h"
 
 namespace fs = std::filesystem;
 
@@ -43,7 +44,6 @@ namespace {
 
 using logging::count;
 using logging::format;
-using logging::item;
 
 constexpr int DIFFERENT = 1, TROUBLE = 3;
 constexpr uint8_t REMAP_DEGREE = 2;
@@ -54,10 +54,8 @@ struct Trouble : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
-/** @brief ✓ identical, ⚠ different within the tolerance (or not compared), ✗ beyond it. */
+/** @brief Identical, different within the tolerance (or not compared), or beyond it. */
 enum class Status { same, within, beyond };
-
-const char * mark(Status s) { return s == Status::same ? "✓" : s == Status::within ? "⚠" : "✗"; }
 
 Status worst(Status a, Status b) { return static_cast<int>(a) > static_cast<int>(b) ? a : b; }
 
@@ -175,7 +173,7 @@ Status status(const Stats & s, double tol) {
 struct Side {
     output::Contents c;
     size_t snapshot = 0;
-    json::Value provenance;
+    json::Value run;  ///< its run block
     std::shared_ptr<Mesh> mesh;   ///< its case's mesh, where needed and found
     std::vector<uint64_t> local;  ///< [global cell] local cell of mesh
     std::string mesh_from;        ///< where the mesh came from
@@ -268,10 +266,10 @@ class Quiet {
         std::streambuf * saved;
 };
 
-json::Value parsed_provenance(const output::Contents & c) {
-    if (c.provenance.empty()) return {};
+json::Value parsed_run(const output::Contents & c) {
+    if (c.run.empty()) return {};
     try {
-        return json::parse(c.provenance);
+        return json::parse(c.run);
     } catch (const std::exception &) {
         return {};
     }
@@ -292,9 +290,37 @@ std::string string_at(const json::Value & v, std::initializer_list<const char *>
     return p && p->type == json::Value::Type::STRING ? p->string : "";
 }
 
+/** @brief The block's files by kind and path as given, with their SHA-256 ("" if not hashed). */
+std::map<std::string, std::string> read_files(const json::Value & run) {
+    std::map<std::string, std::string> out;
+    const json::Value * files = at(run, {"files"});
+    if (!files || files->type != json::Value::Type::ARRAY) return out;
+    for (const json::Value & f : files->array) {
+        out[string_at(f, {"kind"}) + " " + string_at(f, {"path"})] = string_at(f, {"sha256"});
+    }
+    return out;
+}
+
+/** @brief Notes on the files the runs of A and B read that differ (SHA-256), or that only one of them read. */
+void read_files_notes(const json::Value & a, const json::Value & b, std::vector<std::string> & notes) {
+    if (!at(a, {"files"}) || !at(b, {"files"})) return;
+    const auto files_a = read_files(a), files_b = read_files(b);
+    for (const auto & [file, sha] : files_a) {
+        const auto other = files_b.find(file);
+        if (other == files_b.end()) {
+            notes.push_back("only the run of A read " + file);
+        } else if (!sha.empty() && !other->second.empty() && sha != other->second) {
+            notes.push_back("the runs of A and B read different " + file + " (SHA-256)");
+        }
+    }
+    for (const auto & [file, sha] : files_b) {
+        if (!files_a.contains(file)) notes.push_back("only the run of B read " + file);
+    }
+}
+
 /**
  * @brief The mesh of a file's case (collective): mesh_file, else the [mesh]
- *        table of the input its provenance records, with its [[periodic]]
+ *        table of the input its run block records, with its [[periodic]]
  *        entries; mesh files named relative to the run's directory.
  */
 void find_mesh(Side & s, const std::string & mesh_file) {
@@ -305,12 +331,12 @@ void find_mesh(Side & s, const std::string & mesh_file) {
                     "D solver; mallard --dim " + std::to_string(s.c.dim) + " diff ... runs the other";
         return;
     }
-    std::string text = string_at(s.provenance, {"input", "resolved"});
-    if (text.empty()) text = string_at(s.provenance, {"input", "text"});
+    std::string text = string_at(s.run, {"input", "resolved"});
+    if (text.empty()) text = string_at(s.run, {"input", "text"});
     Input recorded(Input::table_type{});
-    if (!text.empty()) recorded = parse_input_string(text, s.c.path + " (its provenance)");
+    if (!text.empty()) recorded = parse_input_string(text, s.c.path + " (its run block)");
     Input setup(Input::table_type{});
-    const std::string directory = string_at(s.provenance, {"run", "directory"});
+    const std::string directory = string_at(s.run, {"run", "directory"});
     std::string recorded_file;
     if (!mesh_file.empty()) {
         Input mesh(Input::table_type{});
@@ -326,14 +352,14 @@ void find_mesh(Side & s, const std::string & mesh_file) {
             if (file.is_relative() && !directory.empty()) file = fs::path(directory) / file;
             recorded_file = file.string();
             mesh.as_table()["filename"] = Input(recorded_file);
-            s.mesh_from = recorded_file + ", as its provenance records";
+            s.mesh_from = recorded_file + ", as its run block records";
         } else {
-            s.mesh_from = "the " + type + " mesh its provenance's input generates";
+            s.mesh_from = "the " + type + " mesh its run block's input generates";
         }
         setup.as_table()["mesh"] = mesh;
     } else {
-        s.no_mesh = s.provenance.is_null() ? "it has no provenance (files before Mallard 0.9), so no record of its mesh"
-                                           : "its provenance records no input";
+        s.no_mesh = s.run.is_null() ? "it has no run block (files before Mallard 0.9), so no record of its mesh"
+                                           : "its run block records no input";
         return;
     }
     if (recorded.contains("periodic")) setup.as_table()["periodic"] = recorded.at("periodic");
@@ -344,7 +370,7 @@ void find_mesh(Side & s, const std::string & mesh_file) {
             s.mesh_from.clear();
             return;
         }
-        const std::string sha = string_at(s.provenance, {"mesh", "sha256"});
+        const std::string sha = string_at(s.run, {"mesh", "sha256"});
         if (!sha.empty() && provenance::sha256_file(recorded_file) != sha) {
             s.no_mesh = "its mesh file " + recorded_file + " has changed since the run (its SHA-256 differs)";
             s.mesh_from.clear();
@@ -587,7 +613,7 @@ Side open_side(const std::string & path, const Selection & snapshot, const char 
                              "probe and CSV files");
     }
     s.snapshot = pick_snapshot(s.c, snapshot, which);
-    s.provenance = parsed_provenance(s.c);
+    s.run = parsed_run(s.c);
     return s;
 }
 
@@ -659,8 +685,9 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
     r.time = dt == 0.0 ? Status::same : dt <= r.tolerance.all * scale ? Status::within : Status::beyond;
     r.step = a.step() == b.step() ? Status::same : Status::within;
 
-    const std::string sha_a = string_at(a.provenance, {"mesh", "sha256"});
-    const std::string sha_b = string_at(b.provenance, {"mesh", "sha256"});
+    const std::string sha_a = string_at(a.run, {"mesh", "sha256"});
+    const std::string sha_b = string_at(b.run, {"mesh", "sha256"});
+    read_files_notes(a.run, b.run, r.notes);
     std::map<std::string, std::vector<double>> remapped;
     if (remap) {
         for (Side * s : {&a, &b}) {
@@ -691,7 +718,7 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
         }
         r.how = a.c.global_order ? "same_mesh" : "file_order";
         if (!sha_a.empty() && !sha_b.empty() && sha_a != sha_b) {
-            r.notes.push_back("the provenance of A and B records different mesh files (SHA-256) with the same cell "
+            r.notes.push_back("the run blocks of A and B record different mesh files (SHA-256) with the same cell "
                               "count; --remap compares them as different meshes");
         }
         if (!a.c.global_order) {
@@ -762,14 +789,31 @@ Comparison compare_files(Side & a, Side & b, const cli::Args & args) {
 // ---------------------------------------------------------------------------
 // Text
 
-std::string result_text(const Comparison & r) {
+using Kind = report::Column::Kind;
+
+/** @brief The status column's word for a comparison: ok identical, WARN within tolerance, ERROR beyond it. */
+report::Status level(Status s) {
+    return s == Status::same ? report::Status::OK : s == Status::within ? report::Status::WARNING : report::Status::ERROR;
+}
+
+std::string result_line(const Comparison & r) {
+    std::string what;
     switch (r.result) {
         case Status::same:
-            return r.restart ? "✓ identical: the same state, bit for bit" : "✓ identical: every value compared, bit for bit";
-        case Status::within: return "⚠ within tolerance: differences, none beyond it";
-        case Status::beyond: break;
+            what = r.restart ? "identical, the same state bit for bit" : "identical, every value compared bit for bit";
+            break;
+        case Status::within: what = "within tolerance, differences but none beyond it"; break;
+        case Status::beyond: {
+            std::vector<std::string> beyond;
+            for (const FieldResult & f : r.fields) {
+                if (f.result == Status::beyond) beyond.push_back(f.name);
+            }
+            what = "beyond tolerance" + (beyond.empty() ? std::string() : ": " + list_text(beyond));
+            break;
+        }
     }
-    return "✗ different: beyond tolerance";
+    return std::string("Result: ") + report::status_word(level(r.result)) + ", " + what +
+           (r.result == Status::beyond ? " (exit status 1)" : " (exit status 0)");
 }
 
 std::string side_text(const Side & s) {
@@ -794,149 +838,164 @@ std::string tolerance_text(const Tolerance & t) {
     return out + "; on max |B - A| / max |A| per field";
 }
 
-void print_fields(const Comparison & r) {
+void fields_section(report::Text & text, const Comparison & r) {
     std::string entries = "cell";
     if (!r.fields.empty()) entries = entry_name(r.fields.front().location);
-    logging::section("Fields", "|B - A| per " + entries + ", in the field's units");
-    std::vector<std::vector<std::string>> rows, relative_rows, located;
+    std::vector<report::Row> rows, relative_rows, located;
     bool vectors = false, problems = false;
+    report::Status s = report::Status::OK;
     for (const FieldResult & f : r.fields) {
+        const report::Status row = level(f.result);
+        s = report::worse(s, row);
         vectors = vectors || f.components > 1;
         if (!f.problem.empty()) {
             problems = true;
-            rows.push_back({mark(f.result), f.name, units_text(f.units), f.problem});
-            relative_rows.push_back({mark(f.result), f.name, "-", "-", "-", real(f.tol)});
+            rows.push_back({row, {f.name, units_text(f.units), f.problem}});
+            relative_rows.push_back({row, {f.name, "dimensionless", "-", "-", "-", real(f.tol)}});
             continue;
         }
-        const Stats & s = f.stats;
-        rows.push_back({mark(f.result), f.name, units_text(f.units), count(s.differing) + " of " + count(s.n),
-                        real(s.d.l1), real(s.d.l2), real(s.d.linf)});
-        relative_rows.push_back({mark(f.result), f.name, real(relative(s.d.l1, s.a.l1)), real(relative(s.d.l2, s.a.l2)),
-                                 real(relative_max(s)), real(f.tol)});
-        if (s.d.linf > 0.0) {
-            std::vector<std::string> row = {f.name, count(s.at)};
-            for (size_t d = 0; d < N_DIM; d++) row.push_back(f.has_x ? format("%.6g", f.x[d]) : "-");
-            // Enough digits to tell A from B
-            const auto values = [](const std::vector<double> & v, int digits) {
-                std::string out;
-                for (size_t k = 0; k < v.size(); k++) out += (k ? " " : "") + format("%.*g", digits, v[k]);
-                return v.size() > 1 ? "(" + out + ")" : out;
-            };
-            const int digits = values(f.a_at, 9) == values(f.b_at, 9) ? 17 : 9;
-            row.push_back(values(f.a_at, digits));
-            row.push_back(values(f.b_at, digits));
-            row.push_back(units_text(f.units));
-            located.push_back(std::move(row));
-        }
-    }
-    logging::table({"", "field", "units", "differing " + entries + "s", "L1", "L2", "Linf"}, rows);
-    logging::line("  L1, L2, Linf: mean, root mean square and max over the " + entries + "s, not weighted by volume;");
-    logging::line("  differing: values not bitwise equal. ✓ identical, ⚠ within tolerance, ✗ beyond it.");
-    if (vectors) logging::line("  Fields with several components: |B - A| is the magnitude of the difference vector.");
-    if (problems) logging::line("  Fields whose units or components differ are not compared.");
-
-    logging::section("Relative differences", "dimensionless: a norm of B - A over that of A");
-    logging::table({"", "field", "L1", "L2", "Linf", "tolerance on Linf"}, relative_rows);
-
-    if (located.empty()) return;
-    logging::section("Largest differences", "per field: the " + entries + " of max |B - A|");
-    std::vector<std::string> header = {"field", entries};
-    for (size_t d = 0; d < N_DIM; d++) header.push_back(std::string(1, "xyz"[d]) + " [m]");
-    header.insert(header.end(), {"A", "B", "units of A and B"});
-    logging::table(header, located);
-    if (std::any_of(r.fields.begin(), r.fields.end(), [](const FieldResult & f) { return f.stats.d.linf > 0.0 && !f.has_x; })) {
-        logging::line("  -: no cell coordinates (see the notes).");
-    }
-}
-
-void print_restart(const RestartResult & s) {
-    logging::section("Restart state", "bit for bit; provenance not compared");
-    std::vector<std::vector<std::string>> rows;
-    for (const Row & row : s.header) rows.push_back({mark(row.s), row.item, row.a, row.b});
-    logging::table({"", "header", "A", "B"}, rows);
-    if (!s.attributes.empty()) {
-        rows.clear();
-        for (const ArrayResult & e : s.attributes) {
-            const double d = difference(e.a, e.b);
-            rows.push_back({mark(e.s), e.name, std::isnan(e.a) ? "-" : format("%.17g", e.a),
-                            std::isnan(e.b) ? "-" : format("%.17g", e.b),
-                            e.problem.empty() ? real(d) : e.problem});
-        }
-        logging::line();
-        logging::table({"", "attribute", "A", "B", "|B - A|"}, rows);
-        logging::line("  Attributes are the solver's scalar state; their units are not recorded.");
-    }
-    std::vector<ArrayResult> arrays = s.arrays;
-    if (s.has_faces) arrays.push_back(s.faces);
-    if (!arrays.empty()) {
-        rows.clear();
-        for (const ArrayResult & e : arrays) {
-            if (!e.problem.empty()) {
-                rows.push_back({mark(e.s), e.name, e.problem});
-            } else {
-                rows.push_back({mark(e.s), e.name, count(e.stats.differing) + " of " + count(e.stats.n),
-                                real(e.stats.d.linf), real(relative_max(e.stats))});
+        const Stats & st = f.stats;
+        rows.push_back({row, {f.name, units_text(f.units), count(st.differing) + " of " + count(st.n), real(st.d.l1),
+                              real(st.d.l2), real(st.d.linf)}});
+        relative_rows.push_back({row, {f.name, "dimensionless", real(relative(st.d.l1, st.a.l1)),
+                                       real(relative(st.d.l2, st.a.l2)), real(relative_max(st)), real(f.tol)}});
+        if (st.d.linf > 0.0) {
+            for (size_t k = 0; k < f.a_at.size(); k++) {
+                // Enough digits to tell A from B
+                const int digits = format("%.9g", f.a_at[k]) == format("%.9g", f.b_at[k]) ? 17 : 9;
+                std::vector<std::string> cells = {f.a_at.size() > 1 ? f.name + " " + "xyz"[k] : f.name, count(st.at)};
+                for (size_t d = 0; d < N_DIM; d++) cells.push_back(f.has_x ? format("%.6g", f.x[d]) : "-");
+                cells.push_back(format("%.*g", digits, f.a_at[k]));
+                cells.push_back(format("%.*g", digits, f.b_at[k]));
+                cells.push_back(units_text(f.units));
+                located.push_back({report::Status::NONE, std::move(cells)});
             }
         }
-        logging::line();
-        logging::table({"", "array", "differing values", "Linf |B - A|", "Linf relative"}, rows);
-        logging::line("  Units not recorded; relative: max |B - A| over max |A|, dimensionless.");
+    }
+    text.section("Fields", s);
+    text.note("|B - A| per " + entries + ", in the field's units: L1, L2, Linf are its mean, root mean square and max "
+              "over the " + entries + "s, not weighted by volume; differing: values not bitwise equal.");
+    if (vectors) text.note("Fields with several components: |B - A| is the magnitude of the difference vector.");
+    if (problems) text.note("Fields whose units or components differ are not compared.");
+    text.table({"field", {"units", Kind::UNITS}, "differing " + entries + "s", {"L1", Kind::VALUE},
+                {"L2", Kind::VALUE}, {"Linf", Kind::VALUE}},
+               rows);
+
+    text.section("Relative differences", s);
+    text.note("A norm of B - A over the same norm of A; a field passes if its Linf is at most its tolerance.");
+    text.table({"field", {"units", Kind::UNITS}, {"L1", Kind::VALUE}, {"L2", Kind::VALUE}, {"Linf", Kind::VALUE},
+                {"tolerance on Linf", Kind::VALUE}},
+               relative_rows);
+
+    if (located.empty()) return;
+    text.section("Largest differences");
+    text.note("Per field, the " + entries + " of max |B - A| and both values there" +
+              (vectors ? std::string(", a row per component of a vector") : std::string()) + ".");
+    std::vector<report::Column> header = {"field", entries};
+    for (size_t d = 0; d < N_DIM; d++) header.push_back(std::string(1, "xyz"[d]) + " [m]");
+    header.insert(header.end(), {{"A", Kind::VALUE}, {"B", Kind::VALUE}, {"units", Kind::UNITS}});
+    text.table(header, located, false);
+    if (std::any_of(r.fields.begin(), r.fields.end(), [](const FieldResult & f) { return f.stats.d.linf > 0.0 && !f.has_x; })) {
+        text.note("-: no cell coordinates (see the notes).");
     }
 }
 
-void print_text(const Comparison & r, const Side & a, const Side & b) {
-    logging::section("mallard diff", mark(r.result));
-    item("A", side_text(a));
-    item("B", side_text(b));
-    item("Compared", how_text(r, a));
-    if (!a.mesh_from.empty()) item("Mesh of A", a.mesh_from);
-    if (!b.mesh_from.empty()) item("Mesh of B", b.mesh_from);
-    item("Tolerance", tolerance_text(r.tolerance));
-    item("Result", result_text(r));
+void restart_section(report::Text & text, const RestartResult & st) {
+    report::Status s = report::Status::OK;
+    std::vector<report::Row> header;
+    for (const Row & row : st.header) {
+        s = report::worse(s, level(row.s));
+        header.push_back({level(row.s), {row.item, row.a, row.b}});
+    }
+    std::vector<report::Row> attributes;
+    for (const ArrayResult & e : st.attributes) {
+        s = report::worse(s, level(e.s));
+        const double d = difference(e.a, e.b);
+        attributes.push_back({level(e.s), {e.name, std::isnan(e.a) ? "-" : format("%.17g", e.a),
+                                           std::isnan(e.b) ? "-" : format("%.17g", e.b),
+                                           e.problem.empty() ? real(d) : e.problem}});
+    }
+    std::vector<ArrayResult> all = st.arrays;
+    if (st.has_faces) all.push_back(st.faces);
+    std::vector<report::Row> arrays;
+    for (const ArrayResult & e : all) {
+        s = report::worse(s, level(e.s));
+        if (!e.problem.empty()) {
+            arrays.push_back({level(e.s), {e.name, e.problem}});
+        } else {
+            arrays.push_back({level(e.s), {e.name, count(e.stats.differing) + " of " + count(e.stats.n),
+                                           real(e.stats.d.linf), real(relative_max(e.stats))}});
+        }
+    }
+    text.section("Restart state", s);
+    text.note("Bit for bit; the run and snapshot blocks are not compared.");
+    text.table({"header", "A", "B"}, header);
+    if (!attributes.empty()) {
+        text.blank();
+        text.note("Attributes are the solver's scalar state; their units are not recorded.");
+        text.table({"attribute", "A", "B", "|B - A|"}, attributes);
+    }
+    if (!arrays.empty()) {
+        text.blank();
+        text.note("Units not recorded; relative: max |B - A| over max |A|, dimensionless.");
+        text.table({"array", "differing values", "Linf |B - A|", "Linf relative"}, arrays);
+    }
+}
 
-    logging::section("Time");
-    std::vector<std::vector<std::string>> rows = {
-        {mark(r.time), "t [s]", seconds(a.t()), seconds(b.t()), real(difference(a.t(), b.t()))}};
+report::Text diff_text(const Comparison & r, const Side & a, const Side & b, const bool color) {
+    report::Text text(color);
+    text.section("Diff", level(r.result));
+    text.line(result_line(r));
+    text.line("A: " + side_text(a));
+    text.line("B: " + side_text(b));
+    text.line("Compared: " + how_text(r, a));
+    if (!a.mesh_from.empty()) text.line("Mesh of A: " + a.mesh_from);
+    if (!b.mesh_from.empty()) text.line("Mesh of B: " + b.mesh_from);
+    text.line("Tolerance: " + tolerance_text(r.tolerance));
+
+    std::vector<report::Row> rows = {
+        {level(r.time), {"t", seconds(a.t()), seconds(b.t()), real(difference(a.t(), b.t())), "s"}}};
+    report::Status time = level(r.time);
     const auto step = [](int64_t s) { return s >= 0 ? std::to_string(s) : std::string("-"); };
     if (a.step() >= 0 || b.step() >= 0) {
         const bool both = a.step() >= 0 && b.step() >= 0;
-        rows.push_back({both ? mark(r.step) : "⚠", "step", step(a.step()), step(b.step()),
-                        both ? std::to_string(std::abs(b.step() - a.step())) : "-"});
+        const report::Status row = both ? level(r.step) : report::Status::WARNING;
+        time = report::worse(time, row);
+        rows.push_back({row, {"step", step(a.step()), step(b.step()),
+                              both ? std::to_string(std::abs(b.step() - a.step())) : "-", "steps"}});
     }
-    logging::table({"", "quantity", "A", "B", "|B - A|"}, rows);
-    logging::line("  t compares with the default tolerance, relative to the larger |t|; steps that differ are a warning.");
+    text.section("Time", time);
+    text.note("t compares with the default tolerance, relative to the larger |t|; steps that differ are a warning.");
+    text.table({"quantity", {"A", Kind::VALUE}, {"B", Kind::VALUE}, {"|B - A|", Kind::VALUE}, {"units", Kind::UNITS}},
+               rows);
 
     if (r.remapped) {
         const remap::Report & p = r.remap.report;
-        logging::section("Remap", "conservative, degree 2, limited");
-        logging::table({"B cells", "A cells", "integrals kept to", "A cells partly covered", "A cells outside B"},
-                       {{count(p.n_source), count(p.n_target), format("%.1e", r.remap.kept), count(p.n_partial),
-                         count(p.n_nearest)}});
-        logging::line("  integrals kept to: max |integral on A - on B| over the integral of |B|, dimensionless.");
-        logging::line("  A cells outside B's mesh take the nearest B cell's value. Remapped results differ from");
-        logging::line("  A by the remap's own error too, so a remap is never ✓ identical.");
+        text.section("Remap", report::Status::WARNING);
+        text.note("Conservative, degree 2, limited. Remapped results differ from A by the remap's own error too, so a "
+                  "remap is never identical. A cells outside B's mesh take the nearest B cell's value.");
+        text.table({"B cells", "A cells", "integrals kept to", "A cells partly covered", "A cells outside B"},
+                   {{report::Status::NONE, {count(p.n_source), count(p.n_target), format("%.1e", r.remap.kept),
+                                            count(p.n_partial), count(p.n_nearest)}}},
+                   false);
+        text.note("integrals kept to: max |integral on A - on B| over the integral of |B|, dimensionless.");
     }
 
-    print_fields(r);
+    fields_section(text, r);
     if (!r.only_a.empty() || !r.only_b.empty()) {
-        logging::section("Fields in one file only", r.restart ? "✗ a different state" : "⚠ not compared");
-        if (!r.only_a.empty()) item("Only in A", list_text(r.only_a));
-        if (!r.only_b.empty()) item("Only in B", list_text(r.only_b));
+        text.section("Fields in one file only", r.restart ? report::Status::ERROR : report::Status::WARNING);
+        text.note(r.restart ? "A different state." : "Not compared.");
+        if (!r.only_a.empty()) text.line("Only in A: " + list_text(r.only_a));
+        if (!r.only_b.empty()) text.line("Only in B: " + list_text(r.only_b));
     }
-    if (r.restart) print_restart(r.state);
+    if (r.restart) restart_section(text, r.state);
     if (!r.notes.empty()) {
-        logging::section("Notes");
-        for (const std::string & n : r.notes) item("Note", n);
+        text.section("Notes");
+        for (const std::string & n : r.notes) text.line(n);
     }
-    logging::section("Result", mark(r.result));
-    std::vector<std::string> beyond;
-    for (const FieldResult & f : r.fields) {
-        if (f.result == Status::beyond) beyond.push_back(f.name);
-    }
-    std::string line = result_text(r);
-    if (!beyond.empty()) line += " (" + list_text(beyond) + ")";
-    item("Result", line);
-    item("Exit status", r.result == Status::beyond ? "1" : "0");
+    text.blank();
+    text.line(result_line(r));
+    return text;
 }
 
 // ---------------------------------------------------------------------------
@@ -954,9 +1013,7 @@ std::string numbers_json(const std::vector<double> & list) {
     return out + "]";
 }
 
-const char * status_name(Status s) {
-    return s == Status::same ? "identical" : s == Status::within ? "within_tolerance" : "beyond_tolerance";
-}
+const char * status_name(Status s) { return report::status_name(level(s)); }
 
 std::string norms_json(const Norms & n) { return json::Object().add("l1", n.l1).add("l2", n.l2).add("linf", n.linf).str(); }
 
@@ -1109,7 +1166,7 @@ int diff_main(const cli::Args & args) {
         if (fmt == "json") {
             std::cout << comparison_json(r, a, b) << "\n";
         } else {
-            print_text(r, a, b);
+            diff_text(r, a, b, logging::color_stdout()).print();
         }
         const int status = r.result == Status::beyond ? DIFFERENT : 0;
         a.mesh.reset();

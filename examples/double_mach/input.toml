@@ -73,6 +73,7 @@ order = 5
 
 [physics]
 type = "euler"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 1.0
 T_ref = 1.0
@@ -84,4 +85,4 @@ check_interval = 200
 [[write_data]]
 prefix = "./solut/dmr"
 time_interval = 0.002
-variables = ["RHO", "U_X", "U_Y", "P"]
+fields = ["RHO", "U_X", "U_Y", "P", "MACH", "SCHLIEREN"]

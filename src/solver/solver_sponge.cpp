@@ -123,7 +123,8 @@ void Solver::init_sponges(region::Regions & regions) {
     Kokkos::deep_copy(sponge_target, h_target);
     if (max_strength > 0.0) sponge_dt_max = static_cast<rtype>(1.0 / max_strength);
     source_summary.emplace_back("Sponges", std::to_string(sponges.size()) + ", " + logging::count(n_cells) +
-                                               " cells, max strength " + logging::real(max_strength));
+                                               " cells, max strength " +
+                                               units::with(logging::real(max_strength), "1/s"));
 }
 
 void Solver::apply_sponges(const State & solution, const State & rhs) {
@@ -151,8 +152,8 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
         Kokkos::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), transverse);
     }
     // Inlet targets at the end of the step, whose change enters the incoming wave
-    for (auto & inflow : inflows) inflow->fill(double(t + dt), boundary_data.char_target_next);
     timed_inlets.fill(double(t + dt), boundary_data.char_target_next);
+    for (auto & inflow : inflows) inflow->fill(double(t + dt), boundary_data.char_target_next);
     const CharacteristicStateFunctor state{boundary_data,
                                            mesh->face_normals,
                                            face_solution,

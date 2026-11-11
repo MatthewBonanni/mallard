@@ -77,6 +77,7 @@ limiter = "none"
 
 [physics]
 type = "navier_stokes"
+units = "nondimensional"
 gamma = 1.4
 p_ref = 17.857142857142858
 T_ref = 1.0
@@ -113,7 +114,7 @@ file = "forces_top.csv"
 [[write_data]]
 prefix = "./stats/channel"
 time_interval = 50.0
-variables = ["MEAN_*", "COV_*"]
+fields = ["MEAN_*", "COV_*"]
 
 [[write_data]]
 prefix = "./restart/channel"

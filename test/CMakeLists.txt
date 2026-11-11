@@ -3,6 +3,7 @@
 set(MALLARD_TEST_SOURCES
     test_main.cpp
     divergence_report_test.cpp
+    derived_fields_test.cpp
     scratch.cpp
     common_math_test.cpp
     kexpr_test.cpp
@@ -37,6 +38,7 @@ set(MALLARD_TEST_SOURCES
     numerics_preset_test.cpp
     tfles_test.cpp
     check_test.cpp
+    run_report_test.cpp
     error_messages_test.cpp
     synthetic_inflow_test.cpp
     provenance_test.cpp
@@ -45,6 +47,8 @@ set(MALLARD_TEST_SOURCES
     field_units_test.cpp
     format_compat_test.cpp
     output_reader_test.cpp
+    post_extract_test.cpp
+    post_convergence_test.cpp
     wall_model_test.cpp
     units_test.cpp
     periodic_pairs_test.cpp
@@ -64,6 +68,7 @@ if(Mallard_DIM EQUAL 2)
     viscous_test.cpp
     restart_test.cpp
     run_control_test.cpp
+    triggers_test.cpp
     step_control_test.cpp
     boundary_test.cpp
     boundary_types_test.cpp
@@ -117,12 +122,11 @@ FetchContent_Declare(
   googletest
   GIT_REPOSITORY https://github.com/google/googletest.git
   GIT_TAG v1.18.0
-  ${MALLARD_THIRD_PARTY}
+  SYSTEM
 )
 # Test-only: `cmake --install` leaves GoogleTest out
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
-mallard_system_headers(gtest gmock)
 
 target_link_libraries(mallard-test PRIVATE gtest)
 

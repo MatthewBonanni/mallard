@@ -32,7 +32,7 @@ std::string mesh_file(const std::string & prefix) { return prefix + "_mesh.h5"; 
 std::string file_name(const std::string & path) { return std::filesystem::path(path).filename().string(); }
 
 void write_xdmf_file(const std::string & filename, const std::string & grids) {
-    std::ofstream out(filename);
+    std::ofstream out(partial_name(filename));
     if (!out.good()) throw cannot_write("the XDMF file", filename);
     out << "<?xml version=\"1.0\" ?>\n"
         << provenance::xml_comment() << "\n"
@@ -41,11 +41,14 @@ void write_xdmf_file(const std::string & filename, const std::string & grids) {
         << "  <Domain>\n"
         << grids << "  </Domain>\n"
         << "</Xdmf>\n";
+    out.close();
+    if (!out) throw cannot_write("the XDMF file", filename);
+    publish_file("the XDMF file", filename);
 }
 
 } // namespace
 
-std::string DataWriter::xdmf_grid(const std::string & stem, double t, const std::string & indent) const {
+std::string DataWriter::xdmf_grid(const std::string & stem, const IndexEntry & entry, const std::string & indent) const {
     const std::string mesh_h5 = file_name(mesh_file(prefix));
     const std::string data_h5 = file_name(stem) + ".h5";
     const std::string real = "NumberType=\"Float\" Precision=\"" + std::to_string(sizeof(rtype)) + "\" Format=\"HDF\"";
@@ -53,8 +56,9 @@ std::string DataWriter::xdmf_grid(const std::string & stem, double t, const std:
     std::ostringstream out;
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     out << indent << "<Grid Name=\"" << file_name(stem) << "\" GridType=\"Uniform\">\n"
-        << indent << "  <Time Value=\"" << t << "\"/>\n"
-        << indent << "  <Topology TopologyType=\"Mixed\" NumberOfElements=\"" << n_cells << "\">\n"
+        << indent << "  <Time Value=\"" << entry.t << "\"/>\n";
+    if (entry.step >= 0) out << indent << "  <Information Name=\"step\" Value=\"" << entry.step << "\"/>\n";
+    out << indent << "  <Topology TopologyType=\"Mixed\" NumberOfElements=\"" << n_cells << "\">\n"
         << indent << "    <DataItem Dimensions=\"" << hdf5_topology_size
         << "\" NumberType=\"Int\" Precision=\"8\" Format=\"HDF\">" << mesh_h5 << ":/cells/topology</DataItem>\n"
         << indent << "  </Topology>\n"
@@ -78,12 +82,12 @@ std::string DataWriter::xdmf_grid(const std::string & stem, double t, const std:
     return out.str();
 }
 
-void DataWriter::write_xdmf(const std::string & stem, const std::vector<std::pair<rtype, std::string>> & series) const {
-    write_xdmf_file(stem + ".xmf", xdmf_grid(stem, double(series.back().first), "    "));
+void DataWriter::write_xdmf(const std::string & stem, const Index & series) const {
+    write_xdmf_file(stem + ".xmf", xdmf_grid(stem, series.back(), "    "));
     std::string grids =
         "    <Grid Name=\"" + file_name(prefix) + "\" GridType=\"Collection\" CollectionType=\"Temporal\">\n";
-    for (const auto & [t, file] : series) {
-        grids += xdmf_grid(std::filesystem::path(file).replace_extension().string(), double(t), "      ");
+    for (const auto & e : series) {
+        grids += xdmf_grid(std::filesystem::path(e.file).replace_extension().string(), e, "      ");
     }
     grids += "    </Grid>\n";
     write_xdmf_file(prefix + ".xmf", grids);
@@ -93,21 +97,30 @@ void DataWriter::resume_xdmf(rtype t) {
     // Keep the snapshots of the previous run's series up to the restart time
     std::ifstream in(prefix + ".xmf");
     const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();
-    std::string line, stem;
+    // Each uniform grid: its time, step (if recorded) and the file of its fields
+    std::string line;
+    bool in_grid = false;
+    IndexEntry entry;
     while (std::getline(in, line)) {
-        const size_t g = line.find("<Grid Name=\"");
-        if (g != std::string::npos && line.find("GridType=\"Uniform\"") != std::string::npos) {
-            const size_t g0 = g + 12;
-            stem = line.substr(g0, line.find('"', g0) - g0);
+        if (line.find("<Grid Name=\"") != std::string::npos && line.find("GridType=\"Uniform\"") != std::string::npos) {
+            in_grid = true;
+            entry = IndexEntry{};
             continue;
         }
-        const size_t a = line.find("<Time Value=\"");
-        if (a == std::string::npos || stem.empty()) continue;
-        const double t_entry = std::stod(line.substr(a + 13));
-        if (t_entry <= static_cast<double>(t) * (1.0 + 1.0e-12) + 1.0e-300) {
-            history.emplace_back(t_entry, (dir / (stem + ".h5")).string());
+        if (!in_grid) continue;
+        if (const size_t a = line.find("<Time Value=\""); a != std::string::npos) {
+            entry.t = std::stod(line.substr(a + 13));
+        } else if (const size_t s = line.find("<Information Name=\"step\" Value=\""); s != std::string::npos) {
+            entry.step = std::stoll(line.substr(s + sizeof("<Information Name=\"step\" Value=\"") - 1));
+        } else if (const size_t f = line.find(":/fields/"); f != std::string::npos && entry.file.empty()) {
+            const size_t start = line.rfind('>', f) + 1;
+            entry.file = (dir / line.substr(start, f - start)).string();
+        } else if (line.find("</Grid>") != std::string::npos) {
+            in_grid = false;
+            if (!entry.file.empty() && entry.t <= static_cast<double>(t) * (1.0 + 1.0e-12) + 1.0e-300) {
+                history.push_back(entry);
+            }
         }
-        stem.clear();
     }
 }
 
@@ -200,10 +213,11 @@ void DataWriter::write_hdf5_mesh() {
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
-    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
+    Handle file(H5Fcreate(partial_name(filename).c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose,
+                "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-        write_strings_attribute(root, "provenance", {provenance});
+        write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
         write_strings_attribute(root, "format", {MESH_FORMAT});
         write_int_attribute(root, "version", static_cast<int>(file_format::HDF5_OUTPUT.version));
         write_int_attribute(root, "dimension", N_DIM);
@@ -223,7 +237,7 @@ void DataWriter::write_hdf5_mesh() {
     }
 }
 
-void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t, const Values & snapshot) {
+void DataWriter::write_hdf5(const std::string & stem, const Block & meta, const Values & snapshot) {
     const std::lock_guard<std::mutex> lock(h5::mutex());
     const bool distributed = mesh->n_global_cells > 0;
     const uint32_t n_owned = mesh->n_owned();
@@ -247,16 +261,22 @@ void DataWriter::write_hdf5(const std::string & stem, uint64_t step, rtype t, co
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
-    Handle file(H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
+    Handle file(H5Fcreate(partial_name(filename).c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose,
+                "creating " + filename);
     {
         Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
-        write_strings_attribute(root, "provenance", {provenance});
+        write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
         write_strings_attribute(root, "format", {SOLUTION_FORMAT});
         write_int_attribute(root, "version", static_cast<int>(file_format::HDF5_OUTPUT.version));
         write_int_attribute(root, "dimension", N_DIM);
-        write_attribute(root, "step", step);
-        write_attribute(root, "time", double(t));
+        write_attribute(root, "step", static_cast<uint64_t>(meta.step));
+        write_attribute(root, "time", meta.time);
         write_strings_attribute(root, "mesh", {file_name(mesh_file(prefix))});
+    }
+    if (snapshot_blocks) {
+        const std::string text = meta.json();
+        put_string_row(file, snapshot_block::DATASET, 1, 0, comm::is_root() || !distributed, text,
+                       snapshot_block::dataset_width(text.size()), dxpl);
     }
     Handle group(H5Gcreate2(file, "fields", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "H5Gcreate2");
     std::vector<rtype> column;
@@ -280,7 +300,7 @@ bool have_hdf5_deflate() { return false; }
 
 void DataWriter::write_hdf5_mesh() { throw std::logic_error("DataWriter: HDF5 output without HDF5"); }
 
-void DataWriter::write_hdf5(const std::string &, uint64_t, rtype, const Values &) {
+void DataWriter::write_hdf5(const std::string &, const Block &, const Values &) {
     throw std::logic_error("DataWriter: HDF5 output without HDF5");
 }
 
