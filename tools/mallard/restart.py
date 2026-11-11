@@ -13,6 +13,7 @@ import numpy as np
 
 MAGIC = b"MALLARD-RESTART\0"
 VERSIONS = range(2, 8)
+FACE_WIDTH = 2  # values per characteristic boundary face (RestartFaces::WIDTH)
 
 
 @dataclass
@@ -132,7 +133,7 @@ def write(path, fields, step=0, t=0.0, attributes=None, arrays=None, real_size=8
             f.write(struct.pack("<Q", len(attributes)))
             f.write(b"".join(name(k) + struct.pack("<d", v) for k, v in attributes.items()))
         if version >= 6:
-            f.write(struct.pack("<QIIQQ", 0, 0, 0, 0, len(arrays)))
+            f.write(struct.pack("<QIIQQ", 0, FACE_WIDTH, 0, 0, len(arrays)))
             for k, v in arrays.items():
                 v = np.ascontiguousarray(v, dtype="<f8").ravel()
                 f.write(name(k) + struct.pack("<Q", v.size) + v.tobytes())

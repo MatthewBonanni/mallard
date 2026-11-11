@@ -1,6 +1,6 @@
 """Runs a small periodic box with each given mallard executable and checks that tools/mallard/restart.py and the
-tools built on it read the restart files it writes (uncompressed and compressed), so that a new restart format
-version fails here until the reader learns it:
+tools built on it read the restart files it writes (also compressed, in builds with zlib), so that a new restart
+format version fails here until the reader learns it:
 
 - read: compressed and uncompressed files hold the same values; written back by restart.write, a file is bitwise
   the original for mallard diff;
@@ -25,7 +25,7 @@ N = (8, 6, 4)
 L = (2 * np.pi, 3.0, 2.0)
 
 
-def case(dim):
+def case(dim, zlib):
     z = " + 0.4 * z" if dim == 3 else ""
     mesh = "".join(f"N{a} = {n}\nL{a} = {length!r}\n" for a, n, length in zip("xyz", N[:dim], L[:dim]))
     periodic = "".join(f'[[periodic]]\nzones = ["{a}", "{b}"]\n'
@@ -59,25 +59,25 @@ products = ["U_X*P"]
 prefix = "plain"
 format = "restart"
 interval = 4
-[[write_data]]
+""" + ("""[[write_data]]
 prefix = "zlib"
 format = "restart"
 compression = "zlib"
 chunk_cells = 20
 interval = 4
-"""
+""" if zlib else "")
 
 
-def gmsh_box(path, dim):
-    """The generated cartesian box of case(3) as an ASCII Gmsh 2.2 mesh of hexahedra."""
-    n = N[:dim]
+def gmsh_box(path):
+    """The generated cartesian box of case(3, ...) as an ASCII Gmsh 2.2 mesh of hexahedra."""
+    n = N
     axes = [np.linspace(0.0, length, m + 1) for length, m in zip(L, n)]
     node = np.arange(np.prod([m + 1 for m in n])).reshape([m + 1 for m in n]) + 1
     x, y, z = np.meshgrid(*axes, indexing="ij")
     with open(path, "w") as f:
         f.write("$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n")
         f.write(f"{node.size}\n")
-        for i, p in zip(node.ravel(), zip(x.ravel(), y.ravel(), z.ravel())):
+        for i, p in zip(node.ravel(), np.stack([x.ravel(), y.ravel(), z.ravel()], axis=1).tolist()):
             f.write(f"{i} {p[0]!r} {p[1]!r} {p[2]!r}\n")
         f.write(f"$EndNodes\n$Elements\n{np.prod(n)}\n")
         e = 0
@@ -97,46 +97,57 @@ def check(mallard):
         def path(name):
             return os.path.join(work, name)
 
-        def run(*args, **kwargs):
-            return subprocess.run([*map(str, args)], cwd=work, check=True, capture_output=True, text=True, **kwargs)
+        def run(*args, check=True):
+            done = subprocess.run([*map(str, args)], cwd=work, capture_output=True, text=True)
+            if check and done.returncode:
+                raise SystemExit(f"{' '.join(map(str, args))} exited with {done.returncode}:\n{done.stdout}{done.stderr}")
+            return done
 
         def tool(name, *args):
             return run(sys.executable, os.path.join(ROOT, "tools", name), *args)
 
-        with open(path("input.toml"), "w") as f:
-            f.write(case(dim))
-        run(mallard, "-i", "input.toml", "--kokkos-num-threads=2")
+        def solve(zlib):
+            with open(path("input.toml"), "w") as f:
+                f.write(case(dim, zlib))
+            return run(mallard, "-i", "input.toml", "--kokkos-num-threads=2", check=not zlib)
+
+        zlib = "Mallard_ENABLE_ZLIB" not in solve(True).stderr
+        if not zlib:
+            solve(False)
         plain = restart.read(path("plain_000004.restart"))
-        zlib = restart.read(path("zlib_000004.restart"))
-        assert zlib.chunk_cells == 20 and plain.chunk_cells == 0, (zlib.chunk_cells, plain.chunk_cells)
         assert plain.n_cells == np.prod(N[:dim]) and plain.step == 4 and plain.arrays and plain.attributes
-        assert (plain.names, plain.t, plain.attributes) == (zlib.names, zlib.t, zlib.attributes)
-        assert np.array_equal(plain.values, zlib.values)
-        assert all(np.array_equal(plain.arrays[k], zlib.arrays[k]) for k in plain.arrays)
+        latest = "plain_000004.restart"
+        if zlib:
+            latest = "zlib_000004.restart"
+            compressed = restart.read(path(latest))
+            assert compressed.chunk_cells == 20 and plain.chunk_cells == 0
+            assert (plain.names, plain.t, plain.attributes) == (compressed.names, compressed.t, compressed.attributes)
+            assert np.array_equal(plain.values, compressed.values)
+            assert all(np.array_equal(plain.arrays[k], compressed.arrays[k]) for k in plain.arrays)
 
         restart.write(path("rewritten.restart"), plain.fields, plain.step, plain.t, plain.attributes, plain.arrays,
                       plain.real_size)
         run(mallard, "diff", "plain_000004.restart", "rewritten.restart")
 
-        tool("setup/tile_restart.py", "zlib_000004.restart", N[0], 2, "tiled.restart")
+        tool("setup/tile_restart.py", latest, N[0], 2, "tiled.restart")
         tiled = restart.read(path("tiled.restart"))
         assert tiled.names == [n for n in plain.names if n.startswith("RHO")]
         assert all(np.array_equal(tiled[n], np.tile(plain[n], 2)) for n in tiled.names)
         run(mallard, "info", "tiled.restart")
 
         if dim == 3:
-            gmsh_box(path("box.msh"), dim)
-            tool("setup/interpolate_restart.py", "box.msh", "zlib_000004.restart", "box.msh", "moved.restart")
+            gmsh_box(path("box.msh"))
+            tool("setup/interpolate_restart.py", "box.msh", latest, "box.msh", "moved.restart")
             moved = restart.read(path("moved.restart"))
             assert (moved.names, moved.step, moved.t, moved.attributes) == \
                 (plain.names, plain.step, plain.t, plain.attributes)
             assert np.allclose(moved.values, plain.values, rtol=1e-12, atol=0.0)
             run(mallard, "info", "moved.restart")
 
-        tool("post/insitu_statistics.py", "spectra", "input.toml", "zlib_000004.restart", "-o", "from_restart.csv")
+        tool("post/insitu_statistics.py", "spectra", "input.toml", latest, "-o", "from_restart.csv")
         tool("post/insitu_statistics.py", "compare", "spectra.csv", "from_restart.csv", "--tol", "1e-10")
-    print(f"restart files of {mallard} ({dim}D, version {plain.version}): read by tools/mallard/restart.py, "
-          f"tile_restart.py{', interpolate_restart.py' if dim == 3 else ''} and insitu_statistics.py")
+    print(f"restart files of {mallard} ({dim}D, version {plain.version}{', compressed too' if zlib else ''}): read by "
+          f"tools/mallard/restart.py, tile_restart.py{', interpolate_restart.py' if dim == 3 else ''} and insitu_statistics.py")
 
 
 def main():
