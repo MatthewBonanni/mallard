@@ -570,12 +570,12 @@ TEST(RegionSnapshotsTest, IsosurfacesWriteTheElementsExtractedAtEachWrite) {
     const std::string dir = fresh_dir("isosurface");
     const std::string front = "{type = \"isosurface\", field = \"RHO\", value = 1.05}";
     const std::string variables = "fields = [\"RHO\", \"P\"]\ninterval = 2\n";
-    std::string writers = "[regions]\nfront = " + front + "\n[[write_data]]\nprefix = \"" + dir +
-                          "/v\"\nformat = \"vtu\"\nregion = \"front\"\n" + variables + "[[probes]]\nname = \"f\"\n"
-                          "region = \"front\"\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/f.csv\"\n" +
+    std::string writers = "[regions]\nflame = " + front + "\n[[write_data]]\nprefix = \"" + dir +
+                          "/v\"\nformat = \"vtu\"\nregion = \"flame\"\n" + variables + "[[probes]]\nname = \"f\"\n"
+                          "region = \"flame\"\nreductions = [\"integral\"]\nreductions_file = \"" + dir + "/f.csv\"\n" +
                           variables;
 #ifdef Mallard_HAS_HDF5
-    writers += "[[write_data]]\nprefix = \"" + dir + "/k\"\nformat = \"vtkhdf\"\nregion = \"front\"\n" + variables;
+    writers += "[[write_data]]\nprefix = \"" + dir + "/k\"\nformat = \"vtkhdf\"\nregion = \"flame\"\n" + variables;
 #endif
     run_case(box_case(N_DIM == 3 ? "cartesian_tet" : "cartesian_tri", "type = \"MUSCL\"\n", writers,
                       "n_steps = 4\ndt = 2.0e-2\n"));
@@ -624,17 +624,56 @@ TEST(RegionSnapshotsTest, IsosurfacesWriteTheElementsExtractedAtEachWrite) {
     }
 }
 
-#ifdef Mallard_HAS_HDF5
 TEST(RegionSnapshotsTest, RegionsOfTheSolutionDoNotDependOnTheRankCount) {
-    if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "VTKHDF on several ranks needs parallel HDF5";
     const std::string dir = fresh_dir("solution_ranks");
     const std::string input = box_case(N_DIM == 3 ? "cartesian_tet" : "cartesian_tri", "type = \"MUSCL\"\n", "",
                                        "n_steps = 4\ndt = 2.0e-2\n");
     const std::string dense = "region = {type = \"where\", condition = \"RHO > 1.05\"}\n";
+    const std::string front = "region = {type = \"isosurface\", field = \"RHO\", value = 1.05}\n";
     const std::string fields = "interval = 2\nfields = [\"RHO\", \"P\"]\n";
+    {
+        // The pieces of the ranks hold the serial snapshot's cells; the isosurface's file is the serial one
+        auto with = [&](const std::string & sub) {
+            return input + "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/w\"\nformat = \"vtu\"\n" + fields + dense +
+                   "[[write_data]]\nprefix = \"" + dir + "/" + sub + "/f\"\nformat = \"vtu\"\n" + fields + front;
+        };
+        Solver distributed;
+        distributed.init(parse_toml(with("d")));
+        distributed.run();
+        const bool pieces = distributed.get_mesh()->n_global_cells > 0;
+        Solver serial;
+        serial.set_distributed(false);
+        serial.init(parse_toml(with("s")));
+        serial.run();
+        comm::barrier();
+        if (comm::is_root()) {
+            for (const char * step : {"_000000", "_000002", "_000004"}) {
+                const std::string f = read_all(dir + "/s/f" + std::string(step) + ".vtp");
+                EXPECT_GT(f.size(), 500u) << step;
+                EXPECT_EQ(without_run_metadata(read_all(dir + "/d/f" + std::string(step) + ".vtp")), without_run_metadata(f))
+                    << step;
+                std::multiset<rtype> serial_fractions, distributed_fractions;
+                for (rtype v : as<rtype>(appended_array(read_all(dir + "/s/w" + std::string(step) + ".vtu"), "REGION_FRACTION"))) {
+                    serial_fractions.insert(v);
+                }
+                for (int r = 0; r < (pieces ? comm::size() : 1); r++) {
+                    std::ostringstream piece;
+                    piece << dir << "/d/w" << step;
+                    if (pieces) piece << "_p" << std::setw(4) << std::setfill('0') << r;
+                    for (rtype v : as<rtype>(appended_array(read_all(piece.str() + ".vtu"), "REGION_FRACTION"))) {
+                        distributed_fractions.insert(v);
+                    }
+                }
+                EXPECT_GT(serial_fractions.size(), 4u) << step;
+                EXPECT_EQ(distributed_fractions, serial_fractions) << step << " on " << comm::size() << " ranks";
+            }
+        }
+        comm::barrier();
+    }
+#ifdef Mallard_HAS_HDF5
+    if (comm::size() > 1 && !have_parallel_hdf5()) return;
     expect_vtkhdf_output_matches_serial(input, fields + "series = true\n" + dense, dir + "/series", {""});
     expect_vtkhdf_output_matches_serial(input, fields + dense, dir + "/files", {"_000000", "_000002", "_000004"});
-    expect_vtkhdf_output_matches_serial(input, fields + "region = {type = \"isosurface\", field = \"RHO\", value = 1.05}\n",
-                                        dir + "/front", {""});
-}
+    expect_vtkhdf_output_matches_serial(input, fields + front, dir + "/front", {""});
 #endif
+}
