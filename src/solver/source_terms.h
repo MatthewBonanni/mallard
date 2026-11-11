@@ -114,7 +114,7 @@ class SourceTerms {
          * @param species Species names (empty for a single gas).
          * @param fields The cell fields the expressions read.
          * @param regions The regions of the run, on mesh.
-         * @param use_nccl Whether domain averages sum over the ranks with NCCL (comm::allreduce_device).
+         * @param use_nccl Whether domain averages and moving regions' totals sum over the ranks with NCCL.
          */
         SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh,
                     const std::vector<std::string> & species, const CellFields & fields, region::Regions & regions,
@@ -132,9 +132,8 @@ class SourceTerms {
          *        cells (times their measure), species per unit volume.
          * @param solution The state the fields were computed from.
          * @param stage_time Device scalar holding the stage time.
-         * @param nccl Whether sums across ranks (of moving regions' totals) go through NCCL.
          */
-        void add(const State & solution, const State & rhs, const Kokkos::View<rtype> & stage_time, bool nccl = false);
+        void add(const State & solution, const State & rhs, const Kokkos::View<rtype> & stage_time);
 
         /** @brief Recompute the domain averages from the solution (a global sum). */
         void update_means(const State & solution);
@@ -155,7 +154,7 @@ class SourceTerms {
 
     private:
         /** @brief The weights of moving regions at the time on the device, and their integrals. */
-        void move(const Kokkos::View<rtype> & time, bool nccl);
+        void move(const Kokkos::View<rtype> & time);
 
         struct Moving {
             std::unique_ptr<region::MovingFractions> fractions;
@@ -164,6 +163,7 @@ class SourceTerms {
         };
         std::vector<Moving> moving;
         std::unique_ptr<DeviceSums> integral_sums;
+        bool nccl_sums = false;
         Kokkos::View<double **, Kokkos::LayoutLeft> integrands;  // (cell, integral): fraction times measure
 
         std::shared_ptr<Mesh> mesh;

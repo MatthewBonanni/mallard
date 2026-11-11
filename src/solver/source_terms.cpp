@@ -332,6 +332,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         for (uint32_t c = 0; c < mesh->n_cells; c++) h_weights(r, c) = weight_rows[r][c];
     }
     Kokkos::deep_copy(weights, h_weights);
+    nccl_sums = use_nccl;
     if (n_totals > 0) {
         integral_sums = std::make_unique<DeviceSums>(static_cast<uint32_t>(n_totals), n_owned, mesh->n_global_cells > 0);
         integrands = Kokkos::View<double **, Kokkos::LayoutLeft>("source_integrands", n_owned, size_t(n_totals));
@@ -382,7 +383,7 @@ void SourceTerms::update_means(const State & solution) {
 
 SourceTerms::~SourceTerms() = default;
 
-void SourceTerms::move(const Kokkos::View<rtype> & time, const bool nccl) {
+void SourceTerms::move(const Kokkos::View<rtype> & time) {
     const Kokkos::View<double **, Kokkos::LayoutRight> w = weights;
     const Kokkos::View<double **, Kokkos::LayoutLeft> terms = integrands;
     const Kokkos::View<rtype *> V = mesh->cell_measure;
@@ -397,12 +398,12 @@ void SourceTerms::move(const Kokkos::View<rtype> & time, const bool nccl) {
             if (k >= 0 && c < n_owned) terms(c, k) = f(c) * double(V(c));
         });
     }
-    if (integral_sums) integral_sums->sum(integrands, nccl);
+    if (integral_sums) integral_sums->sum(integrands, nccl_sums);
 }
 
-void SourceTerms::add(const State & solution, const State & rhs, const Kokkos::View<rtype> & stage_time, const bool nccl) {
+void SourceTerms::add(const State & solution, const State & rhs, const Kokkos::View<rtype> & stage_time) {
     if (m_means) update_means(solution);
-    if (!moving.empty()) move(stage_time, nccl);
+    if (!moving.empty()) move(stage_time);
     Kokkos::parallel_for("rhs_source_terms", mesh->n_owned(),
                          TermKernel<AddToRhs>{static_field, dynamic_terms, table, weights, fields, means, stage_time,
                                               integral_sums ? integral_sums->totals() : Kokkos::View<double *>(), n_species,
@@ -415,7 +416,7 @@ Kokkos::View<rtype **, Kokkos::LayoutRight> SourceTerms::evaluate(const State & 
     if (m_means) update_means(solution);
     Kokkos::View<rtype> time("source_time");
     Kokkos::deep_copy(time, t);
-    if (!moving.empty()) move(time, false);
+    if (!moving.empty()) move(time);
     Kokkos::parallel_for("source_values", mesh->n_owned(),
                          TermKernel<Accumulate>{static_field, dynamic_terms, table, weights, fields, means, time,
                                                 integral_sums ? integral_sums->totals() : Kokkos::View<double *>(), n_species,
