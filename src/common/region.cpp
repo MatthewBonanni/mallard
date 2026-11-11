@@ -37,6 +37,14 @@ double dot(const Vec & a, const Vec & b) { return a[0] * b[0] + a[1] * b[1] + a[
 }
 double norm(const Vec & a) { return std::sqrt(dot(a, a)); }
 
+/** @brief The values at t of programs of t on the host, for move. */
+struct HostTimes {
+    const std::vector<kexpr::Program> & programs;
+    double t;
+
+    double operator()(const uint32_t p) const { return programs[p](&t); }
+};
+
 } // namespace
 
 std::vector<uint32_t> owned_zone_faces(const Mesh & mesh, const std::vector<std::string> & zones) {
@@ -110,7 +118,7 @@ Region Region::at(const double t) const {
     Region r = with_root(m_root, m_copies);
     r.m_own = m_own;
     for (const Motion & m : m_motions) {
-        move(m, m_steps.data(), [&](const uint32_t p) { return m_times[p](&t); }, r.m_nodes[m.node]);
+        move(m, m_steps.data(), HostTimes{m_times, t}, r.m_nodes[m.node]);
     }
     r.m_motions.clear();
     r.m_steps.clear();
@@ -269,10 +277,27 @@ struct HostCone {
     }
 };
 
+/** @brief The signed distance of a region on the host. */
+struct HostDistance {
+    const RegionView<Kokkos::HostSpace> & view;
+
+    double operator()(const double * x) const { return view.distance(x); }
+};
+
+/** @brief Node k of a straight cell on the host. */
+struct HostNodes {
+    const Mesh & mesh;
+    uint32_t c;
+
+    void operator()(const uint32_t k, double * x) const {
+        const uint32_t n = mesh.h_node_of_cell(c, k);
+        for (size_t i = 0; i < 3; i++) x[i] = i < N_DIM ? double(mesh.h_node_coords(n, i)) : 0.0;
+    }
+};
+
 /** @brief The fractions of a filled region of shapes. */
 std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, const RegionView<Kokkos::HostSpace> & view) {
-    auto distance = [&view](const double * x) { return view.distance(x); };
-    const sampler::Shape<decltype(distance)> shape{distance, view.edge, region.bounded()};
+    const sampler::Shape<HostDistance> shape{HostDistance{view}, view.edge, region.bounded()};
     std::vector<double> fractions(mesh.n_cells, 0.0);
     using HostSpace = Kokkos::DefaultHostExecutionSpace;
     Kokkos::parallel_for("region_cell_fractions",
@@ -288,11 +313,8 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
                 sampler::cone(shape, mesh.axisymmetric, cone, k, a, b, inside, total);
             }
         } else {
-            auto node = [&](const uint32_t k, double * x) {
-                const uint32_t n = mesh.h_node_of_cell(i_cell, k);
-                for (size_t i = 0; i < 3; i++) x[i] = i < N_DIM ? double(mesh.h_node_coords(n, i)) : 0.0;
-            };
-            sampler::straight_cell(shape, mesh.axisymmetric, mesh.h_n_nodes_of_cell(i_cell), node, inside, total);
+            sampler::straight_cell(shape, mesh.axisymmetric, mesh.h_n_nodes_of_cell(i_cell), HostNodes{mesh, i_cell}, inside,
+                                   total);
         }
         fractions[i_cell] = total > 0.0 ? inside / total : 0.0;
     });
