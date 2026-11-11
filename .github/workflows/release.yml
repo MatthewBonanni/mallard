@@ -134,6 +134,9 @@ jobs:
           spack info mallard | head -n 3
           spack compiler find
           mkdir -p "$RUNNER_TEMP/env"
+          # Spack runs Python extensions with python-venv's python3, which sees only the venv:
+          # this one also sees the runner's numpy, SciPy and h5py
+          /usr/bin/python3 -m venv --without-pip --system-site-packages "$RUNNER_TEMP/venv"
           cat > "$RUNNER_TEMP/env/spack.yaml" << EOF
           spack:
             specs: [mallard@main]
@@ -157,6 +160,9 @@ jobs:
               py-numpy:
                 buildable: false
                 externals: [{spec: py-numpy@$(/usr/bin/python3 -c 'import numpy; print(numpy.__version__)'), prefix: /usr}]
+              python-venv:
+                buildable: false
+                externals: [{spec: python-venv@1.0, prefix: $RUNNER_TEMP/venv}]
               cmake:
                 buildable: false
                 externals: [{spec: cmake@$(cmake --version | head -1 | cut -d' ' -f3), prefix: $(dirname "$(dirname "$(command -v cmake)")")}]

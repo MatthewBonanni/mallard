@@ -154,12 +154,13 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
             raise SkipTest("Mallard was built without +python or dims=2")
         self._run_example("sod")
         case = join_path(self.test_suite.stage, "sod", "examples", "sod")
-        site = join_path(self.prefix, self.spec["python"].package.purelib)
         script = ("import mallard; f = mallard.open(mallard.run_files('.')[0]); rho = f.read('RHO'); "
                   "assert f.kind == 'snapshot' and rho.size == f.geometry().n_cells and rho.min() > 0")
+        venv = self.spec["python-venv"].package
+        site = os.pathsep.join([join_path(self.prefix, venv.purelib), os.environ.get("PYTHONPATH", "")])
         path = os.pathsep.join([self.prefix.bin, os.environ.get("PATH", "")])
         with working_dir(case):
-            self.spec["python"].command("-c", script, extra_env={"PYTHONPATH": site, "PATH": path})
+            venv.command("-c", script, extra_env={"PYTHONPATH": site, "PATH": path})
 
     def test_reactor(self):
         """Run the hydrogen ignition example with mallard reactor"""
@@ -192,7 +193,7 @@ class CMakeBuilder(cmake.CMakeBuilder):
             self.define_from_variant("Mallard_ENABLE_PYTHON", "python"),
         ]
         if spec.satisfies("+python"):
-            site = join_path(self.pkg.prefix, spec["python"].package.purelib)
+            site = join_path(self.pkg.prefix, spec["python-venv"].package.purelib)
             args.append(self.define("Mallard_PYTHON_INSTALL_DIR", site))
         if spec.satisfies("+mpi"):
             args.append(self.define_from_variant("Mallard_GPU_AWARE_MPI", "gpu_aware_mpi"))
