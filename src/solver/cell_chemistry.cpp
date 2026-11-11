@@ -12,6 +12,7 @@
 #include "cell_chemistry.h"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -705,25 +706,22 @@ void CellChemistry::audit(const RepairRecorder & recorder, const Kokkos::View<rt
     counters = Kokkos::View<uint64_t[2]>("chemistry_substeps");
 }
 
-std::array<uint64_t, 2> CellChemistry::substeps() const {
-    std::array<uint64_t, 2> out = {0, 0};
-    if (counters.is_allocated()) {
-        const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), counters);
-        out = {h(0), h(1)};
-    }
-    return out;
-}
-
 void CellChemistry::balance_across_ranks(const double threshold, const bool use_nccl) {
     balance = std::make_shared<ChemistryBalance>(gas.n_species, threshold, use_nccl);
 }
+
+uint64_t CellChemistry::steps_to_balance_window() const {
+    return balance ? balance->steps_to_window_end() : std::numeric_limits<uint64_t>::max();
+}
+
+const uint32_t * CellChemistry::balance_grows() const { return balance ? balance->grows_flag() : nullptr; }
 
 void CellChemistry::begin_step() {
     if (balance) balance->begin_step();
 }
 
-bool CellChemistry::adapt_balance() {
-    if (!balance || !balance->adapt()) return false;
+bool CellChemistry::adapt_balance(const bool after_last_call) {
+    if (!balance || !balance->adapt(after_last_call)) return false;
     // Guests are sorted in the same scratch as the queue
     if (bin_by_cost) size_sort_scratch(std::max<size_t>(queue.extent(0), balance->guests_capacity()));
     return true;

@@ -56,6 +56,7 @@ set(MALLARD_TEST_SOURCES
     rotational_periodic_test.cpp
     invariance_test.cpp
     inlet_test.cpp
+    step_queue_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

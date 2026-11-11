@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -33,7 +34,17 @@ ncclComm_t nccl() {
     ncclUniqueId id;
     if (rank() == 0 && ncclGetUniqueId(&id) != ncclSuccess) throw std::runtime_error("NCCL: ncclGetUniqueId failed");
     MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, world());
+    // NCCL's graph mixing support adds event nodes to captured graphs, which the step's conditional node cannot
+    // hold. Mallard needs no mixing: its NCCL calls share one stream, and the host drains the step queue before
+    // it calls NCCL outside a step graph.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+    config.graphUsageMode = 1;
+    const ncclResult_t err = ncclCommInitRankConfig(&nccl_comm, size(), id, rank(), &config);
+#else
+    setenv("NCCL_GRAPH_MIXING_SUPPORT", "0", 0);
     const ncclResult_t err = ncclCommInitRank(&nccl_comm, size(), id, rank());
+#endif
     if (err != ncclSuccess) {
         nccl_comm = nullptr;
         throw std::runtime_error(std::string("NCCL: ncclCommInitRank failed: ") + ncclGetErrorString(err) +

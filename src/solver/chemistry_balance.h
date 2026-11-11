@@ -82,9 +82,17 @@ class ChemistryBalance {
          * @brief Between steps, after a fence: sets the capacities from the
          *        cells asked for (collective by its inputs alone). Returns
          *        whether they changed, which changes the messages of the next
-         *        calls.
+         *        calls. after_last_call: no calls ran since this step's;
+         *        otherwise (a step enqueued ahead, which grew nothing and did
+         *        not end the window) it only counts the step.
          */
-        bool adapt();
+        bool adapt(bool after_last_call = true);
+
+        /** @brief Steps until a window ends, at whose last step adapt() may shrink capacities. */
+        uint32_t steps_to_window_end() const;
+
+        /** @brief Device flag: a pair asked for more cells than its capacity since the last adapt(). */
+        const uint32_t * grows_flag() const { return grows.data(); }
 
         /** @brief Slots of the cells this rank may receive per call. */
         uint32_t guests_capacity() const { return n_in; }
@@ -124,6 +132,8 @@ class ChemistryBalance {
         Kokkos::View<uint32_t *> asked;
         Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace> asked_host;
         std::vector<uint32_t> window_max;  // most asked for since the last shrink, per pair
+        Kokkos::View<uint32_t *> window_asked;  // window_max, kept by the device
+        Kokkos::View<uint32_t> grows;
         uint32_t window_steps = 0;
         Kokkos::View<rtype *> send_buffer, guest_buffer;  // states, then results in place
         Kokkos::View<rtype *>::host_mirror_type h_send_buffer, h_guest_buffer;

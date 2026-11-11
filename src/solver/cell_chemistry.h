@@ -158,9 +158,16 @@ class CellChemistry {
         /**
          * @brief Between steps, after a fence: adapts the balancing's
          *        capacities to the last calls. Returns whether the calls' work
-         *        changed (a step graph must be recorded again).
+         *        changed (a step graph must be recorded again). after_last_call:
+         *        see ChemistryBalance::adapt.
          */
-        bool adapt_balance();
+        bool adapt_balance(bool after_last_call = true);
+
+        /** @brief Steps until the balancing may shrink its capacities (adapt_balance after the last call). */
+        uint64_t steps_to_balance_window() const;
+
+        /** @brief Device flag: the balancing must grow a capacity (adapt_balance after the last call); null without it. */
+        const uint32_t * balance_grows() const;
 
         /** @brief Heat release rate and mass production rates W_k omega_k of cells [0, n). */
         void heat_release(const StateView & U, const SpeciesView & rhoY, const Kokkos::View<rtype *> & T_seed,
@@ -176,8 +183,9 @@ class CellChemistry {
         void audit(const RepairRecorder & recorder, const Kokkos::View<rtype *> & volume,
                    const Kokkos::View<uint8_t *> & repaired);
 
-        /** @brief Sub-steps and rejected sub-steps of every integration so far on this rank (also of guests). */
-        std::array<uint64_t, 2> substeps() const;
+        /** @brief Sub-steps and rejected sub-steps of every integration so far on this rank (also of guests), on
+         *         the device; allocated by audit. */
+        Kokkos::View<uint64_t[2]> substeps() const { return counters; }
 
         /** @brief Vector lanes per cell thread (1: one thread per cell). */
         uint32_t lanes() const { return n_lanes; }

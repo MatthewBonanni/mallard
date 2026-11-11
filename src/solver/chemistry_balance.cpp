@@ -74,6 +74,8 @@ ChemistryBalance::ChemistryBalance(const uint32_t n_species_in, const double thr
     h_plan = Kokkos::create_mirror_view(d_plan);
     asked = Kokkos::View<uint32_t *>("chemistry_balance_asked", P * P);
     asked_host = Kokkos::View<uint32_t *, Kokkos::SharedHostPinnedSpace>("chemistry_balance_asked_host", P * P);
+    window_asked = Kokkos::View<uint32_t *>("chemistry_balance_window", P * P);
+    grows = Kokkos::View<uint32_t>("chemistry_balance_grows");
     guest_range = Kokkos::View<uint32_t *>("chemistry_balance_guest_range", 3);
     resize();
 }
@@ -149,14 +151,22 @@ void ChemistryBalance::begin_step() {
     Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), asked, 0u);
 }
 
-bool ChemistryBalance::adapt() {
+uint32_t ChemistryBalance::steps_to_window_end() const { return SHRINK_STEPS - window_steps; }
+
+bool ChemistryBalance::adapt(const bool after_last_call) {
     const size_t P = static_cast<size_t>(n_ranks);
     bool changed = false;
     window_steps++;
     const bool window_over = window_steps >= SHRINK_STEPS;
+    if (!after_last_call) {
+        if (window_over) throw std::logic_error("chemistry balance: the window ended at a queued step");
+        return false;
+    }
+    const auto window = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), window_asked);
+    Kokkos::deep_copy(grows, 0u);
     for (size_t k = 0; k < P * P; k++) {
         const uint32_t n = asked_host(k);
-        window_max[k] = std::max(window_max[k], n);
+        window_max[k] = window(k);
         if (n > cap[k]) {
             cap[k] = capacity_for(n);
             changed = true;
@@ -168,6 +178,7 @@ bool ChemistryBalance::adapt() {
     if (window_over) {
         window_steps = 0;
         std::fill(window_max.begin(), window_max.end(), 0u);
+        Kokkos::deep_copy(window_asked, 0u);
     }
     if (changed) resize();
     return changed;
@@ -175,7 +186,8 @@ bool ChemistryBalance::adapt() {
 
 void ChemistryBalance::plan(const Kokkos::View<uint32_t *> & range) {
     const Kokkos::View<double *> all = loads, ex = excess;
-    const Kokkos::View<uint32_t *> c = d_cap, p = d_plan, ask = asked, r = range;
+    const Kokkos::View<uint32_t *> c = d_cap, p = d_plan, ask = asked, r = range, window = window_asked;
+    const Kokkos::View<uint32_t> grow = grows;
     const uint32_t P = static_cast<uint32_t>(n_ranks), self = static_cast<uint32_t>(me);
     const double thr = threshold;
     Kokkos::parallel_for("chemistry_balance_plan", 1, KOKKOS_LAMBDA(const int) {
@@ -206,6 +218,8 @@ void ChemistryBalance::plan(const Kokkos::View<uint32_t *> & range) {
             const double share = Kokkos::floor(amount * queued / all(2 * s));
             const uint32_t wanted = Kokkos::min(static_cast<uint32_t>(share), queued - given_s);
             if (wanted > ask(s * P + d)) ask(s * P + d) = wanted;
+            if (wanted > window(s * P + d)) window(s * P + d) = wanted;
+            if (wanted > c(s * P + d)) grow() = 1;
             const uint32_t count = Kokkos::min(wanted, c(s * P + d));
             if (count > 0) {
                 given_s += count;

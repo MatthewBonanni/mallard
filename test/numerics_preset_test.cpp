@@ -282,6 +282,8 @@ const std::vector<ExampleCase> EXAMPLES = {
       {"front", "bottom"}}, ""},
 };
 
+} // namespace
+
 std::vector<ExampleCase> examples_of_this_build() {
     std::vector<ExampleCase> list;
     for (const auto & c : EXAMPLES) {
@@ -289,6 +291,8 @@ std::vector<ExampleCase> examples_of_this_build() {
     }
     return list;
 }
+
+namespace {
 
 class ExampleUnderPreset : public ::testing::TestWithParam<ExampleCase> {};
 
