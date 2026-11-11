@@ -378,6 +378,7 @@ class Solver {
         std::string step_graph_unsupported() const;
         void graph_step();
         void record_step();
+        void captured_record_step();
         void destroy_step_graph();
         void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
@@ -526,6 +527,13 @@ class Solver {
          */
         void set_distributed(bool on) { distribute = on; }
         bool is_distributed() const { return distribute && comm::size() > 1; }
+        /**
+         * @brief Off CUDA, takes the steps a CUDA build would graph through the
+         *        graph's step path without capture, so tests check that path's
+         *        captured code on every backend (Kokkos profiling section
+         *        "step_graph_capture"). Call before run().
+         */
+        void set_uncaptured_step_graphs(bool on) { uncaptured_step_graphs = on; }
 
         /** @brief Cell integrations done by another rank than the owner so far (chemistry load balancing). */
         double chemistry_cells_sent() const { return comm::allreduce(chem_cells_sent, comm::Op::SUM); }
@@ -707,6 +715,7 @@ class Solver {
         // Step graph (solver_graph.cpp)
         bool cuda_graphs = true;               // [run] cuda_graphs
         bool use_step_graph = false;
+        bool uncaptured_step_graphs = false;
         void * step_graph_exec = nullptr;      // cudaGraphExec_t
         uint64_t graph_steps = 0;
         Kokkos::View<rtype *> step_reduce;     // device: [dt_cfl1, requests], local, then reduced

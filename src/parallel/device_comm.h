@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
+#include <Kokkos_Profiling_ProfileSection.hpp>
 
 #include "comm.h"
 
@@ -101,6 +102,22 @@ void send_receive_device(const std::vector<DeviceMessage> & sends, const std::ve
  *        (CUDA); a fence of done otherwise.
  */
 void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::DefaultExecutionSpace & done);
+
+/**
+ * @brief While alive, marks for Kokkos Tools (profiling section "host_staged")
+ *        host round trips that a CUDA graph's step does not make: MPI's
+ *        messages, which it sends with NCCL, and host fences off CUDA.
+ */
+class HostStaged {
+    public:
+        HostStaged() : section("host_staged") { section.start(); }
+        ~HostStaged() { section.stop(); }
+        HostStaged(const HostStaged &) = delete;
+        HostStaged & operator=(const HostStaged &) = delete;
+
+    private:
+        Kokkos::Profiling::ProfilingSection section;
+};
 
 } // namespace comm
 
