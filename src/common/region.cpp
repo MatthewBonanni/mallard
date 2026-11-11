@@ -287,8 +287,8 @@ struct HostNodes {
     const Mesh & mesh;
     uint32_t c;
 
-    void operator()(const uint32_t k, double * x) const {
-        const uint32_t n = mesh.h_node_of_cell(c, k);
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, double * x) const {
+        const uint32_t n = mesh.h_nodes_of_cell(mesh.h_offsets_nodes_of_cell(c) + k);
         for (size_t i = 0; i < 3; i++) x[i] = i < N_DIM ? double(mesh.h_node_coords(n, i)) : 0.0;
     }
 };
