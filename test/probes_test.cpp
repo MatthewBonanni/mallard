@@ -741,7 +741,7 @@ TEST(ProbesTest, RegionsPartlyOutsideTheDomainRecordTheShareOutside) {
     const std::string dir = fresh_dir("region_outside");
     const std::string probes = "[regions]\nball = {type = \"" + std::string(N_DIM == 2 ? "disk" : "sphere") +
                                "\", center = " + numbers3("0.5", "0.9", "0.5") + ", radius = 0.2}\n"
-                               "[[probes]]\nname = \"ball\"\nregion = \"ball\"\nvariables = [\"RHO\"]\n"
+                               "[[probes]]\nname = \"ball\"\nregion = \"ball\"\nfields = [\"RHO\"]\n"
                                "reductions_file = \"" + dir + "/ball.csv\"\n";
     Solver solver;
     testing::internal::CaptureStderr();
@@ -1003,10 +1003,10 @@ TEST(ProbesTest, RegionsCutByCurvedWallsMeasureAndBalanceTheirPartInTheDomain) {
         "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\ntroubled_threshold = 1.0\n" + PERFECT_GAS +
         "[output]\ncheck_interval = 1000000\nrun_log = \"" + dir + "/run.jsonl\"\n"
         "[regions]\ndisk = {type = \"disk\", center = [1.384, 0.0], radius = 0.3}\n"
-        "[[probes]]\nname = \"disk\"\nregion = \"disk\"\nvariables = [\"RHO\"]\nreductions = [\"integral\"]\n"
+        "[[probes]]\nname = \"disk\"\nregion = \"disk\"\nfields = [\"RHO\"]\nreductions = [\"integral\"]\n"
         "reductions_file = \"" + dir + "/disk.csv\"\n"
         "[[probes]]\nname = \"surface\"\nregion = {type = \"boundary\", of = {type = \"intersection\", "
-        "regions = [\"domain\", \"disk\"]}}\nvariables = [\"MASS_FLUX\"]\nsampling = \"point\"\n"
+        "regions = [\"domain\", \"disk\"]}}\nfields = [\"MASS_FLUX\"]\nsampling = \"point\"\n"
         "reductions = [\"integral\"]\nreductions_file = \"" + dir + "/surface.csv\"\n";
     };
     Solver solver;

@@ -672,13 +672,13 @@ region = "disk"
 [[probes]]
 name = "disk"
 region = "disk"
-variables = ["RHO"]
+fields = ["RHO"]
 reductions = ["integral"]
 reductions_file = "disk.csv"
 [[probes]]
 name = "surface"
 region = {{type = "boundary", of = {{type = "intersection", regions = ["domain", "disk"]}}}}
-variables = ["MASS_FLUX"]
+fields = ["MASS_FLUX"]
 sampling = "point"
 reductions = ["integral"]
 reductions_file = "surface.csv"
@@ -688,7 +688,7 @@ check_interval = 1000000
 prefix = "f"
 format = "vtu"
 interval = 1
-variables = ["SOURCE_RHOE"]
+fields = ["SOURCE_RHOE"]
 {PHYSICS}"""
     pts, cells, f, sampling, surface, _ = measured_run(mallard, work, toml, view=True)
     with h5py.File(work / "view" / "case.vtkhdf") as h:
@@ -835,7 +835,7 @@ region = "disk"
 [[probes]]
 name = "disk"
 region = "disk"
-variables = ["RHO"]
+fields = ["RHO"]
 reductions = ["mean"]
 reductions_file = "disk.csv"
 [output]
@@ -844,7 +844,7 @@ check_interval = 1000000
 prefix = "f"
 format = "vtu"
 interval = 1
-variables = ["SOURCE_RHOE"]
+fields = ["SOURCE_RHOE"]
 {PHYSICS}"""
     pts, cells, f, sampling, _, warnings = measured_run(mallard, work, toml)
     return pts, cells, f, sampling, warnings
@@ -980,13 +980,13 @@ region = "ball"
 [[probes]]
 name = "disk"
 region = "ball"
-variables = ["RHO"]
+fields = ["RHO"]
 reductions = ["integral"]
 reductions_file = "disk.csv"
 [[probes]]
 name = "surface"
 region = {{type = "boundary", of = {{type = "intersection", regions = ["domain", "ball"]}}}}
-variables = ["MASS_FLUX"]
+fields = ["MASS_FLUX"]
 sampling = "point"
 reductions = ["integral"]
 reductions_file = "surface.csv"
@@ -996,7 +996,7 @@ check_interval = 1000000
 prefix = "f"
 format = "vtu"
 interval = 1
-variables = ["SOURCE_RHOE"]
+fields = ["SOURCE_RHOE"]
 {PHYSICS}"""
     pts, cells, f, sampling, surface, _ = measured_run(mallard3d, work, toml, view=True)
     with h5py.File(work / "view" / "case.vtkhdf") as h:
