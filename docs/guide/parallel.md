@@ -56,7 +56,17 @@ curve, multi-jagged ones are slabs cut along each axis in turn.*
 - `hilbert` (the default before 0.8.0): cells split along a Hilbert curve through their centroids.
 - `graph`: [dKaMinPar](https://github.com/KaHIP/KaMinPar) on the cell connectivity, which minimizes the number of faces between ranks; needs a build with `-DMallard_ENABLE_KAMINPAR=ON` (and oneTBB).
 
-On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo data then goes between GPUs directly instead of through host memory. On NVIDIA GPUs, `-DMallard_ENABLE_NCCL=ON` exchanges halos with NCCL on the GPU's stream, with no host synchronization per exchange (`[parallel] halo_exchange = "nccl"`, the default in such builds). CUDA builds also run each step as one CUDA graph (`[run] cuda_graphs`, on by default), except where the host takes part in the step: gas mixtures, LES models, characteristic boundaries, synthetic inflow turbulence and MPI (not NCCL) halo exchanges. The sums over the ranks inside a step (the time step, average-pressure outlets, sources of domain averages, held mass flow) are NCCL reductions on the same stream in NCCL builds, exact in fixed point where they feed the solution, so NCCL, MPI and serial runs agree bit for bit. Exchanges carry only the halo cells the stencils read.
+On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo data then goes between GPUs directly instead of through host memory. On NVIDIA GPUs, `-DMallard_ENABLE_NCCL=ON` exchanges halos with NCCL on the GPU's stream, with no host synchronization per exchange (`[parallel] halo_exchange = "nccl"`, the default in such builds). CUDA builds also run each step as one CUDA graph (`[run] cuda_graphs`, on by default), except where the host takes part in the step: gas mixtures, LES models, characteristic boundaries, synthetic inflow turbulence and MPI (not NCCL) halo exchanges. Exchanges carry only the halo cells the stencils read.
+
+In NCCL builds every communication between ranks during the steps goes through NCCL on the GPU's stream, with or without the CUDA graph; with `halo_exchange = "mpi"`, and in builds without NCCL, the same operations go through MPI:
+
+- halo exchanges, including those of LES and thickened-flame fields;
+- the time step with the run-control requests (stop, checkpoint, commands), and the step error of `[numerics.error_control]`;
+- the sums of average-pressure outlets, sources of domain averages, held mass flow, the dynamic LES constant and the dynamic thickened-flame efficiency;
+- chemistry load balancing (`[chemistry] load_balance`): the gathered loads and the cells sent to other ranks and back; and the chemistry failure count;
+- the count of `check_nan`, and the signal of triggered phase averages (`[statistics.phase]`).
+
+Sums that feed the solution are exact in fixed point, so NCCL, MPI and serial runs agree bit for bit. Setup, partitioning, output (probes, monitors, snapshots, restarts, progress and health reports) and run control between steps (triggers, control files) communicate with MPI, as do the transposes of spectra statistics (`[statistics.spectra]`).
 
 Every rank builds the same stencils as a serial run and sums each cell's face fluxes in a fixed order, so the solution is bitwise identical on any number of ranks: after 100 steps of the 2D Riemann problem on 400 × 400 quadrilaterals with fifth-order TENO-E, the restart files of runs on 1 and 3 ranks are byte for byte the same. Sums over the whole domain that are written to output files, such as force monitors, are reduced across ranks and can differ in the last digits.
 

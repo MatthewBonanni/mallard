@@ -243,7 +243,7 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) allocate_time_stepping();
         init_les();
-        statistics.init(input, species_names, *mesh);
+        statistics.init(input, species_names, *mesh, is_distributed() && halo.uses_nccl());
         init_rhs_split();
         used_regions = std::make_unique<region::Regions>(input, *mesh);
         init_sources(*used_regions);
@@ -2519,11 +2519,15 @@ void Solver::print_summary(const RunEnd & end) const {
                  .output = t_wall_output,
                  .reacting = reacting,
                  .chemistry = t_wall_chemistry,
-                 .chemistry_slowest = t_chemistry_slowest,
-                 .chemistry_mean = t_chemistry_mean,
                  .rejected_counted = step_controller.enabled(),
                  .rejected = n_rejected};
-    if (chemistry_load_balance && chem_cells_integrated > 0.0) s.chemistry_sent = chem_cells_sent / chem_cells_integrated;
+    if (reacting && comm::size() > 1) {
+        const auto sums = comm::allreduce(std::array<double, 3>{t_wall_chemistry, chem_cells_integrated, chem_cells_sent},
+                                          comm::Op::SUM);
+        s.chemistry_slowest = comm::allreduce(t_wall_chemistry, comm::Op::MAX);
+        s.chemistry_mean = sums[0] / comm::size();
+        if (chemistry_load_balance && sums[1] > 0.0) s.chemistry_sent = sums[2] / sums[1];
+    }
     if (!data_writers.empty()) {
         uint64_t bytes = 0;
         for (const auto & writer : data_writers) {
@@ -2596,25 +2600,22 @@ void Solver::check_fields() {
     if (!check_nan) {
         return;
     }
-    StateView U = conservatives;
-    uint32_t n_bad = 0;
-    Kokkos::parallel_reduce("check_nan", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, uint32_t & bad) {
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    if (!n_nonfinite.is_allocated()) n_nonfinite = Kokkos::View<int64_t *>("step_nonfinite", 1);
+    const StateView U = conservatives;
+    const SpeciesView Y = species;
+    const uint32_t n_species = species.span() > 0 ? static_cast<uint32_t>(Y.extent(1)) : 0;
+    Kokkos::parallel_reduce("check_nan", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, int64_t & bad) {
         FOR_I_CONSERVATIVE {
             if (!Kokkos::isfinite(U(i_cell, i))) bad++;
         }
-    }, n_bad);
-    n_bad = comm::allreduce(n_bad, comm::Op::SUM);
-    if (species.span() > 0) {
-        SpeciesView Y = species;
-        const uint32_t n_species = static_cast<uint32_t>(Y.extent(1));
-        uint32_t n_bad_species = 0;
-        Kokkos::parallel_reduce("check_nan_species", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell, uint32_t & bad) {
-            for (uint32_t k = 0; k < n_species; k++) {
-                if (!Kokkos::isfinite(Y(i_cell, k))) bad++;
-            }
-        }, n_bad_species);
-        n_bad += comm::allreduce(n_bad_species, comm::Op::SUM);
-    }
+        for (uint32_t k = 0; k < n_species; k++) {
+            if (!Kokkos::isfinite(Y(i_cell, k))) bad++;
+        }
+    }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(n_nonfinite.data())));
+    if (is_distributed()) comm::allreduce_device(n_nonfinite, comm::Op::SUM, halo.uses_nccl());
+    int64_t n_bad = 0;
+    Kokkos::deep_copy(n_bad, Kokkos::subview(n_nonfinite, 0));
     if (n_bad > 0) throw DivergedError();
 }
 
@@ -2995,23 +2996,30 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
                                 Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(on_device));
         return 0.0;
     }
-    rtype dt_min = std::numeric_limits<rtype>::max();
-    Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor, Kokkos::Min<rtype>(dt_min));
-    return reduce_dt(dt_min);
+    Kokkos::parallel_reduce("time_step", mesh->n_owned(), functor,
+                            Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(dt_reduce_slot()));
+    return reduce_dt();
 }
 
-rtype Solver::reduce_dt(rtype local) {
+Kokkos::View<rtype> Solver::dt_reduce_slot() {
+    if (!step_reduce.is_allocated()) step_reduce = Kokkos::View<rtype *>("step_reduce", 1 + run_control::N_REQUESTS);
+    return Kokkos::View<rtype>(step_reduce.data());
+}
+
+rtype Solver::reduce_dt() {
     control_contributed = run_control::pending();
-    std::array<rtype, 1 + run_control::N_REQUESTS> values{local};
-    for (int k = 0; k < run_control::N_REQUESTS; k++) {
-        values[size_t(k) + 1] = (control_contributed >> k) & 1 ? rtype(-1) : rtype(0);
-    }
-    values = comm::allreduce(values, comm::Op::MIN);
+    const Kokkos::View<rtype *> values = step_reduce;
+    const int contributed = control_contributed;
+    Kokkos::parallel_for("time_step_requests", run_control::N_REQUESTS, KOKKOS_LAMBDA(const int k) {
+        values(k + 1) = (contributed >> k) & 1 ? rtype(-1) : rtype(0);
+    });
+    if (is_distributed()) comm::allreduce_device(values, comm::Op::MIN, halo.uses_nccl());
+    const auto reduced = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
     control_reduced = 0;
     for (int k = 0; k < run_control::N_REQUESTS; k++) {
-        if (values[size_t(k) + 1] < 0) control_reduced |= 1 << k;
+        if (reduced(k + 1) < 0) control_reduced |= 1 << k;
     }
-    return values[0];
+    return reduced(0);
 }
 
 /**

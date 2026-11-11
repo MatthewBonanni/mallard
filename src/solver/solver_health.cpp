@@ -313,19 +313,17 @@ void Solver::report_health() {
     if (reacting) {
         const std::array<uint64_t, 2> local_substeps = cell_chemistry.substeps();
         const auto substeps = comm::allreduce(local_substeps, comm::Op::SUM);
-        const double slowest = t_chemistry_slowest - run_health.chemistry_slowest_last;
-        const double mean = t_chemistry_mean - run_health.chemistry_mean_last;
-        const double wall = comm::allreduce(t_wall_chemistry - run_health.chemistry_wall_last, comm::Op::MAX);
+        const double interval = t_wall_chemistry - run_health.chemistry_wall_last;
+        const double wall = comm::allreduce(interval, comm::Op::MAX);
+        const double mean = comm::allreduce(interval, comm::Op::SUM) / comm::size();
         report.chemistry = {{"substeps", double(substeps[0] - run_health.substeps_last[0])},
                             {"rejected_substeps", double(substeps[1] - run_health.substeps_last[1])},
                             {"failures", 0.0},
                             {"reacting_cells", double(comm::allreduce(chem_active_cells, comm::Op::SUM)) /
                                                    double(std::max<uint64_t>(n_cells_global, 1))},
                             {"wall", wall}};
-        report.chemistry.emplace_back("imbalance", mean > 0.0 ? slowest / mean : 1.0);
+        report.chemistry.emplace_back("imbalance", mean > 0.0 ? wall / mean : 1.0);
         run_health.substeps_last = substeps;
-        run_health.chemistry_slowest_last = t_chemistry_slowest;
-        run_health.chemistry_mean_last = t_chemistry_mean;
         run_health.chemistry_wall_last = t_wall_chemistry;
     }
 

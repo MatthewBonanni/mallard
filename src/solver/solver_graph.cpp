@@ -143,7 +143,7 @@ void Solver::graph_step() {
     if (!step_scalars.is_allocated()) {
         // The first step through record_step runs without capture: it sets up
         // what its kernels need at their first launch
-        step_reduce = Kokkos::View<rtype *>("step_reduce", N_REDUCE);
+        dt_reduce_slot();
         step_scalars = Kokkos::View<rtype *>("step_scalars", N_STEP_SCALARS);
         step_io = Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace>("step_io", N_STEP_IO);
     }

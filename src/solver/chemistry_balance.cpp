@@ -44,8 +44,9 @@ void reserve(View & v, const size_t n, const char * label) {
 
 } // namespace
 
-ChemistryBalance::ChemistryBalance(const uint32_t n_species_in, const double threshold_in)
-    : n_species(n_species_in), threshold(threshold_in), result_stride(n_species_in + 4) {
+ChemistryBalance::ChemistryBalance(const uint32_t n_species_in, const double threshold_in, const bool use_nccl_in)
+    : n_species(n_species_in), threshold(threshold_in), use_nccl(use_nccl_in), load("chemistry_balance_load", 2),
+      loads("chemistry_balance_loads", 2 * static_cast<size_t>(comm::size())), result_stride(n_species_in + 4) {
 #ifndef Mallard_HAS_MPI
     (void)result_stride;
     throw std::logic_error("ChemistryBalance: built without MPI");
@@ -93,11 +94,14 @@ uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View
     n_sent = 0;
     n_guests = 0;
     const Kokkos::View<float *> previous = cells.previous_cost;
-    double load = 0.0;
+    using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+    const Kokkos::View<double *> mine = load;
     Kokkos::parallel_reduce("chemistry_balance_load", n_queued, KOKKOS_LAMBDA(const uint32_t i, double & sum) {
         sum += Kokkos::fmax(1.0, static_cast<double>(previous(queue(i))));
-    }, load);
-    const std::vector<double> all = comm::allgatherv(std::vector<double>{load, static_cast<double>(n_queued)});
+    }, Kokkos::Sum<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(mine.data())));
+    Kokkos::parallel_for("chemistry_balance_queued", 1, KOKKOS_LAMBDA(const int) { mine(1) = static_cast<double>(n_queued); });
+    comm::allgather_device(load, loads, use_nccl);
+    const auto all = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), loads);
     const size_t n_ranks = static_cast<size_t>(comm::size()), me = static_cast<size_t>(comm::rank());
     double total = 0.0, largest = 0.0;
     for (size_t r = 0; r < n_ranks; r++) {
@@ -158,38 +162,66 @@ uint32_t ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View
             }
             b[S - 1] = c.volume.extent(0) > 0 ? c.volume(cell) : rtype(0);
         });
-        Kokkos::fence("chemistry_balance_pack");
+        if (!use_nccl) Kokkos::fence("chemistry_balance_pack");
     }
     if (n_guests > 0) reserve(guest_buffer, static_cast<size_t>(n_guests) * S, "chem_balance_guests");
-    rtype * send_ptr = send_buffer.data();
-    rtype * guest_ptr = guest_buffer.data();
-    if constexpr (stage_through_host) {
+    if (staged()) {
         h_send_buffer = Kokkos::create_mirror_view(send_buffer);
         h_guest_buffer = Kokkos::create_mirror_view(guest_buffer);
         if (n_sent > 0) Kokkos::deep_copy(h_send_buffer, send_buffer);
-        send_ptr = h_send_buffer.data();
-        guest_ptr = h_guest_buffer.data();
     }
-    requests.assign(sends.size() + receives.size(), MPI_REQUEST_NULL);
-    size_t n = 0;
-    for (const Transfer & t : receives) {
-        MPI_Irecv(guest_ptr + static_cast<size_t>(t.first) * S, static_cast<int>(t.count * S), rtype_mpi(), t.rank,
-                  STATE_TAG, comm::world(), &requests[n++]);
-    }
-    for (const Transfer & t : sends) {
-        MPI_Isend(send_ptr + static_cast<size_t>(t.first - kept) * S, static_cast<int>(t.count * S), rtype_mpi(), t.rank,
-                  STATE_TAG, comm::world(), &requests[n++]);
-    }
+    transfer(messages(sends, send_ptr(), S, kept), messages(receives, guest_ptr(), S, 0), STATE_TAG);
     // Completed now: large GPU messages progress only inside MPI calls, which the sender would
     // otherwise make only after integrating its own cells, leaving the receivers idle meanwhile
-    wait(requests);
-    for (const Transfer & t : sends) {
-        requests.push_back(MPI_REQUEST_NULL);
-        MPI_Irecv(send_ptr + static_cast<size_t>(t.first - kept) * result_stride, static_cast<int>(t.count * result_stride),
-                  rtype_mpi(), t.rank, RESULT_TAG, comm::world(), &requests.back());
+    if (!use_nccl) {
+        wait(requests);
+        // The results come back in place of the states sent
+        transfer({}, messages(sends, send_ptr(), result_stride, kept), RESULT_TAG);
     }
 #endif
     return kept;
+}
+
+bool ChemistryBalance::staged() const {
+#ifdef Mallard_HAS_MPI
+    return stage_through_host && !use_nccl;
+#else
+    return false;
+#endif
+}
+
+rtype * ChemistryBalance::send_ptr() const { return staged() ? h_send_buffer.data() : send_buffer.data(); }
+
+rtype * ChemistryBalance::guest_ptr() const { return staged() ? h_guest_buffer.data() : guest_buffer.data(); }
+
+std::vector<comm::DeviceMessage> ChemistryBalance::messages(const std::vector<Transfer> & transfers, rtype * data,
+                                                            const uint32_t stride, const uint32_t offset) const {
+    std::vector<comm::DeviceMessage> out;
+    for (const Transfer & t : transfers) {
+        out.push_back({t.rank, data + static_cast<size_t>(t.first - offset) * stride,
+                       static_cast<size_t>(t.count) * stride * sizeof(rtype)});
+    }
+    return out;
+}
+
+void ChemistryBalance::transfer(const std::vector<comm::DeviceMessage> & out,
+                                const std::vector<comm::DeviceMessage> & in, [[maybe_unused]] const int tag) {
+    if (use_nccl) {
+        comm::send_receive_device(out, in);
+        return;
+    }
+#ifdef Mallard_HAS_MPI
+    for (const comm::DeviceMessage & m : in) {
+        requests.push_back(MPI_REQUEST_NULL);
+        MPI_Irecv(m.data, static_cast<int>(m.bytes / sizeof(rtype)), rtype_mpi(), m.rank, tag, comm::world(),
+                  &requests.back());
+    }
+    for (const comm::DeviceMessage & m : out) {
+        requests.push_back(MPI_REQUEST_NULL);
+        MPI_Isend(m.data, static_cast<int>(m.bytes / sizeof(rtype)), rtype_mpi(), m.rank, tag, comm::world(),
+                  &requests.back());
+    }
+#endif
 }
 
 uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queue,
@@ -200,7 +232,7 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
     const uint32_t S = state_stride, R = result_stride, ns = n_species;
     if (n_guests > 0) {
         reserve_guests(n_guests);
-        if constexpr (stage_through_host) Kokkos::deep_copy(guest_buffer, h_guest_buffer);
+        if (staged()) Kokkos::deep_copy(guest_buffer, h_guest_buffer);
         const Kokkos::View<rtype *> buf = guest_buffer;
         const ChemistryCells g = guests;
         const Kokkos::View<uint32_t *> q = guest_queue;
@@ -235,18 +267,17 @@ uint32_t ChemistryBalance::receive(const ChemistryCells & cells, const Kokkos::V
             b[ns + 2] = static_cast<rtype>(g.previous_cost(k));
             b[ns + 3] = static_cast<rtype>(g.repaired(k));
         });
-        Kokkos::fence("chemistry_balance_results");
-        if constexpr (stage_through_host) Kokkos::deep_copy(h_guest_buffer, guest_buffer);
+        if (!use_nccl) Kokkos::fence("chemistry_balance_results");
+        if (staged()) Kokkos::deep_copy(h_guest_buffer, guest_buffer);
     }
-    rtype * guest_ptr = stage_through_host ? h_guest_buffer.data() : guest_buffer.data();
-    for (const Transfer & t : receives) {
-        requests.push_back(MPI_REQUEST_NULL);
-        MPI_Isend(guest_ptr + static_cast<size_t>(t.first) * R, static_cast<int>(t.count * R), rtype_mpi(), t.rank,
-                  RESULT_TAG, comm::world(), &requests.back());
+    if (use_nccl) {
+        transfer(messages(receives, guest_ptr(), R, 0), messages(sends, send_ptr(), R, kept), RESULT_TAG);
+    } else {
+        transfer(messages(receives, guest_ptr(), R, 0), {}, RESULT_TAG);
+        wait(requests);
     }
-    wait(requests);
     if (n_sent > 0) {
-        if constexpr (stage_through_host) Kokkos::deep_copy(send_buffer, h_send_buffer);
+        if (staged()) Kokkos::deep_copy(send_buffer, h_send_buffer);
         const Kokkos::View<rtype *> buf = send_buffer;
         const ChemistryCells c = cells;
         const uint32_t first = kept;

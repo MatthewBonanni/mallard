@@ -766,7 +766,9 @@ void Solver::update_dynamic_efficiency() {
     Kokkos::parallel_for("tfles_dynamic_terms", n_owned,
                          DynamicEfficiencyFunctor{tf, les_delta, mesh->cell_volume, tfles_test_width2, a,
                                                   tfles_test_passes, tfles_dynamic_terms});
-    const auto [resolved, test, log_gamma, scale] = exact_sums(tfles_dynamic_terms, n_owned, is_distributed());
+    tfles_dynamic_sums.sum(tfles_dynamic_terms);
+    const auto sums = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), tfles_dynamic_sums.sums());
+    const double resolved = sums(0), test = sums(1), log_gamma = sums(2), scale = sums(3);
     // beta = ln(<hat(|grad c|)> / <|grad hat(c)|>) / <ln gamma>, a function of the state alone (restarts reproduce).
     // A resolved surface below 1e-6 of the thickened volume over Delta_e is round-off in a uniform field: no flame
     const bool flame = test > 1e-6 * scale && log_gamma > 0.0;
@@ -781,6 +783,7 @@ void Solver::init_dynamic_efficiency() {
                                                 mesh->cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
                                                 mesh->cell_volume, tfles_test_width2});
     tfles_dynamic_terms = Kokkos::View<double *[4]>("tfles_dynamic_terms", n_owned);
+    tfles_dynamic_sums = ExactSums<4>(n_owned, is_distributed(), halo.uses_nccl());
     // Passes of the test filter: enough for its width to reach the combustion filter width F_max delta_L on
     // average over the thickened cells (gamma >= sqrt(2); 4 passes on uniform hexahedra at n_res = 5)
     Kokkos::View<double *[2]> ratio("tfles_test_ratio", n_owned);
@@ -850,7 +853,9 @@ void Solver::update_dynamic_constant() {
                                                  mesh->cells_of_cell_shift, mesh->periodic_maps(), mesh->cell_coords,
                                                  mesh->cell_volume, les_width, flow, g, dynamic_stresses,
                                                  dynamic_terms});
-    const auto [lm, mm] = exact_sums(dynamic_terms, n_owned, is_distributed());
+    dynamic_sums.sum(dynamic_terms);
+    const auto sums = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), dynamic_sums.sums());
+    const double lm = sums(0), mm = sums(1);
     // C^2 (Vreman: c) = <L:M> / <M:M>, clipped at zero; a field without resolved strain keeps the previous one
     if (mm > 0.0) {
         dynamic_ratio = lm / mm;
@@ -909,6 +914,7 @@ void Solver::init_les() {
     if (les.dynamic) {
         dynamic_halo = State("dynamic_halo", mesh->n_cells, 9);
         dynamic_terms = Kokkos::View<double *[2]>("dynamic_terms", mesh->n_owned());
+        dynamic_sums = ExactSums<2>(mesh->n_owned(), is_distributed(), halo.uses_nccl());
         dynamic_stresses = Kokkos::View<double *[6]>("dynamic_stresses", mesh->n_cells);
     }
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
