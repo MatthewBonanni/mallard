@@ -512,7 +512,7 @@ TEST(DerivedFields, ScalarDissipationIsTwiceTheDiffusivityForAUnitGradient) {
     uint32_t checked = 0;
     for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
         if (!interior(*solver, c)) continue;
-        EXPECT_NEAR(chi[c], 2.0 * D[c], 1e-6 * D[c]) << c;
+        EXPECT_NEAR(chi[c], 2.0 * D[c], roundoff(1e-11) * D[c]) << c;
         checked++;
     }
     EXPECT_GT(checked, 0u);
