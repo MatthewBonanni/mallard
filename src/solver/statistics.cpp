@@ -118,6 +118,9 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
         h_pairs(p, 1) = products[p].second;
     }
     Kokkos::deep_copy(pairs, h_pairs);
+    clock = Kokkos::View<Clock>("statistics_clock");
+    t_sample = Kokkos::View<rtype>("statistics_t_sample");
+    set_clock({0.0_r, 0.0_r, t_start, 0.0_r, 0});
     mean = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_mean", n_cells, fields.size());
     cov = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_cov", n_cells, products.size());
     h_mean = Kokkos::create_mirror_view(mean);
@@ -130,11 +133,30 @@ void Statistics::start(rtype t) {
     start_means(t);
 }
 
+Statistics::Clock Statistics::host_clock() const {
+    Clock k{0.0_r, 0.0_r, t_start, 0.0_r, 0};
+    if (clock.is_allocated()) Kokkos::deep_copy(Kokkos::View<Clock, Kokkos::HostSpace>(&k), clock);
+    return k;
+}
+
+void Statistics::set_clock(const Clock & k) {
+    Clock c = k;
+    Kokkos::deep_copy(clock, Kokkos::View<Clock, Kokkos::HostSpace>(&c));
+}
+
+void Statistics::set_start(rtype t) {
+    t_start = t;
+    spectra.set_start(t);
+    phase.set_start(t);
+    if (!clock.is_allocated()) return;
+    Clock k = host_clock();
+    k.t_start = t;
+    set_clock(k);
+}
+
 void Statistics::start_means(rtype t) {
     if (!means_enabled()) return;
-    weight = 0.0_r;
-    t_last = std::max(t, t_start);
-    n_samples = 0;
+    set_clock({0.0_r, std::max(t, t_start), t_start, 0.0_r, 0});
     Kokkos::deep_copy(mean, 0.0_r);
     Kokkos::deep_copy(cov, 0.0_r);
 }
@@ -143,17 +165,27 @@ void Statistics::sample(uint64_t step, rtype t, const CellSampler & sampler, uin
     if (spectra.due(step, t)) spectra.sample(step, t, sampler);
     if (phase.due(step, t)) phase.sample(t, sampler, n_owned);
     if (!(means_enabled() && step % interval == 0 && t > t_start)) return;
-    const rtype w = t - t_last;
-    weight += w;
-    t_last = t;
-    n_samples++;
-    const rtype a = w / weight;
+    Kokkos::deep_copy(t_sample, t);
+    sample_means(t_sample.data(), sampler, n_owned);
+}
+
+void Statistics::sample_means(const rtype * t, const CellSampler & sampler, uint32_t n_owned) {
+    const Kokkos::View<Clock> k = clock;
+    Kokkos::parallel_for("statistics_clock", 1, KOKKOS_LAMBDA(const int) {
+        Clock & c = k();
+        const rtype w = *t - c.t_last;
+        c.weight += w;
+        c.t_last = *t;
+        c.n_samples++;
+        c.a = w / c.weight;
+    });
     const auto m = mean;
     const auto C = cov;
     const auto code = codes;
     const auto pair = pairs;
     const uint32_t n_fields = static_cast<uint32_t>(fields.size()), n_products = static_cast<uint32_t>(products.size());
     Kokkos::parallel_for("statistics_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        const rtype a = k().a;
         // Covariances first: they need the means before and after the sample
         for (uint32_t p = 0; p < n_products; p++) {
             const uint32_t i = pair(p, 0), j = pair(p, 1);
@@ -215,9 +247,8 @@ void Statistics::restore(const RestartData & restart, const std::string & file, 
         throw InputError("statistics: restart file " + file + " holds averages but not " + missing +
                          "; set statistics.reset = true to start them afresh.");
     }
-    weight = static_cast<rtype>(*w);
-    t_last = tl ? static_cast<rtype>(*tl) : t;
-    n_samples = n ? static_cast<uint64_t>(*n) : 0;
+    set_clock({static_cast<rtype>(*w), tl ? static_cast<rtype>(*tl) : t, t_start, 0.0_r,
+               n ? static_cast<uint64_t>(*n) : 0});
     for (size_t v = 0; v < names.size(); v++) {
         const bool is_mean = v < fields.size();
         for (size_t c = 0; c < values[v]->size(); c++) {
@@ -235,9 +266,10 @@ void Statistics::restore(const RestartData & restart, const std::string & file, 
 RestartAttributes Statistics::attributes() const {
     RestartAttributes all;
     if (means_enabled()) {
-        all = {{WEIGHT, static_cast<double>(weight)},
-               {T_LAST, static_cast<double>(t_last)},
-               {SAMPLES, static_cast<double>(n_samples)}};
+        const Clock k = host_clock();
+        all = {{WEIGHT, static_cast<double>(k.weight)},
+               {T_LAST, static_cast<double>(k.t_last)},
+               {SAMPLES, static_cast<double>(k.n_samples)}};
     }
     for (auto && a : spectra.attributes()) all.push_back(a);
     for (auto && a : phase.attributes()) all.push_back(a);
@@ -250,7 +282,7 @@ std::vector<std::pair<std::string, std::string>> Statistics::summary() const {
         std::string text = "every " + logging::count(interval) + " steps from t = " + units::with(logging::real(double(t_start)), "s") + ": ";
         for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + std::string("MEAN_") + fields[i];
         for (const auto & [i, j] : products) text += ", COV_" + fields[i] + "_" + fields[j];
-        if (n_samples > 0) text += " (" + logging::count(n_samples) + " samples so far)";
+        if (const uint64_t n = samples(); n > 0) text += " (" + logging::count(n) + " samples so far)";
         items.emplace_back("statistics", text);
     }
     if (spectra.enabled()) items.emplace_back("spectra", spectra.summary());

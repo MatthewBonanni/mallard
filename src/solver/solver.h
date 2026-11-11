@@ -422,6 +422,8 @@ class Solver {
         uint32_t n_progress_values() const;
         void mixture_reductions(step_queue::MixtureDiagnostics * out);
         void chemistry_reductions(step_queue::Chemistry * out);
+        /** @brief The means sampled in the step graph. */
+        bool statistics_on_device() const;
         /** @brief Forces and integrals computed in the step graph and written by the host from its records. */
         bool monitors_on_device() const;
         void allocate_monitors();
@@ -817,6 +819,7 @@ class Solver {
         Kokkos::View<double *> monitor_results;  // columns of every monitor
         Kokkos::View<rtype *> monitor_sums;     // a monitor's reduction
         std::vector<size_t> monitor_offsets;    // first column of each monitor, then their number
+        Kokkos::View<uint32_t> statistics_due;  // the current launch samples the means
         Kokkos::View<uint32_t *> monitor_due;   // the current launch computes monitor k
         Kokkos::View<uint64_t *> monitor_intervals;
         Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> monitor_staging;  // (record, column)

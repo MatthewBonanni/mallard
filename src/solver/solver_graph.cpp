@@ -380,6 +380,20 @@ void Solver::device_step_body() {
         });
     }
     if (p_max.is_allocated()) device_if(advanced, [&] { update_p_max(); });
+    if (statistics_on_device()) {
+        // The means' sample of steps the device goes on from, as after_step takes it
+        const Kokkos::View<const Statistics::Clock> clock = statistics.device_clock();
+        const Kokkos::View<uint32_t> due = statistics_due;
+        const uint64_t every = statistics.sampling_interval();
+        Kokkos::parallel_for("statistics_due", 1, KOKKOS_LAMBDA(const int) {
+            const step_queue::Loop & L = loop();
+            due() = L.active && L.advanced && L.step % every == 0 && s(T) > clock().t_start;
+        });
+        device_if(statistics_due.data(), [&] {
+            update_primitives();
+            statistics.sample_means(step_scalars.data() + T, cell_sampler(), mesh->n_owned());
+        });
+    }
     if (monitors_on_device()) {
         // Forces and integrals of steps the device goes on from, staged for the host's rows; their
         // boundary states at the step's end, the device's t
@@ -442,6 +456,11 @@ void Solver::captured_launch() {
         throw;
     }
     section.stop();
+}
+
+bool Solver::statistics_on_device() const {
+    // Spectra and phase averages sample on the host; fused chemistry is advanced by the host before a sample
+    return statistics.samples_only_means() && !defer_chemistry;
 }
 
 bool Solver::monitors_on_device() const {
@@ -582,6 +601,7 @@ void Solver::begin_device_steps() {
     if (progress_values.extent(0) != n_values) progress_values = Kokkos::View<double *>("step_progress_values", n_values);
     progress_staging = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
         "step_progress_staging", n_records, n_values);
+    if (statistics_on_device()) statistics_due = Kokkos::View<uint32_t>("step_statistics_due");
     allocate_monitors();
     if (monitors_on_device()) {
         const size_t n_monitors = force_monitors.size() + 1;
@@ -624,7 +644,7 @@ step_queue::Horizon Solver::step_horizon() const {
     }
     for (const auto & writer : data_writers) writer->due_limits(step, h.step_limit, h.t_limit);
     probes.due_limits(step, h.step_limit, h.t_limit);
-    statistics.due_limits(step, h.step_limit);
+    if (!statistics_on_device()) statistics.due_limits(step, h.step_limit);
     // The chemistry balancing's window ends after a step the host takes
     const uint64_t window = reacting ? cell_chemistry.steps_to_balance_window() : 0;
     if (reacting && window != std::numeric_limits<uint64_t>::max()) h.at_step(step + window);

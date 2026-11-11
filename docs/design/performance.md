@@ -439,8 +439,9 @@ run health's local values into a pinned record. The host computes, at each step 
 and the first time at which it must act again (`Solver::step_horizon`: `n_steps`, `t_stop`, output and sample
 intervals, time-based outputs, control files). Each such condition is `step >= s` or `t >= t_x`
 (intervals: their next multiple; times: the threshold `due` compares with), so the device's comparison with
-their minima is the host's decision bit for bit; a condition the device cannot evaluate exactly (statistics
-after `t_start`) stops it at every step where it may hold, and the host decides as before.
+their minima is the host's decision bit for bit; a condition the device cannot evaluate exactly (spectra,
+phase averages and time-averaged probes after `t_start`) stops it at every step where it may hold, and the
+host decides as before.
 
 The host keeps `step_queue` launches enqueued and reads each launch's record once its event completes.
 Run-control requests (signals, `mallard ctl`, the wall time) go to a pinned array that each step's
@@ -462,6 +463,12 @@ each monitor's reduction sits under an IF node on its flag and is reduced over t
 writes the rows from the record as it takes it. At a step where the device stops, the host evaluates the
 monitors itself, with the same device reduction, so rows match at any depth. Monitors with the
 kinetic-energy budget or fused chemistry stay on the host.
+
+The statistics means sample in the graph too, when they are the only statistics (no spectra or phase
+averages) and chemistry is not fused. Their clock (weight, last sample time, `t_start`, sample count) lives
+in device memory and every sample, the host's included, advances it in a kernel, so the device's decision
+(`step % interval == 0` and `t > t_start`, after an accepted step the device goes on from) and the weights
+match the host's bit for bit. The host reads the clock when it writes a snapshot or a restart.
 
 ## Scaling (one node)
 

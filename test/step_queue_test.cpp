@@ -450,6 +450,19 @@ TEST(StepQueueTest, ForcesAndIntegralsAreStagedWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("monitors", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, MeansAreSampledWithoutStoppingTheDevice) {
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 20\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\nproducts = [\"RHO*P\"]\n";
+    // The restart carries the means and their clock
+    expect_queue_invariant("means", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 20\n";
+    EXPECT_EQ(run_case("means", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, OutputsByTimeAndTStop) {
     Case c;
     c.run = "t_stop = 0.1\ncfl = 0.3\n";

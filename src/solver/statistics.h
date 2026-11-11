@@ -151,6 +151,15 @@ class PhaseAverage {
  */
 class Statistics {
     public:
+        /** @brief The means' clock, in device memory: weights from t_last, and the last sample's weight a. */
+        struct Clock {
+            rtype weight;
+            rtype t_last;
+            rtype t_start;
+            rtype a;
+            uint64_t n_samples;
+        };
+
         /** @brief Read [statistics] (if any) and allocate the mesh's cells. */
         void init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
                   bool use_nccl = false);
@@ -171,6 +180,12 @@ class Statistics {
 
         /** @brief Add the sample at (step, t) of cells [0, n_owned) to whatever is due (collective). */
         void sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned);
+        /** @brief Only the means sample: in a step graph, at the device's t, when the flag due is set. */
+        bool samples_only_means() const { return means_enabled() && !spectra.enabled() && !phase.enabled(); }
+        /** @brief The means' clock in device memory (its t_start is the one sampling compares with). */
+        Kokkos::View<const Clock> device_clock() const { return clock; }
+        /** @brief Add the means' sample at the device's time *t. */
+        void sample_means(const rtype * t, const CellSampler & sampler, uint32_t n_owned);
 
         /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., PHASE_<bin>_<field>... */
         std::vector<std::string> variables() const;
@@ -186,21 +201,23 @@ class Statistics {
         /** @brief Start afresh at time t (first sample weighted from max(t, t_start)). */
         void start(rtype t);
         /** @brief Sample from time t on (as t_start = t), in the means, spectra and phases. */
-        void set_start(rtype t) {
-            t_start = t;
-            spectra.set_start(t);
-            phase.set_start(t);
-        }
+        void set_start(rtype t);
         RestartAttributes attributes() const;
         RestartArrays arrays() const { return spectra.arrays(); }
         /** @brief Write the averaged spectra (rank 0), with the other output. */
         void write(uint64_t step, rtype t, const std::string & reason) const { spectra.write(step, t, reason); }
 
         std::vector<std::pair<std::string, std::string>> summary() const;
-        uint64_t samples() const { return n_samples; }
+        uint64_t samples() const { return host_clock().n_samples; }
         /** @brief The means' averaging window: from where the first sample's weight starts to the last sample (NaN before one). */
-        double average_start() const { return n_samples ? double(t_last - weight) : std::numeric_limits<double>::quiet_NaN(); }
-        double average_end() const { return n_samples ? double(t_last) : std::numeric_limits<double>::quiet_NaN(); }
+        double average_start() const {
+            const Clock k = host_clock();
+            return k.n_samples ? double(k.t_last - k.weight) : std::numeric_limits<double>::quiet_NaN();
+        }
+        double average_end() const {
+            const Clock k = host_clock();
+            return k.n_samples ? double(k.t_last) : std::numeric_limits<double>::quiet_NaN();
+        }
         const Spectra & get_spectra() const { return spectra; }
         const PhaseAverage & get_phase() const { return phase; }
         /** @brief Host copies (see copy_device_to_host): (cell, field) means, (cell, product) covariances. */
@@ -221,14 +238,15 @@ class Statistics {
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_mean;
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_cov;
 
-        rtype weight = 0.0;
-        rtype t_last = 0.0;
-        uint64_t n_samples = 0;
+        Kokkos::View<Clock> clock;
+        Kokkos::View<rtype> t_sample;
 
         Spectra spectra;
         PhaseAverage phase;
 
         void start_means(rtype t);
+        Clock host_clock() const;
+        void set_clock(const Clock & k);
 };
 
 /**
