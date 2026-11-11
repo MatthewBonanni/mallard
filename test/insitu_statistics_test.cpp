@@ -487,7 +487,9 @@ TEST(MPITest, SpectraAndPhaseAveragesDoNotDependOnTheRankCount) {
         const auto phase_ref = gather_phase(serial);
         EXPECT_EQ(gather_phase(distributed), phase_ref);
         EXPECT_EQ(gather_phase(continued), phase_ref);
-        if (both) EXPECT_EQ(gather_phase(over_mpi), phase_ref);
+        if (both) {
+            EXPECT_EQ(gather_phase(over_mpi), phase_ref);
+        }
         comm::barrier();
     }
 
