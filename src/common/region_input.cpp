@@ -38,6 +38,12 @@ Vec cross(const Vec & a, const Vec & b) {
 }
 double norm(const Vec & a) { return std::sqrt(dot(a, a)); }
 
+/** @brief The values of a step's programs for apply on the host: values[p], or 0 without values. */
+struct ProgramValues {
+    const double * values = nullptr;
+    KOKKOS_INLINE_FUNCTION double operator()(const uint32_t p) const { return values ? values[p] : 0.0; }
+};
+
 /** @brief A region of that dimension, in the words of the run (2D: point, curve, area). */
 std::string dimension_name(int d) {
     const char * names[4] = {"a point", "a curve", N_DIM == 3 ? "a surface" : "an area", "a volume"};
@@ -59,7 +65,7 @@ struct Frame {
     /** @brief The frame followed by step, whose programs have the values at t = 0 values[p]. */
     Frame then(const Step & step, const std::vector<double> & values = {}) const {
         Frame f = *this;
-        apply(step, [&](const uint32_t p) { return values[p]; }, f.M.data(), f.d.data(), f.k);
+        apply(step, ProgramValues{values.data()}, f.M.data(), f.d.data(), f.k);
         f.steps.push_back(step);
         f.moving = moving || !step.fixed();
         return f;
@@ -1341,7 +1347,7 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
             }
             // Its box: the region's corners through the image's map (x -> M^-1 (x' - d) of the inverse frame)
             double M[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}, d[3] = {0.0, 0.0, 0.0}, k = 1.0;
-            for (const Step & s : steps) apply(s, [](uint32_t) { return 0.0; }, M, d, k);
+            for (const Step & s : steps) apply(s, ProgramValues{}, M, d, k);
             std::array<Vec, 2> b = {Vec{INF, INF, INF}, Vec{-INF, -INF, -INF}};
             for (int c = 0; c < 8; c++) {
                 const Vec q = {((c & 1) ? box[1][0] : box[0][0]) - d[0], ((c & 2) ? box[1][1] : box[0][1]) - d[1],

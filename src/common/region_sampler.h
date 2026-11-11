@@ -271,7 +271,7 @@ KOKKOS_INLINE_FUNCTION void cone(const Shape<Distance> & shape, const bool axisy
             constexpr double W[3] = {5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0};
             constexpr int n = N_DIM == 2 ? 9 : 27;
             for (int q = 0; q < n; q++) {
-                double p[3] = {mid[0], mid[1], mid[2]}, x[3];
+                double p[3] = {mid[0], mid[1], mid[2]}, x[3] = {0.0, 0.0, 0.0};
                 double w = 1.0;
                 int rest = q;
                 for (int i = 0; i < N_DIM; i++) {
