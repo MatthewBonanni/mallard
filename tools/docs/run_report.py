@@ -80,7 +80,7 @@ interval = 5
 [[probes]]
 name = "station"
 point = [0.7, 0.5]
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 interval = 5
 
 [[write_data]]
@@ -92,7 +92,7 @@ interval = 60
 prefix = "solut/flow"
 format = "vtu"
 interval = 60
-variables = ["RHO", "P"]
+fields = ["RHO", "P"]
 """
 
 

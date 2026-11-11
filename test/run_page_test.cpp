@@ -302,11 +302,11 @@ TEST(RunPageTest, ProbeValuesArePlottedFromTheProgressRecordsWithTheirUnitsUpToT
     const std::string z = N_DIM == 3 ? ", 0.125" : "";
     // A one-point probe (2 values), then two lines of 6 reductions of 7 values (2D) or 9 (3D) each: more than
     // the run record keeps, so the last is cut
-    std::string probes = "[[probes]]\nname = \"point\"\npoint = [0.7, 0.5" + z + "]\nvariables = [\"RHO\", \"P\"]\n"
+    std::string probes = "[[probes]]\nname = \"point\"\npoint = [0.7, 0.5" + z + "]\nfields = [\"RHO\", \"P\"]\n"
                          "interval = 2\nfile = \"" + dir + "/probe_point.csv\"\n";
     for (const char * name : {"a", "b"}) {
         probes += std::string("[[probes]]\nname = \"") + name + "\"\nstart = [0.1, 0.5" + z + "]\nend = [0.9, 0.5" +
-                  z + "]\nn_points = 9\nvariables = [\"RHO\", \"RHOU\", \"U\", \"P\", \"T\"]\nsamples = false\n"
+                  z + "]\nn_points = 9\nfields = [\"RHO\", \"RHOU\", \"U\", \"P\", \"T\"]\nsamples = false\n"
                   "reductions = [\"integral\", \"mean\", \"favre\", \"min\", \"max\", \"rms\"]\nreductions_file = \"" +
                   dir + "/probe_" + name + "_reductions.csv\"\n";
     }
