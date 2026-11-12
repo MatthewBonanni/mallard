@@ -994,6 +994,7 @@ class Solver {
         bool hybrid_flux = false;           // [numerics] convective_flux = "hybrid" (docs/design/les.md, section 4.3)
         rtype hybrid_threshold = 0.65_r;
         rtype hybrid_floor = 0.0;
+        CentralFlux hybrid_central = CentralFlux::RECONSTRUCTED;  // [numerics.hybrid] central
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
         bool positivity_limiter = false;         // bound-preserving TENO, planar single gas: limit_flux_positivity
         Kokkos::View<rtype *> positivity_kappa;  // (cell): dt sum_f A_f alpha_f / V

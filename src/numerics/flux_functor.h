@@ -129,6 +129,10 @@ struct ConvectiveFluxFunctor {
     rtype low_mach_cutoff;  // 1 disables the low-Mach correction
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell (UpwindSensorFunctor), else empty
     Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
+    CentralFlux central_flux = CentralFlux::RECONSTRUCTED;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;  // the cells' W, read when central_flux is CELL_AVERAGES
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -155,6 +159,16 @@ struct ConvectiveFluxFunctor {
         const bool hybrid = upwind.extent(0) > 0;
         const rtype phi =
             hybrid ? face_upwind_fraction(upwind, boundaries, cells_of_face(i_face, 0), c1, i_face) : 1.0_r;
+        // Interior faces whose central part reads the cell values, W_1 in the face's (cell 0's) frame
+        const bool cell_central = hybrid && c1 >= 0 && central_flux == CentralFlux::CELL_AVERAGES;
+        rtype W_0[N_CONSERVATIVE], W_1[N_CONSERVATIVE];
+        if (cell_central) {
+            FOR_I_CONSERVATIVE {
+                W_0[i] = W_cells(cells_of_face(i_face, 0), i);
+                W_1[i] = W_cells(c1, i);
+            }
+            if (periodic.rotated()) periodic.rotate(face_shift(i_face), W_1 + 1);
+        }
 
         rtype total[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
@@ -176,7 +190,9 @@ struct ConvectiveFluxFunctor {
                 if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) FOR_I_CONSERVATIVE W_l[i] = W_r[i];
             }
             rtype central[N_CONSERVATIVE] = {};
-            if (hybrid) riemann::KEEP::calc_flux(central, n_point, W_l, W_r, gamma);
+            if (hybrid) {
+                riemann::KEEP::calc_flux(central, n_point, cell_central ? W_0 : W_l, cell_central ? W_1 : W_r, gamma);
+            }
             if (phi > 0.0_r) {
                 if (low_mach_cutoff < 1.0_r &&
                     (c1 >= 0 || boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic())) {
