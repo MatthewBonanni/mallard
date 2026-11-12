@@ -127,6 +127,7 @@ add_library(MallardCore STATIC
     parallel/distributed_mesh.cpp
     parallel/global_order.cpp
     parallel/halo_exchange.cpp
+    parallel/lock_arrays.cpp
     parallel/partition.cpp
 )
 
