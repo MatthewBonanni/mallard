@@ -540,6 +540,7 @@ Contents open_vtu(const std::string & path) {
         c.format = "VTP";
         const bool cell_data = x.find("CellData", "") != nullptr;
         read_vtk_metadata(c, x, cell_data ? "CellData" : "PointData", file_format::PROBE_OUTPUT);
+        c.sampling = provenance::parse_comment(x.header, snapshot_block::PROBE_SAMPLING);
         c.mesh.n_points = x.piece_count("NumberOfPoints");
         c.mesh.n_cells = x.piece_count("NumberOfVerts") + x.piece_count("NumberOfLines") + x.piece_count("NumberOfPolys");
         if (const XmlArray * points = x.find("Points", "")) bound(c.mesh, x.values(*points), 3);
@@ -772,6 +773,7 @@ struct Table {
     std::vector<std::pair<size_t, std::string>> runs;      // each run block, with the row it precedes
     std::string snapshot;                                  // a file of one snapshot (spectra): its block
     std::string legacy_snapshot;                           // spectra before 0.10: "# step = ..., t = ..."
+    std::string sampling;                                  // probes: the last probe sampling block
 };
 
 std::vector<std::string> split(const std::string & line, char sep) {
@@ -789,9 +791,12 @@ Table read_table(const std::string & path) {
     Table t;
     std::string line;
     const std::string snapshot_open = "# " + std::string(snapshot_block::NAME) + " ";
+    const std::string sampling_open = "# " + std::string(snapshot_block::PROBE_SAMPLING) + " ";
     while (std::getline(in, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.starts_with("# units: ")) {
+        if (line.starts_with(sampling_open)) {
+            t.sampling = line.substr(sampling_open.size());
+        } else if (line.starts_with("# units: ")) {
             t.units = split(line.substr(9), ',');
         } else if (line.starts_with(snapshot_open)) {
             t.snapshot = line.substr(snapshot_open.size());
@@ -827,6 +832,7 @@ Contents open_csv(const std::string & path) {
     c.kind = Kind::table;
     c.format = "CSV";
     c.run = t.provenance;
+    c.sampling = t.sampling;
     if (t.units.empty()) c.notes.push_back("no units line: written before Mallard 0.9, or not by Mallard");
     size_t time_column = t.header.size(), step_column = t.header.size();
     for (size_t i = 0; i < t.header.size(); i++) {
@@ -1090,6 +1096,7 @@ Contents open_vtkhdf(const std::string & path) {
         c.kind = Kind::probe;
         c.format = "VTKHDF";
         if (c.version >= 0) file_format::check_version(file_format::PROBE_OUTPUT, path, c.version);
+        if (const auto s = root_strings(file, snapshot_block::PROBE_SAMPLING_ATTRIBUTE); !s.empty()) c.sampling = s[0];
         for (const char * kind : {"Vertices", "Lines", "Polygons"}) {
             const std::string group = std::string(kind) + "/NumberOfCells";
             m.n_cells += exists(top, kind) ? first_count(top, group) : 0;
@@ -1229,6 +1236,7 @@ Contents open_h5(const std::string & path) {
         if (c.version >= 0) file_format::check_version(file_format::PROBE_OUTPUT, path, c.version);
         c.kind = Kind::probe;
         c.format = "probe HDF5";
+        if (const auto s = root_strings(file, snapshot_block::PROBE_SAMPLING_ATTRIBUTE); !s.empty()) c.sampling = s[0];
         const std::vector<hsize_t> d = dims(file, "coordinates");
         c.mesh.n_points = d.at(0);
         c.dim = d.size() == 2 ? static_cast<int>(d[1]) : 1;
@@ -1706,6 +1714,13 @@ std::string to_json(const Contents & c) {
         }
         o.raw("run", c.run);
     }
+    bool sampling = !c.sampling.empty();
+    try {
+        if (sampling) json::parse(c.sampling);
+    } catch (const std::exception &) {
+        sampling = false;
+    }
+    o.raw("sampling", sampling ? c.sampling : "null");
     o.raw("notes", strings_json(c.notes));
     return o.str();
 }

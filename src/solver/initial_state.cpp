@@ -1125,6 +1125,14 @@ struct InitialState::Impl {
                            double & edge, bool & bounded) {
         const region::Region r = region::read(table, where, region_names);
         region::require_full_dimension(r, table, where);
+        if (r.solution()) {
+            throw InputError(Diagnostic{.key = where,
+                                        .line = line_of(table),
+                                        .message = "follows the solution, which the initial state sets",
+                                        .fix = "Give the region by its geometry, or write the condition into the "
+                                               "initial state's expressions",
+                                        .docs = "docs/guide/geometry.md#regions-defined-by-the-solution"});
+        }
         const auto & h = r.host();
         const uint32_t vertex_offset = static_cast<uint32_t>(vertices.size() / 2);
         const uint32_t program_offset = static_cast<uint32_t>(programs.size());
