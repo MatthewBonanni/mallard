@@ -27,6 +27,7 @@ struct Entry {
     const char * group = "";  // where mallard list fields files it; empty is an error (FieldUnitsTest)
     const char * needs = "";  // what a case needs for the field, "" if every case has it
     const char * non_si_units = "";
+    bool post_derive = false;  // mallard post derive writes it from a snapshot or restart file
 };
 
 constexpr Dimension momentum_density = dim::mass_flux;
@@ -52,7 +53,7 @@ constexpr const char * SURFACES = "[[probes]] on a surface or boundary zone";
 const Entry VECTORS[] = {
     {"RHOU", momentum_density, "momentum density", CONSERVATIVE, ""},
     {"U", dim::velocity, "velocity", PRIMITIVE, ""},
-    {"VORTICITY", dim::rate, "vorticity", DERIVED, ""},
+    {"VORTICITY", dim::rate, "vorticity", DERIVED, "", "", true},
     {"MOMENTUM_FLUX", dim::pressure, "normal momentum flux", SURFACE, SURFACES},
     {"TRACTION_PRESSURE", dim::pressure, "pressure traction on the boundary", SURFACE, WALLS},
     {"TRACTION_VISCOUS", dim::pressure, "viscous traction on the boundary", SURFACE, WALLS},
@@ -286,13 +287,27 @@ std::string group(const std::string & name) {
     return "";
 }
 
+bool post_derive(const std::string & name) {
+    if (derived::find(name.c_str()) != derived::N_FIELDS) return true;
+    for (const auto & e : VECTORS) {
+        if (!e.post_derive) continue;
+        const std::string stem = e.name;
+        for (const char * suffix : {"", "_X", "_Y", "_Z"}) {
+            if (name == stem + suffix) return true;
+        }
+    }
+    return false;
+}
+
 std::vector<CatalogField> catalog() {
     std::vector<CatalogField> out;
     auto add = [&](const std::string & name, const Entry & e, const std::string & long_name) {
         const std::string units = e.non_si_units[0] ? e.non_si_units : e.dimension.udunits();
-        out.push_back({name, units, long_name, e.group, e.needs});
+        out.push_back({name, units, long_name, e.group, e.needs, e.post_derive});
     };
-    for (const auto & d : derived::FIELDS) out.push_back({d.name, d.dimension.udunits(), d.long_name, d.group, d.needs_text});
+    for (const auto & d : derived::FIELDS) {
+        out.push_back({d.name, d.dimension.udunits(), d.long_name, d.group, d.needs_text, true});
+    }
     for (const auto & e : NAMED) add(e.name, e, e.long_name);
     for (const auto & e : VECTORS) {
         if (find_base(e.name)->long_name == e.long_name) add(e.name, e, e.long_name + std::string(" (vector)"));
