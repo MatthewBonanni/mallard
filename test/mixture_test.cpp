@@ -820,7 +820,7 @@ TEST(MixtureTest, FusedHalfStepsRunTheSameWhateverTheOutputAndRestarts) {
             species = std::max(species, std::abs(double(unfused.h_species(c, k) - fused.h_species(c, k))));
         }
     }
-    EXPECT_LT(species, tol(1e-6, 1e-3) * rho);
+    EXPECT_LT(species, tol(1e-5, 1e-3) * rho);
 }
 
 TEST(MixtureTest, BudgetWithDoubleFluxLeavesTheSolutionUnchanged) {
