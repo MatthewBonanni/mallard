@@ -464,6 +464,19 @@ TEST(StepQueueTest, MeansAreSampledWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("means", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, BatchMeansAreSampledWithoutStoppingTheDevice) {
+    // Batches of the means close on the device; the restart carries their averages and clock
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n"
+              "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 30\n"
+              "[statistics]\ninterval = 2\nt_start = 0.01\nbatch = 0.05\nfields = [\"RHO\", \"P\"]\nproducts = [\"RHO*P\"]\n";
+    expect_queue_invariant("batch_means", c);
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 30\n";
+    EXPECT_EQ(run_case("batch_means", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
     Case c;
     c.run = "n_steps = 20\ncfl = 0.5\n";
