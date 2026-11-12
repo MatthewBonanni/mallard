@@ -1261,8 +1261,9 @@ int average(const cli::Args & args) {
     const auto hash = [](const std::string & block) { return provenance::find_string(block, "mesh", "sha256"); };
     const std::string then = hash(files[0].run), now = hash(provenance::json());
     if (comm::is_root() && !then.empty() && !now.empty() && then != now) {
-        logging::warning(files[0].path + " was written on a mesh file of other contents (the sha256 in its run block "
-                         "differs) with as many cells: check that the case's mesh is the run's.");
+        logging::warning(diagnostic_code::MESH_DIFFERS,
+                         files[0].path + " was written on a mesh file of other contents (the sha256 in its run block "
+                                         "differs) with as many cells: check that the case's mesh is the run's.");
     }
     const Mesh & mesh = *solver.get_mesh();
     if (args.has("--region") && !solution) {
