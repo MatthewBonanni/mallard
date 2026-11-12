@@ -1,0 +1,1 @@
+- Point-sampled filled region probes (`sampling = "point"`) integrate to round-off in curved cells whose centroid the region's surface passes near: the quadrature maps a curved cell's middle by straight simplices and the rest by shells out to its curved faces, none collapsed, instead of cones that collapse at the centroid (#808).

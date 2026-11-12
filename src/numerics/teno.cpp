@@ -36,6 +36,7 @@
 
 #include "input.h"
 #include "launch_bounds.h"
+#include "log.h"
 #include "periodic.h"
 #include "teno.h"
 #include "teno_setup.h"
@@ -1019,7 +1020,7 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
 
     if (n_failed_large > 0) {
         throw std::runtime_error("TENO: could not build a full-rank large stencil for " +
-                                 std::to_string(n_failed_large) + " cells (mesh too small for this order?).");
+                                 logging::count(n_failed_large, "cell") + " (mesh too small for this order?).");
     }
     if (subset == nullptr) n_sector_unavailable = n_invalid_small;
 }

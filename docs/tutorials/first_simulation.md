@@ -78,6 +78,20 @@ PYTHON=../../.venv/bin/python ./post.sh
 
 `post.sh` runs the case's plot script (copied into `tools/`) with the Python given by `PYTHON` (default `python3`), and says which packages to install if any are missing. `sod.png` shows the computed density along the strip against the exact Riemann solution at t = 0.2: the rarefaction, the contact discontinuity (spread over about five cells) and the shock (two cells). The [validation page](https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube) has the same comparison for velocity and pressure, and the error under mesh refinement.
 
+**Your own analysis in Python.** The [Python package](../guide/python.md) reads the output into numpy arrays through Mallard's own reader. The build above made its library; install the package into the virtual environment:
+
+```bash
+../../.venv/bin/pip install -e ../../tools
+PATH=$PWD/../../build/src:$PATH ../../.venv/bin/python
+```
+
+```python
+import mallard
+f = mallard.open("solut/sod.pvd")          # solut/sod.vtkhdf in a build with HDF5
+rho = f.read_all("RHO")                    # (11, 800): every snapshot, every cell
+x = f.geometry().vertex_averages()[:, 0]   # where each cell is
+```
+
 ## 4. Change the case
 
 Edit `input.toml` and run again:

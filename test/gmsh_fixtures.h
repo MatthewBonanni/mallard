@@ -119,8 +119,10 @@ inline std::string annulus_gmsh(uint32_t n_r, uint32_t n_t, int order = 1, bool 
         for (uint32_t i = 0; i < n_t; i++) {
             const bool interior = j > 0 && j < n_r;
             const double dr = (r_out - r_in) / n_r;
-            id[j * n_t + i] = add(r_in + dr * (j + (interior ? jitter(rng) : 0.0)),
-                                  2.0 * pi * (i + (interior ? jitter(rng) : 0.0)) / n_t);
+            // Drawn in sequence: the order of evaluation of a call's arguments differs between compilers
+            const double jitter_r = interior ? jitter(rng) : 0.0;
+            const double jitter_t = interior ? jitter(rng) : 0.0;
+            id[j * n_t + i] = add(r_in + dr * (j + jitter_r), 2.0 * pi * (i + jitter_t) / n_t);
         }
     }
     auto c = [&](uint32_t i, uint32_t j) { return id[j * n_t + (i % n_t)]; };

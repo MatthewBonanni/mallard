@@ -1,0 +1,1 @@
+- Step CUDA graphs: a capture that fails inside the conditional node around a step falls back to steps kernel by kernel with a warning instead of crashing in the CUDA driver (#783).

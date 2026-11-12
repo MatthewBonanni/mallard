@@ -431,8 +431,8 @@ RestartArrays ProbeSpectra::arrays(bool distributed) const {
 std::string ProbeSpectra::summary() const {
     std::string vars;
     for (const auto & s : series) vars += (vars.empty() ? "" : ", ") + s.name;
-    return "spectra of " + vars + " over the last " + std::to_string(n_history) + " samples (" +
-           std::to_string(segments) + (segments == 1 ? " segment" : " segments") + ", " +
+    return "spectra of " + vars + " over the last " + logging::count(n_history, "sample") + " (" +
+           logging::count(segments, "segment") + ", " +
            (window == probe_spectra::Window::HANN ? "Hann" : "rectangular") + " window, bin width " +
            logging::format("%.3g", resolution()) + ") from t = " + logging::real(t_start) +
            (time_interval > 0.0 ? " every t = " + logging::real(time_interval) : "") + " and at the end";

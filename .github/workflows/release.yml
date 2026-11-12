@@ -61,6 +61,8 @@ jobs:
         run: |
           sudo add-apt-repository -y ppa:apptainer/ppa
           sudo apt-get update -qq && sudo apt-get install -y -qq apptainer
+          # Ubuntu 26.04 confines unprivileged user namespaces, which apptainer exec needs
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           apptainer build mallard.sif docker-daemon://mallard:test
           apptainer exec --bind "$PWD/docker/smoke:/smoke" mallard.sif /smoke/run.sh
       - name: Push
@@ -91,9 +93,10 @@ jobs:
         run: |
           docker run --rm mallard:cuda bash -c '
             set -e
-            ldd /opt/mallard/bin/* | grep "not found" | grep -v libcuda.so && exit 1
+            ldd /opt/mallard/bin/* /opt/mallard/lib/libmallard* | grep "not found" | grep -v libcuda.so && exit 1
             export LD_LIBRARY_PATH=/usr/local/cuda/compat:$LD_LIBRARY_PATH
             mallard --version && mallard2d --version && mallard3d --version
+            cd /tmp && python3 -c "import mallard; t = mallard.open(\"$MALLARD_SHARE/examples/autoignition_2d/deflagration.csv\"); print(t.read_all(\"S_L\").size)"
             mallard reactor --help 2>&1 | grep -q Usage
             mallard mesh convert --help 2>&1 | grep -q Usage
             ls $MALLARD_SHARE/examples/sod/input.toml'
@@ -133,6 +136,9 @@ jobs:
           spack info mallard | head -n 3
           spack compiler find
           mkdir -p "$RUNNER_TEMP/env"
+          # Spack runs Python extensions with python-venv's python3, which sees only the venv:
+          # this one also sees the runner's numpy, SciPy and h5py
+          /usr/bin/python3 -m venv --without-pip --system-site-packages "$RUNNER_TEMP/venv"
           cat > "$RUNNER_TEMP/env/spack.yaml" << EOF
           spack:
             specs: [mallard@main]
@@ -150,6 +156,15 @@ jobs:
               openmpi:
                 buildable: false
                 externals: [{spec: openmpi@$(dpkg-query -W -f '${Version}' openmpi-bin | cut -d- -f1), prefix: /usr}]
+              python:
+                buildable: false
+                externals: [{spec: python@$(/usr/bin/python3 -c 'import platform; print(platform.python_version())'), prefix: /usr}]
+              py-numpy:
+                buildable: false
+                externals: [{spec: py-numpy@$(/usr/bin/python3 -c 'import numpy; print(numpy.__version__)'), prefix: /usr}]
+              python-venv:
+                buildable: false
+                externals: [{spec: python-venv@1.0, prefix: $RUNNER_TEMP/venv}]
               cmake:
                 buildable: false
                 externals: [{spec: cmake@$(cmake --version | head -1 | cut -d' ' -f3), prefix: $(dirname "$(dirname "$(command -v cmake)")")}]
@@ -166,6 +181,7 @@ jobs:
       - name: Test
         run: |
           spack -e "$RUNNER_TEMP/env" test run mallard
+          eval "$(spack -e "$RUNNER_TEMP/env" load --sh mallard)"
           docker/smoke/run.sh "$(spack -e "$RUNNER_TEMP/env" location -i mallard)"
 
   # The version's tags, once every image and the Spack package pass

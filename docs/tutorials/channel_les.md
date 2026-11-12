@@ -105,8 +105,8 @@ python3 $MALLARD/tutorials/channel_les/plot_channel_les.py results . --t-start 1
 ```
 
 averages the last statistics snapshot over x and z (with
-`tools/post/plane_average.py`, which also adds the dispersive part of the
-covariances), folds the two halves of the channel, takes $u_\tau$ from the wall
+`mallard post average --statistics --homogeneous x,z`, which also adds the
+dispersive part of the covariances; the script runs `mallard`, or `--mallard PATH`), folds the two halves of the channel, takes $u_\tau$ from the wall
 shear averaged over the same window, and compares in wall units with the DNS,
 downloaded on first use:
 
