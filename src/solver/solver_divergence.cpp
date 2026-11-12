@@ -556,7 +556,7 @@ std::vector<divergence::Cause> Solver::write_divergence_report(Evidence & e, con
     const std::vector<divergence::Cause> causes = divergence::rank_causes(e);
     const std::string text = divergence::text(e, causes);
     logging::line();
-    for (std::istringstream lines(text); !lines.eof();) {
+    for (std::istringstream lines(divergence::text(e, causes, logging::color_stdout())); !lines.eof();) {
         std::string line;
         std::getline(lines, line);
         logging::line(line);
