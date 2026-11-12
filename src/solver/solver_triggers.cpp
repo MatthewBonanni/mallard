@@ -19,20 +19,62 @@
 #include "log.h"
 #include "snapshot_block.h"
 
-void Solver::init_triggers() {
-    std::vector<std::string> monitored, writers;
+std::vector<Convergence::Monitored> Solver::monitored() const {
+    std::vector<Convergence::Monitored> all;
     if (integral_monitor.interval > 0) {
-        for (const auto & column : integral_columns()) monitored.push_back("integrals_" + column.first);
+        for (const auto & [column, dimension] : integral_columns()) all.emplace_back("integrals_" + column, dimension);
     }
+    const Dimension area = measure_dimension().times(dim::length, -1);
     for (const auto & monitor : force_monitors) {
         for (size_t i = 0; i < 2 * N_DIM; i++) {
-            monitored.push_back("forces_" + monitor.zone + "_F" + "xyz"[i % N_DIM] + (i < N_DIM ? "_pressure" : "_viscous"));
+            all.emplace_back("forces_" + monitor.zone + "_F" + "xyz"[i % N_DIM] + (i < N_DIM ? "_pressure" : "_viscous"),
+                             dim::pressure.times(area));
         }
-        if (monitor.modeled) monitored.push_back("forces_" + monitor.zone + "_Q");
+        if (monitor.modeled) all.emplace_back("forces_" + monitor.zone + "_Q", dim::heat_flux.times(area));
     }
-    for (const auto & name : probes.value_names()) monitored.push_back(name);
+    const auto names = probes.value_names();
+    const auto dimensions = probes.value_dimensions();
+    for (size_t i = 0; i < names.size(); i++) all.emplace_back(names[i], dimensions[i]);
+    for (auto & [name, dimension] : all) name = trigger_variable(name);
+    return all;
+}
+
+std::vector<double> Solver::monitored_values() const {
+    std::vector<double> values;
+    auto add = [&](const MonitorValues & last, size_t n) {
+        if (last.values.size() != n) {
+            values.insert(values.end(), n, std::numeric_limits<double>::quiet_NaN());
+            return;
+        }
+        for (const auto & value : last.values) values.push_back(value.second);
+    };
+    if (integral_monitor.interval > 0) add(integral_monitor.last, integral_columns().size());
+    for (const auto & monitor : force_monitors) add(monitor.last, 2 * N_DIM + (monitor.modeled ? 1 : 0));
+    for (const double value : probes.values()) values.push_back(value);
+    return values;
+}
+
+std::vector<uint64_t> Solver::monitored_steps() const {
+    std::vector<uint64_t> steps;
+    auto add = [&](const MonitorValues & last, size_t n) {
+        steps.insert(steps.end(), n, last.name.empty() ? Probes::NO_VALUE : last.step);
+    };
+    if (integral_monitor.interval > 0) add(integral_monitor.last, integral_columns().size());
+    for (const auto & monitor : force_monitors) add(monitor.last, 2 * N_DIM + (monitor.modeled ? 1 : 0));
+    for (const uint64_t s : probes.value_steps()) steps.push_back(s);
+    return steps;
+}
+
+void Solver::init_triggers() {
+    const std::vector<Convergence::Monitored> all = monitored();
+    convergence.init(input, all, find_value_or<std::string>(input, "initialize", "type", "") == "restart");
+    std::vector<std::string> monitored_names, writers;
+    for (const auto & [name, dimension] : all) monitored_names.push_back(name);
+    if (convergence.enabled()) {
+        for (const auto & [name, dimension] : convergence.columns()) monitored_names.push_back("convergence_" + name);
+    }
     for (const auto & writer : data_writers) writers.push_back(writer->get_prefix());
-    triggers.init(input, monitored, writers, statistics.enabled());
+    triggers.init(input, monitored_names, writers, statistics.enabled());
     if (!triggers.starts_statistics()) return;
     const Input & table = input.at("statistics");
     for (const std::string section : {"", "spectra", "phase"}) {
@@ -53,19 +95,17 @@ void Solver::init_triggers() {
 }
 
 std::vector<double> Solver::trigger_values() const {
-    const double unknown = std::numeric_limits<double>::quiet_NaN();
     std::vector<double> values = {static_cast<double>(t), static_cast<double>(step), static_cast<double>(dt),
                                   timer.seconds()};
-    auto add = [&](const MonitorValues & last, size_t n) {
-        if (last.values.size() != n) {
-            values.insert(values.end(), n, unknown);
-            return;
+    for (const double value : monitored_values()) values.push_back(value);
+    if (convergence.enabled()) {
+        const MonitorValues & last = convergence.last();
+        if (last.name.empty()) {
+            values.insert(values.end(), convergence.columns().size(), std::numeric_limits<double>::quiet_NaN());
+        } else {
+            for (const auto & value : last.values) values.push_back(value.second);
         }
-        for (const auto & value : last.values) values.push_back(value.second);
-    };
-    if (integral_monitor.interval > 0) add(integral_monitor.last, integral_columns().size());
-    for (const auto & monitor : force_monitors) add(monitor.last, 2 * N_DIM + (monitor.modeled ? 1 : 0));
-    for (const double value : probes.values()) values.push_back(value);
+    }
     return values;
 }
 
@@ -73,11 +113,42 @@ bool Solver::triggers_on_device() const {
     if (triggers.empty() || defer_chemistry || !triggers.fit_device() || triggers.size() > 64) return false;
     // Monitors written by the host stop the device at their rows anyway; probes' values are reduced by the host
     if (triggers.reads(3)) return false;
-    const size_t n_monitored = triggers.variables().size() - probes.value_names().size();
-    for (size_t v = n_monitored; v < triggers.variables().size(); v++) {
+    const size_t end = triggers.variables().size() - (convergence.enabled() ? convergence.columns().size() : 0);
+    for (size_t v = end - probes.value_names().size(); v < end; v++) {
         if (triggers.reads(static_cast<uint16_t>(v))) return false;
     }
     return true;
+}
+
+bool Solver::convergence_on_device() const {
+    if (!convergence.enabled() || !triggers_on_device()) return false;
+    const size_t n = triggers.variables().size();
+    for (size_t v = n - convergence.columns().size(); v < n; v++) {
+        if (triggers.reads(static_cast<uint16_t>(v))) return true;
+    }
+    return false;
+}
+
+void Solver::convergence_due_limits(step_queue::Horizon & h) const {
+    if (!convergence_on_device()) return;
+    const size_t n_integrals = integral_monitor.interval > 0 ? integral_columns().size() : 0;
+    for (const size_t source : convergence.sources()) {
+        if (source < n_integrals) h.at_multiple(step, integral_monitor.interval);
+        size_t first = n_integrals;
+        for (const auto & monitor : force_monitors) {
+            const size_t n = 2 * N_DIM + (monitor.modeled ? 1 : 0);
+            if (source >= first && source < first + n) h.at_multiple(step, monitor.interval);
+            first += n;
+        }
+    }
+}
+
+bool Solver::convergence_reads_probe(const size_t k) const {
+    if (!convergence_on_device()) return false;
+    const std::vector<size_t> from = probes.value_probes();
+    const size_t first = monitored_steps().size() - from.size();
+    return std::any_of(convergence.sources().begin(), convergence.sources().end(),
+                       [&](size_t source) { return source >= first && from[source - first] == k; });
 }
 
 void Solver::evaluate_triggers() {
@@ -141,6 +212,37 @@ void Solver::evaluate_triggers() {
         }
         for (uint32_t i = 0; i < n_triggers; i++) states(i) = next[i];
     });
+}
+
+double Solver::averages_start() const {
+    return statistics.samples() > 0 ? statistics.average_start() : -std::numeric_limits<double>::infinity();
+}
+
+void Solver::update_convergence() {
+    if (!convergence.enabled()) return;
+    bool written = (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || probes.wrote_values(step);
+    for (const auto & monitor : force_monitors) written = written || step % monitor.interval == 0;
+    if (!written) return;
+    const std::vector<uint64_t> steps = monitored_steps();
+    const size_t first_probe = steps.size() - probes.value_steps().size();
+    std::vector<std::pair<size_t, double>> samples;
+    bool from_probes = false;
+    for (size_t i = 0; i < convergence.sources().size(); i++) {
+        const size_t source = convergence.sources()[i];
+        if (steps[source] != step) continue;
+        samples.emplace_back(i, 0.0);
+        from_probes = from_probes || source >= first_probe;
+    }
+    if (samples.empty()) return;
+    // Rank 0 holds the probes' values; the integrals and forces are on every rank
+    std::vector<double> fresh;
+    if (!is_distributed() || comm::is_root() || !from_probes) {
+        const std::vector<double> values = monitored_values();
+        for (const auto & [i, value] : samples) fresh.push_back(values[convergence.sources()[i]]);
+    }
+    if (is_distributed() && from_probes) fresh = comm::allgatherv(comm::is_root() ? fresh : std::vector<double>{});
+    for (size_t k = 0; k < samples.size(); k++) samples[k].second = fresh[k];
+    convergence.add(step, double(t), samples, averages_start());
 }
 
 void Solver::act_on_triggers() {

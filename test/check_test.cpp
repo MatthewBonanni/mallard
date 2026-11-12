@@ -15,6 +15,7 @@
 #include <map>
 #include <numeric>
 #include <numbers>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -23,7 +24,9 @@
 #include "json.h"
 #include "mesh_block.h"
 #include "data_paths.h"
+#include "gmsh_fixtures.h"
 #include "test_fixtures.h"
+#include "case_image.h"
 #include "check.h"
 #include "comm.h"
 #include "common_io.h"
@@ -31,6 +34,7 @@
 #include "mesh_block.h"
 #include "mesh_quality.h"
 #include "partition.h"
+#include "region_input.h"
 #include "report.h"
 #include "scratch.h"
 #include "solver.h"
@@ -690,29 +694,322 @@ TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
         << (first_error(r));
 }
 
-#ifdef Mallard_HAS_HDF5
-TEST(CheckRegions, TheCaseViewHoldsEveryRegionAndZone) {
+namespace {
+
+std::string read_file(const std::filesystem::path & path) {
+    std::ifstream file(path);
+    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+/** @brief A box with an inlet, an outlet and walls, a named region, a line and a point probe, and one on a curve. */
+std::string view_case() {
+    const std::string two = N_DIM == 2 ? "" : ", 0.125";
+    const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
+                                           : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
+    const std::string heater = N_DIM == 2 ? "{type = \"disk\", center = [0.5, 0.5], radius = 0.2}"
+                                          : "{type = \"sphere\", center = [0.5, 0.5, 0.125], radius = 0.1}";
+    std::string zones = N_DIM == 2 ? "" : "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                                          "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n";
+    zones += "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.2\n"
+             "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n[regions]\nheater = " + heater + "\n"
+             "[[sources]]\nregion = \"heater\"\nrhoE = 1.0\n"
+             "[[probes]]\nname = \"s\"\nfields = [\"P\"]\nregion = " + surface + "\n"
+             "[[probes]]\nname = \"wake\"\nfields = [\"P\"]\nstart = [1.5, 0.1" + two + "]\nend = [1.5, 0.9" + two + "]\n"
+             "n_points = 5\n[[probes]]\nname = \"tap\"\nfields = [\"P\"]\npoint = [0.25, 0.75" + two + "]\n";
+    std::string input = box("1.0", "t_stop = 0.5\ncfl = 0.8\n", zones, {"none"});
+    const std::string none = "[[boundaries]]\nname = \"none\"\ntype = \"symmetry\"\n";
+    input.replace(input.find(none), none.size(),
+                  "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\nu = [1.0, 0.0" + std::string(N_DIM == 3 ? ", 0.0" : "") +
+                      "]\np = 1.0\nT = 1.0\n[[boundaries]]\nname = \"right\"\ntype = \"outlet_pressure\"\np = 1.0\n");
+    return input;
+}
+
+} // namespace
+
+TEST(CheckRegions, TheCaseViewHoldsEveryRegionZoneAndProbeAndLabelsThem) {
     const std::filesystem::path dir = scratch_dir() / "mallard_check_view";
     if (comm::is_root()) std::filesystem::remove_all(dir);
     comm::barrier();
     CheckOptions options;
     options.view_dir = dir.string();
-    const std::string surface = N_DIM == 2 ? "{type = \"circle\", center = [1, 0.5], radius = 0.25}"
-                                           : "{type = \"disk\", center = [1, 0.5, 0.125], normal = [1, 0, 0], radius = 0.1}";
-    const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
-                                    "[[probes]]\nname = \"s\"\nfields = [\"P\"]\nregion = " + surface + "\n"),
-                                options);
+    const CheckReport r = check(view_case(), options);
     ASSERT_TRUE(r.ok()) << (first_error(r));
-    EXPECT_EQ(r.view_file, (dir / "case.vtkhdf").string());
+    ASSERT_EQ(r.view_images.size(), 2u);
     comm::barrier();
     if (!comm::is_root()) return;
+    std::vector<std::string> blocks = {"domain", "left", "right", "bottom", "top", "heater",
+                                       "probes[name = \"s\"].region", "probes[name = \"wake\"]", "probes[name = \"tap\"]"};
+    if (N_DIM == 3) blocks.insert(blocks.end(), {"back", "front"});
+#ifdef Mallard_HAS_HDF5
+    EXPECT_EQ(r.view_file, (dir / "case.vtkhdf").string());
     const auto datasets = h5_all_datasets(r.view_file);
-    for (const std::string block : {"left", "right", "bottom", "top", "probes[name = \"s\"].region"}) {
-        EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/Connectivity")) << block;
-        EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/CellData/normal")) << block;
+    for (const std::string & block : blocks) EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/Connectivity")) << block;
+    EXPECT_TRUE(datasets.count("VTKHDF/probes[name = \"s\"].region/CellData/normal"));
+#else
+    EXPECT_EQ(r.view_file, (dir / "case.vtm").string());
+    const std::string vtm = read_file(r.view_file);
+    for (const std::string & block : blocks) {
+        EXPECT_NE(vtm.find("name=\"" + case_image::xml_text(block) + "\""), std::string::npos) << block;
+    }
+#endif
+    // Every block but the mesh labeled in both images; the zones with their conditions and values in units
+    for (const std::string & image : r.view_images) {
+        const std::string svg = read_file(image);
+        for (size_t k = 1; k < blocks.size(); k++) {
+            EXPECT_NE(svg.find(">" + case_image::xml_text(blocks[k])), std::string::npos) << blocks[k] << " in " << image;
+        }
+        EXPECT_NE(svg.find(">left: inlet_state, T = 1.0 K, p = 1.0 Pa, u = [1.0, 0.0"), std::string::npos) << image;
+        EXPECT_NE(svg.find(">bottom: wall_isothermal, T = 1.2 K<"), std::string::npos) << image;
+        EXPECT_NE(svg.find(">right: outlet_pressure, p = 1.0 Pa<"), std::string::npos) << image;
     }
 }
+
+TEST(CaseView, PeriodicFacesAndTheirImagesLieOnThePairsZones) {
+    Mesh mesh;
+    mesh.init(parse_input_string("[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 3\nLx = 2.0\nLy = 1.0\n" +
+                                 std::string(N_DIM == 3 ? "Nz = 2\nLz = 0.5\n" : "") +
+                                 "[[periodic]]\nzones = [\"left\", \"right\"]\n"));
+    const MeshView view = mesh_view(mesh, region::MeshRegions(mesh));
+    std::vector<const case_view::Block *> periodic;
+    for (const case_view::Block & b : view.blocks) {
+        if (b.kind == case_view::Kind::PERIODIC) periodic.push_back(&b);
+        EXPECT_TRUE(b.name != "left" && b.name != "right") << b.name;
+    }
+    ASSERT_EQ(periodic.size(), 1u);
+    const case_view::Block & b = *periodic[0];
+    EXPECT_EQ(b.label, N_DIM == 2 ? "periodic left / right: translation (2, 0) m"
+                                  : "periodic left / right: translation (2, 0, 0) m");
+    const size_t faces = N_DIM == 2 ? 3 : 6;
+    ASSERT_EQ(b.n_cells(), 2 * faces);
+    for (size_t c = 0; c < b.n_cells(); c += 2) {
+        // The face on one zone, its image on the other
+        const double x_face = b.points[size_t(b.connectivity[size_t(b.offsets[c])])][0];
+        const double x_image = b.points[size_t(b.connectivity[size_t(b.offsets[c + 1])])][0];
+        EXPECT_NEAR(std::abs(x_face - x_image), 2.0, 1e-12);
+        EXPECT_EQ(b.fields[0].values[c], 0.0);
+        EXPECT_EQ(b.fields[0].values[c + 1], 1.0);
+    }
+}
+
+// A wall projected onto a circle (3D: a sphere) is drawn on it, not on its faces' chords, in the faces' own order
+TEST(CaseView, CurvedWallsLieOnTheirShapes) {
+    const std::string shapes = N_DIM == 2 ? "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                                          : "[[mesh.curved]]\nzone = \"inner\"\ntype = \"sphere\"\nfilled = false\n"
+                                            "center = [0.0, 0.0, 0.0]\nradius = 1.0\n";
+    std::vector<std::string> files;
+#if N_DIM == 2
+    files.push_back(write_temp("case_view_annulus.msh", annulus_gmsh(2, 12)));
+#else
+    for (const bool prisms : {false, true}) {
+        files.push_back(write_temp(prisms ? "case_view_shell_prisms.msh" : "case_view_shell.msh", shell_gmsh(2, 1, prisms, false)));
+    }
 #endif
+    for (const std::string & file : files) {
+        auto inner = [&](Mesh & mesh, const bool curved) {
+            const std::string input = "[mesh]\nfilename = \"" + file + "\"\n";
+            mesh.init(parse_input_string(input));
+            if (curved) mesh.apply_curved(curved::surfaces_of_mesh(mesh, parse_input_string(input + shapes)));
+            mesh.copy_host_to_device();
+            for (case_view::Block & b : mesh_view(mesh, region::MeshRegions(mesh)).blocks) {
+                if (b.name == "inner") return b;
+            }
+            return case_view::Block{};
+        };
+        Mesh straight_mesh, curved_mesh;
+        const case_view::Block straight = inner(straight_mesh, false), curved = inner(curved_mesh, true);
+        ASSERT_GT(straight.n_cells(), 0u) << file;
+        ASSERT_EQ(curved.n_cells(), straight.n_cells()) << file;
+        ASSERT_EQ(curved.fields.size(), straight.fields.size());
+        for (size_t f = 0; f < curved.fields.size(); f++) EXPECT_EQ(curved.fields[f].values.size(), straight.fields[f].values.size());
+        for (size_t c = 0; c < curved.n_cells(); c++) {
+            const int64_t n = straight.offsets[c + 1] - straight.offsets[c], m = curved.offsets[c + 1] - curved.offsets[c];
+            ASSERT_GT(m, 2 * n) << "cell " << c << " of " << file;
+            for (int64_t k = 0; k < m; k++) {
+                const auto & x = curved.points[size_t(curved.connectivity[size_t(curved.offsets[c] + k)])];
+                EXPECT_NEAR(std::hypot(x[0], x[1], x[2]), 1.0, 1e-9) << "cell " << c << " of " << file;
+            }
+            // The corners where the straight face has them: every (m - 1) / (n - 1)-th point in 2D, m / n-th in 3D
+            const int64_t step = N_DIM == 2 ? (m - 1) / (n - 1) : m / n;
+            for (int64_t k = 0; k < n; k++) {
+                const auto & a = straight.points[size_t(straight.connectivity[size_t(straight.offsets[c] + k)])];
+                const auto & b = curved.points[size_t(curved.connectivity[size_t(curved.offsets[c] + k * step)])];
+                for (size_t i = 0; i < 3; i++) EXPECT_NEAR(a[i], b[i], 1e-12) << "corner " << k << " of cell " << c;
+            }
+        }
+    }
+}
+
+namespace {
+
+/** @brief The titled groups of an SVG image (each block, legend entry, scale bar and extent): title -> contents. */
+std::vector<std::pair<std::string, std::string>> svg_groups(const std::string & svg) {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (size_t at = svg.find("<g"); at != std::string::npos; at = svg.find("<g", at + 1)) {
+        const size_t open = svg.find("<title>", at), end = svg.find("</g>", at);
+        if (open == std::string::npos || end == std::string::npos || open > end) continue;
+        const size_t close = svg.find("</title>", open);
+        out.emplace_back(svg.substr(open + 7, close - open - 7), svg.substr(at, end - at));
+    }
+    return out;
+}
+
+std::string group(const std::vector<std::pair<std::string, std::string>> & groups, const std::string & prefix) {
+    for (const auto & [title, body] : groups) {
+        if (title.starts_with(prefix)) return body;
+    }
+    return "";
+}
+
+/** @brief The first stroke color in a group. */
+std::string stroke(const std::string & body) {
+    const size_t at = body.find("stroke=\"");
+    return at == std::string::npos ? "" : body.substr(at + 8, body.find('"', at + 8) - at - 8);
+}
+
+/** @brief The numbers of the k-th path of a group: x0 y0 x1 y1 ... */
+std::vector<double> path_numbers(const std::string & body, const size_t k = 0) {
+    size_t at = body.find("<path d=\"");
+    for (size_t i = 0; i < k && at != std::string::npos; i++) at = body.find("<path d=\"", at + 1);
+    std::vector<double> out;
+    if (at == std::string::npos) return out;
+    std::string d = body.substr(at + 9, body.find('"', at + 9) - at - 9);
+    for (char & c : d) {
+        if (c == 'M' || c == 'L' || c == 'Z') c = ' ';
+    }
+    std::istringstream in(d);
+    for (double v; in >> v;) out.push_back(v);
+    return out;
+}
+
+} // namespace
+
+// What the images must show, whatever their palette and layout: every block drawn in its condition's legend
+// color, a scale bar and an extent drawn to the plot's scale, and a filled region's own boundary
+TEST(CaseView, TheImagesDrawEveryBlockInItsLegendColorAndToScale) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_view_images";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const CheckReport r = check(view_case(), options);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    comm::barrier();
+    if (!comm::is_root()) return;
+    std::map<std::string, std::string> wall_color;
+    for (const std::string theme : {"light", "dark"}) {
+        const auto groups = svg_groups(read_file(dir / ("case-" + theme + ".svg")));
+        auto legend = [&](const std::string & name) { return stroke(group(groups, "legend: " + name)); };
+        const std::map<std::string, std::string> expected = {
+            {"left: ", "inlet"},   {"right: ", "outlet"}, {"bottom: ", "wall"},
+            {"top: ", "wall"},     {"heater", "region"},  {"probes[name = \"s\"].region", "probe"},
+            {"probes[name = \"wake\"]", "probe"}, {"probes[name = \"tap\"]", "probe"}};
+        for (const auto & [block, entry] : expected) {
+            const std::string body = group(groups, case_image::xml_text(block));
+            ASSERT_FALSE(body.empty()) << block << " is not drawn in the " << theme << " image";
+            EXPECT_TRUE(body.find("<path") != std::string::npos || body.find("<circle") != std::string::npos) << block;
+            EXPECT_FALSE(legend(entry).empty()) << "no legend entry " << entry;
+            const std::string color = block == "probes[name = \"tap\"]" ? body.substr(body.find("fill=\"") + 6, 7)
+                                                                          : stroke(body);
+            EXPECT_EQ(color, legend(entry)) << block << " in the " << theme << " image";
+        }
+        EXPECT_NE(legend("wall"), legend("inlet"));
+        EXPECT_NE(legend("inlet"), legend("outlet"));
+        wall_color[theme] = legend("wall");
+        // A scale bar in every view, its length that of its label at the plot's scale
+        size_t bars = 0;
+        double px_per_m = 0.0;
+        for (const auto & [title, body] : groups) {
+            if (!title.starts_with("scale bar: ")) continue;
+            bars++;
+            const double length = std::stod(title.substr(11));
+            const std::vector<double> bar = path_numbers(body);
+            ASSERT_GE(bar.size(), 4u);
+            if (bars == 1) px_per_m = (bar[2] - bar[0]) / length;
+        }
+        EXPECT_EQ(bars, N_DIM == 2 ? 1u : 4u);
+        if constexpr (N_DIM == 2) {
+            // The extent's dimension lines: 2 m and 1 m at the scale bar's scale
+            const std::string extent = group(groups, "domain extent: 2 m by 1 m");
+            const std::vector<double> x = path_numbers(extent, 0), y = path_numbers(extent, 1);
+            ASSERT_EQ(x.size(), 4u);
+            ASSERT_EQ(y.size(), 4u);
+            EXPECT_NEAR(x[2] - x[0], 2.0 * px_per_m, 0.2);
+            EXPECT_NEAR(y[1] - y[3], 1.0 * px_per_m, 0.2);
+            // The heater, a disk of radius 0.2 about (0.5, 0.5): its boundary, not its cells' outline
+            const std::vector<double> heater = path_numbers(group(groups, "heater"));
+            ASSERT_GT(heater.size(), 40u);
+            for (size_t k = 0; k + 1 < heater.size(); k += 2) {
+                const double wx = (heater[k] - x[0]) / px_per_m, wy = (y[1] - heater[k + 1]) / px_per_m;
+                EXPECT_NEAR(std::hypot(wx - 0.5, wy - 0.5), 0.2, 2e-3) << "at (" << wx << ", " << wy << ")";
+            }
+        }
+    }
+    EXPECT_NE(wall_color["light"], wall_color["dark"]);
+}
+
+namespace {
+
+/** @brief Where two images differ, beyond one step of their numbers' last digit (0.1 px), or empty. */
+std::string image_difference(const std::string & a, const std::string & b) {
+    // Numbers, and colors (#7b3f6e), which are text
+    const std::regex number(R"(#[0-9a-fA-F]+|-?[0-9]+(\.[0-9]+)?)");
+    auto split = [&](const std::string & s, std::vector<std::string> & text, std::vector<double> & values) {
+        size_t at = 0;
+        for (auto it = std::sregex_iterator(s.begin(), s.end(), number); it != std::sregex_iterator(); ++it) {
+            if (it->str()[0] == '#') continue;
+            text.push_back(s.substr(at, size_t(it->position()) - at));
+            values.push_back(std::stod(it->str()));
+            at = size_t(it->position() + it->length());
+        }
+        text.push_back(s.substr(at));
+    };
+    std::vector<std::string> ta, tb;
+    std::vector<double> va, vb;
+    split(a, ta, va);
+    split(b, tb, vb);
+    if (va.size() != vb.size()) return std::to_string(va.size()) + " numbers vs " + std::to_string(vb.size());
+    for (size_t k = 0; k < ta.size(); k++) {
+        if (ta[k] != tb[k]) return "text \"" + ta[k] + "\" vs \"" + tb[k] + "\" after number " + std::to_string(k);
+    }
+    for (size_t k = 0; k < va.size(); k++) {
+        if (std::abs(va[k] - vb[k]) > 0.1 + 1e-9) {
+            return "number " + std::to_string(k) + ": " + std::to_string(va[k]) + " vs " + std::to_string(vb[k]) +
+                   " after \"" + ta[k] + "\"";
+        }
+    }
+    return "";
+}
+
+} // namespace
+
+// The 2D image is the same whatever the order of the cells (the device backends number them otherwise), up to the
+// rounding of its numbers. After a deliberate change of the drawing, MALLARD_UPDATE_GOLDEN=1 rewrites the expected
+// image (then look at it and review its diff).
+TEST(CaseView, The2DImageMatchesTheGoldenImageInAnyCellOrder) {
+    if (N_DIM != 2 || sizeof(rtype) != 8 || comm::size() > 1) {
+        GTEST_SKIP() << "the golden image is of a serial 2D double-precision check";
+    }
+    const std::filesystem::path golden =
+        std::filesystem::path(source_dir()) / "test" / "data" / "check" / "case_view_2d.svg";
+    for (const std::string order : {"input", "hilbert"}) {
+        const std::filesystem::path dir = scratch_dir() / ("mallard_check_view_golden_" + order);
+        std::filesystem::remove_all(dir);
+        CheckOptions options;
+        options.view_dir = dir.string();
+        std::string input = view_case();
+        input.replace(input.find("[mesh]\n"), 7, "[mesh]\ncell_order = \"" + order + "\"\n");
+        const CheckReport r = check(input, options);
+        ASSERT_TRUE(r.ok()) << (first_error(r));
+        const std::string svg = read_file(dir / "case-light.svg");
+        if (const char * update = std::getenv("MALLARD_UPDATE_GOLDEN"); update && std::string(update) == "1" && order == "input") {
+            std::ofstream(golden) << svg;
+        }
+        const std::string expected = read_file(golden);
+        ASSERT_FALSE(expected.empty()) << golden;
+        EXPECT_EQ(image_difference(svg, expected), "")
+            << "cell order " << order << ": the image differs from " << golden << "; MALLARD_UPDATE_GOLDEN=1 updates it";
+    }
+}
 
 namespace {
 

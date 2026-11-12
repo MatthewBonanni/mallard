@@ -138,6 +138,10 @@ class Region {
         /** @brief One-line description for the run log. */
         const std::string & summary() const { return m_summary; }
 
+        /** @brief The nodes of every filled region of shapes, and the polygons' vertices. */
+        const std::vector<Node> & nodes() const { return m_nodes; }
+        const std::vector<double> & vertices() const { return m_vertices; }
+
         /** @brief The compiled functions of implicit regions, by index. */
         const std::vector<kexpr::Program> & programs() const { return m_programs; }
 

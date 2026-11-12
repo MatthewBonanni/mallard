@@ -57,6 +57,7 @@ checks() {
     run "TOML snippets of the docs" "$python" tools/dev/check_doc_toml.py
     run "\"Used in\" lines of the guide" "$python" tools/docs/used_in.py --check
     run "feature matrix" "$python" tools/docs/feature_matrix.py --check
+    run "Python API reference" "$python" tools/docs/python_api.py --check
     cd "$repo" || return 1
 }
 if [ -z "$failed" ]; then checks; fi

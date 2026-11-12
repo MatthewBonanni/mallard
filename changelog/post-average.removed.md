@@ -1,0 +1,1 @@
+- `tools/post/plane_average.py`: `mallard post average --statistics --homogeneous x,z` replaces it, on any mesh, with the same CSV columns (#512).

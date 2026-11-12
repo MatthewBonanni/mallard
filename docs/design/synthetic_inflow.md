@@ -148,7 +148,7 @@ the generator has no state, so turbulent inlets restart bitwise.
 
 `u` of `inlet_state` with `nscbc` takes expressions in `x`, `y`, `z` and `t`. For turbulence,
 `reynolds_stress` takes numbers or expressions in `x`, `y`, `z`, or `profile` reads a CSV of
-plane averages as `tools/post/plane_average.py` writes it from a precursor's
+plane averages as `mallard post average --homogeneous` writes it from a precursor's
 `[statistics]` (`MEAN_U_*`, `COV_U_*_U_*`), interpolated along its
 coordinate. Pivots of the Cholesky factor that round-off makes slightly
 negative (next to walls) become zero.

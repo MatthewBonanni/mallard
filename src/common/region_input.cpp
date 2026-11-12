@@ -306,6 +306,7 @@ class Parser {
             return p;
         }
 
+    public:
         /** @brief The pieces of the boundary of filled region i, oriented out of it (into it if flip). */
         std::vector<Piece> boundary_of(const uint32_t i, const bool flip) {
             const Filled f = filled[i];
@@ -353,6 +354,7 @@ class Parser {
             return out;
         }
 
+    private:
         Parsed boundary(Parsed p, const std::string & where, const std::size_t line) {
             const std::string what = "boundary(" + p.text + ")";
             if (p.dimension == 0) fail(where, line, "points have no boundary");
@@ -1079,6 +1081,22 @@ Definition parse(const Input & value, const std::string & where, const Input * n
 
 Region read(const Input & value, const std::string & where, const Input * names, const MeshRegions * mesh) {
     return Region(parse(value, where, names, mesh));
+}
+
+Region boundary(const Region & filled) {
+    Parser parser;
+    parser.filled = filled.filled();
+    Definition d;
+    d.pieces = parser.boundary_of(filled.root(), false);
+    d.dimension = N_DIM - 1;
+    d.closed = true;
+    d.nodes = filled.nodes();
+    d.vertices = filled.vertices();
+    d.programs = filled.programs();
+    d.filled = filled.filled();
+    d.bounded = filled.bounded();
+    d.summary = "boundary(" + filled.summary() + ")";
+    return Region(std::move(d));
 }
 
 void require_full_dimension(const Region & region, const Input & value, const std::string & where) {
