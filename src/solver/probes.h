@@ -221,6 +221,13 @@ class Probes {
         std::vector<Dimension> value_dimensions() const;
         static constexpr uint64_t NO_VALUE = UINT64_MAX;
 
+        /** @brief Monitored values the run record keeps per progress row, at most, over every probe. */
+        static constexpr size_t RECORDED = 64;
+        /** @brief By probe, the monitored values the run record keeps: the first RECORDED, in value_names() order. */
+        std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>>>> recorded_columns() const;
+        /** @brief The latest of them, of each probe that has written (rank 0 when distributed). */
+        std::vector<MonitorValues> recorded() const;
+
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
         /**
@@ -332,7 +339,9 @@ class Probes {
             bool point_value = false;   // one sample, evaluated at every write: its values are monitored
             std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
             uint64_t step_last_value = NO_VALUE;           // of the latest values, on every rank
-            std::vector<Dimension> reduction_dimensions;  // of the reductions, as reduction_names()
+            std::vector<std::pair<std::string, Dimension>> monitored;  // what last holds, with its dimensions
+            uint64_t last_step = 0;
+            double last_t = 0.0;
             double measure = 0.0;      // of the samples, at the latest reduction
             std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
 

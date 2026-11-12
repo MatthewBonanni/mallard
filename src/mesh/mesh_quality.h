@@ -35,6 +35,8 @@ struct MeshQuality {
                                                                   "volume ratio"};
     static constexpr std::array<const char *, N_METRICS> FIELDS = {"NON_ORTHOGONALITY", "SKEWNESS", "ASPECT_RATIO",
                                                                    "VOLUME_RATIO"};
+    static constexpr std::array<const char *, N_METRICS> UNITS = {"deg", "dimensionless", "dimensionless",
+                                                                  "dimensionless"};
     // Values above which a cell is questionable
     static constexpr std::array<double, N_METRICS> LIMITS = {70.0, 0.5, 1000.0, 10.0};
     // Values worth listing the worst cells for
