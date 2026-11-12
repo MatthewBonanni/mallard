@@ -26,6 +26,7 @@
 #include <unordered_map>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "region_mesh.h"
 #include "common_io.h"
 #include "field_units.h"
@@ -819,8 +820,9 @@ std::string Probes::clip_to_mesh(probe::Geometry & g, const Mesh & mesh, const s
         k = e + 1;
     }
     if (n_runs > SHOWN) runs += " and " + logging::count(n_runs - SHOWN) + " more runs";
-    logging::warning(key + ": " + logging::count(out.size()) + " of " + logging::count(n) + " samples" + share +
-                     " lie outside the mesh and are not sampled: " + units::with(runs, "m") + ".");
+    logging::warning(diagnostic_code::PROBE_OUTSIDE,
+                     key + ": " + logging::count(out.size()) + " of " + logging::count(n) + " samples" + share +
+                         " lie outside the mesh and are not sampled: " + units::with(runs, "m") + ".");
     g = probe::clip(g, keep, keep_quad);
     return clipped.str();
 }
