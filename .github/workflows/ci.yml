@@ -804,8 +804,8 @@ jobs:
 
   # Sets the commit status `CI` that main requires: success when every job passed or was
   # skipped for a reason (device builds without device code), failure otherwise. After a
-  # merge, a failure opens an issue labeled ci-main (or adds the run to the open one), and
-  # the next success closes it.
+  # merge, a failed job (not a run cancelled by a newer push) opens an issue labeled ci-main
+  # (or adds the run to the open one), and the next success closes it.
   result:
     name: CI result
     if: always()
@@ -839,7 +839,7 @@ jobs:
             failed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
               --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI result") | "- [\(.name)](\(.html_url))"')
             open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --label ci-main --json number -q '.[0].number')
-            if [ "$state" != success ]; then
+            if [ -n "$failed" ]; then
               gh label create ci-main -R "$GITHUB_REPOSITORY" --color B60205 \
                 --description "main fails CI after a merge" 2> /dev/null || true
               body=$(printf 'CI fails on main at %s ([run](%s)):\n\n%s\n' "$GITHUB_SHA" "$run" "$failed")
