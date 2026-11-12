@@ -1,0 +1,17 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/cbc_les/input.toml",
+  "examples/detonation_1d/input.toml"
+ ],
+ "values": [
+  "first_order",
+  "high_order",
+  "les",
+  "reacting",
+  "second_order"
+ ]
+}

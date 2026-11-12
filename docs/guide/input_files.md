@@ -621,9 +621,10 @@ setup stops on an error, with the keys read up to there. The setup's accessors
 (`find_value`, `find_value_or`, `find_real_or` and `find_option` in
 `src/common/input.h`) record these, so the catalog is what the code does.
 `tools/dev/input_catalog.py build` merges the catalogs of every example and
-tutorial, in 2D and 3D, into
-[`docs/input-keys.json`](../input-keys.json), which the website's input builder
-reads; CI checks that it is up to date, and `tools/dev/input_catalog.py docs`
+tutorial, in 2D and 3D, into [`docs/input-keys/`](../input-keys/), one file per
+key named by its path (percent-encoded outside lowercase letters, digits, `_`, `.`
+and `-`), which the website's input builder reads; CI checks that it is up to
+date, and `tools/dev/input_catalog.py docs`
 that every key this reference documents is in it and that the defaults it states
 match it.
 
