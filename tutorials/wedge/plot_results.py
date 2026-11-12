@@ -115,7 +115,7 @@ def main():
             ax.plot(s["y"], s["P"] / p1, color=t["series"][k % len(t["series"])], label=f"t = {1e3 * tt:.1f} ms")
         ax.set_xlabel("y at x = 1.5 [m]")
         ax.set_ylabel("p / p₁")
-        ax.legend(ncol=2, fontsize=10)
+        ax.legend(fontsize=10, loc="lower right", bbox_to_anchor=(1.0, 0.1))
         return fig
 
     def validation(t):
