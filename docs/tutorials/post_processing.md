@@ -2,14 +2,16 @@
 
 A run ends with a directory of files. This tutorial takes such directories, three runs of one case on
 three meshes, and turns them into numbers and figures: it finds out what each run wrote and how, measures
-the flow after the fact with probes the input never had, computes a field the run never wrote, estimates
-the discretization error from the three meshes, and draws the figures in Python. The case is the
+the flow after the fact with probes the input never had, computes fields the run never wrote, averages
+its snapshots to check that the flow is steady, estimates the discretization error from the three meshes,
+and draws the figures in Python. The case is the
 steady wake of a cylinder at Re = 40, a classic with reference values for every quantity measured here.
-The three runs take about 40 minutes on two CPU threads; everything after them takes seconds.
+The three runs take about 16 minutes on two CPU threads of a laptop; everything after them takes seconds.
 
-You will use: `mallard info` on a run directory and on a snapshot, the resolved input a file records,
-`mallard post extract` with probes added after the run and with a snapshot of a derived field,
-`mallard post convergence` with its observed order, extrapolated value and grid convergence index, and the
+You will use: the run report (`report.html`), `mallard info` on a run directory and on a snapshot, the
+resolved input a file records, `mallard post extract` with probes added after the run, `mallard post derive`
+for derived fields, `mallard post average` for statistics over the snapshots, `mallard post convergence`
+with its observed order, extrapolated value and grid convergence index, and the
 [Python package](../guide/python.md) that reads every file into numpy and runs the commands. Files:
 [`tutorials/post_processing/`](../../tutorials/post_processing). Setup: [Tutorials](index.md), with the
 Python package installed.
@@ -57,19 +59,27 @@ for mesh in coarse medium fine; do
 done
 ```
 
-| Run | Cells | Steps | Wall time (2 threads of a busy machine) |
+| Run | Cells | Steps | Wall time (2 threads of a laptop) |
 |---|---|---|---|
-| `coarse` | 3,656 | 10,357 | 4.5 minutes |
-| `medium` | 7,266 | 20,609 | 6.4 minutes |
-| `fine` | 14,444 | 41,181 | 27 minutes |
+| `coarse` | 3,656 | 10,357 | 1.3 minutes |
+| `medium` | 7,266 | 20,609 | 3.8 minutes |
+| `fine` | 14,444 | 41,181 | 11 minutes |
 
 The time step halves from one mesh to the next (viscosity in the cells at the wall limits it), so each
-step costs twice as much on half the time step: each run about four times the one before.
+step costs twice as much on half the time step: each run three to four times the one before.
 
-## 3. What a run wrote: `mallard info`
+## 3. What a run wrote: the run report and `mallard info`
 
-`mallard info` on a run directory reads its run record (`mallard.jsonl`) and lists every file the run
-wrote, checking each against the size it recorded (`--verify` checks their SHA-256 too):
+Every run writes `report.html` in its directory, the first thing to open after a run (or during one), in
+any browser: how the run ended, its configuration and resolved input, its health (the lowest density,
+pressure and temperature, the numerical repairs, the conservation of mass, momentum and energy), plots of
+its monitors (here the forces on the cylinder, settling as the wake forms), its cost and the files it
+wrote. The page is self-contained, so it can be mailed or archived with the run
+([Run report](../guide/output.md#run-report-reporthtml)).
+
+`mallard info` on a run directory prints the same outcome, health and cost as text, from the run record
+(`mallard.jsonl`), and lists every file the run wrote, checking each against the size it recorded
+(`--verify` checks their SHA-256 too):
 
 ```bash
 mallard info medium
@@ -78,16 +88,51 @@ mallard info medium
 ```text
 == Run medium =============================================================================
   Run record         mallard.jsonl, the last run in it
-  Run id             602d29dc-0767-4de4-92ce-03ddd353c83b
+  Run id             7a965c86-59db-453a-814c-364545cdce27
   Restarted from     no: a fresh start
-  Started            2026-11-11T16:05:33Z
+  Started            2026-11-12T03:44:00Z
   Ranks              1 rank
-  Mallard            v0.9.1-63-gc51fd4e2
-  Ended              finished: t_stop = 200 reached
-  Last step          20609
-  Last snapshot      ./solut/wake_000004.vtkhdf, step 20609, t = 200 s
-  Simulated time     t = 200 s at the end
-  Wall time          6m 26s, the whole run
+  Mallard            v0.9.1-119-g99d3221b5
+== Outcome ============================================================================= ok
+  Ended (finished): t_stop = 200 reached, at step 20609, t = 200
+  Last snapshot: ./solut/wake_000004.vtkhdf, step 20609, t = 200
+
+== Health ============================================================================== ok
+  Lowest values over the cells at any progress row so far, with where they occurred:
+  quantity  value   units  step  at
+  rho       0.9607  -      2000  (0.025497, 0.519004, 0)
+  p         0.6902  -      2000  (0.025497, 0.519004, 0)
+  T         0.7115  -      2000  (0.104217, -1.04732, 0)
+
+  Activity at the last progress row, over the whole domain and on the least and most loaded
+  rank (the same in a serial run); troubled_cells: cells TENO marks troubled and
+  reconstructs from its smoother stencils: shocks:
+  activity        whole domain [%]  least loaded rank [%]  most loaded rank [%]
+  troubled_cells  0.00              0.00                   0.00
+
+  Numerical repairs: none
+
+  Conservation: the change of each total that the boundaries, sources and repairs do not
+  explain, relative to the total's scale:
+  total       unexplained change  units  note
+  mass        4.2e-15             -
+  momentum_x  3.5e-18             -
+  momentum_y  -5.7e-18            -
+  energy      1.3e-15             -
+
+== Cost ===================================================================================
+  quantity           value     units    basis
+  wall time          227.2     s        the whole run
+  setup              0.3477    s        0.2% of the wall time
+  time stepping      226.2     s        99.6% of the wall time
+  diagnostics        0.008499  s        0.0% of the wall time
+  output             0.4687    s        0.2% of the wall time
+  steps              20609     steps    this run's
+  throughput         6.62e+05  cells/s  time stepping
+  host memory, peak  77.5      MB       the largest rank
+
+== Warnings ============================================================================ ok
+  none
 
 == Output files =================================================================== 2 files
   file                      kind      times  first t [s]  last t [s]  last step  fields  format
@@ -97,6 +142,9 @@ mallard info medium
 == Files against the run record ======================= 5 recorded as written, size checked
   Recorded files     all present, as written
 ```
+
+`mallard info medium --html` builds the page again from `medium/mallard.jsonl`, byte for byte what the run
+wrote: for a run that is still going, was killed, or ran with `[output] report = ""`.
 
 On a file, it reports what the file holds: its mesh, times and steps, fields with units and ranges, and the
 [run block](../guide/output.md#run-block) of the run that wrote it, the same in every file of the run:
@@ -114,13 +162,14 @@ mallard info medium/solut/wake.vtkhdf.series
   min and max of fields with several components are of their magnitude.
 
 == Run ===================================================== same for every file of the run
-  Mallard            v0.9.1-63-gc51fd4e2 (commit c51fd4e20d45)
+  Mallard            v0.9.1-119-g99d3221b5 (commit 99d3221b5e73)
   Run block          version 3
   Build              2D, double precision, Release, Threads backend, MPI no, HDF5 yes
-  Run id             602d29dc-0767-4de4-92ce-03ddd353c83b
+  Run id             7a965c86-59db-453a-814c-364545cdce27
   Restarted from     no: a fresh start
-  Run started        2026-11-11T16:05:33Z
+  Run started        2026-11-12T03:44:00Z
   Ranks              1 rank on 1 host
+  Device             Apple M4 Pro
   Directory          .../run/post_processing/medium
   Input file         input.toml
   Input sha256       08d40f8d28212543686f394791824a02a93499fd3c90d876390b4ddf19a3b775
@@ -193,18 +242,80 @@ Without an input, `--region` extracts one region or probe given on the command l
 `--region '{type = "line", start = [0.5, 0], end = [5.5, 0], n_points = 201}' --fields U_X`; `--steps`,
 `--times` and `--latest` choose the snapshots.
 
-**A field the run did not write.** `--snapshot` writes the extracted fields as a snapshot, so any field of
-[`[[write_data]]`](../guide/output.md#derived-fields) can be computed after the run. The Q-criterion,
-positive where rotation dominates strain:
+## 5. Fields and averages after the run: `mallard post derive` and `mallard post average`
+
+**Fields the run did not write.** `mallard post derive` sets the case of the snapshots up again and writes
+[derived fields](../guide/output.md#derived-fields-after-the-run) of their state, with the run's own
+reconstruction and gradients: what `[[write_data]]` would have written at those steps. The Q-criterion,
+positive where rotation dominates strain, the enstrophy, and the pressure coefficient, whose reference
+state the run never gave (`--reference` gives it), of the fine run's last snapshot:
 
 ```bash
-cd fine && mallard post extract solut/wake.vtkhdf.series --latest --snapshot vtkhdf \
-    --fields Q_CRITERION --name wake_q && cd ..
+cd fine && mallard post derive solut/wake.vtkhdf.series --latest --fields Q_CRITERION,ENSTROPHY,CP \
+    --reference '{rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}' && cd ..
 ```
 
-writes `fine/extract/wake_q.vtkhdf.series`, to open in ParaView or Python like the run's own snapshots.
+```text
+== Derive =================================================================================
+  File               solut/wake.vtkhdf.series (VTKHDF series index (VTKHDF snapshots))
+  Case               the resolved input in the run block of solut/wake.vtkhdf.series
+  Snapshots          1 of 5, t = 200 s
+  Output             derived
 
-## 5. How large is the discretization error? `mallard post convergence`
+== Snapshots ==================================================================== 1 derived
+  #  t [s]  step   file
+  0  200    41181  wake_000004.vtkhdf
+
+== Written ======================================================================== 1 files
+  file                           kind      times  first t [s]  last t [s]  fields  format
+  derived/derived.vtkhdf.series  snapshot  1      200          200         3       VTKHDF series index (VTKHDF snapshots)
+```
+
+The snapshot, `fine/derived/derived.vtkhdf.series`, opens in ParaView or Python like the run's own;
+`--with-state` adds `RHO`, `U`, `P` and `T` to it, so that it stands alone. `mallard list fields input.toml`
+lists the fields there are, in its derived group.
+
+**Is the flow steady?** `mallard post average` averages the snapshots in time, per cell, with the code of
+[`[statistics]`](../guide/statistics.md#averages-of-saved-snapshots-mallard-post-average), which the run
+did not have: means `MEAN_<a>`, covariances `COV_<a>_<b>` and their square roots `RMS_<a>`. For a steady
+flow, the RMS over the last snapshots measures how much the flow still changes. Those of t = 100, 150 and
+200:
+
+```bash
+for mesh in coarse medium fine; do
+    (cd $mesh && mallard post average solut/wake.vtkhdf.series --times 100:200 --fields U_X,U_Y,P)
+done
+```
+
+```text
+== Average ================================================================================
+  File               solut/wake.vtkhdf.series (VTKHDF series index (VTKHDF snapshots))
+  Case               the resolved input in the run block of solut/wake.vtkhdf.series
+  Snapshots          3 of 5, t = 100 to 200 s
+  Window             50 to 200 s; each snapshot weighs the time since the previous one (the first: since as long before it as the second is after it)
+  Fields             U_X, U_Y, P
+  Covariances        U_X*U_X, U_Y*U_Y, P*P, U_X*U_Y
+  Favre              no (--favre adds them)
+
+== Snapshots =================================================================== 3 averaged
+  #  t [s]  step   weight [s]  file
+  0  100    20595  50          wake_000002.vtkhdf
+  1  150    30888  50          wake_000003.vtkhdf
+  2  200    41181  50          wake_000004.vtkhdf
+
+== Written ======================================================================== 2 files
+  average/average.vtkhdf.series
+  average/average_041181.vtkhdf
+```
+
+The snapshots are chosen by the times they record, and each weighs the time since the one before it (the
+first as much as the second, so the window starts at t = 50). The averages go to `average/average.vtkhdf.series`. In the fine run, the RMS of U_X stays below 1.4% of U in
+the near wake (x < 4.5 D, [the figure of section 7](#7-figures-the-python-package)) but reaches 7.9% of U
+at x ≈ 16 D, where the flow is still adjusting from its initial state: the forces on the cylinder have
+settled (section 7), the wake far behind it has not quite. For an unsteady flow, the same command gives
+its time averages.
+
+## 6. How large is the discretization error? `mallard post convergence`
 
 `mallard post convergence` compares the runs' forces, integrals and probe tables. It identifies each run by
 its run record, not its name, orders them by cell count, and follows the procedure of
@@ -219,9 +330,9 @@ mallard post convergence coarse medium fine --quantity Fx_pressure,Fx_viscous
 ```text
 == Runs ===================================================================================
   run     cells   h / h_fine  run id
-  coarse  3,656   1.988       10e8f857-e923-4431-8fff-2f9181635b39
-  medium  7,266   1.41        602d29dc-0767-4de4-92ce-03ddd353c83b
-  fine    14,444  1           56b67a3e-bd79-49d1-9942-3e953b5cf843
+  coarse  3,656   1.988       9a366ea3-d93e-421f-addc-53cb8d9cc11c
+  medium  7,266   1.41        7a965c86-59db-453a-814c-364545cdce27
+  fine    14,444  1           7a460e95-c708-4f1a-a5c7-e72dd99cbbd3
   design order 3: the runs' [numerics.face_reconstruction]
 
 == Grid convergence ================================================================== WARN
@@ -246,16 +357,17 @@ The pressure drag converges monotonically at order 1.7, with an error band (GCI)
 run's value. The viscous drag converges too, but at order 0.4, far from the scheme's third order: these
 meshes are not yet in its asymptotic range, so its extrapolated value is not to be trusted, and its band,
 13%, says as much. `WARN` marks both orders as far from the design order. Only more meshes tell whether the
-viscous order rises toward it ([Things to try](#7-things-to-try)).
+viscous order rises toward it ([Things to try](#8-things-to-try)).
 
 The quantities are the columns of the tables the runs wrote themselves (here `forces_cylinder.csv`); the
 `extract/` tables of section 4 are not among them. For an unsteady flow, `--average T0:T1` compares time
 averages, and `--time T` the values at one time.
 
-## 6. Figures: the Python package
+## 7. Figures: the Python package
 
 The [Python package](../guide/python.md) reads every file above into numpy arrays through Mallard's own
-reader, and runs the commands as functions that return their JSON reports:
+reader, and runs the commands as functions that return their JSON reports (`mallard.command` runs any
+command, its options as keyword arguments):
 
 ```python
 import mallard
@@ -266,8 +378,12 @@ cd = (forces.read_all("Fx_pressure") + forces.read_all("Fx_viscous")) / 0.02   #
 wall = mallard.open("fine/extract/probe_wall.csv")
 x, y, cf = wall.read("x"), wall.read("y"), wall.read("CF")                   # the last snapshot's samples
 
-q = mallard.open("fine/extract/wake_q.vtkhdf.series")
+q = mallard.open("fine/derived/derived.vtkhdf.series")
 cells = q.geometry()                                                          # points, connectivity, VTK types
+rms = mallard.open("fine/average/average.vtkhdf.series").read("RMS_U_X")     # one value per cell
+
+mallard.command("post", "average", "solut/wake.vtkhdf.series", times="100:200", fields=["U_X", "U_Y", "P"],
+                cwd="fine")                                                   # any command, by its options
 
 study = mallard.post.convergence(["coarse", "medium", "fine"], quantity=["Fx_pressure", "Fx_viscous"])
 [(s["name"], s["estimate"]["extrapolated"], s["estimate"]["gci"]) for s in study["quantities"]]
@@ -281,10 +397,10 @@ python3 $MALLARD/tutorials/post_processing/plot_post_processing.py coarse medium
 ```
 
 ```text
-run        cells     C_D C_D circle  L / D separation
-coarse     3,656  1.6330     1.5502  2.198     52.75°
-medium     7,266  1.6104     1.5570  2.249     53.54°
-fine      14,444  1.5950     1.5580  2.270     53.52°
+run        cells     C_D C_D circle  L / D separation RMS U_X / U
+coarse     3,656  1.6330     1.5502  2.198     52.75°    7.15e-02
+medium     7,266  1.6104     1.5570  2.249     53.54°    7.13e-02
+fine      14,444  1.5950     1.5580  2.270     53.52°    7.86e-02
 reference C_D: 1.5 to 1.54
 reference L / D: 2.13 to 2.35
 reference separation angle [deg]: 53.7 to 55.6
@@ -292,10 +408,11 @@ forces_cylinder:Fx_pressure: converging monotonically, order 1.72 (design 3), ex
 forces_cylinder:Fx_viscous: converging monotonically, order 0.38 (design 3), extrapolated 0.0099813681; fine-grid value 0.011134492 +/- 12.9% (GCI, Fs = 1.25); order 0.38 is more than 1 from the design order 3
 ```
 
-**The wake.** The fine run's U_X with the recirculation outlined, and the Q-criterion from section 4.
+**The wake.** The fine run's U_X with the recirculation outlined, the Q-criterion and the RMS of U_X from
+section 5: the flow still changes least inside the recirculation.
 
-![Streamwise velocity around the cylinder with the recirculation outlined, and the Q-criterion computed after the run](../images/tutorials/post_processing_field-light.svg#gh-light-mode-only)
-![Streamwise velocity around the cylinder with the recirculation outlined, and the Q-criterion computed after the run](../images/tutorials/post_processing_field-dark.svg#gh-dark-mode-only)
+![Streamwise velocity around the cylinder with the recirculation outlined, the Q-criterion computed after the run, and the RMS of the streamwise velocity over the last three snapshots](../images/tutorials/post_processing_field-light.svg#gh-light-mode-only)
+![Streamwise velocity around the cylinder with the recirculation outlined, the Q-criterion computed after the run, and the RMS of the streamwise velocity over the last three snapshots](../images/tutorials/post_processing_field-dark.svg#gh-dark-mode-only)
 
 **The wall and the axis.** The pressure coefficient around the upper half of the cylinder, from the front
 stagnation point (C_p = 1.17: at low Reynolds numbers viscous stresses raise it above the inviscid 1) to
@@ -316,10 +433,10 @@ the medium run's C_D falls from 1.610 to 1.573.
 ![The drag coefficient against time on three meshes, and against the cell size with its extrapolated value and error band](../images/tutorials/post_processing_convergence-light.svg#gh-light-mode-only)
 ![The drag coefficient against time on three meshes, and against the cell size with its extrapolated value and error band](../images/tutorials/post_processing_convergence-dark.svg#gh-dark-mode-only)
 
-## 7. Things to try
+## 8. Things to try
 
 - **A larger domain.** `-setnumber R_far 60 -setnumber h_far 6` moves the far field from 20 to 60
-  diameters (8,628 cells for the medium mesh, 11 minutes): the drag of the paragraph above.
+  diameters (8,628 cells for the medium mesh): the drag of the paragraph above.
 - **Other probes, the same runs.** Add a `line` probe across the wake at x = 3 to `probes.toml` and
   extract again: the runs need not be repeated.
 - **A fourth mesh.** `refine = 2` (about 29,000 cells, four times the fine run's cost): with four runs,
@@ -327,6 +444,7 @@ the medium run's C_D falls from 1.610 to 1.573.
   meshes are in the asymptotic range.
 - **An unsteady wake.** Run the [cylinder tutorial](cylinder.md)'s shedding wake at Re = 100 on two or
   three of these meshes: `mallard post convergence --average 100:160` compares their mean forces over the
-  same window.
+  same window, and `mallard post average --times 100:160` gives the mean wake and the RMS of the shedding,
+  from snapshots a few time units apart (a shedding period lasts about 30).
 
 Next: [Supersonic flow over a cone](cone.md), in 3D.

@@ -375,7 +375,7 @@ OutputSummary DataWriter::summary() const {
                                                                       : "_*.vtu");
     std::vector<std::string> parts;
     if (subset) {
-        parts.push_back(region_name + ", " + (subset_at ? std::string("its cells at each write") : logging::count(n_subset) + " cells"));
+        parts.push_back(region_name + ", " + (subset_at ? std::string("its cells at each write") : logging::count(n_subset, "cell")));
     }
     if (compression == Compression::ZLIB) {
         parts.push_back(relative_error > 0.0 ? "zlib to relative error " + logging::real(relative_error) : "zlib");

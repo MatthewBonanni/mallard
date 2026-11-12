@@ -56,7 +56,7 @@ std::string case_input(const std::string & dir, const std::string & physics, con
     return s.str();
 }
 
-int derive(const std::vector<std::string> & words, std::string * errors = nullptr) {
+int derive(const std::vector<std::string> & words, std::string * errors = nullptr, std::string * printed = nullptr) {
     cli::Args args;
     std::string error;
     EXPECT_TRUE(cli::parse(*cli::command("post derive"), words, args, error)) << error;
@@ -67,6 +67,7 @@ int derive(const std::vector<std::string> & words, std::string * errors = nullpt
     std::cout.rdbuf(out);
     std::cerr.rdbuf(err);
     if (errors) *errors = messages.str();
+    if (printed) *printed = report.str();
     comm::barrier();
     return status;
 }
@@ -109,10 +110,14 @@ void expect_derived_as_written(const std::string & name, const std::string & phy
 } // namespace
 
 TEST(PostDeriveTest, RestartFilesGiveTheRunsDerivedFieldsBitForBit) {
-    // TENO cell gradients of a perfect gas, and the [output] reference of CP from the run's input
+    // TENO cell gradients of a perfect gas (the solver's vorticity among them), and the [output] reference of CP from the run's input
     std::vector<std::string> fields = {"MACH",    "P0",          "T0",         "H0",        "SOUND_SPEED",
                                        "ENTROPY", "Q_CRITERION", "DILATATION", "ENSTROPHY", "STRAIN_RATE", "CP"};
-    if (N_DIM == 3) fields.push_back("HELICITY");
+    if (N_DIM == 3) {
+        fields.insert(fields.end(), {"HELICITY", "VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z"});
+    } else {
+        fields.push_back("VORTICITY");
+    }
     expect_derived_as_written("perfect", "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n",
                               "rho = \"1.0 + 0.2 * sin(2 * pi * x) * sin(2 * pi * y)\"\np = \"1.0\"\n",
                               "reference = {rho = 1.0, u = " + vector_of("0.3", "0.0", "0.0") + ", p = 1.0}\n", fields);
@@ -144,9 +149,15 @@ TEST(PostDeriveTest, FieldsThatNeedInputTheRunLacksSayHowToGiveIt) {
     EXPECT_EQ(derive({run + "/restart_000004.restart", "--fields", "MACHH"}, &errors), 2);
     // With the reference given, CP = (p - p_inf) / q_inf of the stored state, whose divergence-free flow keeps p = 1
     const std::string out = fresh_dir("given");
+    std::string printed;
     ASSERT_EQ(derive({run + "/restart_000004.restart", "--fields", "CP", "--reference",
-                      "{rho = 2.0, u = " + vector_of("1.0", "0.0", "0.0") + ", p = 0.5}", "--snapshot", "vtu", "-o", out}),
+                      "{rho = 2.0, u = " + vector_of("1.0", "0.0", "0.0") + ", p = 0.5}", "--snapshot", "vtu", "-o", out},
+                     nullptr, &printed),
               0);
+    if (comm::is_root()) {
+        EXPECT_NE(printed.find("== Written"), std::string::npos) << printed;
+        EXPECT_NE(printed.find(" 1 file\n"), std::string::npos) << printed;
+    }
     const output::Contents derived = output::open(out + "/derived.pvd");
     for (const double cp : output::read(derived, "CP", 0)) EXPECT_NEAR(cp, 0.5, 1e-3);
 }
