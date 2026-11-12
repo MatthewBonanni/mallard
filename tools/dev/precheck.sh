@@ -53,7 +53,7 @@ checks() {
         echo "== workflow triggers, support matrix: skipped (no PyYAML; PYTHON= a python with it)"
     fi
     run "spelling" "$python" tools/dev/check_spelling.py
-    run "documented input defaults" "$python" tools/dev/input_catalog.py docs
+    run "documented input keys and defaults" "$python" tools/dev/input_catalog.py docs
     run "TOML snippets of the docs" "$python" tools/dev/check_doc_toml.py
     run "\"Used in\" lines of the guide" "$python" tools/docs/used_in.py --check
     run "feature matrix" "$python" tools/docs/feature_matrix.py --check
