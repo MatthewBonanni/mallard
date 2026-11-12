@@ -182,7 +182,7 @@ struct Case {
     std::string right = "type = \"outlet_extrapolation\"\n";  // the right boundary's keys
     bool stop_file = false;       // a STOP file in the working directory
     bool distributed = false;     // over the ranks, else serial on each
-    bool fence_in_step_body = false;
+    Solver::CaptureFault capture_fault = Solver::CaptureFault::NONE;
     std::string body;             // the mesh, state, boundaries, numerics and physics of another case than the box
 };
 
@@ -314,14 +314,14 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         Solver solver;
         solver.set_distributed(c.distributed);
         solver.set_uncaptured_step_graphs(depth > 0);
-        solver.set_fence_in_step_body(c.fence_in_step_body);
+        solver.set_capture_fault(c.capture_fault);
         solver.init(parse_toml(box_input(c, dir.string(), depth)));
         try {
             solver.run();
         } catch (const std::exception & e) {
             o.error = e.what();
         }
-        if (depth > 0 && !c.fence_in_step_body) expect_capturable(guard, solver);
+        if (depth > 0 && c.capture_fault == Solver::CaptureFault::NONE) expect_capturable(guard, solver);
         solver.copy_device_to_host();
         const size_t n_species = solver.h_species.span() > 0 ? solver.h_species.extent(1) : 0;
         for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
@@ -783,17 +783,21 @@ TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
 #ifndef KOKKOS_ENABLE_CUDA
     GTEST_SKIP() << "step graphs are captured in CUDA builds only";
 #else
-    // A fence inside the step's conditional body invalidates the capture: the run warns and takes its steps
-    // kernel by kernel, as the host would
+    // A capture that fails inside the step's conditional body, at once (a fence) or only at cudaStreamEndCapture (a
+    // copy on the legacy stream), warns, and the run takes its steps kernel by kernel, as the host would
     Case c;
     c.run = "n_steps = 12\ncfl = 0.5\n";
     const Outcome host = run_case("failed_capture", c, 0);
-    c.fence_in_step_body = true;
-    const Outcome fallback = run_case("failed_capture", c, 3);
-    expect_same(host, fallback, "a failed capture");
-    EXPECT_EQ(fallback.graph_steps, 0u);
-    ASSERT_EQ(fallback.warnings.size(), 1u);
-    EXPECT_NE(fallback.warnings[0].find("no CUDA graph of the step"), std::string::npos) << fallback.warnings[0];
+    for (const auto & [fault, reported_by] : {std::pair{Solver::CaptureFault::FENCE, "cudaDeviceSynchronize"},
+                                              std::pair{Solver::CaptureFault::LEGACY_STREAM, "cudaStreamEndCapture"}}) {
+        c.capture_fault = fault;
+        const Outcome fallback = run_case("failed_capture", c, 3);
+        expect_same(host, fallback, reported_by);
+        EXPECT_EQ(fallback.graph_steps, 0u) << reported_by;
+        ASSERT_EQ(fallback.warnings.size(), 1u) << reported_by;
+        EXPECT_NE(fallback.warnings[0].find("no CUDA graph of the step"), std::string::npos) << fallback.warnings[0];
+        EXPECT_NE(fallback.warnings[0].find(reported_by), std::string::npos) << fallback.warnings[0];
+    }
 #endif
 }
 
