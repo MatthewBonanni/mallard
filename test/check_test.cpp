@@ -686,9 +686,9 @@ TEST(CheckRegions, RegionsOfTheSolutionAreMeasuredOnTheInitialSolution) {
     // MACH within the cell averages' pressure, rho E averaged with the kinetic energy of the linear u
     const std::string extra = "[regions]\nslow = {type = \"where\", condition = \"MACH * sqrt(1.4) < 0.55\"}\n"
                               "strained = {type = \"where\", condition = \"Q_CRITERION * x > -0.275\"}\n"
-                              "front = {type = \"isosurface\", field = \"MACH\", value = 0.46483484010068415}\n";
+                              "level = {type = \"isosurface\", field = \"MACH\", value = 0.46483484010068415}\n";
     std::string probes;
-    for (const char * name : {"slow", "strained", "front"}) {
+    for (const char * name : {"slow", "strained", "level"}) {
         probes += std::string("[[probes]]\nname = \"") + name + "\"\nfields = [\"P\"]\nregion = \"" + name + "\"\n";
     }
     auto report = [&](const bool distributed) {
@@ -706,8 +706,8 @@ TEST(CheckRegions, RegionsOfTheSolutionAreMeasuredOnTheInitialSolution) {
         EXPECT_NEAR(regions.at(name).measure, 0.55 * depth, (name == std::string("slow") ? 2e-4 : 1e-12) * depth) << name;
         EXPECT_EQ(regions.at(name).cells, N_DIM == 2 ? 40u : 80u) << name;
     }
-    EXPECT_NEAR(regions.at("front").measure, depth, 1e-12);
-    EXPECT_EQ(regions.at("front").cells, N_DIM == 2 ? 8u : 16u);
+    EXPECT_NEAR(regions.at("level").measure, depth, 1e-12);
+    EXPECT_EQ(regions.at("level").cells, N_DIM == 2 ? 8u : 16u);
     const CheckReport serial = report(false);
     ASSERT_EQ(serial.regions.size(), r.regions.size());
     for (size_t i = 0; i < r.regions.size(); i++) {
