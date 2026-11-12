@@ -210,3 +210,67 @@ the case up as a run does (`Solver::init`) and lets the run's own `Probes` and
   ranks (`PostExtractTest`); snapshots of primitives agree to rounding.
 - **The front end** runs it on the solver of `-i`'s dimension, else of the
   file's (restart files) or its run block's build (`Case::output_case`).
+
+## `mallard post derive`
+
+`post derive` sets the case up as `post extract` does (the same input
+rewrite, state reader and skipped time stepping) and writes the derived fields
+of each snapshot with the run's `[[write_data]]` writer, so a field is computed
+by the run's own reconstruction, gradients and kernels.
+
+- **Same values.** From restart files the fields equal the run's bit for bit
+  (`PostDerive.RestartFilesGiveTheRunsDerivedFieldsBitForBit`); from VTKHDF
+  snapshots of `RHO`, `U`, `P` and `T` the gradient fields were bitwise too
+  in both cases of the benchmark below, and `MACH` differs in the last bit, from converting
+  the stored primitives back to the conservative variables.
+- **Cost.** The case's setup is the reconstruction's: for TENO its stencils,
+  pseudo-inverses and smoothness matrices, the same tables as a run's
+  (`[numerics.face_reconstruction] cache_file` stores them), and their memory. Each snapshot then costs one gradient pass and the write.
+
+### Cost against ParaView
+
+`benchmarks/post_derive` (described in `benchmarks/README.md`) derives
+`MACH`, `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN` and `VORTICITY` with
+`mallard post derive` and with the equivalent `pvbatch` pipeline: ParaView's
+`Gradient` filter on the cell data (with its Q-criterion and vorticity),
+`Calculator` for `MACH` and `SCHLIEREN`, and numpy for λ₂, reading the same
+VTKHDF snapshots and writing VTKHDF. Apple M4 Pro, macOS, 2 threads each
+(Kokkos Threads; `VTK_SMP_MAX_THREADS=2`), ParaView 6.0.1; wall time and peak
+memory (`/usr/bin/time -l`), the best of 3 (2D) or 2 (3D) runs:
+
+| Case | Files | `post derive` | `post derive`, TENO cache | `pvbatch` |
+|---|---|---|---|---|
+| 2D double Mach reflection, 115,200 triangles, TENO5 (10 MB per snapshot) | 1 | 6.2 s, 1.1 GB | 0.47 s, 1.0 GB | 3.0 s, 0.21 GB |
+|  | 11 | 6.5 s, 1.1 GB | 0.74 s, 1.0 GB | 3.8 s, 0.23 GB |
+| 3D Taylor-Green vortex, 64³ hexahedra, TENO5 (37 MB per snapshot) | 1 | 37 s, 9.6 GB | 5.0 s, 9.5 GB | 3.7 s, 0.32 GB |
+|  | 11 | 40 s, 9.6 GB | 8.0 s, 9.5 GB | 6.4 s, 0.37 GB |
+
+- **Setup dominates.** Without a cache, the TENO setup is about 6 s in 2D and
+  35 s in 3D, against ParaView's 3 s start (Python, the reader and the
+  pipeline). Each further snapshot costs about 0.03 s in 2D and 0.3 s in 3D
+  for `post derive` (the TENO gradient pass), 0.08 s and 0.26 s for `pvbatch`:
+  in 2D `post derive` is faster from about 70 snapshots on, in 3D not at all.
+- **With the run's cache.** Reading the TENO cache (0.76 GB in 2D, 8.4 GB in
+  3D) instead of computing it makes `post derive` 6 and 5 times faster than
+  `pvbatch` in 2D; in 3D it is slower by a quarter to a third.
+- **Memory** is the TENO tables' (about 32 KB per hexahedron at order 5):
+  5 times ParaView's in 2D, 30 times in 3D.
+
+Agreement, as relative L2 norms of the difference over the norm of
+`post derive`'s field:
+
+| Field | against the run's `[[write_data]]` | against `pvbatch`, 3D, interior | against `pvbatch`, 2D |
+|---|---|---|---|
+| `MACH` | bitwise (restart files); last bit (snapshots) | 1e-16 | 1e-16 |
+| `Q_CRITERION` | bitwise | 1.5e-2 | 0.87 |
+| `LAMBDA2` | bitwise | 1.4e-2 | 0.69 |
+| `SCHLIEREN` | bitwise | 1.1e-2 | 0.21 |
+| `VORTICITY` | bitwise | 8.4e-3 | 0.57 |
+
+`MACH` is pointwise and agrees to rounding. The gradient fields differ by
+discretization: ParaView's cell-data gradient is a linear least-squares fit of
+the neighbors' values, `post derive`'s the TENO5 polynomials of the run. On
+the smooth Taylor-Green vortex they agree to 1-2% away from the box's faces
+(2 cells), which ParaView does not know are periodic (14% for `Q_CRITERION`
+over the whole box); behind the shocks of the double Mach reflection the
+gradient of a discontinuity depends on the method, and they differ at order one.

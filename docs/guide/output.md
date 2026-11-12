@@ -280,6 +280,16 @@ without HDF5), with only the fields asked for unless `--with-state` adds
 `[output.mixture]` come from the run's input; `--reference` and `--mixture`
 give them for runs that set none, or replace them.
 
+**Cost.** Setting the case up costs what a run's setup does, mostly the
+reconstruction's: with TENO, seconds in 2D and minutes per million cells in
+3D on CPUs, and the memory of its tables (about 10 GB for 64³ hexahedra at
+order 5). A run with `[numerics.face_reconstruction] cache_file` stores the
+tables, and `post derive` run from the run's directory reads them instead,
+which takes seconds; each snapshot then costs one gradient pass. For a few
+snapshots of a large 3D case without a cache, ParaView's `Gradient` filter is
+quicker and lighter, with a lower-order gradient
+([benchmark](../design/output_reader.md#cost-against-paraview)).
+
 ### Which format
 
 | `format` | Opens in | Files |
