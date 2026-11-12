@@ -176,7 +176,7 @@ axis (2D: about a point).
   | Time step | the face normal in cell 1's frame |
 
 - **TENO.** A stencil entry is a cell of the stencil search at a lattice
-  offset. The setup (host 2D, CellSetup in 3D) maps node coordinates,
+  offset. The setup (`CellSetup2D`, `CellSetup`) maps node coordinates,
   centroids, mirror planes and point-in-cell tests through `M(L)`, and turns
   the cells' central moments by `Q` (`mapped_moments`), so the
   pseudo-inverses are those of the full annulus. The device must also turn
