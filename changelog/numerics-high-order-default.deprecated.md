@@ -1,0 +1,1 @@
+- `[numerics] preset = "robust"` and `"accurate"` are renamed `"second_order"` and `"high_order"`: the old names are read with a warning until 0.11.0, and `mallard input upgrade` renames them.
