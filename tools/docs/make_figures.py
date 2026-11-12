@@ -25,6 +25,7 @@ import runs
 import schematics
 import teno
 import theory
+import time_integrators
 
 
 def main():
@@ -37,6 +38,7 @@ def main():
     domains.figures()
     inlets.figures()
     theory.figures()
+    time_integrators.figures()
     teno.figures()
     effective_resolution.figures()
     high_order_cost.figures()
