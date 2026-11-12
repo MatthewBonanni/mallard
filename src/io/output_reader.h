@@ -106,6 +106,8 @@ struct Contents {
      *        the file has none. Blocks of version 2 and before were named "provenance".
      */
     std::string run;
+    /** @brief Probe files: the probe sampling block (JSON) of the last run, how and where it samples; else empty. */
+    std::string sampling;
     RestartHeader restart;        ///< restart files: the header
     std::vector<std::string> notes;  ///< what a reader of the file should know (no units, newer provenance, ...)
 
