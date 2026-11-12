@@ -30,6 +30,7 @@
 
 #include "device_comm.h"
 #include "diagnostic_code.h"
+#include "lock_arrays.h"
 #include "log.h"
 #include "probe_fluxes.h"
 #include "run_control.h"
@@ -629,6 +630,7 @@ void Solver::step_prologue() {
 void Solver::capture_step_graph() {
 #ifdef KOKKOS_ENABLE_CUDA
     Kokkos::fence("step_graph");
+    lock_arrays::copy_all();
     cudaGraph_t graph = nullptr;
     try {
         cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
@@ -661,6 +663,7 @@ bool Solver::conditional_nodes_work() {
     bool works = true;
     if (is_distributed() && halo.uses_nccl()) {
         Kokkos::fence("conditional_nodes");
+        lock_arrays::copy_all();
         const Kokkos::View<uint32_t> on("conditional_probe_flag");
         Kokkos::deep_copy(on, 1u);
         const Kokkos::View<double *> x("conditional_probe", 1);
