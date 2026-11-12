@@ -16,6 +16,8 @@
 #include "front_end.h"
 #include "input_upgrade.h"
 #include "run_control.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace cli {
 
@@ -34,6 +36,10 @@ constexpr Option RUN_OPTIONS[] = {
     {"--verbose", "", "",
      "A line for every file written, between the progress rows. Default: the progress table's written column "
      "counts them, and mallard.jsonl and the summary name them."},
+    {"--log-format", "", "text|jsonl",
+     "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
+     "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
+     "and the text on stderr. Default: text."},
     KOKKOS,
 };
 
@@ -378,7 +384,9 @@ constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
-    if (args.has("--list")) std::cerr << "mallard new --list is deprecated: use mallard list templates\n";
+    if (args.has("--list")) {
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard new --list is deprecated: use mallard list templates");
+    }
     return case_template::new_case(args.positional, args.has("--list"), args.has("--quick"), args.has("--force"));
 }
 
@@ -1026,8 +1034,11 @@ constexpr Command COMMANDS[] = {
         .description =
             "Prints a script that makes the shell complete mallard's commands, their options and the values those "
             "take: input files for -i, latest and restart files for --restart, template names for mallard new, "
-            "run directories for mallard ctl and its requests. It is made from the same table as the help pages, "
-            "so it knows every command of this build; templates come from mallard new when completing.\n"
+            "run directories for mallard ctl and its requests, sections and keys of the key catalog for mallard "
+            "list keys, output fields of the field catalog for --fields, each item after a comma too. It is made "
+            "from the same table as the help pages and from the catalogs mallard list keys and mallard list fields "
+            "print, so it knows every command, key and field of this build; templates come from mallard new when "
+            "completing.\n"
             "\n"
             "An install (cmake --install, Spack, the containers) puts the scripts where the shells look: "
             "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "

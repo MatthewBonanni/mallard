@@ -283,10 +283,8 @@ class DataWriter {
         std::string snapshot_attribute() const;
         uint64_t snapshots_written() const { return n_snapshots; }
 
-        /**
-         * @brief Format and the output key-value line for the run log.
-         */
-        std::pair<std::string, std::string> summary() const;
+        /** @brief The output as the setup banner lists it. */
+        OutputSummary summary() const;
 
         DataFormat get_format() const { return format; }
         const std::string & get_prefix() const { return prefix; }

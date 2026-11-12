@@ -1369,9 +1369,9 @@ int post_command(const cli::Args & args, const Post post) {
     } catch (const UsageError & e) {
         return comm::is_root() ? cli::usage_error(*cli::command(command), e.what()) : 2;
     } catch (const InputError & e) {
-        if (comm::is_root()) std::cerr << "mallard " << command << ": the case's input: " << e.what() << "\n";
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, "mallard " + command + ": the case's input: " + e.what());
     } catch (const std::exception & e) {
-        if (comm::is_root()) std::cerr << "mallard " << command << ": " << e.what() << "\n";
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, "mallard " + command + ": " + e.what());
     }
     return 1;
 }
