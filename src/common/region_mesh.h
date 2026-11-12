@@ -59,10 +59,80 @@ struct Elements {
  *        region.resolution() times, as the zero set of the linear interpolant.
  *        Clipping regions keep the parts inside them (outside subtracted
  *        ones): on primitives' own surfaces at the roots of their distance
- *        along the parameters (high order), elsewhere linearly between
- *        vertices (exact for planes). Collective.
+ *        along the parameters (high order), elsewhere at the roots of
+ *        their distance along the elements' edges. Collective.
  */
 Elements elements(const Mesh & mesh, const Region & region);
+
+/**
+ * @brief The levels of a region's conditions (SolutionLevels::levels()) on
+ *        the host in some owned cells, ascending: row i is cells[i]'s.
+ */
+struct Levels {
+    std::vector<uint32_t> cells;
+    Kokkos::View<const double **[N_DIM + 1], Kokkos::LayoutRight, Kokkos::HostSpace> values;
+};
+
+/**
+ * @brief The elements of a region defined by the solution, with its
+ *        conditions' levels: where a condition bounds or clips it, each cell's
+ *        linear level is cut on the cell's simplices (exact for it, without
+ *        subdividing). Pieces cut from conditions' levels are cut in the cells
+ *        of levels; any other piece reads the levels of the cells it is in,
+ *        which levels must hold (level_cells). Collective.
+ */
+Elements elements(const Mesh & mesh, const Region & region, const Levels & levels);
+
+/**
+ * @brief The owned cells elements(mesh, region, levels) reads levels in. For
+ *        each piece cut from conditions' levels, its carriers' conditions: it
+ *        is cut in the cells where none of their linear levels keeps its sign
+ *        within radii of the cell's centroid (a bound of its distance to the
+ *        cell's points). every: another piece reads levels in any owned cell.
+ */
+struct LevelCells {
+    std::vector<std::vector<uint32_t>> conditions;
+    std::vector<double> radii;
+    bool every = false;
+};
+LevelCells level_cells(const Mesh & mesh, const Region & region);
+
+/**
+ * @brief Extracts the elements of a region of lower dimension than a mesh
+ *        repeatedly: what is fixed for the mesh and region (the mesh's extent
+ *        and mean cell size, the fractions of the region's clipping regions of
+ *        whole cells) is computed once, collectively, at construction. Keeps
+ *        references to mesh and region.
+ */
+class Extraction {
+    public:
+        struct Constants {
+            std::array<double, 3> lo{}, hi{};                 // the mesh's bounding box (0 beyond N_DIM)
+            double h = 1.0;                                    // its mean cell size
+            std::vector<std::vector<double>> cells;            // fractions of each clipping region of whole cells
+            std::vector<RegionView<Kokkos::HostSpace>> views;  // of each filled region
+        };
+
+        Extraction(const Mesh & mesh, const Region & region);
+        /** @brief elements(mesh, region). Collective. */
+        Elements elements() const;
+        /** @brief elements(mesh, region, levels). Collective. */
+        Elements elements(const Levels & levels) const;
+
+    private:
+        const Mesh & m_mesh;
+        const Region & m_region;
+        Constants m_constants;
+};
+
+/**
+ * @brief The measures of a filled region's intersection with the domain:
+ *        the sum of f V over the cells, with fractions f (cell_fractions),
+ *        and the measure of its surface_in_domain(); per radian in
+ *        axisymmetric runs. Measures::tolerance is 0: the mesh's own
+ *        accuracy. Collective.
+ */
+Measures measures_in_domain(const Mesh & mesh, const Region & region, const std::vector<double> & fractions);
 
 /**
  * @brief A patch of a surface in world coordinates: x(u, v) and its

@@ -8,10 +8,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <numbers>
@@ -824,9 +826,11 @@ TEST(CaseView, CurvedWallsLieOnTheirShapes) {
         for (size_t c = 0; c < curved.n_cells(); c++) {
             const int64_t n = straight.offsets[c + 1] - straight.offsets[c], m = curved.offsets[c + 1] - curved.offsets[c];
             ASSERT_GT(m, 2 * n) << "cell " << c << " of " << file;
+            // On the shape to the round-off of the rtype nodes its faces are fitted to
+            const double tol = std::max(1e-9, 4.0 * double(std::numeric_limits<rtype>::epsilon()));
             for (int64_t k = 0; k < m; k++) {
                 const auto & x = curved.points[size_t(curved.connectivity[size_t(curved.offsets[c] + k)])];
-                EXPECT_NEAR(std::hypot(x[0], x[1], x[2]), 1.0, 1e-9) << "cell " << c << " of " << file;
+                EXPECT_NEAR(std::hypot(x[0], x[1], x[2]), 1.0, tol) << "cell " << c << " of " << file;
             }
             // The corners where the straight face has them: every (m - 1) / (n - 1)-th point in 2D, m / n-th in 3D
             const int64_t step = N_DIM == 2 ? (m - 1) / (n - 1) : m / n;

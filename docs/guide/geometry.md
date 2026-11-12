@@ -9,24 +9,25 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 
 | Feature | Geometry | Guide |
 |---|---|---|
-| `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone) | [Sources](sources.md#regions) |
-| `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh) | [Probes](probes.md#region-probes) |
+| `[[sources]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh) (`domain`, a cell zone); it may [move](#moving-regions) or [follow the solution](#regions-defined-by-the-solution), and expressions read the index of [copies](#arrays-of-copies) as `copy` | [Sources](sources.md#regions) |
+| `[[probes]]` `region` | a [region](#regions) of any dimension, its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): integrals, means, extremes over its cells (filled regions) or over a [surface or curve](#surfaces-and-curves-on-a-mesh); filled regions may [move](#moving-regions); regions of any dimension may [follow the solution](#regions-defined-by-the-solution); `copies = "each"` reduces each [copy](#arrays-of-copies) | [Probes](probes.md#region-probes) |
 | `[[probes]]` `type` | [points or a curve](#points-and-curves); [boundary zones](#boundary-zones) and [surfaces](#surfaces) soon | [Probes](probes.md#probes-probes) |
-| `[[write_data]]` `region`, `regions` | a [region](#regions) of any dimension or its [name](#named-regions): a filled region's cells, a surface or curve at its elements, a boundary zone, `domain`, or a [probe type as a region](#probe-types-as-regions) | [Output](output.md#snapshots-of-regions) |
-| `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength` | [Sponge layers](sources.md#sponge-layers) |
+| `[[write_data]]` `region`, `regions` | a [region](#regions) of any dimension or its [name](#named-regions): a filled region's cells, a surface or curve at its elements, a boundary zone, `domain`, or a [probe type as a region](#probe-types-as-regions); filled regions may [move](#moving-regions), and regions of any dimension may [follow the solution](#regions-defined-by-the-solution) | [Output](output.md#snapshots-of-regions) |
+| `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength`; it may [move](#moving-regions) or [follow the solution](#regions-defined-by-the-solution) | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
-| `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output | [Probes](probes.md#probes-of-existing-output) |
+| `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output; [regions defined by the solution](#regions-defined-by-the-solution) are placed on that state | [Probes](probes.md#probes-of-existing-output) |
 | `mallard post average` `--region` | what `[[write_data]]` `region` takes; with `--homogeneous`, a filled region, cells weighted by their fraction in it | [Statistics](statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | `mallard check` `--mesh-fields` `--region` | a [region](#regions) or its [name](#named-regions): the cells whose stencils to write | [Mesh and stencil fields](output.md#mesh-and-stencil-fields) |
-| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file and an annotated image of them | [Checking regions](#checking-regions), [the case view](input_files.md#the-case-view) |
+| `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file and an annotated image of them; regions defined by the solution are listed, placed during the run | [Checking regions](#checking-regions), [the case view](input_files.md#the-case-view) |
 | `[[statistics.conditional]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh): cells weighted by their fraction in it | [Statistics](statistics.md#conditional-statistics-and-pdfs-statisticsconditional) |
 | `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
 | `[initialize]` `type = "analytical"` | expressions of `x`, `y`, `z`, averaged over each cell | [Initialization](initialization.md#expressions) |
-| `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces | [Initialization](initialization.md#regions) |
+| `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces; a [moving region](#moving-regions) where it is at `t = 0` | [Initialization](initialization.md#regions) |
 | `[[initialize.data]]` `region` | a [region](#regions) or its [name](#named-regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
 | `[[mesh.curved]]` | a surface (2D: a curve), e.g. `{type = "sphere", ..., filled = false}` or a `circle` | [Curved boundaries](meshes.md#curved-boundaries) |
 
-Filled regions are volumes (areas in 2D runs). Surfaces and curves, such as
+Every region may be [repeated](#arrays-of-copies), and wraps across
+[periodic boundaries](#periodic-boundaries). Filled regions are volumes (areas in 2D runs). Surfaces and curves, such as
 boundary zones and the [boundaries](#boundaries-and-interiors) of regions, are
 regions too; each feature states the dimension it takes, and a region of
 another dimension is an error naming both.
@@ -60,7 +61,8 @@ region = {type = "sphere", center = [0, 0, 0], radius = "2 mm"}
 A region is a table: a primitive, a boolean of regions, or the
 [boundary or interior](#boundaries-and-interiors) of a region, each with
 optional transforms, nested to any depth; or the [name](#named-regions) of
-one, or of a [region of the mesh](#regions-of-the-mesh). Each `type` has one
+one, or of a [region of the mesh](#regions-of-the-mesh); or a
+[region defined by the solution](#regions-defined-by-the-solution). Each `type` has one
 dimension, the same wherever it is used: filled (a volume; an area in 2D), a
 surface, a curve. A filled region of primitives has a **signed distance** φ,
 negative inside, that never exceeds the distance to its surface. Mallard uses it
@@ -353,17 +355,40 @@ intervals between the clipping region's roots, found to round-off, so a clipped
 area or flux converges at high order (in the tests, errors fall by over 8 per
 halving of the cells, to round-off); patches where the clipping boundary is not
 a graph over one parameter, or that several clipping regions cross, are
-subdivided. Extracted elements and mesh faces are cut linearly between their
-vertices: exactly along planes and mesh-aligned boxes. Only the parts inside the
-domain count. In axisymmetric runs measures are those of the r-z plane, not
-of the revolved surface.
+subdivided. Extracted elements and mesh faces are cut along their edges at the
+roots of the clipping region's distance. Only the parts inside the domain
+count. In axisymmetric runs measures are those of the r-z plane, not of the
+revolved surface.
+
+On a mesh with [curved boundaries](meshes.md#curved-boundaries), every kind
+follows the curved walls:
+
+- Exact surfaces' Gauss points are located in the cells' curved shapes, so
+  the slivers between a straight face and the wall count, and points beyond
+  the wall do not. A patch the wall crosses is halved until its kept part ends
+  within 2^-30 (curves) or 2^-6 (surfaces) of the patch at the wall.
+- Boundary zones, and the faces around regions of the mesh where they lie on
+  a curved wall, are the curved faces, with Gauss points, normals and areas
+  of the curved geometry; clipped, their pieces are cut on the curved face.
+- Extracted surfaces and planes are cut from the curved cells, split into
+  cones from the cell's vertex average to each face, each curved face in 8
+  (3D: 4 x 4) flat pieces.
+
+![The closed surface of a disk's part inside a curved wall, as mallard check --view writes it: the disk's edge in the domain and the wall inside the disk with their outward normals, and the net mass outflow of a uniform expansion against 0.2 times the area inside](../images/guide/region-control-surface-light.svg#gh-light-mode-only)
+![The closed surface of a disk's part inside a curved wall, as mallard check --view writes it: the disk's edge in the domain and the wall inside the disk with their outward normals, and the net mass outflow of a uniform expansion against 0.2 times the area inside](../images/guide/region-control-surface-dark.svg#gh-dark-mode-only)
 
 ### Checking regions
 
 `mallard check` lists every region a case uses, and the mesh's own, with its
 kind, measure and cells; surfaces and curves say whether they are exact
-or extracted. A region that covers no cell is an error (`E-REGION-OUTSIDE` or
-`E-REGION-EMPTY`) naming it with its extent and the domain's:
+or extracted. Filled regions of the case also get their own volume and
+surface area (2D: area and perimeter), independent of the mesh, against those
+of their part in the domain, and the share outside it, as
+[region probes](probes.md#region-probes) record them. A region that covers no
+cell is an error (`E-REGION-OUTSIDE` or `E-REGION-EMPTY`) naming it with its
+extent and the domain's. [Regions defined by the solution](#regions-defined-by-the-solution)
+are listed with `-` for measure and cells, made from `the solution, during
+the run`, and `"solution": true` in `--json`; the case view leaves them out:
 
 ```
 == Regions =========================================================================== ERROR
@@ -377,6 +402,13 @@ or extracted. A region that covers no cell is an error (`E-REGION-OUTSIDE` or
   ok      top                           curve   2        m      16     the mesh's
   ERROR   sponges[0].region             filled  0        m^2    0      cell fractions
   ok      probes[name = "ring"].region  curve   1.5708   m      13     exact
+  Filled regions: their part in the domain (its surface: theirs inside the domain and the
+  domain's boundary inside them) and their own measures, independent of the mesh ("-" for
+  regions of the mesh or unbounded ones), exact or within a relative tolerance; outside: the
+  share outside the domain.
+  status  region             quantity   in domain  own  units  tolerance  outside
+  ok      sponges[0].region  area       0          2    m^2    exact      100%
+  ok      sponges[0].region  perimeter  0          6    m      exact
 ...
   ERROR   E-REGION-OUTSIDE  region sponges[0].region lies outside the domain: it spans (4.5, 4) to (5.5, 6) m, the
                             domain (0, 0) to (2, 1) m: move or resize it (--view shows both)
@@ -476,6 +508,169 @@ Pitfalls:
   the sample points of a coarse cell can be missed: refine the mesh, or write
   `f` as a distance.
 
+### Arrays of copies
+
+```toml
+[regions]
+# Eight injectors on a ring, and a 4 by 3 grid of heaters
+injectors = {type = "disk", center = [0.8, 0], radius = 0.05, repeat = {count = 8, rotate = 45}}
+heaters = {type = "rectangle", center = [0.1, 0.1], size = [0.05, 0.02], repeat = [
+    {count = 4, translate = [0.2, 0]},
+    {count = 3, translate = [0, 0.25]}]}
+```
+
+`repeat` on any region (a primitive, a boolean, a named region) makes it the
+union of `count` copies: copy `j` is the region translated `j` times by
+`translate`, or rotated `j` times by `rotate` about `pivot` (default the
+origin; 3D: `rotate = {axis = [...], angle = degrees}`). A list of them
+repeats the copies of the levels before it, so arrays of arrays compose:
+the 4 by 3 grid above has 12 copies, numbered with the first level listed
+fastest (copy `k` is column `k % 4`, row `k / 4`). `repeat` applies after the
+region's own transforms. Regions of the mesh do not repeat.
+
+The copies act as one region, or one at a time:
+
+- **Sources** read the copy's index as `copy` in their expressions: each copy
+  then has its own term, and `total = true` spreads its total over that copy
+  alone. `rho = "1e-3 * (1 + copy)"` gives copy `k` a mass of `(k + 1)` g/s.
+- **Probes** with `copies = "each"` write one reductions file per copy,
+  `<name>_copy<k>` (and `reductions_file` gets `_copy<k>` before its extension).
+- **Measures** of disjoint copies are their sum in closed form; overlapping
+  copies are measured as their union.
+
+### Moving regions
+
+```toml
+# A heater that moves with the flow, and a sponge that grows
+[[sources]]
+rhoE = "1 MW/m^3"
+region = {type = "disk", center = ["0.2 + 3 * t", 0.5], radius = "1 cm"}
+
+[[sponges]]
+strength = 50
+u = [0, 0]
+p = 101325
+T = 300
+region = {type = "disk", center = [1, 0.5], radius = "0.1 + 0.05 * t"}
+```
+
+Centers, points, sizes (`radius`, `inner_radius`, `length`, `size`, a cone's
+radii, a torus' radii), the transforms (`translate`, `rotate` angles, `scale`)
+and an implicit region's `f` may be expressions of `t`, the time in seconds:
+the region moves. At every stage Mallard places it where it is at the stage's
+time and recomputes its cell fractions on the device, curved cells on their
+curved shapes, so a captured CUDA graph of the step follows it with no host
+work. A total of a moving region (`total = true`) is divided by the integral
+of its fractions at each stage, so it stays exact as the region enters or
+leaves the domain.
+
+Who follows a moving region:
+
+- `[[sources]]` and `[[sponges]]`: at every stage. A sponge's `strength` is
+  that of the cells, times the fraction the region has there at the stage;
+  its time step limit takes the fraction as 1.
+- `[[probes]]` of filled regions: at every write. The reductions file's
+  measure column (`area`, `volume`) is the region's measure in the domain at
+  that time; the file's `measures.region` is the region's own while it only
+  translates and rotates, and `null` once it changes shape (`scale` or sizes
+  of `t`, an implicit `f` of `t`).
+- `mallard check`, `[[initialize.regions]]` and `[[initialize.data]]` take the
+  region where it is at `t = 0`.
+
+A [snapshot](output.md#snapshots-of-regions) of a moving filled region
+(`[[write_data]]`) holds the cells it covers at each write. Surfaces, curves
+and points that move, and averaged probes of them, are errors for now
+([#747](https://github.com/MatthewBonanni/mallard/issues/747)).
+
+### Regions defined by the solution
+
+```toml
+# The burnt gas, and the flame as the isosurface T = 1500 K
+[regions]
+burnt = {type = "where", condition = "T > 1500"}
+
+[[probes]]
+name = "burnt"
+region = "burnt"
+fields = ["RHO", "T"]
+reductions = ["integral", "mean"]
+
+[[probes]]
+name = "flame"
+region = {type = "isosurface", field = "T", value = "1500 K"}
+fields = ["MASS_FLUX", "P"]
+reductions = ["integral", "mean"]
+```
+
+A `where` region is filled where its `condition` holds on the solution: a
+comparison (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the
+solution's `RHO`, `U_X`, `U_Y`, `U_Z`, `P`, `T` and `Y_<species>` (SI units),
+or several joined by `and`, `or`, `not` and parentheses
+(`"T > 1500 and not (Y_OH < 1e-3)"`). An `isosurface` (2D: a curve) is where
+`field`, one of those variables, equals `value`, given in the field's units;
+it faces toward increasing `field`, and `flip = true` reverses it. It is the
+[boundary](#boundaries-and-interiors) of `{type = "where", condition =
+"<field> < <value>"}`, and the boundary of any `where` region is its own
+isosurface, facing out of it.
+
+Each cell's **level** is linear: the value of the condition's level function
+(for `a < b`, `a - b`; `and` the larger of two, `or` the smaller, `not` its
+negative; the condition holds where it is negative) at the cell's centroid,
+with its gradient fit by least squares to the values of the cells sharing a
+node with it, across periodic boundaries too. A cell's volume fraction is the exact part of its
+straight triangles (tetrahedra) where that linear level is negative, and an
+isosurface's elements are the level's zero set on them. Both are exact for a
+linear field and converge at second order otherwise, smoothly as the region
+moves through the cells. Booleans with regions of shapes or of the mesh
+combine the cell fractions (`intersection` their product, `union` the
+larger, `difference` the first times one minus the second), exact where a
+cell is wholly inside or outside one of them.
+
+![Volume fractions of where T > 1.5 over two hot spots on a coarse triangle mesh, with the exact isotherm; and the relative errors of a where region's area and of its isosurface's length on refined triangle meshes, both converging at second order](../images/guide/region-solution-light.svg#gh-light-mode-only)
+![Volume fractions of where T > 1.5 over two hot spots on a coarse triangle mesh, with the exact isotherm; and the relative errors of a where region's area and of its isosurface's length on refined triangle meshes, both converging at second order](../images/guide/region-solution-dark.svg#gh-dark-mode-only)
+
+Who follows the solution, and when:
+
+- `[[sources]]` and `[[sponges]]`: at every stage, on the device, as a captured
+  CUDA graph of the step does with no host work. A total (`total = true`) is
+  divided by the integral of the fractions at the stage, and is zero while the
+  region is empty.
+- `[[probes]]`: at each write, a `where` region's fractions and an
+  isosurface's elements, extracted anew, and at each sample of a probe with
+  `average = true`. The measure column of the reductions file is the region's
+  at that time. The run-health timing row `regions` is
+  the time this takes.
+- `[[write_data]]`: at each write, a `where` region's cells (those of positive
+  fraction, with `REGION_FRACTION`) and an isosurface's elements, so each
+  [snapshot](output.md#snapshots-of-regions) is a mesh of its own.
+- `mallard post extract`: the same regions on the state of each restart file
+  or snapshot it reads, in its probes and `--snapshot`
+  ([Probes of existing output](probes.md#probes-of-existing-output)), e.g.
+  `--region '{type = "isosurface", field = "T", value = 1500}'`.
+- `mallard check` lists them, with no measure or cells: the solution places
+  them during the run.
+
+They take no transforms, `repeat` or `edge`. Probes of `n_points` on
+isosurfaces, whose elements have no parameters to place a grid of samples on,
+`[[initialize.regions]]` and `[[initialize.data]]` are errors.
+
+### Periodic boundaries
+
+On a mesh with [periodic boundaries](meshes.md#periodic-boundaries), a region
+that crosses one wraps: its part beyond the boundary enters across the other
+side, as the region's images one period away (translational, rotational or
+both), so it covers its whole measure in the domain. There is no key; a region
+that crosses no periodic boundary is unchanged. Copies wrap each on their own,
+and a moving region wraps while it stays within one period of where it is at
+`t = 0`. `mallard check` and the run log
+note `wrapped across periodic boundaries (N images)`.
+
+![Volume fractions of eight copies of a disk about a pivot on a triangle mesh, and of a disk across the periodic boundary of a box periodic in x](../images/guide/region-arrays-light.svg#gh-light-mode-only)
+![Volume fractions of eight copies of a disk about a pivot on a triangle mesh, and of a disk across the periodic boundary of a box periodic in x](../images/guide/region-arrays-dark.svg#gh-dark-mode-only)
+
+![The same in 3D on tetrahedral meshes, cut open: six copies of a sphere about the z axis, and a sphere across a periodic boundary](../images/guide/region-arrays-3d-light.svg#gh-light-mode-only)
+![The same in 3D on tetrahedral meshes, cut open: six copies of a sphere about the z axis, and a sphere across a periodic boundary](../images/guide/region-arrays-3d-dark.svg#gh-dark-mode-only)
+
 ### Regions on a mesh
 
 Each cell gets its **volume fraction**: the average of the region's indicator
@@ -504,7 +699,11 @@ region = {type = "union", regions = [
 ![Volume fractions of a shell and a tilted wake box on the O-grid around a cylinder](../images/guide/geometry-mesh-region-dark.svg#gh-dark-mode-only)
 
 In axisymmetric runs the fractions are weighted by the radius, so they are true
-volume fractions of the revolved cells.
+volume fractions of the revolved cells. Cells at a
+[curved wall](meshes.md#curved-boundaries) are sampled in their curved shapes,
+as cones from the cell's vertex average to each face, subdivided the same way,
+so the fractions are of the curved cells and `sum f V` counts the slivers
+between the straight faces and the wall.
 
 ### Probe types as regions
 
@@ -558,8 +757,9 @@ Probes sample at points (`point`, `points`, `points_file`) or along a curve
 
 Transforms of probes are `scale`, then `rotate`, then `translate`, all about
 the origin (probes have no `pivot`): the scaled and rotated circle above is
-centered at the origin, then translated. A sample outside the domain takes the
-nearest cell's average.
+centered at the origin, then translated. A `point` or `points` probe with a
+point outside the domain is an error, and curves are clipped to the domain:
+[Samples outside the domain](probes.md#samples-outside-the-domain).
 
 Curve reductions (`mean`, `integral`, ...) integrate along the curve with three
 Gauss points between consecutive samples; points weigh each sample 1.

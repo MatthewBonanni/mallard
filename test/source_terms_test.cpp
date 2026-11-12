@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "comm.h"
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "region_input.h"
@@ -397,4 +398,118 @@ TEST(SourceTermsTest, TimeDependentIsReadAndIgnored) {
     solver.set_distributed(false);
     solver.init(parse_toml(closed_box("[source]\nrhoE = \"t\"\ntime_dependent = false\n")));
     EXPECT_NEAR(integral(rates(solver, 0.5_r), N_DIM + 1), 0.5, precision_tol<double>(1e-13, 1e-5));
+}
+
+namespace {
+
+std::string moving_disk(const double radius) {
+    const std::string center = N_DIM == 2 ? "[\"0.3 + 0.4 * t\", 0.5]" : "[\"0.3 + 0.4 * t\", 0.5, 0.5]";
+    return std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " + center +
+           ", radius = " + std::to_string(radius) + "}";
+}
+
+} // namespace
+
+TEST(SourceTermsTest, MovingRegionsCarryTheirSourcesAndSpongesWithThem) {
+    // A total over a moving disk stays exact wherever the disk is, spread by its fractions there;
+    // the sponge in another acts where that one is
+    const std::string sponge = "[[sponges]]\nstrength = 3.0\nu = " + vector_of("0") + "\np = 1.3\nT = 1.0\n";
+    const std::string sources = "[[sources]]\ntotal = true\nrhoE = 2.0\nregion = " + moving_disk(0.15) + "\n" + sponge +
+                                "region = " + moving_disk(0.2) + "\n";
+    Solver solver, sponge_only;
+    solver.set_distributed(false);
+    sponge_only.set_distributed(false);
+    solver.init(parse_toml(closed_box(sources)));
+    sponge_only.init(parse_toml(closed_box(sponge)));
+    const auto & mesh = *solver.get_mesh();
+    const region::Region disk = region::read(parse_toml("r = " + moving_disk(0.15)).at("r"), "r");
+    const region::Region sponge_disk = region::read(parse_toml("r = " + moving_disk(0.2)).at("r"), "r");
+    const Rates everywhere = rates(sponge_only, 0.0_r);
+    const double tol = precision_tol<double>(1e-12, 1e-5);
+    for (const rtype t : {0.0_r, 0.5_r}) {
+        const Rates r = rates(solver, t);
+        const std::vector<double> f = region::cell_fractions(mesh, disk.at(double(t)));
+        const std::vector<double> g = region::cell_fractions(mesh, sponge_disk.at(double(t)));
+        double w = 0.0, sponged = 0.0;
+        int n_partial = 0;
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+            w += f[c] * r.measure[c];
+            sponged += g[c] * everywhere.values[N_DIM + 1][c] * r.measure[c];
+            n_partial += f[c] > 0.0 && f[c] < 1.0;
+        }
+        EXPECT_GT(n_partial, 5);
+        EXPECT_NEAR(integral(r, N_DIM + 1) - sponged, 2.0, tol * 2.0) << "t " << t;
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+            const double mass = g[c] * everywhere.values[0][c];
+            EXPECT_NEAR(r.values[0][c], mass, tol * (std::abs(everywhere.values[0][c]) + 1e-12)) << "t " << t << " cell " << c;
+            const double energy = 2.0 * f[c] / w + g[c] * everywhere.values[N_DIM + 1][c];
+            EXPECT_NEAR(r.values[N_DIM + 1][c], energy, tol * (1.0 + std::abs(energy))) << "t " << t << " cell " << c;
+        }
+    }
+}
+
+TEST(SourceTermsTest, EachCopyOfARepeatReadsItsIndex) {
+    const std::string disks = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                              (N_DIM == 2 ? "[0.25, 0.5]" : "[0.25, 0.5, 0.5]") +
+                              ", radius = 0.15, repeat = {count = 2, translate = " + (N_DIM == 2 ? "[0.5, 0]" : "[0.5, 0, 0]") +
+                              "}}";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(closed_box("[[sources]]\ntotal = true\nrho = \"1 + copy\"\nregion = " + disks + "\n")));
+    const Rates r = rates(solver, 0.0_r);
+    const auto & mesh = *solver.get_mesh();
+    const region::Region array = region::read(parse_toml("r = " + disks).at("r"), "r");
+    const double tol = precision_tol<double>(1e-12, 1e-5);
+    for (uint32_t k = 0; k < 2; k++) {
+        const std::vector<double> f = region::cell_fractions(mesh, array.copy(k));
+        double sum = 0.0;
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) sum += f[c] > 0.0 ? r.values[0][c] * r.measure[c] : 0.0;
+        EXPECT_NEAR(sum, 1.0 + k, tol * (1.0 + k)) << "copy " << k;
+    }
+}
+
+TEST(SourceTermsTest, MovingRegionsMatchWithAndWithoutStepGraphs) {
+    // The captured step reads the stage time, places the regions and sums their totals on the device
+    const std::string sources = "[[sources]]\ntotal = true\nrhoE = \"2 + t\"\nregion = " + moving_disk(0.15) +
+                                "\n[[sponges]]\nstrength = 3.0\nu = " + vector_of("0.1") + "\np = 1.3\nT = 1.0\nregion = " +
+                                moving_disk(0.2) + "\n";
+    std::vector<rtype> U[2];
+    for (const int graphs : {0, 1}) {
+        std::string input = closed_box(sources);
+        input.replace(input.find("n_steps = 1\n"), 12,
+                      std::string("n_steps = 10\ncuda_graphs = ") + (graphs ? "true" : "false") + "\n");
+        Solver solver;
+        solver.init(parse_toml(input));
+        solver.run();
+        solver.copy_device_to_host();
+        for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+            FOR_I_CONSERVATIVE U[graphs].push_back(solver.h_conservatives(c, i));
+        }
+    }
+    EXPECT_EQ(U[0], U[1]);
+}
+
+TEST(SourceTermsTest, RegionsOfTheSolutionFollowItWithAndWithoutStepGraphs) {
+    // A total over where the heated gas is hot: its fractions from the levels of
+    // each stage's solution, in the captured step as in the uncaptured one
+    const std::string sources = "[[sources]]\nrhoE = \"5 * x\"\n[[sources]]\ntotal = true\nrho = 0.5\n"
+                                "region = {type = \"where\", condition = \"T > 1.05\"}\n";
+    std::vector<rtype> U[2];
+    for (const int graphs : {0, 1}) {
+        std::string input = closed_box(sources);
+        input.replace(input.find("n_steps = 1\n"), 12,
+                      std::string("n_steps = 10\ncuda_graphs = ") + (graphs ? "true" : "false") + "\n");
+        Solver solver;
+        solver.init(parse_toml(input));
+        solver.run();
+        solver.copy_device_to_host();
+        double mass = 0.0;
+        for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+            FOR_I_CONSERVATIVE U[graphs].push_back(solver.h_conservatives(c, i));
+            mass += double(solver.h_conservatives(c, 0) * solver.get_mesh()->h_cell_measure(c));
+        }
+        // The region is empty at first: the gas, of mass 1, gains mass only once some of it is hot
+        EXPECT_GT(comm::allreduce(mass, comm::Op::SUM), 1.0 + 1e-3);
+    }
+    EXPECT_EQ(U[0], U[1]);
 }
