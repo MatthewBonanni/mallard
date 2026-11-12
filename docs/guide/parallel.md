@@ -36,6 +36,14 @@ Each rank owns a piece of the mesh, plus as many layers of halo cells as its rec
 > Distributed over 3 ranks: 160000 cells, at most 53334 per rank, 8 halo layers
 ```
 
+![The owned cells of the middle one of three ranks on a box of triangles and its halo layers, for MUSCL and for fifth-order TENO](../images/guide/halo-light.svg#gh-light-mode-only)
+![The owned cells of the middle one of three ranks on a box of triangles and its halo layers, for MUSCL and for fifth-order TENO](../images/guide/halo-dark.svg#gh-dark-mode-only)
+
+*The cells of rank 1 of 3 and its halo, from Mallard runs (`tools/docs/runs.py`):
+MUSCL needs two layers, fifth-order TENO eight on these triangles, about
+four times as many halo cells. The halo cells' state is exchanged at every
+stage; layer 1 is reconstructed on both ranks so that one exchange suffices.*
+
 The pieces come from one of three partitioners, chosen with `partitioner` in a `[parallel]` table of the input. All three give the same results bit for bit:
 
 ```toml
@@ -59,6 +67,14 @@ curve, multi-jagged ones are slabs cut along each axis in turn.*
 On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo data then goes between GPUs directly instead of through host memory. On NVIDIA GPUs, `-DMallard_ENABLE_NCCL=ON` exchanges halos with NCCL on the GPU's stream, with no host synchronization per exchange (`[parallel] halo_exchange = "nccl"`, the default in such builds). CUDA builds also run each step as one CUDA graph (`[run] cuda_graphs`, on by default), every feature included, as long as halos go through NCCL: with MPI's exchanges (`halo_exchange = "mpi"`, or a build without NCCL) the steps run kernel by kernel, with the host synchronizing at every exchange.
 
 The device decides each step's end itself: it computes dt, advances t and the step, retries a step the error controller rejects, notices a divergence or a failed chemistry integration and writes each progress row's values (with the run health) each force and integral monitor's row and the values of probes written every few steps for the host to report and write later; it also samples the statistics means. The host therefore keeps a few steps enqueued ahead of the GPU (`[run] step_queue`, 3 by default) and the GPU goes from one step to the next without waiting for the host. At a step the host must act on (an output, a probe written by time, a time-averaged probe, a probe reading `[statistics]` outputs, a spectra or phase-average sample, a trigger, a checkpoint, a request from a signal, `mallard ctl`, a control file or the wall time, the end of the run, a divergence), the device stops: the steps enqueued after it do nothing, the host acts on that step's state exactly as if it had waited for every step, and the queue starts again. Requests reach the device within the queue's depth in steps; results and files are the same bit for bit with any depth. Steps ahead of the host need conditional nodes of CUDA graphs (CUDA 12.4 or later): in HIP and SYCL builds, and in CUDA runs without graphs, the device still decides each step but the host waits for each one. Runs with triggers, the progress rows of runs with boundary conditions of `t`, and the progress rows, monitors, means and probes of runs with fused chemistry (and the monitors of runs with the kinetic-energy budget), are taken one step at a time. Exchanges carry only the halo cells the stencils read.
+
+![Timelines of the host and the GPU over eight steps with an output at step 5: with steps enqueued ahead and one step at a time](../images/guide/step_queue-light.svg#gh-light-mode-only)
+![Timelines of the host and the GPU over eight steps with an output at step 5: with steps enqueued ahead and one step at a time](../images/guide/step_queue-dark.svg#gh-dark-mode-only)
+
+*Schematic, not to scale. Top: the host reads each step's record (gray) while
+the GPU runs the next steps; at the output step the device stops, the launches
+already enqueued (6 and 7) do nothing, and the queue starts again after the
+output. Bottom: the GPU waits for the host's decision after every step.*
 
 In NCCL builds every communication between ranks during the steps goes through NCCL on the GPU's stream, with or without the CUDA graph; with `halo_exchange = "mpi"`, and in builds without NCCL, the same operations go through MPI:
 
