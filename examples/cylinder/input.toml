@@ -56,6 +56,8 @@ Pr = 0.72
 
 [output]
 check_interval = 2000
+# The free stream of CP and CF, here and in the wall probe below
+reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
 
 [[forces]]
 zone = "cylinder"
@@ -81,7 +83,7 @@ fields = ["P"]
 prefix = "./solut/near_wake"
 region = {type = "rectangle", center = [3.0, 0.0], size = [6.0, 3.0]}
 time_interval = 0.6
-fields = ["RHO", "U", "P", "VORTICITY"]
+fields = ["RHO", "U", "P", "VORTICITY", "CP", "Q_CRITERION"]
 
 [[write_data]]
 prefix = "./solut/wake"
@@ -124,7 +126,6 @@ reductions_file = "./solut/probe_wake_arc_reductions.csv"
 name = "wall"
 boundary = "cylinder"
 fields = ["CP", "CF", "Y_PLUS"]
-reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
 time_interval = 1.0
 file = "./solut/probe_wall.csv"
 

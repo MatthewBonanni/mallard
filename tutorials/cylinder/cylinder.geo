@@ -4,7 +4,7 @@
 // geometrically from dn0); triangles fill the rest, fine through the wake and
 // coarsening toward the far field.
 //
-//   gmsh cylinder.geo -2 -o cylinder.msh [-setnumber h_wake 0.1] ...
+//   gmsh cylinder.geo -2 -o cylinder.msh [-setnumber h_wake 0.1] [-setnumber refine 2] ...
 //
 // Physical groups: the curves "cylinder" and "farfield" (Mallard's boundary
 // zones) and the surface "fluid".
@@ -17,8 +17,14 @@ DefineConstant[
   dn0 = {0.008, Name "First cell thickness at the wall"},
   h_wake = {0.12, Name "Cell size in the near wake"},
   L_wake = {12, Name "Length of the refined wake"},
-  h_far = {2.0, Name "Cell size at the far field"}
+  h_far = {2.0, Name "Cell size at the far field"},
+  refine = {1, Name "Refinement factor: divides every cell size"}
 ];
+n_theta = 4 * Round(refine * n_theta / 4);
+n_ring = Round(refine * n_ring);
+dn0 = dn0 / refine;
+h_wake = h_wake / refine;
+h_far = h_far / refine;
 
 // Growth ratio across the ring that gives a first cell of dn0
 r = 1.1;
