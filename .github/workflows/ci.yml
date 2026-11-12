@@ -477,7 +477,8 @@ jobs:
           path: ${{ runner.temp }}/junit
           if-no-files-found: ignore
           retention-days: 30
-      - name: Report the job's result
+      - &report-result
+        name: Report the job's result
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -525,14 +526,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           overwrite: true
-      - &report-result
-        name: Report the job's result
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          JOB_ID: ${{ job.check_run_id }}
-          STATUS_NAME: ${{ matrix.backend.job }}
-        run: sh tools/dev/ci_status.sh ${{ job.status }}
+      - *report-result
 
   # A sharded backend's test jobs, on its build. Each runs as soon as all the builds end, and
   # also when another backend's build failed (its own then has no executables to download)

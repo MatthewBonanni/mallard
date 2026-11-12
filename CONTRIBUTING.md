@@ -189,8 +189,8 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   CI builds with warnings as errors. A branch runs the gate: the full suite in 2D and 3D
   with OpenMP, MPI on 1 to 4 ranks and single precision, and GCC 16 and Clang 23, on
   x86-64. Each job also shows on the PR as its own status, `CI / <job>`; the longest
-  suites are split across several jobs (`CI / mpi-3d-1of4`, ...), each running a share of
-  the tests, and the suites without MPI run as several processes at once, so a test must
+  suites are split across several jobs (`CI / mpi-3d-1of4`, ...) on one build
+  (`CI / build-mpi-3d`), each running a share of the tests, and the suites without MPI run as several processes at once, so a test must
   not depend on another having run in the same process nor share a file path with another,
   and a test that reruns the test binary unsets `GTEST_TOTAL_SHARDS` and `GTEST_SHARD_INDEX`.
   Documentation-only changes skip the build jobs (the run takes about a minute).

@@ -15,8 +15,8 @@ When a job runs:
 - **device PRs**: pull requests whose changes touch device code ([`device_changes.sh`](../../tools/dev/device_changes.sh)), before they merge;
 - **nightly**, **release** (every version tag, and by hand on a branch) and **by hand** (before a release).
 
-A job *split across* N jobs runs as `<job>-1of<N>` to `<job>-<N>of<N>`, each building the
-same configuration and running every N-th test of each suite run (googletest's sharding).
+A job *split across* N jobs builds once, in `build-<job>`, and runs as `<job>-1of<N>` to
+`<job>-<N>of<N>`, each running every N-th test of each suite run on that build (googletest's sharding).
 A suite without MPI runs as several processes at once, one per core (Serial) or per two
 cores (OpenMP, Threads), each running a share of the job's tests.
 
