@@ -38,6 +38,8 @@ Write them with `fields = ["MEAN_*", "COV_*"]`, sample them with
 homogeneous directions with [`mallard post average --statistics`](#averages-of-saved-snapshots-mallard-post-average)
 (e.g. over x and z of a channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)).
+Each snapshot records what each of these fields averages, over which window
+([Time-averaged fields](output.md#time-averaged-fields)).
 
 A derived field such as `MACH` is computed at each sample from the cell's
 state and its gradients, exactly as `[[write_data]]` writes it, so its mean is

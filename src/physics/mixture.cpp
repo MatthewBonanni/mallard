@@ -189,15 +189,12 @@ void MixtureModel::conservatives(double p, double T, const rtype * u, const std:
     for (uint32_t k = 0; k < n_species(); k++) rhoY[k] = static_cast<rtype>(rho * Y[k]);
 }
 
-logging::Items MixtureModel::summary() const {
-    logging::Items items = {
-        {"Gas", "thermally perfect mixture, " + std::to_string(n_species()) + " species"},
-        {"Mechanism", mech.file + (mech.phase.empty() ? "" : ", phase " + mech.phase)},
-    };
-    if (viscous()) {
-        items.emplace_back("Transport", transport_name + (gas.transport.thermal_diffusion ? ", Soret effect" : ""));
-    }
-    return items;
+report::Summary MixtureModel::summary() const {
+    report::Summary s;
+    s.setting("Gas", "thermally perfect mixture, " + std::to_string(n_species()) + " species");
+    s.setting("Mechanism", mech.file + (mech.phase.empty() ? "" : ", phase " + mech.phase));
+    if (viscous()) s.setting("Transport", transport_name + (gas.transport.thermal_diffusion ? ", Soret effect" : ""));
+    return s;
 }
 
 chemistry::ReactorOptions reactor_options(const Input & input) {

@@ -60,14 +60,24 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table) {
     return tf;
 }
 
-logging::Items ThickenedFlame::summary() const {
+report::Summary ThickenedFlame::summary() const {
     using logging::real;
     std::string e = "no efficiency";
     if (efficiency == Efficiency::DYNAMIC) e = "dynamic efficiency F^beta";
     if (efficiency == Efficiency::CHARLETTE) {
-        e = "Charlette efficiency (beta " + real(beta) + "), " +
-            (eddy_viscosity_velocity ? "u' = " + real(C_u) + " nu_t / Delta" : "u' = 2 Delta^3 |lap(curl u)|");
+        e = std::string("Charlette efficiency, ") +
+            (eddy_viscosity_velocity ? "u' = C_u nu_t / Delta" : "u' = 2 Delta^3 |lap(curl u)|");
     }
-    return {{"Combustion", "thickened flame, " + real(n_res) + " cells across delta_L " + real(delta_L) + " m, s_L " +
-                               real(s_L) + " m/s, sensor on T from " + real(T_u) + " to " + real(T_b) + " K, " + e}};
+    report::Summary s;
+    s.setting("Combustion", "thickened flame, sensor on T, " + e);
+    s.quantity("TFLES n_res", real(n_res), "cells", "across delta_L");
+    s.quantity("TFLES delta_L", real(delta_L), units::column("m"), "laminar flame thickness");
+    s.quantity("TFLES s_L", real(s_L), units::column("m/s"), "laminar flame speed");
+    s.quantity("TFLES T_unburnt", real(T_u), units::column("K"), "the flame sensor's 0");
+    s.quantity("TFLES T_burnt", real(T_b), units::column("K"), "the flame sensor's 1");
+    if (efficiency == Efficiency::CHARLETTE) {
+        s.quantity("TFLES beta", real(beta), "-", "efficiency exponent");
+        if (eddy_viscosity_velocity) s.quantity("TFLES C_u", real(C_u), "-", "subgrid velocity constant");
+    }
+    return s;
 }

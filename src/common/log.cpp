@@ -282,7 +282,8 @@ void warning(std::string_view code, std::string_view message) {
     std::cout << std::flush;
     std::cerr << diagnostic(false, code, message, color_stderr()) << std::endl;
     run_log::write(json::Object().add("type", "warning").add("code", std::string(code)).add("message", message).add(
-        "docs", diagnostic_code::docs(code)));
+                       "docs", diagnostic_code::docs(code)),
+                   true);
 }
 
 void error(std::string_view code, std::string_view message) {

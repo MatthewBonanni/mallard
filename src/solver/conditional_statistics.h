@@ -88,7 +88,8 @@ class ConditionalStatistics {
         RestartArrays arrays() const;
         /** @brief Rank 0 writes the PDF and conditional statistics to the entry's file. */
         void write(uint64_t step, rtype t, const std::string & reason) const;
-        std::string summary() const;
+        /** @brief The output as the setup banner lists it. */
+        OutputSummary summary() const;
 
         const std::string & file() const { return file_name; }
         void set_file(const std::string & name) { file_name = name; }

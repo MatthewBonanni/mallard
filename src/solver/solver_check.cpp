@@ -538,6 +538,7 @@ struct OnMesh {
     uint64_t cells = 0;
     Box box = {std::array<double, 3>{0.0, 0.0, 0.0}, std::array<double, 3>{0.0, 0.0, 0.0}};
     bool exact = true;
+    region::Measures own, in;  // filled regions of the case
     case_view::Block block;
 };
 
@@ -553,8 +554,12 @@ void add_elements(case_view::Block & block, const region::Elements & e) {
     }
 }
 
-/** @brief A region on the mesh; with outline, a filled region's block also gets its boundary's elements. */
-OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name, const bool outline) {
+/**
+ * @brief A region on the mesh; with measures, a filled region's own measures and those of its part in the
+ *        domain; with outline, a filled region's block also gets its boundary's elements.
+ */
+OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name, const bool measures,
+               const bool outline) {
     OnMesh m;
     m.block.name = name;
     const bool distributed = mesh.n_global_cells > 0;
@@ -568,6 +573,10 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
     };
     if (region.dimension() == N_DIM) {
         const std::vector<double> f = region::cell_fractions(mesh, region);
+        if (measures) {
+            m.own = region::measures(region, mesh.axisymmetric);
+            m.in = region::measures_in_domain(mesh, region, f);
+        }
         auto & fraction = m.block.field("fraction", 1);
         for (uint32_t c = 0; c < mesh.n_owned(); c++) {
             if (f[c] == 0.0) continue;
@@ -619,8 +628,9 @@ std::string block_name(std::string name) {
 CheckRegion entry(const Mesh & mesh, const std::string & name, const region::Region & region, const OnMesh & m,
                   const bool of_mesh) {
     const int d = region.dimension();
-    return CheckRegion{name,    of_mesh, d, m.measure, mesh.axisymmetric && d == N_DIM, m.cells,
-                       m.exact, d < N_DIM && !m.exact ? region.resolution() : 0};
+    return CheckRegion{name,         of_mesh,      d,           m.measure,     mesh.axisymmetric && d == N_DIM,
+                       m.cells,      m.exact,      d < N_DIM && !m.exact ? region.resolution() : 0,
+                       m.in.surface, m.own.volume, m.own.surface, m.own.tolerance};
 }
 
 /**
@@ -791,7 +801,7 @@ MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, con
     for (const std::string & name : automatic.names()) {
         const Input value = parse_input_string("r = \"" + name + "\"").at("r");
         const region::Region region = region::read(value, name, nullptr, &automatic);
-        OnMesh m = on_mesh(mesh, region, block_name(name), outlines && name != "domain");
+        OnMesh m = on_mesh(mesh, region, block_name(name), false, outlines && name != "domain");
         if (name == "domain") v.domain = m.box;
         const bool zone = std::binary_search(automatic.boundary_zones.begin(), automatic.boundary_zones.end(), name);
         m.block.kind = name == "domain" ? case_view::Kind::MESH : zone ? case_view::Kind::BOUNDARY : case_view::Kind::CELL_ZONE;
@@ -826,7 +836,17 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     const std::vector<std::string> mesh_names = automatic.names();
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
-        OnMesh m = on_mesh(*mesh, *region, block_name(label), drawn);
+        if (region->solution()) {
+            CheckRegion g;
+            g.name = label;
+            g.dimension = region->dimension();
+            g.per_radian = mesh->axisymmetric && g.dimension == N_DIM;
+            g.measure = std::numeric_limits<double>::quiet_NaN();
+            g.solution = true;
+            r.regions.push_back(g);
+            continue;
+        }
+        OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM, drawn);
         m.block.kind = label.starts_with("probes[") ? case_view::Kind::PROBE
                        : label.starts_with("write_data[") ? case_view::Kind::SNAPSHOT
                                                           : case_view::Kind::REGION;

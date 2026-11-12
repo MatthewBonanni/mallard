@@ -250,6 +250,26 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-extract-averaged"></a>`W-EXTRACT-AVERAGED` | `mallard post extract` leaves out probes that average over the run's steps, which a snapshot cannot give | Use the probes' own files from the run |
 | <a id="w-pack-rerun"></a>`W-PACK-RERUN` | `mallard pack` wrote the archive, but a rerun from it may differ from the run: a file it read is outside the run directory or named by an absolute path, a setting changed while it ran, or the run did not end | Copy the files into the run directory and use relative paths; repeat `mallard ctl` changes by hand; pack a run that ended |
 
+The other commands' errors have codes too, printed the same way: `error E-USAGE: mallard check: unknown option
+--x (see mallard check --help)` and its docs line. Usage errors exit with status 2, the others with the
+command's own failure status (1, or 3 for `mallard diff`; [Command line](cli.md)).
+
+| Code | What it means | What to do |
+|---|---|---|
+| <a id="e-usage"></a>`E-USAGE` | A command or option `mallard` does not know, a missing argument, or a value an option does not take | Follow the message and the command's `--help` |
+| <a id="e-dimension"></a>`E-DIMENSION` | `mallard` cannot tell from the case's mesh whether to run `mallard2d` or `mallard3d` | State it with `--dim 2` or `--dim 3` |
+| <a id="e-executable"></a>`E-EXECUTABLE` | The solver (`mallard2d`, `mallard3d`) or the test suite a command needs is not next to `mallard`, or cannot be started | Build and install it to the same prefix, as the message says ([Installation](../installation.md)) |
+| <a id="e-one-rank"></a>`E-ONE-RANK` | A command that runs on one rank (`mallard diff`, `mallard post convergence`) was started under `mpirun` | Start it without `mpirun` |
+| <a id="e-info"></a>`E-INFO` | `mallard info` cannot read the file or run directory, or it lacks what was asked for (`--input` of a file without a run block, `--html` without `mallard.jsonl`) | The message names the file and what is missing |
+| <a id="e-list"></a>`E-LIST` | `mallard list` cannot set up the case it lists the fields, species or keys of | Check the case with `mallard check` |
+| <a id="e-diff"></a>`E-DIFF` | `mallard diff` cannot read or compare the two files (exit status 3) | The message says which file and why ([Comparing two solutions](output.md#comparing-two-solutions-mallard-diff)) |
+| <a id="e-mesh-convert"></a>`E-MESH-CONVERT` | `mallard mesh convert` cannot read the mesh or write the HDF5 mesh, or the build has no HDF5 | Build with `-DMallard_ENABLE_HDF5=ON`, or follow the message |
+| <a id="e-input-upgrade"></a>`E-INPUT-UPGRADE` | `mallard input upgrade` cannot open or parse the input file | Fix the file's TOML syntax at the line the message gives |
+| <a id="e-extract"></a>`E-EXTRACT` | `mallard post extract` cannot set up the case or read its output | The message names the input key or file ([Probes of existing output](probes.md#probes-of-existing-output)) |
+| <a id="e-convergence"></a>`E-CONVERGENCE` | `mallard post convergence` cannot read a run or compare the runs | The message names the run ([Grid convergence](convergence.md)) |
+| <a id="e-pack"></a>`E-PACK` | `mallard pack` cannot write the archive, or `--verify` finds one that is not of `mallard pack` or of a newer version | The message names the file |
+| <a id="w-option-deprecated"></a>`W-OPTION-DEPRECATED` | An option that is being removed: `mallard check --quality`, `mallard info --quality`, `mallard new --list` | Use the option the message names |
+
 ## Kubernetes
 
 The [container images](https://matthewbonanni.github.io/mallard/docs/installation/#container) run as Kubernetes workloads. Manifests, in [`docs/guide/k8s`](k8s):

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <stdexcept>
+#include <utility>
 
 #include "log.h"
 
@@ -105,6 +106,17 @@ bool bare(std::string_view s) {
         if (exponent == 0) return false;
     }
     return i == s.size();
+}
+
+void Summary::setting(std::string name, std::string value) { settings.emplace_back(std::move(name), std::move(value)); }
+
+void Summary::quantity(std::string name, std::string value, std::string units, std::string basis) {
+    quantities.push_back({Status::NONE, {std::move(name), std::move(value), std::move(units), "", std::move(basis)}});
+}
+
+void Summary::add(const Summary & other) {
+    settings.insert(settings.end(), other.settings.begin(), other.settings.end());
+    quantities.insert(quantities.end(), other.quantities.begin(), other.quantities.end());
 }
 
 Status worse(const Status a, const Status b) { return a > b ? a : b; }
