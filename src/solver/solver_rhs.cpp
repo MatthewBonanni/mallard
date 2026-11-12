@@ -561,6 +561,11 @@ void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::L
     });
 }
 
+CentralStates Solver::central_states() const {
+    if (!hybrid_flux || hybrid_central != CentralFlux::CELL_AVERAGES) return {};
+    return {W_cells, mesh->periodic_maps(), mesh->face_shift};
+}
+
 template <typename T_riemann_solver>
 ConvectiveFluxFunctor<T_riemann_solver> Solver::flux_functor() const {
     return ConvectiveFluxFunctor<T_riemann_solver>{mesh->face_normals,
@@ -575,10 +580,7 @@ ConvectiveFluxFunctor<T_riemann_solver> Solver::flux_functor() const {
                                                     low_mach_cutoff,
                                                     cell_upwind,
                                                     face_reconstruction->face_quad_normals,
-                                                    hybrid_central,
-                                                    W_cells,
-                                                    mesh->periodic_maps(),
-                                                    mesh->face_shift};
+                                                    central_states()};
 }
 
 template <typename T_riemann_solver>

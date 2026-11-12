@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 #include "comm.h"
 
@@ -32,4 +33,27 @@ TEST(CommTest, AllreduceCombinesEveryRank) {
     const auto v = comm::allreduce(std::array<float, 2>{1.0f, float(r)}, comm::Op::SUM);
     EXPECT_EQ(v[0], float(p));
     EXPECT_EQ(v[1], float(p * (p - 1) / 2));
+}
+
+TEST(CommTest, AlltoallvSendsLongMessagesInPieces) {
+    const uint64_t p = uint64_t(comm::size()), me = uint64_t(comm::rank());
+    const auto length = [](uint64_t from, uint64_t to) { return (from + 2 * to) % 6; };
+    const auto value = [](uint64_t from, uint64_t to, uint64_t i) { return 1000 * from + 100 * to + i; };
+    std::vector<uint64_t> send_counts(p), send_offsets(p), recv_counts(p), recv_offsets(p);
+    std::vector<uint64_t> send, expected;
+    for (uint64_t q = 0; q < p; q++) {
+        // Gaps between the messages: offsets, not counts, place them
+        send.push_back(0);
+        send_offsets[q] = send.size();
+        send_counts[q] = length(me, q);
+        for (uint64_t i = 0; i < send_counts[q]; i++) send.push_back(value(me, q, i));
+        expected.push_back(0);
+        recv_offsets[q] = expected.size();
+        recv_counts[q] = length(q, me);
+        for (uint64_t i = 0; i < recv_counts[q]; i++) expected.push_back(value(q, me, i));
+    }
+    std::vector<uint64_t> recv(expected.size(), 0);
+    comm::detail::alltoallv<uint64_t>(send.data(), send_counts, send_offsets, recv.data(), recv_counts, recv_offsets,
+                                      2);
+    EXPECT_EQ(recv, expected);
 }

@@ -28,6 +28,7 @@
 #include "common_io.h"
 #include "input.h"
 #include "json.h"
+#include "diagnostic_code.h"
 #include "log.h"
 #include "provenance.h"
 
@@ -413,7 +414,7 @@ int pack(const cli::Args & args) {
     item("Rerun", "tar -xf " + fs::path(out_path).filename().string() + " && cd " + top + "/" +
                       rerun_dir.generic_string() + " && " + command);
     item("Verify", "mallard pack --verify " + out_path);
-    for (const std::string & note : notes) logging::warning(note);
+    for (const std::string & note : notes) logging::warning(diagnostic_code::PACK_RERUN, note);
     return 0;
 }
 
@@ -431,7 +432,8 @@ int verify(const cli::Args & args) {
         if (depth_one(m.name, MANIFEST)) manifest = &m;
     }
     if (!manifest) {
-        std::cerr << "mallard pack: " << path << " has no " << MANIFEST << ": not an archive of mallard pack\n";
+        logging::error(diagnostic_code::PACK,
+                       "mallard pack: " + path + " has no " + MANIFEST + ": not an archive of mallard pack");
         return 1;
     }
     const std::string top = manifest->name.substr(0, manifest->name.find('/'));
@@ -440,12 +442,12 @@ int verify(const cli::Args & args) {
     }
     const json::Value m = json::parse(manifest->contents);
     if (text(m.find("schema")) != SCHEMA) {
-        std::cerr << "mallard pack: " << path << ": its manifest is not of mallard pack\n";
+        logging::error(diagnostic_code::PACK, "mallard pack: " + path + ": its manifest is not of mallard pack");
         return 1;
     }
     if (const json::Value * v = m.find("version"); !v || v->number > VERSION) {
-        std::cerr << "mallard pack: " << path << ": manifest version " << text(v)
-                  << " is newer than this Mallard reads (" << VERSION << ")\n";
+        logging::error(diagnostic_code::PACK, "mallard pack: " + path + ": manifest version " + text(v) +
+                                                  " is newer than this Mallard reads (" + std::to_string(VERSION) + ")");
         return 1;
     }
     std::map<std::string, const archive::Member *> by_name;
@@ -530,7 +532,7 @@ int pack_main(const cli::Args & args) {
     try {
         return args.has("--verify") ? verify(args) : pack(args);
     } catch (const std::exception & e) {
-        std::cerr << "mallard pack: " << e.what() << "\n";
+        logging::error(diagnostic_code::PACK, std::string("mallard pack: ") + e.what());
         return 1;
     }
 }

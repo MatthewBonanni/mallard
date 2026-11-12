@@ -16,6 +16,8 @@
 #include "front_end.h"
 #include "input_upgrade.h"
 #include "run_control.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace cli {
 
@@ -34,6 +36,10 @@ constexpr Option RUN_OPTIONS[] = {
     {"--verbose", "", "",
      "A line for every file written, between the progress rows. Default: the progress table's written column "
      "counts them, and mallard.jsonl and the summary name them."},
+    {"--log-format", "", "text|jsonl",
+     "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
+     "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
+     "and the text on stderr. Default: text."},
     KOKKOS,
 };
 
@@ -124,6 +130,9 @@ constexpr Option INFO_OPTIONS[] = {
     {"--verify", "", "",
      "Run directories: also check each file's contents against the SHA-256 its output record holds, not only "
      "its size; reads every file once. Default: sizes only."},
+    {"--html", "", "",
+     "Run directories: write RUN_DIR/report.html, the run report, from RUN_DIR/mallard.jsonl, the page the run "
+     "writes itself: for a run still going, killed, or of a Mallard before 0.10. Default: off."},
     KOKKOS,
 };
 
@@ -286,7 +295,9 @@ constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
-    if (args.has("--list")) std::cerr << "mallard new --list is deprecated: use mallard list templates\n";
+    if (args.has("--list")) {
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard new --list is deprecated: use mallard list templates");
+    }
     return case_template::new_case(args.positional, args.has("--list"), args.has("--quick"), args.has("--force"));
 }
 
@@ -531,7 +542,7 @@ constexpr Command COMMANDS[] = {
         .group = "Inspect",
         .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
         .synopsis = "mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX]\n"
-                    "mallard info RUN_DIR [--format text|json] [--input] [--verify]",
+                    "mallard info RUN_DIR [--format text|json] [--input] [--verify] [--html]",
         .description =
             "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
             "version; the mesh (cells, points, cell types, bounds, boundary and cell zones); its times and steps; "
@@ -549,21 +560,25 @@ constexpr Command COMMANDS[] = {
             "mesh). Output files are read by any build, of any dimension and precision; a mesh file by the solver "
             "of its dimension, which also reports its quality as mallard check does.\n"
             "\n"
-            "RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and every output file "
-            "in it and one level down, one table row each (the snapshots of a series as their index). Each file the "
+            "RUN_DIR is a directory a run wrote to: its start from mallard.jsonl and, from the same records as its "
+            "report.html, its outcome, health (lowest values, repairs, conservation), cost and warnings, each with "
+            "a status; then every output file in it and one level down, one table row each (the snapshots of a series as their index). Each file the "
             "run log records as written is checked against its record: missing, or a size (with --verify, a "
             "SHA-256) other than the one recorded, is reported. A file still named NAME.partial is one whose write "
-            "did not finish.",
+            "did not finish. With --html, writes the run report instead: a page of the run's outcome, identity, "
+            "configuration, health, monitors, cost and output, built from mallard.jsonl alone.",
         .options = INFO_OPTIONS,
         .arguments = FILE_ARGUMENTS,
         .examples = "$ mallard info solut/flow.vtkhdf.series\n"
                     "$ mallard info solut/restart_001000.restart --format json\n"
                     "$ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it\n"
                     "$ mallard info wing.msh --mesh-fields wing\n"
-                    "$ mallard info runs/cylinder",
+                    "$ mallard info runs/cylinder\n"
+                    "$ mallard info runs/cylinder --html            # rebuild runs/cylinder/report.html",
         .exit_status = "0  the file was read\n"
                        "1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run "
-                       "directory's file differs from its output record, or --input finds no run block\n"
+                       "directory's file differs from its output record, --input finds no run block, or --html no "
+                       "mallard.jsonl\n"
                        "2  usage error",
         .dim = Case::file,
         .run = info_main,
@@ -857,8 +872,11 @@ constexpr Command COMMANDS[] = {
         .description =
             "Prints a script that makes the shell complete mallard's commands, their options and the values those "
             "take: input files for -i, latest and restart files for --restart, template names for mallard new, "
-            "run directories for mallard ctl and its requests. It is made from the same table as the help pages, "
-            "so it knows every command of this build; templates come from mallard new when completing.\n"
+            "run directories for mallard ctl and its requests, sections and keys of the key catalog for mallard "
+            "list keys, output fields of the field catalog for --fields, each item after a comma too. It is made "
+            "from the same table as the help pages and from the catalogs mallard list keys and mallard list fields "
+            "print, so it knows every command, key and field of this build; templates come from mallard new when "
+            "completing.\n"
             "\n"
             "An install (cmake --install, Spack, the containers) puts the scripts where the shells look: "
             "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "

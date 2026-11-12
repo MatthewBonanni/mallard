@@ -11,6 +11,7 @@
 
 #include "solver.h"
 
+#include "diagnostic_code.h"
 #include "input.h"
 
 #include <algorithm>
@@ -127,7 +128,7 @@ void Solver::start_from_restart(Input & input, const std::string & restart_file)
             std::vector<std::string> skipped;
             const std::string run_log = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
             const FoundRestart found = newest_restart(prefixes, skipped, run_log);
-            for (const std::string & reason : skipped) logging::warning(reason + " Skipped by --restart latest.");
+            for (const std::string & reason : skipped) logging::warning(diagnostic_code::RESTART_SKIPPED, reason + " Skipped by --restart latest.");
             file = found.file;
             if (!file.empty()) {
                 logging::line("--restart latest: " + file + " (step " + std::to_string(found.step) + ", t = " +
@@ -170,7 +171,7 @@ int Solver::init(const Input & input_in) {
     input_from_file = false;
     deprecated_keys = input_upgrade::apply(input);
     if (!check_only) {
-        for (const auto & finding : deprecated_keys) logging::warning(input_upgrade::advice(finding));
+        for (const auto & finding : deprecated_keys) logging::warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     }
     preset = numerics_preset::apply(input);
     try {
@@ -188,8 +189,10 @@ int Solver::init(const Input & input_in) {
         if (!unused.empty()) {
             std::string list;
             for (const Diagnostic & key : unused) list += "\n  " + describe(key);
-            throw InputError("keys that are unknown or unused with these settings (mallard check lists them all):" +
+            InputError error("keys that are unknown or unused with these settings (mallard check lists them all):" +
                              list);
+            error.code = diagnostic_code::KEY_UNUSED;
+            throw error;
         }
     }
     const ResolvedInput resolved = resolve_input(input);
@@ -254,6 +257,8 @@ void Solver::setup_from_input() {
     });
     timed_phase("initial solution", [&] { init_solution(); });
     init_health();
+    setup_check_json.clear();
+    if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
     mesh->release_setup_data();
     if (!check_only) used_regions.reset();
     // glibc keeps what the setup freed in its arenas; hand it back to the system
@@ -303,7 +308,9 @@ void Solver::write_provenance() {
         .raw("restart_of", provenance::restart_of())
         .raw("provenance", provenance::json())
         .raw("placement", provenance::placement())
-        .raw("setup_phases", setup_phases.str());
+        .raw("setup_phases", setup_phases.str())
+        .raw("units", progress_units());
+    if (!setup_check_json.empty()) start.raw("check", setup_check_json);
     if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart") {
         json::Object restart;
         restart.add("file", find_value<std::string>(input, "initialize", "file")).add("step", step).add("t", double(t));
@@ -321,9 +328,7 @@ namespace {
  *        Each rank counts its owned cells; a face between two ranks is counted by
  *        the rank owning the side with the lower global cell id.
  */
-logging::Items describe_mesh(const Mesh & mesh) {
-    using logging::count;
-    using logging::format;
+MeshSetup describe_mesh(const Mesh & mesh) {
     const bool distributed = mesh.n_global_cells > 0;
     const uint32_t n_owned = mesh.n_owned();
     auto owned = [&](int32_t c) { return c >= 0 && static_cast<uint32_t>(c) < n_owned; };
@@ -367,30 +372,21 @@ logging::Items describe_mesh(const Mesh & mesh) {
     const std::map<uint32_t, const char *> names = N_DIM == 2
         ? std::map<uint32_t, const char *>{{3, "tri"}, {4, "quad"}}
         : std::map<uint32_t, const char *>{{4, "tet"}, {5, "pyramid"}, {6, "prism"}, {8, "hex"}};
-    std::string types;
-    uint64_t n_cells = 0;
-    int n_types = 0;
+    MeshSetup m;
     for (uint32_t k = 0; k < MAX_NODES; k++) {
         if (counts[k] == 0) continue;
         const auto it = names.find(k);
-        types += (types.empty() ? "" : ", ") + count(counts[k]) + " " +
-                 (it != names.end() ? std::string(it->second) : std::to_string(k) + "-node");
-        n_cells += counts[k];
-        n_types++;
+        m.cells.emplace_back(it != names.end() ? std::string(it->second) : std::to_string(k) + "-node", counts[k]);
     }
-    std::string extent;
+    m.faces = counts[MAX_NODES];
+    m.boundary_faces = counts[MAX_NODES + 1];
     for (size_t d = 0; d < N_DIM; d++) {
-        extent += (d ? " x " : "") +
-                  format("[%.4g, %.4g]", static_cast<double>(-lo_hi[d]), static_cast<double>(lo_hi[N_DIM + d]));
+        m.lo[d] = static_cast<double>(-lo_hi[d]);
+        m.hi[d] = static_cast<double>(lo_hi[N_DIM + d]);
     }
-    return {
-        {"Cells", n_types == 1 ? types : count(n_cells) + ": " + types},
-        {"Faces", count(counts[MAX_NODES]) + " (" + count(counts[MAX_NODES + 1]) + " boundary)"},
-        {"Extent", extent},
-        {N_DIM == 2 ? "Cell area" : "Cell volume",
-         format("%.3e to %.3e (ratio %.3g)", static_cast<double>(v_min), static_cast<double>(v_max),
-                static_cast<double>(v_max / v_min))},
-    };
+    m.size_min = static_cast<double>(v_min);
+    m.size_max = static_cast<double>(v_max);
+    return m;
 }
 
 } // namespace
@@ -454,13 +450,13 @@ void Solver::init_mesh() {
     const curved::Surfaces surfaces = is_distributed() ? curved::surfaces_of_block(setup->mesh_block(), input)
                                                        : curved::surfaces_of_mesh(*mesh, input);
     mesh->apply_curved(surfaces);
-    mesh_summary = describe_mesh(*mesh);
-    mesh_summary.insert(mesh_summary.begin(),
-                        {"Type", type == "file" ? "file " + find_value_or<std::string>(input, "mesh", "filename",
-                                                                                         "mesh.msh")
-                                                : type});
+    mesh_setup = describe_mesh(*mesh);
+    Settings & mesh_settings = mesh_setup.settings;
+    mesh_settings.emplace_back("Type", type == "file" ? "file " + find_value_or<std::string>(input, "mesh", "filename",
+                                                                                               "mesh.msh")
+                                                      : type);
     const MeshTransform transform = mesh_transform(input);
-    if (!transform.is_identity()) mesh_summary.insert(mesh_summary.begin() + 1, {"Transform", transform.description});
+    if (!transform.is_identity()) mesh_settings.emplace_back("Transform", transform.description);
     const Stretching stretching = mesh_stretching(input);
     if (stretching != Stretching{}) {
         if (type == "file") {
@@ -472,7 +468,7 @@ void Solver::init_mesh() {
         }
         std::string text;
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(stretching[i]));
-        mesh_summary.insert(mesh_summary.begin() + 1, {"Stretching", text + "] (tanh, toward both ends)"});
+        mesh_settings.emplace_back("Stretching", text + "] (tanh, toward both ends)");
     }
     n_cells_global = comm::allreduce(uint64_t(mesh->n_owned()), comm::Op::SUM);
     if (is_distributed()) {
@@ -481,18 +477,15 @@ void Solver::init_mesh() {
         const uint64_t min_owned = comm::allreduce(n_owned, comm::Op::MIN);
         const uint64_t max_owned = comm::allreduce(n_owned, comm::Op::MAX);
         const uint64_t max_halo = comm::allreduce(n_halo, comm::Op::MAX);
-        const double mean = static_cast<double>(n_cells_global) / comm::size();
-        mesh_summary.emplace_back("Partition", logging::format("%s, %d ranks, %d halo layers exchanged with %s",
-                                                               partitioner == "graph"         ? "graph (KaMinPar)"
-                                                               : partitioner == "multijagged" ? "multi-jagged"
-                                                                                              : "Hilbert curve",
-                                                               comm::size(), halo_layers,
-                                                               halo.uses_nccl() ? "NCCL" : "MPI"));
-        mesh_summary.emplace_back("Cells per rank",
-                                  logging::format("%s to %s owned (imbalance %.3f), up to %s halo",
-                                                  logging::count(min_owned).c_str(),
-                                                  logging::count(max_owned).c_str(), static_cast<double>(max_owned) / mean,
-                                                  logging::count(max_halo).c_str()));
+        mesh_setup.partition = MeshSetup::Partition{.partitioner = partitioner == "graph"         ? "graph (KaMinPar)"
+                                                                   : partitioner == "multijagged" ? "multi-jagged"
+                                                                                                  : "Hilbert curve",
+                                                    .exchange = halo.uses_nccl() ? "NCCL" : "MPI",
+                                                    .ranks = comm::size(),
+                                                    .halo_layers = halo_layers,
+                                                    .owned_min = min_owned,
+                                                    .owned_max = max_owned,
+                                                    .halo_max = max_halo};
     }
     {
         const CellOrderChoice & choice = mesh->cell_order_choice;
@@ -511,7 +504,7 @@ void Solver::init_mesh() {
                                     hilbert ? choice.input_lines : choice.hilbert_lines,
                                     hilbert ? "in the input order" : "along the Hilbert curve");
         }
-        mesh_summary.emplace_back("Cell order", text);
+        mesh_settings.emplace_back("Cell order", text);
     }
     if (mesh->curved_geometry) {
         // Curved boundary faces of owned cells, and curved faces in all
@@ -528,7 +521,7 @@ void Solver::init_mesh() {
         for (const auto & face : surfaces.faces) n_high_order += face.shape < 0;
         if (n_high_order > 0) text += ", high-order faces from the mesh file";
         for (const auto & shape : surfaces.shapes) text += ", " + shape.zone + " projected";
-        mesh_summary.emplace_back("Curved boundary", text);
+        mesh_settings.emplace_back("Curved boundary", text);
     }
     axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
     if (axisymmetric) {
@@ -556,7 +549,7 @@ void Solver::init_mesh() {
             }
         }
         mesh->make_axisymmetric();
-        mesh_summary.emplace_back("Geometry", "axisymmetric about the x axis (y = r), per radian");
+        mesh_setup.settings.emplace_back("Geometry", "axisymmetric about the x axis (y = r), per radian");
     }
     mesh->copy_host_to_device();
 }
@@ -616,13 +609,12 @@ void Solver::describe_partition_surface() {
     const std::array<uint64_t, 3> local{cut, layer1, received};
     const auto total = comm::allreduce(local, comm::Op::SUM);
     const auto most = comm::allreduce(local, comm::Op::MAX);
-    mesh_summary.emplace_back(
-        "Partition surface",
-        logging::format("%s faces between ranks; per rank up to %s halo layer-1 cells (%s in all), %s cells "
-                        "received per exchange (%s in all)",
-                        logging::count(total[0] / 2).c_str(), logging::count(most[1]).c_str(),
-                        logging::count(total[1]).c_str(), logging::count(most[2]).c_str(),
-                        logging::count(total[2]).c_str()));
+    MeshSetup::Partition & p = *mesh_setup.partition;
+    p.cut_faces = total[0] / 2;
+    p.layer1_max = most[1];
+    p.layer1_all = total[1];
+    p.received_max = most[2];
+    p.received_all = total[2];
 }
 
 bool Solver::halo_too_shallow() {
@@ -1126,7 +1118,7 @@ void Solver::init_sources(region::Regions & regions) {
     auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields, regions,
                                                          is_distributed() && halo.uses_nccl());
     if (!terms->empty()) {
-        for (const auto & item : terms->summary()) source_summary.push_back(item);
+        source_summary.add(terms->summary());
         source_terms = std::move(terms);
         stage_time = Kokkos::View<rtype>("stage_time");
     }
@@ -1147,9 +1139,8 @@ void Solver::init_sources(region::Regions & regions) {
         FOR_I_DIM gravity[i] = g[i];
         FOR_I_DIM boundary_data.gravity[i] = g[i];
         face_reconstruction->set_boundaries(boundary_data);
-        std::string text;
-        FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(gravity[i]));
-        source_summary.emplace_back("Gravity", units::with(text + "]", "m/s^2"));
+        FOR_I_DIM source_summary.quantity(std::string("gravity ") + "xyz"[i], logging::real(double(gravity[i])),
+                                          units::column("m/s^2"), "");
     }
     if (source.contains("mass_flow")) {
         const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow", dim::mass_flux);
@@ -1180,10 +1171,9 @@ void Solver::init_sources(region::Regions & regions) {
         mass_flow_sums = Kokkos::View<int64_t *>("mass_flow_sums", 2);
         mass_flow_totals = Kokkos::View<double *>("mass_flow_totals", 3);
         init_mass_flow_volume();
-        std::string text;
-        FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(m[i]));
-        source_summary.emplace_back("Mass flow", units::with(text + "]", "kg/(m^2 s)") +
-                                                     " (volume average of rho u), held by a uniform body force");
+        source_summary.setting("Mass flow", "volume average of rho u, held by a uniform body force");
+        FOR_I_DIM source_summary.quantity(std::string("mass flow ") + "xyz"[i], logging::real(double(m[i])),
+                                          units::column("kg/(m^2 s)"), "volume average of rho u");
     }
 }
 
@@ -1460,18 +1450,12 @@ void Solver::init_numerics() {
     static const std::map<std::string, CentralFlux> central_fluxes = {
         {"reconstructed", CentralFlux::RECONSTRUCTED}, {"cell_averages", CentralFlux::CELL_AVERAGES}};
     // TENO's states make KEEP add kinetic energy (docs/design/les.md, section 4.4)
-    const std::string central = find_value_or<std::string>(hybrid_input, "central",
-                                                           teno && !is_mixture() ? "cell_averages" : "reconstructed");
+    const std::string central =
+        find_value_or<std::string>(hybrid_input, "central", teno ? "cell_averages" : "reconstructed");
     if (!central_fluxes.contains(central)) {
         throw not_accepted(hybrid_input, "numerics.hybrid.central", central, {"cell_averages", "reconstructed"});
     }
     hybrid_central = central_fluxes.at(central);
-    if (hybrid_central == CentralFlux::CELL_AVERAGES && is_mixture()) {
-        throw InputError({.key = "numerics.hybrid.central",
-                          .line = line_of(hybrid_input, "central"),
-                          .message = "\"cell_averages\" is not available for mixtures yet",
-                          .fix = "Use central = \"reconstructed\" (the default for mixtures)"});
-    }
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError({.key = "numerics.hybrid",
                           .line = line_of(hybrid_input),
@@ -1623,19 +1607,11 @@ void Solver::init_output(region::Regions & regions) {
                 monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
                 if (!monitor.out->good()) throw cannot_write("the forces file", file);
                 if (!resume) {
-                    // Over the zone's faces: per unit depth in 2D, per radian in axisymmetric runs
-                    const Dimension area = measure_dimension().times(dim::length, -1);
                     std::vector<Dimension> units = {dim::none, dim::time};
                     *monitor.out << "step,t";
-                    for (const char * kind : {"pressure", "viscous"}) {
-                        FOR_I_DIM {
-                            *monitor.out << ",F" << "xyz"[i] << "_" << kind;
-                            units.push_back(dim::pressure.times(area));
-                        }
-                    }
-                    if (monitor.modeled) {
-                        *monitor.out << ",Q";
-                        units.push_back(dim::heat_flux.times(area));
+                    for (const auto & [name, dimension] : force_columns(monitor.modeled)) {
+                        *monitor.out << "," << name;
+                        units.push_back(dimension);
                     }
                     *monitor.out << "\n" << field_units::csv_line(units) << "\n";
                 }
@@ -1683,12 +1659,13 @@ void Solver::init_output(region::Regions & regions) {
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);
     const std::string run_log_file = find_value_or<std::string>(input, "output", "run_log", "mallard.jsonl");
-    run_log_on = !run_log_file.empty() && output_files_enabled();
+    const std::string report_file = find_value_or<std::string>(input, "output", "report", "report.html");
+    run_log_on = (!run_log_file.empty() || !report_file.empty()) && output_files_enabled();
     divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
     if (run_log_on) {
         const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                             std::filesystem::exists(run_log_file);
-        run_log::open(run_log_file, resume);
+        run_log::open(run_log_file, resume, report_file);
     } else {
         run_log::close();
     }
@@ -1823,6 +1800,44 @@ std::vector<std::pair<std::string, Dimension>> Solver::integral_columns() const 
     if (les_on && les.dynamic) columns.emplace_back("les_C", dim::none);
     if (dynamic_efficiency()) columns.emplace_back("tf_beta", dim::none);
     return columns;
+}
+
+std::vector<std::pair<std::string, Dimension>> Solver::force_columns(const bool modeled) const {
+    // Over the zone's faces: per unit depth in 2D, per radian in axisymmetric runs
+    const Dimension area = measure_dimension().times(dim::length, -1);
+    std::vector<std::pair<std::string, Dimension>> columns;
+    for (const char * kind : {"pressure", "viscous"}) {
+        FOR_I_DIM columns.emplace_back(std::string("F") + "xyz"[i] + "_" + kind, dim::pressure.times(area));
+    }
+    if (modeled) columns.emplace_back("Q", dim::heat_flux.times(area));
+    return columns;
+}
+
+std::string Solver::progress_units() const {
+    const bool si = units::system() == units::System::SI;
+    auto unit = [&](const Dimension & d) { return si ? d.udunits() : std::string("1"); };
+    auto object = [&](const std::vector<std::pair<std::string, Dimension>> & columns) {
+        json::Object o;
+        for (const auto & [name, dimension] : columns) o.add(name, unit(dimension));
+        return o.str();
+    };
+    json::Object u;
+    u.add("t", unit(dim::time)).add("dt", unit(dim::time)).add("cfl", "1").add("progress", "1");
+    u.add("wall", "s").add("wall_per_step", "s").add("cells_per_second", "s-1").add("eta", "s");
+    for (const char * memory : {"memory_host", "memory_host_peak", "memory_device", "memory_device_total"}) {
+        u.add(memory, "B");
+    }
+    u.raw("monitors", object({{"min_rho", dim::density}, {"min_p", dim::pressure}, {"max_mach", dim::none},
+                              {"troubled_cells", dim::none}, {"min_T", dim::temperature},
+                              {"max_T", dim::temperature}, {"max_sum_Y_error", dim::none},
+                              {"reacting_cells", dim::none}, {"max_chemistry_cost", dim::none}}));
+    u.raw("margins", object({{"rho", dim::density}, {"p", dim::pressure}, {"T", dim::temperature}}));
+    if (integral_monitor.interval > 0) u.raw("integrals", object(integral_columns()));
+    for (const auto & monitor : force_monitors) u.raw("forces_" + monitor.zone, object(force_columns(monitor.modeled)));
+    json::Object by_probe;
+    for (const auto & [name, columns] : probes.recorded_columns()) by_probe.raw(name, object(columns));
+    if (!by_probe.empty()) u.raw("probes", by_probe.str());
+    return u.str();
 }
 
 void Solver::allocate_memory() {
@@ -2472,7 +2487,7 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
         report_health(locals, values);
         status.health = run_health.last;
     }
-    if (run_log_on) {
+    if (run_log_on || run_log::streams_progress()) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
                                              comm::Op::MAX);
@@ -2482,7 +2497,8 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
         }
         if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
         for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
-        run_log::write(status.record());
+        status.probes = probes.recorded();
+        run_log::write_progress(status.record());
     }
 
     step_last_check = step;
@@ -2512,101 +2528,104 @@ RunStatus Solver::run_status() const {
 
 void Solver::print_setup(const ResolvedInput & resolved) const {
     using logging::real;
-    logging::section("Mesh");
-    logging::Items mesh_items = mesh_summary;
-    for (auto & [name, value] : mesh_items) {
-        if (name == "Extent") value = units::with(value, "m");
-        if (name == "Cell area" || name == "Cell volume") {
-            const size_t ratio = value.find(" (ratio");
-            value = units::with(value.substr(0, ratio), N_DIM == 2 ? "m^2" : "m^3") + value.substr(ratio);
-        }
-    }
-    logging::items(mesh_items);
+    std::vector<SetupSection> sections = {mesh_section(mesh_setup)};
 
-    logging::section("Physics");
-    logging::item("Units", units::system() == units::System::SI
-                               ? "SI (physics.units)"
-                               : "nondimensional: numbers carry no units (physics.units)");
-    logging::items(is_mixture() ? mixture_model->summary() : physics.summary());
-    logging::items(source_summary);
-    logging::item("Initial state", initial_state);
+    SetupSection physics_section{.title = "Physics"};
+    Settings & physical = physics_section.settings;
+    physical.emplace_back("Units", units::system() == units::System::SI
+                                       ? "SI (physics.units)"
+                                       : "nondimensional: numbers carry no units (physics.units)");
+    physics_section.add(is_mixture() ? mixture_model->summary() : physics.summary());
+    physics_section.add(source_summary);
+    physical.emplace_back("Initial state", initial_state);
+    sections.push_back(std::move(physics_section));
 
-    logging::section("Numerics");
-    if (!preset.name.empty()) logging::item("Preset", preset.summary(resolved));
-    logging::items(face_reconstruction->summary());
-    logging::item("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
+    SetupSection numerics{.title = "Numerics"};
+    Settings & numerical = numerics.settings;
+    numerics.quantities = time_quantities({.use_cfl = use_cfl,
+                                           .cfl = double(cfl),
+                                           .dt = double(dt_fixed),
+                                           .controlled = step_controller.enabled(),
+                                           .n_steps = n_steps,
+                                           .t_stop = double(t_stop),
+                                           .wall_stop = double(t_wall_stop)});
+    if (!preset.name.empty()) numerical.emplace_back("Preset", preset.summary(resolved));
+    numerics.add(face_reconstruction->summary());
+    numerical.emplace_back("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
-        logging::item("Convective flux", std::string("hybrid: KEEP central on the ") +
-                                             (hybrid_central == CentralFlux::CELL_AVERAGES ? "cell values"
-                                                                                            : "reconstructed states") +
-                                             ", Riemann solver where the compression sensor exceeds " +
-                                             real(double(hybrid_threshold)) + " (upwind floor " +
-                                             real(double(hybrid_floor)) + ")");
+        numerical.emplace_back("Convective flux", std::string("hybrid: KEEP central on the ") +
+                                                      (hybrid_central == CentralFlux::CELL_AVERAGES
+                                                           ? "cell values"
+                                                           : "reconstructed states") +
+                                                      ", the Riemann solver where the compression sensor exceeds "
+                                                      "its threshold");
     }
-    logging::item("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
-    if (step_controller.enabled()) {
-        logging::item("Time step", step_controller.summary() + "; first step " +
-                                       (use_cfl ? "CFL " + real(double(cfl))
-                                                : "dt " + units::with(real(double(dt_fixed)), "s")));
-    } else {
-        logging::item("Time step", use_cfl ? "CFL " + real(double(cfl))
-                                           : "dt " + units::with(real(double(dt_fixed)), "s") + " (fixed)");
-    }
-    std::string stop;
-    if (n_steps > 0) stop += "n_steps = " + logging::count(n_steps);
-    if (t_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("t = ") + units::with(real(double(t_stop)), "s");
-    if (t_wall_stop > 0) stop += (stop.empty() ? "" : ", ") + std::string("wall ") + logging::duration(double(t_wall_stop));
-    logging::item("Stop at", stop);
+    numerical.emplace_back("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
+    if (step_controller.enabled()) numerics.add(step_controller.summary());
 #ifdef KOKKOS_ENABLE_CUDA
     const std::string no_graph = step_graph_unsupported();
-    logging::item("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
+    numerical.emplace_back("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
 #endif
     const std::string by_host = device_steps_unsupported();
-    logging::item("Steps", by_host.empty() ? "decided on the device, up to " + logging::count(step_queue_depth) + " ahead"
-                                           : "taken by the host: " + by_host);
-    if (check_nan) logging::item("NaN check", "every step");
-    logging::item("Divergence", std::string("stop at the first non-finite value") +
-                                    (keep_last_good ? ", writing the last valid state" : ""));
-    if (les_on) logging::items(les.summary());
-    if (tfles_on) logging::items(thickened_flame.summary());
-    if (pasr_on) logging::items(pasr.summary());
-    if (double_flux) logging::item("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
+    numerical.emplace_back("Steps", by_host.empty() ? "decided on the device, up to " +
+                                                          logging::count(step_queue_depth) + " ahead"
+                                                    : "taken by the host: " + by_host);
+    if (check_nan) numerical.emplace_back("NaN check", "every step");
+    numerical.emplace_back("Divergence", std::string("stop at the first non-finite value") +
+                                             (keep_last_good ? ", writing the last valid state" : ""));
+    if (les_on) numerics.add(les.summary());
+    if (tfles_on) numerics.add(thickened_flame.summary());
+    if (pasr_on) numerics.add(pasr.summary());
+    if (double_flux) numerical.emplace_back("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
+    if (hybrid_flux) {
+        numerics.quantities.push_back({report::Status::NONE, {"compression sensor threshold",
+                                                              real(double(hybrid_threshold)), "-", "", "hybrid flux"}});
+        numerics.quantities.push_back(
+            {report::Status::NONE, {"upwind floor", real(double(hybrid_floor)), "-", "", "hybrid flux"}});
+    }
     if (reacting) {
-        logging::item("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, " +
-                                       (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
-                                       (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS (rtol " +
-                                       real(chemistry_options.integrator.rtol) + ", atol " +
-                                       real(chemistry_options.atol_Y) + ")" +
-                                       (T_frozen > 0.0 ? ", frozen below " + real(T_frozen) + " K" : "") + ", " +
-                                       (cell_chemistry.lanes() == 1 ? std::string("one thread per cell")
-                                                                    : std::to_string(cell_chemistry.lanes()) +
-                                                                          " lanes per cell"));
+        numerical.emplace_back("Chemistry", std::to_string(kinetics.n_reactions) + " reactions, " +
+                                                (simpler ? "SIMPLER balanced splitting" : "Strang splitting") +
+                                                (fuse_chemistry ? " (half steps fused)" : "") + ", RODAS, " +
+                                                (cell_chemistry.lanes() == 1
+                                                     ? std::string("one thread per cell")
+                                                     : std::to_string(cell_chemistry.lanes()) + " lanes per cell"));
+        numerics.quantities.push_back({report::Status::NONE, {"chemistry rtol", real(chemistry_options.integrator.rtol),
+                                                              "-", "", "relative tolerance"}});
+        numerics.quantities.push_back({report::Status::NONE, {"chemistry atol", real(chemistry_options.atol_Y), "-", "",
+                                                              "absolute tolerance of the mass fractions"}});
+        if (T_frozen > 0.0) {
+            numerics.quantities.push_back({report::Status::NONE, {"chemistry frozen below", real(T_frozen),
+                                                                  units::column("K"), "", "temperature"}});
+        }
     }
+    sections.push_back(std::move(numerics));
 
-    logging::section("Boundaries");
-    for (const CheckBoundary & b : boundary_summary) {
-        logging::item(b.zone, b.condition + ", " + logging::count(b.faces) + " faces" +
-                                  (b.details.empty() ? "" : ", " + b.details));
-        if (!b.turbulence.empty()) logging::item(b.zone + " turbulence", b.turbulence);
-    }
+    SetupSection boundaries{.title = "Boundaries"};
+    boundaries.tables.push_back(boundary_table(boundary_summary));
+    sections.push_back(std::move(boundaries));
 
-    logging::section("Output");
-    logging::item("Progress", "every " + logging::count(check_interval) + " steps");
-    for (const auto & writer : data_writers) {
-        const auto [kind, text] = writer->summary();
-        logging::item(kind, text);
-    }
+    SetupSection output{.title = "Output"};
+    std::vector<OutputSummary> outputs = {{.kind = "progress", .file = "", .steps = check_interval,
+                                           .contents = "a row of the progress table"}};
+    for (const auto & writer : data_writers) outputs.push_back(writer->summary());
     for (const auto & monitor : force_monitors) {
-        logging::item("forces", monitor.file + " (" + monitor.zone + ") every " + logging::count(monitor.interval) +
-                                    " steps");
+        outputs.push_back({.kind = "forces", .file = monitor.file, .steps = monitor.interval, .contents = monitor.zone});
     }
     if (integral_monitor.interval > 0) {
-        logging::item("integrals", integral_monitor.file + " every " + logging::count(integral_monitor.interval) +
-                                       " steps");
+        outputs.push_back({.kind = "integrals", .file = integral_monitor.file, .steps = integral_monitor.interval});
     }
-    logging::items(statistics.summary());
-    logging::items(probes.summary());
-    logging::items(triggers.summary());
+    for (auto && o : statistics.summary()) outputs.push_back(std::move(o));
+    for (auto && o : probes.summary()) outputs.push_back(std::move(o));
+    output.tables.push_back(output_table(outputs));
+    SetupSection::Table trigger_table{.note = "", .columns = {"trigger", "condition and action"}, .rows = {}};
+    for (const auto & [name, text] : triggers.summary()) trigger_table.rows.push_back({report::Status::NONE, {name, text}});
+    output.tables.push_back(std::move(trigger_table));
+    sections.push_back(std::move(output));
+
+    report::Text text(logging::color_stdout());
+    setup_text(text, sections);
+    text.print();
 }
 
 void Solver::print_summary(const RunEnd & end) const {
@@ -3223,11 +3242,8 @@ void Solver::write_forces() {
         if (step % monitor.interval != 0) continue;
         const auto F = calc_force(monitor.faces);
         monitor.last = {"forces_" + monitor.zone, step, double(t), {}};
-        for (size_t i = 0; i < 2 * N_DIM; i++) {
-            monitor.last.values.emplace_back(std::string("F") + "xyz"[i % N_DIM] + (i < N_DIM ? "_pressure" : "_viscous"),
-                                             double(F[i]));
-        }
-        if (monitor.modeled) monitor.last.values.emplace_back("Q", double(F[2 * N_DIM]));
+        const auto columns = force_columns(monitor.modeled);
+        for (size_t i = 0; i < columns.size(); i++) monitor.last.values.emplace_back(columns[i].first, double(F[i]));
         if (!monitor.out) continue;
         *monitor.out << step << "," << std::setprecision(12) << t;
         for (size_t i = 0; i < 2 * N_DIM; i++) *monitor.out << "," << F[i];

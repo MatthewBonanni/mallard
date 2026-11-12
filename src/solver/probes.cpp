@@ -1632,6 +1632,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                      [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
     p.point_value = !p.snapshot && (!p.from_region || p.resampled) && p.nodes.n_global == 1 &&
                     (p.write_samples || extrema || p.quadrature.n_global == 0);
+    p.monitored = reduction_columns;
+    if (p.point_value) {
+        for (const auto & v : p.variables) p.monitored.emplace_back(v, field_units::describe(v).dimension);
+    }
     probes.push_back(std::move(probe_ptr));
 }
 
@@ -1833,6 +1837,8 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         // Rank 0 writes; spectra histories are kept like the averages, on every rank that runs alone
         const bool keep = comm::is_root() || !distributed;
         if (keep) {
+            p.last_step = step;
+            p.last_t = double(t);
             p.last.clear();
             if (!p.reductions.empty()) p.reduce(nodes, quad);
             if (p.point_value) {
@@ -1913,6 +1919,34 @@ std::vector<double> Probes::values() const {
     }
     return values;
 
+}
+
+std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>>>> Probes::recorded_columns() const {
+    std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>>>> all;
+    size_t left = RECORDED;
+    for (const auto & p : probes) {
+        if (p->snapshot || p->monitored.empty() || left == 0) continue;
+        const size_t n = std::min(left, p->monitored.size());
+        all.emplace_back(p->name, std::vector<std::pair<std::string, Dimension>>(p->monitored.begin(),
+                                                                                 p->monitored.begin() + long(n)));
+        left -= n;
+    }
+    return all;
+}
+
+std::vector<MonitorValues> Probes::recorded() const {
+    std::vector<MonitorValues> all;
+    size_t left = RECORDED;
+    for (const auto & p : probes) {
+        if (p->snapshot || p->monitored.empty() || left == 0) continue;
+        const size_t n = std::min(left, p->monitored.size());
+        left -= n;
+        if (p->last.size() != p->monitored.size()) continue;
+        MonitorValues m{p->name, p->last_step, p->last_t, {}};
+        for (size_t i = 0; i < n; i++) m.values.emplace_back(p->monitored[i].first, p->last[i]);
+        all.push_back(std::move(m));
+    }
+    return all;
 }
 
 void Probes::Probe::write_spectra(uint64_t step, rtype t) {
@@ -2359,8 +2393,8 @@ void Probes::Probe::write_reductions(uint64_t step, rtype t) const {
     row.flush();
 }
 
-std::vector<std::pair<std::string, std::string>> Probes::summary() const {
-    std::vector<std::pair<std::string, std::string>> items;
+std::vector<OutputSummary> Probes::summary() const {
+    std::vector<OutputSummary> items;
     for (const auto & pp : probes) {
         const Probe & p = *pp;
         std::string vars;
@@ -2368,10 +2402,7 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         const size_t n = p.from_region && !p.resampled ? p.quadrature.n_global : p.geometry.nodes.size();
         const bool cells = p.from_region && p.geometry.dim == N_DIM;
         const char * unit = cells ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
-        std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.type + (p.from_region ? " over " : " of ") +
-                           logging::count(n) + unit +
-                           (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
-                                           : " every " + units::with(logging::real(double(p.time_interval)), "s") + " of simulated time") +
+        std::string text = p.geometry.type + (p.from_region ? " over " : " of ") + logging::count(n) + unit +
                            (p.average ? ", time averages" : "") +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;
         if (!p.reductions.empty()) {
@@ -2384,7 +2415,11 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
             const std::string & a = p.spectra->samples_file(), & b = p.spectra->reductions_file();
             text += a + (!a.empty() && !b.empty() ? " and " : "") + b;
         }
-        items.emplace_back(p.snapshot ? (p.format == Format::VTKHDF ? "vtkhdf" : "vtu") : "probe " + p.name, text);
+        items.push_back({.kind = p.snapshot ? (p.format == Format::VTKHDF ? "vtkhdf" : "vtu") : "probe " + p.name,
+                         .file = p.write_samples ? p.file : p.reductions_file,
+                         .steps = p.interval,
+                         .seconds = p.interval > 0 ? 0.0 : double(p.time_interval),
+                         .contents = text});
     }
     return items;
 }

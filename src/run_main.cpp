@@ -18,11 +18,13 @@
 #include "build_info.h"
 #include "cli.h"
 #include "commands.h"
+#include "diagnostic_code.h"
 #include "input.h"
 #include "log.h"
 #include "parallel/binding.h"
 #include "parallel/comm.h"
 #include "run_control.h"
+#include "run_log.h"
 #include "solver/solver.h"
 
 namespace {
@@ -44,16 +46,20 @@ std::string error_text(const std::exception & e) {
 /**
  * @brief Reports a fatal error and ends all ranks of a parallel run.
  */
-[[noreturn]] void abort_parallel(const std::string & message) {
+[[noreturn]] void abort_parallel(const std::string & code, const std::string & message) {
     // Most errors (bad input) hit every rank; rank 0 reports and aborts first,
     // so the other ranks wait briefly rather than print the same message again
     if (!comm::is_root()) std::this_thread::sleep_for(std::chrono::seconds(2));
-    logging::error(message);
+    logging::error(code, message);
     comm::abort(1);
 }
 
-/** @brief With check: checks the case, and with resolve writes its resolved input (and nothing else) to stdout. */
-int solve(const cli::Args & args, const std::string & input_file, const CheckOptions * check, bool resolve = false) {
+/**
+ * @brief With check: checks the case, and with resolve writes its resolved input (and nothing else) to stdout.
+ *        With jsonl, stdout gets only the run's progress records and the text goes to stderr.
+ */
+int solve(const cli::Args & args, const std::string & input_file, const CheckOptions * check, bool resolve = false,
+          bool jsonl = false) {
     const std::string restart_file = args.value_or("--restart", "");
     logging::set_verbose(args.has("--verbose"));
     int argc = args.argc;
@@ -65,12 +71,18 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
     std::streambuf * const out = std::cout.rdbuf();
     const bool json = check && args.value_or("--format", "text") == "json";
     if (!comm::is_root() || resolve || json) std::cout.rdbuf(nullptr);
+    std::ostream records(out);
+    if (jsonl) {
+        if (comm::is_root()) std::cout.rdbuf(std::cerr.rdbuf());
+        run_log::stream_progress(&records);
+    }
 
     binding::select_device(argc, argv);
     Kokkos::initialize(argc, argv);
     int status = 0;
     {
         std::string error;
+        std::string code = diagnostic_code::SETUP;
         try {
             print_header(input_file);
             Solver solver;
@@ -85,7 +97,7 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                 } catch (const InputError & e) {
                     if (resolve) throw;
                     report.input_file = input_file;
-                    report.error(check_code::INPUT, input_file + ": " + error_text(e));
+                    report.error(diagnostic_code::INPUT, input_file + ": " + error_text(e));
                 }
                 if (!resolve) check_environment(report);
                 if (resolve && report.ok()) {
@@ -93,9 +105,11 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                     std::cout << report.resolved << std::flush;
                 } else if (resolve) {
                     for (const CheckDiagnostic & d : report.diagnostics) {
-                        if (d.severity != report::Status::ERROR || d.code == check_code::KEY_UNUSED) continue;
+                        if (d.severity != report::Status::ERROR || d.code == diagnostic_code::KEY_UNUSED) continue;
+                        if (error.empty()) code = d.code;
                         error += (error.empty() ? "" : "\n") + d.message;
                     }
+                    if (error.empty()) code = diagnostic_code::KEY_UNUSED;
                     if (!report.unused.empty()) {
                         error += std::string(error.empty() ? "" : "\n") +
                                  "keys that are unknown or unused with these settings (mallard check lists them all):";
@@ -110,19 +124,25 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                 binding::report();
                 solver.enable_control(true);
                 solver.init(input_file, restart_file);
+                code = diagnostic_code::RUN;
                 status = solver.run();
             }
         } catch (const InputError & e) {
+            code = e.code;
             error = input_file + ": " + error_text(e);
+        } catch (const diagnostic_code::Error & e) {
+            code = e.code;
+            error = error_text(e);
         } catch (const std::exception & e) {
             error = error_text(e);
         }
         if (!error.empty()) {
-            if (comm::size() > 1) abort_parallel(error);
-            logging::error(error);
+            if (comm::size() > 1) abort_parallel(code, error);
+            logging::error(code, error);
             status = 1;
         }
     }
+    run_log::stream_progress(nullptr);
     Kokkos::finalize();
     return status;
 }
@@ -149,7 +169,7 @@ bool number(const cli::Args & args, std::string_view name, T & value, std::strin
 /** @brief The mesh-field options of mallard check into options; an error, or empty. */
 std::string mesh_field_options(const cli::Args & args, CheckOptions & options) {
     if (args.has("--quality")) {
-        if (comm::is_root()) std::cerr << "mallard check --quality is deprecated: use --mesh-fields\n";
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard check --quality is deprecated: use --mesh-fields");
         if (!args.has("--mesh-fields")) options.mesh_fields = args.value_or("--quality", "");
     }
     if (args.has("--mesh-fields")) options.mesh_fields = args.value_or("--mesh-fields", "");
@@ -186,7 +206,11 @@ std::string mesh_field_options(const cli::Args & args, CheckOptions & options) {
 
 int run_main(const cli::Args & args) {
     if (!args.has("-i")) return cli::usage_error(*cli::command(""), "missing -i input.toml");
-    return solve(args, args.value_or("-i", ""), nullptr);
+    const std::string log_format = args.value_or("--log-format", "text");
+    if (log_format != "text" && log_format != "jsonl") {
+        return cli::usage_error(*cli::command(""), "--log-format takes text or jsonl, not " + log_format);
+    }
+    return solve(args, args.value_or("-i", ""), nullptr, false, log_format == "jsonl");
 }
 
 int check_main(const cli::Args & args) {

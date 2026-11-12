@@ -9,11 +9,14 @@ name: CI
 #
 # Two tiers. A branch runs the gate: the x86-64 suites of each backend, precision and
 # dimension, GCC 16 and Clang 23, and the CUDA, HIP and SYCL builds when it changes device
-# code. main runs everything after each merge (one run at a time: pushes that arrive while
-# it runs are tested together next): arm64, macOS, every compiler and CUDA version, Spack,
-# the tutorials and the fuzzers. A failure on main opens an issue. -f full=true runs
-# everything on a branch.
+# code. Each merge into main runs the gate again on main; every 3 hours, if main has
+# changed, main runs everything: arm64, macOS, every compiler and CUDA version, Spack, the
+# tutorials and the fuzzers. A failure on main opens an issue. -f full=true runs everything
+# on a branch.
 on:
+  # The full tier every 3 hours on main, if main has changed since its last full run
+  schedule:
+    - cron: '17 */3 * * *'
   push:
     branches: [main]
     paths-ignore:
@@ -48,7 +51,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'full' || 'gate' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -126,7 +129,8 @@ jobs:
       - id: check
         env:
           BEFORE: ${{ github.event.before }}
-          FULL: ${{ github.event_name == 'push' || inputs.full }}
+          FULL: ${{ github.event_name == 'schedule' || inputs.full }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "full=$FULL" >> "$GITHUB_OUTPUT"
           cuda='[
@@ -137,11 +141,17 @@ jobs:
           if [ "$FULL" != true ]; then cuda=$(jq 'map(select(.gate))' <<< "$cuda"); fi
           echo "cuda=$(jq -c . <<< "$cuda")" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_EVENT_NAME" = push ]; then base=$BEFORE
+          elif [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            base=$(gh run list -R "$GITHUB_REPOSITORY" -w ci.yml -e schedule -s success -L 1 \
+              --json headSha -q '.[0].headSha // ""')
+            [ -n "$base" ] && git cat-file -e "$base^{commit}" 2> /dev/null || base=HEAD~20
           elif [ "$GITHUB_REF_NAME" = main ]; then base=HEAD^
           else base=$(git merge-base origin/main HEAD); fi
           echo "changed=$(tools/dev/device_changes.sh "$base")" >> "$GITHUB_OUTPUT"
           # Documentation alone needs none of the build jobs
-          if git diff --name-only "$base" HEAD | grep -qvE '^docs/|\.md$|^CITATION\.cff$|^LICENSE$'; then
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(git rev-parse "$base")" = "$(git rev-parse HEAD)" ]; then
+            echo code=false >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$base" HEAD | grep -qvE '^docs/|\.md$|^CITATION\.cff$|^LICENSE$'; then
             echo code=true >> "$GITHUB_OUTPUT"
           else
             echo code=false >> "$GITHUB_OUTPUT"
@@ -829,7 +839,7 @@ jobs:
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=$state -f context=CI \
             -f description="Jobs: $RESULTS${ONLY:+ (only $ONLY)}" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo "Job results: $RESULTS"
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
+          if [ "$GITHUB_EVENT_NAME" = push ] || [ "$GITHUB_EVENT_NAME" = schedule ]; then
             run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             failed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
               --jq '.jobs[] | select(.conclusion == "failure" and .name != "CI result") | "- [\(.name)](\(.html_url))"')
@@ -840,7 +850,7 @@ jobs:
               body=$(printf 'CI fails on main at %s ([run](%s)):\n\n%s\n' "$GITHUB_SHA" "$run" "$failed")
               if [ -n "$open" ]; then gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"
               else gh issue create -R "$GITHUB_REPOSITORY" --title "CI fails on main" --label ci-main --body "$body"; fi
-            elif [ -n "$open" ]; then
+            elif [ -n "$open" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
               gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "CI passes on main at $GITHUB_SHA ([run]($run))."
             fi
           fi

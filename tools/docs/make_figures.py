@@ -5,7 +5,7 @@ manual and TENO-E reference into docs/images/theory/, light and dark.
 
 Schematics and domain diagrams need numpy, scipy and matplotlib only; with
 --mallard (a 2D build; an MPI build for the partitions) the figures from
-short runs are redrawn too, and with --mallard3d the 3D region, probe and mesh-field figures. MALLARD_FIGURE_PREVIEW=dir also writes PNGs on
+short runs and the sample run report are redrawn too, and with --mallard3d the 3D region, probe and mesh-field figures. MALLARD_FIGURE_PREVIEW=dir also writes PNGs on
 the site's backgrounds there, for review.
 """
 import argparse
@@ -16,13 +16,17 @@ import effective_resolution
 import geometry
 import high_order_cost
 import inlets
+import les_models
+import limiters
 import mesh_fields
 import probes
 import regions
+import run_report
 import runs
 import schematics
 import teno
 import theory
+import time_integrators
 
 
 def main():
@@ -35,9 +39,12 @@ def main():
     domains.figures()
     inlets.figures()
     theory.figures()
+    time_integrators.figures()
     teno.figures()
     effective_resolution.figures()
     high_order_cost.figures()
+    limiters.figures()
+    les_models.figures()
     geometry.figures(args.mallard, args.mallard3d)
     if args.mallard:
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]
@@ -46,6 +53,8 @@ def main():
         probes.main()
         regions.figures(args.mallard, args.mallard3d)
         mesh_fields.figures(args.mallard, args.mallard3d)
+        sys.argv = [sys.argv[0], "--mallard", args.mallard]
+        run_report.main()
 
 
 if __name__ == "__main__":

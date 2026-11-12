@@ -18,8 +18,10 @@ mallard -i input.toml --restart latest  # after a stop: resume from the newest r
 A few things hold for every command:
 
 - **Exit status:** 0 on success, 1 on failure and 2 on a usage error (an unknown
-  option or command, a missing argument), which prints one line naming the
-  command's `--help`. A run stopped on request exits with 3.
+  option or command, a missing argument), which names the command's `--help`.
+  A run stopped on request exits with 3.
+- **Errors and warnings** go to stderr with a stable code and the docs that
+  explain it (`error E-USAGE: ...`, [Warnings and errors](running.md#warnings-and-errors)).
 - **Dimension:** `mallard` runs `mallard2d` or `mallard3d`, whichever the case
   needs, by its mesh; `--dim 2|3`, before or after the command, states it.
 - **Parallel runs:** start `mallard` under `mpirun` (or `srun`); Kokkos options
@@ -31,8 +33,10 @@ A few things hold for every command:
 Tab completes `mallard`'s commands, their options and the values those take: input
 files after `-i`, `latest` and `*.restart` files after `--restart`, template names
 after `mallard new`, run directories and requests after `mallard ctl`, `2` or `3`
-after `--dim`. An install puts the scripts where bash (with the bash-completion
-package), zsh and fish look under its prefix:
+after `--dim`, sections and keys (`numerics.riemann_solver`) after `mallard list
+keys`, and output fields after `--fields`, each item of the comma-separated list
+(`--fields RHO,U,<Tab>`). An install puts the scripts where bash (with the
+bash-completion package), zsh and fish look under its prefix:
 
 | Shell | Installed as | Found without setup when |
 |---|---|---|
@@ -50,8 +54,9 @@ mallard completion fish | source      # ~/.config/fish/config.fish
 ```
 
 The containers load the bash completion in every interactive shell. The script is
-made from the same table as the help pages, so it completes exactly the commands of
-the `mallard` that printed it; reload it after updating Mallard.
+made from the same table as the help pages and from the catalogs `mallard list keys`
+and `mallard list fields` print, so it completes exactly the commands, keys and
+fields of the `mallard` that printed it; reload it after updating Mallard.
 
 How the commands are laid out, and which are planned:
 [design notes](../design/cli.md).
@@ -129,21 +134,26 @@ Commands:
     mallard --version         Print the version
 
 Options:
-  -i FILE                The input file (TOML). Required.
-  --restart FILE|latest  Start from this restart file: replaces the input's
-                         [initialize] with type = "restart". latest: the newest
-                         complete restart file of the input's restart writers
-                         (of the run that started last, then of the highest
-                         step), or [initialize] if there is none. Default: as
-                         [initialize] says.
-  --verbose              A line for every file written, between the progress
-                         rows. Default: the progress table's written column
-                         counts them, and mallard.jsonl and the summary name
-                         them.
-  --kokkos-*             Kokkos options, e.g. --kokkos-num-threads=8 (threads
-                         per rank) or --kokkos-device-id=1 (the GPU; by default
-                         each rank gets its own).
-  -h, --help             Show this page.
+  -i FILE                  The input file (TOML). Required.
+  --restart FILE|latest    Start from this restart file: replaces the input's
+                           [initialize] with type = "restart". latest: the
+                           newest complete restart file of the input's restart
+                           writers (of the run that started last, then of the
+                           highest step), or [initialize] if there is none.
+                           Default: as [initialize] says.
+  --verbose                A line for every file written, between the progress
+                           rows. Default: the progress table's written column
+                           counts them, and mallard.jsonl and the summary name
+                           them.
+  --log-format text|jsonl  text: the setup, the progress table and the summary
+                           on stdout; jsonl: on stdout only the run record's
+                           progress records, one JSON object per line as
+                           mallard.jsonl has them, for live monitoring and
+                           plotting, and the text on stderr. Default: text.
+  --kokkos-*               Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                           per rank) or --kokkos-device-id=1 (the GPU; by
+                           default each rank gets its own).
+  -h, --help               Show this page.
 
 Options of mallard before any command:
   --dim 2|3  --dim 2 runs mallard2d, --dim 3 mallard3d, for any command.
@@ -474,7 +484,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 
 ```text
 Usage: mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX]
-       mallard info RUN_DIR [--format text|json] [--input] [--verify]
+       mallard info RUN_DIR [--format text|json] [--input] [--verify] [--html]
 
 Reports what a file Mallard writes or reads holds, without an input file: its
 kind, format and format version; the mesh (cells, points, cell types, bounds,
@@ -496,12 +506,16 @@ Output files are read by any build, of any dimension and precision; a mesh file
 by the solver of its dimension, which also reports its quality as mallard check
 does.
 
-RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and
-every output file in it and one level down, one table row each (the snapshots of
-a series as their index). Each file the run log records as written is checked
-against its record: missing, or a size (with --verify, a SHA-256) other than the
-one recorded, is reported. A file still named NAME.partial is one whose write
-did not finish.
+RUN_DIR is a directory a run wrote to: its start from mallard.jsonl and, from
+the same records as its report.html, its outcome, health (lowest values,
+repairs, conservation), cost and warnings, each with a status; then every output
+file in it and one level down, one table row each (the snapshots of a series as
+their index). Each file the run log records as written is checked against its
+record: missing, or a size (with --verify, a SHA-256) other than the one
+recorded, is reported. A file still named NAME.partial is one whose write did
+not finish. With --html, writes the run report instead: a page of the run's
+outcome, identity, configuration, health, monitors, cost and output, built from
+mallard.jsonl alone.
 
 Options:
   --format text|json    text: sections and tables, with the units of every
@@ -521,6 +535,10 @@ Options:
   --verify              Run directories: also check each file's contents against
                         the SHA-256 its output record holds, not only its size;
                         reads every file once. Default: sizes only.
+  --html                Run directories: write RUN_DIR/report.html, the run
+                        report, from RUN_DIR/mallard.jsonl, the page the run
+                        writes itself: for a run still going, killed, or of a
+                        Mallard before 0.10. Default: off.
   --kokkos-*            Kokkos options, e.g. --kokkos-num-threads=8 (threads per
                         rank) or --kokkos-device-id=1 (the GPU; by default each
                         rank gets its own).
@@ -532,10 +550,11 @@ Examples:
   $ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it
   $ mallard info wing.msh --mesh-fields wing
   $ mallard info runs/cylinder
+  $ mallard info runs/cylinder --html            # rebuild runs/cylinder/report.html
 
 Exit status:
   0  the file was read
-  1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run directory's file differs from its output record, or --input finds no run block
+  1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run directory's file differs from its output record, --input finds no run block, or --html no mallard.jsonl
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-info
@@ -1112,8 +1131,11 @@ Usage: mallard completion bash|zsh|fish
 Prints a script that makes the shell complete mallard's commands, their options
 and the values those take: input files for -i, latest and restart files for
 --restart, template names for mallard new, run directories for mallard ctl and
-its requests. It is made from the same table as the help pages, so it knows
-every command of this build; templates come from mallard new when completing.
+its requests, sections and keys of the key catalog for mallard list keys, output
+fields of the field catalog for --fields, each item after a comma too. It is
+made from the same table as the help pages and from the catalogs mallard list
+keys and mallard list fields print, so it knows every command, key and field of
+this build; templates come from mallard new when completing.
 
 An install (cmake --install, Spack, the containers) puts the scripts where the
 shells look: share/bash-completion/completions/mallard,

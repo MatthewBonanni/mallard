@@ -12,6 +12,7 @@
 #include "data_writer.h"
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "input.h"
 
 #include <algorithm>
@@ -182,7 +183,7 @@ void DataWriter::init(const Input & input,
         format = DataFormat::VTU;
         static bool told = false;
         if (!told && comm::is_root()) {
-            logging::warning(std::string("[[write_data]] writes VTU files: the default format, \"vtkhdf\", needs a build "
+            logging::warning(diagnostic_code::FORMAT_VTU, std::string("[[write_data]] writes VTU files: the default format, \"vtkhdf\", needs a build "
                                          "with ") +
                              (have_hdf5() ? "parallel HDF5 on several ranks" : "HDF5 (Mallard_ENABLE_HDF5=ON)") +
                              "; set format = \"vtu\" to silence this.");
@@ -358,23 +359,28 @@ void DataWriter::init(const Input & input,
     if (output_files_enabled()) create_parent_directories("the output", prefix);
 }
 
-std::pair<std::string, std::string> DataWriter::summary() const {
-    std::string text = prefix + (format == DataFormat::RESTART  ? "_*.restart"
-                                 : format == DataFormat::HDF5   ? "_*.h5"
-                                 : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
-                                                                : "_*.vtu");
-    if (subset) text += " (" + region_name + ", " + logging::count(n_subset) + " cells)";
+OutputSummary DataWriter::summary() const {
+    const std::string file = prefix + (format == DataFormat::RESTART  ? "_*.restart"
+                                       : format == DataFormat::HDF5   ? "_*.h5"
+                                       : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
+                                                                      : "_*.vtu");
+    std::vector<std::string> parts;
+    if (subset) parts.push_back(region_name + ", " + logging::count(n_subset) + " cells");
     if (compression == Compression::ZLIB) {
-        text += relative_error > 0.0 ? ", zlib to relative error " + logging::real(relative_error) : ", zlib";
+        parts.push_back(relative_error > 0.0 ? "zlib to relative error " + logging::real(relative_error) : "zlib");
     }
-    text += interval > 0 ? " every " + logging::count(interval) + " steps"
-                         : " every " + units::with(logging::real(double(time_interval)), "s") + " of simulated time";
     if (format != DataFormat::RESTART) {
         std::string names;
         for (const auto & field : fields) names += (names.empty() ? "" : ", ") + field.name;
-        text += ": " + names;
+        parts.push_back(names);
     }
-    return {FORMAT_NAMES.at(format), text};
+    std::string contents;
+    for (const std::string & part : parts) contents += (contents.empty() ? "" : "; ") + part;
+    return {.kind = FORMAT_NAMES.at(format),
+            .file = file,
+            .steps = interval,
+            .seconds = interval > 0 ? 0.0 : double(time_interval),
+            .contents = contents};
 }
 
 std::string DataWriter::index_file() const {
@@ -744,7 +750,7 @@ void DataWriter::resume(uint64_t step, rtype t, const double * n_before) {
     n_snapshots = static_cast<uint64_t>(*n_before);
     while (snapshot_exists(n_snapshots)) n_snapshots++;
     if (comm::is_root()) {
-        logging::warning(index_file() + " lists " + std::to_string(history.size()) + " of the " +
+        logging::warning(diagnostic_code::SNAPSHOT_INDEX, index_file() + " lists " + std::to_string(history.size()) + " of the " +
                          std::to_string(static_cast<uint64_t>(*n_before)) +
                          " snapshots up to the restart time; numbering continues at " + std::to_string(n_snapshots));
     }

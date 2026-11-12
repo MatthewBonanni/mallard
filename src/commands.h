@@ -11,6 +11,9 @@
 #include "cli.h"
 
 struct CheckReport;
+namespace json {
+struct Value;
+}
 
 /** @brief `mallard -i input.toml`: runs a case. */
 int run_main(const cli::Args & args);
@@ -42,6 +45,12 @@ int list_species_main(const cli::Args & args);
 
 /** @brief `mallard list keys [SECTION] [INPUT]`: the input keys there are, or those of a case. */
 int list_keys_main(const cli::Args & args);
+
+/**
+ * @brief The key catalog of every example and tutorial (docs/input-keys/, as tools/dev/input_catalog.py merges
+ *        it), from Mallard's data directories. @throws std::runtime_error if none has it
+ */
+json::Value general_key_catalog();
 
 /** @brief `mallard list templates`: the case templates of mallard new. */
 int list_templates_main(const cli::Args & args);
