@@ -460,6 +460,13 @@ inline void annotate(hid_t parent, const std::string & path, const FieldDescript
     if (!field.standard_name.empty()) write_string_attribute(dataset, "standard_name", field.standard_name);
 }
 
+/** @brief The CF cell_methods attribute of the dataset at path (from parent), unless methods is empty. */
+inline void cell_methods(hid_t parent, const std::string & path, const std::string & methods) {
+    if (methods.empty()) return;
+    Handle dataset(H5Dopen2(parent, path.c_str(), H5P_DEFAULT), H5Dclose, "opening " + path);
+    write_string_attribute(dataset, "cell_methods", methods);
+}
+
 } // namespace h5
 
 #endif // Mallard_HAS_HDF5

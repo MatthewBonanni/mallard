@@ -17,6 +17,7 @@
 #include <stdexcept>
 
 #include "comm.h"
+#include "exact_sums.h"
 
 namespace homogeneous {
 
@@ -40,8 +41,9 @@ std::vector<uint32_t> clusters(const std::vector<double> & values, double tol) {
  * @brief Sums per row of points (coords[p * n_kept + d]) that agree in every kept direction:
  *        sums[p * width + j] added into their row's, which comes first in the result.
  */
-std::vector<double> merge(const std::vector<double> & coords, const std::vector<double> & sums, size_t n_kept,
-                          size_t width, const std::vector<double> & tol) {
+template <typename T>
+std::vector<T> merge(const std::vector<double> & coords, const std::vector<T> & sums, size_t n_kept, size_t width,
+                     const std::vector<double> & tol) {
     const size_t n = n_kept ? coords.size() / n_kept : 0;
     std::vector<std::vector<uint32_t>> ids(n_kept);
     for (size_t d = 0; d < n_kept; d++) {
@@ -50,16 +52,71 @@ std::vector<double> merge(const std::vector<double> & coords, const std::vector<
         ids[d] = clusters(v, tol[d]);
     }
     std::map<std::vector<uint32_t>, size_t> rows;
-    std::vector<double> out;
+    std::vector<T> out;
     std::vector<uint32_t> key(n_kept);
     for (size_t p = 0; p < n; p++) {
         for (size_t d = 0; d < n_kept; d++) key[d] = ids[d][p];
         const auto [it, added] = rows.try_emplace(key, rows.size());
-        if (added) out.resize(out.size() + width, 0.0);
+        if (added) out.resize(out.size() + width, T(0));
         for (size_t j = 0; j < width; j++) out[it->second * width + j] += sums[p * width + j];
     }
     return out;
 }
+
+/**
+ * @brief Exact sums of the terms of each column (terms[p * width + j]), so independent of their
+ *        order: of the cells' numbering and of the ranks. A term below 2^e, the column's largest,
+ *        is hi + lo / unit in units of 2^e / unit, two integers whose sums over every rank's
+ *        terms fit in 63 bits (exact_sums_unit); the sums add modulo 2^64. A column with a
+ *        term that is not finite sums to NaN.
+ */
+class FixedPoint {
+    public:
+        /** @brief Collective. */
+        FixedPoint(const std::vector<double> & terms, size_t width_) : width(width_), exponent(width_, 0) {
+            std::vector<double> largest(2 * width, 0.0);
+            for (size_t k = 0; k < terms.size(); k++) {
+                const size_t j = k % width;
+                if (std::isfinite(terms[k])) {
+                    largest[j] = std::max(largest[j], std::abs(terms[k]));
+                } else {
+                    largest[width + j] = 1.0;
+                }
+            }
+            comm::allreduce(std::span<double>(largest), comm::Op::MAX);
+            for (size_t j = 0; j < width; j++) {
+                std::frexp(largest[j], &exponent[j]);
+                finite.push_back(largest[width + j] == 0.0);
+            }
+            unit = exact_sums_unit(comm::allreduce(static_cast<uint64_t>(terms.size() / width), comm::Op::SUM));
+        }
+
+        /** @brief The terms, two integers each. */
+        std::vector<uint64_t> encode(const std::vector<double> & terms) const {
+            std::vector<uint64_t> out(2 * terms.size(), 0);
+            for (size_t k = 0; k < terms.size(); k++) {
+                if (!std::isfinite(terms[k])) continue;
+                const double t = std::ldexp(terms[k], -exponent[k % width]) * unit, hi = std::round(t);
+                out[2 * k] = static_cast<uint64_t>(static_cast<int64_t>(hi));
+                out[2 * k + 1] = static_cast<uint64_t>(static_cast<int64_t>(std::round((t - hi) * unit)));
+            }
+            return out;
+        }
+
+        /** @brief Column j of row r of sums of encoded terms (2 width integers a row). */
+        double decode(const std::vector<uint64_t> & sums, size_t r, size_t j) const {
+            if (!finite[j]) return std::numeric_limits<double>::quiet_NaN();
+            const uint64_t * s = &sums[2 * (r * width + j)];
+            const double hi = double(static_cast<int64_t>(s[0])), lo = double(static_cast<int64_t>(s[1]));
+            return std::ldexp((hi + lo / unit) / unit, exponent[j]);
+        }
+
+    private:
+        size_t width;
+        std::vector<int> exponent;
+        std::vector<bool> finite;
+        double unit = 1.0;
+};
 
 } // namespace
 
@@ -121,35 +178,43 @@ Profile average(const std::vector<std::array<double, N_DIM>> & centers, const st
 
     // Per cell: count, weight, Favre weight, weighted coordinates, weighted columns
     const size_t width = 3 + n_kept + n_cols;
-    std::vector<double> coords, sums;
+    std::vector<double> coords, terms;
     for (size_t c = 0; c < n_cells; c++) {
         const double w = weights[c];
         if (w <= 0.0) continue;
         const double w_f = density.empty() ? 0.0 : w * density[c];
         for (size_t d = 0; d < n_kept; d++) coords.push_back(centers[c][kept[d]]);
-        sums.insert(sums.end(), {1.0, w, w_f});
-        for (size_t d = 0; d < n_kept; d++) sums.push_back(w * centers[c][kept[d]]);
+        terms.insert(terms.end(), {1.0, w, w_f});
+        for (size_t d = 0; d < n_kept; d++) terms.push_back(w * centers[c][kept[d]]);
         for (const Column & col : columns) {
             double x = col.values[c];
             if (col.mean_a >= 0) x += columns[static_cast<size_t>(col.mean_a)].values[c] *
                                       columns[static_cast<size_t>(col.mean_b)].values[c];
-            sums.push_back((col.favre ? w_f : w) * x);
+            terms.push_back((col.favre ? w_f : w) * x);
         }
     }
-    const std::vector<double> local = merge(coords, sums, n_kept, width, tol);
+    const FixedPoint fixed(terms, width);
+    const std::vector<uint64_t> local = merge(coords, fixed.encode(terms), n_kept, 2 * width, tol);
     // Rows of every rank, merged again at their mean coordinates
-    const size_t n_local = local.size() / width;
+    const size_t n_local = local.size() / (2 * width);
     std::vector<double> local_coords(n_local * n_kept);
     for (size_t r = 0; r < n_local; r++) {
-        for (size_t d = 0; d < n_kept; d++) local_coords[r * n_kept + d] = local[r * width + 3 + d] / local[r * width + 1];
+        for (size_t d = 0; d < n_kept; d++) {
+            local_coords[r * n_kept + d] = fixed.decode(local, r, 3 + d) / fixed.decode(local, r, 1);
+        }
     }
-    const std::vector<double> all_coords = comm::gatherv(local_coords), all = comm::gatherv(local);
+    const std::vector<double> all_coords = comm::gatherv(local_coords);
+    const std::vector<uint64_t> all = comm::gatherv(local);
     Profile profile;
     for (const size_t d : kept) profile.axes.emplace_back(AXES[d]);
     for (const Column & col : columns) profile.names.push_back(col.name);
     if (!comm::is_root()) return profile;
-    const std::vector<double> rows = merge(all_coords, all, n_kept, width, tol);
-    const size_t n_rows = rows.size() / width;
+    const std::vector<uint64_t> merged = merge(all_coords, all, n_kept, 2 * width, tol);
+    const size_t n_rows = merged.size() / (2 * width);
+    std::vector<double> rows(n_rows * width);
+    for (size_t r = 0; r < n_rows; r++) {
+        for (size_t j = 0; j < width; j++) rows[r * width + j] = fixed.decode(merged, r, j);
+    }
     std::vector<size_t> order(n_rows);
     std::iota(order.begin(), order.end(), size_t(0));
     const auto coord = [&](size_t r, size_t d) { return rows[r * width + 3 + d] / rows[r * width + 1]; };
