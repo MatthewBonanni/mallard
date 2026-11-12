@@ -671,7 +671,7 @@ after it are that run's), and the run record's `start` record.
 | `run` | `run_id` (a random UUID, new for every run, restarts included), `start_time` (UTC, ISO 8601), `ranks`, `host`, `device` (rank 0's), `directory`, `hosts` (the number of hosts; where each rank ran is the run record's `placement`), `restart_of` (as the run record's: `run_id`, `file`, `step`; `null` for a fresh start) |
 | `input` | `file`, `sha256` of its bytes, its `text`, and `resolved`: the input with every key explicit, as the run used it ([the resolved input](input_files.md#the-resolved-input), what `mallard input resolve` writes) |
 | `mesh` | `type`; for mesh files `file` and the `sha256` of its bytes (of a directory: of each file's relative path and bytes, by path; skipped with `[output] hash_mesh = false`) |
-| `files` | Each other file the run read, once (absent if none): `kind` (`mechanism`, `table`, `inflow_profile`, `probe_points`, `restart`, `remap_source`, `remap_mesh`), `path` as given, `resolved`, `bytes`, and `sha256` of its bytes. A restart file or remap source is not hashed again: it records the `run_id`, `step` and `t` of the run that wrote it, and the `sha256` from that run's [output record](#run-record-mallardjsonl) of the file (`sha256_from`). Where there is none (a copied or moved file, a run before 0.10, a changed file) and for a remap source mesh, `sha256` is `null`, with the file's `modified` time and a `note` saying why |
+| `files` | Each other file the run read, once (absent if none): `kind` (`mechanism`, `table`, `inflow_profile`, `probe_points`, `restart`, `remap_source`, `remap_mesh`, and `snapshot` for each snapshot `mallard post extract` read, once per step of a file of several), `path` as given, `resolved`, `bytes`, and `sha256` of its bytes. A restart file, remap source or snapshot is not hashed again: it records the `run_id`, `step` and `t` of the run that wrote it, and the `sha256` from that run's [output record](#run-record-mallardjsonl) of the file (`sha256_from`). Where there is none (a copied or moved file, a run before 0.10, a changed file) and for a remap source mesh, `sha256` is `null`, with the file's `modified` time and a `note` saying why |
 | `preset` | The `[numerics] preset` (`null` without one): `name`, `default` (`true` when the input names no preset and gets the default, `high_order`), and per key it covers its `key`, its `value` in the resolved input (as TOML: `"\"HLLC\""`, `0.5`) and `from_preset` (`false` where the input overrides it) |
 
 Before 0.10 the block was named the provenance block: schema
@@ -908,6 +908,72 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 | `plot_<case>.py` | Each validation case against its reference |
 
 ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` (HDF5) series directly. `read_vtu_cells` reads any snapshot file, and `mallard.vtu.snapshot("solut/flow_000100")` finds it whichever format the build wrote.
+
+## Sharing a run: `mallard pack`
+
+`mallard pack RUN_DIR` packs a run into one archive that reproduces it: for a
+paper's supplement, a bug report, or moving a case to another machine. What
+goes in comes from the [run record](#run-record-mallardjsonl) of the run
+directory's last run, never from file names:
+
+- **The case:** the input as the run read it (its text, from the [run
+  block](#run-block)), the mesh file, and every other file the run read
+  (mechanisms, tables, inflow profiles, probe points, the restart file or
+  remap source it started from), each checked against the SHA-256 the run
+  recorded of it. A generated mesh needs no file: the input makes it again.
+- **The record:** `run.json` (the run's `start` record: code, build, rank
+  placement), `resolved.toml` (the [resolved input](input_files.md#the-resolved-input))
+  and the run record itself.
+- **Outputs**, `--with-outputs`: `small` (the default) packs the forces,
+  integrals and probes (CSV files, probe snapshots, spectra), as the resolved
+  input and the output records name them; `all` also the snapshots and restart
+  files of the run's output records; `none` none.
+
+```
+$ mallard pack cylinder
+== Packed cylinder.tar.gz ======================================================== 11 files
+  Run                1b01f219-ce2d-4825-96a0-ce37641128ae
+  Case               4 files: the input, mesh and files the run read
+  Outputs            4 files (--with-outputs small)
+  Size               105,997 bytes before compression
+  Rerun              tar -xf cylinder.tar.gz && cd cylinder/case/cylinder && mallard -i input.toml --restart solut/restart_000004.restart
+  Verify             mallard pack --verify cylinder.tar.gz
+```
+
+The archive is one directory, named as the archive:
+
+| Path | Contents |
+|---|---|
+| `manifest.json` | `schema` (`"mallard-pack"`), `version` (1), `created`, `mallard` (the version that packed it), `run_id`, `rerun` (`directory` and `command`: how to run it again), `ranks`, `mesh`, `with_outputs`, `notes`, and `files`: each file's `path`, `role` (`input`, `mesh`, `read`, `run_record`, `resolved_input`, `run_log`, `output`), `kind` (of a file read, or an output's), `given` (the path the run gave it), `bytes` and `sha256` |
+| `run.json`, `resolved.toml` | The run's start record and its resolved input |
+| `case/` | The input, mesh and files read, laid out as they were around the run directory: a mesh in `../meshes/` of the run lands in `case/meshes/`, the run directory in `case/<its name>/`, so the input's relative paths hold unchanged |
+| `output/` | The run record and outputs, by their paths in the run directory, apart from the case so a rerun writes beside them, not over them |
+
+Unpack it anywhere with `tar -xf` and run the manifest's `rerun.command` in
+its `rerun.directory`: the run starts again from the same files (a restart
+given with `--restart` is part of the command), and on the same build and rank
+count reproduces the run bit for bit, which `mallard diff` against `output/`
+shows. `mallard pack --verify ARCHIVE` checks an archive: every file against
+the size and SHA-256 of the manifest, none missing or added, and the input,
+mesh and files read against the hashes of the run block itself; it exits 1 and
+lists the files that differ. The archive is gzip-compressed (`.tar.gz`) in
+builds with zlib (`Mallard_ENABLE_ZLIB`), else plain `.tar`; `-o` names it.
+
+- **A file changed since the run read or wrote it is refused**, by its
+  SHA-256: the archive would not reproduce the run. Restart files the run
+  started from carry the SHA-256 of the run that wrote them, where its run
+  record is still where it was; a restart file written by a script in
+  `tools/setup` has none, and is packed as it is (the script itself is not
+  in the run record, so it is not packed).
+- **Absolute paths** in the input are packed under `absolute/`, but the rerun
+  reads them at that path; give files by relative paths to pack them
+  reproducibly. `pack` warns, and the manifest's `notes` say so.
+- **What a rerun cannot repeat** is noted too: a [`mallard ctl set`](running.md)
+  while the run ran, and a run record without an end record (still running,
+  or killed).
+- Series indexes (`.pvd`, `.vtkhdf.series`), which the output records do not
+  list, are not packed by `--with-outputs all`; `mallard info` and
+  `mallard diff` read the snapshots without them.
 
 ## See also
 
