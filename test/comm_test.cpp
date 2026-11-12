@@ -56,6 +56,14 @@ Terms global_terms(const std::string & label) {
     return terms;
 }
 
+// A free function: nvcc rejects device lambdas in TEST bodies, which are private members
+void fill_rank_columns(const Kokkos::View<double **, Kokkos::LayoutLeft> & columns, const double r) {
+    Kokkos::parallel_for("fill", columns.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
+        columns(c, 0) = Kokkos::sin(1.0 + c + 100.0 * r);
+        columns(c, 1) = Kokkos::cos(c * r) * 1e-6;
+    });
+}
+
 }
 
 TEST(ExactSumsTest, SumsAreTheSameBitForBitOnAnyNumberOfRanks) {
@@ -84,10 +92,7 @@ TEST(ExactSumsTest, AcrossRanksAreTheSameWithNcclAndMpi) {
     const uint32_t n = 100 + 37 * static_cast<uint32_t>(comm::rank());
     Kokkos::View<double **, Kokkos::LayoutLeft> columns("columns", n, 2);
     const double r = comm::rank();
-    Kokkos::parallel_for("fill", n, KOKKOS_LAMBDA(const uint32_t c) {
-        columns(c, 0) = Kokkos::sin(1.0 + c + 100.0 * r);
-        columns(c, 1) = Kokkos::cos(c * r) * 1e-6;
-    });
+    fill_rank_columns(columns, r);
     const ExactSums mpi(2, n, true, false), nccl(2, n, true, true);
     mpi.sum(columns);
     nccl.sum(columns);
