@@ -366,7 +366,9 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageTheirIntegralsAsTheyAreInEachSn
     std::vector<std::string> words = restarts(run);
     words.insert(words.end(), {"--region", dense, "--snapshot", "vtu", "-o", fresh_dir("solution_snapshot")});
     EXPECT_EQ(average(words, &errors), 2);
-    if (comm::is_root()) EXPECT_NE(errors.find("defined by the solution"), std::string::npos) << errors;
+    if (comm::is_root()) {
+        EXPECT_NE(errors.find("defined by the solution"), std::string::npos) << errors;
+    }
 }
 
 TEST(PostAverageTest, RegionsOfTheSolutionAverageProductsFavreAndProfilesAsTheyAreInEachSnapshot) {
