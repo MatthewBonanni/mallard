@@ -16,6 +16,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -435,6 +436,29 @@ TEST(StepQueueTest, OutputsByStep) {
     if (!comm::is_root()) return;
     EXPECT_TRUE(o.files.count("forces.csv"));
     EXPECT_TRUE(o.files.count("restart_000028.restart"));
+}
+
+TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
+    // An integral, a force and a probe's value, each sampled at its own monitor's steps while steps run ahead
+    Case c;
+    c.run = "n_steps = 60\ncfl = 0.5\n";
+    c.extra = "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 25\n"
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+              "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+              "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 5\n"
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+              "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"forces_bottom_Fy_pressure\", "
+              "\"pt_P\"]\nmin_samples = 10\nbatches = 4\nfile = \"{dir}/convergence.csv\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("convergence", c);
+    if (!comm::is_root()) return;
+    ASSERT_TRUE(o.files.count("convergence.csv"));
+    // A row at each step where one of the three monitors wrote
+    size_t rows = 0, expected = 0;
+    std::istringstream in(o.files.at("convergence.csv"));
+    for (std::string line; std::getline(in, line);) rows += !line.empty() && std::isdigit(static_cast<unsigned char>(line[0]));
+    for (uint64_t s = 0; s <= 60; s++) expected += s % 2 == 0 || s % 3 == 0 || s % 5 == 0;
+    EXPECT_EQ(rows, expected);
 }
 
 TEST(StepQueueTest, OutputsByTimeAndTStop) {
