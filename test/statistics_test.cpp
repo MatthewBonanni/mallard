@@ -22,9 +22,13 @@
 #include <string>
 #include <vector>
 
+#include "output_reader.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "scratch.h"
+#ifdef Mallard_HAS_HDF5
+#include "hdf5_util.h"
+#endif
 
 namespace {
 
@@ -121,6 +125,109 @@ TEST(StatisticsTest, AveragesOfAnOscillatingFlowMatchTheAnalyticalOnes) {
         // p' = 0.1 u0^2 cos(2 w t) is orthogonal to u' over a period
         EXPECT_NEAR(double(cov(c, 1)), 0.0, tol * u0 * u0);
     }
+}
+
+TEST(StatisticsTest, SnapshotsRecordWhatEachAveragedFieldAverages) {
+    // The oscillating flow above: 64 samples every 2 steps over t in (1/4, 5/4], four phase bins of one period
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    const std::string dir = (scratch_dir() / "statistics_snapshot_averages").string();
+    std::filesystem::remove_all(dir);
+    std::ostringstream force;
+    force << std::setprecision(17) << 0.1 * 2.0 * M_PI << " * cos(" << 2.0 * M_PI << " * t)";
+    std::string input =
+        "[run]\nn_steps = 160\ndt = 0.0078125\n" + box(4, true) +
+        "[initialize]\ntype = \"constant\"\nu = " + numbers3("0", "0", "0") + "\np = 1.0\nT = 1.0\n" + PERFECT_GAS +
+        "[source]\nrhou = " + vector3(force.str().c_str(), "0", "0") + "\ntime_dependent = true\n"
+        "[output]\ncheck_interval = 1000000\n"
+        "[statistics]\nt_start = 0.25\ninterval = 2\nfields = [\"RHO\", \"P\"]\nproducts = [\"P*U_X\"]\n"
+        "[statistics.phase]\nfields = [\"P\"]\nbins = 4\nperiod = 1.0\n"
+        "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\ninterval = 160\n"
+        "fields = [\"MEAN_*\", \"COV_*\", \"PHASE_*\"]\n";
+    if (have_hdf5()) {
+        input += "[[write_data]]\nprefix = \"" + dir + "/flow\"\ninterval = 160\n"
+                 "fields = [\"MEAN_*\", \"COV_*\", \"PHASE_*\"]\n";
+    }
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input));
+    solver.run();
+    std::vector<std::string> files = {dir + "/flow_000160.vtu"};
+    if (have_hdf5()) files.push_back(dir + "/flow_000160.vtkhdf");
+    for (const std::string & name : files) {
+        SCOPED_TRACE(name);
+        const output::Contents file = output::open(name);
+        ASSERT_TRUE(file.snapshots.back().has_block);
+        const snapshot_block::Block & b = file.snapshots.back().block;
+        auto average = [&](const std::string & field) {
+            const snapshot_block::Field * f = b.field(field);
+            return f ? f->average : snapshot_block::Average{};
+        };
+        const snapshot_block::Average rho = average("MEAN_RHO");
+        EXPECT_EQ(rho.kind, "reynolds");
+        EXPECT_EQ(rho.of, std::vector<std::string>{"RHO"});
+        EXPECT_EQ(rho.weighting, "time");
+        EXPECT_DOUBLE_EQ(rho.start, 0.25);
+        EXPECT_DOUBLE_EQ(rho.end, 1.25);
+        EXPECT_EQ(rho.samples, 64);
+        EXPECT_EQ(rho.interval, 2);
+        const snapshot_block::Average cov = average("COV_P_U_X");
+        EXPECT_EQ(cov.kind, "covariance");
+        EXPECT_EQ(cov.of, (std::vector<std::string>{"P", "U_X"}));
+        EXPECT_EQ(cov.samples, 64);
+        const snapshot_block::Average phase = average("PHASE_2_P");
+        EXPECT_EQ(phase.kind, "phase");
+        EXPECT_EQ(phase.of, std::vector<std::string>{"P"});
+        EXPECT_EQ(phase.bin, 2);
+        EXPECT_EQ(phase.bins, 4);
+        EXPECT_DOUBLE_EQ(phase.period, 1.0);
+        EXPECT_TRUE(phase.trigger.empty());
+        EXPECT_NEAR(phase.bin_weight, 0.25, 1e-12);
+        EXPECT_DOUBLE_EQ(phase.end, 1.25);
+    }
+#ifdef Mallard_HAS_HDF5
+    const std::string path = dir + "/flow_000160.vtkhdf";
+    h5::Handle file(H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + path);
+    auto methods = [&](const std::string & field) -> std::string {
+        h5::Handle d(H5Dopen2(file, ("VTKHDF/CellData/" + field).c_str(), H5P_DEFAULT), H5Dclose, "opening " + field);
+        return H5Aexists(d, "cell_methods") > 0 ? h5::read_string_attribute(d, "cell_methods") : "";
+    };
+    EXPECT_EQ(methods("MEAN_RHO"), std::string(N_DIM == 2 ? "area" : "volume") + ": mean time: mean");
+    EXPECT_EQ(methods("MEAN_P"), "time: mean");
+    EXPECT_EQ(methods("PHASE_2_P"), "time: mean");
+    EXPECT_EQ(methods("COV_P_U_X"), "");
+#endif
+}
+
+TEST(StatisticsTest, AveragedProbesRecordTheirOwnWindow) {
+    // Probe averages sample on the [statistics] schedule but keep their own window, here without any [statistics] means
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    const std::string dir = (scratch_dir() / "statistics_probe_window").string();
+    std::filesystem::remove_all(dir);
+    const std::string extra = "[statistics]\nt_start = 0.02\ninterval = 2\n[[probes]]\nname = \"p\"\nformat = \"vtp\"\n"
+                              "file = \"" + dir + "/p.pvd\"\npoint = " + numbers3("0.45", "0.55", "0.5") +
+                              "\nfields = [\"P\"]\naverage = true\ninterval = 10\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml("[run]\nn_steps = 20\ndt = 0.0078125\n" + box(6, true) + "[initialize]\n" + BLOB +
+                           PERFECT_GAS + "[output]\ncheck_interval = 1000000\n" + extra));
+    solver.run();
+    const output::Contents file = output::open(dir + "/p.pvd");
+    ASSERT_TRUE(file.snapshots.back().has_block);
+    const snapshot_block::Block & b = file.snapshots.back().block;
+    // Samples at steps 4, 6, ..., 20 (t > 0.02), the first weighted from t_start, an rtype as times are
+    const double t_start = static_cast<double>(static_cast<rtype>(0.02));
+    EXPECT_TRUE(b.averaged);
+    EXPECT_NEAR(b.average_start, t_start, 1e-12);
+    EXPECT_DOUBLE_EQ(b.average_end, 20 * 0.0078125);
+    EXPECT_EQ(b.samples, 9);
+    const snapshot_block::Field * f = b.field("MEAN_P");
+    ASSERT_TRUE(f);
+    EXPECT_EQ(f->average.kind, "reynolds");
+    EXPECT_EQ(f->average.of, std::vector<std::string>{"P"});
+    EXPECT_NEAR(f->average.start, t_start, 1e-12);
+    EXPECT_EQ(f->average.samples, 9);
+    EXPECT_EQ(f->average.interval, 2);
+    EXPECT_EQ(f->value, "cell_state");
 }
 
 TEST(StatisticsTest, BatchIntervalsAreThoseOfTheBatchAveragesOfTheOscillation) {
@@ -266,14 +373,11 @@ TEST(StatisticsTest, StatisticsLeaveTheSolutionUnchangedAndRestartBitwise) {
 }
 
 TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
-    // Points on faces between cells take the cell with the lowest id, points
-    // outside the domain the nearest centroid; the values are the cell's, bitwise
+    // Points on faces between cells take the cell with the lowest id; the values are the cell's, bitwise
     const std::string dir = (scratch_dir() / "mallard_probe_test").string();
     const std::string probes =
         "[[probes]]\nname = \"line\"\nfile = \"" + dir + "/line.csv\"\nfields = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
-        "start = " + numbers3("0", "0.5", "0.5") + "\nend = " + numbers3("1", "0.5", "0.5") + "\nn_points = 11\n"
-        "[[probes]]\nname = \"out\"\nfile = \"" + dir + "/out.csv\"\nfields = [\"RHO\", \"U_X\", \"P\", \"T\"]\n"
-        "point = " + numbers3("1.3", "0.27", "0.62") + "\n";
+        "start = " + numbers3("0", "0.5", "0.5") + "\nend = " + numbers3("1", "0.5", "0.5") + "\nn_points = 11\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(blob_input(6, BLOB, probes)));
@@ -296,20 +400,11 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
             }
             if (inside) return c;
         }
-        uint32_t best = 0;
-        double d_best = std::numeric_limits<double>::max();
-        for (uint32_t c : mesh.cells_by_global_id()) {
-            double d2 = 0.0;
-            for (size_t d = 0; d < N_DIM; d++) d2 += std::pow(x[d] - double(mesh.h_cell_coords(c, d)), 2);
-            if (d2 < d_best) {
-                d_best = d2;
-                best = c;
-            }
-        }
-        return best;
+        ADD_FAILURE() << "no cell holds the point";
+        return 0u;
     };
     size_t n_checked = 0;
-    for (const char * name : {"line", "out"}) {
+    for (const char * name : {"line"}) {
         for (const auto & row : csv_rows(dir + "/" + name + ".csv")) {
             if (std::stoull(row[0]) != solver.get_step()) continue;
             std::vector<double> x;
@@ -323,5 +418,5 @@ TEST(StatisticsTest, ProbesReadTheCellHoldingEachPoint) {
             n_checked++;
         }
     }
-    EXPECT_EQ(n_checked, 12u);
+    EXPECT_EQ(n_checked, 11u);
 }

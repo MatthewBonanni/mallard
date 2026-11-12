@@ -1,0 +1,1 @@
+- Probes of moving regions and of regions defined by the solution select the cells they cover on the device at each write and `[statistics]` sample, and evaluate and gather only those to rank 0, instead of every cell of the mesh (#848).

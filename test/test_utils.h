@@ -57,9 +57,9 @@ inline std::string without_comment_lines(const std::string & text) {
 }
 
 /**
- * @brief An output file's bytes without its run and snapshot blocks (which
- *        name the run and when it wrote the file: its id, input, start time,
- *        rank count): the trailers of restart files, the XML comments of VTU,
+ * @brief An output file's bytes without its run, snapshot and probe sampling
+ *        blocks (which name the run, the probe and when it wrote the file: its
+ *        id, input, start time, rank count): the trailers of restart files, the XML comments of VTU,
  *        PVTU, PVD and XDMF files, CSV comment lines.
  */
 inline std::string without_run_metadata(std::string bytes) {
@@ -75,7 +75,7 @@ inline std::string without_run_metadata(std::string bytes) {
         return bytes;
     }
     bool xml = false;
-    for (const char * comment : {"<!-- mallard-run ", "<!-- mallard-snapshot "}) {
+    for (const char * comment : {"<!-- mallard-run ", "<!-- mallard-snapshot ", "<!-- mallard-probe-sampling "}) {
         for (size_t a = bytes.find(comment); a != std::string::npos; a = bytes.find(comment, a)) {
             bytes.erase(a, bytes.find(" -->\n", a) + 5 - a);
             xml = true;
