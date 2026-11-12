@@ -2935,10 +2935,10 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     std::array<int64_t, 4> cells_before = {0, 0, 0, 0}, ids_before = {0, 0, 0, 0};
     h5::Handle top(H5Gopen2(h5file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
     if (changing) {
-        auto sum = [&](hid_t group, const char * name) {
+        auto sum = [&](hid_t group, const char * dataset) {
             int64_t total = 0;
             if (k > 0) {
-                for (const int64_t c : h5::read_rows<int64_t>(group, name, 0, k, 1, H5P_DEFAULT)) total += c;
+                for (const int64_t c : h5::read_rows<int64_t>(group, dataset, 0, k, 1, H5P_DEFAULT)) total += c;
             }
             return total;
         };
