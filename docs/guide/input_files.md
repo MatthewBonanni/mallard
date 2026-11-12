@@ -151,7 +151,8 @@ listed in the [input reference](../input.md#units), and a unit of another
 dimension stops the run before it starts:
 
 ```text
-error: input.toml: line 14: boundaries.p: "300 K" has the dimension of temperature (K). Expected pressure (kg m^-1 s^-2), e.g. in Pa, kPa, MPa, bar, atm, psi; a number without a unit is in SI. See docs/guide/input_files.md#units.
+error E-INPUT: input.toml: line 14: boundaries.p: "300 K" has the dimension of temperature (K). Expected pressure (kg m^-1 s^-2), e.g. in Pa, kPa, MPa, bar, atm, psi; a number without a unit is in SI. See docs/guide/input_files.md#units.
+  docs/guide/input_files.md#e-input
 ```
 
 **Writing units.** A number, an optional space, then the unit:
@@ -292,9 +293,10 @@ the wrong table, or one the chosen settings do not use (for example
 listed with its line and the closest key Mallard looked for:
 
 ```text
-error: input.toml: keys that are unknown or unused with these settings (mallard check lists them all):
+error E-KEY-UNUSED: input.toml: keys that are unknown or unused with these settings (mallard check lists them all):
   line 8: mesh.Nyy (did you mean mesh.Ny?)
   line 11: mesh.t_stop (did you mean run.t_stop?)
+  docs/guide/input_files.md#e-key-unused
 ```
 
 When another error stops the setup first, the keys with a suggestion are
@@ -307,8 +309,10 @@ wrong, lists the accepted values or the closest one, says what to do, and
 links the docs that explain the key; `mallard check` reports it the same way:
 
 ```text
-error: input.toml: line 6: mesh.Nx: is 16 (a float), but must be a non-negative integer. Write it without a decimal point: 16. See docs/input.md#mesh.
-error: input.toml: line 20: boundaries[name = "inlet"].type: "wall" is not accepted (did you mean "wall_adiabatic", "wall_heat_flux" or "wall_isothermal"?). Accepted values: ... See docs/input.md#boundaries.
+error E-INPUT: input.toml: line 6: mesh.Nx: is 16 (a float), but must be a non-negative integer. Write it without a decimal point: 16. See docs/input.md#mesh.
+  docs/guide/input_files.md#e-input
+error E-INPUT: input.toml: line 20: boundaries[name = "inlet"].type: "wall" is not accepted (did you mean "wall_adiabatic", "wall_heat_flux" or "wall_isothermal"?). Accepted values: ... See docs/input.md#boundaries.
+  docs/guide/input_files.md#e-input
 ```
 
 A value of the wrong type is always an error, never replaced by the default.
@@ -475,7 +479,7 @@ The report opens and closes with the result, and the exit status is 1 if there i
 
 ### Diagnostics
 
-Each error and warning has a stable code that scripts can match. Errors (`E-`) make the exit status 1; warnings (`W-`) do not.
+Each error and warning has a stable code that scripts can match. Errors (`E-`) make the exit status 1; warnings (`W-`) do not. A run reports the same codes, and those of its own warnings and errors ([Warnings and errors](running.md#warnings-and-errors)).
 
 | Code | What it means | What to do |
 |---|---|---|
@@ -488,6 +492,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | <a id="e-memory-device"></a>`E-MEMORY-DEVICE` | The estimated peak per rank exceeds the device's memory | Run on more ranks or GPUs, or on a coarser mesh; GPU sizing says how many fit |
 | <a id="e-region-empty"></a>`E-REGION-EMPTY` | A region the case uses overlaps the domain's bounding box but touches no cell: too thin, or in a hole of the mesh | Enlarge or move it; `--view` shows it with the mesh's zones ([Regions on a mesh](geometry.md#regions-on-a-mesh)) |
 | <a id="e-region-outside"></a>`E-REGION-OUTSIDE` | A region the case uses lies outside the domain. The message gives both extents | Move it inside: often a unit or a sign ([Regions on a mesh](geometry.md#regions-on-a-mesh)) |
+| <a id="w-probe-outside"></a>`W-PROBE-OUTSIDE` | Part of a probe lies outside the domain: samples of a line or surface outside the mesh, which it leaves out. The message gives how many and where | Move the probe inside the domain, or accept the part it samples ([Probes](probes.md#probes-probes)) |
 | <a id="w-quality-non-orthogonality"></a>`W-QUALITY-NON-ORTHOGONALITY`, <a id="w-quality-skewness"></a>`W-QUALITY-SKEWNESS`, <a id="w-quality-aspect-ratio"></a>`W-QUALITY-ASPECT-RATIO`, <a id="w-quality-volume-ratio"></a>`W-QUALITY-VOLUME-RATIO` | Cells above the metric's limit (70 deg, 0.5, 1000, 10). Such cells limit the time step and the accuracy, and can make a run diverge | Improve the mesh where they are: `--mesh-fields PREFIX` writes the metrics as fields ([Mesh quality](meshes.md#mesh-quality)) |
 | <a id="e-mesh-fields"></a>`E-MESH-FIELDS` | `--mesh-fields` could not write its files, or `--cells` or `--region` selects no cell: an id beyond the mesh's cells, a region that touches none | Check the path, the ids (global, from 0) and the region ([Mesh and stencil fields](output.md#mesh-and-stencil-fields)) |
 | <a id="w-cfl-limit"></a>`W-CFL-LIMIT` | The CFL number at the initial state is above the time integrator's stability limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4) | Lower `run.cfl`, or `run.dt` |
@@ -514,7 +519,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
 | `regions`, `case_view` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's file |
-| `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{max, mean, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
+| `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ...): `{quantity, value, units, target, status, basis, x}` |
 | `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, and by category `at_setup_peak` and `steady` |

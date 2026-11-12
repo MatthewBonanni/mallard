@@ -1,0 +1,146 @@
+== Divergence report ================================================================ ERROR
+  Run RUN-ID.
+  SI units. Invalid: a non-finite value, or a non-positive density or pressure.
+  status  quantity                    value    units  basis
+  ERROR   failing step                120      -
+          t                           0.00025  s
+  ERROR   invalid cells               3        cells  of 4,096
+            pressure failed first     1        cells
+            temperature failed first  2        cells
+          last valid step             119      -      t = 0.000248 s, in restart_000119.restart
+  The invalid cells lie within (0.01, 0.02) - (0.015, 0.025) m.
+  Closest to failing at the last valid state: cell 812 at (0.01, 0.02) m (its temperature
+  failed).
+
+== Likely causes ==========================================================================
+  Most likely first. The weight (0 to 1) ranks the causes of this failure; it is not a
+  probability.
+  #  cause                                          weight  evidence, and what to try
+  1  chemistry stiffness                            0.80    - the first quantity to fail was the temperature
+                                                            - its cell needed 480 chemistry sub-steps in the last step,
+                                                            against 8 on average
+                                                            - the Rosenbrock integration rejected 25% of its sub-steps
+                                                            since the last progress row
+                                                            Try: lower run.cfl (the splitting error grows with it;
+                                                            detonations need about 0.35), or [chemistry] coupling =
+                                                            "simpler"
+  2  boundary condition of inlet (inlet_mass_flow)  0.40    - 3 of the 3 invalid cells are within two cells of inlet
+                                                            Try: check the condition and values of inlet
+  3  poor cells                                     0.30    - cell 812 at (0.01, 0.02) m, which became invalid, has
+                                                            skewness 0.1 (questionable above 0.5; the mesh's worst is
+                                                            0.4)
+                                                            - the failure is confined to 3 cells
+                                                            Try: improve cells 811, 812, 813 (mallard check input.toml
+                                                            --mesh-fields mesh writes the metrics for ParaView)
+
+== Evidence ===============================================================================
+  The last valid state (step 119).
+  cell  role               rho [kg/m^3]  |u| [m/s]  p [Pa]     T [K]  CFL   at, quality, boundary and activity
+  812   closest, invalid   1.17          35.2       1.013e+05  2850   0.92  (0.01, 0.02) m
+                                                                            non-orthogonality 12 deg, skewness 0.1,
+                                                                            aspect ratio 1.5, volume ratio 1.2
+                                                                            boundary inlet (inlet_mass_flow) on one of
+                                                                            its faces
+                                                                            repaired, 480 chemistry sub-steps
+  811   neighbor           1.17          35.2       1.013e+05  2100   0.92  (0.0095, 0.02) m
+                                                                            non-orthogonality 12 deg, skewness 0.1,
+                                                                            aspect ratio 1.5, volume ratio 1.2
+                                                                            boundary inlet (inlet_mass_flow) 1 cell away
+                                                                            6 chemistry sub-steps
+  813   neighbor, invalid  1.17          35.2       1.013e+05  2600   0.92  (0.0105, 0.02) m
+                                                                            non-orthogonality 12 deg, skewness 0.1,
+                                                                            aspect ratio 1.5, volume ratio 1.2
+                                                                            boundary inlet (inlet_mass_flow) on one of
+                                                                            its faces
+                                                                            480 chemistry sub-steps
+  closest: the invalid cell closest to failing at that state; neighbor: its face neighbors;
+  other: the next invalid cells.
+  quantity       value   units
+  mean density   1.05    kg/m^3
+  mean pressure  101000  Pa
+
+== Progress rows before the failure =======================================================
+  step  t [s]    dt [s]  CFL   min rho [kg/m^3]  min p [Pa]  min T [K]
+  100   0.00021  2e-08   0.95  1.1               1e+05       300
+  110   0.00023  2e-08   0.95  1.09              1e+05       298
+
+== Reproduce ==============================================================================
+  mallard -i <input> --restart restart_000119.restart
+  with [numerics] check_nan = true and [output] check_interval = 1 to follow it step by step
+  divergence_report_neighborhood_000120.vtkhdf: the neighborhood of the invalid cells for
+  ParaView (DIVERGED = 1 marks them; the fields are the last valid state's, with the mesh
+  quality)
+  See docs/guide/running.md#e-diverged
+
+== Divergence report ================================================================ ERROR
+  Run RUN-ID.
+  Nondimensional case (physics.units): no units. Invalid: a non-finite value, or a
+  non-positive density or pressure.
+  status  quantity                    value    units  basis
+  ERROR   failing step                120      -
+          t                           0.00025  -
+  ERROR   invalid cells               3        cells  of 4,096
+            pressure failed first     1        cells
+            temperature failed first  2        cells
+          last valid step             119      -      t = 0.000248, in restart_000119.restart
+  The invalid cells lie within (0.01, 0.02) - (0.015, 0.025).
+  Closest to failing at the last valid state: cell 812 at (0.01, 0.02) (its temperature
+  failed).
+
+== Likely causes ==========================================================================
+  Most likely first. The weight (0 to 1) ranks the causes of this failure; it is not a
+  probability.
+  #  cause                                          weight  evidence, and what to try
+  1  chemistry stiffness                            0.80    - the first quantity to fail was the temperature
+                                                            - its cell needed 480 chemistry sub-steps in the last step,
+                                                            against 8 on average
+                                                            - the Rosenbrock integration rejected 25% of its sub-steps
+                                                            since the last progress row
+                                                            Try: lower run.cfl (the splitting error grows with it;
+                                                            detonations need about 0.35), or [chemistry] coupling =
+                                                            "simpler"
+  2  boundary condition of inlet (inlet_mass_flow)  0.40    - 3 of the 3 invalid cells are within two cells of inlet
+                                                            Try: check the condition and values of inlet
+  3  poor cells                                     0.30    - cell 812 at (0.01, 0.02), which became invalid, has
+                                                            skewness 0.1 (questionable above 0.5; the mesh's worst is
+                                                            0.4)
+                                                            - the failure is confined to 3 cells
+                                                            Try: improve cells 811, 812, 813 (mallard check input.toml
+                                                            --mesh-fields mesh writes the metrics for ParaView)
+
+== Evidence ===============================================================================
+  The last valid state (step 119).
+  cell  role               rho   |u|   p          T     CFL   at, quality, boundary and activity
+  812   closest, invalid   1.17  35.2  1.013e+05  2850  0.92  (0.01, 0.02)
+                                                              non-orthogonality 12 deg, skewness 0.1, aspect ratio 1.5,
+                                                              volume ratio 1.2
+                                                              boundary inlet (inlet_mass_flow) on one of its faces
+                                                              repaired, 480 chemistry sub-steps
+  811   neighbor           1.17  35.2  1.013e+05  2100  0.92  (0.0095, 0.02)
+                                                              non-orthogonality 12 deg, skewness 0.1, aspect ratio 1.5,
+                                                              volume ratio 1.2
+                                                              boundary inlet (inlet_mass_flow) 1 cell away
+                                                              6 chemistry sub-steps
+  813   neighbor, invalid  1.17  35.2  1.013e+05  2600  0.92  (0.0105, 0.02)
+                                                              non-orthogonality 12 deg, skewness 0.1, aspect ratio 1.5,
+                                                              volume ratio 1.2
+                                                              boundary inlet (inlet_mass_flow) on one of its faces
+                                                              480 chemistry sub-steps
+  closest: the invalid cell closest to failing at that state; neighbor: its face neighbors;
+  other: the next invalid cells.
+  quantity       value   units
+  mean density   1.05    -
+  mean pressure  101000  -
+
+== Progress rows before the failure =======================================================
+  step  t        dt     CFL   min rho  min p  min T
+  100   0.00021  2e-08  0.95  1.1      1e+05  300
+  110   0.00023  2e-08  0.95  1.09     1e+05  298
+
+== Reproduce ==============================================================================
+  mallard -i <input> --restart restart_000119.restart
+  with [numerics] check_nan = true and [output] check_interval = 1 to follow it step by step
+  divergence_report_neighborhood_000120.vtkhdf: the neighborhood of the invalid cells for
+  ParaView (DIVERGED = 1 marks them; the fields are the last valid state's, with the mesh
+  quality)
+  See docs/guide/running.md#e-diverged
