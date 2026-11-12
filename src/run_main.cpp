@@ -169,7 +169,7 @@ bool number(const cli::Args & args, std::string_view name, T & value, std::strin
 /** @brief The mesh-field options of mallard check into options; an error, or empty. */
 std::string mesh_field_options(const cli::Args & args, CheckOptions & options) {
     if (args.has("--quality")) {
-        if (comm::is_root()) std::cerr << "mallard check --quality is deprecated: use --mesh-fields\n";
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard check --quality is deprecated: use --mesh-fields");
         if (!args.has("--mesh-fields")) options.mesh_fields = args.value_or("--quality", "");
     }
     if (args.has("--mesh-fields")) options.mesh_fields = args.value_or("--mesh-fields", "");

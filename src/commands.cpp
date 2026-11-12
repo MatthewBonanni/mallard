@@ -16,6 +16,8 @@
 #include "front_end.h"
 #include "input_upgrade.h"
 #include "run_control.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace cli {
 
@@ -293,7 +295,9 @@ constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
 int new_main(const Args & args) {
-    if (args.has("--list")) std::cerr << "mallard new --list is deprecated: use mallard list templates\n";
+    if (args.has("--list")) {
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard new --list is deprecated: use mallard list templates");
+    }
     return case_template::new_case(args.positional, args.has("--list"), args.has("--quick"), args.has("--force"));
 }
 
