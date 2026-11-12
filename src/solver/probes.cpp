@@ -1643,6 +1643,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                      [](Reduction r) { return r == Reduction::MIN || r == Reduction::MAX; });
     p.point_value = !p.snapshot && (!p.from_region || p.resampled) && p.nodes.n_global == 1 &&
                     (p.write_samples || extrema || p.quadrature.n_global == 0);
+    p.monitored = reduction_columns;
+    if (p.point_value) {
+        for (const auto & v : p.variables) p.monitored.emplace_back(v, field_units::describe(v).dimension);
+    }
     probes.push_back(std::move(probe_ptr));
 }
 
@@ -1834,6 +1838,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         // Averages are written once they hold a sample
         if (p.average && p.average_samples == 0) continue;
+        p.step_last_value = step;
         std::vector<double> & sampled_nodes = p.gathered_nodes;
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
@@ -1844,6 +1849,8 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         // Rank 0 writes; spectra histories are kept like the averages, on every rank that runs alone
         const bool keep = comm::is_root() || !distributed;
         if (keep) {
+            p.last_step = step;
+            p.last_t = double(t);
             p.last.clear();
             if (!p.reductions.empty()) p.reduce(nodes, quad);
             if (p.point_value) {
@@ -1897,6 +1904,33 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
     }
 }
 
+std::vector<uint64_t> Probes::value_steps() const {
+    std::vector<uint64_t> steps;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        steps.insert(steps.end(), p.reduction_names().size() + (p.point_value ? p.variables.size() : 0),
+                     p.step_last_value);
+    }
+    return steps;
+}
+
+bool Probes::wrote_values(uint64_t step) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return !p->snapshot && p->step_last_value == step;
+    });
+}
+
+std::vector<Dimension> Probes::value_dimensions() const {
+    std::vector<Dimension> dimensions;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        for (const auto & [name, dimension] : p.monitored) dimensions.push_back(dimension);
+    }
+    return dimensions;
+}
+
 std::vector<std::string> Probes::value_names() const {
     std::vector<std::string> names;
     for (const auto & pp : probes) {
@@ -1924,6 +1958,34 @@ std::vector<double> Probes::values() const {
     }
     return values;
 
+}
+
+std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>>>> Probes::recorded_columns() const {
+    std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>>>> all;
+    size_t left = RECORDED;
+    for (const auto & p : probes) {
+        if (p->snapshot || p->monitored.empty() || left == 0) continue;
+        const size_t n = std::min(left, p->monitored.size());
+        all.emplace_back(p->name, std::vector<std::pair<std::string, Dimension>>(p->monitored.begin(),
+                                                                                 p->monitored.begin() + long(n)));
+        left -= n;
+    }
+    return all;
+}
+
+std::vector<MonitorValues> Probes::recorded() const {
+    std::vector<MonitorValues> all;
+    size_t left = RECORDED;
+    for (const auto & p : probes) {
+        if (p->snapshot || p->monitored.empty() || left == 0) continue;
+        const size_t n = std::min(left, p->monitored.size());
+        left -= n;
+        if (p->last.size() != p->monitored.size()) continue;
+        MonitorValues m{p->name, p->last_step, p->last_t, {}};
+        for (size_t i = 0; i < n; i++) m.values.emplace_back(p->monitored[i].first, p->last[i]);
+        all.push_back(std::move(m));
+    }
+    return all;
 }
 
 void Probes::Probe::write_spectra(uint64_t step, rtype t) {

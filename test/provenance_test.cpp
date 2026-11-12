@@ -164,7 +164,7 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
     // The first record names the format, the run and what it restarted from, and holds the run block
     const Value & start = records.front();
     EXPECT_EQ(key_set(start), (std::set<std::string>{"type", "schema", "version", "run_id", "restart_of", "provenance",
-                                                     "placement", "setup_phases"}));
+                                                     "placement", "setup_phases", "units", "check"}));
     EXPECT_EQ(start["run_id"].string, provenance::run_id());
     EXPECT_TRUE(start["restart_of"].is_null());
     EXPECT_EQ(start["placement"].array.size(), static_cast<size_t>(comm::size()));
@@ -180,7 +180,7 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
     const std::set<std::string> progress_keys = {
         "type", "step", "t", "dt", "cfl", "progress", "wall", "wall_per_step", "cells_per_second", "eta", "cells",
         "ranks", "memory_host", "memory_host_peak", "memory_device", "memory_device_total", "monitors", "integrals",
-        "health"};
+        "probes", "health"};
     std::vector<double> steps;
     double last_progress = 0.0;
     std::set<std::pair<std::string, double>> outputs;

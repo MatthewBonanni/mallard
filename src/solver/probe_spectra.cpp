@@ -21,6 +21,7 @@
 
 #include "comm.h"
 #include "common_typedef.h"
+#include "diagnostic_code.h"
 #include "log.h"
 
 namespace probe_spectra {
@@ -252,7 +253,7 @@ double ProbeSpectra::resolution() const {
 bool ProbeSpectra::add(double t, bool keep, const std::vector<double> & nodes, size_t n_cols,
                        const std::vector<double> & reductions) {
     if (held > 0 && std::fabs(t - t_last - dt) > precision_tol<double>(1e-6, 1e-3) * dt) {
-        logging::warning("probes[name = \"" + name + "\"].spectra: the sample at t = " + logging::real(t) +
+        logging::warning(diagnostic_code::SPECTRA_RESTARTED, "probes[name = \"" + name + "\"].spectra: the sample at t = " + logging::real(t) +
                          " is not dt = " + logging::real(dt) + " after the last (t = " + logging::real(t_last) +
                          "); the history starts afresh.");
         held = 0;
