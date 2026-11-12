@@ -1,0 +1,15 @@
+{
+ "default": "\"von_karman_pao\"",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "examples/turbulent_hot_spot_2d/input.toml"
+ ],
+ "type": "string",
+ "values": [
+  "passot_pouquet",
+  "table",
+  "von_karman_pao"
+ ]
+}
