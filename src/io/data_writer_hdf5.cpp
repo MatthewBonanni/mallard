@@ -73,8 +73,11 @@ std::string DataWriter::xdmf_grid(const std::string & stem, const IndexEntry & e
             << indent << "    <Information Name=\"units\" Value=\"" << field_units::xml_escape(field.description.units())
             << "\"/>\n"
             << indent << "    <Information Name=\"long_name\" Value=\""
-            << field_units::xml_escape(field.description.long_name) << "\"/>\n"
-            << indent << "    <DataItem Dimensions=\"" << n_cells << (is_vector ? " 3" : "") << "\" " << real << ">"
+            << field_units::xml_escape(field.description.long_name) << "\"/>\n";
+        if (const std::string methods = cell_methods(field.name); !methods.empty()) {
+            out << indent << "    <Information Name=\"cell_methods\" Value=\"" << methods << "\"/>\n";
+        }
+        out << indent << "    <DataItem Dimensions=\"" << n_cells << (is_vector ? " 3" : "") << "\" " << real << ">"
             << data_h5 << ":/fields/" << field.name << "</DataItem>\n"
             << indent << "  </Attribute>\n";
     }
@@ -290,6 +293,7 @@ void DataWriter::write_hdf5(const std::string & stem, const Block & meta, const 
         write_dataset(group, field.name.c_str(), cell_order.n_global(), int(n_comp), cell_order.first(), n,
                       column.data(), dxpl, deflate, !distributed, io_threads);
         annotate(group, field.name, field.description);
+        h5::cell_methods(group, field.name, cell_methods(field.name));
         c0 += n_comp;
     }
 }

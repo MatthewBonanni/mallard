@@ -56,7 +56,32 @@ Vertex lerp(const Vertex & a, const Vertex & b, const double t) {
     return v;
 }
 
-/** @brief The part of a polygon (or segment, or point) where the linear function of values s is negative. */
+/** @brief Where s changes sign along pq (s(p) = a, s(q) = b of opposite signs): regula falsi from the linear guess. */
+Vertex crossing(const Vertex & p, const Vertex & q, const double a, const double b,
+                const std::function<double(const Vertex &)> & s) {
+    double t0 = 0.0, t1 = 1.0, f0 = a, f1 = b, t = a / (a - b);
+    const double small = 1e-13 * (std::abs(a) + std::abs(b));
+    for (int side = 0, it = 0; it < 60 && t1 - t0 > 1e-15; it++) {
+        t = (t0 * f1 - t1 * f0) / (f1 - f0);
+        const double f = s(lerp(p, q, t));
+        if (std::abs(f) <= small) break;
+        // Illinois: halve the end that stays, so that both ends move
+        if ((f < 0.0) == (f0 < 0.0)) {
+            t0 = t;
+            f0 = f;
+            if (side < 0) f1 *= 0.5;
+            side = -1;
+        } else {
+            t1 = t;
+            f1 = f;
+            if (side > 0) f0 *= 0.5;
+            side = 1;
+        }
+    }
+    return lerp(p, q, t);
+}
+
+/** @brief The part of a polygon (or segment, or point) where s is negative, its edges cut where s changes sign. */
 std::vector<Vertex> clip(const std::vector<Vertex> & poly, const std::function<double(const Vertex &)> & s) {
     if (poly.size() <= 2) {
         std::vector<Vertex> out;
@@ -67,7 +92,7 @@ std::vector<Vertex> clip(const std::vector<Vertex> & poly, const std::function<d
         const double a = s(poly[0]), b = s(poly[1]);
         if (a >= 0.0 && b >= 0.0) return out;
         if (a < 0.0 && b < 0.0) return poly;
-        const Vertex m = lerp(poly[0], poly[1], a / (a - b));
+        const Vertex m = crossing(poly[0], poly[1], a, b, s);
         return a < 0.0 ? std::vector<Vertex>{poly[0], m} : std::vector<Vertex>{m, poly[1]};
     }
     std::vector<Vertex> out;
@@ -76,7 +101,7 @@ std::vector<Vertex> clip(const std::vector<Vertex> & poly, const std::function<d
         const Vertex & q = poly[(i + 1) % poly.size()];
         const double a = s(p), b = s(q);
         if (a < 0.0) out.push_back(p);
-        if ((a < 0.0) != (b < 0.0)) out.push_back(lerp(p, q, a / (a - b)));
+        if ((a < 0.0) != (b < 0.0)) out.push_back(crossing(p, q, a, b, s));
     }
     return out;
 }
@@ -384,57 +409,79 @@ struct Clipper {
     }
 };
 
+/** @brief A bound of the distance from cell c's centroid to its points (curved cells: to their bounding box). */
+double cell_radius(const Mesh & mesh, const uint32_t c) {
+    Vec x0 = {0.0, 0.0, 0.0};
+    for (size_t d = 0; d < N_DIM; d++) x0[d] = double(mesh.h_cell_coords(c, d));
+    double radius = 0.0;
+    for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
+        Vec x = {0.0, 0.0, 0.0};
+        for (size_t d = 0; d < N_DIM; d++) x[d] = double(mesh.h_node_coords(mesh.h_node_of_cell(c, k), d));
+        radius = std::max(radius, norm(sub(x, x0)));
+    }
+    if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(c)) {
+        curved::Vec3 lo, hi;
+        mesh.curved_geometry->bounds(c, lo, hi);
+        for (size_t d = 0; d < N_DIM; d++) radius = std::max(radius, std::max(std::abs(lo[d] - x0[d]), std::abs(hi[d] - x0[d])) * std::sqrt(double(N_DIM)));
+    }
+    return radius;
+}
+
+bool is_condition(const Region & region, const uint32_t i) { return region.filled()[i].kind == Filled::Kind::CONDITION; }
+
+bool has_condition(const Region & region, const uint32_t i) {
+    const Filled & f = region.filled()[i];
+    return f.kind == Filled::Kind::CONDITION ||
+           std::any_of(f.parts.begin(), f.parts.end(), [&](const uint32_t k) { return has_condition(region, k); });
+}
+
+/** @brief Whether a condition bounds or clips a piece. */
+bool conditional(const Region & region, const Piece & p) {
+    for (const auto * list : {&p.carriers, &p.inside, &p.outside}) {
+        for (const uint32_t i : *list) {
+            if (has_condition(region, i)) return true;
+        }
+    }
+    return false;
+}
+
+/** @brief Whether a piece is cut from its carriers' conditions' levels. */
+bool cut_from_conditions(const Region & region, const Piece & p) {
+    return p.zones.empty() && p.cells < 0 &&
+           std::any_of(p.carriers.begin(), p.carriers.end(), [&](const uint32_t i) { return is_condition(region, i); });
+}
+
 const Mesh & no_mesh() {
     static const Mesh mesh;
     return mesh;
 }
 
+/** @brief The fractions of clipping region i of whole cells, and of those it is made of, into cells. Collective. */
+void need_cells(const Mesh & mesh, const Region & region, const uint32_t i, std::vector<std::vector<double>> & cells) {
+    const Filled & f = region.filled()[i];
+    if (f.kind == Filled::Kind::SHAPES || !cells[i].empty()) return;
+    if (f.cells) {
+        cells[i] = cell_fractions(mesh, region, i);
+    } else {
+        for (const uint32_t part : f.parts) need_cells(mesh, region, part, cells);
+    }
+}
+
 class Builder {
     public:
-        /** @brief For the patches of a region alone: no mesh, so no extent for unbounded surfaces. */
-        explicit Builder(const Region & region) : m_mesh(no_mesh()), m_region(region) {
-            m_lo = m_hi = {0.0, 0.0, 0.0};
-            for (const auto & f : region.filled()) m_views.push_back(region.host(f));
-        }
-
-        Builder(const Mesh & mesh, const Region & region) : m_mesh(mesh), m_region(region) {
-            const bool distributed = mesh.n_global_cells > 0;
-            double volume = 0.0;
-            for (uint32_t c = 0; c < mesh.n_owned(); c++) volume += double(mesh.h_cell_volume(c));
-            for (size_t i = 0; i < 3; i++) {
-                m_lo[i] = i < N_DIM ? std::numeric_limits<double>::max() : 0.0;
-                m_hi[i] = i < N_DIM ? std::numeric_limits<double>::lowest() : 0.0;
-            }
-            for (uint32_t n = 0; n < mesh.n_nodes; n++) {
-                for (size_t i = 0; i < N_DIM; i++) {
-                    m_lo[i] = std::min(m_lo[i], double(mesh.h_node_coords(n, i)));
-                    m_hi[i] = std::max(m_hi[i], double(mesh.h_node_coords(n, i)));
-                }
-            }
-            double n_cells = double(mesh.n_owned());
-            if (distributed) {
-                volume = comm::allreduce(volume, comm::Op::SUM);
-                n_cells = double(mesh.n_global_cells);
-                m_lo = comm::allreduce(m_lo, comm::Op::MIN);
-                m_hi = comm::allreduce(m_hi, comm::Op::MAX);
-            }
-            m_h = std::pow(volume / std::max(n_cells, 1.0), 1.0 / N_DIM);
-            for (const auto & f : region.filled()) m_views.push_back(region.host(f));
-            // Clipping regions of whole cells: their cells, computed collectively up front
-            m_cells.resize(region.filled().size());
-            for (const Piece & p : region.pieces()) {
-                for (const auto * masks : {&p.inside, &p.outside}) {
-                    for (const uint32_t i : *masks) need_cells(i);
-                }
-                if (p.cells >= 0) need_cells(static_cast<uint32_t>(p.cells));
-            }
-        }
+        Builder(const Mesh & mesh, const Region & region, const Extraction::Constants & constants,
+                const Levels * levels = nullptr) :
+            m_mesh(mesh), m_region(region), m_levels(levels), m_views(constants.views), m_cells(constants.cells),
+            m_lo(constants.lo), m_hi(constants.hi), m_h(constants.h) {}
 
         Elements build() {
             m_out.dimension = m_region.dimension();
             for (const Piece & p : m_region.pieces()) {
                 if (!p.zones.empty() || p.cells >= 0) {
                     faces(p);
+                } else if (conditional(p)) {
+                    m_out.exact = false;
+                    extract(p);
                 } else if (!exact_piece(p)) {
                     m_out.exact = m_out.exact && affine(p);
                     extract(p);
@@ -446,27 +493,44 @@ class Builder {
     private:
         const Mesh & m_mesh;
         const Region & m_region;
-        std::vector<RegionView<Kokkos::HostSpace>> m_views;
-        std::vector<std::vector<double>> m_cells;
-        Vec m_lo, m_hi;
-        double m_h = 1.0;
+        const Levels * m_levels = nullptr;
+        const std::vector<RegionView<Kokkos::HostSpace>> & m_views;
+        const std::vector<std::vector<double>> & m_cells;
+        const Vec & m_lo;
+        const Vec & m_hi;
+        const double m_h;
         Elements m_out;
         std::vector<std::array<std::array<double, 3>, 4>> m_tets;  // a cell's, reused
 
-        void need_cells(const uint32_t i) {
-            const Filled & f = m_region.filled()[i];
-            if (f.kind == Filled::Kind::SHAPES || !m_cells[i].empty()) return;
-            if (f.cells) {
-                m_cells[i] = cell_fractions(m_mesh, m_region, i);
-            } else {
-                for (const uint32_t part : f.parts) need_cells(part);
-            }
+        bool is_condition(const uint32_t i) const { return region::is_condition(m_region, i); }
+        bool conditional(const Piece & p) const { return region::conditional(m_region, p); }
+
+        /** @brief The linear level of condition i of the filled regions at x in local cell c. */
+        double condition_level(const uint32_t i, const Vec & x, const int32_t c) const {
+            if (c < 0) throw std::logic_error("region::elements: a condition is evaluated in its cell.");
+            const uint32_t k = m_region.filled()[i].first, cell = static_cast<uint32_t>(c);
+            const size_t row = level_row(cell);
+            double g = m_levels->values(row, k, 0);
+            for (size_t d = 0; d < N_DIM; d++) g += m_levels->values(row, k, 1 + d) * (x[d] - double(m_mesh.h_cell_coords(cell, d)));
+            return g;
+        }
+
+        size_t level_row(const uint32_t c) const {
+            const auto it = std::lower_bound(m_levels->cells.begin(), m_levels->cells.end(), c);
+            if (it == m_levels->cells.end() || *it != c) throw std::logic_error("region::elements: no levels in a cell.");
+            return static_cast<size_t>(it - m_levels->cells.begin());
+        }
+
+        /** @brief The level of a carrier at x in cell c: its signed distance (implicit function), or condition's level. */
+        double carrier(const uint32_t i, const Vec & x, const int32_t c) const {
+            return is_condition(i) ? condition_level(i, x, c) : m_views[i].distance(x.data());
         }
 
         /** @brief Whether x (in local cell c, or -1) is inside filled region i. */
         bool inside(const uint32_t i, const Vec & x, const int32_t c) const {
             const Filled & f = m_region.filled()[i];
             if (f.kind == Filled::Kind::SHAPES) return m_views[i].distance(x.data()) < 0.0;
+            if (f.kind == Filled::Kind::CONDITION) return condition_level(i, x, c) < 0.0;
             if (f.cells) return c >= 0 && m_cells[i][static_cast<size_t>(c)] > 0.5;
             bool in = f.kind != Filled::Kind::UNION;
             for (size_t k = 0; k < f.parts.size(); k++) {
@@ -481,6 +545,7 @@ class Builder {
         /** @brief A level of filled region i, negative inside: its signed distance, or -1 / 1 at x in cell c. */
         double level(const uint32_t i, const Vec & x, const int32_t c) const {
             if (m_region.filled()[i].kind == Filled::Kind::SHAPES) return m_views[i].distance(x.data());
+            if (is_condition(i)) return condition_level(i, x, c);
             return inside(i, x, c) ? -1.0 : 1.0;
         }
 
@@ -494,7 +559,7 @@ class Builder {
             return true;
         }
 
-        /** @brief Clip a polygon in cell c by the piece's clipping regions: along their levels, linear between vertices. */
+        /** @brief Clip a polygon in cell c by the piece's clipping regions: at their levels' roots along its edges. */
         std::vector<Vertex> clipped(const Piece & p, std::vector<Vertex> poly, const int32_t c) const {
             for (const bool in : {true, false}) {
                 for (const uint32_t i : in ? p.inside : p.outside) {
@@ -617,12 +682,167 @@ class Builder {
                     std::reverse(poly.begin(), poly.end());
                 }
                 const bool whole = p.inside.empty() && p.outside.empty();
+                const std::vector<Vertex> corners = poly;
                 poly = clipped(p, poly, static_cast<int32_t>(face.cell));
+                const bool curved = m_mesh.curved_geometry && m_mesh.curved_geometry->face_is_curved(face.f);
+                if (curved || shape_clipped(p)) {
+                    const std::vector<Quadrature> q = face_quadrature(p, face, corners, n, curved);
+                    double measure = 0.0;
+                    Vec center = {0.0, 0.0, 0.0}, direction = {0.0, 0.0, 0.0};
+                    for (const Quadrature & point : q) {
+                        measure += point.w;
+                        center = add(center, mul(point.w, point.x));
+                        direction = add(direction, mul(point.w, point.n));
+                    }
+                    if (!(measure > 0.0)) continue;
+                    center = mul(1.0 / measure, center);
+                    std::vector<Vec> v;
+                    for (const Vertex & x : poly.empty() ? corners : poly) v.push_back(x.x);
+                    emit(face.cell, v, unit(direction), p.flip, measure, &center, &q);
+                    continue;
+                }
                 if (poly.empty()) continue;
                 std::vector<Vec> v;
                 for (const Vertex & x : poly) v.push_back(x.x);
                 emit(face.cell, v, n, p.flip, whole ? double(m_mesh.h_face_area(face.f)) : -1.0);
             }
+        }
+
+        /** @brief Whether a shape clips the piece (the levels of whole cells are constant on a face). */
+        bool shape_clipped(const Piece & p) const {
+            for (const auto * masks : {&p.inside, &p.outside}) {
+                for (const uint32_t i : *masks) {
+                    if (m_region.filled()[i].kind == Filled::Kind::SHAPES) return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * @brief Quadrature of a face's part the piece keeps: the face (its
+         *        curved geometry's reference box, or its flat polygon) split into
+         *        segments (3D: triangles), halved where a clipping shape's
+         *        surface may cross them, each leaf clipped at the roots of the
+         *        levels along its edges and integrated with default_quadrature,
+         *        mapped onto the face. Normals face out of the face's cell (into
+         *        it if reversed).
+         */
+        std::vector<Quadrature> face_quadrature(const Piece & p, const Face & face, const std::vector<Vertex> & corners,
+                                                const Vec & normal, const bool curved) const {
+            // Parameters: the curved face's box coordinates, or the flat face's own points
+            std::function<void(const Vec &, Vec &, Vec &)> image;
+            std::vector<std::vector<Vec>> pieces;
+            if (curved) {
+                const curved::Geometry & g = *m_mesh.curved_geometry;
+                std::array<double, 2> lo, hi;
+                g.box_of(face.f, lo, hi);
+                image = [&g, &face](const Vec & box, Vec & x, Vec & n) {
+                    double xi[2] = {0.0, 0.0};
+                    const double j = g.face_coordinates(face.f, box.data(), xi);
+                    curved::Vec3 y, dx[2];
+                    g.eval(face.f, xi, y, dx);
+                    x = {y[0], y[1], y[2]};
+                    const Vec t0 = {dx[0][0], dx[0][1], dx[0][2]};
+                    n = N_DIM == 2 ? Vec{t0[1], -t0[0], 0.0} : cross(t0, Vec{dx[1][0], dx[1][1], dx[1][2]});
+                    n = mul(face.reversed ? -j : j, n);
+                };
+                constexpr int PIECES = N_DIM == 2 ? 16 : 6;
+                const int nb = N_DIM == 2 ? 1 : PIECES;
+                for (int a = 0; a < PIECES; a++) {
+                    for (int b = 0; b < nb; b++) {
+                        const double a0 = lo[0] + (hi[0] - lo[0]) * a / PIECES, a1 = lo[0] + (hi[0] - lo[0]) * (a + 1) / PIECES;
+                        const double b0 = lo[1] + (hi[1] - lo[1]) * b / nb, b1 = lo[1] + (hi[1] - lo[1]) * (b + 1) / nb;
+                        if (N_DIM == 2) {
+                            pieces.push_back({{a0, 0.0, 0.0}, {a1, 0.0, 0.0}});
+                        } else {
+                            pieces.push_back({{a0, b0, 0.0}, {a1, b0, 0.0}, {a1, b1, 0.0}});
+                            pieces.push_back({{a0, b0, 0.0}, {a1, b1, 0.0}, {a0, b1, 0.0}});
+                        }
+                    }
+                }
+            } else {
+                image = [&normal](const Vec & y, Vec & x, Vec & n) {
+                    x = y;
+                    n = normal;
+                };
+                if (N_DIM == 2) {
+                    pieces.push_back({corners[0].x, corners[1].x});
+                } else {
+                    for (size_t k = 1; k + 1 < corners.size(); k++) pieces.push_back({corners[0].x, corners[k].x, corners[k + 1].x});
+                }
+            }
+            const int32_t c = static_cast<int32_t>(face.cell);
+            constexpr int MAX_LEVEL = N_DIM == 2 ? 8 : 5;
+            std::vector<Quadrature> out;
+            std::function<void(const std::vector<Vec> &, int)> refine = [&](const std::vector<Vec> & simplex, const int depth) {
+                Vec center_param = {0.0, 0.0, 0.0};
+                for (const Vec & v : simplex) center_param = add(center_param, mul(1.0 / double(simplex.size()), v));
+                Vec center, n;
+                image(center_param, center, n);
+                double radius = 0.0;
+                for (const Vec & v : simplex) {
+                    Vec x, m;
+                    image(v, x, m);
+                    radius = std::max(radius, norm(sub(x, center)));
+                }
+                bool crossed = false;
+                for (const bool in : {true, false}) {
+                    for (const uint32_t i : in ? p.inside : p.outside) {
+                        if (m_region.filled()[i].kind != Filled::Kind::SHAPES) continue;
+                        const double phi = level(i, center, c);
+                        if (m_region.bounded()) {
+                            crossed = crossed || std::abs(phi) < 1.25 * radius;
+                        } else {
+                            for (const Vec & v : simplex) {
+                                Vec x, m;
+                                image(v, x, m);
+                                crossed = crossed || (level(i, x, c) < 0.0) != (phi < 0.0);
+                            }
+                        }
+                    }
+                }
+                if (crossed && depth < MAX_LEVEL) {
+                    if (simplex.size() == 2) {
+                        const Vec m = lerp(simplex[0], simplex[1], 0.5);
+                        refine({simplex[0], m}, depth + 1);
+                        refine({m, simplex[1]}, depth + 1);
+                    } else {
+                        const Vec ab = lerp(simplex[0], simplex[1], 0.5), bc = lerp(simplex[1], simplex[2], 0.5);
+                        const Vec ca = lerp(simplex[2], simplex[0], 0.5);
+                        refine({simplex[0], ab, ca}, depth + 1);
+                        refine({ab, simplex[1], bc}, depth + 1);
+                        refine({ca, bc, simplex[2]}, depth + 1);
+                        refine({ab, bc, ca}, depth + 1);
+                    }
+                    return;
+                }
+                std::vector<Vertex> poly;
+                for (const Vec & v : simplex) poly.push_back({v, {}});
+                for (const bool in : {true, false}) {
+                    for (const uint32_t i : in ? p.inside : p.outside) {
+                        if (poly.empty()) return;
+                        poly = clip(poly, [&](const Vertex & v) {
+                            Vec x, m;
+                            image(v.x, x, m);
+                            return (in ? 1.0 : -1.0) * level(i, x, c);
+                        });
+                    }
+                }
+                if (poly.empty()) return;
+                std::vector<Vec> param;
+                for (const Vertex & v : poly) param.push_back(v.x);
+                // Flat faces' own points: the rule of the polygon itself; curved ones' boxes: mapped by the Jacobian
+                for (const Quadrature & r : default_quadrature(param, normal)) {
+                    Quadrature q;
+                    Vec m;
+                    image(r.x, q.x, m);
+                    q.w = r.w * (curved ? norm(m) : 1.0);
+                    q.n = unit(m);
+                    out.push_back(q);
+                }
+            };
+            for (const auto & piece : pieces) refine(piece, 0);
+            return out;
         }
 
         /** @brief The edges (2D: end points) of a set of faces: those of one face only, across every rank. */
@@ -673,9 +893,48 @@ class Builder {
             return true;
         }
 
-        /** @brief The simplices of an owned cell, as vertex positions. */
+        /**
+         * @brief The simplices of an owned cell, as vertex positions. Curved
+         *        cells: their cones (curved::Geometry::cone_eval), each face
+         *        split into CONE_PIECES pieces per direction, as straight
+         *        simplices between the images of the pieces' corners.
+         */
         std::vector<std::vector<Vec>> simplices(const uint32_t c) {
             std::vector<std::vector<Vec>> out;
+            const curved::Geometry * curves = m_mesh.curved_geometry.get();
+            if (curves && curves->cell_is_curved(c)) {
+                constexpr int CONE_PIECES = N_DIM == 2 ? 8 : 4;
+                for (uint32_t k = 0; k < m_mesh.h_n_faces_of_cell(c); k++) {
+                    const uint32_t f = m_mesh.h_face_of_cell(c, k);
+                    std::array<double, 2> lo, hi;
+                    curves->box_of(f, lo, hi);
+                    auto at = [&](const double a, const double b, const double t) {
+                        const double box[2] = {a, b};
+                        double xi[2] = {0.0, 0.0};
+                        curves->face_coordinates(f, box, xi);
+                        curved::Vec3 x, dx[3];
+                        curves->cone_eval(c, k, xi, t, x, dx);
+                        return Vec{x[0], x[1], x[2]};
+                    };
+                    const int nb = N_DIM == 2 ? 1 : CONE_PIECES;
+                    for (int i = 0; i < CONE_PIECES; i++) {
+                        for (int j = 0; j < nb; j++) {
+                            const double a0 = lo[0] + (hi[0] - lo[0]) * i / CONE_PIECES, a1 = lo[0] + (hi[0] - lo[0]) * (i + 1) / CONE_PIECES;
+                            const double b0 = lo[1] + (hi[1] - lo[1]) * j / nb, b1 = lo[1] + (hi[1] - lo[1]) * (j + 1) / nb;
+                            const Vec o = at(a0, b0, 0.0);
+                            if constexpr (N_DIM == 2) {
+                                out.push_back({o, at(a0, b0, 1.0), at(a1, b0, 1.0)});
+                            } else {
+                                // The piece's quadrilateral (a triangle's collapsed corner repeats a point) in two triangles
+                                const Vec p00 = at(a0, b0, 1.0), p10 = at(a1, b0, 1.0), p11 = at(a1, b1, 1.0), p01 = at(a0, b1, 1.0);
+                                out.push_back({o, p00, p10, p11});
+                                out.push_back({o, p00, p11, p01});
+                            }
+                        }
+                    }
+                }
+                return out;
+            }
             if constexpr (N_DIM == 2) {
                 const uint32_t n = m_mesh.h_n_nodes_of_cell(c);
                 const Vec v0 = node(m_mesh.h_node_of_cell(c, 0));
@@ -690,7 +949,16 @@ class Builder {
         }
 
         void extract(const Piece & p) {
-            // Planes are cut exactly without subdividing
+            // Planes, and conditions' linear levels in each cell, are cut exactly without subdividing
+            const bool conditions = std::any_of(p.carriers.begin(), p.carriers.end(), [&](const uint32_t i) { return is_condition(i); });
+            if (conditions) {
+                for (size_t row = 0; row < m_levels->cells.size(); row++) {
+                    const uint32_t c = m_levels->cells[row];
+                    if (off_conditions(p, c, row)) continue;
+                    for (const auto & s : simplices(c)) extract(p, c, s, 0, 0);
+                }
+                return;
+            }
             const int levels = affine(p) ? 0 : m_region.resolution();
             // A plane's levels at the nodes. A cell with none negative has no negative simplex vertex either (and
             // the cells on the negative side take a face in the plane); one with all clearly negative has no zero
@@ -702,9 +970,24 @@ class Builder {
                 }
             }
             for (uint32_t c = 0; c < m_mesh.n_owned(); c++) {
-                if (levels == 0 && off_planes(phi, c)) continue;
+                const bool curved_cell = m_mesh.curved_geometry && m_mesh.curved_geometry->cell_is_curved(c);
+                if (levels == 0 && !curved_cell && off_planes(phi, c)) continue;
                 for (const auto & s : simplices(c)) extract(p, c, s, 0, levels);
             }
+        }
+
+        /** @brief Whether a condition's linear level in cell c (row of levels) keeps its sign over a sphere around the cell. */
+        bool off_conditions(const Piece & p, const uint32_t c, const size_t row) const {
+            const double radius = cell_radius(m_mesh, c);
+            const auto & L = m_levels->values;
+            for (const uint32_t i : p.carriers) {
+                if (!is_condition(i)) continue;
+                const uint32_t k = m_region.filled()[i].first;
+                double slope = 0.0;
+                for (size_t d = 0; d < N_DIM; d++) slope += L(row, k, 1 + d) * L(row, k, 1 + d);
+                if (std::abs(L(row, k, 0)) > 1.01 * std::sqrt(slope) * radius) return true;
+            }
+            return false;
         }
 
         bool off_planes(const std::vector<std::vector<double>> & phi, const uint32_t c) const {
@@ -732,15 +1015,16 @@ class Builder {
             double radius = 0.0;
             for (const Vec & x : s) radius = std::max(radius, norm(sub(x, center)));
             // Most simplices lie away from the surface: bounded distances say so before any vertex is evaluated
+            const int32_t cell = static_cast<int32_t>(c);
             if (m_region.bounded()) {
                 for (const uint32_t i : p.carriers) {
-                    if (std::abs(m_views[i].distance(center.data())) >= radius) return;
+                    if (!is_condition(i) && std::abs(m_views[i].distance(center.data())) >= radius) return;
                 }
             }
             std::vector<Vertex> simplex;
             for (const Vec & x : s) {
                 Vertex v{x, {}};
-                for (const uint32_t i : p.carriers) v.phi.push_back(m_views[i].distance(x.data()));
+                for (const uint32_t i : p.carriers) v.phi.push_back(carrier(i, x, cell));
                 simplex.push_back(v);
             }
             // Vertices within round-off of a zero set lie on it: a plane through mesh faces takes them once, from
@@ -751,7 +1035,7 @@ class Builder {
             for (size_t k = 0; k < p.carriers.size(); k++) {
                 // No zero set here: bounded distances farther than the simplex's radius, or implicit
                 // functions of one sign with a margin of twice their slope
-                if (m_region.bounded()) continue;
+                if (m_region.bounded() || is_condition(p.carriers[k])) continue;
                 const double phi = m_views[p.carriers[k]].distance(center.data());
                 bool positive = false, negative = false;
                 double slope = 0.0;
@@ -1156,60 +1440,86 @@ class Builder {
                     }
                 }
             }
-            std::vector<std::array<double, N_DIM>> points;
-            std::vector<Quadrature> quad;
-            std::vector<size_t> first{0};
-            for (const Cell & c : cells) {
-                const Clipper clipper{map, *c.patch, clips, m_region.bounded(), curve};
-                clipper.patch_quadrature(c.u0, c.u1, c.v0, c.v1, quad);
-                // Then the patch's center, which places it when kept
-                quad.push_back(clipper.point(0.5 * (c.u0 + c.u1), 0.5 * (c.v0 + c.v1), 0.0));
-                first.push_back(quad.size());
-            }
-            for (const Quadrature & q : quad) {
-                std::array<double, N_DIM> point;
-                for (size_t i = 0; i < N_DIM; i++) point[i] = q.x[i];
-                points.push_back(point);
-            }
-            std::vector<uint8_t> contained;
-            const std::vector<int32_t> located = locate_points(m_mesh, points, &contained);
-            std::vector<uint32_t> keep(points.size(), 0);
-            for (size_t k = 0; k < points.size(); k++) {
-                keep[k] = located[k] >= 0 && contained[k] && kept(rest, quad[k].x, located[k]) ? 1 : 0;
-            }
-            if (m_mesh.n_global_cells > 0) comm::allreduce(std::span<uint32_t>(keep), comm::Op::MAX);
-            for (size_t c = 0; c < cells.size(); c++) {
-                const size_t center = first[c + 1] - 1;
-                std::vector<Quadrature> kept_points;
-                size_t owner = keep[center] && inside_clips(clips, quad[center].x) ? center : first[c + 1];
-                for (size_t k = first[c]; k < center; k++) {
-                    if (!keep[k]) continue;
-                    kept_points.push_back(quad[k]);
-                    if (owner == first[c + 1]) owner = k;
+            // Patches that the mesh's boundary crosses (some of their points in it, some not) are split, so their
+            // kept part ends within round-off of a fraction of the patch: the boundary has no distance function
+            // (a crossed curve has one patch per crossing at each halving, a surface one per patch along the crossing)
+            const int max_splits = curve ? 30 : 6;
+            for (int split = 0; !cells.empty(); split++) {
+                std::vector<std::array<double, N_DIM>> points;
+                std::vector<Quadrature> quad;
+                std::vector<size_t> first{0}, corners_at;
+                for (const Cell & c : cells) {
+                    const Clipper clipper{map, *c.patch, clips, m_region.bounded(), curve};
+                    clipper.patch_quadrature(c.u0, c.u1, c.v0, c.v1, quad);
+                    // Then its corners (a segment's ends), where the mesh's boundary may cross it between the
+                    // ends and the outermost Gauss points, and its center, which places it when kept
+                    corners_at.push_back(quad.size());
+                    for (const double v : curve ? std::vector<double>{c.v0} : std::vector<double>{c.v0, c.v1}) {
+                        for (const double u : {c.u0, c.u1}) quad.push_back(clipper.point(u, v, 0.0));
+                    }
+                    quad.push_back(clipper.point(0.5 * (c.u0 + c.u1), 0.5 * (c.v0 + c.v1), 0.0));
+                    first.push_back(quad.size());
                 }
-                if (kept_points.empty() || located[owner] < 0) continue;  // none, or another rank's
-                double measure = 0.0;
-                for (const Quadrature & q : kept_points) measure += q.w;
-                if (!(measure > 0.0)) continue;
-                // Vertices: the patch's corners in order (a segment's ends)
-                std::vector<Vec> corners;
-                const auto & cell = cells[c];
-                const std::vector<std::pair<double, double>> uv =
-                    curve ? std::vector<std::pair<double, double>>{{cell.u0, 0.0}, {cell.u1, 0.0}}
-                          : std::vector<std::pair<double, double>>{{cell.u0, cell.v0}, {cell.u1, cell.v0}, {cell.u1, cell.v1}, {cell.u0, cell.v1}};
-                for (const auto & [u, v] : uv) {
-                    Vec q, qu, qv;
-                    cell.patch->at(u, v, q, qu, qv);
-                    const Vec x = map.point(q);
-                    if (corners.empty() || norm(sub(x, corners.back())) > 1e-14 * m_h) corners.push_back(x);
+                for (const Quadrature & q : quad) {
+                    std::array<double, N_DIM> point;
+                    for (size_t i = 0; i < N_DIM; i++) point[i] = q.x[i];
+                    points.push_back(point);
                 }
-                if (corners.size() > 2 && norm(sub(corners.front(), corners.back())) <= 1e-14 * m_h) corners.pop_back();
-                Vec n = quad[center].n;
-                if (norm(n) == 0.0) {
-                    for (const Quadrature & q : kept_points) n = add(n, mul(q.w, q.n));
-                    n = unit(n);
+                std::vector<uint8_t> contained;
+                const std::vector<int32_t> located = locate_points(m_mesh, points, &contained);
+                std::vector<uint32_t> keep(points.size(), 0);
+                for (size_t k = 0; k < points.size(); k++) {
+                    keep[k] = located[k] >= 0 && contained[k] && kept(rest, quad[k].x, located[k]) ? 1 : 0;
                 }
-                emit(static_cast<uint32_t>(located[owner]), corners, n, p.flip, measure, &quad[owner].x, &kept_points);
+                if (m_mesh.n_global_cells > 0) comm::allreduce(std::span<uint32_t>(keep), comm::Op::MAX);
+                std::vector<Cell> crossed;
+                for (size_t c = 0; c < cells.size(); c++) {
+                    const size_t center = first[c + 1] - 1, gauss_end = corners_at[c];
+                    size_t n_kept = 0;
+                    for (size_t k = first[c]; k < center; k++) n_kept += keep[k];
+                    if (n_kept > 0 && n_kept < center - first[c] && split < max_splits) {
+                        const Cell & cell = cells[c];
+                        const double um = 0.5 * (cell.u0 + cell.u1), vm = 0.5 * (cell.v0 + cell.v1);
+                        crossed.push_back({cell.u0, um, cell.v0, curve ? cell.v1 : vm, cell.patch});
+                        crossed.push_back({um, cell.u1, cell.v0, curve ? cell.v1 : vm, cell.patch});
+                        if (!curve) {
+                            crossed.push_back({cell.u0, um, vm, cell.v1, cell.patch});
+                            crossed.push_back({um, cell.u1, vm, cell.v1, cell.patch});
+                        }
+                        continue;
+                    }
+                    std::vector<Quadrature> kept_points;
+                    size_t owner = keep[center] && inside_clips(clips, quad[center].x) ? center : first[c + 1];
+                    for (size_t k = first[c]; k < gauss_end; k++) {
+                        if (!keep[k]) continue;
+                        kept_points.push_back(quad[k]);
+                        if (owner == first[c + 1]) owner = k;
+                    }
+                    if (kept_points.empty() || located[owner] < 0) continue;  // none, or another rank's
+                    double measure = 0.0;
+                    for (const Quadrature & q : kept_points) measure += q.w;
+                    if (!(measure > 0.0)) continue;
+                    // Vertices: the patch's corners in order (a segment's ends)
+                    std::vector<Vec> corners;
+                    const auto & cell = cells[c];
+                    const std::vector<std::pair<double, double>> uv =
+                        curve ? std::vector<std::pair<double, double>>{{cell.u0, 0.0}, {cell.u1, 0.0}}
+                              : std::vector<std::pair<double, double>>{{cell.u0, cell.v0}, {cell.u1, cell.v0}, {cell.u1, cell.v1}, {cell.u0, cell.v1}};
+                    for (const auto & [u, v] : uv) {
+                        Vec q, qu, qv;
+                        cell.patch->at(u, v, q, qu, qv);
+                        const Vec x = map.point(q);
+                        if (corners.empty() || norm(sub(x, corners.back())) > 1e-14 * m_h) corners.push_back(x);
+                    }
+                    if (corners.size() > 2 && norm(sub(corners.front(), corners.back())) <= 1e-14 * m_h) corners.pop_back();
+                    Vec n = quad[center].n;
+                    if (norm(n) == 0.0) {
+                        for (const Quadrature & q : kept_points) n = add(n, mul(q.w, q.n));
+                        n = unit(n);
+                    }
+                    emit(static_cast<uint32_t>(located[owner]), corners, n, p.flip, measure, &quad[owner].x, &kept_points);
+                }
+                cells = std::move(crossed);
             }
         }
 
@@ -1224,7 +1534,9 @@ class Builder {
 } // namespace
 
 std::vector<SurfacePatch> surface_patches(const Region & region, const std::string & where) {
-    const Builder builder(region);
+    Extraction::Constants constants;  // no mesh, so no extent for unbounded surfaces
+    for (const auto & f : region.filled()) constants.views.push_back(region.host(f));
+    const Builder builder(no_mesh(), region, constants);
     std::vector<Patch> patches;
     const Node * frame = nullptr;
     Piece rest, piece;
@@ -1317,9 +1629,91 @@ Grid sample_grid(const std::vector<SurfacePatch> & patches, const uint32_t nu, c
     return g;
 }
 
-Elements elements(const Mesh & mesh, const Region & region) {
+Extraction::Extraction(const Mesh & mesh, const Region & region) : m_mesh(mesh), m_region(region) {
     if (region.dimension() == N_DIM) throw std::logic_error("region::elements: the region is filled.");
-    return Builder(mesh, region).build();
+    Constants & c = m_constants;
+    const bool distributed = mesh.n_global_cells > 0;
+    double volume = 0.0;
+    for (uint32_t cell = 0; cell < mesh.n_owned(); cell++) volume += double(mesh.h_cell_volume(cell));
+    for (size_t i = 0; i < 3; i++) {
+        c.lo[i] = i < N_DIM ? std::numeric_limits<double>::max() : 0.0;
+        c.hi[i] = i < N_DIM ? std::numeric_limits<double>::lowest() : 0.0;
+    }
+    for (uint32_t n = 0; n < mesh.n_nodes; n++) {
+        for (size_t i = 0; i < N_DIM; i++) {
+            c.lo[i] = std::min(c.lo[i], double(mesh.h_node_coords(n, i)));
+            c.hi[i] = std::max(c.hi[i], double(mesh.h_node_coords(n, i)));
+        }
+    }
+    double n_cells = double(mesh.n_owned());
+    if (distributed) {
+        volume = comm::allreduce(volume, comm::Op::SUM);
+        n_cells = double(mesh.n_global_cells);
+        c.lo = comm::allreduce(c.lo, comm::Op::MIN);
+        c.hi = comm::allreduce(c.hi, comm::Op::MAX);
+    }
+    c.h = std::pow(volume / std::max(n_cells, 1.0), 1.0 / N_DIM);
+    for (const auto & f : region.filled()) c.views.push_back(region.host(f));
+    c.cells.resize(region.filled().size());
+    for (const Piece & p : region.pieces()) {
+        for (const auto * masks : {&p.inside, &p.outside}) {
+            for (const uint32_t i : *masks) need_cells(mesh, region, i, c.cells);
+        }
+        if (p.cells >= 0) need_cells(mesh, region, static_cast<uint32_t>(p.cells), c.cells);
+    }
+}
+
+Elements Extraction::elements() const {
+    if (m_region.solution()) throw std::logic_error("region::elements: the region's conditions need levels.");
+    return Builder(m_mesh, m_region, m_constants).build();
+}
+
+Elements Extraction::elements(const Levels & levels) const {
+    return Builder(m_mesh, m_region, m_constants, &levels).build();
+}
+
+Elements elements(const Mesh & mesh, const Region & region) { return Extraction(mesh, region).elements(); }
+
+Elements elements(const Mesh & mesh, const Region & region, const Levels & levels) {
+    return Extraction(mesh, region).elements(levels);
+}
+
+LevelCells level_cells(const Mesh & mesh, const Region & region) {
+    LevelCells out;
+    for (const Piece & p : region.pieces()) {
+        if (cut_from_conditions(region, p)) {
+            std::vector<uint32_t> & k = out.conditions.emplace_back();
+            for (const uint32_t i : p.carriers) {
+                if (is_condition(region, i)) k.push_back(region.filled()[i].first);
+            }
+        } else if (conditional(region, p)) {
+            out.every = true;
+        }
+    }
+    if (!out.conditions.empty()) {
+        out.radii.resize(mesh.n_owned());
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) out.radii[c] = cell_radius(mesh, c);
+    }
+    return out;
+}
+
+Measures measures_in_domain(const Mesh & mesh, const Region & region, const std::vector<double> & fractions) {
+    Measures out;
+    double volume = 0.0, surface = 0.0;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) volume += fractions[c] * double(mesh.h_cell_measure(c));
+    const Elements e = elements(mesh, region.surface_in_domain());
+    for (size_t k = 0; k < e.size(); k++) {
+        for (uint32_t q = e.quad_offsets[k]; q < e.quad_offsets[k + 1]; q++) {
+            surface += e.quad_weights[q] * (mesh.axisymmetric ? std::max(e.quad_points[q][1], 0.0) : 1.0);
+        }
+    }
+    if (mesh.n_global_cells > 0) {
+        volume = comm::allreduce(volume, comm::Op::SUM);
+        surface = comm::allreduce(surface, comm::Op::SUM);
+    }
+    out.volume = volume;
+    out.surface = surface;
+    return out;
 }
 
 } // namespace region

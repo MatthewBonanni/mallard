@@ -28,8 +28,18 @@
 #include "log.h"
 
 int32_t CellSampler::code(const std::string & name, const std::vector<std::string> & species_names,
-                          const std::string & key) {
+                          const std::string & key, const derived::Selection * derived, const bool chemistry) {
     if (name == "RHO") return RHO;
+    if (chemistry) {
+        if (name == "HRR") return FIRST_CHEMISTRY;
+        for (size_t k = 0; k < species_names.size(); k++) {
+            if ("OMEGA_" + species_names[k] == name) return FIRST_CHEMISTRY + 1 + static_cast<int32_t>(k);
+        }
+    }
+    if (derived) {
+        const derived::Field f = derived::find(name.c_str());
+        if (f != derived::N_FIELDS && derived->column[f] >= 0) return FIRST_DERIVED + derived->column[f];
+    }
     for (size_t i = 0; i < N_PRIMITIVE; i++) {
         if (PRIMITIVE_NAMES[i] == name) return FIRST_PRIMITIVE + static_cast<int32_t>(i);
     }
@@ -48,6 +58,11 @@ int32_t CellSampler::code(const std::string & name, const std::vector<std::strin
         known.push_back("Y_<species>");
         known.push_back("RHOY_<species>");
     }
+    if (chemistry) {
+        known.push_back("HRR");
+        known.push_back("OMEGA_<species>");
+    }
+    if (derived) known.push_back("a derived field (mallard list fields)");
     throw InputError({.key = key, .message = "unknown variable \"" + name + "\"", .valid = known, .suggestion = suggestion});
 }
 
@@ -71,16 +86,55 @@ const char * const BATCH_PREFIXES[3] = {"BATCH_", "BATCH_AVG_", "BATCH_M2_"};
 
 } // namespace
 
+std::vector<derived::Field> Statistics::derived_fields(const Input & input) {
+    std::vector<derived::Field> out;
+    if (!input.contains("statistics")) return out;
+    const Input & table = input.at("statistics");
+    std::vector<std::string> names = find_value_or<std::vector<std::string>>(table, "fields", {});
+    for (const auto & product : find_value_or<std::vector<std::string>>(table, "products", {})) {
+        const size_t star = product.find('*');
+        names.push_back(product.substr(0, star));
+        if (star != std::string::npos) names.push_back(product.substr(star + 1));
+    }
+    for (const auto & entry : find_value_or<std::vector<Input>>(table, "conditional", {})) {
+        for (const auto & name : ConditionalStatistics::sampled(entry)) names.push_back(name);
+    }
+    for (const auto & name : names) {
+        const derived::Field f = derived::find(name.c_str());
+        if (f != derived::N_FIELDS && std::find(out.begin(), out.end(), f) == out.end()) out.push_back(f);
+    }
+    return out;
+}
+
 void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
-                      const bool use_nccl) {
+                      const derived::Selection & derived, const ConditionalStatistics::Context & context) {
     if (!input.contains("statistics")) return;
     const Input & table = input.at("statistics");
     interval = find_value_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
     t_start = find_real_or(table, "t_start", dim::time, 0.0);
     reset = find_value_or<bool>(table, "reset", false);
+    const bool use_nccl = context.distributed && context.nccl;
     if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start, use_nccl);
     if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start, use_nccl);
+    const std::vector<Input> entries = find_value_or<std::vector<Input>>(table, "conditional", {});
+    conditional.resize(entries.size());
+    ConditionalStatistics::Context with_derived = context;
+    with_derived.derived = &derived;
+    for (size_t i = 0; i < entries.size(); i++) {
+        const std::string key = "statistics.conditional[" + std::to_string(i) + "]";
+        conditional[i].init(entries[i], static_cast<uint32_t>(i), species_names, mesh, with_derived, interval, t_start);
+        for (size_t j = 0; j < i; j++) {
+            if (conditional[j].file() == conditional[i].file()) {
+                throw InputError(key + ": statistics.conditional[" + std::to_string(j) + "] writes " +
+                                 conditional[i].file() + " too; give each entry its own file.");
+            }
+        }
+        for (const int32_t c : conditional[i].sampled_codes()) {
+            derived_sampled = derived_sampled || c >= CellSampler::FIRST_DERIVED;
+            chemistry_sampled = chemistry_sampled || CellSampler::is_chemistry(c);
+        }
+    }
     auto add_field = [&](const std::string & name) {
         const auto it = std::find(fields.begin(), fields.end(), name);
         if (it != fields.end()) return static_cast<uint32_t>(it - fields.begin());
@@ -107,11 +161,11 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
         products.push_back(pair);
     }
     if (fields.empty()) {
-        if (spectra.enabled() || phase.enabled() || table.contains("convergence")) return;
+        if (spectra.enabled() || phase.enabled() || !conditional.empty() || table.contains("convergence")) return;
         for (const auto & probe : find_value_or<std::vector<Input>>(input, "probes", {})) {
             if (find_value_or<bool>(probe, "average", false)) return;
         }
-        throw InputError("statistics: list at least one of fields and products (or add spectra, phase, convergence or "
+        throw InputError("statistics: list at least one of fields and products (or add spectra, phase, conditional, convergence or "
                          "a probe with average = true).");
     }
     const uint32_t n_cells = mesh.n_cells;
@@ -143,7 +197,12 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
     }
 
     std::vector<int32_t> h_codes;
-    for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, "statistics"));
+    for (const auto & name : fields) {
+        h_codes.push_back(CellSampler::code(name, species_names, "statistics", &derived, context.chemistry));
+    }
+    derived_sampled = derived_sampled ||
+                      std::any_of(h_codes.begin(), h_codes.end(), [](int32_t c) { return c >= CellSampler::FIRST_DERIVED; });
+    chemistry_sampled = chemistry_sampled || std::any_of(h_codes.begin(), h_codes.end(), CellSampler::is_chemistry);
     codes = to_device(h_codes, "statistics_codes");
     pairs = Kokkos::View<uint32_t *[2]>("statistics_pairs", products.size());
     auto h_pairs = Kokkos::create_mirror_view(pairs);
@@ -161,6 +220,7 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
 void Statistics::start(rtype t) {
     spectra.start(t);
     phase.start(t);
+    for (auto & c : conditional) c.start(t);
     start_means(t);
 }
 
@@ -183,6 +243,9 @@ void Statistics::start_means(rtype t) {
 void Statistics::sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned) {
     if (spectra.due(step, t)) spectra.sample(step, t, sampler);
     if (phase.due(step, t)) phase.sample(t, sampler, n_owned);
+    for (auto & c : conditional) {
+        if (c.due(step, t)) c.sample(t, sampler, n_owned);
+    }
     if (!(means_enabled() && step % interval == 0 && t > t_start)) return;
     const rtype w = t - t_last;
     weight += w;
@@ -271,6 +334,29 @@ std::vector<std::string> Statistics::restart_variables() const {
     return names;
 }
 
+std::vector<std::pair<std::string, snapshot_block::Average>> Statistics::field_averages() const {
+    const std::vector<std::string> names = variables();
+    std::vector<std::pair<std::string, snapshot_block::Average>> out;
+    auto average = [&](const char * kind, std::vector<std::string> of) {
+        snapshot_block::Average a;
+        a.kind = kind;
+        a.of = std::move(of);
+        a.weighting = "time";
+        a.start = average_start();
+        a.end = average_end();
+        a.samples = static_cast<int64_t>(n_samples);
+        a.interval = static_cast<int64_t>(interval);
+        return a;
+    };
+    for (size_t i = 0; i < fields.size(); i++) out.emplace_back(names[i], average("reynolds", {fields[i]}));
+    for (size_t p = 0; p < products.size(); p++) {
+        const auto [i, j] = products[p];
+        out.emplace_back(names[fields.size() + p], average("covariance", {fields[i], fields[j]}));
+    }
+    for (auto & entry : phase.field_averages()) out.push_back(std::move(entry));
+    return out;
+}
+
 void Statistics::register_data(std::vector<Data> & data) const {
     const std::vector<std::string> names = average_names(fields, products);
     for (size_t i = 0; i < fields.size(); i++) data.emplace_back(names[i], Kokkos::subview(h_mean, Kokkos::ALL(), i));
@@ -308,6 +394,7 @@ void Statistics::copy_device_to_host() {
 void Statistics::restore(const RestartData & restart, const std::string & file, rtype t) {
     spectra.restore(restart, file, t, reset);
     phase.restore(restart, file, t, reset);
+    for (auto & c : conditional) c.restore(restart, file, t, reset);
     if (!means_enabled()) return;
     std::vector<std::string> names;
     for (const auto & f : fields) names.push_back("MEAN_" + f);
@@ -394,13 +481,29 @@ RestartAttributes Statistics::attributes() const {
     }
     for (auto && a : spectra.attributes()) all.push_back(a);
     for (auto && a : phase.attributes()) all.push_back(a);
+    for (const auto & c : conditional) {
+        for (auto && a : c.attributes()) all.push_back(a);
+    }
     return all;
 }
 
-std::vector<std::pair<std::string, std::string>> Statistics::summary() const {
-    std::vector<std::pair<std::string, std::string>> items;
+RestartArrays Statistics::arrays() const {
+    RestartArrays all = spectra.arrays();
+    for (const auto & c : conditional) {
+        for (auto && a : c.arrays()) all.push_back(a);
+    }
+    return all;
+}
+
+void Statistics::write(uint64_t step, rtype t, const std::string & reason) const {
+    spectra.write(step, t, reason);
+    for (const auto & c : conditional) c.write(step, t, reason);
+}
+
+std::vector<OutputSummary> Statistics::summary() const {
+    std::vector<OutputSummary> items;
     if (means_enabled()) {
-        std::string text = "every " + logging::count(interval) + " steps from t = " + units::with(logging::real(double(t_start)), "s") + ": ";
+        std::string text = "from t = " + units::with(logging::real(double(t_start)), "s") + ": ";
         for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + std::string("MEAN_") + fields[i];
         for (const auto & [i, j] : products) text += ", COV_" + fields[i] + "_" + fields[j];
         if (batches_enabled()) {
@@ -408,10 +511,11 @@ std::vector<std::pair<std::string, std::string>> Statistics::summary() const {
                     units::with(logging::real(double(batch)), "s");
         }
         if (n_samples > 0) text += " (" + logging::count(n_samples) + " samples so far)";
-        items.emplace_back("statistics", text);
+        items.push_back({.kind = "statistics", .file = "", .steps = interval, .contents = text});
     }
-    if (spectra.enabled()) items.emplace_back("spectra", spectra.summary());
-    if (phase.enabled()) items.emplace_back("phase averages", phase.summary());
+    if (spectra.enabled()) items.push_back(spectra.summary());
+    if (phase.enabled()) items.push_back(phase.summary());
+    for (const auto & c : conditional) items.push_back(c.summary());
     return items;
 }
 
@@ -549,6 +653,37 @@ std::vector<std::string> PhaseAverage::variables() const {
     return names;
 }
 
+std::vector<std::pair<std::string, snapshot_block::Average>> PhaseAverage::field_averages() const {
+    const std::vector<std::string> names = variables();
+    double total = 0.0;
+    for (const double w : weight) total += w;
+    std::vector<std::pair<std::string, snapshot_block::Average>> out;
+    for (uint32_t b = 0; b < bins; b++) {
+        for (size_t f = 0; f < fields.size(); f++) {
+            snapshot_block::Average a;
+            a.kind = "phase";
+            a.of = {fields[f]};
+            a.weighting = "time";
+            if (n_samples > 0) {
+                a.start = double(t_last) - total;
+                a.end = double(t_last);
+            }
+            a.samples = static_cast<int64_t>(n_samples);
+            a.interval = static_cast<int64_t>(interval);
+            a.bin = b;
+            a.bins = bins;
+            a.bin_weight = b < weight.size() ? weight[b] : 0.0;
+            if (trigger_variable.empty()) {
+                a.period = period;
+            } else {
+                a.trigger = trigger_variable;
+            }
+            out.emplace_back(names[b * fields.size() + f], std::move(a));
+        }
+    }
+    return out;
+}
+
 void PhaseAverage::register_data(std::vector<Data> & data) const {
     const std::vector<std::string> names = variables();
     for (size_t i = 0; i < names.size(); i++) data.emplace_back(names[i], Kokkos::subview(h_mean, Kokkos::ALL(), i));
@@ -615,9 +750,8 @@ RestartAttributes PhaseAverage::attributes() const {
     return a;
 }
 
-std::string PhaseAverage::summary() const {
-    std::string text = logging::count(bins) + " bins every " + logging::count(interval) + " steps from t = " +
-                       units::with(logging::real(double(t_start)), "s") + ", ";
+OutputSummary PhaseAverage::summary() const {
+    std::string text = logging::count(bins) + " bins from t = " + units::with(logging::real(double(t_start)), "s") + ", ";
     if (trigger_cell == NO_TRIGGER) {
         text += "period " + units::with(logging::real(period), "s");
     } else {
@@ -628,7 +762,7 @@ std::string PhaseAverage::summary() const {
     text += ": ";
     for (size_t i = 0; i < fields.size(); i++) text += (i ? ", " : "") + fields[i];
     if (n_samples > 0) text += " (" + logging::count(n_samples) + " samples so far)";
-    return text;
+    return {.kind = "phase averages", .file = "", .steps = interval, .contents = text};
 }
 
 std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::array<double, N_DIM>> & points,
@@ -679,8 +813,10 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
         buckets[key(b)].push_back(p);
     }
 
+    const curved::Geometry * curves = mesh.curved_geometry.get();
     for (uint32_t c = 0; c < n_owned && n_points > 0; c++) {
         const uint32_t n_nodes = mesh.h_n_nodes_of_cell(c);
+        const bool curved_cell = curves && curves->cell_is_curved(c);
         std::array<double, N_DIM> c_lo, c_hi;
         c_lo.fill(std::numeric_limits<double>::max());
         c_hi.fill(std::numeric_limits<double>::lowest());
@@ -690,8 +826,17 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
                 c_hi[d] = std::max(c_hi[d], node(c, k, d));
             }
         }
+        if (curved_cell) {
+            curved::Vec3 lo3, hi3;
+            curves->bounds(c, lo3, hi3);
+            for (size_t d = 0; d < N_DIM; d++) {
+                c_lo[d] = lo3[d];
+                c_hi[d] = hi3[d];
+            }
+        }
+        const double relative_tol = precision_tol<double>(1e-9, 1e-5);
         const double size = std::pow(static_cast<double>(mesh.h_cell_volume(c)), 1.0 / N_DIM);
-        const double tol = precision_tol<double>(1e-9, 1e-5) * size;
+        const double tol = relative_tol * size;
         bool outside = false;
         for (size_t d = 0; d < N_DIM; d++) {
             c_lo[d] -= tol;
@@ -706,6 +851,11 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
         }
         // Each face's plane through its centroid, with the normal out of c
         auto contains = [&](const std::array<double, N_DIM> & x) {
+            if (curved_cell) {
+                curved::Vec3 y = {0.0, 0.0, 0.0};
+                for (size_t d = 0; d < N_DIM; d++) y[d] = x[d];
+                return curves->contains(c, y, relative_tol);
+            }
             for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
                 const uint32_t f = mesh.h_face_of_cell(c, k);
                 const bool side_1 = mesh.h_cells_of_face(f, 1) == static_cast<int32_t>(c) &&
