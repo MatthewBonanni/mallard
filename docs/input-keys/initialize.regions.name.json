@@ -1,0 +1,14 @@
+{
+ "default": "\"initialize.regions[1]\"",
+ "defaults_by_dim": {
+  "2": "\"initialize.regions[0]\""
+ },
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "examples/shock_bubble_2d/input.toml",
+  "examples/turbulent_hot_spot_2d/input.toml"
+ ],
+ "type": "string"
+}
