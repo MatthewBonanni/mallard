@@ -846,10 +846,13 @@ void norm_verdict(NormResult & r, const Study & study) {
         r.verdict = "no positive order fits the errors against the finest grid: refine further";
         return;
     }
+    const bool finest = study.exact.empty();
     r.status = Status::OK;
-    r.verdict = "order " + order_text(p) + (study.exact.empty() ? " from the two runs next to the finest" : " on the finest pair") + design;
+    r.verdict = "order " + order_text(p) + (finest ? " from the two runs next to the finest" : " on the finest pair") +
+                design;
     if (r.errors.size() > 2) {
-        r.verdict += ", " + order_text(r.fitted) + (study.exact.empty() ? " fitted over every run but the finest" : " fitted over every grid");
+        r.verdict += ", " + order_text(r.fitted) +
+                     (finest ? " fitted over every run but the finest" : " fitted over every grid");
     }
     if (std::isfinite(study.design) && std::abs(p - study.design) > ORDER_SLACK) {
         r.status = Status::WARNING;
