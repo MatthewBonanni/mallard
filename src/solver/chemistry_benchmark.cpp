@@ -125,7 +125,7 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     CellChemistry cells;
     cells.init(model.device(), mech, chemistry::make_kinetics_table(mech, options.C_reg), cell_options, n_cells);
 
-    logging::items(model.summary());
+    logging::items(model.summary().settings);
     logging::items({
         {"Benchmark", logging::count(n_cells, "cell") + " from " + logging::count(n_samples, "trajectory state") + " (" +
                           logging::count(n_igniting, "igniting cell") + ")"},

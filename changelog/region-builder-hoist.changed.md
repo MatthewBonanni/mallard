@@ -1,0 +1,1 @@
+- Isosurface probes and snapshots compute the mesh's extent and mean cell size, and the fractions of their clipping regions of whole cells, once instead of at each write and `[statistics]` sample (#871).

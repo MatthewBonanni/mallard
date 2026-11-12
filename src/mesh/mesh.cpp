@@ -360,30 +360,25 @@ void Mesh::h_neighbors_of_cell(uint32_t i_cell, uint8_t n_order, std::vector<uin
     neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
 }
 
-void Mesh::compute_cell_centroids() {
-    // Area centroid of the polygon (the vertex average is only correct for
-    // triangles and parallelograms), relative to the cell's first node: in
-    // absolute coordinates the cross products cancel, leaving errors of
-    // eps |x|^2 / h, which break the equidistance of mirror-equivalent
-    // stencil entries on fine meshes away from the origin
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        const uint32_t n = h_n_nodes_of_cell(i_cell);
-        const uint32_t o = h_node_of_cell(i_cell, 0);
-        const rtype x0 = h_node_coords(o, 0), y0 = h_node_coords(o, 1);
-        rtype A = 0.0, Cx = 0.0, Cy = 0.0;
-        for (uint32_t k = 0; k < n; ++k) {
-            const uint32_t a = h_node_of_cell(i_cell, k);
-            const uint32_t b = h_node_of_cell(i_cell, (k + 1) % n);
-            const rtype xa = h_node_coords(a, 0) - x0, ya = h_node_coords(a, 1) - y0;
-            const rtype xb = h_node_coords(b, 0) - x0, yb = h_node_coords(b, 1) - y0;
-            const rtype cross = xa * yb - xb * ya;
-            A += 0.5_r * cross;
-            Cx += (xa + xb) * cross;
-            Cy += (ya + yb) * cross;
+AxisymmetricCell axisymmetric_cell(const std::vector<std::array<rtype, N_DIM>> & nodes) {
+    // Fan triangles from the first node; int y, int (x - x0) y and int y^2
+    // are exact with the edge-midpoint rule for each triangle
+    const size_t n = nodes.size();
+    const double x0 = double(nodes[0][0]), y0 = double(nodes[0][1]);
+    double I_y = 0.0, I_xy = 0.0, I_yy = 0.0;
+    for (size_t k = 1; k + 1 < n; k++) {
+        const double xa = double(nodes[k][0]) - x0, ya = double(nodes[k][1]);
+        const double xb = double(nodes[k + 1][0]) - x0, yb = double(nodes[k + 1][1]);
+        const double area = 0.5 * std::abs(xa * (yb - y0) - xb * (ya - y0));
+        I_y += area * (y0 + ya + yb) / 3.0;
+        const double mx[3] = {0.5 * xa, 0.5 * (xa + xb), 0.5 * xb};
+        const double my[3] = {0.5 * (y0 + ya), 0.5 * (ya + yb), 0.5 * (yb + y0)};
+        for (int m = 0; m < 3; m++) {
+            I_xy += area / 3.0 * mx[m] * my[m];
+            I_yy += area / 3.0 * my[m] * my[m];
         }
-        h_cell_coords(i_cell, 0) = x0 + Cx / (6.0_r * A);
-        h_cell_coords(i_cell, 1) = y0 + Cy / (6.0_r * A);
     }
+    return {I_y, {x0 + I_xy / I_y, I_yy / I_y}};
 }
 
 void Mesh::make_axisymmetric() {
@@ -407,28 +402,15 @@ void Mesh::make_axisymmetric() {
         h_face_measure = Kokkos::create_mirror_view(face_measure);
         cell_covariance = Kokkos::View<rtype *[3]>("cell_covariance", n_cells);
         h_cell_covariance = Kokkos::create_mirror_view(cell_covariance);
-        // Fan triangles from the first node; int y, int (x - x0) y and int y^2
-        // are exact with the edge-midpoint rule for each triangle
+        std::vector<std::array<rtype, N_DIM>> nodes;
         for (uint32_t c = 0; c < n_cells; c++) {
             const uint32_t n = h_n_nodes_of_cell(c);
-            const uint32_t o = h_node_of_cell(c, 0);
-            const double x0 = double(h_node_coords(o, 0)), y0 = double(h_node_coords(o, 1));
-            double I_y = 0.0, I_xy = 0.0, I_yy = 0.0;
-            for (uint32_t k = 1; k + 1 < n; k++) {
-                const uint32_t a = h_node_of_cell(c, k), b = h_node_of_cell(c, k + 1);
-                const double xa = double(h_node_coords(a, 0)) - x0, ya = double(h_node_coords(a, 1));
-                const double xb = double(h_node_coords(b, 0)) - x0, yb = double(h_node_coords(b, 1));
-                const double area = 0.5 * std::abs(xa * (yb - y0) - xb * (ya - y0));
-                I_y += area * (y0 + ya + yb) / 3.0;
-                const double mx[3] = {0.5 * xa, 0.5 * (xa + xb), 0.5 * xb};
-                const double my[3] = {0.5 * (y0 + ya), 0.5 * (ya + yb), 0.5 * (yb + y0)};
-                for (int m = 0; m < 3; m++) {
-                    I_xy += area / 3.0 * mx[m] * my[m];
-                    I_yy += area / 3.0 * my[m] * my[m];
-                }
-            }
+            nodes.resize(n);
+            for (uint32_t k = 0; k < n; k++) FOR_I_DIM nodes[k][i] = h_node_coords(h_node_of_cell(c, k), i);
+            const AxisymmetricCell cell = axisymmetric_cell(nodes);
+            const double I_y = cell.measure, xc = cell.centroid[0], yc = cell.centroid[1];
+            const double x0 = double(nodes[0][0]), y0 = double(nodes[0][1]);
             h_cell_measure(c) = rtype(I_y);
-            const double xc = x0 + I_xy / I_y, yc = I_yy / I_y;
             h_cell_coords(c, 0) = rtype(xc);
             h_cell_coords(c, 1) = rtype(yc);
             // Second moments: cubic integrands, a 3 x 3 collapsed Gauss rule (exact to degree 4)
@@ -457,43 +439,6 @@ void Mesh::make_axisymmetric() {
             h_face_measure(f) = h_face_area(f) * std::max(h_face_coords(f, 1), rtype(0));
         }
         axisymmetric = true;
-    }
-}
-
-void Mesh::compute_cell_volumes() {
-    for (uint32_t i_cell = 0; i_cell < n_cells; ++i_cell) {
-        switch (h_cell_type(i_cell)) {
-            case CellType::TRIANGLE: {
-                uint32_t i_node_0 = h_node_of_cell(i_cell, 0);
-                uint32_t i_node_1 = h_node_of_cell(i_cell, 1);
-                uint32_t i_node_2 = h_node_of_cell(i_cell, 2);
-
-                const NVector coords_0 = {h_node_coords(i_node_0, 0), h_node_coords(i_node_0, 1)};
-                const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
-                const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
-
-                h_cell_volume(i_cell) = triangle_area<2>(coords_0.data(), coords_1.data(), coords_2.data());
-                break;
-            }
-            case CellType::QUAD: {
-                uint32_t i_node_0 = h_node_of_cell(i_cell, 0);
-                uint32_t i_node_1 = h_node_of_cell(i_cell, 1);
-                uint32_t i_node_2 = h_node_of_cell(i_cell, 2);
-                uint32_t i_node_3 = h_node_of_cell(i_cell, 3);
-
-                const NVector coords_0 = {h_node_coords(i_node_0, 0), h_node_coords(i_node_0, 1)};
-                const NVector coords_1 = {h_node_coords(i_node_1, 0), h_node_coords(i_node_1, 1)};
-                const NVector coords_2 = {h_node_coords(i_node_2, 0), h_node_coords(i_node_2, 1)};
-                const NVector coords_3 = {h_node_coords(i_node_3, 0), h_node_coords(i_node_3, 1)};
-
-                rtype a1 = triangle_area<2>(coords_0.data(), coords_1.data(), coords_2.data());
-                rtype a2 = triangle_area<2>(coords_0.data(), coords_2.data(), coords_3.data());
-                h_cell_volume(i_cell) = a1 + a2;
-                break;
-            }
-            default:
-                throw std::runtime_error("Unknown cell type.");
-        }
     }
 }
 

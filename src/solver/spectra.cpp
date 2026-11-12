@@ -807,15 +807,14 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const
     logging::written(step, double(t), "spectra", name, reason, file);
 }
 
-std::string Spectra::summary() const {
-    std::string text = std::string(average ? "averaged" : "per sample") + " every " + logging::count(interval, "step") +
-                       " from t = " + units::with(logging::real(double(t_start)), "s") + " along ";
+OutputSummary Spectra::summary() const {
+    std::string text = std::string(average ? "averaged" : "per sample") + " from t = " +
+                       units::with(logging::real(double(t_start)), "s") + " along ";
     for (size_t h = 0; h < directions.size(); h++) text += (h ? ", " : "") + std::string(1, AXES[directions[h]]);
     text += ": ";
     for (size_t p = 0; p < pairs.size(); p++) {
         text += (p ? ", " : "") + fields[pairs[p].first] + (pairs[p].first == pairs[p].second ? "" : "*" + fields[pairs[p].second]);
     }
-    text += " -> " + file;
     if (n_samples > 0 && average) text += " (" + logging::count(n_samples, "sample") + " so far)";
-    return text;
+    return {.kind = "spectra", .file = file, .steps = interval, .contents = text};
 }

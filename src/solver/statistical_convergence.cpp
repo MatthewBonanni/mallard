@@ -458,15 +458,15 @@ void Convergence::restore(const RestartData & restart, const std::string & resta
     update(window_start);
 }
 
-std::vector<std::pair<std::string, std::string>> Convergence::summary() const {
+std::vector<OutputSummary> Convergence::summary() const {
     if (!enabled()) return {};
     std::string names;
     for (const auto & s : signals) names += (names.empty() ? "" : ", ") + s.name;
-    std::string text = "of " + names + ": transient by MSER-5, " + logging::format("%g%%", 100.0 * confidence) +
+    std::string text = names + ": transient by MSER-5, " + logging::format("%g%%", 100.0 * confidence) +
                        " intervals by " + std::to_string(batches) + " batch means";
     if (tolerance > 0.0) {
         text += logging::format("; converged at +-%g of the means", tolerance);
         if (variance_tolerance > 0.0) text += logging::format(" and +-%g of the variances", variance_tolerance);
     }
-    return {{"convergence", text + " to " + file}};
+    return {{.kind = "convergence", .file = file, .contents = text}};
 }

@@ -271,6 +271,10 @@ TEST(FieldUnitsTest, DerivedFieldsTakeTheirUnitsFromTheirFields) {
     EXPECT_EQ(units_of("COV_RHO_RHO"), "kg2 m-6");
     EXPECT_EQ(units_of("COV_U_X_P"), "kg s-3");
     EXPECT_EQ(units_of("COV_Y_O2_T"), "K");
+    EXPECT_EQ(units_of("COV_U_Y_U_Y"), "m2 s-2");
+    EXPECT_EQ(units_of("COV_P_MACH"), "kg m-1 s-2");
+    EXPECT_EQ(units_of("FAVRE_COV_U_X_U_Y"), "m2 s-2");
+    EXPECT_EQ(units_of("RMS_P"), "kg m-1 s-2");
     EXPECT_EQ(field_units::describe("COV_U_X_P").long_name, "covariance of x component of velocity and pressure");
     // Every product of two sampled scalars, though U and RHOU are fields and Y_ starts a species name
     std::vector<std::string> scalars(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());

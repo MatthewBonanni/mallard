@@ -37,6 +37,7 @@
 #include "provenance.h"
 #include "remap.h"
 #include "report.h"
+#include "diagnostic_code.h"
 
 namespace fs = std::filesystem;
 
@@ -1153,9 +1154,9 @@ int post_convergence(const cli::Args & args) {
     } catch (const UsageError & e) {
         return cli::usage_error(*cli::command("post convergence"), e.what());
     } catch (const InputError & e) {
-        std::cerr << NAME << ": a run's input: " << e.what() << "\n";
+        logging::error(diagnostic_code::CONVERGENCE, std::string(NAME) + ": a run's input: " + e.what());
     } catch (const std::exception & e) {
-        std::cerr << NAME << ": " << e.what() << "\n";
+        logging::error(diagnostic_code::CONVERGENCE, std::string(NAME) + ": " + e.what());
     }
     return 1;
 }
@@ -1165,7 +1166,10 @@ int convergence_main(const cli::Args & args) {
     char ** argv = args.argv;
     comm::Session session(argc, argv);
     if (comm::size() > 1) {
-        if (comm::is_root()) std::cerr << NAME << ": runs on one rank, not " << comm::size() << "; start it without mpirun.\n";
+        if (comm::is_root()) {
+            logging::error(diagnostic_code::ONE_RANK, std::string(NAME) + ": runs on one rank, not " +
+                                                          std::to_string(comm::size()) + "; start it without mpirun.");
+        }
         return 1;
     }
     Kokkos::ScopeGuard kokkos(argc, argv);
