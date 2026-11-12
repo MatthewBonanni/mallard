@@ -520,6 +520,10 @@ TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
     expect_matches_serial(teno);
     expect_matches_serial(mixture_input(hybrid, "type = \"MUSCL\"\n", "", "euler"));
     expect_matches_serial(mixture_input(hybrid + "double_flux = true\n", "type = \"MUSCL\"\n", "", "euler"));
+    // And the halo cells' [gamma, e0]
+    const std::string cells = "[numerics.hybrid]\ncentral = \"cell_averages\"\n";
+    expect_matches_serial(mixture_input(hybrid + cells, "type = \"MUSCL\"\n", "", "euler"));
+    expect_matches_serial(mixture_input(hybrid + "double_flux = true\n" + cells, "type = \"MUSCL\"\n", "", "euler"));
 }
 
 TEST(MPITest, CharacteristicBoundariesAndSpongesMatchSerialWithAndWithoutStepGraphs) {
