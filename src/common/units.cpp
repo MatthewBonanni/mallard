@@ -413,6 +413,15 @@ std::string Dimension::examples() const {
     return n ? n->examples : "";
 }
 
+std::string Dimension::symbol() const {
+    if (same_as(dim::none)) return "";
+    if (plain != 1.0) return plain_unit;
+    const NamedDimension * n = named(*this);
+    if (!n || !*n->examples) return base_units(*this);
+    const std::string all = n->examples;
+    return all.substr(0, all.find(','));
+}
+
 Quantity parse_quantity(const std::string & text_in) {
     const std::string text = trim(text_in);
     const size_t n = number_length(text);

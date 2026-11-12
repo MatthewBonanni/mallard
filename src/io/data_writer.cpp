@@ -305,22 +305,13 @@ void DataWriter::init(const Input & input,
         }
         subset = true;
         region_name = cell_subset->name;
-        subset_cells = cell_subset->cells;
-        std::sort(subset_cells.begin(), subset_cells.end(),
-                  [&](uint32_t a, uint32_t b) { return mesh->h_global_cell(a) < mesh->h_global_cell(b); });
-        std::vector<uint64_t> global;
-        for (uint32_t c : subset_cells) global.push_back(mesh->h_global_cell(c));
-        std::vector<uint64_t> all = mesh->n_global_cells > 0 ? comm::allgatherv(global) : global;
-        std::sort(all.begin(), all.end());
-        n_subset = all.size();
-        for (uint64_t g : global) {
-            subset_ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
-        }
-        Kokkos::View<rtype *, Kokkos::LayoutStride>::host_mirror_type values(
-            "REGION_FRACTION", Kokkos::LayoutStride(cell_subset->fractions.size(), 1));
-        for (size_t c = 0; c < cell_subset->fractions.size(); c++) values(c) = static_cast<rtype>(cell_subset->fractions[c]);
-        fraction = std::make_unique<Data>("REGION_FRACTION", values);
+        subset_at = cell_subset->at;
+        subset_solution = cell_subset->solution;
+        fraction_values = Kokkos::View<rtype *, Kokkos::LayoutStride>::host_mirror_type(
+            "REGION_FRACTION", Kokkos::LayoutStride(subset_at ? mesh->n_cells : cell_subset->fractions.size(), 1));
+        fraction = std::make_unique<Data>("REGION_FRACTION", fraction_values);
         fields.push_back(Field{"REGION_FRACTION", {fraction.get()}, field_units::describe("REGION_FRACTION")});
+        if (!subset_at) select_subset(cell_subset->cells, cell_subset->fractions);
     }
 
     const std::string compression_str = find_value_or<std::string>(input, "compression", "none");
@@ -359,23 +350,48 @@ void DataWriter::init(const Input & input,
     if (output_files_enabled()) create_parent_directories("the output", prefix);
 }
 
-std::pair<std::string, std::string> DataWriter::summary() const {
-    std::string text = prefix + (format == DataFormat::RESTART  ? "_*.restart"
-                                 : format == DataFormat::HDF5   ? "_*.h5"
-                                 : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
-                                                                : "_*.vtu");
-    if (subset) text += " (" + region_name + ", " + logging::count(n_subset) + " cells)";
-    if (compression == Compression::ZLIB) {
-        text += relative_error > 0.0 ? ", zlib to relative error " + logging::real(relative_error) : ", zlib";
+void DataWriter::select_subset(const std::vector<uint32_t> & cells, const std::vector<double> & fractions) {
+    subset_cells = cells;
+    subset_ids.clear();
+    std::sort(subset_cells.begin(), subset_cells.end(),
+              [&](uint32_t a, uint32_t b) { return mesh->h_global_cell(a) < mesh->h_global_cell(b); });
+    std::vector<uint64_t> global;
+    for (uint32_t c : subset_cells) global.push_back(mesh->h_global_cell(c));
+    std::vector<uint64_t> all = mesh->n_global_cells > 0 ? comm::allgatherv(global) : global;
+    std::sort(all.begin(), all.end());
+    n_subset = all.size();
+    for (uint64_t g : global) {
+        subset_ids.push_back(static_cast<uint64_t>(std::lower_bound(all.begin(), all.end(), g) - all.begin()));
     }
-    text += interval > 0 ? " every " + logging::count(interval) + " steps"
-                         : " every " + units::with(logging::real(double(time_interval)), "s") + " of simulated time";
+    for (size_t c = 0; c < fraction_values.extent(0); c++) fraction_values(c) = static_cast<rtype>(fractions[c]);
+    vtkhdf.built = false;
+    vtu_mesh.clear();
+}
+
+OutputSummary DataWriter::summary() const {
+    const std::string file = prefix + (format == DataFormat::RESTART  ? "_*.restart"
+                                       : format == DataFormat::HDF5   ? "_*.h5"
+                                       : format == DataFormat::VTKHDF ? (one_file ? ".vtkhdf" : "_*.vtkhdf")
+                                                                      : "_*.vtu");
+    std::vector<std::string> parts;
+    if (subset) {
+        parts.push_back(region_name + ", " + (subset_at ? std::string("its cells at each write") : logging::count(n_subset) + " cells"));
+    }
+    if (compression == Compression::ZLIB) {
+        parts.push_back(relative_error > 0.0 ? "zlib to relative error " + logging::real(relative_error) : "zlib");
+    }
     if (format != DataFormat::RESTART) {
         std::string names;
         for (const auto & field : fields) names += (names.empty() ? "" : ", ") + field.name;
-        text += ": " + names;
+        parts.push_back(names);
     }
-    return {FORMAT_NAMES.at(format), text};
+    std::string contents;
+    for (const std::string & part : parts) contents += (contents.empty() ? "" : "; ") + part;
+    return {.kind = FORMAT_NAMES.at(format),
+            .file = file,
+            .steps = interval,
+            .seconds = interval > 0 ? 0.0 : double(time_interval),
+            .contents = contents};
 }
 
 std::string DataWriter::index_file() const {
@@ -585,6 +601,14 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     const bool root = comm::is_root();
     const std::string stem = snapshot_stem(interval > 0 || format == DataFormat::RESTART ? step : n_snapshots);
     const Block block = snapshot_of(step, t, force);
+    if (subset_at) {
+        const std::vector<double> fractions = subset_at(double(t));
+        std::vector<uint32_t> cells;
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+            if (fractions[c] > 0.0) cells.push_back(c);
+        }
+        select_subset(cells, fractions);
+    }
     if (format == DataFormat::RESTART) {
         // Written under another name, so that no file of this name is ever incomplete
         last_file = stem + ".restart";
@@ -687,7 +711,7 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
     const char * stored = sizeof(rtype) == 8 ? "float64" : "float32";
     for (const auto & field : fields) {
         snapshot_block::Field f{field.name, field.description.units(), field.description.long_name, stored,
-                                relative_error};
+                                relative_error, "", {}};
         if (format == DataFormat::RESTART) {
             const auto d = field_units::find(field.name);
             f.units = d ? d->units() : "";
@@ -702,6 +726,14 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
                                                            : file_format::VTU_OUTPUT.version;
     return snapshot_block::make(step, double(t), snapshot_block::current_reason(force), FORMAT_NAMES.at(format),
                                 version, std::move(list));
+}
+
+std::string DataWriter::cell_methods(const std::string & name) const {
+    if (!snapshot_blocks) return "";
+    snapshot_block::Field f;
+    f.name = name;
+    f.value = snapshot_block::value_kind(name);
+    return snapshot_block::cell_methods(f);
 }
 
 std::string DataWriter::set_interval(uint64_t steps) {

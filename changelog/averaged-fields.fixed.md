@@ -1,0 +1,1 @@
+- The snapshot block of a probe with `average = true` gives the probe's own averaging window and sample count, not those of the `[statistics]` means (none when the run keeps no `[statistics]` means) (#672).

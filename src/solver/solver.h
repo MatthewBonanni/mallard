@@ -60,6 +60,7 @@
 #include "log.h"
 #include "run_control.h"
 #include "check.h"
+#include "run_report.h"
 #include "memory_tracker.h"
 #include "numerics_preset.h"
 #include "run_status.h"
@@ -183,6 +184,17 @@ class Solver {
          *        writes them, and waits for the files.
          */
         void write_output_of_state(bool next);
+
+        /**
+         * @brief Post-processing (`mallard post average`): with next, takes the next state from the
+         *        reader; then adds it to the [statistics] means as a sample at its step and time (the
+         *        means start at statistics.t_start, not from the files'), updates their host copies,
+         *        and returns the cell values sampled.
+         */
+        CellSampler sample_statistics_of_state(bool next);
+
+        /** @brief Post-processing, set before init(): fields of the caller's own on the mesh's cells, for [[write_data]]. */
+        void set_output_data(std::function<void(const Mesh &, std::vector<Data> &)> add) { output_data = std::move(add); }
 
         /**
          * @brief Run until a stop condition is reached.
@@ -337,7 +349,9 @@ class Solver {
         /** @brief Rank-count independent key of a boundary face in restart files. */
         uint64_t restart_face_key(uint32_t i_face) const;
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
-        void apply_sponges(const State & solution, const State & rhs);
+        void apply_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
+        /** @brief Those of sponges in moving regions, weighted by their fractions at the stage time. */
+        void apply_moving_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
         void calc_dt();
         /** @brief step_reduce(0), where calc_dt_cfl1 reduces this rank's time step (allocated at the first call). */
         Kokkos::View<rtype> dt_reduce_slot();
@@ -463,6 +477,8 @@ class Solver {
          *        and the last bits of T, do not depend on output or diagnostics.
          */
         void update_cell_states(const State & solution, bool update_seed);
+        /** @brief update_cell_states of the state and update_primitives, solving each cell's temperature once. */
+        void update_cell_states_and_primitives();
         /**
          * @brief Viscous mixtures, after update_cell_states: transport
          *        coefficients of every cell and the gradients of [u, T, X].
@@ -710,7 +726,7 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
-        /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*. */
+        /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*; the primitives are left to their users. */
         void apply_output_state(RestartData state);
         void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
@@ -776,7 +792,13 @@ class Solver {
         void sample_probe_averages();
         /** @brief The named arrays of restart files: averaged spectra and probes (collective). */
         RestartArrays restart_arrays() const;
-        CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
+        CellSampler cell_sampler() const {
+            return CellSampler{conservatives, species, primitives, derived_fields, hrr, production};
+        }
+        /** @brief The cell fields that source expressions and regions defined by the solution read. */
+        region::CellFields cell_fields() const;
+        /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
+        void sample_statistics();
         /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
         ProbeFields probe_fields(ProbeFluxes & fluxes);
         /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
@@ -911,6 +933,7 @@ class Solver {
         Input input;
         bool check_only = false;  // within check()
         std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
+        std::function<void(const Mesh &, std::vector<Data> &)> output_data;  // post-processing: fields of its own
         numerics_preset::Resolution preset;
         std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
@@ -929,9 +952,9 @@ class Solver {
         uint64_t n_cells_global = 0;
 
         // Run log
-        logging::Items mesh_summary;
+        MeshSetup mesh_setup;
         std::vector<CheckBoundary> boundary_summary;
-        logging::Items source_summary;
+        report::Summary source_summary;
         std::string initial_state;
         double t_wall_setup = 0.0;
         double t_wall_stepping = 0.0;
@@ -1138,6 +1161,12 @@ class Solver {
         Kokkos::View<rtype *> sponge_strength;
         Kokkos::View<rtype **, Kokkos::LayoutRight> sponge_target;
         rtype sponge_dt_max = std::numeric_limits<rtype>::infinity();  // 1 / max strength
+        struct MovingSponge {
+            std::shared_ptr<region::MovingFractions> fractions;
+            Kokkos::View<rtype *> strength;                        // per owned cell, inside the region
+            Kokkos::View<rtype **, Kokkos::LayoutRight> target;    // strength times the target state
+        };
+        std::vector<MovingSponge> moving_sponges;
 
         bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
         rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from

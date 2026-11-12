@@ -29,6 +29,13 @@
   ok      top                           curve   2        m      16     the mesh's
   ERROR   sponges[0].region             filled  0        m^2    0      cell fractions
   ok      probes[name = "ring"].region  curve   1.5708   m      13     exact
+  Filled regions: their part in the domain (its surface: theirs inside the domain and the
+  domain's boundary inside them) and their own measures, independent of the mesh ("-" for
+  regions of the mesh or unbounded ones), exact or within a relative tolerance; outside: the
+  share outside the domain.
+  status  region             quantity   in domain  own  units  tolerance  outside
+  ok      sponges[0].region  area       0          2    m^2    exact      100%
+  ok      sponges[0].region  perimeter  0          6    m      exact
 
 == Mesh quality ======================================================================== ok
   Over every cell; a cell above the limit is questionable.
