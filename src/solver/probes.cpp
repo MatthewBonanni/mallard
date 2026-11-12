@@ -455,10 +455,11 @@ void Probes::region_measures(Probe & p, const Mesh & mesh, const region::Region 
     const double share = std::max(0.0, 1.0 - in.volume / own.volume);
     if (share <= CLIPPED_SHARE + own.tolerance) return;
     p.clipped = json::Object().add(std::string(volume) + "_fraction", share).str();
-    logging::warning(key + ": " + logging::real(100.0 * share) + "% of its " + volume +
-                     " lies outside the domain, and the probe covers only its part inside (" +
-                     units::with(logging::real(in.volume), volume_units(mesh.axisymmetric)) + " of " +
-                     units::with(logging::real(own.volume), volume_units(mesh.axisymmetric)) + ").");
+    logging::warning(diagnostic_code::PROBE_OUTSIDE,
+                     key + ": " + logging::real(100.0 * share) + "% of its " + volume +
+                         " lies outside the domain, and the probe covers only its part inside (" +
+                         units::with(logging::real(in.volume), volume_units(mesh.axisymmetric)) + " of " +
+                         units::with(logging::real(own.volume), volume_units(mesh.axisymmetric)) + ").");
 }
 
 void Probes::select_region(Probe & p, const Mesh & mesh, const region::Region & r,
