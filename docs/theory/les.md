@@ -116,6 +116,18 @@ the default constants (`[les] model`, `C`) are
     ($\sigma_3 = 0$ exactly for planar gradients). Sigma vanishes for every
     2D flow, so 2D builds reject it and default to WALE.
 
+![The operator of each subgrid-scale model for canonical velocity gradients, and its decay toward a no-slip wall](../images/theory/sgs_models-light.svg#gh-light-mode-only)
+![The operator of each subgrid-scale model for canonical velocity gradients, and its decay toward a no-slip wall](../images/theory/sgs_models-dark.svg#gh-dark-mode-only)
+
+*Left: $\mathcal{D}$ of each model relative to $\lvert\mathbf{g}\rvert = (g_{ij}g_{ij})^{1/2}$,
+for unit gradients; the last row is the mean over 2000 random traceless
+gradients. Only Sigma vanishes in every case without turbulence: pure
+shear, solid rotation, axisymmetric strain and any 2D gradient. Right:
+$\mathcal{D}$ of a velocity field expanded from a no-slip wall in the distance
+$y$; WALE and Sigma decay as $y^3$ like the subgrid stresses, Vreman as $y$
+and Smagorinsky not at all
+(`tools/docs/les_models.py`, from the operators in `src/physics/les.h`).*
+
 ## Filter width
 
 The filter width is the cell size $\Delta_V = \lvert\Omega_i\rvert^{1/d}$
@@ -136,6 +148,14 @@ The extents $h_1 \le h_2 \le h_3$ of an arbitrary cell are
 $h_m = \lvert\Omega_i\rvert/\lambda_m$, with $\lambda_m$ the eigenvalues of
 its projected-area tensor $\tfrac12\sum_f A_f\,\mathbf{n}_f\mathbf{n}_f^T$
 (exact for boxes, equal for regular tetrahedra).
+
+![Scotti's correction factor of the filter width against the two aspect ratios of a cell](../images/theory/filter_width-light.svg#gh-light-mode-only)
+![Scotti's correction factor of the filter width against the two aspect ratios of a cell](../images/theory/filter_width-dark.svg#gh-dark-mode-only)
+
+*The factor $\Delta/\Delta_V$ of eq. $\eqref{eq:filter-width}$ over the aspect
+ratios of a cell. Along both edges, pencils ($h_1 = h_2$) and pancakes
+($h_2 = h_3$), it grows to 1.42 at an aspect ratio of 10 and 3.0 at 100: the
+volume size alone underestimates the filter width of stretched wall cells.*
 
 ## Resolution of the reconstructions and the model's gradients
 
