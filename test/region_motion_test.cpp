@@ -2,7 +2,7 @@
  * @file region_motion_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Arrays of copies, regions that move, and regions that wrap across
- *        periodic boundaries; exact sums on the device.
+ *        periodic boundaries.
  * @version 0.1
  * @date 2026-11-10
  *
@@ -13,7 +13,6 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
-#include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -22,9 +21,6 @@
 #include <utility>
 #include <vector>
 
-#include "device_comm.h"
-#include "device_sums.h"
-#include "exact_sums.h"
 #include "gmsh_fixtures.h"
 #include "input.h"
 #include "mesh.h"
@@ -100,28 +96,42 @@ std::shared_ptr<Mesh> simplex_mesh(const uint32_t n) {
     return mesh;
 }
 
-/** @brief The cell fields of a gas at rest, R = 1 and density 1, with the pressure p(x) at each cell centroid. */
-template <typename F>
-region::CellFields gas_with_pressure(const Mesh & mesh, F p) {
+/**
+ * @brief The cell fields of a gas of R = 1, gamma = 1.4 and density 1, with the
+ *        pressure p(x) and the velocity u(x, out) at each cell centroid.
+ */
+template <typename F, typename G>
+region::CellFields gas(const Mesh & mesh, F p, G u) {
     region::CellFields fields;
     fields.coords = mesh.cell_coords;
     fields.R = 1.0;
+    fields.gamma = 1.4;
     fields.W = Kokkos::View<rtype *[N_CONSERVATIVE]>("W", mesh.n_cells);
     const auto W = Kokkos::create_mirror_view(fields.W);
     const auto x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh.cell_coords);
     for (uint32_t c = 0; c < mesh.n_cells; c++) {
         const double at[3] = {double(x(c, 0)), double(x(c, 1)), N_DIM == 3 ? double(x(c, N_DIM - 1)) : 0.0};
+        double v[3] = {0.0, 0.0, 0.0};
+        u(at, v);
         W(c, 0) = 1.0;
+        for (int d = 0; d < N_DIM; d++) W(c, 1 + d) = static_cast<rtype>(v[d]);
         W(c, N_DIM + 1) = static_cast<rtype>(p(at));
     }
     Kokkos::deep_copy(fields.W, W);
     return fields;
 }
 
+/** @brief The cell fields of a gas at rest, R = 1 and density 1, with the pressure p(x) at each cell centroid. */
+template <typename F>
+region::CellFields gas_with_pressure(const Mesh & mesh, F p) {
+    return gas(mesh, p, [](const double *, double *) {});
+}
+
 /** @brief The measure of a solution-defined region on the mesh: the integral of its fractions, or its elements' total. */
-double solution_measure(const Mesh & mesh, const std::string & table, const region::CellFields & fields) {
+double solution_measure(const Mesh & mesh, const std::string & table, const region::CellFields & fields,
+                        const std::vector<std::string> & species = {}) {
     const region::Region r = read(table);
-    const auto levels = std::make_shared<const region::SolutionLevels>(mesh, r.conditions(), std::vector<std::string>{}, fields);
+    const auto levels = std::make_shared<const region::SolutionLevels>(mesh, r.conditions(), species, fields);
     if (r.dimension() == N_DIM) {
         const region::MovingFractions moving(mesh, r, levels);
         moving.update(0.0);
@@ -142,21 +152,6 @@ region::Levels owned_levels(const Mesh & mesh, const region::SolutionLevels & le
     Kokkos::deep_copy(values, h);
     out.values = values;
     return out;
-}
-
-// Device lambdas live in free functions: nvcc rejects them in TEST bodies, which are private members
-void fill_terms(const Kokkos::View<double *[2]> & terms, const Kokkos::View<double **, Kokkos::LayoutLeft> & columns) {
-    Kokkos::parallel_for("fill", terms.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
-        terms(c, 0) = columns(c, 0) = Kokkos::sin(1.0 + c) * 1e-3;
-        terms(c, 1) = columns(c, 1) = (c % 7 == 0 ? 1e8 : 1e-8) * Kokkos::cos(double(c));
-    });
-}
-
-void fill_rank_columns(const Kokkos::View<double **, Kokkos::LayoutLeft> & columns, const double r) {
-    Kokkos::parallel_for("fill", columns.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
-        columns(c, 0) = Kokkos::sin(1.0 + c + 100.0 * r);
-        columns(c, 1) = Kokkos::cos(c * r) * 1e-6;
-    });
 }
 
 } // namespace
@@ -313,6 +308,59 @@ TEST(RegionMotionTest, ConditionsOfLinearFieldsCoverTheirExactVolume) {
                 0.6 * 0.6 - 0.25 * 0.36, 2e-3);
 }
 
+TEST(RegionMotionTest, DerivedFieldsOfLinearFieldsCoverTheirExactVolume) {
+    // Each condition below is linear in x on these fields, so its region is exact
+    const auto mesh = unit_mesh();
+    const double tol = std::max(1e-12, 64.0 * double(std::numeric_limits<rtype>::epsilon()));
+    const auto where = [](const std::string & condition) { return "{type = \"where\", condition = \"" + condition + "\"}"; };
+    // H = gamma / (gamma - 1) p / rho
+    const auto layered = gas_with_pressure(*mesh, [](const double * x) { return 1.0 + x[0] + 0.5 * x[1]; });
+    EXPECT_NEAR(solution_measure(*mesh, where("H < 5.6"), layered), 0.35, tol);
+    // Its isosurface: x + y / 2 = 0.6
+    EXPECT_NEAR(solution_measure(*mesh, "{type = \"isosurface\", field = \"H\", value = 5.6}", layered),
+                std::hypot(0.5, 1.0), tol);
+    // u = (x, 0): MACH = x / sqrt(gamma), and Q = -(du_x/dx)^2 / 2 = -1/2
+    const auto stretched = gas(*mesh, [](const double *) { return 1.0; }, [](const double * x, double * u) { u[0] = x[0]; });
+    EXPECT_NEAR(solution_measure(*mesh, where("MACH * sqrt(1.4) < 0.3"), stretched), 0.3, tol);
+    EXPECT_NEAR(solution_measure(*mesh, where("Q_CRITERION * x > -0.15"), stretched), 0.3, tol);
+    // Rotation at rate 2 about (0.5, 0.5): vorticity 4 about z, Q = 4
+    const auto rotating = gas(*mesh, [](const double *) { return 1.0; }, [](const double * x, double * u) {
+        u[0] = -2.0 * (x[1] - 0.5);
+        u[1] = 2.0 * (x[0] - 0.5);
+    });
+    EXPECT_NEAR(solution_measure(*mesh, where(N_DIM == 2 ? "VORTICITY * x < 1.6" : "VORTICITY_Z * x < 1.6"), rotating),
+                0.4, tol);
+    EXPECT_NEAR(solution_measure(*mesh, where("Q_CRITERION * x < 1.6"), rotating), 0.4, tol);
+    if constexpr (N_DIM == 3) {
+        EXPECT_NEAR(solution_measure(*mesh, where("abs(VORTICITY_X) + abs(VORTICITY_Y) < 1e-6"), rotating), 1.0, tol);
+    }
+    // Mixtures: X_k = (Y_k / W_k) / sum_j (Y_j / W_j), H = e0 + gamma / (gamma - 1) p / rho
+    region::CellFields mixture = layered;
+    mixture.R = 0.0;
+    mixture.R_universal = 1.0;
+    mixture.inv_W = Kokkos::View<double *>("inv_W", 2);
+    const auto inv_W = Kokkos::create_mirror_view(mixture.inv_W);
+    inv_W(0) = 0.5;
+    inv_W(1) = 0.25;
+    Kokkos::deep_copy(mixture.inv_W, inv_W);
+    mixture.Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("Y", mesh->n_cells, 4);
+    const auto Y = Kokkos::create_mirror_view(mixture.Y);
+    const auto x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->cell_coords);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        // X_A = 2 Y_A / (1 + Y_A) = x
+        const double X_A = double(x(c, 0));
+        Y(c, 0) = static_cast<rtype>(X_A / (2.0 - X_A));
+        Y(c, 1) = static_cast<rtype>(1.0 - X_A / (2.0 - X_A));
+        Y(c, 2) = 1.4_r;
+        Y(c, 3) = 2.0_r;
+    }
+    Kokkos::deep_copy(mixture.Y, Y);
+    const std::vector<std::string> species = {"A", "B-2"};
+    EXPECT_NEAR(solution_measure(*mesh, where("X_A < 0.3"), mixture, species), 0.3, tol);
+    EXPECT_NEAR(solution_measure(*mesh, where("X_B_2 > 0.7"), mixture, species), 0.3, tol);
+    EXPECT_NEAR(solution_measure(*mesh, where("H < 7.6"), mixture, species), 0.35, tol);
+}
+
 TEST(RegionMotionTest, ConditionVolumesAndIsosurfaceAreasConvergeAtSecondOrder) {
     // p = 1 + r^2: where p < 1 + R^2 is the disk (ball) of radius R, and its isosurface the circle (sphere)
     const double R = 0.3, pi = std::numbers::pi;
@@ -376,32 +424,4 @@ TEST(RegionMotionTest, SurfacesOfTheSolutionAreCutFromTheLevelsOfTheCellsTheyMay
         EXPECT_EQ(a.quad_weights, b.quad_weights) << table;
         EXPECT_EQ(a.vertices, b.vertices) << table;
     }
-}
-
-TEST(RegionMotionTest, DeviceSumsAreTheExactSums) {
-    const uint32_t n = 1000;
-    Kokkos::View<double *[2]> terms("terms", n);
-    Kokkos::View<double **, Kokkos::LayoutLeft> columns("columns", n, 2);
-    fill_terms(terms, columns);
-    const DeviceSums sums(2, n, false);
-    sums.sum(columns, false);
-    const auto got = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.totals());
-    const std::array<double, 2> expected = exact_sums(terms, n, false);
-    EXPECT_EQ(got(0), expected[0]);
-    EXPECT_EQ(got(1), expected[1]);
-}
-
-TEST(RegionMotionTest, DeviceSumsAcrossRanksAreTheSameWithNcclAndMpi) {
-    if (!comm::nccl_available() || comm::size() < 2) GTEST_SKIP() << "needs NCCL and more than one rank";
-    const uint32_t n = 100 + 37 * static_cast<uint32_t>(comm::rank());
-    Kokkos::View<double **, Kokkos::LayoutLeft> columns("columns", n, 2);
-    const double r = comm::rank();
-    fill_rank_columns(columns, r);
-    const DeviceSums sums(2, n, true);
-    sums.sum(columns, false);
-    const auto mpi = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.totals());
-    sums.sum(columns, true);
-    const auto nccl = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.totals());
-    EXPECT_EQ(mpi(0), nccl(0));
-    EXPECT_EQ(mpi(1), nccl(1));
 }

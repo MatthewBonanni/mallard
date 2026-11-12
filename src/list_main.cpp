@@ -150,14 +150,25 @@ int format_error(const cli::Args & args, const char * command) {
 std::string count_text(size_t n) { return std::to_string(n) + (n == 1 ? " field" : " fields"); }
 
 std::string field_json(const std::string & name, const std::string & units, const std::string & long_name,
-                       const std::string & group, const std::string & needs, const std::vector<std::string> & species) {
+                       const std::string & group, const std::string & needs, bool post_derive,
+                       const std::vector<std::string> & species) {
     json::Object o;
     o.add("name", name).add("units", units).add("long_name", long_name).add("group", group);
     if (!needs.empty()) o.add("needs", needs);
+    if (post_derive) o.add("post_derive", true);
     std::string where = "[";
     for (const std::string & w : available(name, group, species)) where += (where.size() > 1 ? "," : "") + json::quote(w);
     o.raw("available", where + "]");
     return o.str();
+}
+
+/** @brief The line naming the fields of names that mallard post derive writes, or "" if none. */
+std::string post_derive_text(const std::vector<std::string> & names) {
+    std::string list;
+    for (const std::string & name : names) {
+        if (field_units::post_derive(name)) list += (list.empty() ? "" : ", ") + name;
+    }
+    return list.empty() ? "" : "mallard post derive writes, from snapshots and restart files: " + list + ".\n";
 }
 
 template <typename T, typename F>
@@ -173,7 +184,7 @@ int list_catalog(const cli::Args & args) {
         std::cout << json::Object()
                          .raw("input", "null")
                          .raw("fields", json_array(catalog, [](const CatalogField & f) {
-                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, {});
+                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, f.post_derive, {});
                               }))
                          .str()
                   << "\n";
@@ -190,7 +201,9 @@ int list_catalog(const cli::Args & args) {
             rows.clear();
         }
     }
-    std::cout << "\nmallard list fields input.toml lists the fields of one case.\n";
+    std::vector<std::string> names;
+    for (const CatalogField & f : catalog) names.push_back(f.name);
+    std::cout << "\n" << post_derive_text(names) << "mallard list fields input.toml lists the fields of one case.\n";
     return 0;
 }
 
@@ -213,10 +226,11 @@ int list_fields_main(const cli::Args & args) {
                          .raw("fields", json_array(c.fields, [&](const std::string & name) {
                                   const FieldDescription d = field_units::describe(name);
                                   return field_json(name, d.units(), d.long_name, field_units::group(name), "",
-                                                    c.species);
+                                                    field_units::post_derive(name), c.species);
                               }))
                          .raw("missing", json_array(absent, [&](const CatalogField & f) {
-                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, c.species);
+                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, f.post_derive,
+                                                    c.species);
                               }))
                          .str()
                   << "\n";
@@ -242,7 +256,8 @@ int list_fields_main(const cli::Args & args) {
         for (const CatalogField & f : absent) rows.push_back({f.name, units_text(f.units), f.needs});
         logging::table({"field", "units", "needs"}, rows);
     }
-    std::cout << "\nVectors also go by their name without _X, _Y, _Z (U); a trailing * selects every field it starts "
+    std::cout << "\n" << post_derive_text(fields)
+              << "Vectors also go by their name without _X, _Y, _Z (U); a trailing * selects every field it starts "
                  "(Y_*).\n";
     return 0;
 }
@@ -276,10 +291,7 @@ int list_species_main(const cli::Args & args) {
 
 int list_templates_main(const cli::Args &) { return case_template::new_case({}, true, false, false); }
 
-namespace {
-
-/** @brief The key catalog of every example and tutorial, as tools/dev/input_catalog.py merges it. */
-json::Value general_catalog() {
+json::Value general_key_catalog() {
     for (const std::filesystem::path & dir : data_dirs()) {
         std::ifstream in(dir / "docs" / "input-keys.json");
         if (!in) continue;
@@ -290,6 +302,8 @@ json::Value general_catalog() {
     throw std::runtime_error("the key catalog docs/input-keys.json is in none of Mallard's data directories (set "
                              "MALLARD_DATA_DIR to the source tree, or to the install tree's share/mallard)");
 }
+
+namespace {
 
 std::string section_of(const std::string & key) { return key.substr(0, key.find('.')); }
 
@@ -371,7 +385,7 @@ int list_keys_main(const cli::Args & args) {
     json::Value catalog;
     if (input_file.empty()) {
         try {
-            catalog = general_catalog();
+            catalog = general_key_catalog();
         } catch (const std::exception & e) {
             logging::error(diagnostic_code::LIST, std::string("mallard list keys: ") + e.what());
             return 1;
