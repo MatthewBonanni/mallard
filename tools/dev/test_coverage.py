@@ -11,9 +11,10 @@ depends on, so CI can rerun only the tests a change can affect.
 -fcoverage-mapping). It runs each test (or each suite) in its own process, with every
 process it starts writing its own profile, and records the source files with an executed
 line. A test then depends on:
-- those files, and every header the translation units among them include (from the
-  build's dependency files), so a change to a constant or a type in a header counts too;
-- the data files that any of them names (`"test/data/meshes"`, `"examples" / file`):
+- those files, and the headers they include directly, so a change to a constant or a type
+  in a header counts too (a header included only through another header counts for the
+  tests that execute a line of it or of a file that includes it directly);
+- the data files that a file it executes names (`"test/data/meshes"`, `"examples" / file`):
   a path named in a string, or joined from strings with `/`, as a file or a directory;
 - the files of RULES["global"] (the build system, the CI workflow, the submodules).
 With --ranks, the tests matching --rank-pattern also run on that many ranks, and the
@@ -86,6 +87,34 @@ def data_refs(text, tracked):
     return sorted(refs)
 
 
+INCLUDE = re.compile(r'^\s*#\s*include\s*"([^"]+)"', re.M)
+
+
+def direct_includes(src, tracked):
+    """{source: [repository headers its #include "..." lines name]}."""
+    by_name = {}
+    for f in tracked:
+        by_name.setdefault(os.path.basename(f), []).append(f)
+    out = {}
+    for f in tracked:
+        if not f.startswith(("src/", "test/")) or not f.endswith((".cpp", ".h", ".hpp")) \
+                or f.startswith("src/external/"):
+            continue
+        with open(os.path.join(src, f), errors="replace") as fh:
+            names = INCLUDE.findall(fh.read())
+        found = set()
+        for inc in names:
+            local = os.path.normpath(os.path.join(os.path.dirname(f), inc))
+            if local in tracked:
+                found.add(local)
+                continue
+            found.update(c for c in by_name.get(os.path.basename(inc), [])
+                         if c.endswith("/" + inc) and not c.startswith("src/external/"))
+        if found:
+            out[f] = sorted(found)
+    return out
+
+
 def parse_depfiles(build, src, tracked):
     """{translation unit: [repository headers it includes]} from the build's .d files."""
     graph = {}
@@ -129,8 +158,10 @@ def executed(args, unit, launchers, tmp, src_real, tracked):
     ok = True
     for launcher in launchers:
         r = subprocess.run(launcher + [args.binary, f"--gtest_filter={unit}", "--gtest_brief=1"], cwd=d, env=env,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        ok = ok and r.returncode == 0
+                           capture_output=True, text=True, errors="replace")
+        if r.returncode != 0:
+            print(f"{unit} failed ({r.returncode}):\n{(r.stdout + r.stderr)[-600:]}", flush=True)
+            ok = False
     raws = [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".profraw")]
     files = set()
     if raws:
@@ -153,6 +184,7 @@ def executed(args, unit, launchers, tmp, src_real, tracked):
 def cmd_run(args):
     src = os.path.realpath(args.source)
     tracked = git_files(src)
+    args.build = os.path.realpath(args.build)
     args.binary = os.path.join(args.build, "test", f"mallard-test{args.dim}d")
     args.objects = [os.path.join(args.build, "src", "mallard")]
     args.llvm_cov, args.llvm_profdata = shlex.split(args.llvm_cov), shlex.split(args.llvm_profdata)
@@ -164,6 +196,7 @@ def cmd_run(args):
         units = tests
     many = shlex.split(args.launcher.replace("-n 1", f"-n {args.ranks}") + " --oversubscribe") if args.ranks else None
     graph = parse_depfiles(args.build, src, tracked)
+    includes = direct_includes(src, tracked)
     tmp = tempfile.mkdtemp(prefix="test-coverage-")
     start = time.time()
     results = {}
@@ -183,10 +216,11 @@ def cmd_run(args):
     shutil.rmtree(tmp, ignore_errors=True)
 
     def expand(files):
-        return files | {h for f in files for h in graph.get(f, ())}
+        return files | {h for f in files for h in includes.get(f, ())}
 
     unit_files = {u: expand(f) for u, (f, _) in results.items()}
-    per_test = {t: unit_files[t.split(".")[0] + ".*" if args.unit == "suite" else t] for t in tests}
+    unit_of = {t: t.split(".")[0] + ".*" if args.unit == "suite" else t for t in tests}
+    per_test = {t: unit_files[unit_of[t]] for t in tests}
     build_files = set(graph) | {h for hs in graph.values() for h in hs}
     names = sorted(set().union(*per_test.values(), build_files)) if per_test else sorted(build_files)
     index = {f: i for i, f in enumerate(names)}
@@ -198,6 +232,12 @@ def cmd_run(args):
                 r = data_refs(fh.read(), tracked)
             if r:
                 refs[f] = r
+    # Data a test reads: named in a file it executes (a header's name counts only where its code runs)
+    order = sorted(per_test)
+    by_ref = {}
+    for i, t in enumerate(order):
+        for r in {r for f in results[unit_of[t]][0] for r in refs.get(f, ())}:
+            by_ref.setdefault(r, []).append(i)
     suites = {}
     for f in sorted(tracked):
         if f.startswith("test/") and f.endswith((".cpp", ".h")) and not f.startswith("test/fuzz/"):
@@ -208,7 +248,7 @@ def cmd_run(args):
            "files": names, "build_files": sorted(index[f] for f in build_files),
            "tests": {t: sorted(index[f] for f in fs) for t, fs in sorted(per_test.items())},
            "failed": sorted(u for u, (_, ok) in results.items() if not ok),
-           "refs": refs, "suites": {s: sorted(fs) for s, fs in sorted(suites.items())}}
+           "data": by_ref, "suites": {s: sorted(fs) for s, fs in sorted(suites.items())}}
     with open(args.out, "w") as f:
         json.dump(out, f, separators=(",", ":"))
     print(f"{len(tests)} tests in {len(units)} units, {out['seconds']} s; {len(out['failed'])} failed; {args.out}")
