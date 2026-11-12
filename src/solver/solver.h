@@ -59,6 +59,7 @@
 #include "log.h"
 #include "run_control.h"
 #include "check.h"
+#include "run_report.h"
 #include "memory_tracker.h"
 #include "numerics_preset.h"
 #include "run_status.h"
@@ -917,9 +918,9 @@ class Solver {
         uint64_t n_cells_global = 0;
 
         // Run log
-        logging::Items mesh_summary;
+        MeshSetup mesh_setup;
         std::vector<CheckBoundary> boundary_summary;
-        logging::Items source_summary;
+        report::Summary source_summary;
         std::string initial_state;
         double t_wall_setup = 0.0;
         double t_wall_stepping = 0.0;

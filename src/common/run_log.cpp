@@ -31,6 +31,7 @@ std::vector<std::string> held;
 std::optional<run_page::Page> page;
 std::string report_file;
 bool ended = false, reported_progress = false;
+std::ostream * progress_out = nullptr;
 
 void write_report() {
     try {
@@ -127,6 +128,15 @@ void release(const json::Object & start) {
     write(start);
     for (const std::string & line : held) write_line(line);
     held.clear();
+}
+
+void stream_progress(std::ostream * stream) { progress_out = stream; }
+
+bool streams_progress() { return progress_out != nullptr; }
+
+void write_progress(const json::Object & record) {
+    write(record);
+    if (progress_out && comm::is_root()) *progress_out << record.str() << std::endl;
 }
 
 } // namespace run_log

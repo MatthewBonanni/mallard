@@ -246,7 +246,7 @@ TEST(CliTest, TopLevelPageListsEveryCommandAndFamily) {
     }
 }
 
-TEST(CliTest, UnknownOptionIsOneLinePointingAtHelp) {
+TEST(CliTest, UnknownOptionIsAUsageErrorPointingAtHelp) {
     SKIP_UNDER_MPI();
     for (const cli::Command & c : cli::commands()) {
         const std::string title = cli::title(c);
@@ -255,15 +255,29 @@ TEST(CliTest, UnknownOptionIsOneLinePointingAtHelp) {
         args.push_back("--no-such-option");
         const Result r = run(args);
         EXPECT_EQ(r.status, 2);
-        EXPECT_EQ(r.err, title + ": unknown option --no-such-option (see " + title + " --help)\n");
+        EXPECT_EQ(r.err, "error E-USAGE: " + title + ": unknown option --no-such-option (see " + title +
+                             " --help)\n  docs/guide/running.md#e-usage\n");
     }
     const Result r = run({"no-such-command"});
     EXPECT_EQ(r.status, 2);
-    EXPECT_EQ(r.err, "mallard: unknown command no-such-command; to run an input file, give it with -i: "
-                     "mallard -i no-such-command (see mallard --help)\n");
+    EXPECT_EQ(r.err, "error E-USAGE: mallard: unknown command no-such-command; to run an input file, give it with -i: "
+                     "mallard -i no-such-command (see mallard --help)\n  docs/guide/running.md#e-usage\n");
     const Result typo = run({"chek", "input.toml"});
     EXPECT_EQ(typo.status, 2);
-    EXPECT_EQ(typo.err, "mallard: unknown command chek (did you mean \"check\"?)\n");
+    EXPECT_EQ(typo.err, "error E-USAGE: mallard: unknown command chek (did you mean \"check\"?)\n"
+                        "  docs/guide/running.md#e-usage\n");
+    const Result dim = run({"--dim", "4", "-i", "input.toml"});
+    EXPECT_EQ(dim.status, 2);
+    EXPECT_EQ(dim.err, "error E-USAGE: mallard: --dim takes 2 or 3 (see mallard --help)\n"
+                       "  docs/guide/running.md#e-usage\n");
+}
+
+TEST(CliTest, CommandErrorsHaveTheirCode) {
+    SKIP_UNDER_MPI();
+    const Result r = run({"info", "no_such_file.vtkhdf"});
+    EXPECT_EQ(r.status, 1);
+    EXPECT_EQ(r.err.rfind("error E-INFO: mallard info: ", 0), 0u) << r.err;
+    EXPECT_NE(r.err.find("\n  docs/guide/running.md#e-info\n"), std::string::npos) << r.err;
 }
 
 TEST(CliTest, UserDocsShowEveryHelpPage) {
