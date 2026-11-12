@@ -21,7 +21,7 @@ Maintain  mallard test | completion | --version
 | `--restart latest` | Run | available |
 | `new`, `input upgrade`, `input resolve` | Set up | available |
 | `check input.toml` | Inspect | available |
-| `check --view DIR` (the case view) | Inspect | regions and boundary zones available; the rest planned ([#546](https://github.com/MatthewBonanni/mallard/issues/546)) |
+| `check --view DIR`, `info MESH --view DIR` (the case view) | Inspect | available: ParaView file and annotated images; particle injectors with them ([#759](https://github.com/MatthewBonanni/mallard/issues/759)) |
 | `check` with no input (the environment) | Inspect | available |
 | `info <file>`, `info <run-dir>` | Inspect | available; on the [output reader](output_reader.md) |
 | `info <run-dir> --html` (the run report) | Inspect | planned ([#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
@@ -30,8 +30,8 @@ Maintain  mallard test | completion | --version
 | `mesh convert` | Mesh | available |
 | `mesh extrude` | Mesh | planned |
 | `post extract` | Post | available; on the [output reader](output_reader.md#mallard-post-extract) |
-| `post derive` | Post | planned ([#511](https://github.com/MatthewBonanni/mallard/issues/511)) |
-| `post average` | Post | planned ([#512](https://github.com/MatthewBonanni/mallard/issues/512)) |
+| `post derive` | Post | available; on `post extract`'s case setup, with the in-run [derived fields](../guide/output.md#derived-fields) |
+| `post average` | Post | available; on `post extract`'s case setup, with the in-run [statistics](../guide/statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | Reacting-flow analysis | Post | planned ([#513](https://github.com/MatthewBonanni/mallard/issues/513)) |
 | `post convergence` | Post | available (scalars and `--exact` norms); norms against the finest run planned |
 | `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
@@ -71,10 +71,13 @@ Maintain  mallard test | completion | --version
   alternatives (`2|3`, `FILE|latest`, `status|checkpoint|stop|set`) are words
   to offer; `FILE` and `INPUT` are files (`*.toml` for `-i`, `*.restart` for
   `--restart`), `NAME.ext` files of that extension, `DIR`, `RUN_DIR` and
-  `DIRECTORY` directories, and `TEMPLATE` the templates `mallard new` lists;
-  anything else (`N`, `KEY=VALUE`) completes nothing. A pass-through row offers
-  the options its help names (`--kokkos-num-threads=8`). So a command added to
-  the table completes with no change to the scripts.
+  `DIRECTORY` directories, `TEMPLATE` the templates `mallard new` lists,
+  `SECTION` the sections and keys of the key catalog (or an input file), and
+  the value of `--fields` the output fields of the field catalog, item by item
+  of the comma-separated list; anything else (`N`, `KEY=VALUE`) completes
+  nothing. A pass-through row offers the options its help names
+  (`--kokkos-num-threads=8`). So a command added to the table completes with
+  no change to the scripts.
 - **Pass-through options** are rows whose name ends in `*`: `--kokkos-*` for
   every command that starts Kokkos, `--gtest_*` for `mallard test`.
 - **Tests** (`test/cli_test.cpp`) run every command's `--help` and fail if a
@@ -82,8 +85,9 @@ Maintain  mallard test | completion | --version
   the parser accepts; check that `docs/guide/cli.md` shows every page as
   it is (`python tools/docs/cli.py --mallard build/src/mallard` regenerates
   it); and check that each shell's completion has every command and option,
-  that bash completes them and their values, and that the zsh and fish
-  scripts parse (where those shells are installed).
+  that bash completes them, their values and the key and field catalogs as
+  `mallard list keys` and `mallard list fields` print them, and that the zsh
+  and fish scripts parse (where those shells are installed).
 
 ## Adding a command
 

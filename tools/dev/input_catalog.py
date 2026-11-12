@@ -14,9 +14,12 @@ text) or that it is required, the accepted values, the builds (2D, 3D) whose set
 read it, and the inputs that set it. With --check it compares with the
 committed file instead of writing it, and exits 1 if they differ.
 
-docs: compares the catalog's defaults with the defaults docs/input.md states
-("default X", "Default: X", "X (default)" in a key's row) and exits 1 on any
-difference. CI runs both (the tutorials job, which has both builds).
+docs: checks docs/input.md against the catalog and exits 1 on any difference:
+every key of its key tables (those headed "| Key |") must be in the catalog,
+except those in UNEXERCISED, and the defaults it states ("default X",
+"Default: X", "X (default)" in a key's row) must be the catalog's. CI runs
+build --check in the tutorials job, which has both builds, and docs in
+tools/dev/precheck.sh.
 """
 import argparse
 import json
@@ -30,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CATALOG = ROOT / "docs" / "input-keys.json"
 SIZE_KEYS = ("Nx", "Ny", "Nz")
-TUTORIAL_DIMS = {"wedge": 2, "cylinder": 2, "measuring": 2, "cone": 3, "channel_les": 3, "cluster": 2}
+TUTORIAL_DIMS = {"wedge": 2, "cylinder": 2, "measuring": 2, "cone": 3, "channel_les": 3, "cluster": 2, "post_processing": 2}
 
 
 def inputs():
@@ -123,20 +126,71 @@ LITERAL = r"(?>`[^`<\s]+`|-?\d[\d.]*(?:[eE][-+]?\d+)?|true|false)"
 DEFAULT = re.compile(rf"[Dd]efault:?\s+({LITERAL})(?![\w<])(?!\s+in\s+[23]D)|({LITERAL})\s+\(default\)")
 
 
-def documented_defaults():
-    """{path: default text} of the keys whose row in docs/input.md states one."""
-    out, section = {}, ""
+# Documented keys that no example or tutorial sets up, so they are missing from the
+# catalog; a key leaves this list when an input exercises it (#877)
+UNEXERCISED = {
+    "mesh.filename", "mesh.scale", "mesh.rotate", "mesh.translate",
+    "periodic.center", "periodic.axis",
+    "physics.sutherland_S",
+    "initialize.turbulence.file",
+    "sponges.X", "sponges.Y", "sponges.balance",
+    "numerics.error_control.tolerance", "numerics.error_control.abs_tolerance",
+    "numerics.error_control.rel_tolerance", "numerics.error_control.beta",
+    "numerics.hybrid.sensor_threshold", "numerics.hybrid.upwind_floor", "numerics.hybrid.central",
+    "statistics.spectra.fields", "statistics.spectra.products", "statistics.spectra.directions",
+    "statistics.spectra.average", "statistics.spectra.file", "statistics.spectra.interval",
+    "statistics.spectra.t_start",
+    "statistics.phase.fields", "statistics.phase.bins", "statistics.phase.period",
+    "statistics.phase.t_reference", "statistics.phase.probe", "statistics.phase.variable",
+    "statistics.phase.level", "statistics.phase.interval", "statistics.phase.t_start",
+    "probes.moment_center",
+    "parallel.partitioner", "parallel.halo_exchange",
+    "output.hash_mesh",
+    "write_data.geometry",
+}
+
+
+def documented_rows():
+    """(paths, whether they are alternatives, row text) of every row of the key tables of
+    docs/input.md; a row may name several keys (`Nx`, `Ny`) or alternatives (`p` / `p0`,
+    `X` or `Y`).
+    A heading names its table as `[table]`, a subtable of its section as (`name`), or a
+    variant of its section as `type = "..."`; the tables under other headings are skipped."""
+    out, top, section, key_table, previous = [], "", "", False, ""
     for line in (ROOT / "docs" / "input.md").read_text().splitlines():
-        h = re.match(r"^#{2,4} `\[*([\w.]+)\]*`", line)
+        h = re.match(r"^(#{2,4}) (.*)$", line)
         if h:
-            section = h.group(1)
-            continue
-        row = re.match(r"^\| `([\w]+)`(?: / `[\w]+`)* \| (.*)$", line)
-        if not row or not section:
-            continue
-        m = DEFAULT.search(row.group(2))
-        if m:
-            out[f"{section}.{row.group(1)}"] = (m.group(1) or m.group(2)).strip("`\"'")
+            table = re.search(r"`\[\[?([\w.]+)\]\]?`", h.group(2))
+            subtable = re.search(r"\(`(\w+)`\)$", h.group(2))
+            if table:
+                section = table.group(1)
+            elif subtable and top:
+                section = f"{top}.{subtable.group(1)}"
+            elif re.match(r'`type = "\w+"`$', h.group(2)):
+                section = top
+            else:
+                section = ""
+            if len(h.group(1)) == 2:
+                top = section
+        if line.startswith("|") and not previous.startswith("|"):
+            key_table = line.startswith("| Key |")
+        previous = line
+        row = re.match(r"^\| (`\w+`(?:(?:, | / | or )`\w+`)*) \| (.*)$", line)
+        if row and section and key_table:
+            paths = [f"{section}.{key}" for key in re.findall(r"`(\w+)`", row.group(1))]
+            out.append((paths, ", " not in row.group(1), row.group(2)))
+    return out
+
+
+def documented_defaults():
+    """{path: default text} of the keys whose row in docs/input.md states one (the first
+    key of a row of alternatives, `p` / `p0`; rows of several keys, `Nx`, `Ny`, are not
+    compared)."""
+    out = {}
+    for paths, alternatives, text in documented_rows():
+        m = DEFAULT.search(text)
+        if m and alternatives:
+            out[paths[0]] = (m.group(1) or m.group(2)).strip("`\"'")
     return out
 
 
@@ -158,10 +212,25 @@ def docs(args):
             continue
         if not same(entry["default"], text) and not any(same(d, text) for d in entry.get("defaults_by_dim", {}).values()):
             wrong.append(f"{path}: setup uses {entry['default']}, docs/input.md says {text}")
+    keys = {path for paths, _, _ in documented_rows() for path in paths}
+    unread = sorted(keys - UNEXERCISED - catalog.keys())
+    exercised = sorted(UNEXERCISED & catalog.keys())
+    undocumented = sorted(UNEXERCISED - keys)
     checked = sum(1 for p in documented if p in catalog and "default" in catalog[p])
+    errors = []
+    if unread:
+        errors.append("keys in docs/input.md that setup never reads (or that no example or tutorial sets up):\n  "
+                      + "\n  ".join(unread))
+    if exercised:
+        errors.append("keys now in the catalog, to remove from UNEXERCISED:\n  " + "\n  ".join(exercised))
+    if undocumented:
+        errors.append("keys of UNEXERCISED that docs/input.md no longer documents:\n  " + "\n  ".join(undocumented))
     if wrong:
-        sys.exit("defaults in docs/input.md that setup does not use:\n  " + "\n  ".join(wrong))
-    print(f"{checked} documented defaults match the catalog")
+        errors.append("defaults in docs/input.md that setup does not use:\n  " + "\n  ".join(wrong))
+    if errors:
+        sys.exit("\n".join(errors))
+    print(f"{len(keys) - len(UNEXERCISED)} documented keys are in the catalog ({len(UNEXERCISED)} not exercised yet), "
+          f"{checked} documented defaults match it")
 
 
 def main():

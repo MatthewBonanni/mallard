@@ -221,6 +221,11 @@ void regions_section(report::Text & text, const CheckReport & r) {
                    measures);
     }
     if (!r.view_file.empty()) text.line("Case view (every region and zone, for ParaView): " + r.view_file);
+    if (!r.view_images.empty()) {
+        std::string images;
+        for (const std::string & f : r.view_images) images += (images.empty() ? "" : ", ") + f;
+        text.line("Case view images: " + images);
+    }
 }
 
 void quality_section(report::Text & text, const CheckReport & r) {
@@ -730,6 +735,7 @@ std::string check_json(const CheckReport & r) {
                   .str();
           }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
+    o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
     if (r.has_quality) {
         o.raw("mesh_quality", quality_json(r));
         o.raw("mesh_fields_file", r.mesh_fields_file.empty() ? "null" : json::quote(r.mesh_fields_file));

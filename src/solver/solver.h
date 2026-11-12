@@ -42,6 +42,7 @@
 #include "derived_fields.h"
 #include "probes.h"
 #include "statistics.h"
+#include "statistical_convergence.h"
 #include "triggers.h"
 #include "health_state.h"
 #include "step_queue.h"
@@ -59,6 +60,7 @@
 #include "log.h"
 #include "run_control.h"
 #include "check.h"
+#include "run_report.h"
 #include "memory_tracker.h"
 #include "numerics_preset.h"
 #include "run_status.h"
@@ -184,6 +186,17 @@ class Solver {
         void write_output_of_state(bool next);
 
         /**
+         * @brief Post-processing (`mallard post average`): with next, takes the next state from the
+         *        reader; then adds it to the [statistics] means as a sample at its step and time (the
+         *        means start at statistics.t_start, not from the files'), updates their host copies,
+         *        and returns the cell values sampled.
+         */
+        CellSampler sample_statistics_of_state(bool next);
+
+        /** @brief Post-processing, set before init(): fields of the caller's own on the mesh's cells, for [[write_data]]. */
+        void set_output_data(std::function<void(const Mesh &, std::vector<Data> &)> add) { output_data = std::move(add); }
+
+        /**
          * @brief Run until a stop condition is reached.
          * @return Exit status.
          */
@@ -287,7 +300,10 @@ class Solver {
          */
         void update_vortex_fields();
 
-        /** @brief The written derived fields of each owned cell, into derived_fields, after update_velocity_gradients. */
+        /**
+         * @brief The written derived fields of each owned cell, into derived_fields, after
+         *        update_velocity_gradients (and the transport coefficients and mass-fraction gradients they need).
+         */
         void update_derived_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
@@ -376,11 +392,21 @@ class Solver {
         RestartAttributes restart_attributes() const;
         void write_checkpoint();
         void poll_control_files();
-        // Triggers (see triggers.h)
+        // Triggers (see triggers.h) and the convergence of monitored values (convergence.h)
+        /** @brief Names (as triggers read them) and dimensions of the values of [integrals], [[forces]] and [[probes]]. */
+        std::vector<Convergence::Monitored> monitored() const;
+        /** @brief Their latest values (NaN before the first; probes' on rank 0 only when distributed). */
+        std::vector<double> monitored_values() const;
+        /** @brief The step each was last written at (Probes::NO_VALUE before), on every rank. */
+        std::vector<uint64_t> monitored_steps() const;
         void init_triggers();
-        /** @brief The monitored values triggers read, in the order of init_triggers' names. */
+        /** @brief The values triggers read, in the order of init_triggers' names. */
         std::vector<double> trigger_values() const;
         void act_on_triggers();
+        /** @brief Adds the samples of the convergence signals written at this step; collective where a probe's is. */
+        void update_convergence();
+        /** @brief Start of the [statistics] averages, -inf before they run. */
+        double averages_start() const;
         void publish_status();
         std::string stop_conditions() const;
 
@@ -451,6 +477,8 @@ class Solver {
          *        and the last bits of T, do not depend on output or diagnostics.
          */
         void update_cell_states(const State & solution, bool update_seed);
+        /** @brief update_cell_states of the state and update_primitives, solving each cell's temperature once. */
+        void update_cell_states_and_primitives();
         /**
          * @brief Viscous mixtures, after update_cell_states: transport
          *        coefficients of every cell and the gradients of [u, T, X].
@@ -642,8 +670,10 @@ class Solver {
         // The vorticity (one component in 2D), if written
         Kokkos::View<rtype **> vortex_fields;
         Kokkos::View<rtype **>::host_mirror_type h_vortex_fields;
-        // MACH, Q_CRITERION, LAMBDA2 and SCHLIEREN, those written, in the columns of derived_selection
+        // The derived fields written (derived_catalog.h), in the columns of derived_selection
         derived::Selection derived_selection;
+        derived::Settings derived_settings;
+        derived::Workspace derived_workspace;
         Kokkos::View<rtype **> derived_fields;
         Kokkos::View<rtype **>::host_mirror_type h_derived_fields;
 
@@ -696,7 +726,7 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
-        /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*. */
+        /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*; the primitives are left to their users. */
         void apply_output_state(RestartData state);
         void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
         void init_inlets(const std::vector<Input> & input_boundaries,
@@ -762,7 +792,11 @@ class Solver {
         void sample_probe_averages();
         /** @brief The named arrays of restart files: averaged spectra and probes (collective). */
         RestartArrays restart_arrays() const;
-        CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives}; }
+        CellSampler cell_sampler() const {
+            return CellSampler{conservatives, species, primitives, derived_fields, hrr, production};
+        }
+        /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
+        void sample_statistics();
         /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
         ProbeFields probe_fields(ProbeFluxes & fluxes);
         /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
@@ -897,6 +931,7 @@ class Solver {
         Input input;
         bool check_only = false;  // within check()
         std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
+        std::function<void(const Mesh &, std::vector<Data> &)> output_data;  // post-processing: fields of its own
         numerics_preset::Resolution preset;
         std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
@@ -915,9 +950,9 @@ class Solver {
         uint64_t n_cells_global = 0;
 
         // Run log
-        logging::Items mesh_summary;
+        MeshSetup mesh_setup;
         std::vector<CheckBoundary> boundary_summary;
-        logging::Items source_summary;
+        report::Summary source_summary;
         std::string initial_state;
         double t_wall_setup = 0.0;
         double t_wall_stepping = 0.0;
@@ -1154,6 +1189,7 @@ class Solver {
         Statistics statistics;
         Probes probes;
         Triggers triggers;
+        Convergence convergence;
         RunEnd trigger_stop;  // a trigger that stopped the run, else empty
         HealthState run_health;
 };

@@ -4,7 +4,7 @@
     python tools/post/plot_channel.py input.toml profile.csv forces_bottom.csv forces_top.csv \\
         --t-start 160 [--half profile_half.csv] [--out channel.png]
 
-profile.csv is tools/post/plane_average.py's average over x and z of a snapshot
+profile.csv is mallard post average's average over x and z (--homogeneous x,z) of a snapshot
 with the [statistics] fields of examples/channel_retau180 (MEAN_RHO, MEAN_U_X,
 COV_U_X_U_X, COV_U_Y_U_Y, COV_U_Z_U_Z, COV_U_X_U_Y); the two halves of the
 channel are folded together. The wall shear stress tau_w is the time average
@@ -48,7 +48,7 @@ def mkm(directory, case=180):
 
 
 def read_profile(path, h):
-    """Columns of a plane_average CSV, folded about the center: y is the distance to the nearer wall over h."""
+    """Columns of a mallard post average --homogeneous CSV, folded about the center: y is the distance to the nearer wall over h."""
     d = np.genfromtxt(path, delimiter=",", names=True)
     y = d["y"] / h
     lower = y < 1
