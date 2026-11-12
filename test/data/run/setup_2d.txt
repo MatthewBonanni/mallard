@@ -51,6 +51,45 @@
   forces      forces_wall.csv    10     steps  wall
   statistics  -                  -             from t = 0.1 s
 
+== Physics ================================================================================
+  setting    value
+  Model      Navier-Stokes
+  Gas        perfect gas
+  Viscosity  Sutherland's law
+
+  quantity      value      units     basis
+  gamma         1.4        -         ratio of specific heats
+  R             287.053    J/(kg K)  gas constant
+  cp            1004.69    J/(kg K)  specific heat at constant pressure
+  cv            717.632    J/(kg K)  specific heat at constant volume
+  mu            1.716e-05  Pa s      dynamic viscosity at T_mu_ref
+  T_mu_ref      273.15     K         reference temperature of the viscosity
+  sutherland_S  110.4      K         Sutherland's constant
+  Pr            0.72       -         Prandtl number
+
+== Numerics ===============================================================================
+  setting          value
+  Step controller  embedded error estimate, PID control
+  LES              WALE, filter width V^(1/2)
+  Combustion       thickened flame, sensor on T, Charlette efficiency, u' = C_u nu_t / Delta
+
+  quantity                       value   units  basis
+  step controller abs_tolerance  1e-06   U's    absolute, in each conservative variable's units
+  step controller rel_tolerance  0.0001  -      relative
+  step controller b1             0.64    -      PID coefficient
+  step controller b2             -0.31   -      PID coefficient
+  step controller b3             0.04    -      PID coefficient
+  LES C                          0.5     -      model constant
+  LES Pr_t                       0.9     -      turbulent Prandtl number
+  LES Sc_t                       0.9     -      turbulent Schmidt number
+  TFLES n_res                    5       cells  across delta_L
+  TFLES delta_L                  0.0004  m      laminar flame thickness
+  TFLES s_L                      0.38    m/s    laminar flame speed
+  TFLES T_unburnt                300     K      the flame sensor's 0
+  TFLES T_burnt                  2200    K      the flame sensor's 1
+  TFLES beta                     0.5     -      efficiency exponent
+  TFLES C_u                      28      -      subgrid velocity constant
+
 == Mesh ===================================================================================
   setting        value
   Type           file mesh.msh
@@ -83,3 +122,36 @@
   quantity      value  units  basis
   time step     1e-05  -      every step
   stop at time  0.2    -      simulated time
+
+== Physics ================================================================================
+  setting    value
+  Model      Navier-Stokes
+  Gas        perfect gas
+  Viscosity  Sutherland's law
+
+  quantity      value      units  basis
+  gamma         1.4        -      ratio of specific heats
+  R             287.053    -      gas constant
+  cp            1004.69    -      specific heat at constant pressure
+  cv            717.632    -      specific heat at constant volume
+  mu            1.716e-05  -      dynamic viscosity at T_mu_ref
+  T_mu_ref      273.15     -      reference temperature of the viscosity
+  sutherland_S  110.4      -      Sutherland's constant
+  Pr            0.72       -      Prandtl number
+
+== Numerics ===============================================================================
+  setting          value
+  Step controller  embedded error estimate, PID control
+  LES              WALE, filter width V^(1/2)
+  Combustion       partially stirred reactor, tau_mix = C_mix Delta^2 / (nu + nu_t), tau_c = rho cp T / |q|
+
+  quantity                       value   units  basis
+  step controller abs_tolerance  1e-06   -      absolute, in each conservative variable's units
+  step controller rel_tolerance  0.0001  -      relative
+  step controller b1             0.64    -      PID coefficient
+  step controller b2             -0.31   -      PID coefficient
+  step controller b3             0.04    -      PID coefficient
+  LES C                          0.5     -      model constant
+  LES Pr_t                       0.9     -      turbulent Prandtl number
+  LES Sc_t                       0.9     -      turbulent Schmidt number
+  PaSR C_mix                     1       -      mixing time constant

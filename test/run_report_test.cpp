@@ -17,8 +17,13 @@
 #include "common.h"
 #include "comm.h"
 #include "data_paths.h"
+#include "les.h"
 #include "log.h"
+#include "pasr.h"
+#include "physics.h"
 #include "run_report.h"
+#include "step_control.h"
+#include "tfles.h"
 #include "units.h"
 
 namespace {
@@ -155,8 +160,29 @@ TEST(RunReport, SummaryAndHealthMatchTheGolden) {
     expect_golden(text.str(), "summary_2d.txt");
 }
 
+/** @brief A Physics and a Numerics section from the components' summaries, as Solver::print_setup builds them. */
+std::vector<SetupSection> component_sections(const bool thickened_flame) {
+    Euler gas = Euler::from_reference(1.4_r, 101325.0_r, 288.15_r, 1.225_r);
+    gas.viscosity_model = ViscosityModel::SUTHERLAND;
+    gas.mu_ref = 1.716e-5_r;
+    LES les{.model = SGSModel::WALE, .C = 0.5_r};
+    ThickenedFlame flame{.delta_L = 4.0e-4, .s_L = 0.38, .T_u = 300.0, .T_b = 2200.0};
+    flame.efficiency = ThickenedFlame::Efficiency::CHARLETTE;
+    flame.beta = 0.5;
+    flame.eddy_viscosity_velocity = true;
+    StepController controller;
+    controller.init(1.0e-6_r, 1.0e-4_r, {0.64_r, -0.31_r, 0.04_r}, 3);
+    SetupSection physics{.title = "Physics"};
+    physics.add(gas.summary());
+    SetupSection numerics{.title = "Numerics"};
+    numerics.add(controller.summary());
+    numerics.add(les.summary());
+    numerics.add(thickened_flame ? flame.summary() : PartiallyStirredReactor{}.summary());
+    return {physics, numerics};
+}
+
 // Guards the setup banner's sections: settings, quantities with units, the mesh's ranges and partition, the
-// boundaries' and the outputs' tables
+// boundaries' and the outputs' tables, the components' constants
 TEST(RunReport, SetupBannerMatchesTheGolden) {
     if (N_DIM != 2) GTEST_SKIP() << "the golden is of a 2D mesh (two extents, cell areas)";
     MeshSetup mesh{.settings = {{"Type", "file mesh.msh"}, {"Cell order", "Hilbert curve"}},
@@ -195,10 +221,12 @@ TEST(RunReport, SetupBannerMatchesTheGolden) {
                                           {.kind = "statistics", .file = "", .contents = "from t = 0.1 s"}}));
     report::Text si(false);
     setup_text(si, {mesh_section(mesh), numerics, cfl, boundaries, output});
+    setup_text(si, component_sections(true));
     units::set_system(units::System::NONDIMENSIONAL);
     numerics.quantities = time_quantities({.use_cfl = false, .dt = 1.0e-5, .t_stop = 0.2});
     report::Text nondimensional(false);
     setup_text(nondimensional, {mesh_section(mesh), numerics});
+    setup_text(nondimensional, component_sections(false));
     units::set_system(units::System::SI);
     expect_golden(si.str() + "\n" + nondimensional.str(), "setup_2d.txt");
 }

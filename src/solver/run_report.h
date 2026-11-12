@@ -35,6 +35,9 @@ struct SetupSection {
     Settings settings{};
     std::vector<report::Row> quantities{};  // quantity, value, units, target (empty), basis
     std::vector<Table> tables{};
+
+    /** @brief Appends a component's settings and quantities. */
+    void add(const report::Summary & summary);
 };
 
 /** @brief The sections of the setup banner, as report::Text renders them. */

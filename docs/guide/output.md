@@ -375,8 +375,11 @@ Numerics, Boundaries and Output sections. Each section gives its settings in
 words, then its quantities in a table with a units column: the cells and faces,
 the extent, cell sizes and owned cells per rank as min and max, the partition's
 ranks, halo layers and exchange sizes, the time step or CFL number and the
-stops; the boundaries as zone, condition, faces and details; the outputs as
-file, interval (in steps, or in simulated time) and contents:
+stops, and the constants of the models: the gas's (`gamma`, `R`, `cp`, `cv`),
+the viscosity law's, the source terms', TENO's stencil sizes and switch, the
+step controller's tolerances, LES's, TFLES's and PaSR's; the boundaries as
+zone, condition, faces and details; the outputs as file, interval (in steps,
+or in simulated time) and contents:
 
 ```text
 == Mesh ===================================================================================

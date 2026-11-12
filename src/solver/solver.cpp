@@ -1118,7 +1118,7 @@ void Solver::init_sources(region::Regions & regions) {
     auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields, regions,
                                                          is_distributed() && halo.uses_nccl());
     if (!terms->empty()) {
-        for (const auto & item : terms->summary()) source_summary.push_back(item);
+        source_summary.add(terms->summary());
         source_terms = std::move(terms);
         stage_time = Kokkos::View<rtype>("stage_time");
     }
@@ -1139,9 +1139,8 @@ void Solver::init_sources(region::Regions & regions) {
         FOR_I_DIM gravity[i] = g[i];
         FOR_I_DIM boundary_data.gravity[i] = g[i];
         face_reconstruction->set_boundaries(boundary_data);
-        std::string text;
-        FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(gravity[i]));
-        source_summary.emplace_back("Gravity", units::with(text + "]", "m/s^2"));
+        FOR_I_DIM source_summary.quantity(std::string("gravity ") + "xyz"[i], logging::real(double(gravity[i])),
+                                          units::column("m/s^2"), "");
     }
     if (source.contains("mass_flow")) {
         const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow", dim::mass_flux);
@@ -1172,10 +1171,9 @@ void Solver::init_sources(region::Regions & regions) {
         mass_flow_sums = Kokkos::View<int64_t *>("mass_flow_sums", 2);
         mass_flow_totals = Kokkos::View<double *>("mass_flow_totals", 3);
         init_mass_flow_volume();
-        std::string text;
-        FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(m[i]));
-        source_summary.emplace_back("Mass flow", units::with(text + "]", "kg/(m^2 s)") +
-                                                     " (volume average of rho u), held by a uniform body force");
+        source_summary.setting("Mass flow", "volume average of rho u, held by a uniform body force");
+        FOR_I_DIM source_summary.quantity(std::string("mass flow ") + "xyz"[i], logging::real(double(m[i])),
+                                          units::column("kg/(m^2 s)"), "volume average of rho u");
     }
 }
 
@@ -2543,15 +2541,22 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     physical.emplace_back("Units", units::system() == units::System::SI
                                        ? "SI (physics.units)"
                                        : "nondimensional: numbers carry no units (physics.units)");
-    for (const auto & item : is_mixture() ? mixture_model->summary() : physics.summary()) physical.push_back(item);
-    physical.insert(physical.end(), source_summary.begin(), source_summary.end());
+    physics_section.add(is_mixture() ? mixture_model->summary() : physics.summary());
+    physics_section.add(source_summary);
     physical.emplace_back("Initial state", initial_state);
     sections.push_back(std::move(physics_section));
 
     SetupSection numerics{.title = "Numerics"};
     Settings & numerical = numerics.settings;
+    numerics.quantities = time_quantities({.use_cfl = use_cfl,
+                                           .cfl = double(cfl),
+                                           .dt = double(dt_fixed),
+                                           .controlled = step_controller.enabled(),
+                                           .n_steps = n_steps,
+                                           .t_stop = double(t_stop),
+                                           .wall_stop = double(t_wall_stop)});
     if (!preset.name.empty()) numerical.emplace_back("Preset", preset.summary(resolved));
-    for (const auto & item : face_reconstruction->summary()) numerical.push_back(item);
+    numerics.add(face_reconstruction->summary());
     numerical.emplace_back("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
         numerical.emplace_back("Convective flux", std::string("hybrid: KEEP central on the ") +
@@ -2562,7 +2567,7 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
                                                       "its threshold");
     }
     numerical.emplace_back("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
-    if (step_controller.enabled()) numerical.emplace_back("Step controller", step_controller.summary());
+    if (step_controller.enabled()) numerics.add(step_controller.summary());
 #ifdef KOKKOS_ENABLE_CUDA
     const std::string no_graph = step_graph_unsupported();
     numerical.emplace_back("CUDA graphs", no_graph.empty() ? "one per step" : "no: " + no_graph);
@@ -2574,17 +2579,10 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     if (check_nan) numerical.emplace_back("NaN check", "every step");
     numerical.emplace_back("Divergence", std::string("stop at the first non-finite value") +
                                              (keep_last_good ? ", writing the last valid state" : ""));
-    if (les_on) for (const auto & item : les.summary()) numerical.push_back(item);
-    if (tfles_on) for (const auto & item : thickened_flame.summary()) numerical.push_back(item);
-    if (pasr_on) for (const auto & item : pasr.summary()) numerical.push_back(item);
+    if (les_on) numerics.add(les.summary());
+    if (tfles_on) numerics.add(thickened_flame.summary());
+    if (pasr_on) numerics.add(pasr.summary());
     if (double_flux) numerical.emplace_back("Double flux", "frozen gamma and e0 per cell and step (not energy conservative)");
-    numerics.quantities = time_quantities({.use_cfl = use_cfl,
-                                           .cfl = double(cfl),
-                                           .dt = double(dt_fixed),
-                                           .controlled = step_controller.enabled(),
-                                           .n_steps = n_steps,
-                                           .t_stop = double(t_stop),
-                                           .wall_stop = double(t_wall_stop)});
     if (hybrid_flux) {
         numerics.quantities.push_back({report::Status::NONE, {"compression sensor threshold",
                                                               real(double(hybrid_threshold)), "-", "", "hybrid flux"}});

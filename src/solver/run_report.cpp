@@ -85,6 +85,11 @@ void setup_text(report::Text & text, const std::vector<SetupSection> & sections)
     }
 }
 
+void SetupSection::add(const report::Summary & summary) {
+    settings.insert(settings.end(), summary.settings.begin(), summary.settings.end());
+    quantities.insert(quantities.end(), summary.quantities.begin(), summary.quantities.end());
+}
+
 SetupSection mesh_section(const MeshSetup & m) {
     using Kind = Column::Kind;
     SetupSection s{.title = "Mesh", .settings = m.settings};
