@@ -615,8 +615,7 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
     } else {
         region::Elements e;
         if (levels) {
-            levels->update(t);
-            e = region::elements(mesh, region, Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), levels->levels()));
+            e = region::elements(mesh, region, region::CrossedLevels(mesh, region, levels).update(t));
         } else {
             e = region::elements(mesh, region);
         }
