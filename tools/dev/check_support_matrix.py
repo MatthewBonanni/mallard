@@ -20,7 +20,7 @@ NOT_TESTS = {
     "release.yml": {"meta", "publish"},
     "batch.yml": {"stamp"},
 }
-SKIPPED_WORKFLOWS = {"pages.yml"}
+SKIPPED_WORKFLOWS = {"pages.yml", "coverage.yml"}
 REFERENCE = re.compile(r"`([\w-]+\.ya?ml/[\w.-]+)`")
 JSON_LIST = re.compile(r"'(\[\s*\{.*?\}\s*\])'", re.DOTALL)
 

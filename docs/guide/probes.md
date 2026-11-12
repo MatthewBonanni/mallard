@@ -35,7 +35,13 @@ n_points = 200
 interval = 10
 ```
 
-*Used in:* [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet), [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions), [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters), [`hot_gas_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#hot-gas-regions), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder) and 4 more.
+*Used in:*
+[`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
+[`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions),
+[`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
+[`hot_gas_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#hot-gas-regions),
+[`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder)
+and 4 more.
 
 ```toml
 # Wake survey: high-order point values on an arc, a VTK series for ParaView,
@@ -361,7 +367,10 @@ reductions = ["integral", "mean", "min", "max"]   # the default
 interval = 10
 ```
 
-*Used in:* [`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions), [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters), [`hot_gas_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#hot-gas-regions).
+*Used in:*
+[`source_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#source-regions),
+[`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
+[`hot_gas_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#hot-gas-regions).
 
 A probe with `region` reduces the cell averages of the cells the region covers,
 each weighted by its volume times its volume fraction `f`, so a region need not
@@ -564,7 +573,13 @@ interval = 10        # default 1
 # file = "forces_cylinder.csv"
 ```
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder), [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300) and 3 more.
+*Used in:*
+[`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3),
+[`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid),
+[`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric),
+[`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder),
+[`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300)
+and 3 more.
 
 Writes `step, t` and the pressure and viscous force components of the fluid
 on the zone, per unit depth in 2D (per radian in axisymmetric runs). Divide by
@@ -581,7 +596,13 @@ interval = 1
 budget = true        # kinetic-energy budget (LES), default false
 ```
 
-*Used in:* [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d), [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence) and 5 more.
+*Used in:*
+[`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d),
+[`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d),
+[`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence),
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
+[`forced_isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-isotropic-turbulence)
+and 5 more.
 
 Writes `integrals.csv` with the volume integrals of the kinetic energy,
 enstrophy, squared dilatation and pressure dilatation, and of `|u|^2`,
