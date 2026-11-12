@@ -149,7 +149,7 @@ def main():
         ax1.set_xlabel("x")
         ax1.set_xlim(0.0, 4.0)
         ax1.set_ylim(0.0, 1.8)
-        ax1.legend(loc="upper left", fontsize=10, ncol=2)
+        ax1.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), fontsize=10, ncol=2)
         return fig
 
     if args.figure:
