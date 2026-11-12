@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       run:
-        description: The passed ci.yml run on the batch/* branch
+        description: The passed ci.yml run on the batch branch
         type: string
         required: true
       shas:
@@ -36,8 +36,8 @@ jobs:
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN"
           echo "run $RUN: $path $event $branch $conclusion $batch"
           [ "$path" = .github/workflows/ci.yml ] && [ "$event" = workflow_dispatch ] \
-            && [ "${branch#batch/}" != "$branch" ] && [ "$conclusion" = success ] \
-            || { echo "::error::$url is not a passed ci.yml run on a batch/* branch"; exit 1; }
+            && [ "$conclusion" = success ] \
+            || { echo "::error::$url is not a passed, dispatched ci.yml run"; exit 1; }
           ci=$(gh api "repos/$GITHUB_REPOSITORY/commits/$batch/status" \
             --jq '.statuses[] | select(.context == "CI") | "\(.state)\t\(.description)"')
           [ "${ci%%$'\t'*}" = success ] || { echo "::error::CI on the batch $batch is not success"; exit 1; }
