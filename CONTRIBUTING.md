@@ -166,26 +166,34 @@ fix and a `fixed` fragment; a documentation fix needs neither.
 - Pull requests are squash-merged: the PR title becomes the commit subject on
   `main`, so make it descriptive. Intermediate commits on the branch need not be
   tidy; push new commits rather than rewriting history once a review has started.
+- **Before asking for CI**, run `tools/dev/precheck.sh`: in a few seconds and without a
+  build, it checks that the branch merges into `main` and runs CI's checks that need no
+  build (spelling, docs, feature matrix, changelog) on the merge.
 - **CI does not run on every push.** When a PR is ready to land, a maintainer (or
   you, with write access) runs `gh workflow run ci.yml --ref <branch>`. The run sets
   the commit status `CI` on the head commit: pending while it runs, then success or
   failure, and its *Details* link shows every job and its log. `main` requires a
   passing `CI` status on the PR's current head, so a new push needs a new run.
-  CI builds with warnings as errors and runs the full suite in 2D and 3D, with
-  OpenMP, serial, MPI on 1 to 4 ranks and single precision, with every supported
-  compiler on x86-64 and arm64, on macOS, and through Spack on RHEL 8 and 9, plus the
-  tutorials and case templates. Each job also shows on the PR as
-  its own status, `CI / <job>`. Documentation-only changes skip the build jobs (the
-  run takes about a minute). `main` runs CI on every merge.
+  CI builds with warnings as errors. A branch runs the gate: the full suite in 2D and 3D
+  with OpenMP, MPI on 1 to 4 ranks and single precision, and GCC 16 and Clang 23, on
+  x86-64. Each job also shows on the PR as its own status, `CI / <job>`.
+  Documentation-only changes skip the build jobs (the run takes about a minute).
+- **`main` runs everything after each merge**: every supported compiler on x86-64 and
+  arm64, macOS, Spack on RHEL 8 and 9, every CUDA version, the tutorials and case
+  templates, and the fuzzers. One run at a time: merges that arrive while it runs are
+  tested together next. A failure opens an issue labeled `ci-main`, fixed before anything
+  else lands; the next passing run closes it. `-f full=true` runs all of it on a branch,
+  for a change that targets one of those platforms.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only
   what the resolution can affect: `gh workflow run ci.yml --ref <branch> -f
-  only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `spack`, `fuzz`; any other name
-  fails the run). The `CI` status records the subset. A resolution in build files,
+  only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `spack`, `fuzz`, whatever their tier;
+  any other name fails the run). The `CI` status records the subset. A resolution in build files,
   shared headers or anything the whole suite exercises needs the full run.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
   run when a branch's changes touch device code: `tools/dev/device_changes.sh` decides (a
   changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
-  runs the CUDA builds on every push. `-f device=true` forces all three.
+  runs the CUDA builds on every push (on a branch, CUDA 13.5 on x86-64; on `main`, every
+  CUDA version). `-f device=true` forces all three.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
   on the GPU (including the CUDA-graph path; NCCL is not built), the MPI tests on 2 ranks, and
