@@ -939,6 +939,20 @@ changing it.
 | `t_start` | Start time, default 0; a [trigger](#triggers) with `"start statistics"` starts them instead |
 | `interval` | Every this many steps, default 1 |
 | `reset` | `true` starts the averages afresh on a restart instead of continuing those of the restart file (default `false`) |
+| `batch` | Confidence intervals of the averages by batch means: the duration of a batch (time), at least 10 integrated autocorrelation times; default none (no intervals) |
+| `confidence` | Confidence of those intervals, default 0.95 (with `batch`) |
+
+With `batch`, the samples also fall in consecutive batches of that duration
+from the start of the averages (a sample in the batch that holds its time);
+each batch keeps its own averages, and when a sample opens a batch, the last
+one's averages join the mean and the sum of squared deviations of the batch
+values (Welford). `CI_MEAN_<A>` and `CI_COV_<A>_<B>` are the half widths
+`t s / sqrt(n)` of the intervals over the `n` closed batches (Student's t with
+`n - 1` degrees of freedom; NaN before two). Memory: three more device arrays
+per average (the current batch and the two batch sums), four times what the
+averages take, and on the host also the half widths; restart files carry
+the batch state as `BATCH_<average>`, `BATCH_AVG_<average>` and
+`BATCH_M2_<average>`.
 
 The averages are output variables for `[[write_data]]`: `MEAN_<A>` and
 `COV_<A>_<B>`, the covariance `<A'B'> = <AB> - <A><B>` (kept directly, by a

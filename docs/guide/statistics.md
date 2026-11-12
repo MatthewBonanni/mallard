@@ -37,6 +37,35 @@ homogeneous directions with `tools/post/plane_average.py` (e.g. over x and z of 
 channel, giving profiles in y; its CSV also feeds
 [synthetic inflow](boundary_conditions.md#synthetic-turbulence-turbulence)).
 
+### Confidence intervals
+
+```toml
+[statistics]
+fields = ["U_X", "P"]
+products = ["U_X*U_X"]
+batch = 2.0          # >= 10 integrated autocorrelation times
+```
+
+With `batch`, every cell also gets the half width of a confidence interval
+on each of its averages, `CI_MEAN_<A>` and `CI_COV_<A>_<B>` (write them with
+`variables = ["CI_*"]`): the samples fall in consecutive batches of that
+duration, each batch is averaged on its own, and the spread of the batch
+averages gives the interval (batch means, Student's t over the closed
+batches; NaN before two have closed). This is what
+[`[statistics.convergence]`](#convergence-statisticsconvergence) does for
+monitored values, cell by cell.
+
+- The batches must be long compared with the flow's correlation time, or
+  the intervals come out too narrow: at least 10 times the integrated
+  autocorrelation time `tau` that `[statistics.convergence]` reports for a
+  representative signal (in samples of that signal: multiply by its
+  sampling period). Fewer, longer batches are safe; 10 to 30 closed batches
+  give useful intervals.
+- Costs four times the device memory of the averages (three more arrays
+  per average) and a little more work per sample; no communication.
+- `confidence` (default 0.95) sets the confidence. Restart files carry the
+  batches, so a continued run continues them bitwise.
+
 **Favre averages** are not computed directly. Favre means follow exactly from
 Reynolds statistics that include `RHO`: with `fields = ["RHO", "U_X", "U_Y", ...]`
 and `products = ["RHO*U_X", "RHO*U_Y", "U_X*U_Y", ...]`,

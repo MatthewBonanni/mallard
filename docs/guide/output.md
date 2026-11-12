@@ -73,7 +73,7 @@ fields = ["P", "T"]
 | LES | `MU_T`; TFLES: `TF_F`, `TF_E`, `TF_OMEGA`; PaSR: `PASR_KAPPA` |
 | Detonations | `P_MAX`, the largest pressure each cell has seen (numerical soot foil) |
 | [Mesh and stencils](#mesh-and-stencil-fields) | `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO`; `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION` |
-| [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `PHASE_<bin>_<A>`, `PHASE_*` |
+| [Statistics](statistics.md) | `MEAN_<A>`, `COV_<A>_<B>`, `MEAN_*`, `COV_*`; `CI_MEAN_<A>`, `CI_COV_<A>_<B>`, `CI_*` (with `batch`); `PHASE_<bin>_<A>`, `PHASE_*` |
 
 ### Derived fields
 
@@ -608,7 +608,7 @@ columns, column_units = read_csv("forces_cylinder.csv")
 These are the attributes xarray and netCDF tools look for, readable as
 they are. Units are written in SI base units (`kg m-1 s-2`, not `Pa`), so that
 derived fields compose: `MEAN_<A>` and `PHASE_<bin>_<A>` have the units of
-`A`, `COV_<A>_<B>` their product (`COV_U_X_U_Y`: `m2 s-2`), and `SOURCE_<A>`
+`A`, `COV_<A>_<B>` their product (`COV_U_X_U_Y`: `m2 s-2`), `CI_<average>` those of the average, and `SOURCE_<A>`
 those of `A` per second.
 
 | Field | Units | Field | Units |
@@ -908,6 +908,72 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 | `plot_<case>.py` | Each validation case against its reference |
 
 ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` (HDF5) series directly. `read_vtu_cells` reads any snapshot file, and `mallard.vtu.snapshot("solut/flow_000100")` finds it whichever format the build wrote.
+
+## Sharing a run: `mallard pack`
+
+`mallard pack RUN_DIR` packs a run into one archive that reproduces it: for a
+paper's supplement, a bug report, or moving a case to another machine. What
+goes in comes from the [run record](#run-record-mallardjsonl) of the run
+directory's last run, never from file names:
+
+- **The case:** the input as the run read it (its text, from the [run
+  block](#run-block)), the mesh file, and every other file the run read
+  (mechanisms, tables, inflow profiles, probe points, the restart file or
+  remap source it started from), each checked against the SHA-256 the run
+  recorded of it. A generated mesh needs no file: the input makes it again.
+- **The record:** `run.json` (the run's `start` record: code, build, rank
+  placement), `resolved.toml` (the [resolved input](input_files.md#the-resolved-input))
+  and the run record itself.
+- **Outputs**, `--with-outputs`: `small` (the default) packs the forces,
+  integrals and probes (CSV files, probe snapshots, spectra), as the resolved
+  input and the output records name them; `all` also the snapshots and restart
+  files of the run's output records; `none` none.
+
+```
+$ mallard pack cylinder
+== Packed cylinder.tar.gz ======================================================== 11 files
+  Run                1b01f219-ce2d-4825-96a0-ce37641128ae
+  Case               4 files: the input, mesh and files the run read
+  Outputs            4 files (--with-outputs small)
+  Size               105,997 bytes before compression
+  Rerun              tar -xf cylinder.tar.gz && cd cylinder/case/cylinder && mallard -i input.toml --restart solut/restart_000004.restart
+  Verify             mallard pack --verify cylinder.tar.gz
+```
+
+The archive is one directory, named as the archive:
+
+| Path | Contents |
+|---|---|
+| `manifest.json` | `schema` (`"mallard-pack"`), `version` (1), `created`, `mallard` (the version that packed it), `run_id`, `rerun` (`directory` and `command`: how to run it again), `ranks`, `mesh`, `with_outputs`, `notes`, and `files`: each file's `path`, `role` (`input`, `mesh`, `read`, `run_record`, `resolved_input`, `run_log`, `output`), `kind` (of a file read, or an output's), `given` (the path the run gave it), `bytes` and `sha256` |
+| `run.json`, `resolved.toml` | The run's start record and its resolved input |
+| `case/` | The input, mesh and files read, laid out as they were around the run directory: a mesh in `../meshes/` of the run lands in `case/meshes/`, the run directory in `case/<its name>/`, so the input's relative paths hold unchanged |
+| `output/` | The run record and outputs, by their paths in the run directory, apart from the case so a rerun writes beside them, not over them |
+
+Unpack it anywhere with `tar -xf` and run the manifest's `rerun.command` in
+its `rerun.directory`: the run starts again from the same files (a restart
+given with `--restart` is part of the command), and on the same build and rank
+count reproduces the run bit for bit, which `mallard diff` against `output/`
+shows. `mallard pack --verify ARCHIVE` checks an archive: every file against
+the size and SHA-256 of the manifest, none missing or added, and the input,
+mesh and files read against the hashes of the run block itself; it exits 1 and
+lists the files that differ. The archive is gzip-compressed (`.tar.gz`) in
+builds with zlib (`Mallard_ENABLE_ZLIB`), else plain `.tar`; `-o` names it.
+
+- **A file changed since the run read or wrote it is refused**, by its
+  SHA-256: the archive would not reproduce the run. Restart files the run
+  started from carry the SHA-256 of the run that wrote them, where its run
+  record is still where it was; a restart file written by a script in
+  `tools/setup` has none, and is packed as it is (the script itself is not
+  in the run record, so it is not packed).
+- **Absolute paths** in the input are packed under `absolute/`, but the rerun
+  reads them at that path; give files by relative paths to pack them
+  reproducibly. `pack` warns, and the manifest's `notes` say so.
+- **What a rerun cannot repeat** is noted too: a [`mallard ctl set`](running.md)
+  while the run ran, and a run record without an end record (still running,
+  or killed).
+- Series indexes (`.pvd`, `.vtkhdf.series`), which the output records do not
+  list, are not packed by `--with-outputs all`; `mallard info` and
+  `mallard diff` read the snapshots without them.
 
 ## See also
 
