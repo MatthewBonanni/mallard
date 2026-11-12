@@ -17,6 +17,7 @@
 #include "common.h"
 #include "boundary.h"
 #include "periodic_maps.h"
+#include "read_only.h"
 #include "riemann_solver.h"
 
 /**
@@ -196,9 +197,9 @@ struct ConvectiveFluxFunctor {
                 if (w_q == 0.0_r) continue;
             }
             rtype W_l[N_CONSERVATIVE], W_r[N_CONSERVATIVE], flux_q[N_CONSERVATIVE];
-            FOR_I_CONSERVATIVE W_l[i] = face_solution(i_face, i_quad, 0, i);
+            FOR_I_CONSERVATIVE W_l[i] = load_read_only(&face_solution(i_face, i_quad, 0, i));
             if (c1 >= 0) {
-                FOR_I_CONSERVATIVE W_r[i] = face_solution(i_face, i_quad, 1, i);
+                FOR_I_CONSERVATIVE W_r[i] = load_read_only(&face_solution(i_face, i_quad, 1, i));
             } else {
                 boundaries.exterior_W(i_face, i_quad, n_quad, W_l, n_point, face_solution, W_r);
                 if (boundaries.bcs(boundaries.face_bc(i_face)).flux_of_ghost()) FOR_I_CONSERVATIVE W_l[i] = W_r[i];
@@ -250,12 +251,12 @@ struct FaceFluxSumFunctor {
             if (rotated && sign < 0.0_r) {
                 // The flux is in the face's (cell 0's) frame
                 rtype F[N_CONSERVATIVE];
-                FOR_I_CONSERVATIVE F[i] = face_flux(i_face, i);
+                FOR_I_CONSERVATIVE F[i] = load_read_only(&face_flux(i_face, i));
                 periodic.rotate_state(face_shift(i_face), F, true);
                 FOR_I_CONSERVATIVE sum[i] -= F[i];
                 continue;
             }
-            FOR_I_CONSERVATIVE sum[i] += sign * face_flux(i_face, i);
+            FOR_I_CONSERVATIVE sum[i] += sign * load_read_only(&face_flux(i_face, i));
         }
         FOR_I_CONSERVATIVE rhs(i_cell, i) = sum[i];
     }
