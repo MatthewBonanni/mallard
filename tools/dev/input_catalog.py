@@ -33,7 +33,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CATALOG = ROOT / "docs" / "input-keys.json"
 SIZE_KEYS = ("Nx", "Ny", "Nz")
-TUTORIAL_DIMS = {"wedge": 2, "cylinder": 2, "measuring": 2, "cone": 3, "channel_les": 3, "cluster": 2}
+TUTORIAL_DIMS = {"wedge": 2, "cylinder": 2, "measuring": 2, "cone": 3, "channel_les": 3, "cluster": 2, "post_processing": 2}
 
 
 def inputs():
@@ -143,6 +143,10 @@ UNEXERCISED = {
     "statistics.phase.fields", "statistics.phase.bins", "statistics.phase.period",
     "statistics.phase.t_reference", "statistics.phase.probe", "statistics.phase.variable",
     "statistics.phase.level", "statistics.phase.interval", "statistics.phase.t_start",
+    "statistics.confidence",
+    "statistics.convergence.signals", "statistics.convergence.batches", "statistics.convergence.min_samples",
+    "statistics.convergence.confidence", "statistics.convergence.tolerance",
+    "statistics.convergence.variance_tolerance", "statistics.convergence.file",
     "probes.moment_center",
     "parallel.partitioner", "parallel.halo_exchange",
     "output.hash_mesh",

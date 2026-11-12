@@ -4,9 +4,9 @@ tube with each reconstruction (through a line probe), MPI partitions, a
 mallard reactor ignition, a sector against the full annulus (rotational
 periodicity), the mesh-import fixtures as Mallard reads them
 (through mallard mesh convert, which needs h5py and an HDF5 and CGNS build), a
-remap from quadrilaterals to triangles, the mesh quality from mallard check,
-the halo layers of one rank, and a grid-convergence study through mallard post
-convergence.
+remap from quadrilaterals to triangles, the mesh quality from mallard check, the
+conditional statistics of an igniting mixing layer, the halo layers of one rank, and a
+grid-convergence study through mallard post convergence.
 
     python tools/docs/runs.py --mallard build/src/mallard [--mpirun mpirun] [names...]
 
@@ -570,6 +570,97 @@ def remap_fields(P, args):
     ax.legend(loc="upper right")
     return fig
 
+# ------------------------------------------------------- conditional statistics
+
+LAYER = """[run]
+t_stop = 3.0e-4
+cfl = 0.5
+
+[mesh]
+type = "cartesian"
+Nx = 16
+Ny = 48
+Lx = 2.0e-2
+Ly = 4.0e-2
+
+[[periodic]]
+zones = ["left", "right"]
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+type = "analytical"
+p = "101325.0"
+T = "1300.0 - 1000.0 * FUEL"
+u = ["20.0 * FUEL + 2.0 * sin(2 * pi * y / 4.0e-2)", "1.0 * sin(2 * pi * x / 2.0e-2)"]
+Y = { H2 = "0.0284 * FUEL", O2 = "0.233 * (1.0 - FUEL)" }
+balance = "N2"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "MECHANISMS/h2o2.yaml"
+
+[chemistry]
+
+[output]
+check_interval = 1000000
+[output.mixture]
+fuel = {Y = {H2 = 0.0284, N2 = 0.9716}}
+oxidizer = {Y = {O2 = 0.233, N2 = 0.767}}
+
+[statistics]
+t_start = 1.0e-4
+interval = 5
+
+[[statistics.conditional]]
+on = "MIXTURE_FRACTION"
+bins = 25
+fields = ["T", "HRR"]
+weight = "mass"
+file = "conditional.csv"
+"""
+
+
+@functools.cache
+def conditional_data(args):
+    """A fuel layer (H2 in N2, 300 K) in hot air (1300 K) igniting, from 0.1 to 0.3 ms (about 20 s)."""
+    work = Path(tempfile.mkdtemp())
+    fuel = "0.5 * (tanh((9.0e-3 - abs(y - 2.0e-2)) / 5.0e-3) + 1.0)"
+    text = LAYER.replace("FUEL", "(" + fuel + ")").replace("MECHANISMS", str(ROOT / "mechanisms"))
+    run(args.mallard, text, work)
+    rows = list(csv.DictReader(line for line in open(work / "conditional.csv") if not line.startswith("#")))
+    return {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
+
+
+def conditional(P, args):
+    d = conditional_data(args)
+    Z = d["MIXTURE_FRACTION"]
+    fig, (ax, low) = plt.subplots(2, 1, figsize=(6.6, 4.8), sharex=True,
+                                  gridspec_kw=dict(height_ratios=[2.2, 1], hspace=0.08))
+    ax.fill_between(Z, d["MEAN_T"] - d["RMS_T"], d["MEAN_T"] + d["RMS_T"], color=P["flame"], alpha=0.25, lw=0)
+    ax.plot(Z, d["MEAN_T"], color=P["flame"], lw=2.4)
+    ax.set_ylabel("T [K]", color=P["flame"])
+    hrr = ax.twinx()
+    hrr.plot(Z, d["MEAN_HRR"] / 1e9, color=P["teal"], lw=1.8)
+    hrr.set_ylabel(r"HRR [GW/m$^3$]", color=P["teal"])
+    hrr.spines["right"].set_visible(True)
+    hrr.set_ylim(bottom=0)
+    width = Z[1] - Z[0]
+    low.bar(Z, d["PDF"], width=0.9 * width, color=P["muted"])
+    low.set_ylabel("PDF")
+    low.set_xlabel("mixture fraction Z")
+    low.set_xlim(0, 1)
+    label(ax, 0.97, 1820, r"$\widetilde{T|Z}$ $\pm$ RMS", P, color=P["flame"], ha="right", size=12)
+    label(ax, 0.97, 1620, r"$\widetilde{\mathrm{HRR}|Z}$", P, color=P["teal"], ha="right", size=12)
+    return fig
+
 
 # ------------------------------------------------------------------- halo
 
@@ -799,7 +890,8 @@ class Args(tuple):
 FIGURES = {"teno_stencils": teno_stencils, "sod_schemes": sod_schemes, "partitions": partitions,
            "ignition": ignition, "mesh_import": mesh_import, "mesh_transform": mesh_transform,
            "remap-supermesh": remap_supermesh, "remap-fields": remap_fields, "mesh_quality": mesh_quality,
-           "rotational_sector": rotational_sector, "halo": halo, "grid_convergence": grid_convergence}
+           "rotational_sector": rotational_sector, "conditional": conditional, "halo": halo,
+           "grid_convergence": grid_convergence}
 
 
 def main():

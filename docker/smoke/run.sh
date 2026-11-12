@@ -7,7 +7,10 @@
 # PREFIX defaults to the installation of the mallard on PATH. Runs the Sod shock tube
 # through mallard in 2D (also on two MPI ranks, when built with MPI) and in 3D, each
 # dimension that is installed (mallard2d, mallard3d), and hydrogen ignition with
-# mallard reactor. Needs Python 3 with NumPy and SciPy, and h5py for builds with HDF5.
+# mallard reactor. Needs Python 3 with NumPy and SciPy, and h5py for builds with HDF5. Where
+# the reader library (lib/libmallard2d) is installed, also reads the 2D run with the
+# Python package mallard, which must then be importable (a container's Python, `spack load
+# mallard`, or `pip install PREFIX/share/mallard/tools`).
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -38,6 +41,9 @@ for dim in 2 3; do
     (cd "$case" && run "sod_${dim}d" "$bin/mallard" -i input.toml)
     grep -q "Build.* ${dim}D," "$case/sod_${dim}d.log" || { echo "mallard ran sod_${dim}d in another dimension"; exit 1; }
     python3 "$here/check.py" "$tools" sod "$case/solut/sod"
+    if [ "$dim" = 2 ] && ls "$prefix"/lib*/libmallard2d.* > /dev/null 2>&1; then
+        (cd "$work" && python3 "$here/check.py" "$tools" python "$case/solut/sod")
+    fi
 done
 
 links_mpi() { { ldd "$1" || otool -L "$1"; } 2> /dev/null | grep -q libmpi; }

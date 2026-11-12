@@ -394,7 +394,8 @@ quick = ["run.t_stop = 1.0e-5"]
 
 # ------------------------------------------------------------- tutorials
 # The tutorials' scripts stay in Mallard's tutorials/ ({data}), next to the
-# shared code they import; their figures go to figures/.
+# shared code they import; their figures go to figures/. {mallard} is the mallard that
+# created the case.
 
 [[templates]]
 name = "cone"
@@ -428,9 +429,9 @@ mesh = ["gmsh channel.geo -3 -o channel.msh"]
 mesh_creates = "channel.msh"
 quick_mesh = ["gmsh channel.geo -3 -setnumber nx 8 -setnumber ny 16 -setnumber nz 8 -o channel.msh"]
 post = ["{data}/tutorials/channel_les/plot_channel_les.py mesh channel.msh --out figures",
-        "{data}/tutorials/channel_les/plot_channel_les.py results . --out figures"]
+        "{data}/tutorials/channel_les/plot_channel_les.py results . --mallard {mallard} --out figures"]
 quick_post = ["{data}/tutorials/channel_les/plot_channel_les.py mesh channel.msh --out figures",
-              "{data}/tutorials/channel_les/plot_channel_les.py results . --t-start 0.2 --out figures"]
+              "{data}/tutorials/channel_les/plot_channel_les.py results . --t-start 0.2 --mallard {mallard} --out figures"]
 packages = ["numpy", "scipy", "matplotlib"]
 results = "figures/, the mesh, profiles and spectra against Moser, Kim & Mansour (docs/tutorials/channel_les.md)"
 quick = ["run.t_stop = 0.5", "statistics.t_start = 0.2", "statistics.interval = 1",

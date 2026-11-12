@@ -43,7 +43,7 @@ struct HealthState {
     std::vector<health::Extremum> margins_run;
     std::array<uint64_t, 2> substeps_last = {0, 0};
     double chemistry_wall_last = 0.0;
-    double output_last = 0.0, writing_last = 0.0;
+    double output_last = 0.0, writing_last = 0.0, regions_last = 0.0;
     uint64_t step_last = 0;
 
     std::vector<std::pair<std::string, double>> setup_phases;

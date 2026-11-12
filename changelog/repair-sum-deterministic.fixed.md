@@ -1,0 +1,1 @@
+- The repairs' changes in progress rows and the run record, and the conservation ledger's `repairs`, `residual` and `relative` terms and the element drift derived from them, are the same bit for bit between identical runs and at any `step_queue` depth: the chemistry's composition clippings are summed by a reduction instead of atomics (#782).

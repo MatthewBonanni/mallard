@@ -1,7 +1,8 @@
 /**
  * @file extract_main.cpp
- * @brief `mallard post extract`: the probes, regions and snapshots of existing output, written by the
- *        run's own code on a case set up from the output's input.
+ * @brief `mallard post extract`: the probes, regions and snapshots of existing output,
+ *        `mallard post derive`: snapshots of derived fields of it, and `mallard post average`: its
+ *        statistics over snapshots, all by the run's own code on a case set up from the output's input.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -11,8 +12,11 @@
 #include <cmath>
 #include <exception>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -22,16 +26,22 @@
 
 #include "cli.h"
 #include "commands.h"
+#include "derived_catalog.h"
 #include "diagnostic_code.h"
+#include "favre_average.h"
+#include "field_units.h"
+#include "homogeneous_average.h"
 #include "input.h"
 #include "input_upgrade.h"
 #include "json.h"
 #include "log.h"
+#include "mesh_block.h"
 #include "output_reader.h"
 #include "parallel/binding.h"
 #include "parallel/comm.h"
 #include "provenance.h"
 #include "region_input.h"
+#include "remap.h"
 #include "solver/solver.h"
 
 namespace fs = std::filesystem;
@@ -42,7 +52,6 @@ using logging::count;
 using logging::format;
 using logging::item;
 
-const char * const NAME = "mallard post extract";
 
 /** @brief A usage error found after parsing: printed by rank 0 as cli::usage_error does. */
 struct UsageError : std::runtime_error {
@@ -208,14 +217,14 @@ Input region_value(const std::string & text) {
     return parsed.as_table().entries().at("region");
 }
 
-/** @brief Whether a [[probes]] entry writes samples, not only reductions: a probe with region writes none. */
+/** @brief Whether a [[probes]] entry writes samples, not only reductions: a region probe writes none without n_points. */
 bool writes_samples(const Input & input, const Input::table_type & entry) {
     if (!entry.entries().contains("region")) return true;
     const Input & value = entry.entries().at("region");
     const Input * names = region::named_regions(input);
     const bool named = value.is_string() && names && names->as_table().entries().contains(value.as_string());
     const Input & table = named ? names->as_table().entries().at(value.as_string()) : value;
-    return probe::sampled(table) || (N_DIM == 3 && entry.entries().contains("n_points"));
+    return probe::sampled(table) || entry.entries().contains("n_points");
 }
 
 std::string probe_extension(const Input::table_type & entry) {
@@ -240,6 +249,7 @@ struct Plan {
     std::vector<std::string> probes;  // names
     std::vector<std::string> files;   // that may be written: probe files, reductions files, snapshot indexes
     std::string snapshot_prefix;
+    std::vector<std::string> conditional;  // the conditional statistics files
 };
 
 /**
@@ -352,6 +362,92 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
     return plan;
 }
 
+/** @brief The value of an option that takes an inline TOML table, as the input has it. */
+Input inline_table(const std::string & text, const std::string & option) {
+    const Input parsed = parse_input_string("value = " + text, option);
+    const Input & value = parsed.as_table().entries().at("value");
+    if (!value.is_table()) throw UsageError(option + " takes an inline TOML table ({...}), not " + text);
+    return value;
+}
+
+/** @brief An example of the [output] table a derived-field need takes, for messages. */
+std::string need_hint(uint16_t need) {
+    if (need == derived::need::REFERENCE) return "--reference '{rho = 1.2, u = [30, 0], p = 101325}'";
+    if (need == derived::need::PROGRESS) return "--mixture '{progress = {T_unburnt = 300, T_burnt = 2200}}'";
+    return "--mixture '{fuel = {X = {CH4 = 1}}, oxidizer = {X = {O2 = 1, N2 = 3.76}}}'";
+}
+
+/**
+ * @brief The case input of mallard post derive: no probes, one snapshot of the --fields (with the
+ *        state, with --with-state) at each step, and [output] reference and mixture from --reference
+ *        and --mixture, which replace the input's.
+ */
+Plan prepare_derive(Input & input, const cli::Args & args, const std::string & dir) {
+    Plan plan;
+    auto & top = input.as_table().entries();
+    for (const char * key : {"write_data", "forces", "integrals", "statistics", "initialize", "probes"}) top.erase(key);
+    if (!top.contains("output") || !top.at("output").is_table()) top["output"] = Input(Input::table_type{});
+    auto & output = top.at("output").as_table().entries();
+    output["run_log"] = Input("");
+    output["health"] = Input(false);
+    if (args.has("--reference")) output["reference"] = inline_table(args.value_or("--reference", ""), "--reference");
+    if (args.has("--mixture")) output["mixture"] = inline_table(args.value_or("--mixture", ""), "--mixture");
+
+    if (!args.has("--fields")) throw UsageError("--fields is required: the derived fields to write (MACH,P0,CP)");
+    const std::vector<std::string> fields = split_list(args.value_or("--fields", ""));
+    if (fields.empty()) throw UsageError("--fields lists no field");
+    const auto has = [&](const char * table, const char * key) {
+        if (!output.contains(table)) return false;
+        return key == nullptr || (output.at(table).is_table() && output.at(table).contains(key));
+    };
+    for (const std::string & name : fields) {
+        if (!field_units::post_derive(name)) {
+            std::vector<std::string> names;
+            for (const CatalogField & c : field_units::catalog()) {
+                if (c.post_derive) names.push_back(c.name);
+            }
+            const std::string like = suggest_value(name, names);
+            throw UsageError("--fields: mallard post derive does not write " + name +
+                             (like.empty() ? "" : " (did you mean " + like + "?)") +
+                             "; mallard list fields names those it writes");
+        }
+        const derived::Field f = derived::find(name.c_str());
+        if (f == derived::N_FIELDS) continue;
+        const uint16_t needs = derived::FIELDS[f].needs;
+        uint16_t missing = 0;
+        if ((needs & derived::need::REFERENCE) && !has("reference", nullptr)) missing = derived::need::REFERENCE;
+        if ((needs & derived::need::STREAMS) && !has("mixture", "fuel")) missing = derived::need::STREAMS;
+        if ((needs & derived::need::PROGRESS) && !has("mixture", "progress")) missing = derived::need::PROGRESS;
+        if ((needs & derived::need::SPECIES_PAIR) && !has("mixture", "fuel") &&
+            !(has("mixture", "fuel_species") && has("mixture", "oxidizer_species"))) {
+            missing = derived::need::STREAMS;
+        }
+        if (missing) {
+            throw std::runtime_error(name + " needs [output] " +
+                                     (missing == derived::need::REFERENCE ? "reference" : "mixture keys") +
+                                     " (" + derived::FIELDS[f].needs_text + "), which the run's input does not " +
+                                     "have: give them, e.g. " + need_hint(missing));
+        }
+    }
+    std::vector<std::string> variables;
+    if (args.has("--with-state")) variables = {"RHO", "U", "P", "T"};
+    variables.insert(variables.end(), fields.begin(), fields.end());
+    const std::string format = args.value_or(
+        "--snapshot", have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()) ? "vtkhdf" : "vtu");
+    if (format != "vtkhdf" && format != "vtu") throw UsageError("--snapshot takes vtkhdf or vtu, not " + format);
+    Input::table_type entry;
+    plan.snapshot_prefix = under(dir, args.value_or("--name", "derived"));
+    entry["prefix"] = Input(plan.snapshot_prefix);
+    entry["fields"] = string_array(variables);
+    entry["interval"] = Input(1);
+    entry["format"] = Input(format);
+    if (args.has("--region")) entry["region"] = region_value(args.value_or("--region", ""));
+    top["write_data"] = Input(Input::array_type{Input(entry)});
+    plan.files.push_back(plan.snapshot_prefix + (format == "vtkhdf" ? ".vtkhdf.series" : ".pvd"));
+    plan.files.push_back(plan.snapshot_prefix + ".vtkhdf");
+    return plan;
+}
+
 /** @brief Fields the state needs, read from a snapshot: the conservative variables if it holds them, else primitives. */
 std::vector<std::string> state_fields(const output::Contents & c) {
     const bool conservative = c.field("RHO") && c.field("RHOE") && (c.field("RHOU") || c.field("RHOU_X"));
@@ -370,7 +466,7 @@ RestartData read_state(const output::Contents & c, const Selected & e, const Mes
     const bool distributed = mesh.n_global_cells > 0;
     const uint64_t n_global = distributed ? mesh.n_global_cells : mesh.n_cells;
     const auto wrong_mesh = [&](uint64_t n) {
-        return std::runtime_error("has " + count(n) + " cells, but the case's mesh has " +
+        return std::runtime_error("has " + count(n, "cell") + ", but the case's mesh has " +
                                   count(n_global) + ": give the input of the run that wrote it (-i)");
     };
     if (c.kind == output::Kind::restart) {
@@ -489,10 +585,27 @@ void print_json(const std::vector<output::Contents> & files, const std::vector<S
     std::cout << o.str() << "\n";
 }
 
+/** @brief The last row of each table written. */
+void print_last(const std::vector<Written> & written) {
+    for (const Written & w : written) {
+        if (w.last.empty()) continue;
+        const output::Contents & c = w.contents;
+        const output::Snapshot & s = c.snapshots.back();
+        logging::section(fs::path(c.path).filename().string(),
+                         "t = " + seconds(s.t) + " s" + (c.snapshots.size() > 1 ? ", the last" : ""));
+        std::vector<std::vector<std::string>> rows;
+        for (const auto & [name, value] : w.last) {
+            const output::Field * f = c.field(name);
+            rows.push_back({name, format("%.9g", value), units_text(f ? f->units : "")});
+        }
+        logging::table({"column", "value", "units"}, rows);
+    }
+}
+
 void print_text(const std::vector<output::Contents> & files, const std::vector<Selected> & selected,
                 const std::string & case_from, const std::string & dir, const std::vector<Written> & written,
-                size_t n_available) {
-    logging::section("Extract");
+                size_t n_available, bool derive) {
+    logging::section(derive ? "Derive" : "Extract");
     std::vector<std::string> names;
     for (const auto & c : files) names.push_back(c.path + " (" + c.format + ")");
     item(files.size() == 1 ? "File" : "Files", list_text(names));
@@ -504,7 +617,7 @@ void print_text(const std::vector<output::Contents> & files, const std::vector<S
     if (!first.step_recorded) item("Steps", "not recorded in the files: numbered by position, from 0");
     item("Output", dir);
 
-    logging::section("Snapshots", count(selected.size()) + " extracted");
+    logging::section("Snapshots", count(selected.size()) + (derive ? " derived" : " extracted"));
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < selected.size(); i++) {
         const Selected & e = selected[i];
@@ -515,7 +628,7 @@ void print_text(const std::vector<output::Contents> & files, const std::vector<S
     logging::table({"#", "t [s]", "step", "file"}, rows);
     if (!first.step_recorded) logging::line("  *: position in the files, which record no step.");
 
-    logging::section("Written", count(written.size()) + " files");
+    logging::section("Written", count(written.size(), "file"));
     rows.clear();
     for (const Written & w : written) {
         const output::Contents & c = w.contents;
@@ -525,67 +638,67 @@ void print_text(const std::vector<output::Contents> & files, const std::vector<S
                         count(c.fields.size()), c.format});
     }
     logging::table({"file", "kind", "times", "first t [s]", "last t [s]", "fields", "format"}, rows);
-
-    for (const Written & w : written) {
-        if (w.last.empty()) continue;
-        const output::Contents & c = w.contents;
-        const output::Snapshot & s = c.snapshots.back();
-        logging::section(fs::path(c.path).filename().string(),
-                         "t = " + seconds(s.t) + " s" + (c.snapshots.size() > 1 ? ", the last" : ""));
-        rows.clear();
-        for (const auto & [name, value] : w.last) {
-            const output::Field * f = c.field(name);
-            rows.push_back({name, format("%.9g", value), units_text(f ? f->units : "")});
-        }
-        logging::table({"column", "value", "units"}, rows);
-    }
+    print_last(written);
 }
 
-int extract(const cli::Args & args) {
-    const std::string dir = args.value_or("--output", "extract");
-    const std::string report = args.value_or("--format", "text");
-    if (report != "text" && report != "json") throw UsageError("--format takes text or json, not " + report);
-    if (args.has("--sampling") && args.value_or("--sampling", "") != "cell" && args.value_or("--sampling", "") != "point") {
-        throw UsageError("--sampling takes cell or point, not " + args.value_or("--sampling", ""));
-    }
+/** @brief The files of the command line: restart files and snapshots of the whole mesh, in its order. */
+std::vector<output::Contents> open_files(const cli::Args & args, const std::string & verb) {
     std::vector<output::Contents> files;
     for (const std::string & path : args.positional) {
         output::Contents c = output::open(path);
         if (c.kind != output::Kind::snapshot && c.kind != output::Kind::restart) {
             throw std::runtime_error(path + " is a " + output::kind_name(c.kind) +
-                                     " file; extract takes restart files and snapshots of the whole mesh");
+                                     " file; " + verb + " takes restart files and snapshots of the whole mesh");
         }
         if (!c.global_order) {
             throw std::runtime_error(path + " holds cells in an order of its own (" + c.format +
-                                     "), not the mesh's: extract from restart files, VTKHDF or XDMF snapshots of the "
+                                     "), not the mesh's: " + verb + " from restart files, VTKHDF or XDMF snapshots of the "
                                      "whole mesh");
         }
         files.push_back(std::move(c));
     }
-    size_t n_available = 0;
-    for (const auto & c : files) n_available += c.snapshots.size();
-    const std::vector<Selected> selected = select(files, args);
+    return files;
+}
 
+/** @brief The case's input: -i, else the input in the first file's run block; case_from says which. */
+Input case_input(const cli::Args & args, const output::Contents & first, std::string & case_from) {
     Input input;
-    std::string case_from;
     if (args.has("-i")) {
         case_from = args.value_or("-i", "");
         input = parse_input(case_from);
     } else {
         bool resolved = false;
-        const std::string text = recorded_input(files[0], resolved);
+        const std::string text = recorded_input(first, resolved);
         if (text.empty()) {
-            throw std::runtime_error(files[0].path + " records no input (files of Mallard 0.9 and later do, in their "
+            throw std::runtime_error(first.path + " records no input (files of Mallard 0.9 and later do, in their "
                                      "run block): give the input file with -i");
         }
         case_from = std::string(resolved ? "the resolved input" : "the input as written") + " in the run block of " +
-                    files[0].path;
-        input = parse_input_string(text, files[0].path + " (its run block)");
+                    first.path;
+        input = parse_input_string(text, first.path + " (its run block)");
     }
     for (const auto & finding : input_upgrade::apply(input)) {
         if (comm::is_root()) logging::warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     }
-    const Plan plan = prepare(input, args, dir);
+    return input;
+}
+
+int extract(const cli::Args & args, const bool derive) {
+    const std::string verb = derive ? "derive" : "extract";
+    const std::string dir = args.value_or("--output", derive ? "derived" : "extract");
+    const std::string report = args.value_or("--format", "text");
+    if (report != "text" && report != "json") throw UsageError("--format takes text or json, not " + report);
+    if (args.has("--sampling") && args.value_or("--sampling", "") != "cell" && args.value_or("--sampling", "") != "point") {
+        throw UsageError("--sampling takes cell or point, not " + args.value_or("--sampling", ""));
+    }
+    const std::vector<output::Contents> files = open_files(args, verb);
+    size_t n_available = 0;
+    for (const auto & c : files) n_available += c.snapshots.size();
+    const std::vector<Selected> selected = select(files, args);
+
+    std::string case_from;
+    Input input = case_input(args, files[0], case_from);
+    const Plan plan = derive ? prepare_derive(input, args, dir) : prepare(input, args, dir);
 
     // The setup's report and the writers' events are the run's, not this command's: errors and warnings still show
     std::ostringstream quiet;
@@ -635,35 +748,1026 @@ int extract(const cli::Args & args) {
     if (report == "json") {
         print_json(files, selected, case_from, dir, written);
     } else {
-        print_text(files, selected, case_from, dir, written, n_available);
+        print_text(files, selected, case_from, dir, written, n_available, derive);
     }
+    return 0;
+}
+
+/** @brief What mallard post average computes. */
+struct Averages {
+    std::vector<std::string> fields;
+    std::vector<std::pair<uint32_t, uint32_t>> products;  // indices into fields
+    bool favre = false;
+    std::vector<Input> conditional;  // [[statistics.conditional]] entries
+    std::string homogeneous;  // the directions averaged over ("xz"); empty: a snapshot of every cell
+    double rtol = 1e-6;
+
+    std::string product(const std::pair<uint32_t, uint32_t> & p) const { return fields[p.first] + "_" + fields[p.second]; }
+    /** @brief Favre averages: of the fields and products without RHO, as indices into fields. */
+    std::vector<uint32_t> favre_fields() const {
+        std::vector<uint32_t> out;
+        for (uint32_t i = 0; i < fields.size(); i++) {
+            if (fields[i] != "RHO") out.push_back(i);
+        }
+        return out;
+    }
+    std::vector<std::pair<uint32_t, uint32_t>> favre_products() const {
+        std::vector<std::pair<uint32_t, uint32_t>> out;
+        for (const auto & p : products) {
+            if (fields[p.first] != "RHO" && fields[p.second] != "RHO") out.push_back(p);
+        }
+        return out;
+    }
+    /** @brief The products of a field with itself, whose square roots are RMS_<field>. */
+    std::vector<uint32_t> variances() const {
+        std::vector<uint32_t> out;
+        for (uint32_t p = 0; p < products.size(); p++) {
+            if (products[p].first == products[p].second) out.push_back(p);
+        }
+        return out;
+    }
+    /** @brief The fields written: MEAN_, COV_, RMS_, then FAVRE_MEAN_ and FAVRE_COV_. */
+    std::vector<std::string> variables() const {
+        std::vector<std::string> out;
+        for (const auto & f : fields) out.push_back("MEAN_" + f);
+        for (const auto & p : products) out.push_back("COV_" + product(p));
+        for (const uint32_t p : variances()) out.push_back("RMS_" + fields[products[p].first]);
+        if (!favre) return out;
+        for (const uint32_t i : favre_fields()) out.push_back("FAVRE_MEAN_" + fields[i]);
+        for (const auto & p : favre_products()) out.push_back("FAVRE_COV_" + product(p));
+        return out;
+    }
+};
+
+std::vector<std::string> velocity_names() {
+    std::vector<std::string> out;
+    for (size_t d = 0; d < N_DIM; d++) out.push_back(std::string("U_") + "XYZ"[d]);
+    return out;
+}
+
+/** @brief Whether [statistics] fields take name (species variables are checked against the case later). */
+void check_variable(const std::string & name, const std::string & option) {
+    if (name.starts_with("Y_") || name.starts_with("RHOY_") || name.starts_with("OMEGA_") || name == "HRR" ||
+        derived::find(name.c_str()) != derived::N_FIELDS) {
+        return;
+    }
+    std::vector<std::string> known = {"RHO"};
+    known.insert(known.end(), PRIMITIVE_NAMES.begin(), PRIMITIVE_NAMES.end());
+    known.insert(known.end(), CONSERVATIVE_NAMES.begin() + 1, CONSERVATIVE_NAMES.end());
+    if (std::find(known.begin(), known.end(), name) != known.end()) return;
+    std::vector<std::string> names = known;
+    for (const auto & d : derived::FIELDS) names.emplace_back(d.name);
+    const std::string like = suggest_value(name, names);
+    throw UsageError(option + ": " + name + " is not a variable [statistics] averages" +
+                     (like.empty() ? "" : " (did you mean " + like + "?)") + "; it takes " + list_text(known) +
+                     ", Y_<species>, RHOY_<species>, HRR, OMEGA_<species> and the derived fields of mallard list "
+                     "fields");
+}
+
+/** @brief --conditional: an inline table, or an array of them, of [[statistics.conditional]] entries. */
+std::vector<Input> conditional_entries(const std::string & text) {
+    const Input parsed = parse_input_string("value = " + text, "--conditional");
+    const Input & value = parsed.as_table().entries().at("value");
+    std::vector<Input> out;
+    if (value.is_table()) out.push_back(value);
+    if (value.is_array()) {
+        for (const Input & item : value.as_array()) {
+            if (!item.is_table()) break;
+            out.push_back(item);
+        }
+        if (out.size() != value.as_array().size()) out.clear();
+    }
+    if (out.empty()) {
+        throw UsageError("--conditional takes an inline TOML table ({on = \"MIXTURE_FRACTION\", fields = [\"T\"]}) "
+                         "or an array of them, not " + text);
+    }
+    for (const Input & entry : out) {
+        for (const std::string & name : ConditionalStatistics::sampled(entry)) check_variable(name, "--conditional");
+    }
+    return out;
+}
+
+Averages choose_averages(const cli::Args & args) {
+    Averages a;
+    a.favre = args.has("--favre");
+    if (args.has("--conditional")) a.conditional = conditional_entries(args.value_or("--conditional", ""));
+    std::vector<std::string> fields = {"RHO"};
+    for (const auto & u : velocity_names()) fields.push_back(u);
+    fields.insert(fields.end(), {"P", "T"});
+    if (!a.conditional.empty() && !a.favre && !args.has("--products")) fields.clear();
+    if (args.has("--fields")) fields = split_list(args.value_or("--fields", ""));
+    if (fields.empty() && (args.has("--fields") || a.conditional.empty())) throw UsageError("--fields lists no variable");
+    const auto add_field = [&](const std::string & name, const std::string & option) {
+        check_variable(name, option);
+        const auto it = std::find(a.fields.begin(), a.fields.end(), name);
+        if (it != a.fields.end()) return static_cast<uint32_t>(it - a.fields.begin());
+        a.fields.push_back(name);
+        return static_cast<uint32_t>(a.fields.size() - 1);
+    };
+    for (size_t i = 0; i < fields.size(); i++) {
+        if (std::find(fields.begin(), fields.begin() + static_cast<std::ptrdiff_t>(i), fields[i]) !=
+            fields.begin() + static_cast<std::ptrdiff_t>(i)) {
+            throw UsageError("--fields: " + fields[i] + " is listed twice");
+        }
+    }
+    if (a.favre && std::find(fields.begin(), fields.end(), "RHO") == fields.end()) a.fields.push_back("RHO");
+    for (const auto & f : fields) add_field(f, "--fields");
+    const auto add_product = [&](uint32_t i, uint32_t j) {
+        for (const auto & p : a.products) {
+            if ((p.first == i && p.second == j) || (p.first == j && p.second == i)) return false;
+        }
+        a.products.emplace_back(i, j);
+        return true;
+    };
+    if (args.has("--products")) {
+        const std::string text = args.value_or("--products", "");
+        for (const std::string & product : text == "none" ? std::vector<std::string>{} : split_list(text)) {
+            const size_t star = product.find('*');
+            if (star == std::string::npos || product.find('*', star + 1) != std::string::npos) {
+                throw UsageError("--products: " + product + " is not of the form A*B");
+            }
+            const uint32_t i = add_field(product.substr(0, star), "--products");
+            if (!add_product(i, add_field(product.substr(star + 1), "--products"))) {
+                throw UsageError("--products: " + product + " is listed twice");
+            }
+        }
+    } else {
+        for (uint32_t i = 0; i < a.fields.size(); i++) add_product(i, i);
+        const std::vector<std::string> u = velocity_names();
+        for (size_t d = 0; d < u.size(); d++) {
+            for (size_t e = d + 1; e < u.size(); e++) {
+                const auto i = std::find(a.fields.begin(), a.fields.end(), u[d]);
+                const auto j = std::find(a.fields.begin(), a.fields.end(), u[e]);
+                if (i == a.fields.end() || j == a.fields.end()) continue;
+                add_product(static_cast<uint32_t>(i - a.fields.begin()), static_cast<uint32_t>(j - a.fields.begin()));
+            }
+        }
+    }
+    for (const std::string & d : split_list(args.value_or("--homogeneous", ""))) {
+        if (d.size() != 1 || d[0] < 'x' || d[0] > 'z' || a.homogeneous.find(d) != std::string::npos) {
+            throw UsageError("--homogeneous takes directions x, y and z, each once, separated by commas, not " +
+                             args.value_or("--homogeneous", ""));
+        }
+        a.homogeneous += d;
+    }
+    if (args.has("--homogeneous") && a.homogeneous.empty()) throw UsageError("--homogeneous lists no direction");
+    if (!a.homogeneous.empty() && a.fields.empty()) {
+        throw UsageError("--homogeneous averages fields over directions: give --fields with --conditional");
+    }
+    if (args.has("--rtol")) {
+        a.rtol = parse_number(args.value_or("--rtol", ""), "--rtol");
+        if (a.rtol <= 0.0) throw UsageError("--rtol takes a positive number");
+    }
+    return a;
+}
+
+/**
+ * @brief The case input of mallard post average: [statistics] of the fields and products, from
+ *        t_start at every state read, [output] reference and mixture from --reference and
+ *        --mixture, no other output, and a snapshot of the averages unless they are averaged over
+ *        homogeneous directions; for a --region defined by the solution, instead of the snapshot,
+ *        a probe of it that keeps the time averages of the fields and their products per cell.
+ */
+Plan prepare_average(Input & input, const cli::Args & args, const std::string & dir, const Averages & a, double t_start,
+                     bool solution) {
+    Plan plan;
+    auto & top = input.as_table().entries();
+    for (const char * key : {"write_data", "forces", "integrals", "statistics", "initialize", "probes"}) top.erase(key);
+    if (!top.contains("output") || !top.at("output").is_table()) top["output"] = Input(Input::table_type{});
+    auto & output = top.at("output").as_table().entries();
+    output["run_log"] = Input("");
+    output["health"] = Input(false);
+    if (args.has("--reference")) output["reference"] = inline_table(args.value_or("--reference", ""), "--reference");
+    if (args.has("--mixture")) output["mixture"] = inline_table(args.value_or("--mixture", ""), "--mixture");
+    std::vector<std::string> products;
+    for (const auto & [i, j] : a.products) products.push_back(a.fields[i] + "*" + a.fields[j]);
+    Input::table_type statistics;
+    statistics["fields"] = string_array(a.fields);
+    statistics["products"] = string_array(solution ? std::vector<std::string>{} : products);
+    statistics["t_start"] = Input(t_start);
+    statistics["interval"] = Input(1);
+    if (!a.conditional.empty()) {
+        Input::array_type entries;
+        for (Input entry : a.conditional) {
+            auto & e = entry.as_table().entries();
+            if (!e.contains("file")) {
+                e["file"] = Input(under(dir, ConditionalStatistics::default_file(ConditionalStatistics::on_of(entry))));
+            }
+            plan.conditional.push_back(e.at("file").as_string());
+            entries.push_back(entry);
+        }
+        statistics["conditional"] = Input(entries);
+    }
+    top["statistics"] = Input(statistics);
+    if (solution) {
+        const std::string name = args.value_or("--name", "average");
+        Input::table_type probe;
+        probe["name"] = Input(name);
+        probe["region"] = region_value(args.value_or("--region", ""));
+        probe["fields"] = string_array(a.fields);
+        probe["average"] = Input(true);
+        probe["reductions"] = string_array({"integral", "mean"});
+        probe["interval"] = Input(1);
+        top["probes"] = Input(Input::array_type{Input(probe)});
+        plan.probes.push_back(name);
+        if (a.homogeneous.empty()) plan.files.push_back(under(dir, name + "_reductions.csv"));
+        return plan;
+    }
+    if (!a.homogeneous.empty() || a.fields.empty()) return plan;
+    const std::string format = args.value_or(
+        "--snapshot", have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()) ? "vtkhdf" : "vtu");
+    if (format != "vtkhdf" && format != "vtu") throw UsageError("--snapshot takes vtkhdf or vtu, not " + format);
+    Input::table_type entry;
+    plan.snapshot_prefix = under(dir, args.value_or("--name", "average"));
+    entry["prefix"] = Input(plan.snapshot_prefix);
+    entry["fields"] = string_array(a.variables());
+    entry["interval"] = Input(1);
+    entry["format"] = Input(format);
+    if (args.has("--region")) entry["region"] = region_value(args.value_or("--region", ""));
+    top["write_data"] = Input(Input::array_type{Input(entry)});
+    plan.files.push_back(plan.snapshot_prefix + (format == "vtkhdf" ? ".vtkhdf.series" : ".pvd"));
+    plan.files.push_back(plan.snapshot_prefix + ".vtkhdf");
+    return plan;
+}
+
+/** @brief Whether a region's value, or a region of [regions] it names, has a part of type where or isosurface. */
+bool has_solution_part(const Input & value, const Input * names, std::vector<std::string> & named) {
+    if (value.is_string()) {
+        const std::string & name = value.as_string();
+        if (!names || !names->as_table().entries().contains(name) ||
+            std::find(named.begin(), named.end(), name) != named.end()) {
+            return false;
+        }
+        named.push_back(name);
+        return has_solution_part(names->as_table().entries().at(name), names, named);
+    }
+    if (value.is_array()) {
+        for (const Input & item : value.as_array()) {
+            if (has_solution_part(item, names, named)) return true;
+        }
+        return false;
+    }
+    if (!value.is_table()) return false;
+    for (const auto & [key, item] : value.as_table().entries()) {
+        if (key == "type" && item.is_string() && (item.as_string() == "where" || item.as_string() == "isosurface")) {
+            return true;
+        }
+        if (has_solution_part(item, names, named)) return true;
+    }
+    return false;
+}
+
+/**
+ * @brief Whether a --region follows the solution, before the mesh is read: a region that names
+ *        regions of the mesh does when it has a part defined by the solution (checked once the mesh
+ *        is built).
+ */
+bool follows_solution(const Input & input, const Input & value) {
+    const Input * names = region::named_regions(input);
+    try {
+        return region::read(value, "--region", names).solution();
+    } catch (const InputError &) {
+        std::vector<std::string> named;
+        return has_solution_part(value, names, named);
+    }
+}
+
+/**
+ * @brief The products a --region defined by the solution averages, as indices into the fields: the
+ *        covariances' pairs, then with --favre RHO times each Favre field and RHO times each Favre product.
+ */
+std::vector<std::vector<uint32_t>> region_products(const Averages & a) {
+    std::vector<std::vector<uint32_t>> out;
+    for (const auto & [i, j] : a.products) out.push_back({i, j});
+    if (!a.favre) return out;
+    const uint32_t rho = static_cast<uint32_t>(std::find(a.fields.begin(), a.fields.end(), "RHO") - a.fields.begin());
+    for (const uint32_t k : a.favre_fields()) out.push_back({rho, k});
+    for (const auto & [i, j] : a.favre_products()) out.push_back({rho, i, j});
+    return out;
+}
+
+struct RegionColumn {
+    std::string name;
+    Dimension dimension;
+    double value = 0.0;
+};
+
+/**
+ * @brief Over a --region defined by the solution, from the time averages of its probe per cell
+ *        (rank 0): its mean measure, the time averages of the integrals of the fields and of the
+ *        products (integral_MEAN_), the means (mean_MEAN_: mean integral over mean measure), and the
+ *        covariances and Favre averages of these means, as the per-cell averages name them.
+ */
+std::vector<RegionColumn> region_columns(const Averages & a, const Probes::CellAverages & c) {
+    const size_t n_cells = c.weights.size(), n_fields = a.fields.size();
+    const size_t n_products = n_cells == 0 ? 0 : c.products.size() / n_cells;
+    double measure = 0.0;
+    std::vector<double> integral(n_fields, 0.0), product(n_products, 0.0);
+    for (size_t i = 0; i < n_cells; i++) {
+        measure += c.weights[i];
+        for (size_t k = 0; k < n_fields; k++) integral[k] += c.values[i * c.n_columns + k];
+        for (size_t m = 0; m < n_products; m++) product[m] += c.products[i * n_products + m];
+    }
+    if (!(measure > 0.0)) throw std::runtime_error("--region is empty in every snapshot averaged");
+    std::vector<Dimension> d;
+    for (const auto & f : a.fields) d.push_back(field_units::describe(f).dimension);
+    std::vector<double> mean(n_fields);
+    for (size_t k = 0; k < n_fields; k++) mean[k] = integral[k] / measure;
+    std::vector<RegionColumn> out = {{c.measure, c.measure_dimension, measure}};
+    for (size_t k = 0; k < n_fields; k++) {
+        out.push_back({"integral_MEAN_" + a.fields[k], d[k].times(c.measure_dimension), integral[k]});
+    }
+    for (size_t k = 0; k < n_fields; k++) out.push_back({"mean_MEAN_" + a.fields[k], d[k], mean[k]});
+    std::vector<double> cov(a.products.size());
+    for (size_t p = 0; p < a.products.size(); p++) {
+        const auto [i, j] = a.products[p];
+        out.push_back({"integral_MEAN_" + a.product(a.products[p]), d[i].times(d[j]).times(c.measure_dimension),
+                       product[p]});
+        cov[p] = product[p] / measure - mean[i] * mean[j];
+    }
+    for (size_t p = 0; p < a.products.size(); p++) {
+        out.push_back({"COV_" + a.product(a.products[p]), d[a.products[p].first].times(d[a.products[p].second]), cov[p]});
+    }
+    for (const uint32_t p : a.variances()) {
+        const uint32_t i = a.products[p].first;
+        out.push_back({"RMS_" + a.fields[i], d[i], std::sqrt(std::max(0.0, cov[p]))});
+    }
+    if (!a.favre) return out;
+    const std::vector<uint32_t> fields = a.favre_fields();
+    const std::vector<std::pair<uint32_t, uint32_t>> products = a.favre_products();
+    const size_t rho = static_cast<size_t>(std::find(a.fields.begin(), a.fields.end(), "RHO") - a.fields.begin());
+    std::vector<double> favre(n_fields, 0.0);
+    for (size_t k = 0; k < fields.size(); k++) {
+        favre[fields[k]] = product[a.products.size() + k] / integral[rho];
+        out.push_back({"FAVRE_MEAN_" + a.fields[fields[k]], d[fields[k]], favre[fields[k]]});
+    }
+    for (size_t q = 0; q < products.size(); q++) {
+        const auto [i, j] = products[q];
+        out.push_back({"FAVRE_COV_" + a.product(products[q]), d[i].times(d[j]),
+                       product[a.products.size() + fields.size() + q] / integral[rho] - favre[i] * favre[j]});
+    }
+    return out;
+}
+
+/** @brief Writes the averages over a --region defined by the solution as a CSV row at (step, t), as probes do. */
+void write_region_columns(const std::vector<RegionColumn> & columns, uint64_t step, double t, const std::string & path) {
+    fs::create_directories(fs::path(path).parent_path());
+    std::ofstream out(path);
+    std::vector<Dimension> units = {dim::none, dim::time};
+    out << "step,t";
+    for (const RegionColumn & c : columns) {
+        out << "," << c.name;
+        units.push_back(c.dimension);
+    }
+    out << "\n" << field_units::csv_line(units) << "\n" << provenance::csv_comment() << "\n";
+    out << step << "," << std::setprecision(std::numeric_limits<double>::max_digits10) << t;
+    for (const RegionColumn & c : columns) out << "," << c.value;
+    out << "\n";
+    if (!out) throw std::runtime_error("cannot write " + path);
+}
+
+/**
+ * @brief The per-cell columns of a profile over homogeneous directions of a --region defined by the
+ *        solution, on rank 0 in global cell order (empty elsewhere): MEAN_ = mean w q / mean w,
+ *        COV_ and the Favre ones likewise, so that homogeneous::average weighing each cell by mean w
+ *        (and by mean w RHO for Favre columns) gives the region's averages per row.
+ */
+std::vector<homogeneous::Column> region_cell_columns(const Averages & a, const Probes::CellAverages & c,
+                                                     std::vector<double> & density) {
+    const size_t n_cells = comm::is_root() ? c.weights.size() : 0, n_fields = a.fields.size();
+    const size_t n_products = n_cells == 0 ? 0 : c.products.size() / n_cells;
+    std::vector<homogeneous::Column> columns;
+    columns.reserve(n_fields + a.products.size() + (a.favre ? a.favre_fields().size() + a.favre_products().size() : 0));
+    const auto add = [&](const std::string & name, bool favre, int32_t mean_a, int32_t mean_b) {
+        homogeneous::Column col;
+        col.name = name;
+        col.favre = favre;
+        col.mean_a = mean_a;
+        col.mean_b = mean_b;
+        col.values.assign(n_cells, 0.0);
+        columns.push_back(std::move(col));
+        return &columns.back().values;
+    };
+    const auto per_weight = [&](size_t i, double x) { return c.weights[i] > 0.0 ? x / c.weights[i] : 0.0; };
+    for (size_t k = 0; k < n_fields; k++) {
+        std::vector<double> & v = *add("MEAN_" + a.fields[k], false, -1, -1);
+        for (size_t i = 0; i < n_cells; i++) v[i] = per_weight(i, c.values[i * c.n_columns + k]);
+    }
+    for (size_t p = 0; p < a.products.size(); p++) {
+        const auto [ia, ib] = a.products[p];
+        std::vector<double> & v = *add("COV_" + a.product(a.products[p]), false, static_cast<int32_t>(ia),
+                                      static_cast<int32_t>(ib));
+        for (size_t i = 0; i < n_cells; i++) {
+            v[i] = per_weight(i, c.products[i * n_products + p]) - columns[ia].values[i] * columns[ib].values[i];
+        }
+    }
+    density.clear();
+    if (!a.favre) return columns;
+    const size_t rho = static_cast<size_t>(std::find(a.fields.begin(), a.fields.end(), "RHO") - a.fields.begin());
+    density = columns[rho].values;
+    const std::vector<uint32_t> fields = a.favre_fields();
+    const std::vector<std::pair<uint32_t, uint32_t>> products = a.favre_products();
+    const size_t first = columns.size();
+    const auto per_mass = [&](size_t i, double x) {
+        const double m = c.values[i * c.n_columns + rho];
+        return m > 0.0 ? x / m : 0.0;
+    };
+    for (size_t k = 0; k < fields.size(); k++) {
+        std::vector<double> & v = *add("FAVRE_MEAN_" + a.fields[fields[k]], true, -1, -1);
+        for (size_t i = 0; i < n_cells; i++) v[i] = per_mass(i, c.products[i * n_products + a.products.size() + k]);
+    }
+    const auto favre_column = [&](uint32_t f) {
+        return first + static_cast<size_t>(std::find(fields.begin(), fields.end(), f) - fields.begin());
+    };
+    for (size_t q = 0; q < products.size(); q++) {
+        const size_t ia = favre_column(products[q].first), ib = favre_column(products[q].second);
+        std::vector<double> & v = *add("FAVRE_COV_" + a.product(products[q]), true, static_cast<int32_t>(ia),
+                                      static_cast<int32_t>(ib));
+        for (size_t i = 0; i < n_cells; i++) {
+            v[i] = per_mass(i, c.products[i * n_products + a.products.size() + fields.size() + q]) -
+                   columns[ia].values[i] * columns[ib].values[i];
+        }
+    }
+    return columns;
+}
+
+/** @brief The centers of every cell of the mesh, on rank 0 in global cell order (empty elsewhere). */
+std::vector<std::array<double, N_DIM>> global_cell_centers(const Mesh & mesh) {
+    std::vector<uint64_t> ids;
+    std::vector<double> coords;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        ids.push_back(mesh.h_global_cell(c));
+        FOR_I_DIM coords.push_back(double(mesh.h_cell_coords(c, i)));
+    }
+    if (mesh.n_global_cells > 0) {
+        ids = comm::gatherv(ids);
+        coords = comm::gatherv(coords);
+    }
+    std::vector<std::array<double, N_DIM>> out(comm::is_root() ? ids.size() : 0);
+    for (size_t k = 0; k < out.size(); k++) FOR_I_DIM out[ids[k]][i] = coords[k * N_DIM + i];
+    return out;
+}
+
+/** @brief Each owned cell's weight in averages over homogeneous directions: its volume, times its fraction of --region. */
+std::vector<double> cell_weights(const cli::Args & args, const Input & input, const Mesh & mesh) {
+    std::vector<double> w(mesh.n_owned());
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) w[c] = double(mesh.h_cell_measure(c));
+    if (!args.has("--region")) return w;
+    region::Regions regions(input, mesh);
+    const Input value = region_value(args.value_or("--region", ""));
+    region::require_full_dimension(regions.get(value, "--region"), value, "--region");
+    const std::vector<double> & fractions = regions.fractions(value, "--region");
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) w[c] *= fractions[c];
+    double total = 0.0;
+    for (const double x : w) total += x;
+    if (comm::allreduce(total, comm::Op::SUM) <= 0.0) throw std::runtime_error("--region contains no part of any cell");
+    return w;
+}
+
+std::vector<std::array<double, N_DIM>> cell_centers(const Mesh & mesh) {
+    std::vector<std::array<double, N_DIM>> out(mesh.n_owned());
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) FOR_I_DIM out[c][i] = double(mesh.h_cell_coords(c, i));
+    return out;
+}
+
+/** @brief RMS_<a> = sqrt(COV_a_a) of every averaged covariance of a field with itself, as columns of the profile. */
+void add_rms(homogeneous::Profile & p) {
+    const size_t n = p.names.size();
+    std::vector<std::pair<std::string, size_t>> rms;
+    for (size_t j = 0; j < n; j++) {
+        const std::string & name = p.names[j];
+        if (!name.starts_with("COV_")) continue;
+        const std::string body = name.substr(4);
+        const size_t k = body.size() / 2;
+        if (body.size() % 2 == 1 && body[k] == '_' && body.substr(0, k) == body.substr(k + 1)) {
+            rms.emplace_back("RMS_" + body.substr(0, k), j);
+        }
+    }
+    if (rms.empty()) return;
+    std::vector<double> values;
+    for (size_t r = 0; r < p.rows(); r++) {
+        for (size_t j = 0; j < n; j++) values.push_back(p.values[r * n + j]);
+        for (const auto & entry : rms) values.push_back(std::sqrt(std::max(0.0, p.values[r * n + entry.second])));
+    }
+    for (const auto & entry : rms) p.names.push_back(entry.first);
+    p.values = std::move(values);
+}
+
+/** @brief Writes the profile to OUTPUT/NAME.csv (rank 0); its path. */
+std::string write_profile(const homogeneous::Profile & p, const cli::Args & args, const std::string & dir) {
+    const std::string path = under(dir, args.value_or("--name", "average") + ".csv");
+    if (!comm::is_root()) return path;
+    fs::create_directories(dir);
+    std::ofstream out(path);
+    out << p.csv();
+    if (!out) throw std::runtime_error("cannot write " + path);
+    return path;
+}
+
+std::string json_strings(const std::vector<std::string> & items) {
+    std::string out = "[";
+    for (const auto & s : items) out += (out.size() > 1 ? "," : "") + json::quote(s);
+    return out + "]";
+}
+
+std::string directions_text(const std::string & directions) {
+    std::vector<std::string> out;
+    for (const char d : directions) out.emplace_back(1, d);
+    return list_text(out);
+}
+
+void print_profile(const homogeneous::Profile & p, const std::string & path, const std::string & homogeneous,
+                   const std::string & weights) {
+    logging::section("Profile", count(p.rows(), "row"));
+    item("Averaged over", directions_text(homogeneous) + ", weighted by " + weights + "; a row per position in " +
+                              list_text(p.axes));
+    item("Columns", list_text(p.names));
+    item("Written", path);
+}
+
+/**
+ * @brief mallard post average --statistics: the [statistics] fields one snapshot holds (MEAN_,
+ *        COV_, FAVRE_MEAN_, FAVRE_COV_), averaged over homogeneous directions, on the case's mesh.
+ */
+int average_statistics(const cli::Args & args, const std::string & dir, const std::string & report) {
+    for (const char * option : {"--fields", "--products", "--favre", "--t-start", "--snapshot", "--reference", "--mixture"}) {
+        if (args.has(option)) {
+            throw UsageError(std::string(option) + " does not apply to --statistics, which averages the time "
+                             "averages the file holds");
+        }
+    }
+    const Averages a = choose_averages(args);
+    if (a.homogeneous.empty()) {
+        throw UsageError("--statistics needs --homogeneous: the [statistics] fields are time averages already");
+    }
+    const std::vector<output::Contents> files = open_files(args, "average");
+    const std::vector<Selected> selected = select(files, args);
+    if (selected.size() > 1) {
+        throw UsageError("--statistics averages the [statistics] fields of one snapshot, and " +
+                         count(selected.size()) + " are selected: choose one with --latest, --steps or --times");
+    }
+    const Selected & e = selected.front();
+    const output::Contents & c = files[e.file];
+    std::string case_from;
+    const Input input = case_input(args, files[0], case_from);
+    Input setup(Input::table_type{});
+    for (const char * key : {"mesh", "periodic", "regions"}) {
+        if (input.contains(key)) setup.as_table()[key] = input.at(key);
+    }
+    const bool axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
+    // Centers and weights of the owned cells, and their global ids; faces only for --region and curved cells
+    std::vector<uint64_t> global;
+    std::vector<std::array<double, N_DIM>> centers;
+    std::vector<double> weights;
+    uint64_t n_global = 0;
+    {
+        std::ostringstream quiet;
+        std::streambuf * const out = std::cout.rdbuf(quiet.rdbuf());
+        struct Restore {
+            std::streambuf * out;
+            ~Restore() { std::cout.rdbuf(out); }
+        } restore{out};
+        const MeshBlock block = read_mesh_block(setup);
+        const bool curved = comm::allreduce(uint32_t(!block.face_high_order_offsets.empty()), comm::Op::MAX) > 0;
+        if (args.has("--region") || curved) {
+            const std::shared_ptr<Mesh> mesh = remap::source_mesh(setup, 1);
+            if (axisymmetric) mesh->make_axisymmetric();
+            n_global = mesh->n_global_cells > 0 ? mesh->n_global_cells : mesh->n_cells;
+            for (uint32_t i = 0; i < mesh->n_owned(); i++) global.push_back(mesh->h_global_cell(i));
+            centers = cell_centers(*mesh);
+            weights = cell_weights(args, input, *mesh);
+        } else {
+            n_global = comm::allreduce(block.n_cells(), comm::Op::SUM);
+            for (const CellGeometry & g : block_cell_geometry(block, axisymmetric)) {
+                global.push_back(block.first_cell + global.size());
+                std::array<double, N_DIM> x;
+                FOR_I_DIM x[i] = double(g.centroid[i]);
+                centers.push_back(x);
+                weights.push_back(double(g.measure));
+            }
+        }
+    }
+    const uint32_t n_owned = static_cast<uint32_t>(global.size());
+    std::vector<homogeneous::Column> columns;
+    const auto index = [&](const std::string & name) {
+        for (size_t j = 0; j < columns.size(); j++) {
+            if (columns[j].name == name) return static_cast<int32_t>(j);
+        }
+        return int32_t(-1);
+    };
+    for (const std::string prefix : {"MEAN_", "FAVRE_MEAN_", "COV_", "FAVRE_COV_"}) {
+        for (const output::Field & f : c.fields) {
+            if (!f.name.starts_with(prefix)) continue;
+            const std::vector<double> values = output::read(c, f.name, e.index);
+            if (values.size() != n_global * f.components) {
+                throw std::runtime_error(c.path + " has " + count(values.size() / f.components, "cell") + ", but the "
+                                         "case's mesh has " + count(n_global) + ": give the input of the run that "
+                                         "wrote it (-i)");
+            }
+            for (uint32_t d = 0; d < f.components && d < N_DIM; d++) {
+                homogeneous::Column col;
+                col.name = f.components == 1 ? f.name : f.name + "_" + "XYZ"[d];
+                col.favre = prefix.starts_with("FAVRE_");
+                col.values.resize(n_owned);
+                for (uint32_t i = 0; i < n_owned; i++) {
+                    col.values[i] = values[global[i] * f.components + d];
+                }
+                columns.push_back(std::move(col));
+            }
+        }
+    }
+    if (columns.empty()) {
+        throw std::runtime_error(c.path + " holds no [statistics] fields (MEAN_, COV_): average its states "
+                                 "without --statistics, or write them with variables = [\"MEAN_*\", \"COV_*\"]");
+    }
+    // COV_<a>_<b> pairs with MEAN_<a> and MEAN_<b> where the file holds both
+    for (homogeneous::Column & col : columns) {
+        const std::string cov = col.favre ? "FAVRE_COV_" : "COV_", mean = col.favre ? "FAVRE_MEAN_" : "MEAN_";
+        if (!col.name.starts_with(cov)) continue;
+        const std::string body = col.name.substr(cov.size());
+        for (size_t k = 1; k + 1 < body.size(); k++) {
+            if (body[k] != '_') continue;
+            const int32_t i = index(mean + body.substr(0, k)), j = index(mean + body.substr(k + 1));
+            if (i >= 0 && j >= 0) {
+                col.mean_a = i;
+                col.mean_b = j;
+                break;
+            }
+        }
+    }
+    std::vector<double> density;
+    if (std::any_of(columns.begin(), columns.end(), [](const auto & col) { return col.favre; })) {
+        const int32_t rho = index("MEAN_RHO");
+        if (rho < 0) throw std::runtime_error(c.path + " holds Favre averages but not MEAN_RHO, which weighs them");
+        density = columns[static_cast<size_t>(rho)].values;
+    }
+    homogeneous::Profile profile = homogeneous::average(centers, weights, density,
+                                                        columns, a.homogeneous, a.rtol);
+    add_rms(profile);
+    const std::string path = write_profile(profile, args, dir);
+    if (!comm::is_root()) return 0;
+    if (report == "json") {
+        json::Object o;
+        o.add("file", c.path).add("input", case_from).raw("snapshot", snapshot_json(c, e));
+        o.add("homogeneous", a.homogeneous).add("rows", profile.rows()).raw("columns", json_strings(profile.names));
+        o.raw("written", json_strings({path}));
+        std::cout << o.str() << "\n";
+        return 0;
+    }
+    logging::section("Average");
+    item("File", c.path + " (" + c.format + ")");
+    item("Case", case_from);
+    item("Snapshot", "t = " + seconds(e.snapshot.t) + " s, step " + std::to_string(e.step) +
+                         (e.step_recorded ? "" : " (its position: the file records no step)"));
+    item("Averaged", "its [statistics] fields, over space only");
+    print_profile(profile, path, a.homogeneous, "cell volume");
+    return 0;
+}
+
+int average(const cli::Args & args) {
+    const std::string dir = args.value_or("--output", "average");
+    const std::string report = args.value_or("--format", "text");
+    if (report != "text" && report != "json") throw UsageError("--format takes text or json, not " + report);
+    if (args.has("--statistics")) return average_statistics(args, dir, report);
+    const Averages a = choose_averages(args);
+    if (!a.homogeneous.empty() && args.has("--snapshot")) {
+        throw UsageError("--snapshot does not apply to --homogeneous, which writes a CSV profile");
+    }
+    const std::vector<output::Contents> files = open_files(args, "average");
+    size_t n_available = 0;
+    for (const auto & c : files) n_available += c.snapshots.size();
+    const std::vector<Selected> selected = select(files, args);
+    for (size_t k = 1; k < selected.size(); k++) {
+        if (selected[k].snapshot.t <= selected[k - 1].snapshot.t) {
+            throw std::runtime_error(selected[k].snapshot.file + " (t = " + seconds(selected[k].snapshot.t) +
+                                     " s) follows " + selected[k - 1].snapshot.file + " (t = " +
+                                     seconds(selected[k - 1].snapshot.t) + " s): give the snapshots in increasing "
+                                     "time, each once");
+        }
+    }
+    const double t_first = selected.front().snapshot.t;
+    double t_start = 0.0;
+    if (args.has("--t-start")) {
+        t_start = parse_number(args.value_or("--t-start", ""), "--t-start");
+        if (t_start >= t_first) {
+            throw UsageError("--t-start must come before the first snapshot (t = " + seconds(t_first) + " s), where "
+                             "its weight starts");
+        }
+    } else if (selected.size() < 2) {
+        throw UsageError("one snapshot has no time since a previous one to weigh it by: give --t-start");
+    } else {
+        t_start = t_first - (selected[1].snapshot.t - t_first);
+    }
+
+    std::string case_from;
+    Input input = case_input(args, files[0], case_from);
+    const Input region = args.has("--region") ? region_value(args.value_or("--region", "")) : Input();
+    const bool solution = args.has("--region") && follows_solution(input, region);
+    if (solution && args.has("--snapshot")) {
+        throw UsageError("--snapshot does not apply to a --region defined by the solution, whose time averages are "
+                         "integrals over it, written to a CSV file");
+    }
+    if (solution && args.has("--conditional")) {
+        throw UsageError("--conditional does not apply to a --region defined by the solution, whose time averages are "
+                         "integrals over it");
+    }
+    const Plan plan = prepare_average(input, args, dir, a, t_start, solution);
+
+    std::ostringstream quiet;
+    std::streambuf * const out = std::cout.rdbuf(quiet.rdbuf());
+    struct Restore {
+        std::streambuf * out;
+        ~Restore() { std::cout.rdbuf(out); }
+    } restore{out};
+    if (comm::is_root()) fs::create_directories(dir);
+    const auto since = fs::file_time_type::clock::now() - std::chrono::seconds(1);
+    Solver solver;
+    size_t current = 0;
+    solver.set_state_reader([&](const Mesh & mesh) {
+        try {
+            return read_state(files[selected[current].file], selected[current], mesh);
+        } catch (const std::exception & e) {
+            throw std::runtime_error(selected[current].snapshot.file + ": " + e.what());
+        }
+    });
+    const std::vector<uint32_t> variances = solution ? std::vector<uint32_t>{} : a.variances();
+    const std::vector<uint32_t> favre_fields = a.favre_fields();
+    const std::vector<std::pair<uint32_t, uint32_t>> favre_products = a.favre_products();
+    Kokkos::View<rtype **, Kokkos::LayoutLeft, Kokkos::HostSpace> rms;
+    std::unique_ptr<FavreAverage> favre;
+    solver.set_output_data([&](const Mesh & mesh, std::vector<Data> & data) {
+        rms = decltype(rms)("rms", mesh.n_cells, variances.size());
+        for (size_t k = 0; k < variances.size(); k++) {
+            data.emplace_back("RMS_" + a.fields[a.products[variances[k]].first], Kokkos::subview(rms, Kokkos::ALL(), k));
+        }
+        if (!a.favre || solution) return;
+        std::vector<std::string> fields;
+        std::vector<uint32_t> column(a.fields.size());
+        for (const uint32_t i : favre_fields) {
+            column[i] = static_cast<uint32_t>(fields.size());
+            fields.push_back(a.fields[i]);
+        }
+        std::vector<std::pair<uint32_t, uint32_t>> products;
+        for (const auto & [i, j] : favre_products) products.emplace_back(column[i], column[j]);
+        favre = std::make_unique<FavreAverage>(fields, products, solver.get_species_names(), solver.derived_selection,
+                                               mesh.n_cells);
+        favre->register_data(data);
+    });
+    {
+        // A region of the solution writes no file through the solver: post average writes its averages
+        struct Files {
+            bool on;
+            ~Files() { set_output_files_enabled(on); }
+        } files_on{output_files_enabled()};
+        if (solution) set_output_files_enabled(false);
+        solver.init(input);
+    }
+    const auto hash = [](const std::string & block) { return provenance::find_string(block, "mesh", "sha256"); };
+    const std::string then = hash(files[0].run), now = hash(provenance::json());
+    if (comm::is_root() && !then.empty() && !now.empty() && then != now) {
+        logging::warning(diagnostic_code::MESH_DIFFERS,
+                         files[0].path + " was written on a mesh file of other contents (the sha256 in its run block "
+                                         "differs) with as many cells: check that the case's mesh is the run's.");
+    }
+    const Mesh & mesh = *solver.get_mesh();
+    const std::string name = args.value_or("--name", "average");
+    if (args.has("--region")) {
+        region::Regions regions(input, mesh);
+        const region::Region & r = regions.get(region, "--region");
+        if (r.solution() != solution) {
+            throw std::runtime_error("--region " + r.summary() + (r.solution() ? " is" : " is not") +
+                                     " defined by the solution, unlike what its input gave before the mesh was read");
+        }
+        if (solution && !a.homogeneous.empty()) region::require_full_dimension(r, region, "--region");
+        if (solution) {
+            std::vector<std::vector<std::string>> products;
+            for (const auto & factors : region_products(a)) {
+                products.emplace_back();
+                for (const uint32_t i : factors) products.back().push_back(a.fields[i]);
+            }
+            solver.get_probes().average_products(name, products);
+        }
+    }
+    std::vector<double> weights;
+    rtype t_last = static_cast<rtype>(t_start);
+    for (current = 0; current < selected.size(); current++) {
+        try {
+            const CellSampler sampler = solver.sample_statistics_of_state(current > 0);
+            const rtype w = solver.get_time() - t_last;
+            t_last = solver.get_time();
+            weights.push_back(double(w));
+            if (favre) favre->sample(w, sampler, mesh.n_owned());
+        } catch (const std::exception & e) {
+            const std::string what = e.what();
+            if (what.starts_with(selected[current].snapshot.file)) throw;
+            throw std::runtime_error(selected[current].snapshot.file + ": " + what);
+        }
+    }
+    const Statistics & statistics = solver.get_statistics();
+    const auto & means = statistics.host_means();
+    const auto & cov = statistics.host_covariances();
+    for (size_t k = 0; k < variances.size(); k++) {
+        for (uint32_t c = 0; c < mesh.n_cells; c++) rms(c, k) = std::sqrt(std::max(0.0_r, cov(c, variances[k])));
+    }
+    if (favre) favre->copy_device_to_host();
+
+    homogeneous::Profile profile;
+    std::string profile_path;
+    if (solution) {
+        const Probes::CellAverages averages = solver.get_probes().cell_averages(name);
+        if (a.homogeneous.empty()) {
+            if (comm::is_root()) {
+                write_region_columns(region_columns(a, averages), solver.get_step(), double(solver.get_time()),
+                                     plan.files.front());
+            }
+        } else {
+            std::vector<double> density;
+            const std::vector<homogeneous::Column> columns = region_cell_columns(a, averages, density);
+            const std::vector<double> region_weights = comm::is_root() ? averages.weights : std::vector<double>{};
+            profile = homogeneous::average(global_cell_centers(mesh), region_weights, density, columns, a.homogeneous, a.rtol);
+            add_rms(profile);
+            profile_path = write_profile(profile, args, dir);
+        }
+    } else if (a.homogeneous.empty() && !a.fields.empty()) {
+        solver.write_output_of_state(false);
+    } else if (!a.conditional.empty()) {
+        statistics.write(solver.get_step(), solver.get_time(), snapshot_block::current_reason(true));
+    }
+    if (!solution && !a.homogeneous.empty()) {
+        std::vector<homogeneous::Column> columns;
+        const auto add_column = [&](const std::string & column, const auto & view, uint32_t k, bool is_favre) {
+            homogeneous::Column col;
+            col.name = column;
+            col.favre = is_favre;
+            col.values.resize(mesh.n_owned());
+            for (uint32_t c = 0; c < mesh.n_owned(); c++) col.values[c] = double(view(c, k));
+            columns.push_back(std::move(col));
+        };
+        for (uint32_t i = 0; i < a.fields.size(); i++) add_column("MEAN_" + a.fields[i], means, i, false);
+        for (uint32_t p = 0; p < a.products.size(); p++) {
+            add_column("COV_" + a.product(a.products[p]), cov, p, false);
+            columns.back().mean_a = static_cast<int32_t>(a.products[p].first);
+            columns.back().mean_b = static_cast<int32_t>(a.products[p].second);
+        }
+        std::vector<double> density;
+        if (favre) {
+            const int32_t first = static_cast<int32_t>(columns.size());
+            const auto favre_column = [&](uint32_t i) {
+                return first + static_cast<int32_t>(std::find(favre_fields.begin(), favre_fields.end(), i) -
+                                                    favre_fields.begin());
+            };
+            for (uint32_t k = 0; k < favre_fields.size(); k++) {
+                add_column("FAVRE_MEAN_" + a.fields[favre_fields[k]], favre->host_means(), k, true);
+            }
+            for (uint32_t p = 0; p < favre_products.size(); p++) {
+                add_column("FAVRE_COV_" + a.product(favre_products[p]), favre->host_covariances(), p, true);
+                columns.back().mean_a = favre_column(favre_products[p].first);
+                columns.back().mean_b = favre_column(favre_products[p].second);
+            }
+            const auto rho = std::find(a.fields.begin(), a.fields.end(), "RHO");
+            density = columns[static_cast<size_t>(rho - a.fields.begin())].values;
+        }
+        profile = homogeneous::average(cell_centers(mesh), cell_weights(args, input, mesh), density, columns,
+                                       a.homogeneous, a.rtol);
+        add_rms(profile);
+        profile_path = write_profile(profile, args, dir);
+    }
+    comm::barrier();
+    std::cout.rdbuf(out);
+    if (!comm::is_root()) return 0;
+    const std::vector<Written> written =
+        a.homogeneous.empty() && !a.fields.empty() ? read_written(plan, since) : std::vector<Written>{};
+    std::vector<std::string> products;
+    for (const auto & [i, j] : a.products) products.push_back(a.fields[i] + "*" + a.fields[j]);
+    std::vector<std::string> paths;
+    for (const Written & w : written) {
+        paths.push_back(w.contents.path);
+        for (const output::Snapshot & snapshot : w.contents.snapshots) {
+            if (snapshot.file != w.contents.path) paths.push_back(snapshot.file);
+        }
+    }
+    if (!profile_path.empty()) paths.push_back(profile_path);
+    for (const std::string & path : plan.conditional) paths.push_back(path);
+    // The window of the means, or of the conditional statistics without them
+    double window_start = statistics.average_start(), window_end = statistics.average_end();
+    uint64_t samples = statistics.samples();
+    if (a.fields.empty() && !statistics.get_conditional().empty()) {
+        const ConditionalStatistics::Result r = statistics.get_conditional().front().result();
+        window_start = r.t_first;
+        window_end = r.t_last;
+        samples = r.samples;
+    }
+    if (report == "json") {
+        json::Object o;
+        std::vector<std::string> names;
+        for (const auto & c : files) names.push_back(c.path);
+        o.raw("files", json_strings(names)).add("input", case_from).add("output", dir);
+        o.raw("window", json::Object()
+                            .add("start", window_start)
+                            .add("end", window_end)
+                            .add("samples", samples)
+                            .str());
+        o.raw("fields", json_strings(a.fields)).raw("products", json_strings(products));
+        o.add("favre", a.favre).add("homogeneous", a.homogeneous).raw("conditional", json_strings(plan.conditional));
+        std::string snaps = "[";
+        for (size_t k = 0; k < selected.size(); k++) {
+            json::Object s;
+            s.raw("snapshot", snapshot_json(files[selected[k].file], selected[k])).add("weight", weights[k]);
+            snaps += (snaps.size() > 1 ? "," : "") + s.str();
+        }
+        o.raw("snapshots", snaps + "]").raw("written", json_strings(paths));
+        std::cout << o.str() << "\n";
+        return 0;
+    }
+    logging::section("Average");
+    std::vector<std::string> names;
+    for (const auto & c : files) names.push_back(c.path + " (" + c.format + ")");
+    item(files.size() == 1 ? "File" : "Files", list_text(names));
+    item("Case", case_from);
+    item("Snapshots", count(selected.size()) + " of " + count(n_available) + ", t = " + seconds(t_first) +
+                          (selected.size() > 1 ? " to " + seconds(selected.back().snapshot.t) : "") + " s");
+    item("Window", seconds(window_start) + " to " + seconds(window_end) +
+                       " s; each snapshot weighs the time since the previous one (the first: since " +
+                       (args.has("--t-start") ? "--t-start" : "as long before it as the second is after it") + ")");
+    if (!a.fields.empty()) {
+        item("Fields", list_text(a.fields));
+        item("Covariances", products.empty() ? "none" : list_text(products));
+        item("Favre", a.favre ? "means and covariances, weighted by density" : "no (--favre adds them)");
+    }
+    if (solution) {
+        item("Region", "defined by the solution, as it is in each snapshot: the means are mean integrals over its "
+                       "mean measure" + std::string(a.homogeneous.empty() ? "" : ", per row of the profile"));
+    }
+    for (const ConditionalStatistics & c : statistics.get_conditional()) {
+        const OutputSummary o = c.summary();
+        item("Conditional", o.contents + ", every " + count(o.steps, "step") + " -> " + o.file);
+    }
+    logging::section("Snapshots", count(selected.size()) + " averaged");
+    std::vector<std::vector<std::string>> rows;
+    for (size_t i = 0; i < selected.size(); i++) {
+        const Selected & e = selected[i];
+        rows.push_back({std::to_string(i), seconds(e.snapshot.t), std::to_string(e.step) + (e.step_recorded ? "" : " *"),
+                        format("%.6g", weights[i]),
+                        fs::path(e.snapshot.file).filename().string() +
+                            (e.snapshot.index ? ", index " + std::to_string(e.snapshot.index) : "")});
+    }
+    logging::table({"#", "t [s]", "step", "weight [s]", "file"}, rows);
+    if (!selected.front().step_recorded) logging::line("  *: position in the files, which record no step.");
+    if (!a.homogeneous.empty()) {
+        print_profile(profile, profile_path, a.homogeneous,
+                      solution ? "the time average of the measure of the region in each cell" : "cell volume");
+        for (const std::string & path : plan.conditional) item("Written", path);
+        return 0;
+    }
+    logging::section("Written", count(paths.size(), "file"));
+    for (const auto & p : paths) logging::line("  " + p);
+    print_last(written);
     return 0;
 }
 
 } // namespace
 
-int post_extract(const cli::Args & args) {
+namespace {
+
+enum class Post { extract, derive, average };
+
+int post_command(const cli::Args & args, const Post post) {
+    const std::string command = post == Post::extract ? "post extract" : post == Post::derive ? "post derive" : "post average";
     try {
-        return extract(args);
+        return post == Post::average ? average(args) : extract(args, post == Post::derive);
     } catch (const UsageError & e) {
-        return comm::is_root() ? cli::usage_error(*cli::command("post extract"), e.what()) : 2;
+        return comm::is_root() ? cli::usage_error(*cli::command(command), e.what()) : 2;
     } catch (const InputError & e) {
-        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, std::string(NAME) + ": the case's input: " + e.what());
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, "mallard " + command + ": the case's input: " + e.what());
     } catch (const std::exception & e) {
-        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, std::string(NAME) + ": " + e.what());
+        if (comm::is_root()) logging::error(diagnostic_code::EXTRACT, "mallard " + command + ": " + e.what());
     }
     return 1;
 }
 
-int extract_main(const cli::Args & args) {
+int post_main(const cli::Args & args, const Post post) {
     int argc = args.argc;
     char ** argv = args.argv;
     comm::Session session(argc, argv);
     binding::select_device(argc, argv);
     Kokkos::initialize(argc, argv);
-    const int status = post_extract(args);
+    const int status = post_command(args, post);
     // A rank that failed alone would leave the others waiting in a collective
     if (status == 1 && comm::size() > 1) comm::abort(1);
     Kokkos::finalize();
     return status;
 }
+
+} // namespace
+
+int post_extract(const cli::Args & args) { return post_command(args, Post::extract); }
+
+int post_derive(const cli::Args & args) { return post_command(args, Post::derive); }
+
+int post_average(const cli::Args & args) { return post_command(args, Post::average); }
+
+int extract_main(const cli::Args & args) { return post_main(args, Post::extract); }
+
+int derive_main(const cli::Args & args) { return post_main(args, Post::derive); }
+
+int average_main(const cli::Args & args) { return post_main(args, Post::average); }

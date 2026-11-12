@@ -403,6 +403,47 @@ def snapshot_blocks(path):
     return [json.loads(m) for m in re.findall(r"(?:<!-- |^# )mallard-snapshot (\{.*?\})(?: -->|$)", head, re.M | re.S)]
 
 
+def value_kinds(path):
+    """{field: value kind} of the last snapshot of a file: "cell_average" (the
+    cell's average), "cell_state" (computed from the cell's averaged state) or
+    "point_value" (the reconstruction's value at a point); empty for files
+    before Mallard 0.10 (docs/guide/output.md#cell-averages-and-point-values)."""
+    blocks = snapshot_blocks(path)
+    if not blocks:
+        return {}
+    return {f["name"]: f["value"] for f in blocks[-1]["fields"] if "value" in f}
+
+
+def field_averages(path):
+    """{field: average} of the last snapshot of a file, for its MEAN_, COV_ and
+    PHASE_ fields: kind ("reynolds", "covariance", "phase"), of (the variables),
+    weighting, start and end (s), samples, interval, and for phase means bin,
+    bins, bin_weight and period or trigger (docs/guide/output.md#time-averaged-fields)."""
+    blocks = snapshot_blocks(path)
+    if not blocks:
+        return {}
+    return {f["name"]: f["average"] for f in blocks[-1]["fields"] if "average" in f}
+
+
+def probe_sampling(path):
+    """The probe sampling block of a probe file (.csv, .h5, .vtkhdf, .vtp, or
+    the last member of its .pvd): sampling ("cell", "point"), reconstruction,
+    each variable's value kind (and average), and for located samples their
+    requested point, cell, cell centroid and distance (m) from the requested
+    point to where it is read, and what clipping to the mesh dropped
+    (docs/guide/output.md#probe-sampling).
+    None for files before Mallard 0.10."""
+    if path.endswith(".h5") or path.endswith(".vtkhdf"):
+        from .h5 import probe_sampling as h5_sampling
+        return h5_sampling(path)
+    if path.endswith(".pvd"):
+        members = re.findall(r'file="([^"]+)"', open(path).read())
+        return probe_sampling(os.path.join(os.path.dirname(path), members[-1])) if members else None
+    text = open(path, "rb").read(1 << 26).decode("utf-8", "replace")
+    found = re.findall(r"(?:<!-- |^# )mallard-probe-sampling (\{.*?\})(?: -->|$)", text, re.M | re.S)
+    return json.loads(found[-1]) if found else None
+
+
 def resolved_input(path):
     """The input with every key explicit (TOML text) that made a Mallard output
     file: its provenance's input.resolved. None for a file without provenance, or

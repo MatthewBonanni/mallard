@@ -139,6 +139,12 @@ inline void expect_matches_serial_with_and_without_step_graphs(
                 }
 #ifdef KOKKOS_ENABLE_CUDA
                 EXPECT_EQ(s.get_graph_steps() > 0, graphs && why.empty()) << why;
+#if CUDART_VERSION >= 12040
+                // On one node NCCL's collectives fit under the step's conditional node: steps queue ahead
+                if (graphs && why.empty() && s.is_distributed()) {
+                    EXPECT_GT(s.get_queue_depth(), 1u) << "NCCL steps launched one at a time";
+                }
+#endif
 #else
                 EXPECT_EQ(s.get_graph_steps(), 0u);
 #endif

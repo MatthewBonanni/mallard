@@ -10,7 +10,7 @@ A running `mallard` takes requests from signals, from `mallard ctl` and, optiona
 | `mallard ctl <run-dir> checkpoint` | As `SIGUSR1`; replies with the restart file once it is written |
 | `mallard ctl <run-dir> stop` | As `SIGTERM`; replies with the restart file once the run has ended |
 | `mallard ctl <run-dir> set <key>=<value> ...` | Change settings from the next step on: `n_steps`, `t_stop`, `t_wall_stop` (0 removes a limit; one must remain; times in seconds or with a unit, e.g. `t_wall_stop=2h`), `check_interval`, `write_data.<prefix or index>.interval` or `.time_interval` (whichever the writer has), `probes.<name>.interval` or `.time_interval`, `forces.<zone>.interval`, `integrals.interval`. Other keys are refused |
-| `STOP`, `CHECKPOINT` files | With `[run] control_file_interval`, as `stop` and `checkpoint`; the file is removed once seen |
+| `STOP`, `CHECKPOINT` files | With `[run] control_file_interval`, as `stop` and `checkpoint` (and at the same step as they would act); the file is removed once seen |
 
 ```bash
 $ mallard ctl runs/cylinder status
@@ -76,6 +76,7 @@ front:
 | `[[forces]]` | `forces_<zone>_<column>`, e.g. `forces_cylinder_Fx_pressure`, `forces_wall_Q` |
 | `[[probes]]` reductions | `<probe>_<reduction>_<variable>`, e.g. `combustor_max_T`, `inlet_integral_MASS_FLUX` |
 | `[[probes]]` of one point | `<probe>_<variable>`, e.g. `outlet_T` |
+| [`[statistics.convergence]`](statistics.md#convergence-statisticsconvergence) | `convergence_<column>`, e.g. `convergence_stationary`, `convergence_converged`, `convergence_integrals_kinetic_energy_ci` |
 
 Characters other than letters, digits and `_` in these names become `_`.
 A misspelled name is an input error (also of `mallard check`) that lists
@@ -84,10 +85,13 @@ the names the run has.
 **When conditions are evaluated.** After every step, once that step's
 monitors and probes are written, from the values they wrote: a monitor
 written every 10 steps keeps its value in between. A condition that reads a
-monitor before its first value is false. Evaluating costs nothing on the
-device: on several ranks rank 0 evaluates every condition and sends the
-outcome to the others, one small message per step (none when the run has no
-triggers), so every rank acts after the same step.
+monitor before its first value is false. On GPUs the device evaluates the
+conditions of `t`, the step, `dt` and the monitors at every step, and the
+steps queued ahead of the host (`[run] step_queue`) stop only at a step a
+trigger fires at; every rank holds the same values, so every rank acts after
+the same step. Conditions that read `wall` or a probe's value are evaluated by
+the host: rank 0 evaluates every condition and sends the outcome to the
+others, and the host then takes every step itself.
 
 **Actions.** `stop` ends the run after that step as `t_stop` would: the
 final output and a restart are written, the exit status is 0 and the log
