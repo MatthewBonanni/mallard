@@ -1,0 +1,11 @@
+{
+ "dimension": "temperature (K)",
+ "dims": [
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/flame_turbulence/les.toml"
+ ],
+ "type": "number"
+}
