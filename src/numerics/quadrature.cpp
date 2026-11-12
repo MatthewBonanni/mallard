@@ -11,6 +11,7 @@
 
 #include "quadrature.h"
 
+#include "diagnostic_code.h"
 #include "log.h"
 
 Quadrature::Quadrature() {
@@ -187,7 +188,7 @@ TriangleDunavant::TriangleDunavant(uint8_t order_in) {
             h_weights(2) = 1.0_r / 3.0_r;
             break;
         case 3:
-            logging::warning("quadrature rule TriangleDunavant<3> has negative weights; use with caution.");
+            logging::warning(diagnostic_code::QUADRATURE_WEIGHTS, "quadrature rule TriangleDunavant<3> has negative weights; use with caution.");
 
             points = Kokkos::View<rtype **>("points", 4, dim);
             weights = Kokkos::View<rtype *>("weights", 4);

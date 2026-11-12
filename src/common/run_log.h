@@ -24,9 +24,12 @@ constexpr int VERSION = 2;
 
 /**
  * @brief Opens the log on rank 0 (other ranks ignore the log): appended to
- *        when resuming a run, else started afresh.
+ *        when resuming a run, else started afresh. A report (report.html) is
+ *        built from the records, from those of the log appended to on, and
+ *        written at each restart file, at the first progress record and at
+ *        the end. Either file may be empty: none.
  */
-void open(const std::string & file, bool append);
+void open(const std::string & file, bool append, const std::string & report = "");
 void close();
 bool is_open();
 
@@ -34,14 +37,15 @@ bool is_open();
 std::optional<uint64_t> last_step();
 
 /**
- * @brief Writes a record as one line and flushes it; nothing if the log is not
- *        open. A held record (a warning) waits while hold() is in effect.
+ * @brief Writes a record as one line and flushes it, and adds it to the
+ *        report; nothing if neither is open. A held record (a warning) waits
+ *        while hold() is in effect.
  */
 void write(const json::Object & record, bool held = false);
 
 /** @brief Keeps the held records written from now on (a run's setup warnings) until release(). */
 void hold();
-/** @brief Stops holding: writes the run's start record, then the held records, if the log is open. */
+/** @brief Stops holding: writes the run's start record, then the held records. */
 void release(const json::Object & start);
 
 } // namespace run_log

@@ -25,6 +25,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "log.h"
 
 namespace binding {
@@ -606,7 +607,7 @@ void report() {
     if (!comm::is_root()) return;
     logging::section("Ranks");
     print_table(ranks);
-    for (const std::string & warning : check(ranks)) logging::warning(warning);
+    for (const std::string & warning : check(ranks)) logging::warning(diagnostic_code::ENV_PLACEMENT, warning);
 }
 
 } // namespace binding
