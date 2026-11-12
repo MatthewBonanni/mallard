@@ -35,8 +35,10 @@ FaceReconstruction::~FaceReconstruction() {
     // Empty
 }
 
-logging::Items FaceReconstruction::summary() const {
-    return {{"Reconstruction", type == FaceReconstructionType::FIRST_ORDER ? "first order" : FACE_RECONSTRUCTION_NAMES.at(type)}};
+report::Summary FaceReconstruction::summary() const {
+    report::Summary s;
+    s.setting("Reconstruction", type == FaceReconstructionType::FIRST_ORDER ? "first order" : FACE_RECONSTRUCTION_NAMES.at(type));
+    return s;
 }
 
 std::vector<uint32_t> FaceReconstruction::cells_independent_of_halo(uint32_t) const {
@@ -437,10 +439,11 @@ void MUSCL::init(const Input & input) {
     init_face_quadrature_2d_curved();
 }
 
-logging::Items MUSCL::summary() const {
-    std::string limiter_text = LIMITER_NAMES.at(limiter);
-    if (limiter == LimiterType::VENKATAKRISHNAN) limiter_text += " (K " + logging::real(double(venkat_K)) + ")";
-    return {{"Reconstruction", "MUSCL, limiter " + limiter_text}};
+report::Summary MUSCL::summary() const {
+    report::Summary s;
+    s.setting("Reconstruction", "MUSCL, limiter " + LIMITER_NAMES.at(limiter));
+    if (limiter == LimiterType::VENKATAKRISHNAN) s.quantity("MUSCL venkatakrishnan_K", logging::real(double(venkat_K)), "-", "");
+    return s;
 }
 
 uint8_t MUSCL::n_face_quadrature_points() const {

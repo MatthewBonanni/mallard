@@ -96,7 +96,8 @@ class PhaseAverage {
         void set_start(rtype t) { t_start = t; }
         void restore(const RestartData & restart, const std::string & file, rtype t, bool reset);
         RestartAttributes attributes() const;
-        std::string summary() const;
+        /** @brief The output as the setup banner lists it. */
+        OutputSummary summary() const;
 
         uint64_t samples() const { return n_samples; }
         uint32_t n_bins() const { return bins; }
@@ -196,7 +197,8 @@ class Statistics {
         /** @brief Write the averaged spectra (rank 0), with the other output. */
         void write(uint64_t step, rtype t, const std::string & reason) const { spectra.write(step, t, reason); }
 
-        std::vector<std::pair<std::string, std::string>> summary() const;
+        /** @brief The outputs as the setup banner lists them: the means, spectra and phase averages. */
+        std::vector<OutputSummary> summary() const;
         uint64_t samples() const { return n_samples; }
         /** @brief The means' averaging window: from where the first sample's weight starts to the last sample (NaN before one). */
         double average_start() const { return n_samples ? double(t_last - weight) : std::numeric_limits<double>::quiet_NaN(); }
