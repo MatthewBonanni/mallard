@@ -18,6 +18,7 @@
 
 #include "common.h"
 #include "log.h"
+#include "report.h"
 
 /**
  * @brief Thickening F, efficiency E and flame sensor Omega of a cell. The
@@ -47,7 +48,7 @@ struct ThickenedFlame {
     /** @brief [les.combustion] of an input with one. */
     static ThickenedFlame from_input(const Input & table);
 
-    logging::Items summary() const;
+    report::Summary summary() const;
 
     /** @brief Flame sensor: 1 inside the flame (preheat zone included), 0 in fresh and burnt gas. */
     KOKKOS_INLINE_FUNCTION

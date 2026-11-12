@@ -37,6 +37,7 @@
 #include "provenance.h"
 #include "remap.h"
 #include "report.h"
+#include "diagnostic_code.h"
 
 namespace fs = std::filesystem;
 
@@ -1155,7 +1156,10 @@ int diff_main(const cli::Args & args) {
         }
     }
     if (comm::size() > 1) {
-        std::cerr << "mallard diff: runs on one rank, not " << comm::size() << "; start it without mpirun.\n";
+        if (comm::is_root()) {
+            logging::error(diagnostic_code::ONE_RANK, "mallard diff: runs on one rank, not " +
+                                                          std::to_string(comm::size()) + "; start it without mpirun.");
+        }
         return TROUBLE;
     }
     Kokkos::ScopeGuard kokkos(argc, argv);
@@ -1173,7 +1177,7 @@ int diff_main(const cli::Args & args) {
         b.mesh.reset();
         return status;
     } catch (const std::exception & e) {
-        std::cerr << "mallard diff: " << e.what() << "\n";
+        logging::error(diagnostic_code::DIFF, std::string("mallard diff: ") + e.what());
         return TROUBLE;
     }
 }

@@ -1,0 +1,1 @@
+- Shell completion: `mallard list keys` completes the sections and keys of the key catalog, and `--fields` (`mallard post extract`, `mallard diff`) the output fields of the field catalog, each item of the comma-separated list (#770, #785).
