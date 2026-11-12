@@ -808,8 +808,8 @@ std::string clip_curves(const probe::Geometry & g, const double length, const st
     for (const double w : g.node_weights) kept += w;
     const double share = length > 0.0 ? 1.0 - kept / length : 0.0;
     if (!(share > CLIPPED_SHARE)) return "";
-    logging::warning(key + ": " + logging::real(100.0 * share) +
-                     "% of its length lies outside the mesh and is not sampled.");
+    logging::warning(diagnostic_code::PROBE_OUTSIDE,
+                     key + ": " + logging::real(100.0 * share) + "% of its length lies outside the mesh and is not sampled.");
     return json::Object().add("length_fraction", share).str();
 }
 
