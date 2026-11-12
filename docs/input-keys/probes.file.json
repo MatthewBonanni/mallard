@@ -1,0 +1,15 @@
+{
+ "default": "\"probe_inlet_p.csv\"",
+ "defaults_by_dim": {
+  "2": "\"probe_line.csv\"",
+  "3": "\"probe_x5.csv\""
+ },
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/pulsed_jet/input.toml"
+ ],
+ "type": "string"
+}

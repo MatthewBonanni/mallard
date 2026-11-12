@@ -17,7 +17,13 @@ mu = 1.0e-3              # navier_stokes: dynamic viscosity
 Pr = 0.72
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 49 more.
+*Used in:*
+[`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod),
+[`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher),
+[`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
+[`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
+[`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
+and 49 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -58,7 +64,10 @@ viscosity_model = "sutherland"
 mu = 1.716e-5
 ```
 
-*Used in:* [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body).
+*Used in:*
+[`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence),
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles),
+[`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body).
 
 ![Viscosity against temperature for the constant, Sutherland and power laws](../images/guide/viscosity-light.svg#gh-light-mode-only)
 ![Viscosity against temperature for the constant, Sutherland and power laws](../images/guide/viscosity-dark.svg#gh-dark-mode-only)
@@ -82,7 +91,13 @@ gas = "mixture"
 mechanism = "../../mechanisms/h2o2.yaml"
 ```
 
-*Used in:* [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence), [`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition), [`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube), [`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d) and 11 more.
+*Used in:*
+[`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence),
+[`h2_ignition`](https://matthewbonanni.github.io/mallard/docs/examples/#h2-ignition),
+[`reactive_shock_tube`](https://matthewbonanni.github.io/mallard/docs/examples/#reactive-shock-tube),
+[`detonation_1d`](https://matthewbonanni.github.io/mallard/docs/examples/#detonation-1d)
+and 11 more.
 
 `gas = "mixture"` replaces `gamma` and the reference state with the species
 of a Cantera mechanism: thermally perfect thermodynamics, mixture-averaged or
@@ -102,7 +117,12 @@ name = "axis"            # every boundary face on y = 0
 type = "symmetry"
 ```
 
-*Used in:* [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`noh_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#noh-axisymmetric), [`sedov_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sedov-axisymmetric), [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric), [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet).
+*Used in:*
+[`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
+[`noh_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#noh-axisymmetric),
+[`sedov_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sedov-axisymmetric),
+[`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric),
+[`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet).
 
 With `axisymmetric = true` (2D builds), the mesh is the meridian half-plane of
 a body of revolution: x is the axis and y the radius, so every node needs

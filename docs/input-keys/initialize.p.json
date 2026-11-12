@@ -1,0 +1,43 @@
+{
+ "dimension": "pressure (kg m^-1 s^-2)",
+ "dims": [
+  2,
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/average_outlet/input.toml",
+  "examples/average_outlet/local.toml",
+  "examples/explosion_3d/input.toml",
+  "examples/flame_outflow/input.toml",
+  "examples/forced_inlet/input.toml",
+  "examples/heated_duct/closed.toml",
+  "examples/heated_duct/closed_upt.toml",
+  "examples/heated_duct/input.toml",
+  "examples/heated_wall/input.toml",
+  "examples/moving_heaters/input.toml",
+  "examples/noh_axisymmetric/input.toml",
+  "examples/poiseuille_pipe/input.toml",
+  "examples/pulsed_jet/input.toml",
+  "examples/reactive_shock_tube/input.toml",
+  "examples/riemann_2d/input.toml",
+  "examples/riemann_2d_quads/coarse.toml",
+  "examples/riemann_2d_quads/input.toml",
+  "examples/rotational_sector/annulus.toml",
+  "examples/rotational_sector/sector.toml",
+  "examples/sedov_3d/input.toml",
+  "examples/sedov_axisymmetric/input.toml",
+  "examples/shock_bubble_2d/input.toml",
+  "examples/shu_osher/input.toml",
+  "examples/sod/input.toml",
+  "examples/source_regions/input.toml",
+  "examples/taylor_green_3d/coarse.toml",
+  "examples/taylor_green_3d/input.toml",
+  "examples/turbulent_hot_spot_2d/input.toml",
+  "examples/turbulent_inflow_duct/input.toml",
+  "examples/viscous_shock_tube/input.toml",
+  "examples/wedge/input.toml",
+  "tutorials/wedge/input.toml"
+ ],
+ "type": "number"
+}
