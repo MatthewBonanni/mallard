@@ -25,7 +25,13 @@ Lx = 2.0              # the domain is [0, Lx] x [0, Ly]
 Ly = 1.0
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 40 more.
+*Used in:*
+[`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod),
+[`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher),
+[`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
+[`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
+[`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
+and 40 more.
 
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-light.svg#gh-light-mode-only)
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-dark.svg#gh-dark-mode-only)
@@ -69,7 +75,10 @@ Ly = 2.0
 stretching = [0.0, 1.7]   # cluster cells toward y = 0 and y = Ly
 ```
 
-*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les).
+*Used in:*
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
+[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les).
 
 `stretching = [beta_x, beta_y]` (three factors in 3D) clusters nodes toward
 both ends of each axis with a nonzero factor: node `j` of `N` sits at
@@ -109,7 +118,13 @@ Ny = 64
 zones = ["left", "right"]     # joined; the mesh gives the translation, [Lx, 0]
 ```
 
-*Used in:* [`rotational_sector`](https://matthewbonanni.github.io/mallard/docs/examples/#rotational-sector), [`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d), [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe), [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters), [`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d) and 12 more.
+*Used in:*
+[`rotational_sector`](https://matthewbonanni.github.io/mallard/docs/examples/#rotational-sector),
+[`turbulent_hot_spot_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-hot-spot-2d),
+[`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
+[`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
+[`taylor_green_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#taylor-green-3d)
+and 12 more.
 
 Periodic boundaries join two zones into interior faces: every scheme sees the
 seam as the inside of the domain, and the zones disappear from
@@ -205,7 +220,13 @@ type = "file"
 filename = "cylinder.msh"
 ```
 
-*Used in:* [`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3), [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid), [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard), [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle), [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo) and 5 more.
+*Used in:*
+[`sphere_mach3`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-mach3),
+[`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid),
+[`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
+[`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle),
+[`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo)
+and 5 more.
 
 Mallard reads ASCII Gmsh meshes, format 2.2 or 4.1, of linear triangles and
 quadrilaterals (2D) or tetrahedra, pyramids, prisms and hexahedra (3D).
@@ -346,7 +367,8 @@ radius = 0.5
 filled = false
 ```
 
-*Used in:* [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid).
+*Used in:*
+[`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid).
 
 Boundary faces can follow the true geometry instead of straight edges or flat
 facets. Curved faces get quadrature points on the curve with their own normals,

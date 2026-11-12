@@ -1,0 +1,1 @@
+- `mallard check --format json` prints the same report as one JSON object (`version` 1), for scripts and CI (#657).
