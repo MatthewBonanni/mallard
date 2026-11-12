@@ -324,6 +324,12 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the `Q_CRITERION` output field (`src/solver/derived_fields.h`).
 - <a id="jeong-hussain-1995"></a>J. Jeong and F. Hussain, On the identification of a vortex, *J. Fluid Mech.* 285, 69–94 (1995). [doi:10.1017/S0022112095000462](https://doi.org/10.1017/S0022112095000462)
   Used in: the `LAMBDA2` output field, the middle eigenvalue of S² + Ω² by Jacobi rotations (`src/solver/derived_fields.h`).
+- <a id="bilger-starner-kee-1990"></a>R. W. Bilger, S. H. Stårner and R. J. Kee, On reduced mechanisms for methane-air combustion in nonpremixed flames, *Combust. Flame* 80, 135–149 (1990). [doi:10.1016/0010-2180(90)90122-8](https://doi.org/10.1016/0010-2180%2890%2990122-8)
+  Used in: the `MIXTURE_FRACTION` output field, Bilger's element-based mixture fraction (`src/solver/derived_fields.cpp`).
+- <a id="yamashita-shimada-takeno-1996"></a>H. Yamashita, M. Shimada and T. Takeno, A numerical study on flame stability at the transition point of jet diffusion flames, *Proc. Combust. Inst.* 26, 27–34 (1996). [doi:10.1016/S0082-0784(96)80196-2](https://doi.org/10.1016/S0082-0784%2896%2980196-2)
+  Used in: the `FLAME_INDEX` output field, Takeno's flame index normalized to [-1, 1] (`src/solver/derived_fields.h`).
+- <a id="peters-2000"></a>N. Peters, *Turbulent Combustion*, Cambridge University Press (2000). [doi:10.1017/CBO9780511612701](https://doi.org/10.1017/CBO9780511612701)
+  Used in: the `SCALAR_DISSIPATION` output field, χ = 2 D \|∇Z\|² of the mixture fraction (`src/solver/derived_fields.cpp`).
 
 ## Grid convergence and discretization error
 
@@ -335,6 +341,19 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the procedure of `mallard post convergence` (eqs. 1–7: the representative cell size, the observed order by fixed-point iteration, the extrapolated value, the approximate and extrapolated relative errors, the fine-grid GCI; oscillatory convergence when e32 / e21 < 0); its Table 1 is a test (`test/post_convergence_test.cpp`).
 - <a id="nparc-spatial-convergence"></a>NPARC Alliance, Examination of spatial grid convergence, NASA Glenn Research Center, CFD Verification and Validation website. [grc.nasa.gov](https://www.grc.nasa.gov/www/wind/valid/tutorial/spatconv.html)
   Used in: a test of `mallard post convergence`, its worked example of inlet pressure recovery on three grids (`test/post_convergence_test.cpp`).
+
+## Statistics of time series
+
+- <a id="white-1997"></a>K. P. White Jr., An effective truncation heuristic for bias reduction in simulation output, *Simulation* 69, 323–334 (1997). [doi:10.1177/003754979706900601](https://doi.org/10.1177/003754979706900601)
+  Used in: MSER-5, the end of the initial transient in `[statistics.convergence]` (`src/solver/statistical_convergence.h`).
+- <a id="hoad-2010"></a>K. Hoad, S. Robinson and R. Davies, Automating warm-up length estimation, *J. Oper. Res. Soc.* 61, 1389–1403 (2010). [doi:10.1057/jors.2009.87](https://doi.org/10.1057/jors.2009.87)
+  Used in: MSER-5 with batches of 5 and its rejection of a minimum in the second half (`src/solver/statistical_convergence.h`).
+- <a id="schmeiser-1982"></a>B. Schmeiser, Batch size effects in the analysis of simulation output, *Oper. Res.* 30, 556–568 (1982). [doi:10.1287/opre.30.3.556](https://doi.org/10.1287/opre.30.3.556)
+  Used in: confidence intervals by batch means, 10 to 30 batches (`src/solver/statistical_convergence.h`).
+- <a id="madras-sokal-1988"></a>N. Madras and A. D. Sokal, The pivot algorithm: a highly efficient Monte Carlo method for the self-avoiding walk, *J. Stat. Phys.* 50, 109–186 (1988). [doi:10.1007/BF01022990](https://doi.org/10.1007/BF01022990)
+  Used in: the integrated autocorrelation time with the automatic window M >= 5 tau (`src/solver/statistical_convergence.h`).
+- <a id="abramowitz-stegun-1964"></a>M. Abramowitz and I. A. Stegun, *Handbook of Mathematical Functions*, National Bureau of Standards (1964), 26.7.3–4.
+  Used in: Student's t distribution for integer degrees of freedom (`src/solver/statistical_convergence.cpp`).
 
 ## Validation cases and reference data
 

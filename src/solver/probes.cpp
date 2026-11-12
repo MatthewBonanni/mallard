@@ -1034,6 +1034,32 @@ void Probes::Samples::gather(std::vector<double> & out, const CellColumns & colu
 
 namespace probe {
 
+ProbeReference read_reference(const Input & ref, const std::string & key) {
+    if (!ref.is_table() || !ref.contains("rho") || !ref.contains("u") || !ref.contains("p")) {
+        throw InputError(key + " must be a table {rho, u = [...], p}.");
+    }
+    const std::vector<rtype> u = find_real_vector(ref, "u", dim::velocity);
+    if (u.size() != N_DIM) throw InputError(key + ".u must have " + std::to_string(N_DIM) + " components.");
+    double speed = 0.0;
+    for (rtype x : u) speed += static_cast<double>(x) * static_cast<double>(x);
+    speed = std::sqrt(speed);
+    if (!(speed > 0.0)) throw InputError(key + ".u must not be zero.");
+    ProbeReference out;
+    for (size_t d = 0; d < N_DIM; d++) out.e[d] = static_cast<rtype>(static_cast<double>(u[d]) / speed);
+    out.q = static_cast<rtype>(0.5 * static_cast<double>(find_real(ref, "rho", dim::density)) * speed * speed);
+    out.p = find_real(ref, "p", dim::pressure);
+    return out;
+}
+
+bool samples(const std::string & name, const std::vector<std::string> & species_names) {
+    try {
+        variable_code(name, species_names, "");
+        return true;
+    } catch (const InputError &) {
+        return false;
+    }
+}
+
 namespace {
 
 // Probe types that are regions too: points, curves and cut planes with the probe keys
@@ -1287,6 +1313,11 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     if (cut && mesh.axisymmetric && !p.reductions.empty()) {
         throw InputError(key + ".reductions: cut planes take no reductions with physics.axisymmetric.");
     }
+    const bool output_reference = input.contains("output") && input.at("output").is_table() &&
+                                  input.at("output").contains("reference");
+    const Input * reference_table = entry.contains("reference") ? &entry.at("reference")
+                                    : output_reference            ? &input.at("output").at("reference")
+                                                                  : nullptr;
     for (size_t v = 0; v < p.variables.size(); v++) {
         const int32_t k = h_codes[v];
         if (code::on_faces(k) && !boundary) {
@@ -1305,8 +1336,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             throw InputError(key + ".fields: " + p.variables[v] + " needs a viscous run.");
         }
         p.gradients = p.gradients || code::gradients(k);
-        if (code::reference(k) && !entry.contains("reference")) {
-            throw InputError(key + ".fields: " + p.variables[v] + " needs a reference = {rho, u, p}.");
+        if (code::reference(k) && !reference_table) {
+            throw InputError(key + ".fields: " + p.variables[v] +
+                             " needs a reference = {rho, u, p}, in the probe or in [output].");
         }
     }
     p.transport = p.gradients && !species_names.empty();
@@ -1340,21 +1372,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         }
         for (size_t d = 0; d < N_DIM; d++) p.moment_center[d] = static_cast<double>(center[d]);
     }
-    if (entry.contains("reference")) {
-        const Input & ref = entry.at("reference");
-        const std::string rkey = key + ".reference";
-        if (!ref.is_table() || !ref.contains("rho") || !ref.contains("u") || !ref.contains("p")) {
-            throw InputError(rkey + " must be a table {rho, u = [...], p}.");
-        }
-        const std::vector<rtype> u = find_real_vector(ref, "u", dim::velocity);
-        if (u.size() != N_DIM) throw InputError(rkey + ".u must have " + std::to_string(N_DIM) + " components.");
-        double speed = 0.0;
-        for (rtype x : u) speed += static_cast<double>(x) * static_cast<double>(x);
-        speed = std::sqrt(speed);
-        if (!(speed > 0.0)) throw InputError(rkey + ".u must not be zero.");
-        for (size_t d = 0; d < N_DIM; d++) p.reference.e[d] = static_cast<rtype>(static_cast<double>(u[d]) / speed);
-        p.reference.q = static_cast<rtype>(0.5 * static_cast<double>(find_real(ref, "rho", dim::density)) * speed * speed);
-        p.reference.p = find_real(ref, "p", dim::pressure);
+    if (reference_table) {
+        p.reference = probe::read_reference(*reference_table,
+                                            entry.contains("reference") ? key + ".reference" : "output.reference");
     }
 
     if (elements) {
@@ -1827,6 +1847,7 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         // Averages are written once they hold a sample
         if (p.average && p.average_samples == 0) continue;
+        p.step_last_value = step;
         std::vector<double> & sampled_nodes = p.gathered_nodes;
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
@@ -1890,6 +1911,33 @@ void Probes::write(uint64_t step, rtype t, const ProbeFields & fields, bool snap
         }
         if (!p.reductions.empty()) p.write_reductions(step, t);
     }
+}
+
+std::vector<uint64_t> Probes::value_steps() const {
+    std::vector<uint64_t> steps;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        steps.insert(steps.end(), p.reduction_names().size() + (p.point_value ? p.variables.size() : 0),
+                     p.step_last_value);
+    }
+    return steps;
+}
+
+bool Probes::wrote_values(uint64_t step) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return !p->snapshot && p->step_last_value == step;
+    });
+}
+
+std::vector<Dimension> Probes::value_dimensions() const {
+    std::vector<Dimension> dimensions;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        for (const auto & [name, dimension] : p.monitored) dimensions.push_back(dimension);
+    }
+    return dimensions;
 }
 
 std::vector<std::string> Probes::value_names() const {
