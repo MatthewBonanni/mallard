@@ -296,12 +296,13 @@ KOKKOS_INLINE_FUNCTION double indicator(const double phi, const double edge) {
 
 /**
  * @brief A filled region (a volume; an area in 2D) of a Region: shapes with a
- *        signed distance, the mesh's cells, or a boolean of filled regions.
+ *        signed distance, the mesh's cells, where a condition on the solution
+ *        holds, or a boolean of filled regions.
  */
 struct Filled {
-    enum class Kind : uint8_t { SHAPES, ALL, CELL_ZONE, INSIDE, UNION, INTERSECTION, DIFFERENCE };
+    enum class Kind : uint8_t { SHAPES, ALL, CELL_ZONE, INSIDE, CONDITION, UNION, INTERSECTION, DIFFERENCE };
     Kind kind = Kind::SHAPES;
-    uint32_t first = 0, count = 0;   // SHAPES: its nodes, in postfix order
+    uint32_t first = 0, count = 0;   // SHAPES: its nodes, in postfix order; CONDITION: its condition
     std::vector<std::string> zones;  // CELL_ZONE: its name; INSIDE: the boundary zones that enclose it
     std::vector<uint32_t> parts;     // booleans: filled regions (DIFFERENCE: the first minus the others)
     bool cells = false;              // every cell entirely inside or outside (no shapes)
@@ -314,7 +315,7 @@ struct Filled {
  *        inside filled region and outside every outside one.
  */
 struct Piece {
-    std::vector<uint32_t> carriers;  // filled regions of SHAPES whose boundaries meet here
+    std::vector<uint32_t> carriers;  // filled regions of SHAPES (or a CONDITION) whose boundaries meet here
     std::vector<std::string> zones;  // or: the faces of these boundary zones
     int32_t cells = -1;              // or: the faces between a cells-only filled region and the rest
     bool edges = false;              // faces: their edges (2D: end points) that only one face of the set has

@@ -20,11 +20,13 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
+#include "cell_fields.h"
 #include "common.h"
 #include "exact_sums.h"
 #include "kexpr.h"
 #include "input.h"
 #include "log.h"
+#include "report.h"
 #include "mesh.h"
 #include "state.h"
 
@@ -46,15 +48,7 @@ enum Variable : uint16_t {
 /** @brief Domain averages: rho, rho u, rho E, rho |u|^2 / 2. */
 constexpr int N_MEANS = 6;
 
-/** @brief What the expressions read in each cell: W = [rho, u, p], and for mixtures the mass fractions. */
-struct CellFields {
-    Kokkos::View<rtype *[N_DIM]> coords;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
-    Kokkos::View<rtype **, Kokkos::LayoutRight> Y;  // (cell, k), mixtures
-    Kokkos::View<double *> inv_W;                   // kmol/kg, mixtures
-    double R = 0.0;                                 // single gas: gas constant
-    double R_universal = 0.0;                       // mixtures: J/(kmol K)
-};
+using CellFields = region::CellFields;
 
 /** @brief Values of the variables in one cell, read on demand. */
 struct CellVariables {
@@ -123,7 +117,7 @@ class SourceTerms {
         bool time_dependent() const { return m_time; }
         /** @brief Whether some expression reads a domain average (a global sum per stage). */
         bool uses_means() const { return m_means; }
-        const logging::Items & summary() const { return m_summary; }
+        const report::Summary & summary() const { return m_summary; }
 
         /**
          * @brief Add the sources to rhs: the flow block integrated over the
@@ -176,7 +170,7 @@ class SourceTerms {
         Kokkos::View<double *> means;
         Kokkos::View<double *[N_MEANS + 1]> mean_terms;  // (cell, [volume, mean integrands])
         ExactSums mean_sums;
-        logging::Items m_summary;
+        report::Summary m_summary;
 
 };
 

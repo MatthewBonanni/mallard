@@ -141,13 +141,12 @@ KOKKOS_INLINE_FUNCTION void simplex(const Shape<Distance> & shape, const bool ax
 }
 
 /**
- * @brief Adds the integrals of the indicator and of 1 over a straight cell,
- *        whose nodes node(k, x) gives (n of them): 2D its triangles fanned
- *        from node 0; 3D the tetrahedra of cell_tetrahedra (mesh.h).
+ * @brief Calls add(s, measure) for each simplex of a straight cell, whose
+ *        nodes node(k, x) gives (n of them): 2D its triangles fanned from
+ *        node 0; 3D the tetrahedra of cell_tetrahedra (mesh.h).
  */
-template <typename Distance, typename Nodes>
-KOKKOS_INLINE_FUNCTION void straight_cell(const Shape<Distance> & shape, const bool axisymmetric, const uint32_t n,
-                                          const Nodes & node, double & inside, double & total) {
+template <typename Nodes, typename Add>
+KOKKOS_INLINE_FUNCTION void straight_simplices(const uint32_t n, const Nodes & node, const Add & add_simplex) {
     double s[4][3] = {};
     if constexpr (N_DIM == 2) {
         node(0, s[0]);
@@ -156,7 +155,7 @@ KOKKOS_INLINE_FUNCTION void straight_cell(const Shape<Distance> & shape, const b
             node(k + 1, s[2]);
             const double area = 0.5 * Kokkos::fabs((s[1][0] - s[0][0]) * (s[2][1] - s[0][1]) -
                                                    (s[1][1] - s[0][1]) * (s[2][0] - s[0][0]));
-            simplex(shape, axisymmetric, s, area, inside, total);
+            add_simplex(s, area);
         }
     } else {
         // Local faces of tetrahedra, pyramids, prisms and hexahedra (cell_local_faces), -1 past a face's end
@@ -182,7 +181,7 @@ KOKKOS_INLINE_FUNCTION void straight_cell(const Shape<Distance> & shape, const b
             const double cx = e[1][1] * e[2][2] - e[1][2] * e[2][1], cy = e[1][2] * e[2][0] - e[1][0] * e[2][2],
                          cz = e[1][0] * e[2][1] - e[1][1] * e[2][0];
             const double volume = Kokkos::fabs(e[0][0] * cx + e[0][1] * cy + e[0][2] * cz) / 6.0;
-            simplex(shape, axisymmetric, t, volume, inside, total);
+            add_simplex(t, volume);
         };
         for (int f = 0; f < n_faces; f++) {
             const int m = local(f, 3) < 0 ? 3 : 4;
@@ -208,6 +207,113 @@ KOKKOS_INLINE_FUNCTION void straight_cell(const Shape<Distance> & shape, const b
                 add(s);
             }
         }
+    }
+}
+
+/**
+ * @brief Adds the integrals of the indicator and of 1 over a straight cell,
+ *        whose nodes node(k, x) gives (n of them), over its simplices
+ *        (straight_simplices).
+ */
+template <typename Distance, typename Nodes>
+KOKKOS_INLINE_FUNCTION void straight_cell(const Shape<Distance> & shape, const bool axisymmetric, const uint32_t n,
+                                          const Nodes & node, double & inside, double & total) {
+    straight_simplices(n, node, [&](const double s[4][3], const double measure) {
+        simplex(shape, axisymmetric, s, measure, inside, total);
+    });
+}
+
+/**
+ * @brief Adds the integrals of the indicator of {g < 0} (times r in
+ *        axisymmetric runs) and of 1 over a simplex v of that measure, exactly
+ *        for the linear function g with values g[k] at its vertices.
+ */
+KOKKOS_INLINE_FUNCTION void linear_simplex(const double v[4][3], const double g[4], const double measure,
+                                           const bool axisymmetric, double & inside, double & total) {
+    constexpr int n = N_DIM + 1;
+    int negative = 0;
+    for (int k = 0; k < n; k++) negative += g[k] < 0.0;
+    double weight = measure;
+    if (axisymmetric) {
+        double c = 0.0;
+        for (int k = 0; k < n; k++) c += v[k][1] / double(n);
+        weight *= c;
+    }
+    total += weight;
+    if (negative == 0) return;
+    if (negative == n) {
+        inside += weight;
+        return;
+    }
+    if constexpr (N_DIM == 2) {
+        // The polygon where g < 0: the triangle clipped along its edges
+        double p[4][2];
+        int m = 0;
+        for (int k = 0; k < 3; k++) {
+            const int j = (k + 1) % 3;
+            if (g[k] < 0.0) {
+                p[m][0] = v[k][0];
+                p[m][1] = v[k][1];
+                m++;
+            }
+            if ((g[k] < 0.0) != (g[j] < 0.0)) {
+                const double s = g[k] / (g[k] - g[j]);
+                p[m][0] = v[k][0] + s * (v[j][0] - v[k][0]);
+                p[m][1] = v[k][1] + s * (v[j][1] - v[k][1]);
+                m++;
+            }
+        }
+        double area = 0.0, cy = 0.0;
+        for (int k = 0; k < m; k++) {
+            const int j = (k + 1) % m;
+            const double cross = p[k][0] * p[j][1] - p[j][0] * p[k][1];
+            area += cross;
+            cy += (p[k][1] + p[j][1]) * cross;
+        }
+        area *= 0.5;
+        const double a = Kokkos::fabs(area);
+        inside += axisymmetric ? (area != 0.0 ? a * cy / (6.0 * area) : 0.0) : a;
+    } else {
+        auto volume = [](const double * a, const double * b, const double * c, const double * d) {
+            const double e[3][3] = {{b[0] - a[0], b[1] - a[1], b[2] - a[2]},
+                                    {c[0] - a[0], c[1] - a[1], c[2] - a[2]},
+                                    {d[0] - a[0], d[1] - a[1], d[2] - a[2]}};
+            return Kokkos::fabs(e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
+                                e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
+                                e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0])) / 6.0;
+        };
+        if (negative == 1 || negative == 3) {
+            // The corner on its own side, a tetrahedron cut off at the edges' roots
+            const bool alone_negative = negative == 1;
+            int a = 0;
+            while ((g[a] < 0.0) != alone_negative) a++;
+            double corner = 1.0;
+            for (int k = 0; k < 4; k++) {
+                if (k != a) corner *= g[a] / (g[a] - g[k]);
+            }
+            inside += weight * (alone_negative ? corner : 1.0 - corner);
+            return;
+        }
+        // Two on each side: the prism between the negative edge and the cut
+        int neg[2], pos[2], i_n = 0, i_p = 0;
+        for (int k = 0; k < 4; k++) {
+            if (g[k] < 0.0) {
+                neg[i_n++] = k;
+            } else {
+                pos[i_p++] = k;
+            }
+        }
+        double q[2][2][3];  // q[i][j]: the root on the edge from neg[i] to pos[j]
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 2; j++) {
+                const double s = g[neg[i]] / (g[neg[i]] - g[pos[j]]);
+                for (int d = 0; d < 3; d++) q[i][j][d] = v[neg[i]][d] + s * (v[pos[j]][d] - v[neg[i]][d]);
+            }
+        }
+        const double * a0 = v[neg[0]];
+        const double * b0 = v[neg[1]];
+        inside += volume(a0, q[0][0], q[0][1], q[1][1]) + volume(a0, q[0][0], q[1][0], q[1][1]) +
+                  volume(a0, b0, q[1][0], q[1][1]);
     }
 }
 

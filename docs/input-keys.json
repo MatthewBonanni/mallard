@@ -34,6 +34,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -304,6 +305,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -567,6 +569,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -1019,6 +1022,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -1066,6 +1070,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/poiseuille_pipe/input.toml",
    "examples/pulsed_jet/input.toml",
@@ -1398,6 +1403,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -1542,10 +1548,12 @@
   "set_in": []
  },
  "initialize.regions.region.flip": {
+  "default": "false",
   "dims": [
    2
   ],
-  "set_in": []
+  "set_in": [],
+  "type": "bool"
  },
  "initialize.regions.region.normal": {
   "dims": [
@@ -1644,11 +1652,13 @@
    "implicit",
    "interior",
    "intersection",
+   "isosurface",
    "polygon",
    "rectangle",
    "sphere",
    "torus",
-   "union"
+   "union",
+   "where"
   ]
  },
  "initialize.regions.rho": {
@@ -1898,6 +1908,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -1955,6 +1966,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -2287,6 +2299,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -2363,6 +2376,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -2436,6 +2450,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -2561,6 +2576,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -2632,6 +2648,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -2827,6 +2844,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -2913,6 +2931,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -3069,6 +3088,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -3341,6 +3361,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -3459,6 +3480,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -3529,6 +3551,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/flame_vortex/input.toml",
    "examples/flame_vortex_quenching/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -3606,6 +3629,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -3684,6 +3708,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -3744,6 +3769,86 @@
   ],
   "set_in": [],
   "type": "integer"
+ },
+ "output.mixture": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": [
+   "examples/flame_turbulence/input.toml"
+  ]
+ },
+ "output.mixture.fuel": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "output.mixture.fuel_species": {
+  "default": "\"\"",
+  "dims": [
+   3
+  ],
+  "set_in": [],
+  "type": "string"
+ },
+ "output.mixture.oxidizer": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "output.mixture.oxidizer_species": {
+  "default": "\"\"",
+  "dims": [
+   3
+  ],
+  "set_in": [],
+  "type": "string"
+ },
+ "output.mixture.progress": {
+  "dims": [
+   3
+  ],
+  "set_in": [
+   "examples/flame_turbulence/input.toml"
+  ]
+ },
+ "output.mixture.progress.T_burnt": {
+  "dimension": "temperature (K)",
+  "dims": [
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/flame_turbulence/input.toml"
+  ],
+  "type": "number"
+ },
+ "output.mixture.progress.T_unburnt": {
+  "dimension": "temperature (K)",
+  "dims": [
+   3
+  ],
+  "required": true,
+  "set_in": [
+   "examples/flame_turbulence/input.toml"
+  ],
+  "type": "number"
+ },
+ "output.mixture.progress.species": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "output.reference": {
+  "dims": [
+   2,
+   3
+  ],
+  "set_in": []
  },
  "output.report": {
   "default": "\"report.html\"",
@@ -3904,6 +4009,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -4008,6 +4114,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -4077,6 +4184,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -4231,6 +4339,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -4309,6 +4418,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -4408,6 +4518,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -4464,6 +4575,7 @@
    "examples/channel_wmles/tl_m3.0.toml",
    "examples/double_mach/input.toml",
    "examples/explosion_3d/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -4534,6 +4646,7 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/pulsed_jet/input.toml",
    "examples/shock_bubble_3d/input.toml",
@@ -4603,6 +4716,7 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/pulsed_jet/input.toml",
    "examples/shock_bubble_3d/input.toml",
@@ -4651,6 +4765,7 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/pulsed_jet/input.toml",
    "examples/shock_bubble_3d/input.toml",
@@ -4684,6 +4799,7 @@
   "set_in": [
    "examples/channel_inflow_retau180/input.toml",
    "examples/flame_outflow/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/pulsed_jet/input.toml",
    "examples/shock_bubble_3d/input.toml",
@@ -4716,6 +4832,7 @@
    3
   ],
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ],
@@ -4756,6 +4873,7 @@
    3
   ],
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ]
@@ -4786,6 +4904,16 @@
   ],
   "set_in": []
  },
+ "probes.region.field": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/hot_gas_regions/input.toml"
+  ],
+  "type": "string"
+ },
  "probes.region.filled": {
   "dims": [
    2
@@ -4793,10 +4921,14 @@
   "set_in": []
  },
  "probes.region.flip": {
+  "default": "false",
   "dims": [
    2
   ],
-  "set_in": []
+  "set_in": [
+   "examples/hot_gas_regions/input.toml"
+  ],
+  "type": "bool"
  },
  "probes.region.pivot": {
   "dims": [
@@ -4835,10 +4967,12 @@
   "set_in": []
  },
  "probes.region.regions.flip": {
+  "default": "false",
   "dims": [
    2
   ],
-  "set_in": []
+  "set_in": [],
+  "type": "bool"
  },
  "probes.region.regions.pivot": {
   "dims": [
@@ -4902,11 +5036,13 @@
    "implicit",
    "interior",
    "intersection",
+   "isosurface",
    "polygon",
    "rectangle",
    "sphere",
    "torus",
-   "union"
+   "union",
+   "where"
   ]
  },
  "probes.region.repeat": {
@@ -4945,6 +5081,7 @@
   ],
   "required": true,
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/source_regions/input.toml"
   ],
   "type": "string",
@@ -4963,11 +5100,21 @@
    "implicit",
    "interior",
    "intersection",
+   "isosurface",
    "polygon",
    "rectangle",
    "sphere",
    "torus",
-   "union"
+   "union",
+   "where"
+  ]
+ },
+ "probes.region.value": {
+  "dims": [
+   2
+  ],
+  "set_in": [
+   "examples/hot_gas_regions/input.toml"
   ]
  },
  "probes.rotate": {
@@ -5096,6 +5243,7 @@
    3
   ],
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ]
@@ -5105,6 +5253,7 @@
    2
   ],
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ]
@@ -5117,6 +5266,16 @@
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ]
+ },
+ "regions.<name>.condition": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/hot_gas_regions/input.toml"
+  ],
+  "type": "string"
  },
  "regions.<name>.edge": {
   "dims": [
@@ -5133,10 +5292,12 @@
   "set_in": []
  },
  "regions.<name>.flip": {
+  "default": "false",
   "dims": [
    2
   ],
-  "set_in": []
+  "set_in": [],
+  "type": "bool"
  },
  "regions.<name>.inner_radius": {
   "dims": [
@@ -5235,6 +5396,7 @@
   ],
   "required": true,
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ],
@@ -5254,11 +5416,13 @@
    "implicit",
    "interior",
    "intersection",
+   "isosurface",
    "polygon",
    "rectangle",
    "sphere",
    "torus",
-   "union"
+   "union",
+   "where"
   ]
  },
  "run": {
@@ -5299,6 +5463,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -5374,6 +5539,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -5512,6 +5678,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -5651,6 +5818,7 @@
    3
   ],
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ]
@@ -5661,6 +5829,7 @@
   ],
   "required": true,
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ],
@@ -5671,6 +5840,7 @@
    2
   ],
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ]
@@ -5682,6 +5852,16 @@
   "set_in": [
    "examples/source_regions/input.toml"
   ]
+ },
+ "sources.region.condition": {
+  "dims": [
+   2
+  ],
+  "required": true,
+  "set_in": [
+   "examples/hot_gas_regions/input.toml"
+  ],
+  "type": "string"
  },
  "sources.region.edge": {
   "dims": [
@@ -5698,10 +5878,12 @@
   "set_in": []
  },
  "sources.region.flip": {
+  "default": "false",
   "dims": [
    2
   ],
-  "set_in": []
+  "set_in": [],
+  "type": "bool"
  },
  "sources.region.pivot": {
   "dims": [
@@ -5757,6 +5939,7 @@
   ],
   "required": true,
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/source_regions/input.toml"
   ],
   "type": "string",
@@ -5775,11 +5958,13 @@
    "implicit",
    "interior",
    "intersection",
+   "isosurface",
    "polygon",
    "rectangle",
    "sphere",
    "torus",
-   "union"
+   "union",
+   "where"
   ]
  },
  "sources.rho": {
@@ -5793,6 +5978,7 @@
    2
   ],
   "set_in": [
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/source_regions/input.toml"
   ]
@@ -5895,8 +6081,114 @@
    "examples/channel_wmles/lm5200.toml",
    "examples/channel_wmles/tl_m1.7.toml",
    "examples/channel_wmles/tl_m3.0.toml",
+   "examples/flame_turbulence/input.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ]
+ },
+ "statistics.batch": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "statistics.conditional": {
+  "default": "[]",
+  "dims": [
+   3
+  ],
+  "set_in": [
+   "examples/flame_turbulence/input.toml"
+  ],
+  "type": "array"
+ },
+ "statistics.conditional.bins": {
+  "default": "[50]",
+  "dims": [
+   3
+  ],
+  "set_in": [],
+  "type": "array"
+ },
+ "statistics.conditional.fields": {
+  "default": "[]",
+  "dims": [
+   3
+  ],
+  "set_in": [
+   "examples/flame_turbulence/input.toml"
+  ],
+  "type": "array"
+ },
+ "statistics.conditional.file": {
+  "default": "\"conditional_PROGRESS_VARIABLE.csv\"",
+  "dims": [
+   3
+  ],
+  "set_in": [
+   "examples/flame_turbulence/input.toml"
+  ],
+  "type": "string"
+ },
+ "statistics.conditional.interval": {
+  "default": "10",
+  "dims": [
+   3
+  ],
+  "set_in": [],
+  "type": "integer"
+ },
+ "statistics.conditional.on": {
+  "default": "\"\"",
+  "dims": [
+   3
+  ],
+  "set_in": [
+   "examples/flame_turbulence/input.toml"
+  ],
+  "type": "string"
+ },
+ "statistics.conditional.range": {
+  "default": "[0.0, 1.0]",
+  "dims": [
+   3
+  ],
+  "set_in": [],
+  "type": "array"
+ },
+ "statistics.conditional.region": {
+  "dims": [
+   3
+  ],
+  "set_in": []
+ },
+ "statistics.conditional.t_start": {
+  "default": "0.0002",
+  "dimension": "time (s)",
+  "dims": [
+   3
+  ],
+  "set_in": [],
+  "type": "number"
+ },
+ "statistics.conditional.weight": {
+  "default": "\"volume\"",
+  "dims": [
+   3
+  ],
+  "set_in": [
+   "examples/flame_turbulence/input.toml"
+  ],
+  "type": "string",
+  "values": [
+   "mass",
+   "volume"
+  ]
+ },
+ "statistics.convergence": {
+  "dims": [
+   3
+  ],
+  "set_in": []
  },
  "statistics.fields": {
   "default": "[]",
@@ -5928,7 +6220,8 @@
    "examples/channel_wmles/lm2000.toml",
    "examples/channel_wmles/lm5200.toml",
    "examples/channel_wmles/tl_m1.7.toml",
-   "examples/channel_wmles/tl_m3.0.toml"
+   "examples/channel_wmles/tl_m3.0.toml",
+   "examples/flame_turbulence/input.toml"
   ],
   "type": "integer"
  },
@@ -5985,6 +6278,7 @@
    "examples/channel_wmles/lm5200.toml",
    "examples/channel_wmles/tl_m1.7.toml",
    "examples/channel_wmles/tl_m3.0.toml",
+   "examples/flame_turbulence/input.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ],
   "type": "number"
@@ -6083,6 +6377,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -6189,6 +6484,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
    "examples/poiseuille_pipe/input.toml",
@@ -6246,6 +6542,7 @@
    "examples/flame_turbulence/les.toml",
    "examples/forced_inlet/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/riemann_2d_quads/coarse.toml",
    "examples/sedov_3d/input.toml",
@@ -6330,6 +6627,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",
@@ -6444,6 +6742,7 @@
    "examples/heated_duct/closed_upt.toml",
    "examples/heated_duct/input.toml",
    "examples/heated_wall/input.toml",
+   "examples/hot_gas_regions/input.toml",
    "examples/isotropic_turbulence/input.toml",
    "examples/moving_heaters/input.toml",
    "examples/noh_axisymmetric/input.toml",

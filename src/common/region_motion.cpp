@@ -19,6 +19,7 @@
 #include "curved.h"
 #include "mesh.h"
 #include "region_sampler.h"
+#include "units.h"
 
 namespace region {
 
@@ -107,12 +108,195 @@ struct Cones {
 
 } // namespace
 
-MovingFractions::MovingFractions(const Mesh & mesh, const Region & region) :
-    MovingFractions(mesh, region, region.root()) {}
+namespace {
 
-MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const uint32_t filled) :
-    n_cells(mesh.n_cells), bounded(region.bounded()), axisymmetric(mesh.axisymmetric) {
+/** @brief The variables of conditions (condition_variables) at a point x of cell c, its state W given. */
+struct LevelVariables {
+    const double * x;
+    double t;
+    const double * W;
+    const CellFields & f;
+    uint32_t c;
+    uint32_t n_species;
+
+    KOKKOS_INLINE_FUNCTION double mixture_sum() const {
+        double s = 0.0;
+        for (uint32_t k = 0; k < n_species; k++) s += double(f.Y(c, k)) * f.inv_W(k);
+        return s;
+    }
+
+    KOKKOS_INLINE_FUNCTION double operator()(const uint16_t i) const {
+        constexpr uint16_t RHO = 4, P = 5 + N_DIM, T = 6 + N_DIM;
+        if (i < 3) return x[i];
+        if (i == 3) return t;
+        if (i == RHO) return W[0];
+        if (i < P) return W[1 + (i - RHO - 1)];
+        if (i == P) return W[N_DIM + 1];
+        if (i == T) return W[N_DIM + 1] / (W[0] * (n_species > 0 ? f.R_universal * mixture_sum() : f.R));
+        return double(f.Y(c, i - T - 1));
+    }
+};
+
+} // namespace
+
+SolutionLevels::SolutionLevels(const Mesh & mesh, const std::vector<Condition> & conditions,
+                               const std::vector<std::string> & species, const CellFields & fields_) :
+    n_cells(mesh.n_cells), n_owned(mesh.n_owned()), n_conditions(static_cast<uint32_t>(conditions.size())),
+    n_species(static_cast<uint32_t>(species.size())), fields(fields_) {
+    const std::vector<std::string> variables = condition_variables(species);
+    for (const Condition & c : conditions) programs.emplace_back(c.key, c.level, variables, expression_unit_hint);
+    std::vector<const kexpr::Program *> all;
+    for (const auto & p : programs) all.push_back(&p);
+    table = kexpr::ProgramTable<>(all);
+    m_centroids = mesh.cell_coords;
+    offsets_cells_of_cell = mesh.offsets_cells_of_cell;
+    cells_of_cell = mesh.cells_of_cell;
+    cells_of_cell_shift = mesh.cells_of_cell_shift;
+    periodic = mesh.periodic_maps();
+    host_time = Kokkos::View<rtype>("region_levels_time");
+    m_levels = Kokkos::View<double **[N_DIM + 1]>("region_levels", n_cells, n_conditions);
+}
+
+void SolutionLevels::update(const Kokkos::View<const rtype> & time) const {
+    const kexpr::ProgramTable<> programs_ = table;
+    const CellFields f = fields;
+    const auto x_c = m_centroids;
+    const auto offsets = offsets_cells_of_cell;
+    const auto neighbors = cells_of_cell;
+    const auto shift = cells_of_cell_shift;
+    const PeriodicMaps maps = periodic;
+    const auto out = m_levels;
+    const uint32_t owned = n_owned, n_k = n_conditions, n_sp = n_species;
+    Kokkos::parallel_for("region_levels", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        const double t = static_cast<double>(time());
+        double x[3] = {0.0, 0.0, 0.0}, W[N_CONSERVATIVE];
+        for (int d = 0; d < N_DIM; d++) x[d] = static_cast<double>(x_c(c, d));
+        for (int i = 0; i < N_CONSERVATIVE; i++) W[i] = static_cast<double>(f.W(c, i));
+        for (uint32_t k = 0; k < n_k; k++) {
+            const double g = programs_(k, LevelVariables{x, t, W, f, c, n_sp});
+            out(c, k, 0) = g;
+            double M[3][3] = {}, b[3] = {};
+            if (c < owned) {
+                for (uint32_t q = offsets(c); q < offsets(c + 1); q++) {
+                    const uint32_t j = neighbors(q);
+                    rtype x_j[N_DIM], y[N_DIM], W_j[N_CONSERVATIVE];
+                    for (int d = 0; d < N_DIM; d++) x_j[d] = x_c(j, d);
+                    for (int i = 0; i < N_CONSERVATIVE; i++) W_j[i] = f.W(j, i);
+                    maps.forward(shift(q), x_j, y);
+                    if (maps.rotated()) maps.rotate_state(shift(q), W_j);
+                    double xn[3] = {0.0, 0.0, 0.0}, Wn[N_CONSERVATIVE], dx[3] = {0.0, 0.0, 0.0};
+                    for (int d = 0; d < N_DIM; d++) {
+                        xn[d] = static_cast<double>(y[d]);
+                        dx[d] = xn[d] - x[d];
+                    }
+                    for (int i = 0; i < N_CONSERVATIVE; i++) Wn[i] = static_cast<double>(W_j[i]);
+                    const double dg = programs_(k, LevelVariables{xn, t, Wn, f, j, n_sp}) - g;
+                    const double w = 1.0 / (dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]);
+                    for (int a = 0; a < N_DIM; a++) {
+                        for (int e = 0; e < N_DIM; e++) M[a][e] += w * dx[a] * dx[e];
+                        b[a] += w * dx[a] * dg;
+                    }
+                }
+            }
+            // The gradient where the neighbors span every direction, else none
+            double grad[3] = {0.0, 0.0, 0.0};
+            if constexpr (N_DIM == 2) {
+                const double det = M[0][0] * M[1][1] - M[0][1] * M[1][0];
+                if (Kokkos::fabs(det) > 1e-12 * M[0][0] * M[1][1]) {
+                    grad[0] = (M[1][1] * b[0] - M[0][1] * b[1]) / det;
+                    grad[1] = (M[0][0] * b[1] - M[1][0] * b[0]) / det;
+                }
+            } else {
+                const double A[3][3] = {{M[1][1] * M[2][2] - M[1][2] * M[2][1], M[0][2] * M[2][1] - M[0][1] * M[2][2],
+                                         M[0][1] * M[1][2] - M[0][2] * M[1][1]},
+                                        {M[1][2] * M[2][0] - M[1][0] * M[2][2], M[0][0] * M[2][2] - M[0][2] * M[2][0],
+                                         M[0][2] * M[1][0] - M[0][0] * M[1][2]},
+                                        {M[1][0] * M[2][1] - M[1][1] * M[2][0], M[0][1] * M[2][0] - M[0][0] * M[2][1],
+                                         M[0][0] * M[1][1] - M[0][1] * M[1][0]}};
+                const double det = M[0][0] * A[0][0] + M[0][1] * A[1][0] + M[0][2] * A[2][0];
+                if (Kokkos::fabs(det) > 1e-12 * M[0][0] * M[1][1] * M[2][2]) {
+                    for (int a = 0; a < 3; a++) grad[a] = (A[a][0] * b[0] + A[a][1] * b[1] + A[a][2] * b[2]) / det;
+                }
+            }
+            for (int d = 0; d < N_DIM; d++) out(c, k, 1 + d) = grad[d];
+        }
+    });
+}
+
+void SolutionLevels::update(const double t) const {
+    Kokkos::deep_copy(host_time, static_cast<rtype>(t));
+    update(Kokkos::View<const rtype>(host_time));
+}
+
+CrossedLevels::CrossedLevels(const Mesh & mesh, const Region & region, std::shared_ptr<const SolutionLevels> levels) :
+    n_owned(mesh.n_owned()), m_levels(std::move(levels)) {
+    const LevelCells reads = level_cells(mesh, region);
+    every = reads.every;
+    std::vector<uint32_t> h_offsets{0}, h_conditions;
+    for (const auto & k : reads.conditions) {
+        h_conditions.insert(h_conditions.end(), k.begin(), k.end());
+        h_offsets.push_back(static_cast<uint32_t>(h_conditions.size()));
+    }
+    offsets = upload(h_offsets, "region_crossed_offsets");
+    conditions = upload(h_conditions, "region_crossed_conditions");
+    radii = upload(reads.radii, "region_crossed_radii");
+    cells = Kokkos::View<uint32_t *>("region_crossed_cells", n_owned);
+    values = Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight>("region_crossed_levels", n_owned, m_levels->size());
+}
+
+Levels CrossedLevels::update(const double t) const {
+    m_levels->update(t);
+    const auto L = m_levels->levels();
+    const auto offsets_ = offsets;
+    const auto conditions_ = conditions;
+    const auto radii_ = radii;
+    const auto cells_ = cells;
+    const bool all = every;
+    const uint32_t n_pieces = static_cast<uint32_t>(offsets.extent(0)) - 1;
+    uint32_t n = 0;
+    // A cell the host keeps (|g| <= 1.01 |grad g| r for every condition of a piece) with a margin for round-off
+    Kokkos::parallel_scan("region_crossed_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c, uint32_t & i, const bool final) {
+        bool keep = all;
+        for (uint32_t p = 0; p < n_pieces && !keep; p++) {
+            keep = true;
+            for (uint32_t q = offsets_(p); q < offsets_(p + 1) && keep; q++) {
+                const uint32_t k = conditions_(q);
+                double slope = 0.0;
+                for (int d = 0; d < N_DIM; d++) slope += L(c, k, 1 + d) * L(c, k, 1 + d);
+                keep = !(Kokkos::fabs(L(c, k, 0)) > 1.02 * Kokkos::sqrt(slope) * radii_(c));
+            }
+        }
+        if (!keep) return;
+        if (final) cells_(i) = c;
+        i++;
+    }, n);
+    const auto rows = Kokkos::make_pair(uint32_t(0), n);
+    const auto values_ = values;
+    const uint32_t n_k = m_levels->size();
+    Kokkos::parallel_for("region_crossed_levels", n, KOKKOS_LAMBDA(const uint32_t i) {
+        for (uint32_t k = 0; k < n_k; k++) {
+            for (int d = 0; d <= N_DIM; d++) values_(i, k, d) = L(cells_(i), k, d);
+        }
+    });
+    Levels out;
+    const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(cells, rows));
+    out.cells.assign(h_cells.data(), h_cells.data() + n);
+    const Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight, Kokkos::HostSpace> h_values(
+        Kokkos::view_alloc(Kokkos::WithoutInitializing, "region_crossed_levels"), n, n_k);
+    Kokkos::deep_copy(h_values, Kokkos::subview(values, rows, Kokkos::ALL, Kokkos::ALL));
+    out.values = h_values;
+    return out;
+}
+
+MovingFractions::MovingFractions(const Mesh & mesh, const Region & region,
+                                 std::shared_ptr<const SolutionLevels> levels) :
+    MovingFractions(mesh, region, region.root(), std::move(levels)) {}
+
+MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const uint32_t filled,
+                                 std::shared_ptr<const SolutionLevels> levels) :
+    n_cells(mesh.n_cells), bounded(region.bounded()), axisymmetric(mesh.axisymmetric), m_levels(std::move(levels)) {
     if (region.dimension() != N_DIM) throw std::logic_error("MovingFractions: the region is not filled.");
+    if (region.solution() && !m_levels) throw std::logic_error("MovingFractions: the region's conditions need levels.");
     Kokkos::View<Node *> d_nodes("region_moving_nodes", region.nodes().size());
     Kokkos::deep_copy(d_nodes, Kokkos::View<const Node *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
                                    region.nodes().data(), region.nodes().size()));
@@ -135,6 +319,10 @@ MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const
         if (f.kind == Filled::Kind::SHAPES) {
             h_ops.push_back({Op::Kind::SHAPES, static_cast<uint32_t>(h_leaves.size())});
             h_leaves.push_back({f.first, f.count, i == region.root() ? region.edge() : 0.0});
+            return;
+        }
+        if (f.kind == Filled::Kind::CONDITION) {
+            h_ops.push_back({Op::Kind::CONDITION, f.first});
             return;
         }
         if (f.cells) {
@@ -269,6 +457,13 @@ MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const
 }
 
 void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
+    Kokkos::View<const double **[N_DIM + 1]> level;
+    Kokkos::View<const rtype *[N_DIM]> centroid;
+    if (m_levels) {
+        m_levels->update(time);
+        level = m_levels->levels();
+        centroid = m_levels->centroids();
+    }
     const Kokkos::View<Node *> n = nodes;
     const Kokkos::View<const Motion *> m = motions;
     const Kokkos::View<const Step *> s = steps;
@@ -339,6 +534,31 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
                 case Op::Kind::CELLS:
                     stack[++top] = columns(c, op.index);
                     break;
+                case Op::Kind::CONDITION: {
+                    // Exact for the cell's linear level, on its straight simplices
+                    double x0[N_DIM], g0 = level(c, op.index, 0), grad[N_DIM];
+                    for (int d = 0; d < N_DIM; d++) {
+                        x0[d] = static_cast<double>(centroid(c, d));
+                        grad[d] = level(c, op.index, 1 + d);
+                    }
+                    const uint32_t first = cell_offsets(c);
+                    auto node = [&](const uint32_t k, double * x) {
+                        const uint32_t q = cell_nodes(first + k);
+                        for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
+                    };
+                    double inside = 0.0, total = 0.0;
+                    sampler::straight_simplices(cell_offsets(c + 1) - first, node,
+                                                [&](const double s_[4][3], const double measure) {
+                        double g[4] = {0.0, 0.0, 0.0, 0.0};
+                        for (int k = 0; k <= N_DIM; k++) {
+                            g[k] = g0;
+                            for (int d = 0; d < N_DIM; d++) g[k] += grad[d] * (s_[k][d] - x0[d]);
+                        }
+                        sampler::linear_simplex(s_, g, measure, axi, inside, total);
+                    });
+                    stack[++top] = total > 0.0 ? region::detail::clamp(inside / total, 0.0, 1.0) : 0.0;
+                    break;
+                }
                 case Op::Kind::UNION:
                     top--;
                     stack[top] = region::detail::max(stack[top], stack[top + 1]);

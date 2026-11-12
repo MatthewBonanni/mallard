@@ -32,8 +32,11 @@
 #include "mesh.h"
 #include "physics.h"
 #include "boundary.h"
+#include "case_view.h"
+#include "cell_fields.h"
 #include "probe_geometry.h"
 #include "probe_spectra.h"
+#include "common_io.h"
 #include "probe_surface.h"
 #include "snapshot_block.h"
 #include "data.h"
@@ -44,6 +47,10 @@ namespace region {
 class Region;
 class Regions;
 class MovingFractions;
+class CrossedLevels;
+class SolutionLevels;
+class Extraction;
+struct Elements;
 }
 struct ProbeFluxes;
 
@@ -82,6 +89,19 @@ struct ProbeReference {
 };
 
 namespace probe {
+
+/**
+ * @brief The reference state {rho, u = [...], p} of the table ref (at key, for
+ *        errors): of CF and CP of probes, and of the derived field CP.
+ */
+ProbeReference read_reference(const Input & ref, const std::string & key);
+
+/**
+ * @brief Whether [[probes]] fields take a field of a case with these species
+ *        (a cell field statistics samples, or a boundary field); the averages of
+ *        [statistics] are the other fields it takes.
+ */
+bool samples(const std::string & name, const std::vector<std::string> & species_names);
 
 /**
  * @brief What a region key of [[write_data]] gives: the whole mesh
@@ -215,6 +235,13 @@ class Probes {
         std::vector<std::string> value_names() const;
         /** @brief The latest monitored values, as value_names(); NaN before a probe's first write. Rank 0 when distributed. */
         std::vector<double> values() const;
+        /** @brief Step of each monitored value's latest write (NO_VALUE before it), as value_names(); on every rank. */
+        std::vector<uint64_t> value_steps() const;
+        /** @brief Whether a probe wrote monitored values at this step. */
+        bool wrote_values(uint64_t step) const;
+        /** @brief Dimension of each monitored value, as value_names(). */
+        std::vector<Dimension> value_dimensions() const;
+        static constexpr uint64_t NO_VALUE = UINT64_MAX;
 
         /** @brief Monitored values the run record keeps per progress row, at most, over every probe. */
         static constexpr size_t RECORDED = 64;
@@ -223,7 +250,13 @@ class Probes {
         /** @brief The latest of them, of each probe that has written (rank 0 when distributed). */
         std::vector<MonitorValues> recorded() const;
 
-        std::vector<std::pair<std::string, std::string>> summary() const;
+        /** @brief The outputs as the setup banner lists them, one per probe. */
+        std::vector<OutputSummary> summary() const;
+        /**
+         * @brief The case view's blocks of the probes on geometries of their own (not regions, which the
+         *        view has already): their points, polylines or polygons, on rank 0 (empty elsewhere).
+         */
+        std::vector<case_view::Block> view_blocks() const;
         std::vector<std::string> files() const;
         /**
          * @brief Rank 0 adds the run block of a run starting at step to the files written so
@@ -247,6 +280,11 @@ class Probes {
 
         /** @brief How point values are evaluated (before init): the face reconstruction's, or linear least squares. */
         void set_reconstruction(const FaceReconstruction * r);
+        /** @brief The cell fields that regions defined by the solution read (before init). */
+        void set_cell_fields(const region::CellFields & f) { cell_fields = f; }
+        /** @brief Wall seconds spent placing regions defined by the solution, so far, and whether any probe has one. */
+        double region_seconds() const { return m_region_seconds; }
+        bool any_solution() const;
 
         /** @brief This rank's share of a set of samples, and their values on the device. */
         struct Samples {
@@ -334,12 +372,15 @@ class Probes {
             std::vector<std::pair<std::string, std::array<uint32_t, N_DIM>>> moment_vectors;
             bool average = false;                // writes the time averages of its samples
             // Averages: total weight, time of the last sample, samples, and (rank 0) the means of the
-            // gathered node and quadrature values; moving regions: the means of f V q and of their weights f V
+            // gathered node and quadrature values; kept per cell (cell_means), for the cells covered so far
+            // (mean_cells, sorted): moving regions, the means of f V q and of f V; isosurfaces, the means of
+            // the sums of w q and of w over each cell's quadrature points
             double average_weight = 0.0, average_t_last = 0.0;
             uint64_t average_samples = 0;
             std::vector<double> mean_nodes, mean_quadrature, mean_weights;
+            std::vector<uint64_t> mean_cells;
             ProbeReference reference;
-            probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
+            probe::Geometry geometry;  // regions: no nodes; quadrature weights f V of the cells covered, by global cell
             bool from_region = false;
             bool resampled = false;  // a surface region on an n_points grid
             bool snapshot = false;   // of a [[write_data]] entry
@@ -359,25 +400,63 @@ class Probes {
             std::string last_file;                               // vtp, vtkhdf: the file written last
             bool point_value = false;   // one sample, evaluated at every write: its values are monitored
             std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
+            uint64_t step_last_value = NO_VALUE;           // of the latest values, on every rank
             std::vector<std::pair<std::string, Dimension>> monitored;  // what last holds, with its dimensions
             uint64_t last_step = 0;
             double last_t = 0.0;
             double measure = 0.0;      // of the samples, at the latest reduction
             std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
             std::shared_ptr<region::Region> copy;  // copies = "each": the copy it covers
-            /** @brief A moving filled region: its fractions, and its cells (every owned one) with their measures. */
+            /**
+             * @brief A moving filled region: its fractions, the measures of the owned cells, and at each move the
+             *        owned cells it covers (f V > 0, the first of covered) with their f V.
+             */
             struct Motion {
+                const Mesh * mesh = nullptr;
                 std::shared_ptr<region::MovingFractions> fractions;
-                std::vector<uint32_t> cells;
-                std::vector<double> volumes;
-                std::vector<size_t> order;  // rank 0: the gathered weights in global cell order
+                Kokkos::View<double *> volumes;
+                Kokkos::View<uint32_t *> covered;
+                Kokkos::View<double *> weights;
+                uint64_t n_cells = 0;         // of the mesh, which its averages are kept per
+                std::vector<uint64_t> cells;  // rank 0: the global cell of each gathered sample
                 bool distributed = false;
             };
             std::shared_ptr<Motion> motion;
-            /** @brief The quadrature weights f V of a moving region at time t (collective). */
+            bool solution = false;  // its region follows the solution (ProbeFields::W must be current)
+            /** @brief An isosurface (or another surface or curve of the solution): extracted at each write. */
+            struct Isosurface {
+                const Mesh * mesh = nullptr;
+                std::shared_ptr<region::Region> region;
+                std::shared_ptr<region::CrossedLevels> levels;
+                std::shared_ptr<region::Extraction> extraction;  // of region on mesh
+                uint32_t n_evaluated = 0;
+                bool per_cell = false;
+                uint64_t n_cells = 0;              // of the mesh, which its averages are kept per
+                std::vector<uint64_t> quad_cells;  // rank 0: the global cell of each gathered quadrature point
+            };
+            std::shared_ptr<Isosurface> isosurface;
+            /**
+             * @brief A moving region at time t: its samples, the owned cells it covers, and (rank 0) their
+             *        weights f V in global cell order (collective).
+             */
             void move(double t);
-            /** @brief Rank 0 of a time-averaged moving region: its weights and values, mean f V q / mean f V. */
+            /** @brief The isosurface where the solution puts it at time t, and its samples (collective). */
+            void extract(double t);
+            /** @brief Whether its time averages are kept per cell: a moving region's or an isosurface's. */
+            bool cell_means() const { return average && (motion || isosurface); }
+            /** @brief The cells its time averages may cover (cell_means): those of the mesh. */
+            uint64_t n_mean_cells() const { return motion ? motion->n_cells : isosurface ? isosurface->n_cells : 0; }
+            /**
+             * @brief Rank 0 of time averages kept per cell: the weights and values of the cells, mean w q /
+             *        mean w (moving regions: w = f V; isosurfaces: the sums over each cell's quadrature points).
+             */
             void mean_fields(std::vector<double> & quad);
+            /**
+             * @brief Rank 0 of time averages kept per cell: the cells its latest samples cover (sorted), with
+             *        their sums of w q and of w.
+             */
+            void cell_sums(const std::vector<double> & quad, std::vector<uint64_t> & cells, std::vector<double> & sums,
+                           std::vector<double> & weights) const;
 
             bool due(uint64_t step, rtype t) const;
             /** @brief With a time interval: due once t is at least this. */
@@ -418,6 +497,8 @@ class Probes {
                  const Snapshot * snapshot, const std::vector<Data> * cell_data, int32_t copy = -1);
         /** @brief A snapshot's samples of a region of lower dimension: one at each element's center. */
         static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables);
+        static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Elements & e, int dimension,
+                                             const std::string & summary, uint32_t n_variables);
         /**
          * @brief A filled region probe's samples: the owned cells with their weight f V.
          */
@@ -426,13 +507,16 @@ class Probes {
         /**
          * @brief A filled region probe's measures: its own and of its part in
          *        the domain, with a warning and p.clipped where part of it is
-         *        outside. Collective.
+         *        outside. Collective. quadrature_volume: the part in the domain from a quadrature (rank 0), not f V.
          */
         static void region_measures(Probe & p, const Mesh & mesh, const region::Region & r,
-                                    const std::vector<double> & f, const std::string & key);
+                                    const std::vector<double> & f, const std::string & key,
+                                    const double * quadrature_volume = nullptr);
         /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
         static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
                                     bool per_cell);
+        static void select_elements(Probe & p, const Mesh & mesh, region::Elements e, int dimension,
+                                    const std::string & summary, uint32_t n_variables, bool per_cell);
 
         std::vector<std::unique_ptr<Probe>> probes;
         snapshot_block::Reconstruction reconstruction{"linear_least_squares", 2, {"cell_average"}};
@@ -441,6 +525,8 @@ class Probes {
         rtype average_start = 0.0;
         bool resumed = false;
         bool distributed = false;  // samples split over the ranks, which set up and write together
+        region::CellFields cell_fields;
+        double m_region_seconds = 0.0;
 };
 
 #endif // PROBES_H
