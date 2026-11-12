@@ -24,6 +24,7 @@
 #include "common_typedef.h"
 #include "periodic_maps.h"
 #include "region.h"
+#include "region_mesh.h"
 
 class Mesh;
 
@@ -70,6 +71,29 @@ class SolutionLevels {
         Kokkos::View<rtype> host_time;
         Kokkos::View<double **[N_DIM + 1]> m_levels;
         Kokkos::View<rtype *[N_DIM][N_DIM]> velocity_gradients;  // (cell, k, i) = d u_k / d x_i, if read
+};
+
+/**
+ * @brief The levels a surface or curve of the solution is cut from
+ *        (region::elements with levels), in the owned cells level_cells reads
+ *        them in, selected on the device: only those cells' levels reach the
+ *        host.
+ */
+class CrossedLevels {
+    public:
+        CrossedLevels(const Mesh & mesh, const Region & region, std::shared_ptr<const SolutionLevels> levels);
+
+        /** @brief The levels at time t in the cells, on the host. */
+        Levels update(double t) const;
+
+    private:
+        uint32_t n_owned = 0;
+        bool every = false;
+        std::shared_ptr<const SolutionLevels> m_levels;
+        Kokkos::View<const uint32_t *> offsets, conditions;  // of each piece cut from conditions' levels
+        Kokkos::View<const double *> radii;
+        Kokkos::View<uint32_t *> cells;
+        Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> values;
 };
 
 /**

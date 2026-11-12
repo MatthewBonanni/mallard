@@ -186,6 +186,13 @@ struct CellSubset {
     std::string name;            // the region's, for the log
     std::vector<uint32_t> cells;  // owned, increasing
     std::vector<double> fractions;
+    /**
+     * @brief For a region that moves or follows the solution: the fractions
+     *        of every cell at time t (collective), from which each snapshot
+     *        takes its cells; cells and fractions are then unused.
+     */
+    std::function<std::vector<double>(double t)> at;
+    bool solution = false;  // at reads the solution's cell values, which must be current
 };
 
 /**
@@ -283,12 +290,12 @@ class DataWriter {
         std::string snapshot_attribute() const;
         uint64_t snapshots_written() const { return n_snapshots; }
 
-        /**
-         * @brief Format and the output key-value line for the run log.
-         */
-        std::pair<std::string, std::string> summary() const;
+        /** @brief The output as the setup banner lists it. */
+        OutputSummary summary() const;
 
         DataFormat get_format() const { return format; }
+        /** @brief Whether its region follows the solution: a write reads the solution's cell values. */
+        bool follows_solution() const { return subset_solution; }
         const std::string & get_prefix() const { return prefix; }
         uint64_t files_written() const { return n_files; }
         /** @brief The file ParaView opens for the whole series: .pvd, .vtkhdf.series, .vtkhdf or .xmf. */
@@ -388,6 +395,8 @@ class DataWriter {
          */
         void write_vtkhdf(const std::string & filename, const Block & block, const Values & values);
         void build_vtkhdf_cells();
+        /** @brief The subset of these owned cells, with these fractions of every cell, numbered in global order (collective). */
+        void select_subset(const std::vector<uint32_t> & cells, const std::vector<double> & fractions);
         void write_vtkhdf_series(const Index & series) const;
         void resume_vtkhdf(rtype t);
         void resume_pvd(rtype t);
@@ -435,6 +444,9 @@ class DataWriter {
         std::vector<uint64_t> subset_ids;
         uint64_t n_subset = 0;
         std::unique_ptr<Data> fraction;
+        Kokkos::View<rtype *, Kokkos::LayoutStride>::host_mirror_type fraction_values;
+        std::function<std::vector<double>(double)> subset_at;  // the region changes between snapshots
+        bool subset_solution = false;
         // Compression
         Compression compression = Compression::NONE;
         double relative_error = 0.0;  // 0: lossless

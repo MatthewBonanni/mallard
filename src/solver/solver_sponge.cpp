@@ -159,10 +159,10 @@ void Solver::init_sponges(region::Regions & regions) {
     Kokkos::deep_copy(sponge_target, h_target);
     if (max_strength > 0.0) sponge_dt_max = static_cast<rtype>(1.0 / max_strength);
     if (!moving_sponges.empty() && !stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
-    const std::string moving_text = moving_sponges.empty() ? "" : " (" + std::to_string(moving_sponges.size()) + " moving)";
-    source_summary.emplace_back("Sponges", std::to_string(sponges.size()) + moving_text + ", " +
-                                               logging::count(n_cells) + " cells, max strength " +
-                                               units::with(logging::real(max_strength), "1/s"));
+    source_summary.quantity("sponges", std::to_string(sponges.size()), "sponges",
+                            moving_sponges.empty() ? "" : std::to_string(moving_sponges.size()) + " moving");
+    source_summary.quantity("sponge cells", logging::count(n_cells), "cells", "");
+    source_summary.quantity("sponge strength", logging::real(max_strength), units::column("1/s"), "largest");
 }
 
 void Solver::apply_sponges(const State & solution, const State & rhs, const rtype t_stage, const rtype c_stage) {

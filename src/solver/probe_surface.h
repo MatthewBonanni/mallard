@@ -48,6 +48,7 @@ struct CellPoints {
     std::vector<Point> points;
     uint64_t n_global = 0;
     std::vector<uint64_t> gathered_row;  // rank 0 (every rank if not distributed)
+    std::vector<uint8_t> averages;       // 1: the sample takes its cell's value, not a point value (empty: none)
 };
 
 /**

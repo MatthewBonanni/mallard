@@ -15,6 +15,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "cli.h"
@@ -26,6 +27,7 @@
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "test_utils.h"
 
 constexpr double ROUNDING = std::max(1e-12, 4.0 * double(std::numeric_limits<rtype>::epsilon()));
 
@@ -47,6 +49,8 @@ const std::string BOX = N_DIM == 3 ? "{type = \"box\", center = [0.5, 0.5, 0.5],
                                    : "{type = \"rectangle\", center = [0.5, 0.5], size = [0.4, 0.2]}";
 
 const std::string FRONT = "{type = \"isosurface\", field = \"RHO\", value = 1.1}";
+
+const std::string DENSE = "{type = \"where\", condition = \"RHO > 1.1\"}";
 
 /** @brief A periodic box with a curve probe of point values, a region probe and restart files and snapshots every 2 steps. */
 std::string case_input(const std::string & dir, uint32_t n) {
@@ -70,7 +74,11 @@ std::string case_input(const std::string & dir, uint32_t n) {
       << "[[probes]]\nname = \"front\"\nregion = " << FRONT << "\nfields = [\"RHO\", \"MASS_FLUX\"]\n"
       << "reductions = [\"integral\", \"mean\"]\ninterval = 2\nreductions_file = \"" << dir
       << "/probe_front_reductions.csv\"\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
+      << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/dense\"\nformat = \"vtu\"\nregion = " << DENSE
+      << "\nfields = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/front\"\nformat = \"vtu\"\nregion = " << FRONT
+      << "\nfields = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n";
     if (vtkhdf()) {
         s << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtkhdf\"\nfields = [\"RHO\", \"U\", \"P\"]\n"
           << "interval = 2\n";
@@ -125,6 +133,13 @@ int extract(const std::vector<std::string> & words, std::string * errors = nullp
     return status;
 }
 
+std::string slurp(const std::string & file) {
+    std::ifstream in(file, std::ios::binary);
+    std::stringstream s;
+    s << in.rdbuf();
+    return s.str();
+}
+
 std::vector<double> numbers(const std::string & row) {
     std::vector<double> out;
     std::stringstream s(row);
@@ -159,6 +174,24 @@ TEST(PostExtractTest, RestartFilesGiveTheRunsProbesBitForBit) {
                        "integral,mean", "--name", "f", "-o", front}),
               0);
     EXPECT_EQ(rows(front + "/probe_f_reductions.csv"), std::vector<std::string>{after_step_0(run + "/probe_front_reductions.csv").front()});
+}
+
+TEST(PostExtractTest, SnapshotsOfRegionsOfTheSolutionAreTheRunsBitForBit) {
+    // The cells of a where region and the elements of an isosurface, placed on each restart file's state
+    const std::string run = run_dir();
+    if (comm::size() > 1) GTEST_SKIP() << "VTU snapshots of several ranks are pieces in each run's own order";
+    for (const auto & [name, region, piece] : {std::tuple{"dense", DENSE, ".vtu"}, std::tuple{"front", FRONT, ".vtp"}}) {
+        const std::string out = fresh_dir(std::string("snapshot_") + name);
+        ASSERT_EQ(extract({run + "/restart_000002.restart", run + "/restart_000004.restart", "--snapshot", "vtu",
+                           "--region", region, "--fields", "RHO,U,P", "--name", name, "-o", out}),
+                  0);
+        for (const char * step : {"_000002", "_000004"}) {
+            const std::string mine = slurp(out + "/" + name + step + piece);
+            EXPECT_GT(mine.size(), 1000u) << name << step;
+            EXPECT_EQ(without_run_metadata(mine), without_run_metadata(slurp(run + "/" + name + step + piece)))
+                << name << step;
+        }
+    }
 }
 
 TEST(PostExtractTest, SnapshotsOfPrimitivesGiveTheRunsProbesToRounding) {
@@ -216,6 +249,7 @@ TEST(PostExtractTest, FileOfAnotherMeshIsAnError) {
     EXPECT_EQ(extract({run + "/restart_000002.restart", "-i", dir + "/input.toml", "-o", dir + "/out"}, &errors), 1);
     if (comm::is_root()) {
         EXPECT_NE(errors.find(" cells, but the case's mesh has "), std::string::npos) << errors;
+        EXPECT_NE(errors.find("docs/guide/running.md#e-extract"), std::string::npos) << errors;
     }
     EXPECT_TRUE(!fs::exists(dir + "/out/probe_line.csv") || rows(dir + "/out/probe_line.csv").empty());
 }

@@ -53,6 +53,20 @@ struct Column {
 bool bare(std::string_view cell);
 
 /**
+ * @brief A part of a run as its setup banner shows it: settings in words, then quantities, each a row of
+ *        quantity, value, units, target (empty) and basis cells as Text::quantities takes them.
+ */
+struct Summary {
+    std::vector<std::pair<std::string, std::string>> settings{};
+    std::vector<Row> quantities{};
+
+    void setting(std::string name, std::string value);
+    /** @param units "-" when dimensionless; units::column for dimensional ones */
+    void quantity(std::string name, std::string value, std::string units, std::string basis = "");
+    void add(const Summary & other);
+};
+
+/**
  * @brief Text built section by section: headings, indented lines and tables, each line at most
  *        logging::WIDTH wide (tables 120) where it can wrap.
  */

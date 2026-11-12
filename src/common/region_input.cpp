@@ -1701,6 +1701,22 @@ Region read(const Input & value, const std::string & where, const Input * names,
     return Region(parse(value, where, names, mesh));
 }
 
+Region boundary(const Region & filled) {
+    Definition d;
+    d.pieces = boundary_pieces(filled.filled(), filled.root(), false);
+    d.dimension = N_DIM - 1;
+    d.closed = true;
+    d.nodes = filled.nodes();
+    d.vertices = filled.vertices();
+    d.programs = filled.programs();
+    d.filled = filled.filled();
+    d.conditions = filled.conditions();
+    d.bounded = filled.bounded();
+    d.resolution = filled.resolution();
+    d.summary = "boundary(" + filled.summary() + ")";
+    return Region(std::move(d));
+}
+
 void require_full_dimension(const Region & region, const Input & value, const std::string & where) {
     if (region.dimension() == N_DIM) return;
     const std::string what = region.name().empty() ? "this region" : "\"" + region.name() + "\"";
@@ -1738,11 +1754,6 @@ bool conditions_read_gradients(const Input & input) {
 }
 
 void require_fixed(const Region & region, const Input & value, const std::string & where, const std::string & what) {
-    if (region.solution()) {
-        fail(where, line_of(value), "follows the solution, and " + what + " of regions defined by the solution are not "
-                                    "supported yet",
-             "Give a fixed region", SOLUTION_DOCS);
-    }
     if (!region.moving()) return;
     fail(where, line_of(value), "moves (it has expressions of t), and " + what + " of moving regions are not supported yet",
          "Give a fixed region", "docs/guide/geometry.md#moving-regions");

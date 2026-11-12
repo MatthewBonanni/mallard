@@ -376,6 +376,8 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
     const bool append = one_file && vtkhdf_steps > 0;
     const uint64_t k = one_file ? vtkhdf_steps : 0;
     const uint64_t n_block = m.order.size();
+    // A region that changes between snapshots: each step's mesh follows the previous ones' in the series
+    const bool changing = one_file && subset_at;
 
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
@@ -400,25 +402,27 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
         Handle top(H5Gcreate2(file, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating VTKHDF");
         write_array_attribute(top, "Version", VTKHDF_VERSION);
         write_string_scalar_attribute(top, "Type", "UnstructuredGrid");
-        write_count(top, "NumberOfPoints", m.n_points, dxpl, distributed);
-        write_dataset(top, "Points", m.n_points, 3, m.first_point, m.points.size() / 3, m.points.data(), dxpl, deflate,
-                      serial, io_threads);
-        annotate(top, "Points", FieldDescription{dim::length, "point coordinates", "", ""});
-        auto topology = [&](hid_t group, uint64_t n_cells, uint64_t n_ids, bool mine) {
-            const std::vector<int64_t> none;
-            const std::vector<int64_t> zero = {0};
-            const auto & offsets = mine ? m.offsets : last_rank(distributed) ? zero : none;
-            const auto & connectivity = mine ? m.connectivity : none;
-            write_count(group, "NumberOfCells", n_cells, dxpl, distributed);
-            write_count(group, "NumberOfConnectivityIds", n_ids, dxpl, distributed);
-            write_dataset(group, "Offsets", n_cells + 1, 1, mine ? m.first_cell : n_cells, offsets.size(),
-                          offsets.data(), dxpl, deflate, serial, io_threads);
-            write_dataset(group, "Connectivity", n_ids, 1, mine ? m.first_id : n_ids, connectivity.size(),
-                          connectivity.data(), dxpl, deflate, serial, io_threads);
-        };
-        topology(top, m.n_cells, m.n_ids, true);
-        write_dataset(top, "Types", m.n_cells, 1, m.first_cell, m.types.size(), m.types.data(), dxpl, deflate,
-                      serial, io_threads);
+        if (!changing) {
+            write_count(top, "NumberOfPoints", m.n_points, dxpl, distributed);
+            write_dataset(top, "Points", m.n_points, 3, m.first_point, m.points.size() / 3, m.points.data(), dxpl,
+                          deflate, serial, io_threads);
+            annotate(top, "Points", FieldDescription{dim::length, "point coordinates", "", ""});
+            auto topology = [&](hid_t group, uint64_t n_cells, uint64_t n_ids, bool mine) {
+                const std::vector<int64_t> none;
+                const std::vector<int64_t> zero = {0};
+                const auto & offsets = mine ? m.offsets : last_rank(distributed) ? zero : none;
+                const auto & connectivity = mine ? m.connectivity : none;
+                write_count(group, "NumberOfCells", n_cells, dxpl, distributed);
+                write_count(group, "NumberOfConnectivityIds", n_ids, dxpl, distributed);
+                write_dataset(group, "Offsets", n_cells + 1, 1, mine ? m.first_cell : n_cells, offsets.size(),
+                              offsets.data(), dxpl, deflate, serial, io_threads);
+                write_dataset(group, "Connectivity", n_ids, 1, mine ? m.first_id : n_ids, connectivity.size(),
+                              connectivity.data(), dxpl, deflate, serial, io_threads);
+            };
+            topology(top, m.n_cells, m.n_ids, true);
+            write_dataset(top, "Types", m.n_cells, 1, m.first_cell, m.types.size(), m.types.data(), dxpl, deflate,
+                          serial, io_threads);
+        }
         for (const char * name : {"CellData", "PointData", "FieldData"}) {
             Handle group(H5Gcreate2(top, name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, name);
         }
@@ -442,7 +446,8 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
     }
     if (append) {
         Handle cells(H5Gopen2(top, ".", H5P_DEFAULT), H5Gclose, "opening the cells");
-        bool same = read_rows<int64_t>(cells, "NumberOfCells", 0, 1, 1, H5P_DEFAULT)[0] == static_cast<int64_t>(m.n_cells);
+        bool same = changing || read_rows<int64_t>(cells, "NumberOfCells", 0, 1, 1, H5P_DEFAULT)[0] ==
+                                    static_cast<int64_t>(m.n_cells);
         Handle cell_data(H5Gopen2(top, "CellData", H5P_DEFAULT), H5Gclose, "opening CellData");
         H5G_info_t info;
         check(H5Gget_info(cell_data, &info), "H5Gget_info");
@@ -455,6 +460,38 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
         }
     }
 
+    // Points, cells and connectivity ids of the steps before this one
+    uint64_t points_before = 0, cells_before = 0, ids_before = 0;
+    if (changing && k > 0) {
+        auto sum = [&](const char * name) {
+            uint64_t total = 0;
+            for (const int64_t n : read_rows<int64_t>(top, name, 0, k, 1, H5P_DEFAULT)) total += static_cast<uint64_t>(n);
+            return total;
+        };
+        points_before = sum("NumberOfPoints");
+        cells_before = sum("NumberOfCells");
+        ids_before = sum("NumberOfConnectivityIds");
+    }
+    const uint64_t data_before = changing ? cells_before : k * m.n_cells;
+    if (changing) {
+        const uint64_t mine = first_rank(distributed) ? 1 : 0;
+        const int64_t counts[3] = {static_cast<int64_t>(m.n_points), static_cast<int64_t>(m.n_cells),
+                                   static_cast<int64_t>(m.n_ids)};
+        put_rows(top, "NumberOfPoints", k + 1, 1, k, mine, &counts[0], dxpl);
+        put_rows(top, "NumberOfCells", k + 1, 1, k, mine, &counts[1], dxpl);
+        put_rows(top, "NumberOfConnectivityIds", k + 1, 1, k, mine, &counts[2], dxpl);
+        put_rows(top, "Points", points_before + m.n_points, 3, points_before + m.first_point, m.points.size() / 3,
+                 m.points.data(), dxpl, deflate);
+        // Each step's offsets have one more row than its cells
+        put_rows(top, "Offsets", cells_before + k + m.n_cells + 1, 1, cells_before + k + m.first_cell,
+                 m.offsets.size(), m.offsets.data(), dxpl, deflate);
+        put_rows(top, "Connectivity", ids_before + m.n_ids, 1, ids_before + m.first_id, m.connectivity.size(),
+                 m.connectivity.data(), dxpl, deflate);
+        put_rows(top, "Types", cells_before + m.n_cells, 1, cells_before + m.first_cell, m.types.size(),
+                 m.types.data(), dxpl, deflate);
+        if (!append) annotate(top, "Points", FieldDescription{dim::length, "point coordinates", "", ""});
+    }
+
     Handle cell_data(H5Gopen2(top, "CellData", H5P_DEFAULT), H5Gclose, "opening CellData");
     std::vector<rtype> local;
     for (size_t f = 0; f < fields.size(); f++) {
@@ -464,7 +501,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
         const std::vector<rtype> block = m.order.gather<rtype>(local, n_comp);
         const char * name = fields[f].name.c_str();
         if (one_file) {
-            put_rows(cell_data, name, (k + 1) * m.n_cells, int(n_comp), k * m.n_cells + m.first_cell, n_block,
+            put_rows(cell_data, name, data_before + m.n_cells, int(n_comp), data_before + m.first_cell, n_block,
                      block.data(), dxpl, deflate);
         } else {
             write_dataset(cell_data, name, m.n_cells, int(n_comp), m.first_cell, n_block, block.data(), dxpl, deflate,
@@ -477,27 +514,28 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
     }
     if (!one_file) return;
 
-    // Every snapshot reuses the mesh: its parts, points and cells all start at 0
+    // Every snapshot reuses the mesh, its parts, points and cells all starting at 0, unless it changes
     Handle steps = open_or_create_group(top, "Steps");
     set_attribute<int64_t>(steps, "NSteps", static_cast<int64_t>(k + 1));
     const uint64_t mine = first_rank(distributed) ? 1 : 0;
     const double time = snapshot.time;
-    const std::array<int64_t, 4> zeros = {0, 0, 0, 0};
     const int64_t one = 1;
     put_rows(steps, "Values", k + 1, 1, k, mine, &time, dxpl);
     if (!append) annotate(steps, "Values", FieldDescription{dim::time, "time", "time", ""});
-    put_rows(steps, "PartOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
+    const int64_t part = changing ? static_cast<int64_t>(k) : 0, point_offset = static_cast<int64_t>(points_before),
+                  cell_offset = static_cast<int64_t>(cells_before), id_offset = static_cast<int64_t>(ids_before);
+    put_rows(steps, "PartOffsets", k + 1, 1, k, mine, &part, dxpl);
     put_rows(steps, "NumberOfParts", k + 1, 1, k, mine, &one, dxpl);
-    put_rows(steps, "PointOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
-    put_rows(steps, "CellOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
-    put_rows(steps, "ConnectivityIdOffsets", k + 1, 1, k, mine, zeros.data(), dxpl);
+    put_rows(steps, "PointOffsets", k + 1, 1, k, mine, &point_offset, dxpl);
+    put_rows(steps, "CellOffsets", k + 1, 1, k, mine, &cell_offset, dxpl);
+    put_rows(steps, "ConnectivityIdOffsets", k + 1, 1, k, mine, &id_offset, dxpl);
     open_or_create_group(steps, "PointDataOffsets");
     Handle field_offsets = open_or_create_group(steps, "FieldDataOffsets");
     const int64_t field_offset = static_cast<int64_t>(k);
     put_rows(field_offsets, "TIME", k + 1, 1, k, mine, &field_offset, dxpl);
     if (snapshot_blocks) put_rows(field_offsets, "STEP", k + 1, 1, k, mine, &field_offset, dxpl);
     Handle data_offsets = open_or_create_group(steps, "CellDataOffsets");
-    const int64_t offset = static_cast<int64_t>(k * m.n_cells);
+    const int64_t offset = static_cast<int64_t>(data_before);
     for (const auto & field : fields) put_rows(data_offsets, field.name.c_str(), k + 1, 1, k, mine, &offset, dxpl);
     vtkhdf_steps = k + 1;
 }
