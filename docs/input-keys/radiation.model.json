@@ -1,0 +1,8 @@
+{
+ "default": "\"optically_thin\"",
+ "dims": [
+  2
+ ],
+ "set_in": [],
+ "type": "string"
+}

@@ -1,0 +1,12 @@
+{
+ "default": "18",
+ "defaults_by_dim": {
+  "2": "10"
+ },
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [],
+ "type": "integer"
+}
