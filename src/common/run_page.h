@@ -106,8 +106,11 @@ class Page {
         /** @brief The start record's check, part by part, with the largest CFL number of the progress rows. */
         std::vector<CheckPart> check() const;
         Series & series(const std::string & group, const std::string & name, const std::string & unit);
-        /** @brief The unit the start record gives a progress record quantity (of an object of it; "": at the top). */
-        std::string unit(const std::string & group, const std::string & name) const;
+        /**
+         * @brief The unit the start record gives a progress record quantity: of an object of it (and of an object
+         *        of that, as the probes' by probe), "" at the top.
+         */
+        std::string unit(const std::string & group, const std::string & name, const std::string & member = "") const;
 
         uint64_t n_records = 0;
         bool nondimensional = false;

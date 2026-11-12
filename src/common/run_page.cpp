@@ -223,6 +223,10 @@ std::string group_note(const std::string & group) {
         return "The force on the zone's walls, from the pressure and the viscous stress, as its [[forces]] file "
                "records it; per unit depth in 2D.";
     }
+    if (group.starts_with("Probe ")) {
+        return "The probe's latest reductions (or a one-point probe's values) at each progress row, as its CSV "
+               "files record them; the files hold every write.";
+    }
     if (group == "Conservation") {
         return "The conservation ledger's unexplained change of each total, relative to its scale (see Health).";
     }
@@ -234,6 +238,16 @@ std::string group_note(const std::string & group) {
 std::string caption(const Series & s) {
     if (s.group == "Conservation") return "unexplained change of the " + s.name + " total, relative to its scale";
     if (s.group == "Numerical repairs") return "times the repair " + s.name + " has acted";
+    if (s.group.starts_with("Probe ")) {
+        static const std::vector<std::pair<std::string, std::string>> REDUCTIONS = {
+            {"integral_", "integral"}, {"mean_", "mean"},          {"favre_", "density-weighted (Favre) mean"},
+            {"min_", "lowest value"},  {"max_", "highest value"}, {"rms_", "root mean square"}};
+        for (const auto & [prefix, words] : REDUCTIONS) {
+            if (s.name.starts_with(prefix)) return words + " of " + s.name.substr(prefix.size()) + " over the probe";
+        }
+        if (s.name.starts_with("moment_")) return "moment of " + s.name.substr(7) + " about moment_center";
+        return s.name + " at the probe's point";
+    }
     const std::string d = description(s.name);
     return d.empty() ? s.name : d;
 }
@@ -360,11 +374,12 @@ void Kept::add(const json::Value & v) {
     if (last.size() > KEPT) last.erase(last.begin());
 }
 
-std::string Page::unit(const std::string & group, const std::string & name) const {
+std::string Page::unit(const std::string & group, const std::string & name, const std::string & member) const {
     const json::Value * units = start.find("units");
     if (!units) return "";
     if (!group.empty()) units = units->find(group);
-    const json::Value * u = units ? units->find(name) : nullptr;
+    if (units && !member.empty()) units = units->find(name);
+    const json::Value * u = units ? units->find(member.empty() ? name : member) : nullptr;
     return u && u->type == Type::STRING ? shown(u->string) : "";
 }
 
@@ -408,6 +423,20 @@ void Page::progress(const json::Value & r) {
         for (size_t j = 0; j < v.names.size(); j++) {
             if (v.names[j] != "step" && v.names[j] != "t") {
                 add(group, v.names[j], &v.members[j], s, time, unit(key, v.names[j]));
+            }
+        }
+    }
+    if (const json::Value * probes = r.find("probes"); probes && probes->type == Type::OBJECT) {
+        for (size_t i = 0; i < probes->names.size(); i++) {
+            const json::Value & v = probes->members[i];
+            if (v.type != Type::OBJECT) continue;
+            const uint64_t s = static_cast<uint64_t>(number_of(v.find("step"), double(step)));
+            const double time = number_of(v.find("t"), t);
+            for (size_t j = 0; j < v.names.size(); j++) {
+                if (v.names[j] != "step" && v.names[j] != "t") {
+                    add("Probe " + probes->names[i], v.names[j], &v.members[j], s, time,
+                        unit("probes", probes->names[i], v.names[j]));
+                }
             }
         }
     }
