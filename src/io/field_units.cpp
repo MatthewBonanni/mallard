@@ -15,6 +15,8 @@
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <tuple>
 
 namespace {
 
@@ -157,9 +159,13 @@ std::optional<FieldDescription> find_base(const std::string & name) {
     return std::nullopt;
 }
 
-/** @brief A scalar that statistics sample: a conservative, a primitive, Y_<species> or RHOY_<species>. */
+/**
+ * @brief A scalar that statistics sample: a conservative, a primitive, Y_<species>,
+ *        RHOY_<species> or a derived field.
+ */
 std::optional<FieldDescription> find_sampled_scalar(const std::string & name) {
-    bool sampled = (starts_with(name, "Y_") && name.size() > 2) || (starts_with(name, "RHOY_") && name.size() > 5);
+    bool sampled = (starts_with(name, "Y_") && name.size() > 2) || (starts_with(name, "RHOY_") && name.size() > 5) ||
+                   derived::find(name.c_str()) != derived::N_FIELDS;
     for (const auto & conservative : CONSERVATIVE_NAMES) sampled = sampled || name == conservative;
     for (const auto & primitive : PRIMITIVE_NAMES) sampled = sampled || name == primitive;
     return sampled ? find_base(name) : std::nullopt;
@@ -192,17 +198,45 @@ std::optional<FieldDescription> find(const std::string & name) {
         if (!of) return std::nullopt;
         return FieldDescription{of->dimension, "time average of " + of->long_name, "", ""};
     }
-    if (starts_with(name, "COV_")) {
+    if (starts_with(name, "FAVRE_MEAN_")) {
+        auto of = find_sampled(name.substr(11));
+        if (!of) return std::nullopt;
+        return FieldDescription{of->dimension, "Favre (density-weighted) time average of " + of->long_name, "", ""};
+    }
+    if (starts_with(name, "RMS_")) {
+        auto of = find_sampled(name.substr(4));
+        if (!of) return std::nullopt;
+        return FieldDescription{of->dimension, "root mean square fluctuation of " + of->long_name, "", ""};
+    }
+    for (const char * prefix : {"COV_", "FAVRE_COV_"}) {
+        if (!starts_with(name, prefix)) continue;
         // COV_<A>_<B> of two sampled scalars: the first split whose halves are both (names hold underscores)
-        const std::string pair = name.substr(4);
+        const std::string pair = name.substr(std::string(prefix).size());
+        const std::string what = prefix[0] == 'F' ? "Favre covariance of " : "covariance of ";
         for (size_t at = pair.find('_'); at != std::string::npos; at = pair.find('_', at + 1)) {
             const auto a = find_sampled_scalar(pair.substr(0, at)), b = find_sampled_scalar(pair.substr(at + 1));
             if (a && b) {
-                return FieldDescription{a->dimension.times(b->dimension),
-                                        "covariance of " + a->long_name + " and " + b->long_name, "", ""};
+                return FieldDescription{a->dimension.times(b->dimension), what + a->long_name + " and " + b->long_name,
+                                        "", ""};
             }
         }
         return std::nullopt;
+    }
+    if (starts_with(name, "CI_MEAN_") || starts_with(name, "CI_COV_")) {
+        auto of = find(name.substr(3));
+        if (!of) return std::nullopt;
+        return FieldDescription{of->dimension, "confidence interval half width of the " + of->long_name, "", ""};
+    }
+    // Restart state of the batches of [statistics]
+    for (const auto & [prefix, power, what] : {std::tuple{"BATCH_AVG_", 1, "mean over the closed batches of the "},
+                                               std::tuple{"BATCH_M2_", 2, "sum of squared deviations over the closed batches of the "},
+                                               std::tuple{"BATCH_", 1, "current batch's "}}) {
+        if (!starts_with(name, prefix)) continue;
+        const std::string average = name.substr(std::string(prefix).size());
+        if (!starts_with(average, "MEAN_") && !starts_with(average, "COV_")) continue;
+        auto of = find(average);
+        if (!of) return std::nullopt;
+        return FieldDescription{power == 2 ? of->dimension.times(of->dimension) : of->dimension, what + of->long_name, "", ""};
     }
     if (starts_with(name, "PHASE_")) {
         const size_t at = name.find('_', 6);
@@ -245,7 +279,8 @@ std::string group(const std::string & name) {
     }
     if (starts_with(name, "SOURCE_")) return "sources";
     if (starts_with(name, "STENCIL_")) return STENCILS;
-    for (const char * prefix : {"MEAN_", "COV_", "PHASE_"}) {
+    for (const char * prefix : {"MEAN_", "COV_", "PHASE_", "RMS_", "FAVRE_MEAN_", "FAVRE_COV_", "CI_MEAN_", "CI_COV_",
+                                "BATCH_MEAN_", "BATCH_COV_", "BATCH_AVG_", "BATCH_M2_"}) {
         if (starts_with(name, prefix)) return "statistics";
     }
     return "";
@@ -268,11 +303,17 @@ std::vector<CatalogField> catalog() {
         {"MEAN_<A>", dim::none, "", "statistics", "[statistics] fields with A, or [[probes]] averaging A"},
         {"COV_<A>_<B>", dim::none, "", "statistics", "[statistics] products with A*B"},
         {"PHASE_<bin>_<A>", dim::none, "", "statistics", "[statistics.phase]"},
+        {"RMS_<A>", dim::none, "", "statistics", "mallard post average, of A with its variance"},
+        {"FAVRE_MEAN_<A>", dim::none, "", "statistics", "mallard post average --favre"},
+        {"FAVRE_COV_<A>_<B>", dim::none, "", "statistics", "mallard post average --favre, of A*B"},
+        {"CI_<average>", dim::none, "", "statistics", "[statistics] batch, of a MEAN_ or COV_ average"},
         {"STENCIL_<id>", dim::none, "", STENCILS, "mallard check --mesh-fields with --cells or --region"},
     };
     const char * long_names[] = {"source of A, per second", "time average of A", "covariance of A and B",
-                                 "phase average of A in a bin", "membership in the stencils of cell id"};
-    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "1"};
+                                 "phase average of A in a bin", "root mean square fluctuation of A",
+                                 "Favre (density-weighted) time average of A", "Favre covariance of A and B",
+                                 "confidence interval half width of an average", "membership in the stencils of cell id"};
+    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "A's", "A's", "A's times B's", "the average's", "1"};
     for (size_t i = 0; i < std::size(derived); i++) {
         out.push_back({derived[i].name, units[i], long_names[i], derived[i].group, derived[i].needs});
     }

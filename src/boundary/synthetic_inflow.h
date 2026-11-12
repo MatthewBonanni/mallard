@@ -38,7 +38,7 @@ constexpr uint8_t N_STRESS = N_DIM * (N_DIM + 1) / 2;
  *        expressions in x, y, z), and with a
  *        `[boundaries.turbulence]` table its `reynolds_stress` (numbers or
  *        expressions), or both from its `profile`, a CSV file of plane
- *        averages (tools/post/plane_average.py: a coordinate column, `MEAN_U_*` and
+ *        averages (mallard post average --homogeneous: a coordinate column, `MEAN_U_*` and
  *        `COV_U_*_U_*`) interpolated linearly along that coordinate.
  */
 class InletProfile {

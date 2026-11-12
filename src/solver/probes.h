@@ -226,6 +226,20 @@ class Probes {
         std::vector<std::string> value_names() const;
         /** @brief The latest monitored values, as value_names(); NaN before a probe's first write. Rank 0 when distributed. */
         std::vector<double> values() const;
+        /** @brief Step of each monitored value's latest write (NO_VALUE before it), as value_names(); on every rank. */
+        std::vector<uint64_t> value_steps() const;
+        /** @brief Whether a probe wrote monitored values at this step. */
+        bool wrote_values(uint64_t step) const;
+        /** @brief Dimension of each monitored value, as value_names(). */
+        std::vector<Dimension> value_dimensions() const;
+        static constexpr uint64_t NO_VALUE = UINT64_MAX;
+
+        /** @brief Monitored values the run record keeps per progress row, at most, over every probe. */
+        static constexpr size_t RECORDED = 64;
+        /** @brief By probe, the monitored values the run record keeps: the first RECORDED, in value_names() order. */
+        std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>>>> recorded_columns() const;
+        /** @brief The latest of them, of each probe that has written (rank 0 when distributed). */
+        std::vector<MonitorValues> recorded() const;
 
         std::vector<std::pair<std::string, std::string>> summary() const;
         std::vector<std::string> files() const;
@@ -337,6 +351,10 @@ class Probes {
             std::string last_file;                               // vtp, vtkhdf: the file written last
             bool point_value = false;   // one sample, evaluated at every write: its values are monitored
             std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
+            uint64_t step_last_value = NO_VALUE;           // of the latest values, on every rank
+            std::vector<std::pair<std::string, Dimension>> monitored;  // what last holds, with its dimensions
+            uint64_t last_step = 0;
+            double last_t = 0.0;
             double measure = 0.0;      // of the samples, at the latest reduction
             std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
 
