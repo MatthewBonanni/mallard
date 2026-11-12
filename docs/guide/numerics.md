@@ -70,9 +70,10 @@ Why each, and what it passes (each check runs in the test suite,
   These are the reconstruction and flux of `cbc_les` and `channel_les`, within 0.7–1.6% of the
   DNS ([benchmark](https://matthewbonanni.github.io/mallard/validation/#les)).
   SSPRK54 at `cfl = 2.0` takes two thirds of SSPRK3's right-hand-side
-  evaluations at 0.8 for the same result: `cbc_les` on 32³ cells gives the
-  same spectra at both stations (log10 RMS deviation 0.153 / 0.151, resolved
-  energy 1.538 / 1.505) in 172 steps against 428, and the kinetic energy of
+  evaluations at 0.8 for the same result: `cbc_les` gives the same spectra
+  at both stations (log10 RMS deviation 0.107 / 0.104 and resolved energy
+  1.250 / 1.020 on 64³ cells, 0.153 / 0.151 and 1.538 / 1.505 on 32³) in 408
+  steps against 1,018 (64³), and the kinetic energy of
   the Taylor–Green vortex (2D as above, and 3D on 32³ cells to t = 10) agrees
   within 0.06%. Under-resolved double shear layers stay stable up to `cfl = 3.2`
   on quads and triangles, and a turbulent channel on stretched cells (32 x
