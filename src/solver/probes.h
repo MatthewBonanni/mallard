@@ -34,6 +34,7 @@
 #include "boundary.h"
 #include "probe_geometry.h"
 #include "probe_spectra.h"
+#include "common_io.h"
 #include "probe_surface.h"
 #include "data.h"
 #include "statistics.h"
@@ -228,7 +229,8 @@ class Probes {
         /** @brief The latest of them, of each probe that has written (rank 0 when distributed). */
         std::vector<MonitorValues> recorded() const;
 
-        std::vector<std::pair<std::string, std::string>> summary() const;
+        /** @brief The outputs as the setup banner lists them, one per probe. */
+        std::vector<OutputSummary> summary() const;
         std::vector<std::string> files() const;
         /**
          * @brief Rank 0 adds the run block of a run starting at step to the files written so
