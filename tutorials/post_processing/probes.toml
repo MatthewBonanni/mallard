@@ -1,0 +1,37 @@
+
+# Probes of the from-run-to-figure tutorial, added after the run and
+# evaluated on its snapshots by mallard post extract:
+#   cat input.toml probes.toml > measure.toml
+#   mallard post extract solut/wake.vtkhdf.series -i measure.toml
+
+# The wall: pressure and skin-friction coefficients of the free stream, and
+# the integral of the tractions, the force of [[forces]]
+[[probes]]
+name = "wall"
+boundary = "cylinder"
+fields = ["CP", "CF", "TRACTION_PRESSURE", "TRACTION_VISCOUS"]
+reference = {rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}
+reductions = ["integral"]
+
+# The wake axis behind the cylinder: U_X < 0 in the recirculation
+[[probes]]
+name = "axis"
+type = "line"
+start = [0.5, 0.0]
+end = [5.5, 0.0]
+n_points = 201
+fields = ["U_X"]
+sampling = "point"
+
+# A circle of radius 5 around the cylinder: the mass and momentum flowing
+# out through it
+[[probes]]
+name = "contour"
+type = "circle"
+center = [0.0, 0.0]
+radius = 5.0
+n_points = 400
+fields = ["MASS_FLUX", "MOMENTUM_FLUX"]
+sampling = "point"
+samples = false
+reductions = ["integral"]
