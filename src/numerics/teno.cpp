@@ -1120,7 +1120,7 @@ struct TENOFunctor {
             turned_entry_W(c, code, W_e);
             return;
         }
-        FOR_I_CONSERVATIVE W_e[i] = W(c, i);
+        FOR_I_CONSERVATIVE W_e[i] = load_read_only(&W(c, i));
         if (code >= 0) ghost_W(c, code, W_e);
     }
 
@@ -1145,7 +1145,7 @@ struct TENOFunctor {
     /** @brief entry_W of an entry reached across a periodic rotation. */
     KOKKOS_FUNCTION
     void turned_entry_W(const int32_t c, const int32_t code, rtype * W_e) const {
-        FOR_I_CONSERVATIVE W_e[i] = W(c, i);
+        FOR_I_CONSERVATIVE W_e[i] = load_read_only(&W(c, i));
         int32_t row, rel_row;
         const int32_t f = teno::entry_face(code, boundary_faces, row, rel_row);
         if (f >= 0) {
