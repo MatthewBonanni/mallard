@@ -631,7 +631,7 @@ constexpr Command COMMANDS[] = {
         .summary = "The input keys there are, or exactly those of one case: type, units, default, values",
         .synopsis = "mallard list keys [SECTION] [INPUT] [--format text|json]",
         .description =
-            "Without an input file, lists the key catalog docs/input-keys.json: every key the examples and "
+            "Without an input file, lists the key catalog docs/input-keys/: every key the examples and "
             "tutorials read, by table, with its type, units (of a number with a physical dimension), default "
             "(or required) and accepted values; (2D) or (3D) marks a key only that dimension reads.\n"
             "\n"

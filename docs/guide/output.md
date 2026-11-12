@@ -44,7 +44,13 @@ region = "cylinder"           # a boundary zone, a slice, a volume: any region (
 fields = ["P", "T"]
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
+*Used in:*
+[`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod),
+[`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher),
+[`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
+[`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
+[`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
+and 48 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -367,7 +373,13 @@ input.toml --mesh-fields mesh` shows that of 8 ranks.
 check_interval = 100   # a progress row every 100 steps
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
+*Used in:*
+[`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod),
+[`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher),
+[`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
+[`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
+[`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
+and 48 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, then the Mesh, Physics (with the case's units, `physics.units`),
@@ -810,7 +822,7 @@ Before 0.10 the block was named the provenance block: schema
 `"mallard-provenance"`, the comment `<!-- provenance {...} -->`, the attribute
 `provenance` and the CSV line `# provenance {...}`, without `run_id` and
 `restart_of`. Every reader (`mallard info`, the post-processing commands,
-`tools/mallard`) reads those names too, and says so. Version 2 (0.9.1) added
+`tools/mallard`) reads those names too, and says so. Version 2 (development builds after 0.9.1) added
 `input.resolved`; version 1 (0.9) had none, its preset values were plain text
 (`"HLLC"`), and a `setup` object held the terminal output's setup summary as
 `[key, value]` pairs per section; `resolved_input()` of `tools/mallard/vtu.py`
@@ -882,7 +894,7 @@ build reads. It is never misread.
 | XDMF output (`format = "xdmf"`; `"hdf5"` before 0.10) | root attribute `version` of both files | 1 (0.6) | ParaView, `tools/mallard/h5.py` |
 | VTU output | field data `MALLARD_FORMAT_VERSION` | none before 0.9, 1 (0.9) | ParaView, `tools/mallard/vtu.py` |
 | Run record (`mallard.jsonl`, `[output] run_log`) | `version` of each `start` record | 1 (0.9), 2: `run_id`, `restart_of`, `output` records (0.10) | Your scripts (records only gain fields within a version) |
-| [Run block](#run-block) (every output file) | its `version` | 3: `mallard-run`, `run_id`, `restart_of` (0.10); as the provenance block: 2 (0.9.1), 1 (0.9) | `mallard info`, `tools/mallard/vtu.py` (`run_block()`, `resolved_input()`, every version) |
+| [Run block](#run-block) (every output file) | its `version` | 3: `mallard-run`, `run_id`, `restart_of` (0.10); as the provenance block: 2 (development builds after 0.9.1), 1 (0.9) | `mallard info`, `tools/mallard/vtu.py` (`run_block()`, `resolved_input()`, every version) |
 | [Snapshot block](#snapshot-metadata) (every snapshot) | its `version` | 1 (0.10) | `mallard info`, `tools/mallard/vtu.py` (`snapshot_blocks()`) |
 | Probe output (`[[probes]]` `format = "hdf5"`, `"vtkhdf"`, `"vtp"`) | root attribute `version` (HDF5, VTKHDF), field data `MALLARD_FORMAT_VERSION` (VTP) | 1 (0.9) | Mallard (restarts append to HDF5), ParaView |
 | TENO cache (`cache_file`) | magic `MALLARD-TENO-<n>` | - | Rebuilt automatically when it does not match |
