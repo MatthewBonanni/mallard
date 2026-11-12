@@ -45,10 +45,10 @@ class Session {
 #endif
 };
 
-/** @brief Rank of this process in the world communicator. */
+/** @brief Rank of this process in the world communicator; 0 before MPI starts and after it ends. */
 int rank();
 
-/** @brief Number of processes in the world communicator. */
+/** @brief Number of processes in the world communicator; 1 before MPI starts and after it ends. */
 int size();
 
 /** @brief Whether this is rank 0, which does all logging. */

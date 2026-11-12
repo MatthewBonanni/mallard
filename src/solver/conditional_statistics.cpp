@@ -491,8 +491,9 @@ void ConditionalStatistics::write(uint64_t step, rtype t, const std::string & re
     logging::written(step, double(t), "conditional", file_name, reason, file_name);
 }
 
-std::string ConditionalStatistics::summary() const {
-    std::string text = n_on == 1 ? "PDF of " : "joint PDF of ";
+OutputSummary ConditionalStatistics::summary() const {
+    std::string text = "from t = " + units::with(logging::real(double(t_start)), "s") + ": " +
+                       (n_on == 1 ? "PDF of " : "joint PDF of ");
     for (uint32_t v = 0; v < n_on; v++) {
         text += (v ? " and " : "") + on[v] + " (" + std::to_string(n_bins[v]) + " bins in [" +
                 logging::real(lo[v]) + ", " + logging::real(hi[v]) + "])";
@@ -503,7 +504,5 @@ std::string ConditionalStatistics::summary() const {
     }
     text += std::string(", weighted by ") + (mass ? "mass" : "volume");
     if (!region_text.empty()) text += " in " + region_text;
-    text += ", every " + logging::count(interval) + " steps from t = " + units::with(logging::real(double(t_start)), "s");
-    text += " -> " + file_name;
-    return text;
+    return {.kind = "conditional", .file = file_name, .steps = interval, .contents = text};
 }
