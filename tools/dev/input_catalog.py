@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""The key catalog of Mallard's input (docs/input-keys.json), made by the setup itself.
+"""The key catalog of Mallard's input (docs/input-keys/), made by the setup itself.
 
     python tools/dev/input_catalog.py build --mallard-2d build/src/mallard --mallard-3d build-3d/src/mallard [--check]
-    python tools/dev/input_catalog.py docs [--catalog docs/input-keys.json]
+    python tools/dev/input_catalog.py docs [--catalog docs/input-keys]
 
 build: runs `mallard check INPUT --catalog KEYS.json` on every input of examples/
 and tutorials/, in its directory on a temporary copy whose generated mesh is cut to
 a few cells per direction (each check takes seconds; inputs whose mesh file is not
 in the repository are skipped) and
-merges what setup recorded into docs/input-keys.json: for each key path, its type,
+merges what setup recorded into docs/input-keys/, one file per key path: its type,
 physical dimension (and the unit of a plain number, when not SI), default (as TOML
 text) or that it is required, the accepted values, the builds (2D, 3D) whose setup
-read it, and the inputs that set it. With --check it compares with the
-committed file instead of writing it, and exits 1 if they differ.
+read it, and the inputs that set it. A key's file is its path, percent-encoded
+outside [a-z0-9_.-] (file systems that ignore case keep sigma_t and sigma_T apart),
+plus .json. With --check it compares with the committed files instead of writing
+them, and exits 1 if they differ.
 
 docs: compares the catalog's defaults with the defaults docs/input.md states
 ("default X", "Default: X", "X (default)" in a key's row) and exits 1 on any
@@ -25,10 +27,12 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CATALOG = ROOT / "docs" / "input-keys.json"
+CATALOG = ROOT / "docs" / "input-keys"
+PLAIN = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_.-")
 SIZE_KEYS = ("Nx", "Ny", "Nz")
 TUTORIAL_DIMS = {"wedge": 2, "cylinder": 2, "measuring": 2, "cone": 3, "channel_les": 3, "cluster": 2}
 
@@ -107,14 +111,36 @@ def build(args):
     for m in merged.values():
         m["dims"].sort()
         m["set_in"].sort()
-    text = json.dumps(dict(sorted(merged.items())), indent=1, sort_keys=True) + "\n"
+    files = {file_name(key): json.dumps(entry, indent=1, sort_keys=True) + "\n" for key, entry in merged.items()}
+    present = {f.name: f.read_text() for f in CATALOG.glob("*.json")}
+    where = CATALOG.relative_to(ROOT)
     if args.check:
-        if not CATALOG.exists() or CATALOG.read_text() != text:
-            sys.exit(f"{CATALOG.relative_to(ROOT)} is out of date: run python tools/dev/input_catalog.py build ...")
-        print(f"{CATALOG.relative_to(ROOT)}: up to date ({len(merged)} keys)")
+        if present != files:
+            stale = sorted(set(present) ^ set(files) | {n for n in files if present.get(n, files[n]) != files[n]})
+            sys.exit(f"{where}/ is out of date ({', '.join(stale[:5])}{', ...' if len(stale) > 5 else ''}): "
+                     "run python tools/dev/input_catalog.py build ...")
+        print(f"{where}/: up to date ({len(files)} keys)")
     else:
-        CATALOG.write_text(text)
-        print(f"wrote {CATALOG.relative_to(ROOT)}: {len(merged)} keys")
+        CATALOG.mkdir(exist_ok=True)
+        for name in set(present) - set(files):
+            (CATALOG / name).unlink()
+        for name, text in files.items():
+            if present.get(name) != text:
+                (CATALOG / name).write_text(text)
+        print(f"wrote {where}/: {len(files)} keys")
+
+
+def file_name(key):
+    return "".join(c if c in PLAIN else "".join(f"%{b:02X}" for b in c.encode()) for c in key) + ".json"
+
+
+def key_of(name):
+    return urllib.parse.unquote(name.removesuffix(".json"))
+
+
+def load(directory):
+    """{key path: entry} of a catalog directory."""
+    return {key_of(f.name): json.loads(f.read_text()) for f in sorted(Path(directory).glob("*.json"))}
 
 
 # A default stated as a literal: a number, true/false, or a quoted or backticked value
@@ -149,7 +175,7 @@ def same(catalog_text, doc_text):
 
 
 def docs(args):
-    catalog = json.loads(Path(args.catalog).read_text())
+    catalog = load(args.catalog)
     documented = documented_defaults()
     wrong = []
     for path, text in documented.items():

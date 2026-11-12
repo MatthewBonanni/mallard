@@ -505,9 +505,14 @@ jobs:
                    printf '%s\n' \"\${COMPREPLY[@]}\"" | grep -qx cylinder
       - name: Run the tutorials
         run: tutorials/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/tutorials
-      # docs/input-keys.json is what setup reads from the examples and tutorials
+      # docs/input-keys/ is what setup reads from the examples and tutorials
       - name: Check the key catalog
-        run: python3 tools/dev/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
+        run: |
+          python3 tools/dev/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
+          n=$(ls docs/input-keys | wc -l)
+          test $(ls ${{ runner.temp }}/mallard/share/mallard/docs/input-keys | wc -l) -eq $n
+          test $(${{ runner.temp }}/mallard/bin/mallard list keys --format json |
+                 python3 -c 'import json, sys; print(len(json.load(sys.stdin)["keys"]))') -eq $n
       # Every case template (mallard new --quick)
       - name: Run the case templates
         run: templates/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/templates
