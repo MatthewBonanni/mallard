@@ -291,7 +291,7 @@ def figures():
 
     save_generated(
         "domain_viscous_shock_tube", "viscous_shock_tube", 40, None, figsize=(5.6, 3.4),
-        legend_kw=dict(bbox_to_anchor=(0.5, -0.12)))
+        legend_kw=dict(bbox_to_anchor=(0.5, -0.25)))
 
     def flame2d_extra(ax, P, case):
         figstyle.label(ax, 0.0061, 0.0039, "periodic in y", P, color=P["plum"], size=12)

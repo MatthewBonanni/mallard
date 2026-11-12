@@ -2393,8 +2393,8 @@ void Probes::Probe::write_reductions(uint64_t step, rtype t) const {
     row.flush();
 }
 
-std::vector<std::pair<std::string, std::string>> Probes::summary() const {
-    std::vector<std::pair<std::string, std::string>> items;
+std::vector<OutputSummary> Probes::summary() const {
+    std::vector<OutputSummary> items;
     for (const auto & pp : probes) {
         const Probe & p = *pp;
         std::string vars;
@@ -2402,10 +2402,7 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         const size_t n = p.from_region && !p.resampled ? p.quadrature.n_global : p.geometry.nodes.size();
         const bool cells = p.from_region && p.geometry.dim == N_DIM;
         const char * unit = cells ? (n == 1 ? " cell" : " cells") : (n == 1 ? " point" : " points");
-        std::string text = (p.write_samples ? p.file : p.reductions_file) + ", " + p.geometry.type + (p.from_region ? " over " : " of ") +
-                           logging::count(n) + unit +
-                           (p.interval > 0 ? " every " + logging::count(p.interval) + " steps"
-                                           : " every " + units::with(logging::real(double(p.time_interval)), "s") + " of simulated time") +
+        std::string text = p.geometry.type + (p.from_region ? " over " : " of ") + logging::count(n) + unit +
                            (p.average ? ", time averages" : "") +
                            (p.sampling == Sampling::POINT ? " (point values): " : ": ") + vars;
         if (!p.reductions.empty()) {
@@ -2418,7 +2415,11 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
             const std::string & a = p.spectra->samples_file(), & b = p.spectra->reductions_file();
             text += a + (!a.empty() && !b.empty() ? " and " : "") + b;
         }
-        items.emplace_back(p.snapshot ? (p.format == Format::VTKHDF ? "vtkhdf" : "vtu") : "probe " + p.name, text);
+        items.push_back({.kind = p.snapshot ? (p.format == Format::VTKHDF ? "vtkhdf" : "vtu") : "probe " + p.name,
+                         .file = p.write_samples ? p.file : p.reductions_file,
+                         .steps = p.interval,
+                         .seconds = p.interval > 0 ? 0.0 : double(p.time_interval),
+                         .contents = text});
     }
     return items;
 }

@@ -115,7 +115,7 @@ def main():
             ax.set_xlabel("x [m]")
             ax.set_ylabel(label)
             ax.set_xlim(0.0, 1.0)
-        axes[0].legend(loc="upper right")
+        axes[0].legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=2)
         return fig
 
     def held_fig(P):

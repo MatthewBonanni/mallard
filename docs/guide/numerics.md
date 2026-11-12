@@ -109,9 +109,14 @@ input overrides, and its Numerics section lists what is used:
 
 ```
 == Numerics ===========================
-  Preset             high_order (the input sets numerics.riemann_solver = "RHLL")
-  Reconstruction     TENO, order 5 (degree 4), 3 face quadrature points
-  Riemann solver     RHLL
+  setting          value
+  Preset           high_order (the input sets numerics.riemann_solver = "RHLL")
+  Reconstruction   TENO, order 5 (degree 4), 3 face quadrature points
+  Riemann solver   RHLL
+...
+  quantity      value  units  basis
+  CFL number    1      -      every step
+  stop at time  0.2    s      simulated time
 ```
 
 Each example's closest preset runs in the test suite

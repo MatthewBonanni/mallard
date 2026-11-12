@@ -26,6 +26,7 @@
 #include "boundary.h"
 #include "gradient.h"
 #include "log.h"
+#include "report.h"
 #include "teno.h"
 
 enum class FaceReconstructionType {
@@ -71,7 +72,7 @@ class FaceReconstruction {
         /**
          * @brief Display lines for the run log.
          */
-        virtual logging::Items summary() const;
+        virtual report::Summary summary() const;
 
         /**
          * @brief Set the mesh.
@@ -297,7 +298,7 @@ class MUSCL : public FaceReconstruction {
         MUSCL();
         ~MUSCL();
         void init(const Input & input) override;
-        logging::Items summary() const override;
+        report::Summary summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
@@ -331,7 +332,7 @@ class TENO : public FaceReconstruction {
         TENO();
         ~TENO();
         void init(const Input & input) override;
-        logging::Items summary() const override;
+        report::Summary summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
@@ -478,7 +479,7 @@ class TENO : public FaceReconstruction {
          */
         std::vector<uint32_t> cells_within_reach(const std::vector<uint32_t> & changed) const;
 
-        // 3D setup: on the host only (tests), and the cells per device batch (0: from the device memory)
+        // Setup: on the host only (tests), and the cells per device batch (0: from the device memory)
         bool setup_on_host = false;
         uint32_t setup_batch_cells = 0;
 
@@ -518,7 +519,6 @@ class TENO : public FaceReconstruction {
 
         void read_options(const Input & input);
         void compute_stencils_and_matrices(const std::vector<uint32_t> * subset = nullptr);
-        void compute_stencils_and_matrices_3d(const std::vector<uint32_t> * subset);
         void allocate_scratch();
         uint64_t options_key() const;
         uint64_t cache_key() const;

@@ -22,6 +22,8 @@
 
 #include "input.h"
 #include "version.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace input_upgrade {
 
@@ -820,7 +822,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
 int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {
-        std::cerr << "mallard input upgrade: cannot open " << file << "\n";
+        logging::error(diagnostic_code::INPUT_UPGRADE, "mallard input upgrade: cannot open " + file);
         return 1;
     }
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -838,7 +840,7 @@ int upgrade_file(const std::string & file, bool check, int dim, const std::strin
         if (check) return findings.empty() ? 0 : 1;
         std::cout << upgraded;
     } catch (const std::exception & e) {
-        std::cerr << "mallard input upgrade: " << file << ": " << e.what() << "\n";
+        logging::error(diagnostic_code::INPUT_UPGRADE, "mallard input upgrade: " + file + ": " + e.what());
         return 1;
     }
     return 0;
