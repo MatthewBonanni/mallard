@@ -211,6 +211,18 @@ makes limited runs depend on the orientation of the axes
 ([#459](https://github.com/MatthewBonanni/mallard/issues/459)); without a
 limiter, MUSCL does not.
 
+![The Barth-Jespersen and Venkatakrishnan limiter values of one face against the ratio of the neighbors' range to the face increment, and the reconstruction of a smooth wave and a jump in 18 cells with each limiter](../images/theory/limiters-light.svg#gh-light-mode-only)
+![The Barth-Jespersen and Venkatakrishnan limiter values of one face against the ratio of the neighbors' range to the face increment, and the reconstruction of a smooth wave and a jump in 18 cells with each limiter](../images/theory/limiters-dark.svg#gh-dark-mode-only)
+
+*Left: $\phi_f$ of eq. $\eqref{eq:muscl-3}$ for $\Delta_+/\Delta_- \ge 0$;
+Venkatakrishnan's is smooth, reaches 1 at $\Delta_+/\Delta_- = 2$ and exceeds
+it by up to 9% beyond, and its threshold $\varepsilon$ lifts it toward 1 where the
+variation is small compared with the cell size. Right: the face values of 18
+uniform cells in 1D (`tools/docs/limiters.py`, with the default $K = 5$).
+Barth-Jespersen flattens the cells at the smooth extrema; Venkatakrishnan keeps
+their slopes there and limits only next to the jump, where the unlimited
+reconstruction (dashed) overshoots.*
+
 ### TENO-E
 
 `type = "TENO"` with `order` $k = 3,\dots,6$ is the TENO-E scheme of
