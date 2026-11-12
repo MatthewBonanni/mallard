@@ -16,9 +16,11 @@ When a job runs:
 - **nightly**, **release** (every version tag, and by hand on a branch) and **by hand** (before a release).
 
 A job *split across* N jobs builds once, in `build-<job>`, and runs as `<job>-1of<N>` to
-`<job>-<N>of<N>`, each running every N-th test of each suite run on that build (googletest's sharding).
+`<job>-<N>of<N>`, each running a share of the job's tests of about equal duration on that build.
 A suite without MPI runs as several processes at once, one per core (Serial) or per two
-cores (OpenMP, Threads), each running a share of the job's tests.
+cores (OpenMP, Threads), each running a share of the job's tests. The shares follow the test
+durations of `main`'s newest passed run, or [`test_times.json`](../../tools/dev/test_times.json)
+([`test_split.py`](../../tools/dev/test_split.py)).
 
 ## Builds
 

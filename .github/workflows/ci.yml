@@ -211,6 +211,7 @@ jobs:
       backends: ${{ steps.pick.outputs.backends }}
       builds: ${{ steps.pick.outputs.builds }}
       shards: ${{ steps.pick.outputs.shards }}
+      times_run: ${{ steps.times.outputs.run }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -257,6 +258,18 @@ jobs:
                               | $b + {shard: ., job: "\($b.name)-\(.)of\($b.shards)"})' <<< "$backends")
           { echo "backends=$whole"; echo "builds=$builds"; echo "shards=$shards"; } >> "$GITHUB_OUTPUT"
           sh tools/dev/ci_status.sh queued $(jq -r '.[].job' <<< "$whole $builds $shards")
+      # The newest passed run on main with test reports, whose durations split every job's
+      # tests (tools/dev/test_split.py); none: tools/dev/test_times.json
+      - id: times
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success \
+                        --limit 10 --json databaseId -q '.[].databaseId'); do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts?per_page=100" \
+                  -q '[.artifacts[] | select(.name | startswith("junit-"))] | length')
+            if [ "$n" -gt 0 ]; then echo "run $id"; echo "run=$id" >> "$GITHUB_OUTPUT"; break; fi
+          done || true
 
   # The backends without shards: each job builds and runs its checks
   build-and-test:
@@ -383,6 +396,23 @@ jobs:
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache/${{ matrix.backend.name }}/${{ github.sha }}
+      # The backend's test durations, which split its tests among processes and shards: those
+      # of the run the matrix job picked, or else tools/dev/test_times.json
+      - &download-times
+        name: Download the test reports of main
+        if: needs.matrix.outputs.times_run
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ needs.matrix.outputs.times_run }}
+          github-token: ${{ github.token }}
+          pattern: junit-${{ matrix.backend.name }}*
+          path: ${{ runner.temp }}/times
+      - &test-times
+        name: Test durations
+        env:
+          NAME: ${{ matrix.backend.name }}
+        run: python3 tools/dev/test_split.py times "$RUNNER_TEMP/times" "$NAME" tools/dev/test_times.json > build/test_times.json
       # As many processes at once as the runner's cores hold: one per core with Serial, one
       # per two with OpenMP and Threads (tools/dev/parallel_test.sh)
       - &test
@@ -394,7 +424,7 @@ jobs:
           FLAGS: ${{ matrix.backend.flags }}
         run: |
           case "$FLAGS" in *OPENMP=ON*|*THREADS=ON*) threads=2 ;; *) threads=1 ;; esac
-          sh tools/dev/parallel_test.sh $(( $(getconf _NPROCESSORS_ONLN) / threads )) ./build/src/mallard test
+          sh tools/dev/parallel_test.sh $(( $(getconf _NPROCESSORS_ONLN) / threads )) build/test_times.json ./build/src/mallard test
       - name: Upgrade the inputs of every release
         if: matrix.backend.name == 'openmp'
         run: |
@@ -429,8 +459,9 @@ jobs:
           MALLARD_TEST_TIMEOUT: 600
         run: |
           mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
-          # A filter of this step, restricted to the dispatch's GTEST_FILTER (empty: no test)
-          list() { mpirun -n 1 ./build/src/mallard test --gtest_list_tests --gtest_filter="$1" |
+          # A filter of this step, restricted to GTEST_FILTER (the dispatch's selection, or the
+          # shard's share of it; empty: no test). The listing writes no JUnit report
+          list() { env -u MALLARD_TEST_XML mpirun -n 1 ./build/src/mallard test --gtest_list_tests --gtest_filter="$1" |
                    awk '/^[^ ].*\.$/ { s = $1 } /^  / { print s $1 }' | sort; }
           only() {
             if [ -z "${GTEST_FILTER:-}" ]; then echo "$1"; return; fi
@@ -511,12 +542,14 @@ jobs:
       - *configure
       - *build
       - *save-cache
+      - *download-times
+      - *test-times
       # tar keeps the symlink build/src/mallard and the modes, which an artifact drops; the
       # test jobs restore it at the same path, which the test binary has built in
       - name: Package the executables
         run: |
           strip build/src/mallard[23]d build/test/mallard-test[23]d
-          tar -cf "$RUNNER_TEMP/build.tar" build/src/mallard build/src/mallard[23]d build/test/mallard-test[23]d
+          tar -cf "$RUNNER_TEMP/build.tar" build/src/mallard build/src/mallard[23]d build/test/mallard-test[23]d build/test_times.json
           ls -l build/src/mallard[23]d build/test/mallard-test[23]d "$RUNNER_TEMP/build.tar"
       - name: Upload the executables
         uses: actions/upload-artifact@v4
@@ -544,12 +577,6 @@ jobs:
       # The sources hold the test data and the pages the tests read
       - uses: actions/checkout@v4
       - *report-running
-      # Read by googletest in every suite run below; mpirun's ranks inherit it
-      - name: Shard the suite
-        env:
-          SHARD: ${{ matrix.backend.shard }}
-          SHARDS: ${{ matrix.backend.shards }}
-        run: printf 'GTEST_TOTAL_SHARDS=%s\nGTEST_SHARD_INDEX=%s\n' "$SHARDS" "$((SHARD - 1))" >> "$GITHUB_ENV"
       - *select-tests
       - *install-mpi
       - *install-hdf5
@@ -561,6 +588,27 @@ jobs:
           path: ${{ runner.temp }}
       - name: Unpack the executables
         run: tar -xf "$RUNNER_TEMP/build.tar"
+      # The shard's share of the selected tests, split by the build's durations alike in every
+      # shard (tools/dev/test_split.py), becomes GTEST_FILTER of every suite run below
+      - name: Shard the suite
+        env:
+          SHARD: ${{ matrix.backend.shard }}
+          SHARDS: ${{ matrix.backend.shards }}
+          MPI: ${{ matrix.backend.mpi }}
+        run: |
+          if [ "$MPI" = true ]; then
+            env -u MALLARD_TEST_XML mpirun -n 1 ./build/src/mallard test --gtest_list_tests > "$RUNNER_TEMP/tests.txt"
+          else
+            env -u MALLARD_TEST_XML ./build/src/mallard test --gtest_list_tests > "$RUNNER_TEMP/tests.txt"
+          fi
+          split="$RUNNER_TEMP/junit/split.txt"
+          if ! filter=$(python3 tools/dev/test_split.py split build/test_times.json "$SHARDS" "$SHARD" \
+                          < "$RUNNER_TEMP/tests.txt" 2> "$split"); then
+            cat "$split" "$RUNNER_TEMP/tests.txt"
+            exit 1
+          fi
+          cat "$split"
+          echo "GTEST_FILTER=$filter" >> "$GITHUB_ENV"
       - *test
       - *test-mpi
       - *rank-report
