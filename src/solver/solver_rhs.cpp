@@ -19,6 +19,7 @@
 #include "flux_functor.h"
 #include "gradient.h"
 #include "launch_bounds.h"
+#include "region_motion.h"
 #include "viscous_flux.h"
 
 namespace {
@@ -313,6 +314,20 @@ struct LedgerSponges {
     }
 };
 
+/** @brief The sources of a sponge in a moving region, at the fractions of its last stage. */
+struct LedgerMovingSponge {
+    StateView U;
+    Kokkos::View<rtype *> measure;
+    Kokkos::View<double *> fractions;
+    Kokkos::View<rtype *> strength;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> target;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c, rtype * out) const {
+        const rtype w = static_cast<rtype>(fractions(c));
+        FOR_I_CONSERVATIVE out[i] = w * measure(c) * (target(c, i) - strength(c) * U(c, i));
+    }
+};
+
 } // namespace
 
 void Solver::ledger_stage(const State & state, const ViscousFluxFunctor * viscous) {
@@ -364,6 +379,11 @@ void Solver::ledger_stage(const State & state, const ViscousFluxFunctor * viscou
     if (sponge_cells.extent(0) > 0) {
         ledger.add_sources(LedgerSponges{state.flow, mesh->cell_measure, sponge_cells, sponge_strength, sponge_target},
                            static_cast<uint32_t>(sponge_cells.extent(0)));
+    }
+    for (const MovingSponge & m : moving_sponges) {
+        ledger.add_sources(LedgerMovingSponge{state.flow, mesh->cell_measure, m.fractions->fractions(), m.strength,
+                                              m.target},
+                           static_cast<uint32_t>(m.strength.extent(0)));
     }
 }
 
@@ -484,7 +504,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
             FOR_I_CONSERVATIVE rhs(i_cell, i) *= factor;
         });
     }
-    apply_sponges(state, rhs_state);
+    apply_sponges(state, rhs_state, t_stage, c);
     if (!budget_pass && run_health.ledger.on()) {
         ledger_stage(state, physics.is_viscous() ? &viscous_functor : nullptr);
     }
