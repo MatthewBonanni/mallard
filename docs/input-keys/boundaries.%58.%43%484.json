@@ -1,0 +1,11 @@
+{
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/flame_vortex_quenching/input.toml",
+  "examples/premixed_flame/ch4/input.toml"
+ ],
+ "type": "number"
+}
