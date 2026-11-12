@@ -1054,6 +1054,32 @@ void Probes::Samples::copy_to_staging(const uint64_t * seq) const {
 
 namespace probe {
 
+ProbeReference read_reference(const Input & ref, const std::string & key) {
+    if (!ref.is_table() || !ref.contains("rho") || !ref.contains("u") || !ref.contains("p")) {
+        throw InputError(key + " must be a table {rho, u = [...], p}.");
+    }
+    const std::vector<rtype> u = find_real_vector(ref, "u", dim::velocity);
+    if (u.size() != N_DIM) throw InputError(key + ".u must have " + std::to_string(N_DIM) + " components.");
+    double speed = 0.0;
+    for (rtype x : u) speed += static_cast<double>(x) * static_cast<double>(x);
+    speed = std::sqrt(speed);
+    if (!(speed > 0.0)) throw InputError(key + ".u must not be zero.");
+    ProbeReference out;
+    for (size_t d = 0; d < N_DIM; d++) out.e[d] = static_cast<rtype>(static_cast<double>(u[d]) / speed);
+    out.q = static_cast<rtype>(0.5 * static_cast<double>(find_real(ref, "rho", dim::density)) * speed * speed);
+    out.p = find_real(ref, "p", dim::pressure);
+    return out;
+}
+
+bool samples(const std::string & name, const std::vector<std::string> & species_names) {
+    try {
+        variable_code(name, species_names, "");
+        return true;
+    } catch (const InputError &) {
+        return false;
+    }
+}
+
 namespace {
 
 // Probe types that are regions too: points, curves and cut planes with the probe keys
@@ -1307,6 +1333,11 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     if (cut && mesh.axisymmetric && !p.reductions.empty()) {
         throw InputError(key + ".reductions: cut planes take no reductions with physics.axisymmetric.");
     }
+    const bool output_reference = input.contains("output") && input.at("output").is_table() &&
+                                  input.at("output").contains("reference");
+    const Input * reference_table = entry.contains("reference") ? &entry.at("reference")
+                                    : output_reference            ? &input.at("output").at("reference")
+                                                                  : nullptr;
     for (size_t v = 0; v < p.variables.size(); v++) {
         const int32_t k = h_codes[v];
         if (code::on_faces(k) && !boundary) {
@@ -1325,8 +1356,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             throw InputError(key + ".fields: " + p.variables[v] + " needs a viscous run.");
         }
         p.gradients = p.gradients || code::gradients(k);
-        if (code::reference(k) && !entry.contains("reference")) {
-            throw InputError(key + ".fields: " + p.variables[v] + " needs a reference = {rho, u, p}.");
+        if (code::reference(k) && !reference_table) {
+            throw InputError(key + ".fields: " + p.variables[v] +
+                             " needs a reference = {rho, u, p}, in the probe or in [output].");
         }
     }
     p.transport = p.gradients && !species_names.empty();
@@ -1360,21 +1392,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         }
         for (size_t d = 0; d < N_DIM; d++) p.moment_center[d] = static_cast<double>(center[d]);
     }
-    if (entry.contains("reference")) {
-        const Input & ref = entry.at("reference");
-        const std::string rkey = key + ".reference";
-        if (!ref.is_table() || !ref.contains("rho") || !ref.contains("u") || !ref.contains("p")) {
-            throw InputError(rkey + " must be a table {rho, u = [...], p}.");
-        }
-        const std::vector<rtype> u = find_real_vector(ref, "u", dim::velocity);
-        if (u.size() != N_DIM) throw InputError(rkey + ".u must have " + std::to_string(N_DIM) + " components.");
-        double speed = 0.0;
-        for (rtype x : u) speed += static_cast<double>(x) * static_cast<double>(x);
-        speed = std::sqrt(speed);
-        if (!(speed > 0.0)) throw InputError(rkey + ".u must not be zero.");
-        for (size_t d = 0; d < N_DIM; d++) p.reference.e[d] = static_cast<rtype>(static_cast<double>(u[d]) / speed);
-        p.reference.q = static_cast<rtype>(0.5 * static_cast<double>(find_real(ref, "rho", dim::density)) * speed * speed);
-        p.reference.p = find_real(ref, "p", dim::pressure);
+    if (reference_table) {
+        p.reference = probe::read_reference(*reference_table,
+                                            entry.contains("reference") ? key + ".reference" : "output.reference");
     }
 
     if (elements) {
@@ -1894,6 +1914,7 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
         }
         // Averages are written once they hold a sample
         if (p.average && p.average_samples == 0) return;
+        p.step_last_value = step;
         std::vector<double> & sampled_nodes = p.gathered_nodes;
         std::vector<double> & sampled_quad = p.gathered_quad;
         sampled_nodes.clear();
@@ -1957,6 +1978,33 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
         }
         if (!p.reductions.empty()) p.write_reductions(step, t);
     }
+}
+
+std::vector<uint64_t> Probes::value_steps() const {
+    std::vector<uint64_t> steps;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        steps.insert(steps.end(), p.reduction_names().size() + (p.point_value ? p.variables.size() : 0),
+                     p.step_last_value);
+    }
+    return steps;
+}
+
+bool Probes::wrote_values(uint64_t step) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return !p->snapshot && p->step_last_value == step;
+    });
+}
+
+std::vector<Dimension> Probes::value_dimensions() const {
+    std::vector<Dimension> dimensions;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.snapshot) continue;
+        for (const auto & [name, dimension] : p.monitored) dimensions.push_back(dimension);
+    }
+    return dimensions;
 }
 
 std::vector<std::string> Probes::value_names() const {
@@ -2489,6 +2537,47 @@ std::vector<std::pair<std::string, std::string>> Probes::summary() const {
         items.emplace_back(p.snapshot ? (p.format == Format::VTKHDF ? "vtkhdf" : "vtu") : "probe " + p.name, text);
     }
     return items;
+}
+
+std::vector<case_view::Block> Probes::view_blocks() const {
+    std::vector<case_view::Block> blocks;
+    for (const auto & pp : probes) {
+        const Probe & p = *pp;
+        if (p.from_region || p.snapshot) continue;
+        const probe::Geometry & g = p.geometry;
+        case_view::Block b;
+        b.name = "probes[name = \"" + p.name + "\"]";
+        b.kind = case_view::Kind::PROBE;
+        b.label = b.name + ": " + g.type + ", " + logging::count(g.nodes.size()) +
+                  (g.nodes.size() == 1 ? " point" : " points");
+        if (comm::is_root()) {
+            auto at = [](const probe::Point & q) {
+                std::array<double, 3> x = {0.0, 0.0, 0.0};
+                for (size_t i = 0; i < N_DIM; i++) x[i] = q[i];
+                return x;
+            };
+            const std::vector<probe::Point> & corners = g.vertices.empty() ? g.nodes : g.vertices;
+            if (g.polygon_offsets.size() > 1) {
+                for (size_t k = 0; k + 1 < g.polygon_offsets.size(); k++) {
+                    std::vector<std::array<double, 3>> v;
+                    for (uint64_t j = g.polygon_offsets[k]; j < g.polygon_offsets[k + 1]; j++) {
+                        v.push_back(at(corners[g.polygon_vertices[j]]));
+                    }
+                    b.add_cell(v.size() == 2 ? case_view::LINE : case_view::POLYGON, v);
+                }
+            } else if (!g.polylines.empty()) {
+                for (const auto & line : g.polylines) {
+                    for (size_t k = 0; k + 1 < line.size(); k++) {
+                        b.add_cell(case_view::LINE, {at(g.nodes[line[k]]), at(g.nodes[line[k + 1]])});
+                    }
+                }
+            } else {
+                for (const probe::Point & q : g.nodes) b.add_cell(case_view::VERTEX, {at(q)});
+            }
+        }
+        blocks.push_back(std::move(b));
+    }
+    return blocks;
 }
 
 void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t step) {

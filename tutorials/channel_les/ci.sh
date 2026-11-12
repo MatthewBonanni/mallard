@@ -9,5 +9,5 @@ channel_les() {
     gmsh "$here/channel_les/channel.geo" -3 -setnumber nx 8 -setnumber ny 16 -setnumber nz 8 -o channel.msh > gmsh.log
     mpi "$mallard" -i input.toml > run.log
     python3 "$here/channel_les/plot_channel_les.py" mesh channel.msh --out figures
-    python3 "$here/channel_les/plot_channel_les.py" results . --t-start 0.2 --out figures
+    python3 "$here/channel_les/plot_channel_les.py" results . --t-start 0.2 --mallard "$mallard" --out figures
 }

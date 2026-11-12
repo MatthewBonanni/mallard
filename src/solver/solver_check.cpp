@@ -13,6 +13,8 @@
 #include <fstream>
 #include <cmath>
 #include <limits>
+#include <map>
+#include <numbers>
 
 #include <Kokkos_Core.hpp>
 
@@ -29,6 +31,7 @@
 #include "region_input.h"
 #include "region_mesh.h"
 #include "run_status.h"
+#include "units.h"
 
 namespace {
 
@@ -538,7 +541,20 @@ struct OnMesh {
     case_view::Block block;
 };
 
-OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name) {
+/** @brief The elements of a surface, curve or points as cells of the block, with their direction and measure. */
+void add_elements(case_view::Block & block, const region::Elements & e) {
+    block.field(N_DIM == 3 && e.dimension == 1 ? "tangent" : "normal", 3);
+    block.field(e.dimension == 2 ? "area" : e.dimension == 1 ? "length" : "count", 1);
+    for (size_t k = 0; k < e.size(); k++) {
+        const std::vector<std::array<double, 3>> v(e.vertices.begin() + e.offsets[k], e.vertices.begin() + e.offsets[k + 1]);
+        block.add_cell(v.size() == 1 ? case_view::VERTEX : v.size() == 2 ? case_view::LINE : case_view::POLYGON, v);
+        block.fields[0].values.insert(block.fields[0].values.end(), e.direction[k].begin(), e.direction[k].end());
+        block.fields[1].values.push_back(e.measure[k]);
+    }
+}
+
+/** @brief A region on the mesh; with outline, a filled region's block also gets its boundary's elements. */
+OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name, const bool outline) {
     OnMesh m;
     m.block.name = name;
     const bool distributed = mesh.n_global_cells > 0;
@@ -570,24 +586,19 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
             m.block.add_cell(type, nodes);
             fraction.values.push_back(f[c]);
         }
+        if (outline) {
+            m.block.outline.push_back({});
+            add_elements(m.block.outline[0], region::elements(mesh, region::boundary(region)));
+        }
     } else {
         const region::Elements e = region::elements(mesh, region);
         m.exact = e.exact;
         std::vector<uint32_t> cells(e.cell);
         std::sort(cells.begin(), cells.end());
         m.cells = static_cast<uint64_t>(std::unique(cells.begin(), cells.end()) - cells.begin());
-        m.block.field(N_DIM == 3 && e.dimension == 1 ? "tangent" : "normal", 3);
-        m.block.field(e.dimension == 2 ? "area" : e.dimension == 1 ? "length" : "count", 1);
-        auto & direction = m.block.fields[0];
-        auto & measure = m.block.fields[1];
-        for (size_t k = 0; k < e.size(); k++) {
-            m.measure += e.measure[k];
-            const std::vector<std::array<double, 3>> v(e.vertices.begin() + e.offsets[k], e.vertices.begin() + e.offsets[k + 1]);
-            for (const auto & x : v) extend(x);
-            m.block.add_cell(v.size() == 1 ? case_view::VERTEX : v.size() == 2 ? case_view::LINE : case_view::POLYGON, v);
-            direction.values.insert(direction.values.end(), e.direction[k].begin(), e.direction[k].end());
-            measure.values.push_back(e.measure[k]);
-        }
+        add_elements(m.block, e);
+        for (size_t k = 0; k < e.size(); k++) m.measure += e.measure[k];
+        for (const auto & x : m.block.points) extend(x);
     }
     if (distributed) {
         m.measure = comm::allreduce(m.measure, comm::Op::SUM);
@@ -605,32 +616,221 @@ std::string block_name(std::string name) {
     return name;
 }
 
+CheckRegion entry(const Mesh & mesh, const std::string & name, const region::Region & region, const OnMesh & m,
+                  const bool of_mesh) {
+    const int d = region.dimension();
+    return CheckRegion{name,    of_mesh, d, m.measure, mesh.axisymmetric && d == N_DIM, m.cells,
+                       m.exact, d < N_DIM && !m.exact ? region.resolution() : 0};
+}
+
+/**
+ * @brief The periodic faces of the mesh, one block per lattice direction: each face (side 0) and its image
+ *        in the partner zone (side 1), owned by the rank of its cell of lower global id.
+ */
+std::vector<case_view::Block> periodic_blocks(const Mesh & mesh) {
+    const size_t n_directions = mesh.periodic_translations.size();
+    std::vector<case_view::Block> blocks(n_directions);
+    const bool named = mesh.periodic_zones.size() == 2 * n_directions;
+    for (size_t j = 0; j < n_directions; j++) {
+        case_view::Block & b = blocks[j];
+        const std::string a = named ? mesh.periodic_zones[2 * j] : "", z = named ? mesh.periodic_zones[2 * j + 1] : "";
+        b.name = named ? "periodic " + a + " " + z : "periodic " + std::to_string(j);
+        b.kind = case_view::Kind::PERIODIC;
+        std::string map;
+        if (mesh.periodic_rotation.direction == int(j)) {
+            const PeriodicRotation & q = mesh.periodic_rotation;
+            map = "rotation by " + logging::real(q.angle * 180.0 / std::numbers::pi) + " deg about (" +
+                  logging::real(q.center[0]) + ", " + logging::real(q.center[1]) +
+                  (N_DIM == 3 ? ", " + logging::real(q.center[2]) : "") + ") m";
+        } else {
+            map = "translation (";
+            for (size_t i = 0; i < N_DIM; i++) map += (i ? ", " : "") + logging::real(double(mesh.periodic_translations[j][i]));
+            map += ") m";
+        }
+        b.label = "periodic" + (named ? " " + a + " / " + z : "") + ": " + map;
+        b.field("side", 1);
+    }
+    if (n_directions == 0) return blocks;
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        const uint8_t shift = mesh.h_face_shift(f);
+        const int32_t c0 = mesh.h_cells_of_face(f, 0), c1 = mesh.h_cells_of_face(f, 1);
+        if (shift == 0 || c1 < 0 || uint32_t(c0) >= mesh.n_owned()) continue;
+        if (uint32_t(c1) >= mesh.n_owned() && mesh.h_global_cell(uint32_t(c1)) < mesh.h_global_cell(uint32_t(c0))) continue;
+        const auto & lattice = mesh.shift_lattice[shift];
+        size_t j = 0;
+        while (j + 1 < n_directions && lattice[j] == 0) j++;
+        // Cell 1 seen from cell 0 is at Q x1 + s, so the face's image beside cell 1 is Q^T (x - s)
+        std::vector<std::array<double, 3>> face, image;
+        for (uint32_t k = mesh.h_offsets_nodes_of_face(f); k < mesh.h_offsets_nodes_of_face(f + 1); k++) {
+            std::array<double, 3> x = {0.0, 0.0, 0.0}, y = {0.0, 0.0, 0.0};
+            for (size_t i = 0; i < N_DIM; i++) x[i] = double(mesh.h_node_coords(mesh.h_nodes_of_face(k), i));
+            for (size_t i = 0; i < N_DIM; i++) {
+                for (size_t m = 0; m < N_DIM; m++) {
+                    const double q = mesh.h_shift_rotations.extent(0) > shift ? double(mesh.h_shift_rotations(shift, m, i))
+                                                                              : double(m == i);
+                    y[i] += q * (x[m] - double(mesh.h_shifts(shift, m)));
+                }
+            }
+            face.push_back(x);
+            image.push_back(y);
+        }
+        const uint8_t type = face.size() == 2 ? case_view::LINE : case_view::POLYGON;
+        blocks[j].add_cell(type, face);
+        blocks[j].add_cell(type, image);
+        blocks[j].fields[0].values.push_back(0.0);
+        blocks[j].fields[0].values.push_back(1.0);
+    }
+    return blocks;
+}
+
+/** @brief Boundary entry i as the view labels it: its type and the keys the input sets, "inlet_mass_flow, mdot = 0.2 kg/s". */
+std::string condition_text(const ResolvedInput & resolved, const size_t i, const CheckBoundary & b) {
+    const std::string prefix = "boundaries[" + std::to_string(i) + "].";
+    std::string text = b.condition;
+    for (const KeyRecord & k : resolved.keys) {
+        if (!k.set || !k.path.starts_with(prefix) || k.value.empty()) continue;
+        const std::string key = k.path.substr(prefix.size());
+        if (key == "name" || key == "type" || key.find_first_of(".[") != std::string::npos) continue;
+        const std::string unit = k.use.dimension.symbol();
+        std::string value = k.value;
+        if (value.size() >= 2 && value.front() == '"') {
+            value = value.substr(1, value.size() - 2);
+            if (!unit.empty() && units::system() == units::System::SI) value += " (" + unit + ")";
+        } else {
+            value = units::with(value, unit);
+        }
+        text += ", " + key + " = " + value;
+    }
+    return text;
+}
+
+/**
+ * @brief A boundary zone's block with its curved faces on their curved geometry: in 2D as polylines, in 3D as
+ *        polygons whose edges are sampled. The faces are found by their nodes, which the block's cells hold.
+ */
+void follow_curved_faces(const Mesh & mesh, case_view::Block & block) {
+    const curved::Geometry & geometry = *mesh.curved_geometry;
+    using Point = std::array<double, 3>;
+    auto node = [&](const uint32_t n) {
+        Point x = {0.0, 0.0, 0.0};
+        for (size_t i = 0; i < N_DIM; i++) x[i] = double(mesh.h_node_coords(n, i));
+        return x;
+    };
+    std::map<std::vector<Point>, uint32_t> curved_faces;
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        if (!geometry.face_is_curved(f) || mesh.h_cells_of_face(f, 1) >= 0) continue;
+        std::vector<Point> nodes;
+        for (uint32_t k = 0; k < mesh.h_n_nodes_of_face(f); k++) nodes.push_back(node(mesh.h_node_of_face(f, k)));
+        std::sort(nodes.begin(), nodes.end());
+        curved_faces.emplace(std::move(nodes), f);
+    }
+    if (curved_faces.empty()) return;
+    constexpr size_t PIECES = N_DIM == 2 ? 8 : 4;  // per edge
+    case_view::Block out = block;
+    out.points.clear();
+    out.offsets = {0};
+    out.connectivity.clear();
+    out.types.clear();
+    for (size_t c = 0; c < block.n_cells(); c++) {
+        std::vector<Point> v;
+        for (int64_t k = block.offsets[c]; k < block.offsets[c + 1]; k++) {
+            v.push_back(block.points[size_t(block.connectivity[size_t(k)])]);
+        }
+        std::vector<Point> key = v;
+        std::sort(key.begin(), key.end());
+        const auto it = curved_faces.find(key);
+        if (it == curved_faces.end() || v.size() > 4) {
+            out.add_cell(block.types[c], v);
+            continue;
+        }
+        const uint32_t f = it->second;
+        // The face's corners in its reference coordinates, in its node order
+        std::vector<std::array<double, 2>> corners;
+        if (N_DIM == 2) {
+            corners = {{-1.0, 0.0}, {1.0, 0.0}};
+        } else if (v.size() == 3) {
+            corners = {{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}};
+        } else {
+            corners = {{-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}};
+        }
+        const size_t n_edges = N_DIM == 2 ? 1 : corners.size();
+        std::vector<Point> sampled;
+        for (size_t e = 0; e < n_edges; e++) {
+            const auto & a = corners[e];
+            const auto & b = corners[(e + 1) % corners.size()];
+            for (size_t k = 0; k < PIECES + size_t(N_DIM == 2); k++) {
+                const double t = double(k) / double(PIECES);
+                const double xi[2] = {a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])};
+                curved::Vec3 x;
+                geometry.eval(f, xi, x, nullptr);
+                sampled.push_back(x);
+            }
+        }
+        // The cell's vertices run as the face's nodes from node r, forward or backward
+        const size_t n = v.size();
+        size_t r = 0;
+        while (r + 1 < n && v[0] != node(mesh.h_node_of_face(f, uint32_t(r)))) r++;
+        if (N_DIM == 2) {
+            if (r == 1) std::reverse(sampled.begin(), sampled.end());
+        } else {
+            const bool forward = v[1] == node(mesh.h_node_of_face(f, uint32_t((r + 1) % n)));
+            const size_t total = sampled.size();
+            std::vector<Point> turned(total);
+            for (size_t j = 0; j < total; j++) turned[j] = sampled[(r * PIECES + (forward ? j : total - j)) % total];
+            sampled = std::move(turned);
+        }
+        out.add_cell(N_DIM == 2 ? case_view::POLY_LINE : case_view::POLYGON, sampled);
+    }
+    block = std::move(out);
+}
+
 } // namespace
 
-void Solver::check_regions(CheckReport & r, const CheckOptions & options) const {
-    if (!used_regions) return;
-    std::vector<case_view::Block> blocks;
-    auto entry = [&](const std::string & name, const region::Region & region, const OnMesh & m, const bool of_mesh) {
-        const int d = region.dimension();
-        return CheckRegion{name,   of_mesh, d, m.measure, mesh->axisymmetric && d == N_DIM, m.cells,
-                           m.exact, d < N_DIM && !m.exact ? region.resolution() : 0};
-    };
-    // The mesh's own regions: the domain, its boundary zones and cell zones
-    const region::MeshRegions & automatic = used_regions->automatic();
-    Box domain;
+MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, const bool outlines) {
+    MeshView v;
     for (const std::string & name : automatic.names()) {
         const Input value = parse_input_string("r = \"" + name + "\"").at("r");
         const region::Region region = region::read(value, name, nullptr, &automatic);
-        OnMesh m = on_mesh(*mesh, region, block_name(name));
-        if (name == "domain") domain = m.box;
-        r.regions.push_back(entry(name, region, m, true));
-        if (name != "domain") blocks.push_back(std::move(m.block));
+        OnMesh m = on_mesh(mesh, region, block_name(name), outlines && name != "domain");
+        if (name == "domain") v.domain = m.box;
+        const bool zone = std::binary_search(automatic.boundary_zones.begin(), automatic.boundary_zones.end(), name);
+        m.block.kind = name == "domain" ? case_view::Kind::MESH : zone ? case_view::Kind::BOUNDARY : case_view::Kind::CELL_ZONE;
+        if (zone && mesh.curved_geometry) follow_curved_faces(mesh, m.block);
+        v.regions.push_back(entry(mesh, name, region, m, true));
+        v.blocks.push_back(std::move(m.block));
+    }
+    for (case_view::Block & b : periodic_blocks(mesh)) v.blocks.push_back(std::move(b));
+    return v;
+}
+
+void Solver::check_regions(CheckReport & r, const CheckOptions & options) const {
+    if (!used_regions) return;
+    // The mesh's own regions: the domain, its boundary zones and cell zones; its periodic pairs
+    const region::MeshRegions & automatic = used_regions->automatic();
+    const bool drawn = !options.view_dir.empty();
+    MeshView view = mesh_view(*mesh, automatic, drawn);
+    r.regions = view.regions;
+    std::vector<case_view::Block> & blocks = view.blocks;
+    const Box & domain = view.domain;
+    const ResolvedInput resolved = resolve_input(input);
+    for (case_view::Block & b : blocks) {
+        if (b.kind != case_view::Kind::BOUNDARY) continue;
+        std::string conditions;
+        for (size_t i = 0; i < boundary_summary.size(); i++) {
+            if (block_name(boundary_summary[i].zone) != b.name) continue;
+            if (b.condition.empty()) b.condition = boundary_summary[i].condition;
+            conditions += (conditions.empty() ? "" : "; ") + condition_text(resolved, i, boundary_summary[i]);
+        }
+        if (!conditions.empty()) b.label = b.name + ": " + conditions;
     }
     const std::vector<std::string> mesh_names = automatic.names();
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
-        OnMesh m = on_mesh(*mesh, *region, block_name(label));
-        r.regions.push_back(entry(label, *region, m, false));
+        OnMesh m = on_mesh(*mesh, *region, block_name(label), drawn);
+        m.block.kind = label.starts_with("probes[") ? case_view::Kind::PROBE
+                       : label.starts_with("write_data[") ? case_view::Kind::SNAPSHOT
+                                                          : case_view::Kind::REGION;
+        r.regions.push_back(entry(*mesh, label, *region, m, false));
         if (m.cells == 0) {
             const Box b = region::bounds(*region);
             bool outside = false;
@@ -642,8 +842,12 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         blocks.push_back(std::move(m.block));
     }
+    for (case_view::Block & b : probes.view_blocks()) blocks.push_back(std::move(b));
     if (!options.view_dir.empty()) {
-        r.view_file = case_view::write(options.view_dir + "/case.vtkhdf", blocks);
+        const std::string title = options.input_file.empty() ? "case view" : options.input_file;
+        const std::vector<std::string> files = case_view::write_view(options.view_dir, blocks, title);
+        r.view_file = files[0];
+        r.view_images.assign(files.begin() + 1, files.end());
     }
 }
 

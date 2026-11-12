@@ -496,6 +496,60 @@ MeshBlock read_mesh_block(const Input & input) {
     return cartesian_2d_block(Nx, Ny, Lx, Ly, type, comm::rank(), comm::size(), mesh_stretching(input));
 }
 
+std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axisymmetric) {
+    const size_t p = static_cast<size_t>(comm::size());
+    const auto local = [&](uint64_t g) { return g >= block.first_node && g - block.first_node < block.n_nodes(); };
+    // Nodes of other ranks' blocks, sorted, and their coordinates
+    std::vector<uint64_t> remote;
+    for (const uint64_t g : block.cell_nodes) {
+        if (!local(g)) remote.push_back(g);
+    }
+    std::sort(remote.begin(), remote.end());
+    remote.erase(std::unique(remote.begin(), remote.end()), remote.end());
+    std::vector<double> remote_coords;
+    if (p > 1) {
+        // Ranks' node ranges are contiguous and in rank order
+        const std::vector<uint64_t> first = comm::allgatherv(std::vector<uint64_t>{block.first_node});
+        const auto rank_of = [&](uint64_t g) {
+            return static_cast<size_t>(std::upper_bound(first.begin(), first.end(), g) - first.begin()) - 1;
+        };
+        std::vector<std::vector<uint64_t>> wanted(p);
+        for (const uint64_t g : remote) wanted[rank_of(g)].push_back(g);
+        const auto asked = comm::exchange(std::move(wanted));
+        std::vector<std::vector<double>> answer(p);
+        for (size_t r = 0; r < p; r++) {
+            for (const uint64_t g : asked.from(r)) {
+                const auto & x = block.node_coords[g - block.first_node];
+                answer[r].insert(answer[r].end(), x.begin(), x.end());
+            }
+        }
+        remote_coords = comm::exchange(std::move(answer)).data;
+    } else if (!remote.empty()) {
+        throw std::runtime_error("mesh: a cell refers to node " + std::to_string(remote.front()) +
+                                 ", which the mesh does not have");
+    }
+    const auto coords = [&](uint64_t g) {
+        if (local(g)) return block.node_coords[g - block.first_node].data();
+        const size_t j = static_cast<size_t>(std::lower_bound(remote.begin(), remote.end(), g) - remote.begin());
+        return static_cast<const double *>(&remote_coords[N_DIM * j]);
+    };
+    std::vector<CellGeometry> out(block.n_cells());
+    Kokkos::parallel_for(
+        "block_cell_geometry", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, block.n_cells()),
+        [&](const uint64_t c) {
+            thread_local std::vector<std::array<rtype, N_DIM>> nodes;
+            nodes.clear();
+            for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
+                const double * x = coords(block.cell_nodes[k]);
+                std::array<rtype, N_DIM> y;
+                FOR_I_DIM y[i] = static_cast<rtype>(x[i]);
+                nodes.push_back(y);
+            }
+            out[c] = cell_geometry(nodes, axisymmetric);
+        });
+    return out;
+}
+
 #ifdef Mallard_HAS_HDF5
 
 namespace {
