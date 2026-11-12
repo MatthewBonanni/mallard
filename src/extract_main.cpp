@@ -578,6 +578,23 @@ void print_json(const std::vector<output::Contents> & files, const std::vector<S
     std::cout << o.str() << "\n";
 }
 
+/** @brief The last row of each table written. */
+void print_last(const std::vector<Written> & written) {
+    for (const Written & w : written) {
+        if (w.last.empty()) continue;
+        const output::Contents & c = w.contents;
+        const output::Snapshot & s = c.snapshots.back();
+        logging::section(fs::path(c.path).filename().string(),
+                         "t = " + seconds(s.t) + " s" + (c.snapshots.size() > 1 ? ", the last" : ""));
+        std::vector<std::vector<std::string>> rows;
+        for (const auto & [name, value] : w.last) {
+            const output::Field * f = c.field(name);
+            rows.push_back({name, format("%.9g", value), units_text(f ? f->units : "")});
+        }
+        logging::table({"column", "value", "units"}, rows);
+    }
+}
+
 void print_text(const std::vector<output::Contents> & files, const std::vector<Selected> & selected,
                 const std::string & case_from, const std::string & dir, const std::vector<Written> & written,
                 size_t n_available, bool derive) {
@@ -614,20 +631,7 @@ void print_text(const std::vector<output::Contents> & files, const std::vector<S
                         count(c.fields.size()), c.format});
     }
     logging::table({"file", "kind", "times", "first t [s]", "last t [s]", "fields", "format"}, rows);
-
-    for (const Written & w : written) {
-        if (w.last.empty()) continue;
-        const output::Contents & c = w.contents;
-        const output::Snapshot & s = c.snapshots.back();
-        logging::section(fs::path(c.path).filename().string(),
-                         "t = " + seconds(s.t) + " s" + (c.snapshots.size() > 1 ? ", the last" : ""));
-        rows.clear();
-        for (const auto & [name, value] : w.last) {
-            const output::Field * f = c.field(name);
-            rows.push_back({name, format("%.9g", value), units_text(f ? f->units : "")});
-        }
-        logging::table({"column", "value", "units"}, rows);
-    }
+    print_last(written);
 }
 
 /** @brief The files of the command line: restart files and snapshots of the whole mesh, in its order. */
@@ -881,9 +885,11 @@ Averages choose_averages(const cli::Args & args) {
  * @brief The case input of mallard post average: [statistics] of the fields and products, from
  *        t_start at every state read, [output] reference and mixture from --reference and
  *        --mixture, no other output, and a snapshot of the averages unless they are averaged over
- *        homogeneous directions.
+ *        homogeneous directions; for a --region defined by the solution, instead of the snapshot,
+ *        a probe of it that averages the fields in time and writes their integrals and means.
  */
-Plan prepare_average(Input & input, const cli::Args & args, const std::string & dir, const Averages & a, double t_start) {
+Plan prepare_average(Input & input, const cli::Args & args, const std::string & dir, const Averages & a, double t_start,
+                     bool solution) {
     Plan plan;
     auto & top = input.as_table().entries();
     for (const char * key : {"write_data", "forces", "integrals", "statistics", "initialize", "probes"}) top.erase(key);
@@ -901,6 +907,21 @@ Plan prepare_average(Input & input, const cli::Args & args, const std::string & 
     statistics["t_start"] = Input(t_start);
     statistics["interval"] = Input(1);
     top["statistics"] = Input(statistics);
+    if (solution) {
+        const std::string name = args.value_or("--name", "average");
+        Input::table_type probe;
+        probe["name"] = Input(name);
+        probe["region"] = region_value(args.value_or("--region", ""));
+        probe["fields"] = string_array(a.fields);
+        probe["average"] = Input(true);
+        probe["reductions"] = string_array({"integral", "mean"});
+        probe["interval"] = Input(1);
+        probe["reductions_file"] = Input(under(dir, name + "_reductions.csv"));
+        top["probes"] = Input(Input::array_type{Input(probe)});
+        plan.probes.push_back(name);
+        plan.files.push_back(probe["reductions_file"].as_string());
+        return plan;
+    }
     if (!a.homogeneous.empty()) return plan;
     const std::string format = args.value_or(
         "--snapshot", have_hdf5() && (comm::size() == 1 || have_parallel_hdf5()) ? "vtkhdf" : "vtu");
@@ -916,6 +937,18 @@ Plan prepare_average(Input & input, const cli::Args & args, const std::string & 
     plan.files.push_back(plan.snapshot_prefix + (format == "vtkhdf" ? ".vtkhdf.series" : ".pvd"));
     plan.files.push_back(plan.snapshot_prefix + ".vtkhdf");
     return plan;
+}
+
+/**
+ * @brief Whether a --region follows the solution, from the input alone. A region that names a
+ *        region of the mesh is read only with the mesh: false here, and checked once it is built.
+ */
+bool follows_solution(const Input & input, const Input & value) {
+    try {
+        return region::read(value, "--region", region::named_regions(input)).solution();
+    } catch (const InputError &) {
+        return false;
+    }
 }
 
 /** @brief Each owned cell's weight in averages over homogeneous directions: its volume, times its fraction of --region. */
@@ -1138,7 +1171,7 @@ int average(const cli::Args & args) {
     const std::string report = args.value_or("--format", "text");
     if (report != "text" && report != "json") throw UsageError("--format takes text or json, not " + report);
     if (args.has("--statistics")) return average_statistics(args, dir, report);
-    const Averages a = choose_averages(args);
+    Averages a = choose_averages(args);
     if (!a.homogeneous.empty() && args.has("--snapshot")) {
         throw UsageError("--snapshot does not apply to --homogeneous, which writes a CSV profile");
     }
@@ -1170,7 +1203,18 @@ int average(const cli::Args & args) {
 
     std::string case_from;
     Input input = case_input(args, files[0], case_from);
-    const Plan plan = prepare_average(input, args, dir, a, t_start);
+    const Input region = args.has("--region") ? region_value(args.value_or("--region", "")) : Input();
+    const bool solution = args.has("--region") && follows_solution(input, region);
+    if (solution) {
+        for (const char * option : {"--homogeneous", "--snapshot", "--favre", "--products"}) {
+            if (args.has(option) && !(std::string(option) == "--products" && args.value_or(option, "") == "none")) {
+                throw UsageError(std::string(option) + " does not apply to a --region defined by the solution, "
+                                 "whose time averages are the integrals and means of the fields over it");
+            }
+        }
+        a.products.clear();
+    }
+    const Plan plan = prepare_average(input, args, dir, a, t_start, solution);
 
     std::ostringstream quiet;
     std::streambuf * const out = std::cout.rdbuf(quiet.rdbuf());
@@ -1220,6 +1264,13 @@ int average(const cli::Args & args) {
                          "differs) with as many cells: check that the case's mesh is the run's.");
     }
     const Mesh & mesh = *solver.get_mesh();
+    if (args.has("--region") && !solution) {
+        region::Regions regions(input, mesh);
+        if (regions.get(region, "--region").solution()) {
+            throw std::runtime_error("--region combines a region of the mesh with one defined by the solution, "
+                                     "which post average does not take yet (#851)");
+        }
+    }
     std::vector<double> weights;
     rtype t_last = static_cast<rtype>(t_start);
     for (current = 0; current < selected.size(); current++) {
@@ -1335,6 +1386,10 @@ int average(const cli::Args & args) {
     item("Fields", list_text(a.fields));
     item("Covariances", products.empty() ? "none" : list_text(products));
     item("Favre", a.favre ? "means and covariances, weighted by density" : "no (--favre adds them)");
+    if (solution) {
+        item("Region", "defined by the solution, as it is in each snapshot: the time-weighted mean of the integrals "
+                       "over it, and their mean over its mean measure");
+    }
     logging::section("Snapshots", count(selected.size()) + " averaged");
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < selected.size(); i++) {
@@ -1352,6 +1407,7 @@ int average(const cli::Args & args) {
     }
     logging::section("Written", count(paths.size()) + " files");
     for (const auto & p : paths) logging::line("  " + p);
+    print_last(written);
     return 0;
 }
 

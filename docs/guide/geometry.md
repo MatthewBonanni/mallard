@@ -16,7 +16,7 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `[[sponges]]` `region` | a filled [region](#regions), its [name](#named-regions), or a [region of the mesh](#regions-of-the-mesh), times `strength`; it may [move](#moving-regions) or [follow the solution](#regions-defined-by-the-solution) | [Sponge layers](sources.md#sponge-layers) |
 | `[[sponges]]` `strength` | an expression of `x`, `y`, `z` | [Sponge layers](sources.md#sponge-layers) |
 | `mallard post extract` `--region` | what a `[[probes]]` `region` takes, sampled on the state of existing output; [regions defined by the solution](#regions-defined-by-the-solution) are placed on that state | [Probes](probes.md#probes-of-existing-output) |
-| `mallard post average` `--region` | what `[[write_data]]` `region` takes; with `--homogeneous`, a filled region, cells weighted by their fraction in it | [Statistics](statistics.md#averages-of-saved-snapshots-mallard-post-average) |
+| `mallard post average` `--region` | what `[[write_data]]` `region` takes; with `--homogeneous`, a filled region, cells weighted by their fraction in it; [regions defined by the solution](#regions-defined-by-the-solution) are placed on each snapshot's state, and their integrals and means averaged in time | [Statistics](statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | `mallard check` `--mesh-fields` `--region` | a [region](#regions) or its [name](#named-regions): the cells whose stencils to write | [Mesh and stencil fields](output.md#mesh-and-stencil-fields) |
 | `mallard check` (`--view DIR`) | every region used and the mesh's own: dimension, measure, cells; a ParaView file of them; regions defined by the solution are listed, placed during the run | [Checking regions](#checking-regions) |
 | `[statistics.phase]` `probe` | a point | [Statistics](statistics.md#phase-averages-statisticsphase) |
@@ -646,6 +646,9 @@ Who follows the solution, and when:
   or snapshot it reads, in its probes and `--snapshot`
   ([Probes of existing output](probes.md#probes-of-existing-output)), e.g.
   `--region '{type = "isosurface", field = "T", value = 1500}'`.
+- `mallard post average`: the same, on each snapshot it averages; it averages
+  the integrals and means over the region as an averaged probe does
+  ([Averages of saved snapshots](statistics.md#averages-of-saved-snapshots-mallard-post-average)).
 - `mallard check` lists them, with no measure or cells: the solution places
   them during the run.
 
