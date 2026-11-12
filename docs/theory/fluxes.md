@@ -225,7 +225,15 @@ $$
 $$
 
 with $\theta_D$ = `[numerics.hybrid] sensor_threshold` (default 0.65) and
-$\phi_\mathrm{floor}$ = `upwind_floor` (default 0). A face takes the larger
+$\phi_\mathrm{floor}$ = `upwind_floor` (default 0).
+
+![The region of the divergence and vorticity plane where a cell's upwind fraction is 1, for three sensor thresholds](../images/theory/hybrid_sensor-light.svg#gh-light-mode-only)
+![The region of the divergence and vorticity plane where a cell's upwind fraction is 1, for three sensor thresholds](../images/theory/hybrid_sensor-dark.svg#gh-dark-mode-only)
+
+*A cell is upwind where it compresses and $\lvert\nabla\times\mathbf{u}\rvert < \lvert\nabla\cdot\mathbf{u}\rvert\sqrt{(1 - \theta_D)/\theta_D}$:
+shocks, not vortices or expansions. A larger threshold narrows the wedge.*
+
+A face takes the larger
 fraction of its two cells, $\phi_f = \max(\phi_L, \phi_R)$; boundary faces
 take 1, except walls and symmetry planes, whose mirror states make the
 central flux exact and which take their cell's. At every face point,
