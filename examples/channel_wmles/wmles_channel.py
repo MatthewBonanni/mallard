@@ -22,8 +22,8 @@ u_tau = sqrt(tau_w / rho_w):
 
 - Re_tau = rho_w u_tau h / mu_w, Cf = 2 tau_w / (rho_b U_b^2), and
   B_q = q_w / (cp T_w rho_w u_tau);
-- with --profile (tools/post/plane_average.py's average over x and z of the
-  [statistics] snapshot), U+ against y+ and the centerline temperature, with
+- with --profile (mallard post average's average over x and z of the
+  [statistics] snapshot, --statistics --homogeneous x,z), U+ against y+ and the centerline temperature, with
   the semi-local Re_tau* = sqrt(rho_c tau_w) h / mu_c.
 
 References: Lee & Moser (2015), J. Fluid Mech. 774, 395,
