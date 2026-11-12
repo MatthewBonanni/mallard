@@ -1,0 +1,38 @@
+{
+ "default": "false",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/cbc_les/input.toml",
+  "examples/channel_inflow_retau180/input.toml",
+  "examples/channel_les/input.toml",
+  "examples/channel_les/input_590.toml",
+  "examples/channel_retau180/input.toml",
+  "examples/channel_wmles/lm2000.toml",
+  "examples/channel_wmles/lm5200.toml",
+  "examples/channel_wmles/tl_m1.7.toml",
+  "examples/channel_wmles/tl_m3.0.toml",
+  "examples/explosion_3d/input.toml",
+  "examples/flame_turbulence/input.toml",
+  "examples/flame_turbulence/les.toml",
+  "examples/isotropic_turbulence/input.toml",
+  "examples/noh_axisymmetric/input.toml",
+  "examples/riemann_2d/input.toml",
+  "examples/riemann_2d_quads/coarse.toml",
+  "examples/riemann_2d_quads/input.toml",
+  "examples/riemann_2d_quads/remap.toml",
+  "examples/sedov_3d/input.toml",
+  "examples/sedov_axisymmetric/input.toml",
+  "examples/sod/input.toml",
+  "examples/taylor_green_3d/coarse.toml",
+  "examples/taylor_green_3d/input.toml",
+  "examples/taylor_green_3d/remap.toml",
+  "examples/turbulent_inflow_duct/input.toml",
+  "examples/viscous_shock_tube/input.toml",
+  "examples/wedge/input.toml",
+  "tutorials/wedge/input.toml"
+ ],
+ "type": "bool"
+}
