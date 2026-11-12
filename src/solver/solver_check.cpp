@@ -30,6 +30,7 @@
 #include "case_view.h"
 #include "region_input.h"
 #include "region_mesh.h"
+#include "region_motion.h"
 #include "run_status.h"
 #include "units.h"
 
@@ -108,6 +109,8 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_cost(r, options, tracker);
     check_sizing(r, options);
     check_settings(r);
+    // Regions defined by the solution are placed on the initial one
+    update_cell_W();
     check_regions(r, options);
     return r;
 }
@@ -138,7 +141,7 @@ void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, c
     r.has_quality = true;
     for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
         if (r.quality[m].n_over_limit == 0) continue;
-        r.warning(diagnostic_code::QUALITY[m], logging::count(r.quality[m].n_over_limit) + " cells with " +
+        r.warning(diagnostic_code::QUALITY[m], logging::count(r.quality[m].n_over_limit, "cell") + " with " +
                                               MeshQuality::NAMES[m] + " above " +
                                               logging::real(MeshQuality::LIMITS[m]) + ", the worst " +
                                               logging::format("%.3g", r.quality[m].max) + " at " +
@@ -355,7 +358,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
         r.target_bytes_peak = static_cast<uint64_t>(scale * static_cast<double>(r.bytes_peak));
     } else {
         r.error(diagnostic_code::RANKS, "--ranks " + std::to_string(r.target_ranks) + " in a check on " +
-                                       std::to_string(r.ranks) + " ranks: run the check serially or on " +
+                                       logging::count(uint64_t(r.ranks), "rank") + ": run the check serially or on " +
                                        std::to_string(r.target_ranks) + " ranks");
         r.target_ranks = r.ranks;
         return;
@@ -431,8 +434,8 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     PartSize part = n == 1 ? PartSize{n_cells_global, 0} : check_part(whole, n);
     for (int tries = 0; !fits(part); tries++) {
         if (tries == 16 || uint64_t(n) >= max_ranks) {
-            r.warning(diagnostic_code::SIZING_PARTS, "no partition into up to " + logging::count(uint64_t(n)) +
-                                                    " parts fits in " + per +
+            r.warning(diagnostic_code::SIZING_PARTS, "no partition into up to " + logging::count(uint64_t(n), "part") +
+                                                    " fits in " + per +
                                                     ": size the run for a larger memory (--memory) or coarsen the mesh");
             return;
         }
@@ -556,10 +559,12 @@ void add_elements(case_view::Block & block, const region::Elements & e) {
 
 /**
  * @brief A region on the mesh; with measures, a filled region's own measures and those of its part in the
- *        domain; with outline, a filled region's block also gets its boundary's elements.
+ *        domain; with outline, a filled region's block also gets its boundary's elements; with levels, a
+ *        region defined by the solution placed on them at time t.
  */
 OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::string & name, const bool measures,
-               const bool outline) {
+               const bool outline, const std::shared_ptr<const region::SolutionLevels> & levels = nullptr,
+               const double t = 0.0) {
     OnMesh m;
     m.block.name = name;
     const bool distributed = mesh.n_global_cells > 0;
@@ -572,7 +577,15 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
         }
     };
     if (region.dimension() == N_DIM) {
-        const std::vector<double> f = region::cell_fractions(mesh, region);
+        std::vector<double> f;
+        if (levels) {
+            const region::MovingFractions moving(mesh, region, levels);
+            moving.update(t);
+            const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), moving.fractions());
+            f.assign(h.data(), h.data() + h.extent(0));
+        } else {
+            f = region::cell_fractions(mesh, region);
+        }
         if (measures) {
             m.own = region::measures(region, mesh.axisymmetric);
             m.in = region::measures_in_domain(mesh, region, f);
@@ -600,7 +613,12 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
             add_elements(m.block.outline[0], region::elements(mesh, region::boundary(region)));
         }
     } else {
-        const region::Elements e = region::elements(mesh, region);
+        region::Elements e;
+        if (levels) {
+            e = region::elements(mesh, region, region::CrossedLevels(mesh, region, levels).update(t));
+        } else {
+            e = region::elements(mesh, region);
+        }
         m.exact = e.exact;
         std::vector<uint32_t> cells(e.cell);
         std::sort(cells.begin(), cells.end());
@@ -836,20 +854,23 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     const std::vector<std::string> mesh_names = automatic.names();
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
+        const case_view::Kind kind = label.starts_with("probes[")       ? case_view::Kind::PROBE
+                                     : label.starts_with("write_data[") ? case_view::Kind::SNAPSHOT
+                                                                        : case_view::Kind::REGION;
         if (region->solution()) {
-            CheckRegion g;
-            g.name = label;
-            g.dimension = region->dimension();
-            g.per_radian = mesh->axisymmetric && g.dimension == N_DIM;
-            g.measure = std::numeric_limits<double>::quiet_NaN();
+            const auto levels =
+                std::make_shared<const region::SolutionLevels>(*mesh, region->conditions(), species_names, cell_fields());
+            OnMesh m = on_mesh(*mesh, *region, block_name(label), false, false, levels, static_cast<double>(t));
+            m.block.kind = kind;
+            CheckRegion g = entry(*mesh, label, *region, m, false);
+            g.resolution = 0;
             g.solution = true;
             r.regions.push_back(g);
+            blocks.push_back(std::move(m.block));
             continue;
         }
         OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM, drawn);
-        m.block.kind = label.starts_with("probes[") ? case_view::Kind::PROBE
-                       : label.starts_with("write_data[") ? case_view::Kind::SNAPSHOT
-                                                          : case_view::Kind::REGION;
+        m.block.kind = kind;
         r.regions.push_back(entry(*mesh, label, *region, m, false));
         if (m.cells == 0) {
             const Box b = region::bounds(*region);

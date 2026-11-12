@@ -672,7 +672,7 @@ std::string svg(const std::vector<Block> & blocks, const bool dark, const std::s
     for (size_t i = 0; i < N_DIM; i++) extent += (i ? " × " : "") + length_text(domain[1][i] - domain[0][i]);
     std::string subtitle = "domain " + units::with(corner(domain[0]) + " to " + corner(domain[1]), "m") + ": " + extent;
     if (mesh) {
-        subtitle += ", " + logging::count(mesh_cells) + " cells" +
+        subtitle += ", " + logging::count(mesh_cells, "cell") +
                     (N_DIM == 2 && mesh_cells > MESH_EDGE_CELLS ? " (edges not drawn above " +
                                                                       logging::count(MESH_EDGE_CELLS) + ")" : "");
     }

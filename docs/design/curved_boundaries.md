@@ -117,8 +117,8 @@ operations, so the geometry does not depend on the partition.
   to each face (`x = o + tau (x_f(xi) - o)`): the tetrahedra of
   `cell_tetrahedra` for straight faces, and tensor Gauss rules over the curved
   ones. The signed cones are exact for polynomials even where a cell is not
-  star-shaped. The volume, centroid, TENO moments (2D on the host; 3D: the
-  rows of the device's moment table) and initial averages of curved cells
+  star-shaped. The volume, centroid, TENO moments (2D: monomial means over the
+  rule, which the host computes; 3D: the rows of the device's moment table) and initial averages of curved cells
   come from this rule.
 
 ## TENO at curved walls
