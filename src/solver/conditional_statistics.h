@@ -109,13 +109,15 @@ class ConditionalStatistics {
         };
         Result result() const;
 
-    private:
+        /** @brief The time weights of the samples, held on the device. */
         struct Clock {
             double weight;   // sum of sample weights
             double t_last;
             double w;        // the last sample's weight
             uint64_t n;
         };
+
+    private:
         Clock host_clock() const;
         void set_clock(const Clock & k);
         void reduce(const Kokkos::View<double *> & values, bool max) const;
