@@ -281,9 +281,11 @@ def figure(args):
             ax.loglog(data[sel, 3], data[sel, 4], "-", color=f"C{i}", lw=1.2, label=label)
         ax.set(xlabel="k (1/m)", title=f"t U0 / M = {station}", xlim=(10, 1000), ylim=(1e-6, 1e-3))
     axes[0].set_ylabel("E(k) (m$^3$/s$^2$)")
-    axes[1].legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    fig.savefig(args.out, dpi=150)
+    handles, labels = axes[1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=min(4, len(labels)),
+               frameon=False, fontsize=8)
+    fig.savefig(args.out, dpi=150, bbox_inches="tight")
 
 
 def main():
