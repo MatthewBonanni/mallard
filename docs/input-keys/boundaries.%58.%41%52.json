@@ -1,0 +1,10 @@
+{
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/reactive_shock_tube/input.toml"
+ ],
+ "type": "number"
+}
