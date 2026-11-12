@@ -346,7 +346,9 @@ class Solver {
         /** @brief Rank-count independent key of a boundary face in restart files. */
         uint64_t restart_face_key(uint32_t i_face) const;
         /** @brief Adds the sponge-layer sources to the RHS per unit volume (owned cells). */
-        void apply_sponges(const State & solution, const State & rhs);
+        void apply_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
+        /** @brief Those of sponges in moving regions, weighted by their fractions at the stage time. */
+        void apply_moving_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
         void calc_dt();
         /** @brief step_reduce(0), where calc_dt_cfl1 reduces this rank's time step (allocated at the first call). */
         Kokkos::View<rtype> dt_reduce_slot();
@@ -772,6 +774,8 @@ class Solver {
         CellSampler cell_sampler() const { return CellSampler{conservatives, species, primitives, derived_fields}; }
         /** @brief Add the current state to the [statistics] due, with the derived fields they average. */
         void sample_statistics();
+        /** @brief The cell fields that source expressions and regions defined by the solution read. */
+        region::CellFields cell_fields() const;
         /** @brief What probes read, with the viscous fluxes in fluxes (which must outlive it). */
         ProbeFields probe_fields(ProbeFluxes & fluxes);
         /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
@@ -1131,6 +1135,12 @@ class Solver {
         Kokkos::View<rtype *> sponge_strength;
         Kokkos::View<rtype **, Kokkos::LayoutRight> sponge_target;
         rtype sponge_dt_max = std::numeric_limits<rtype>::infinity();  // 1 / max strength
+        struct MovingSponge {
+            std::shared_ptr<region::MovingFractions> fractions;
+            Kokkos::View<rtype *> strength;                        // per owned cell, inside the region
+            Kokkos::View<rtype **, Kokkos::LayoutRight> target;    // strength times the target state
+        };
+        std::vector<MovingSponge> moving_sponges;
 
         bool characteristic_transverse = false;  // Some characteristic boundary has transverse terms
         rtype t_characteristic = -1.0;           // Time the incoming waves were last advanced from

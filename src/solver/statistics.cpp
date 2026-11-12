@@ -197,6 +197,29 @@ std::vector<std::string> Statistics::variables() const {
     return names;
 }
 
+std::vector<std::pair<std::string, snapshot_block::Average>> Statistics::field_averages() const {
+    const std::vector<std::string> names = variables();
+    std::vector<std::pair<std::string, snapshot_block::Average>> out;
+    auto average = [&](const char * kind, std::vector<std::string> of) {
+        snapshot_block::Average a;
+        a.kind = kind;
+        a.of = std::move(of);
+        a.weighting = "time";
+        a.start = average_start();
+        a.end = average_end();
+        a.samples = static_cast<int64_t>(n_samples);
+        a.interval = static_cast<int64_t>(interval);
+        return a;
+    };
+    for (size_t i = 0; i < fields.size(); i++) out.emplace_back(names[i], average("reynolds", {fields[i]}));
+    for (size_t p = 0; p < products.size(); p++) {
+        const auto [i, j] = products[p];
+        out.emplace_back(names[fields.size() + p], average("covariance", {fields[i], fields[j]}));
+    }
+    for (auto & entry : phase.field_averages()) out.push_back(std::move(entry));
+    return out;
+}
+
 void Statistics::register_data(std::vector<Data> & data) const {
     const std::vector<std::string> names = variables();
     for (size_t i = 0; i < fields.size(); i++) data.emplace_back(names[i], Kokkos::subview(h_mean, Kokkos::ALL(), i));
@@ -415,6 +438,37 @@ std::vector<std::string> PhaseAverage::variables() const {
     return names;
 }
 
+std::vector<std::pair<std::string, snapshot_block::Average>> PhaseAverage::field_averages() const {
+    const std::vector<std::string> names = variables();
+    double total = 0.0;
+    for (const double w : weight) total += w;
+    std::vector<std::pair<std::string, snapshot_block::Average>> out;
+    for (uint32_t b = 0; b < bins; b++) {
+        for (size_t f = 0; f < fields.size(); f++) {
+            snapshot_block::Average a;
+            a.kind = "phase";
+            a.of = {fields[f]};
+            a.weighting = "time";
+            if (n_samples > 0) {
+                a.start = double(t_last) - total;
+                a.end = double(t_last);
+            }
+            a.samples = static_cast<int64_t>(n_samples);
+            a.interval = static_cast<int64_t>(interval);
+            a.bin = b;
+            a.bins = bins;
+            a.bin_weight = b < weight.size() ? weight[b] : 0.0;
+            if (trigger_variable.empty()) {
+                a.period = period;
+            } else {
+                a.trigger = trigger_variable;
+            }
+            out.emplace_back(names[b * fields.size() + f], std::move(a));
+        }
+    }
+    return out;
+}
+
 void PhaseAverage::register_data(std::vector<Data> & data) const {
     const std::vector<std::string> names = variables();
     for (size_t i = 0; i < names.size(); i++) data.emplace_back(names[i], Kokkos::subview(h_mean, Kokkos::ALL(), i));
@@ -545,8 +599,10 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
         buckets[key(b)].push_back(p);
     }
 
+    const curved::Geometry * curves = mesh.curved_geometry.get();
     for (uint32_t c = 0; c < n_owned && n_points > 0; c++) {
         const uint32_t n_nodes = mesh.h_n_nodes_of_cell(c);
+        const bool curved_cell = curves && curves->cell_is_curved(c);
         std::array<double, N_DIM> c_lo, c_hi;
         c_lo.fill(std::numeric_limits<double>::max());
         c_hi.fill(std::numeric_limits<double>::lowest());
@@ -556,8 +612,17 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
                 c_hi[d] = std::max(c_hi[d], node(c, k, d));
             }
         }
+        if (curved_cell) {
+            curved::Vec3 lo3, hi3;
+            curves->bounds(c, lo3, hi3);
+            for (size_t d = 0; d < N_DIM; d++) {
+                c_lo[d] = lo3[d];
+                c_hi[d] = hi3[d];
+            }
+        }
+        const double relative_tol = precision_tol<double>(1e-9, 1e-5);
         const double size = std::pow(static_cast<double>(mesh.h_cell_volume(c)), 1.0 / N_DIM);
-        const double tol = precision_tol<double>(1e-9, 1e-5) * size;
+        const double tol = relative_tol * size;
         bool outside = false;
         for (size_t d = 0; d < N_DIM; d++) {
             c_lo[d] -= tol;
@@ -572,6 +637,11 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
         }
         // Each face's plane through its centroid, with the normal out of c
         auto contains = [&](const std::array<double, N_DIM> & x) {
+            if (curved_cell) {
+                curved::Vec3 y = {0.0, 0.0, 0.0};
+                for (size_t d = 0; d < N_DIM; d++) y[d] = x[d];
+                return curves->contains(c, y, relative_tol);
+            }
             for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
                 const uint32_t f = mesh.h_face_of_cell(c, k);
                 const bool side_1 = mesh.h_cells_of_face(f, 1) == static_cast<int32_t>(c) &&

@@ -163,6 +163,7 @@ void Solver::timed_phase(const std::string & name, F && f) {
 
 int Solver::init(const Input & input_in) {
     this->input = input_in;
+    run_log::hold();
     if (!input_from_file) {
         provenance::start_run();
         provenance::set_input("", toml::format(unrecorded(input)));
@@ -311,7 +312,7 @@ void Solver::write_provenance() {
         if (recorded && *recorded > step) restart.add("rewound_from", *recorded);
         start.raw("restart", restart.str());
     }
-    run_log::write(start);
+    run_log::release(start);
 }
 
 namespace {
@@ -1112,8 +1113,8 @@ void Solver::init_boundaries() {
     timed_boundaries = comm::allreduce(static_cast<int>(timed), comm::Op::MAX) > 0;
 }
 
-void Solver::init_sources(region::Regions & regions) {
-    sources::CellFields fields;
+region::CellFields Solver::cell_fields() const {
+    region::CellFields fields;
     fields.coords = mesh->cell_coords;
     fields.W = W_cells;
     if (is_mixture()) {
@@ -1123,7 +1124,11 @@ void Solver::init_sources(region::Regions & regions) {
     } else {
         fields.R = double(physics.R);
     }
-    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, fields, regions,
+    return fields;
+}
+
+void Solver::init_sources(region::Regions & regions) {
+    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, cell_fields(), regions,
                                                          is_distributed() && halo.uses_nccl());
     if (!terms->empty()) {
         for (const auto & item : terms->summary()) source_summary.push_back(item);
@@ -1664,6 +1669,8 @@ void Solver::init_output(region::Regions & regions) {
             }
         }
     }
+    probes.set_reconstruction(face_reconstruction.get());
+    probes.set_cell_fields(cell_fields());
     probes.init(input, *mesh, regions, species_names,
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);
@@ -1742,6 +1749,7 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
         } else if (r.kind == probe::RegionValue::Kind::VOLUME) {
             const region::Region & region = regions.get(*value, key);
             region::require_full_dimension(region, *value, key);
+            region::require_fixed(region, *value, key, "data files");
             CellSubset subset{region.summary(), {}, regions.fractions(*value, key)};
             for (uint32_t c = 0; c < mesh->n_owned(); c++) {
                 if (subset.fractions[c] > 0.0) subset.cells.push_back(c);
@@ -2729,9 +2737,9 @@ void Solver::write_data(bool force) {
     if (!any_due) {
         return;
     }
-    if (statistics.means_enabled()) {
+    if (statistics.means_enabled() || statistics.get_phase().enabled()) {
         snapshot_block::set_averages(statistics.average_start(), statistics.average_end(),
-                                     static_cast<int64_t>(statistics.samples()));
+                                     static_cast<int64_t>(statistics.samples()), statistics.field_averages());
     }
     update_primitives();
     copy_device_to_host();

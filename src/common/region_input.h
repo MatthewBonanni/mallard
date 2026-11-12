@@ -13,6 +13,7 @@
 #ifndef REGION_INPUT_H
 #define REGION_INPUT_H
 
+#include <array>
 #include <map>
 #include <memory>
 #include <string>
@@ -32,6 +33,11 @@ struct MeshRegions {
     const Mesh * mesh = nullptr;
     std::vector<std::string> boundary_zones;  // every rank's, sorted
     std::vector<std::string> cell_zones;
+    std::array<std::array<double, 3>, 2> domain = {};  // a box around the owned cells of every rank
+    std::vector<std::array<double, 3>> translations;   // of the periodic lattice's directions (0 for the rotation's)
+    int rotation = -1;                                  // the direction that rotates, or -1
+    double angle = 0.0;                                 // its angle (degrees) about axis through center
+    std::array<double, 3> center = {0.0, 0.0, 0.0}, axis = {0.0, 0.0, 1.0};
 
     MeshRegions() = default;
     /** @brief The automatic regions of the mesh. Collective. */
@@ -67,6 +73,9 @@ Region read(const Input & value, const std::string & where, const Input * names 
 
 /** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
 void require_full_dimension(const Region & region, const Input & value, const std::string & where);
+
+/** @brief An error unless the region given at where is fixed: what, the key's use, does not follow moving regions. */
+void require_fixed(const Region & region, const Input & value, const std::string & where, const std::string & what);
 
 /**
  * @brief The regions that the region keys of a run give on its mesh. A named

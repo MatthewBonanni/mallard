@@ -559,7 +559,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     Kokkos::parallel_for("rhs_divide_volume", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE rhs(i_cell, i) /= vol(i_cell);
     });
-    apply_sponges(state, rhs_state);
+    apply_sponges(state, rhs_state, t_stage, c);
     if (!budget_pass && run_health.ledger.on()) {
         ledger_stage(state, nullptr);
     }

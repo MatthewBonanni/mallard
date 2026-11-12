@@ -32,9 +32,11 @@
 #include "mesh.h"
 #include "physics.h"
 #include "boundary.h"
+#include "cell_fields.h"
 #include "probe_geometry.h"
 #include "probe_spectra.h"
 #include "probe_surface.h"
+#include "snapshot_block.h"
 #include "data.h"
 #include "statistics.h"
 #include "wall_exchange.h"
@@ -42,6 +44,9 @@
 namespace region {
 class Region;
 class Regions;
+class MovingFractions;
+class SolutionLevels;
+struct Elements;
 }
 struct ProbeFluxes;
 
@@ -236,6 +241,20 @@ class Probes {
         /** @brief Columns of the values filled on the host with a cell field's value in each sample's cell. */
         using CellColumns = std::vector<std::pair<uint32_t, const Data *>>;
 
+        /** @brief Where a located sample is read: its cell (global id) and the cell's centroid. */
+        struct Location {
+            uint64_t cell = 0;
+            probe::Point centroid{};
+        };
+
+        /** @brief How point values are evaluated (before init): the face reconstruction's, or linear least squares. */
+        void set_reconstruction(const FaceReconstruction * r);
+        /** @brief The cell fields that regions defined by the solution read (before init). */
+        void set_cell_fields(const region::CellFields & f) { cell_fields = f; }
+        /** @brief Wall seconds spent placing regions defined by the solution, so far, and whether any probe has one. */
+        double region_seconds() const { return m_region_seconds; }
+        bool any_solution() const;
+
         /** @brief This rank's share of a set of samples, and their values on the device. */
         struct Samples {
             uint64_t n_global = 0;
@@ -250,6 +269,7 @@ class Probes {
             Kokkos::View<rtype *[N_DIM]> normals;
             Kokkos::View<uint32_t *> faces;
             Kokkos::View<rtype *> distance;
+            bool located = false;                   // by locate: points of the geometry
             Kokkos::View<uint32_t *> inside;        // local samples inside their cell (point values)
             Kokkos::View<uint32_t *> inside_cells;
             Kokkos::View<rtype *[N_DIM]> inside_offsets;  // from the cell centroid
@@ -273,6 +293,8 @@ class Probes {
                           const ProbeReference & reference, bool gradients, bool diffusive = false);
             /** @brief Rank 0: the values of every sample in global order, (sample, variable); empty elsewhere. */
             void gather(std::vector<double> & out, const CellColumns & columns = {}) const;
+            /** @brief Rank 0: the location of every located sample in global order (collective); empty elsewhere. */
+            std::vector<Location> locations(const Mesh & mesh) const;
 
             private:
                 // Reused across writes: fresh pages for every write cost page faults
@@ -282,6 +304,13 @@ class Probes {
         };
 
     private:
+        /**
+         * @brief Drop the samples of g outside the mesh, with a warning, and
+         *        return what was dropped as JSON ("" if none); throws if g is
+         *        point or points probes with any outside, or nothing is left.
+         */
+        static std::string clip_to_mesh(probe::Geometry & g, const Mesh & mesh, const std::string & key, size_t line);
+
         struct Probe {
             std::string name;
             std::string file;
@@ -295,6 +324,13 @@ class Probes {
             bool write_samples = true;
             std::vector<Reduction> reductions;
             std::vector<std::string> variables;  // written
+            std::vector<std::string> value_kinds; // snapshot_block::value of each written variable
+            snapshot_block::Reconstruction reconstruction;  // of the point values
+            std::vector<Location> locations;     // rank 0: of each located sample (node), in sample order
+            std::string clipped;                 // JSON of the samples dropped outside the mesh, or empty
+            std::string measures;                // filled regions: JSON of their own measures and in the domain
+            /** @brief The probe sampling block: method, variables, and where each located sample is read. */
+            std::string sampling_json() const;
             uint32_t rho_column = 0;             // of RHO among the evaluated variables (favre)
             Kokkos::View<int32_t *> codes;       // evaluated: the written ones, then RHO if favre needs it
             bool gradients = false;              // some variable needs velocity or temperature gradients
@@ -305,10 +341,10 @@ class Probes {
             std::vector<std::pair<std::string, std::array<uint32_t, N_DIM>>> moment_vectors;
             bool average = false;                // writes the time averages of its samples
             // Averages: total weight, time of the last sample, samples, and (rank 0) the means of the
-            // gathered node and quadrature values
+            // gathered node and quadrature values; moving regions: the means of f V q and of their weights f V
             double average_weight = 0.0, average_t_last = 0.0;
             uint64_t average_samples = 0;
-            std::vector<double> mean_nodes, mean_quadrature;
+            std::vector<double> mean_nodes, mean_quadrature, mean_weights;
             ProbeReference reference;
             probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
             bool from_region = false;
@@ -332,6 +368,32 @@ class Probes {
             std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
             double measure = 0.0;      // of the samples, at the latest reduction
             std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
+            std::shared_ptr<region::Region> copy;  // copies = "each": the copy it covers
+            /** @brief A moving filled region: its fractions, and its cells (every owned one) with their measures. */
+            struct Motion {
+                std::shared_ptr<region::MovingFractions> fractions;
+                std::vector<uint32_t> cells;
+                std::vector<double> volumes;
+                std::vector<size_t> order;  // rank 0: the gathered weights in global cell order
+                bool distributed = false;
+            };
+            std::shared_ptr<Motion> motion;
+            bool solution = false;  // its region follows the solution (ProbeFields::W must be current)
+            /** @brief An isosurface (or another surface or curve of the solution): extracted at each write. */
+            struct Isosurface {
+                const Mesh * mesh = nullptr;
+                std::shared_ptr<region::Region> region;
+                std::shared_ptr<region::SolutionLevels> levels;
+                uint32_t n_evaluated = 0;
+                bool per_cell = false;
+            };
+            std::shared_ptr<Isosurface> isosurface;
+            /** @brief The quadrature weights f V of a moving region at time t (collective). */
+            void move(double t);
+            /** @brief The isosurface where the solution puts it at time t, and its samples (collective). */
+            void extract(double t);
+            /** @brief Rank 0 of a time-averaged moving region: its weights and values, mean f V q / mean f V. */
+            void mean_fields(std::vector<double> & quad);
 
             bool due(uint64_t step, rtype t) const;
             /** @brief With a time interval: due once t is at least this. */
@@ -345,8 +407,16 @@ class Probes {
             /** @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values. */
             void sample(const ProbeFields & fields, std::vector<double> & nodes, std::vector<double> & quad);
             void write_hdf5(uint64_t step, rtype t, const std::vector<double> & values) const;
+            /** @brief The snapshot block entry of written variable v (no units). */
+            snapshot_block::Field field_of(size_t v) const {
+                snapshot_block::Field f;
+                f.name = variables[v];
+                f.value = value_kinds[v];
+                return f;
+            }
             /** @brief The snapshot block of the samples at (step, t), written now for reason. */
-            snapshot_block::Block snapshot_of(uint64_t step, rtype t, const std::string & reason) const;
+            snapshot_block::Block snapshot_of(uint64_t step, rtype t, const std::string & reason,
+                                              uint64_t sampled_every) const;
             void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
             void write_vtkhdf(const snapshot_block::Block & block, const std::vector<double> & values);
             bool vtkhdf_run_written = false;  // this run's block is in the vtkhdf file
@@ -358,9 +428,10 @@ class Probes {
             void write_reductions(uint64_t step, rtype t) const;
             void write_spectra(uint64_t step, rtype t);
         };
+        /** @brief copy: with copies = "each", the index of the region's copy the probe covers (-1: all). */
         void add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,
-                 const Snapshot * snapshot, const std::vector<Data> * cell_data);
+                 const Snapshot * snapshot, const std::vector<Data> * cell_data, int32_t copy = -1);
         /** @brief A snapshot's samples of a region of lower dimension: one at each element's center. */
         static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables);
         /**
@@ -368,16 +439,28 @@ class Probes {
          */
         static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
                                   const std::vector<double> & cell_weights, uint32_t n_variables);
+        /**
+         * @brief A filled region probe's measures: its own and of its part in
+         *        the domain, with a warning and p.clipped where part of it is
+         *        outside. Collective.
+         */
+        static void region_measures(Probe & p, const Mesh & mesh, const region::Region & r,
+                                    const std::vector<double> & f, const std::string & key);
         /** @brief A surface, curve or points region probe's samples: its elements' quadrature points, with normals. */
         static void select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
                                     bool per_cell);
+        static void select_elements(Probe & p, const Mesh & mesh, region::Elements e, int dimension,
+                                    const std::string & summary, uint32_t n_variables, bool per_cell);
 
         std::vector<std::unique_ptr<Probe>> probes;
+        snapshot_block::Reconstruction reconstruction{"linear_least_squares", 2, {"cell_average"}};
         std::vector<std::string> statistics_variables;
         uint64_t average_interval = 1;
         rtype average_start = 0.0;
         bool resumed = false;
         bool distributed = false;  // samples split over the ranks, which set up and write together
+        region::CellFields cell_fields;
+        double m_region_seconds = 0.0;
 };
 
 #endif // PROBES_H

@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -385,7 +386,7 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
         {Mallard_DIM == 3 ? "36" : "12"},
         {"axis", "min [m]", "max [m]"},
         {"x", "0", "1"},
-        {"field", "units", "components", "min", "max", "stored", "description"},
+        {"field", "units", "components", "min", "max", "value", "stored", "description"},
         {"RHO", "kg m-3", "1"},
         {"U", "m s-1", "3"},
         {"Input file", "small.toml"},
@@ -428,6 +429,58 @@ TEST(CliTest, InfoOfARunsFilesGivesItsInputAndFields) {
     EXPECT_EQ(snapshot["snapshot"]["reason"].string, "interval");
     EXPECT_EQ(snapshot["run_id"].string, v["run"]["run"]["run_id"].string);
     EXPECT_EQ(snapshot["snapshot"]["run_id"].string, v["run"]["run"]["run_id"].string);
+    const auto & recorded = snapshot["snapshot"]["fields"].array;
+    ASSERT_EQ(recorded.size(), 2u);
+    EXPECT_EQ(recorded[0]["value"].string, "cell_average");
+    EXPECT_EQ(recorded[1]["value"].string, "cell_state");
+}
+
+TEST(CliTest, InfoAndDiffSayWhetherProbeValuesArePointValuesOrOfCells) {
+    SKIP_UNDER_MPI();
+    const bool three = Mallard_DIM == 3;
+    std::ofstream input("probes.toml");
+    input << "[run]\nn_steps = 2\ndt = 1.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 8\nLx = 1.0\nLy = 1.0\n"
+          << (three ? "Nz = 4\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+          << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+          << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.3 * x * x\"\n"
+          << (three ? "u = [\"0.3\", \"0.0\", \"0.0\"]\n" : "u = [\"0.3\", \"0.0\"]\n")
+          << "p = \"1.0\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+          << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n";
+    for (const char * sampling : {"cell", "point"}) {
+        input << "[[probes]]\nname = \"" << sampling << "\"\nsampling = \"" << sampling << "\"\nformat = \"vtp\"\n"
+              << "file = \"case/" << sampling << ".pvd\"\nfields = [\"RHO\", \"P\"]\nn_points = 5\n"
+              << "start = " << (three ? "[0.1, 0.3, 0.4]" : "[0.1, 0.3]") << "\nend = "
+              << (three ? "[0.9, 0.3, 0.4]" : "[0.9, 0.3]") << "\ninterval = 2\n";
+    }
+    input.close();
+    const Result ran = run({"-i", "probes.toml", "--kokkos-num-threads=1"}, true);
+    ASSERT_EQ(ran.status, 0) << ran.err;
+
+    const Result point = run({"info", "case/point.pvd"}, true);
+    ASSERT_EQ(point.status, 0) << point.err;
+    EXPECT_TRUE(has_row(point.out, {"Point values", "TENO, order 3; falling back to linear_least_squares, then "
+                                                    "cell_average"}))
+        << point.out;
+    const Result cell = run({"info", "case/cell.pvd"}, true);
+    ASSERT_EQ(cell.status, 0) << cell.err;
+    EXPECT_FALSE(contains(cell.out, "Point values")) << cell.out;
+
+    const Result compared = run({"diff", "case/cell.pvd", "case/point.pvd", "--tol", "1", "--format", "json"}, true);
+    EXPECT_EQ(compared.status, 0) << compared.err;
+    const json::Value v = json::parse(compared.out);
+    EXPECT_EQ(v["result"].string, "warning");
+    std::map<std::string, const json::Value *> fields;
+    for (const json::Value & f : v["fields"].array) fields[f["name"].string] = &f;
+    ASSERT_TRUE(fields.count("RHO") && fields.count("P")) << compared.out;
+    EXPECT_EQ((*fields["RHO"])["value_a"].string, "cell_average");
+    EXPECT_EQ((*fields["RHO"])["value_b"].string, "point_value");
+    EXPECT_EQ((*fields["RHO"])["status"].string, "warning");
+    EXPECT_EQ((*fields["P"])["value_a"].string, "cell_state");
+    const Result text = run({"diff", "case/cell.pvd", "case/point.pvd", "--tol", "1"}, true);
+    EXPECT_TRUE(has_row(text.out, {"WARN", "RHO", "cell_average", "point_value"})) << text.out;
+    EXPECT_TRUE(contains(text.out, "different kinds of values")) << text.out;
+    const Result itself = run({"diff", "case/point.pvd", "case/point.pvd", "--format", "json"}, true);
+    EXPECT_EQ(json::parse(itself.out)["result"].string, "ok") << itself.out;
 }
 
 TEST(CliTest, InfoOfARunDirectoryListsItsRunAndFiles) {

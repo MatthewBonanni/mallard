@@ -55,6 +55,8 @@ hardware they were measured on.
 | Case | What it shows | Cells | Run time |
 |---|---|---|---|
 | `source_regions` | `[[sources]]` in regions: an annulus with a smooth edge releases a Gaussian heat pulse of exact total energy (`total = true`), a rotated rectangle pushes the gas with a body force and its work; a probe of the same named region records the mass and temperature in the ring, and probes of the mesh's region `domain` the total mass and the gas away from the ring; a [trigger](../docs/guide/running.md#triggers) writes a snapshot and a restart once the ring has cooled back below a temperature | 51,200 triangles | ~2 minutes on 4 CPU threads |
+| `moving_heaters` | A [repeat](../docs/guide/geometry.md#arrays-of-copies) of three heaters [moving](../docs/guide/geometry.md#moving-regions) through gas at rest and [wrapping](../docs/guide/geometry.md#periodic-boundaries) across a periodic boundary: each heater's exact total power grows with its index `copy`, and a probe with `copies = "each"` records each heater's mass, temperature and area in the domain | 10,000 quadrilaterals | ~1 minute on 2 CPU threads |
+| `hot_gas_regions` | [Regions defined by the solution](../docs/guide/geometry.md#regions-defined-by-the-solution): a hot spot expands in a closed box, and a source cools the gas where `T > 3`, its cell fractions following the temperature at every stage; probes of where `T > 1.5` and of its isosurface record the hot gas's area, mass and mean temperature and the edge's length and the mass flux through it (area within 0.01% and length within 0.2% of the exact ones at `t = 0`); `mallard post extract` draws other isosurfaces from the restart files | 16,384 quadrilaterals | ~5 seconds on 2 CPU threads |
 
 ## Viscous flows
 

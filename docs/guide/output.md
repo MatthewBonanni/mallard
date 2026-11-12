@@ -43,7 +43,7 @@ region = "cylinder"           # a boundary zone, a slice, a volume: any region (
 fields = ["P", "T"]
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 50 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -446,7 +446,7 @@ input.toml --mesh-fields mesh` shows that of 8 ranks.
 check_interval = 100   # a progress row every 100 steps
 ```
 
-*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 48 more.
+*Used in:* [`sod`](https://matthewbonanni.github.io/mallard/docs/examples/#sod), [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher), [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d), [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads), [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach) and 50 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, summaries of mesh, physics (with the case's units, `physics.units`),
@@ -520,7 +520,8 @@ Each record has a `type`:
 | `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`; probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; no `sha256` for a [file appended to](#complete-files)) |
 | `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
 | `divergence` | A run that diverged, before its `error` record | the [divergence report](running.md#the-divergence-report): `step`, `t`, `invalid_cells`, `failed` (cells by the quantity that failed first), `box` (their extent), `last_valid` (`step`, `t`, `file`, or `null`), `causes` (most likely first: `kind` (`time_step`, `mesh`, `boundary`, `initial_state`, `chemistry`, `numerics`), `title`, `score`, `evidence`, `fix`), `cell`, `neighbors`, `others` (`id`, `rank`, `x`, `failed`, `rho`, `speed`, `p`, `T`, `cfl`, `quality`, `repaired`, `troubled`), `time_step` (`integrator`, `limit`, `dt`, `dt_cfl1`, `cfl`, `cells_over_limit`), `zones` (`name`, `type`, `near`, and where compared `inadmissible`, `ratio`, `jump`), `history` (the last progress rows), `snapshot` |
-| `warning`, `error` | A warning, or the error that ended the run | `message` |
+| `warning`, `error` | A warning (those of the setup right after the `start` record), or the error that ended the run | `message` |
+| `probe` | After the `start` record, for each filled region probe | `probe` (its name), `sampling` (its [probe sampling block](#probe-sampling), with the region's `measures`) |
 | `end` | The end of the run, also on a stop signal, divergence or an error (on rank 0): a run without one was killed (`SIGKILL`, a lost node) or is still running | `outcome` (`finished`, `stopped`, `signal`, `wall_time_limit`, `diverged`, `error`), `cause` (`finished`: `n_steps` or `t_stop`; `stopped`: `stop_file`, `mallard_ctl` or `trigger`; `signal`: `SIGTERM`, `SIGINT` or `SIGUSR2`), `trigger` (the [trigger](running.md#triggers) that stopped the run, by name), `reason` (in words; the error's message), `step`, `t`, `last_snapshot` and `last_restart` (the last of each recorded complete: `step`, `t`, `path`; none if the run wrote none), `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
 
 Progress records:
@@ -593,7 +594,7 @@ it all off.
 | `margins_run` | The smallest of each at any progress row so far |
 | `activity` | Fractions of cells, over the domain (`all`) and the least and most active rank (`rank_min`, `rank_max`): `troubled_cells` (TENO's troubled-cell indicator), `limited_cells` (MUSCL cells whose limiter is below one in some variable), `upwind_fraction` (the hybrid flux's mean upwind fraction) |
 | `chemistry` | Since the previous row: `substeps` and `rejected_substeps` of the Rosenbrock integration, `failures`, `reacting_cells` (fraction of the last call), `wall` (seconds of the slowest rank) and `imbalance` (the slowest rank's chemistry time over the ranks' mean) |
-| `timing` | Per step since the previous row, `all` (mean), `rank_min`, `rank_max` over ranks: `output_sync` (the run's own output time) and `output_async` (time of the background writers). The step's own wall time and throughput are the row's `wall_per_step` and `cells_per_second` |
+| `timing` | Per step since the previous row, `all` (mean), `rank_min`, `rank_max` over ranks: `output_sync` (the run's own output time), `output_async` (time of the background writers) and, with probes of [regions defined by the solution](geometry.md#regions-defined-by-the-solution), `regions` (the part of `output_sync` spent placing them on the solution). The step's own wall time and throughput are the row's `wall_per_step` and `cells_per_second` |
 | `repairs`, `repairs_run` | Each [numerical repair](#numerical-repairs), since the previous row and since the start: `activations`, `cells` (distinct owned cells) and `change`, the integrated change of each quantity it changes |
 | `balance`, `balance_run` | The [conservation ledger](#conservation-ledger), since the previous row and since the first row |
 | `element_drift` | Mixtures with chemistry: the largest change of a rank's element mass over one chemistry call, beyond the recorded repairs, relative to the rank's mass (round-off) |
@@ -667,7 +668,7 @@ units by definition, for Mallard to read back.
 
 | File | Where the units are |
 |---|---|
-| VTKHDF, HDF5 (snapshots, their mesh file, probes) | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres) |
+| VTKHDF, HDF5 (snapshots, their mesh file, probes) | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres); `cell_methods` for [cell averages and point values](#cell-averages-and-point-values) |
 | XDMF (`.xmf`) | `<Information Name="units" Value="..."/>` and `<Information Name="long_name" .../>` in each `<Attribute>` |
 | VTU, VTP (each piece of a PVTU) | Field data: the string arrays `MALLARD_FIELD_NAMES`, `MALLARD_FIELD_UNITS` and `MALLARD_FIELD_LONG_NAMES`, entry *i* of each for the same array (VTK has no units attribute) |
 | CSV (forces, integrals, probes) | A line `# units: ...` after the header, one entry per column |
@@ -802,7 +803,8 @@ The block's fields:
 | `reason` | `interval` (its `interval` or `time_interval`), `start` (the initial state), `end` (the run's end), `stop` (a stop request or signal), `checkpoint` (a [run control](running.md) request), `divergence` (the last valid state, written as the run diverged), `trigger` (a [trigger](running.md#triggers)'s `write`) |
 | `format`, `format_version`, `solver_precision` | The file's format and its [version](#formats-and-compatibility); the precision the solver ran in (`double`, `single`) |
 | `statistics` | Snapshots of time-averaged fields (`MEAN_`, `COV_`, `PHASE_`) and spectra: `average_start`, `average_end` (s), `samples`; absent otherwise |
-| `fields` | Per field: `name`, `units`, `long_name`, `stored` (`float64`, `float32`: as written, which a single-precision build or output makes `float32`) |
+| `reconstruction` | Snapshots with point values: how they were evaluated, `method` (`TENO`, `linear_least_squares`), its design `order`, and `fallback`, what replaces it in order where it cannot be used ([below](#cell-averages-and-point-values)); absent otherwise |
+| `fields` | Per field: `name`, `units`, `long_name`, `stored` (`float64`, `float32`: as written, which a single-precision build or output makes `float32`), `value` (`cell_average`, `cell_state`, `point_value`: [below](#cell-averages-and-point-values)), and for time-averaged fields `average` ([below](#time-averaged-fields)) |
 | `units` | The units of the block's own numbers (`time`: `s`) |
 
 Files written before 0.10 have no snapshot block. Readers then take step and
@@ -812,6 +814,118 @@ index, from 0; their run is that of the file's run block, and their reason
 and stored precision are unknown. `snapshot_blocks(path)` of
 `tools/mallard/vtu.py` reads the blocks of any file (`[]` for older files),
 and `mallard info FILE` prints the last one under **This snapshot**.
+
+### Cell averages and point values
+
+A finite-volume solution is a set of cell averages: a cell's `RHO` is the
+mean density over the cell, not the density at its centroid, and above
+second order the two differ by the scheme's truncation error. Every snapshot
+says which of three kinds of value each field holds, as `value` in its
+[snapshot block](#snapshot-metadata):
+
+| `value` | What it is | Fields |
+|---|---|---|
+| `cell_average` | The average of the quantity over the cell | The solver's unknowns `RHO`, `RHOU`, `RHOE`, `RHOY_<s>` (restart files hold only these), their `MEAN_` and `PHASE_` averages, `REGION_FRACTION` |
+| `cell_state` | Computed pointwise from the cell's averaged state: at high order neither the cell average nor the centroid value of that quantity (the pressure of the mean state is not the mean pressure) | Every other cell field: `P`, `T`, `U`, `MACH`, gradient fields such as `VORTICITY`, `COV_`; probes and boundary samples with `sampling = "cell"` other than the unknowns; mass fractions in every mode |
+| `point_value` | The reconstruction evaluated at the sample | [Probes](probes.md) with `sampling = "point"` and [snapshots of regions](#snapshots-of-regions) of lower dimension, except mass fractions and the cell fields they copy |
+
+Point values are a snapshot's `reconstruction`: with TENO its polynomials
+at the scheme's `order`, falling back to linear least squares in troubled
+cells and to the cell average where neither gives a positive density and
+energy
+(`{"method": "TENO", "order": 5, "fallback": ["linear_least_squares", "cell_average"]}`);
+with MUSCL or first order, linear least squares (order 2). The same
+distinction is in the format's own metadata where it has a slot: the
+[CF](https://cfconventions.org/) attribute `cell_methods` of each VTKHDF and
+HDF5 dataset and an `<Information Name="cell_methods">` of each XDMF
+attribute, `area: mean` (3D: `volume: mean`) for a cell average and
+`area: point` (`volume: point`) for a point value, and none for a
+`cell_state`, which no CF method describes.
+
+Compare like with like. An error norm against an exact solution, or a
+convergence study, of cell averages takes the exact solution's cell averages
+(or `RHO` against `RHO`); a point value is compared with the exact value at
+the point. Mixing the two hides an error of the scheme's order at high order.
+`mallard diff` warns when A and B hold different kinds of values of a field
+(a **Value kinds** table, `value_a` and `value_b` per field in its JSON),
+`mallard info FILE` lists each field's `value` and the reconstruction under
+**This snapshot**, and `value_kinds(path)` of `tools/mallard/vtu.py` returns
+them. Files written before 0.10 record none.
+
+### Time-averaged fields
+
+A `MEAN_`, `COV_` or `PHASE_` field records what it averages, as `average`
+in its field's entry of the [snapshot block](#snapshot-metadata), so a
+script never infers it from the name:
+
+| Key | Contents |
+|---|---|
+| `kind` | `reynolds` (a time mean, not weighted by density), `covariance` (`<a'b'>`) or `phase` (a [phase mean](statistics.md#phase-averages-statisticsphase)) |
+| `of` | The variables averaged: `["U_X"]`, two for a covariance (`["P", "U_X"]`) |
+| `weighting` | `time`: each sample weighs the time since the previous one (the first, since the start) |
+| `start`, `end` | The window, s: where the first sample's weight starts, and the last sample |
+| `samples`, `interval` | The samples taken, every `interval` steps |
+| `bin`, `bins`, `bin_weight`, `period` or `trigger` | Phase means: the field's bin, of how many, the time its samples weigh (s), and the fixed period (s) or the variable whose crossings set it |
+
+```json
+{"name": "COV_P_U_X", "units": "kg s-3", "value": "cell_state",
+ "average": {"kind": "covariance", "of": ["P", "U_X"], "weighting": "time",
+             "start": 0.25, "end": 1.25, "samples": 64, "interval": 2}}
+```
+
+Mallard keeps Reynolds statistics only; [Favre means follow from
+them](statistics.md#time-averages-statistics) with `RHO` among the fields.
+The averages of a probe with `average = true` record the probe's own window,
+and VTKHDF, HDF5 and XDMF datasets of time and phase means add `time: mean`
+to their `cell_methods` (`area: mean time: mean` for `MEAN_RHO`). `mallard
+info FILE` tabulates them under **This snapshot**, and `field_averages(path)`
+of `tools/mallard/vtu.py` returns them.
+
+### Probe sampling
+
+A probe file says where each of its samples is read, so it stands alone
+without the input or the mesh. Its probe sampling block (`schema`
+`mallard-probe-sampling`, version 1) is the line `# mallard-probe-sampling
+{...}` after each run's `# mallard-run` line of a CSV file (of the
+reductions file, for a probe without a samples file, such as a region probe), the root
+attribute `mallard_sampling` of an HDF5 or VTKHDF file, and an XML comment
+of each VTP file:
+
+| Key | Contents |
+|---|---|
+| `probe`, `sampling` | The probe's name and `cell` or `point` |
+| `reconstruction` | For `sampling = "point"`, the method, order and fallbacks the values are read with (as in [Cell averages and point values](#cell-averages-and-point-values)); `null` for `cell` |
+| `variables` | Each column's `name` and `value` kind, and with `average = true` its `average` (`kind`, `of`, `weighting`, window `start`) |
+| `points` | For `point` and `points` probes, curves and resampled surfaces: `n` samples, `max_distance` and `mean_distance`, and per sample, in sample order, the `requested` point, the owning `cell` (global id), its `centroid` and the `distance` from the requested point to where the value is read; `null` for probes of a region's cells, a cut plane or a boundary's faces |
+| `clipped` | For a curve or resampled surface partly outside the mesh: the samples `dropped`, `of` how many, and the dropped share of its length (`length_fraction`) or area (`area_fraction`); for a filled region partly outside the domain, the share of its volume outside (`volume_fraction`; planar 2D: `area_fraction`); `null` when nothing was dropped |
+| `measures` | For a filled region probe ([Measures](probes.md#region-probes)): the `region`'s own `volume` and `surface_area` (planar 2D: `area` and `perimeter`; axisymmetric: per radian) with their relative `tolerance` (0: closed form), `null` for a region of the mesh or an unbounded one, and the same of its part in the domain (`in_domain`); `null` for other probes |
+| `units` | Units of the dimensional keys (m, s) |
+
+The distance is zero for a point value and the distance to the centroid of
+the cell for a cell sample. Every sample lies in the mesh: a point on a
+boundary face counts as inside, a `point` or `points` probe with a point
+outside is an input error, and the samples of a curve or resampled surface
+outside the mesh are dropped with a warning
+([Samples outside the domain](probes.md#samples-outside-the-domain)), absent
+from `points` and counted in `clipped`, so a clipped file never looks like
+the whole curve.
+
+```json
+{"schema": "mallard-probe-sampling", "version": 1, "probe": "wake",
+ "sampling": "point",
+ "reconstruction": {"method": "TENO", "order": 3, "fallback": ["linear_least_squares", "cell_average"]},
+ "variables": [{"name": "RHO", "value": "point_value"}, {"name": "P", "value": "point_value"}],
+ "points": {"n": 6, "max_distance": 0.0, "mean_distance": 0.0,
+            "requested": [[0.3, 0.5], [0.3, 0.6], ...], "cell": [5, 9, ...],
+            "centroid": [[0.375, 0.375], [0.375, 0.625], ...], "distance": [0.0, 0.0, ...]},
+ "clipped": {"dropped": 5, "of": 11, "length_fraction": 0.5},
+ "units": {"points.requested": "m", "points.centroid": "m", "points.distance": "m",
+           "points.max_distance": "m", "points.mean_distance": "m"}}
+```
+
+`mallard info FILE` prints it under **Probe sampling** (with `--json`, as
+`sampling`), and `probe_sampling(path)` of `tools/mallard/vtu.py` returns it
+for any probe file. Files written before 0.10 record none.
 
 ### Formats and compatibility
 

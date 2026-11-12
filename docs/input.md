@@ -1062,6 +1062,7 @@ ranks. A probe that is not due costs nothing.
 | `reductions` | Any of `integral`, `mean`, `favre`, `min`, `max`, `rms`, and for boundary probes `moment` (below); default none, and `["integral", "mean", "min", "max"]` with `region` |
 | `moment_center` | Point about which `moment` takes the moments, default the origin |
 | `reductions_file` | Default `probe_<name>_reductions.csv` |
+| `copies` | `"combined"` (default): a region with `repeat` is one region; `"each"`: one probe per copy, `<name>_copy<k>`, each writing its reductions to `reductions_file` with `_copy<k>` before the extension ([Arrays of copies](guide/geometry.md#arrays-of-copies)) |
 | `scale`, `rotate`, `pivot`, `translate` | Transform of the geometry, as for [regions](#regions): scaled (a factor, or one per axis), then rotated (2D: `rotate = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`), both about `pivot` (default the origin), then translated |
 
 Types (`[x, y(, z)]` points):
@@ -1087,8 +1088,10 @@ least-squares reconstruction (second order), and failing that the cell
 average. `RHO`, `U_*` and `P` are reconstructed; `T` and `H` follow `p / rho`
 at the cell's composition (exact for a perfect gas), and mass fractions are
 cell averages. A sample on a face between cells belongs to the cell with the lowest global
-id, so any number of ranks pick the same cell; samples outside the domain take
-the nearest cell's average in both modes.
+id, so any number of ranks pick the same cell. A sample on a boundary face is
+inside; a `point` or `points` probe with a point outside the domain is an
+error, and curves and resampled surfaces drop their samples outside it with a
+warning ([Samples outside the domain](guide/probes.md#samples-outside-the-domain)).
 
 **Surfaces.** A surface region (3D) with `n_points = [n_u, n_v]`, e.g.
 `region = {type = "sphere", center = [0, 0, 0], radius = 1, filled = false}`
@@ -1320,7 +1323,11 @@ rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
 radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
 in global cell order, so they are the same bit for bit on any number of ranks.
 A region probe has no samples: `type`, `sampling`, `format`, `file` and
-`samples` do not apply. The region must cover part of some cell.
+`samples` do not apply. The region must cover part of some cell. A filled
+region's own volume and surface area, and those of its part in the domain,
+are recorded in the probe sampling block that heads `reductions_file` and in
+`mallard.jsonl`, with a warning when more than 0.1% of it lies outside the
+domain ([Measures](guide/probes.md#region-probes)).
 
 ```toml
 # Fuel mass and the extreme temperatures in the combustor
@@ -1395,7 +1402,7 @@ graphs; domain averages add an exact global sum per stage, on the device).
 |---|---|---|
 | `name` | `sources[i]` | Name in the terminal output |
 | `region` | everywhere | A [region](#regions), or the name of one in [`[regions]`](#named-regions-regions): the values are multiplied by each cell's volume fraction of it. It must fill space (a volume; an area in 2D) |
-| `total` | `false` | `true`: the values are integrated rates over the region (kg/s, N, W; per unit depth in 2D, per radian in axisymmetric runs), spread over it in proportion to the volume fraction, so that their integral is exact on any mesh; they may then depend on `t` only |
+| `total` | `false` | `true`: the values are integrated rates over the region (kg/s, N, W; per unit depth in 2D, per radian in axisymmetric runs), spread over it in proportion to the volume fraction, so that their integral is exact on any mesh (for a moving region, at each stage); they may then depend on `t` and `copy` only |
 | `rho`, `rhou`, `rhoE` | none | Mass, momentum (one per component) and energy sources: numbers, quantities with units (`rhoE = "5 MW/m^3"`, with `total`: `"50 W"`) or expressions (in SI units) |
 | `rhoY` | none | Mixtures: table of species partial-density sources, e.g. `{H2 = "1e-3"}`; the mass source `rho` is their sum (and `rho` itself is not allowed) |
 
@@ -1404,8 +1411,9 @@ Expressions ([syntax](#regions)) read the variables `x`, `y`, `z`, `t`,
 `X_<species>` (characters other than letters, digits and `_` in species names
 become `_`), and the domain averages (volume-weighted over the whole mesh)
 `mean_rho`, `mean_rhou_x`, `mean_rhou_y` (`mean_rhou_z`), `mean_rhoE` and
-`mean_ke` (of `rho |u|^2 / 2`). Values are taken at cell centroids, from the
-cell averages. Domain averages and the region integrals for totals are the
+`mean_ke` (of `rho |u|^2 / 2`), and `copy`, the index of the copy of a region
+with `repeat` (each copy then has its own term, and a total its own share).
+Values are taken at cell centroids, from the cell averages. Domain averages and the region integrals for totals are the
 same bit for bit on any number of ranks or threads.
 
 Sources of the solution are explicit: a source that relaxes a quantity at rate
@@ -1472,6 +1480,8 @@ units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
 | `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
 | `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
+| `where` | `condition`: comparisons (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the solution's `RHO`, `U_X`, `U_Y`, `U_Z` (3D), `P`, `T` and `Y_<species>` (SI units), joined by `and`, `or`, `not` and parentheses, e.g. `"T > 1500 and Y_OH > 1e-3"` | filled: where the condition holds on the solution ([Regions defined by the solution](guide/geometry.md#regions-defined-by-the-solution)) |
+| `isosurface` | `field`: one of the variables of `where`; `value`, in the field's units (`"1500 K"`) | surface (2D: curve) where `field` equals `value`, facing toward increasing `field` (`flip = true`: decreasing): the boundary of `{type = "where", condition = "<field> < <value>"}` |
 | `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
 | `difference` | `a` and `b` (or `regions`, the first minus the others) | `a` without `b`: filled regions, or a surface or curve `a` clipped to outside filled ones |
 | `boundary` | `of`: a region or its name | one dimension lower: a filled region's closed surface (2D: curve), a flat surface's edge curve, the edges of open boundary zones |
@@ -1495,6 +1505,25 @@ Any region, primitive or boolean, may also have, applied in this order:
 | `rotate` | 3D: `{axis = [...], angle = degrees}` or `{axes = [[...], [...], [...]]}` (the region's x, y, z axes in world coordinates, orthonormal and right-handed); 2D: an angle in degrees, counterclockwise; about `pivot` |
 | `pivot` | Center of `scale` and `rotate` (default the origin) |
 | `translate` | A displacement |
+| `repeat` | Copies of the region (after its transforms), whose union it becomes: `{count = N, translate = [...]}` (copy `j` translated `j` times) or `{count = N, rotate = ..., pivot = [...]}` (rotated `j` times, `rotate` as above but an angle about an axis; `pivot` default the origin), or a list of them, which repeats the copies of the levels before it (copy `k` numbered with the first level listed fastest). Regions of primitives only; default none. [Arrays of copies](guide/geometry.md#arrays-of-copies) |
+
+Centers, `point`, `base`, sizes (`radius`, `inner_radius`, `length`, `size`,
+`base_radius`, `top_radius`, `major_radius`, `minor_radius`), `translate`,
+`rotate` angles, `scale` and an implicit `f` may be expressions of `t` (time,
+s): the region moves, placed where it is at each stage
+([Moving regions](guide/geometry.md#moving-regions)). Filled regions alone
+move, in `[[sources]]`, `[[sponges]]` and `[[probes]]`; elsewhere, and for
+surfaces, curves and points, a moving region is an error. On a mesh with
+`[[periodic]]` boundaries, a region that crosses one wraps into the domain
+([Periodic boundaries](guide/geometry.md#periodic-boundaries)).
+
+Regions defined by the solution, `where` and `isosurface` and the booleans and
+boundaries that use them, follow the solution: in `[[sources]]` and
+`[[sponges]]` at every stage, in `[[probes]]` at every write, and in
+`mallard post extract` on the state of the output it reads. They take no
+transforms, `repeat` or `edge`; snapshots of them (`[[write_data]]`),
+averaged probes and probes of `n_points` on isosurfaces,
+`[[initialize.regions]]` and `[[initialize.data]]` are errors.
 
 The outermost region may also have `edge`, the width of a smooth edge: the
 indicator falls from 1 to 0 as the smoothstep `s^2 (3 - 2 s)` across the band

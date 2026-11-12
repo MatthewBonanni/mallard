@@ -274,7 +274,7 @@ void warning(std::string_view message) {
     close_phase();
     std::cout << std::flush;
     std::cerr << paint("warning:", Style::YELLOW, color_stderr()) << " " << message << std::endl;
-    run_log::write(json::Object().add("type", "warning").add("message", message));
+    run_log::write(json::Object().add("type", "warning").add("message", message), true);
 }
 
 void error(std::string_view message) {
