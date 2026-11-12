@@ -8,7 +8,7 @@ its progress on the terminal and in a machine-readable run record.
 
 | Output | File(s) | Turned on by | Details |
 |---|---|---|---|
-| Solution snapshots | `PREFIX_<n>.vtkhdf` (`<n>`: the step, or with `time_interval` the snapshot's index) and `PREFIX.vtkhdf.series`; VTU: `.vtu`, `.pvtu`, `.pvd` | `[[write_data]]` | [Solution snapshots](#solution-snapshots-write_data) |
+| Solution snapshots | `PREFIX.vtkhdf`, every snapshot in one file; with `series = false` `PREFIX_<n>.vtkhdf` (`<n>`: the step, or with `time_interval` the snapshot's index) and `PREFIX.vtkhdf.series`; VTU: `.vtu`, `.pvtu`, `.pvd` | `[[write_data]]` | [Solution snapshots](#solution-snapshots-write_data) |
 | Restart files | `PREFIX_<step>.restart` | `[[write_data]]` with `format = "restart"` | [Initialization and restarts](initialization.md#restarts) |
 | Terminal output | standard output (errors: standard error) | always; `[output] check_interval` sets the progress rows | [Terminal output](#terminal-output) |
 | Run record | `mallard.jsonl` | on by default; `[output] run_log` | [Run record](#run-record-mallardjsonl) |
@@ -49,8 +49,8 @@ fields = ["P", "T"]
 | Key | Default | Meaning |
 |---|---|---|
 | `prefix` | required | Output path prefix |
-| `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, with a `.vtkhdf.series` index), `vtu` (ParaView, with a `.pvd` time series), `xdmf` (XDMF indexes over HDF5 files) or `restart`; see [which format](#which-format). Builds without HDF5 write `vtu`, with a warning |
-| `series` | `false` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf` |
+| `format` | `"vtkhdf"` | `vtkhdf` (ParaView 5.12+, every snapshot in `PREFIX.vtkhdf`), `vtu` (ParaView, with a `.pvd` time series), `xdmf` (XDMF indexes over HDF5 files) or `restart`; see [which format](#which-format). Builds without HDF5 write `vtu`, with a warning |
+| `series` | `true` | `vtkhdf`: `true` keeps every snapshot in one file, `PREFIX.vtkhdf`; `false` writes one file per snapshot, `PREFIX_<n>.vtkhdf`, indexed by `PREFIX.vtkhdf.series` |
 | `interval` / `time_interval` | one required | Every this many steps, or this much simulated time (the step is shortened to land on each output time) |
 | `fields` | required (all but `restart`) | Fields to write, below (`mallard list fields input.toml` lists those of a case); `Y_*` selects every field with that prefix |
 | `region` | none (the whole mesh) | `vtkhdf`, `vtu`: write only this [region](geometry.md#regions), inline or by name: a filled region's cells, or a boundary zone, surface, curve, points or cut plane ([below](#snapshots-of-regions)). Replaces `geometry` (removed in 0.10.0; `mallard input upgrade` rewrites it) |
@@ -116,7 +116,7 @@ ParaView's calculator shows both.
 
 | `format` | Opens in | Files |
 |---|---|---|
-| `vtkhdf` (default) | ParaView 5.12+, PyVista, h5py | One file per snapshot, or one for the series (`series = true`) |
+| `vtkhdf` (default) | ParaView 5.12+, PyVista, h5py | One file for the series, or one per snapshot (`series = false`) |
 | `xdmf` | VisIt, meshio, ParaView of any version ([open by a path with a directory](#xdmf-in-paraview)); h5py | The mesh once, one HDF5 file of fields per snapshot, and XDMF indexes |
 | `vtu` | Anything with a VTK XML reader (e.g. Tecplot); builds without HDF5 | One file per rank per snapshot, with a `.pvtu` and a `.pvd` series |
 | `restart` | Mallard, to continue or remap a run | One file per snapshot |
@@ -126,13 +126,16 @@ Before 0.10.0, `xdmf` was called `format = "hdf5"`, which is now an error since
 VTKHDF is HDF5 too; `mallard input upgrade` rewrites it to `"vtkhdf"`.
 
 **VTKHDF, the default.** `format = "vtkhdf"` writes VTK's HDF5 format, which
-ParaView 5.12 and later open directly: open `PREFIX.vtkhdf.series` for the time
-series. Every rank writes its part of one file per snapshot with collective I/O
-(parallel HDF5 on several ranks), each array in global cell order, so the files
-are the same on any number of ranks. Cells touching a curved wall are written as
-quadratic Lagrange cells, so ParaView shows the curved geometry. With `series = true` the mesh is stored
-once and every snapshot goes into `PREFIX.vtkhdf`; a restarted run drops the
-snapshots after its restart time and continues the file. Read the files in
+ParaView 5.12 and later open directly: open `PREFIX.vtkhdf` for the time
+series. The mesh is stored once and every snapshot goes into that one file; a
+restarted run drops the snapshots after its restart time and continues the
+file. Every rank writes its part with collective I/O (parallel HDF5 on several
+ranks), each array in global cell order, so the files are the same on any
+number of ranks. Cells touching a curved wall are written as quadratic Lagrange
+cells, so ParaView shows the curved geometry. `series = false` writes one file
+per snapshot, `PREFIX_<n>.vtkhdf`, and the index `PREFIX.vtkhdf.series` that
+ParaView opens for the time series: for scripts that take one snapshot file at
+a time, or that delete snapshots once they are processed. Read the files in
 Python with `tools/mallard/vtkhdf.py` (or `read_vtu_cells`, which reads every
 format), or with h5py alone.
 
@@ -690,7 +693,7 @@ f["fields/P"].attrs["units"], f["fields/P"].attrs["long_name"]   # ('kg m-1 s-2'
 
 import sys; sys.path.insert(0, "tools")
 from mallard.vtu import units, long_names        # any output file: .vtkhdf, .vtu, .pvtu, .vtp, .h5, .xmf, .csv
-units("solut/flow_000100.vtkhdf")["U"]             # 'm s-1'
+units("solut/flow.vtkhdf")["U"]                    # 'm s-1'
 from mallard.tables import read_csv               # CSV columns and their units
 columns, column_units = read_csv("forces_cylinder.csv")
 ```
@@ -791,8 +794,8 @@ a snapshot block, one JSON object per snapshot:
 | VTU, probe VTP | field data `TIME` (s) and `STEP` | XML comment `<!-- mallard-snapshot {...} -->` |
 | PVTU | its pieces' | XML comment, as VTU |
 | PVD index | `timestep` and `step` of each `DataSet` | its members' |
-| VTKHDF, one snapshot per file | field data `TIME` and `STEP` | dataset `mallard_snapshot` of the root group |
-| VTKHDF, `series = true`, and probe VTKHDF | `Steps/Values`, and field data `TIME` and `STEP` per step | dataset `mallard_snapshot`, one row per step |
+| VTKHDF, one snapshot per file (`series = false`) | field data `TIME` and `STEP` | dataset `mallard_snapshot` of the root group |
+| VTKHDF series file (`series = true`, the default), and probe VTKHDF | `Steps/Values`, and field data `TIME` and `STEP` per step | dataset `mallard_snapshot`, one row per step |
 | `.vtkhdf.series` index | `time` and `step` of each entry | its members' |
 | XDMF | `<Time>` and `<Information Name="step">` of each grid; root attributes `time` and `step` of each `.h5` | dataset `mallard_snapshot` of each `.h5` |
 | Restart | header `step` and `t` | trailer before the run block's |
@@ -869,28 +872,28 @@ column or a labeled line that names its units (`t [s]`, `min [m]`, a field's
 units, `dimensionless`); a `-` is something the file does not record:
 
 ```
-$ mallard info solut/flow.vtkhdf.series
-== solut/flow.vtkhdf.series ===============================================================
+$ mallard info solut/flow.vtkhdf
+== solut/flow.vtkhdf ======================================================================
   Kind               snapshot
-  Format             VTKHDF series index (VTKHDF snapshots), version 1
+  Format             VTKHDF, version 1
   Values             2D, double precision
-  Simulated time     3 snapshots, t = 0 to 0.002 s
+  Simulated time     3 snapshots, t = 0 to 0.002 s, steps 0 to 2
 
 == Mesh ===================================================================================
   cells  points
   12     20
 ...
 == Snapshots ================================================================== 3 snapshots
-  #  t [s]  file
-  0  0      flow_000000.vtkhdf
-  1  0.001  flow_000001.vtkhdf
-  2  0.002  flow_000002.vtkhdf
+  #  t [s]  step  file
+  0  0      0     flow.vtkhdf
+  1  0.001  1     flow.vtkhdf, index 1
+  2  0.002  2     flow.vtkhdf, index 2
 
 == Fields ================================================= ranges at t = 0.002 s, the last
-  field  units       components  min      max      description
-  P      kg m-1 s-2  1           1        1        pressure
-  RHO    kg m-3      1           1.03804  1.26232  density
-  U      m s-1       3           0.3      0.3      velocity
+  field  units       components  min       max      stored   description
+  P      kg m-1 s-2  1           1         1        float64  pressure
+  RHO    kg m-3      1           0.840846  1.15915  float64  density
+  U      m s-1       3           0.3       0.3      float64  velocity
   min and max of fields with several components are of their magnitude.
 ```
 
@@ -997,7 +1000,7 @@ The Python scripts in `tools/` (numpy, matplotlib; see
 | `post/insitu_statistics.py` | Plots `[statistics.spectra]` output; recomputes it, or phase-bins a probe series, to check the in-situ values |
 | `plot_<case>.py` | Each validation case against its reference |
 
-ParaView opens `.vtkhdf.series` and `.vtkhdf` (VTKHDF), `.pvd` (VTU) and `.xmf` (HDF5) series directly. `read_vtu_cells` reads any snapshot file, and `mallard.vtu.snapshot("solut/flow_000100")` finds it whichever format the build wrote.
+ParaView opens `.vtkhdf` and `.vtkhdf.series` (VTKHDF), `.pvd` (VTU) and `.xmf` (HDF5) series directly. `read_vtu_cells` reads any snapshot file (of a series file, its last snapshot), `mallard.vtu.read_index("solut/flow")` lists the snapshots of a series in whichever format the build wrote, each one a path `read_vtu_cells` reads, and `mallard.vtu.snapshot("solut/flow")` gives the last.
 
 ## Sharing a run: `mallard pack`
 

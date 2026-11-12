@@ -37,7 +37,7 @@ for dim in 2 3; do
     [ "$dim" = 3 ] && cp "$here/sod_3d.toml" "$case/input.toml"
     (cd "$case" && run "sod_${dim}d" "$bin/mallard" -i input.toml)
     grep -q "Build.* ${dim}D," "$case/sod_${dim}d.log" || { echo "mallard ran sod_${dim}d in another dimension"; exit 1; }
-    python3 "$here/check.py" "$tools" sod "$case/solut/sod_000010"
+    python3 "$here/check.py" "$tools" sod "$case/solut/sod"
 done
 
 links_mpi() { { ldd "$1" || otool -L "$1"; } 2> /dev/null | grep -q libmpi; }
@@ -45,7 +45,7 @@ if [ -x "$bin/mallard2d" ] && command -v mpirun > /dev/null && links_mpi "$bin/m
     case="$work/examples/sod_mpi"
     cp -R "$share/examples/sod" "$case"
     (cd "$case" && OMP_NUM_THREADS=1 run mpi mpirun -n 2 --oversubscribe "$bin/mallard" -i input.toml)
-    python3 "$here/check.py" "$tools" sod "$case/solut/sod_000010"
+    python3 "$here/check.py" "$tools" sod "$case/solut/sod"
 fi
 
 out="$("$bin/mallard" mesh convert --help 2>&1 || true)"

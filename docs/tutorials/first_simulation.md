@@ -56,7 +56,7 @@ cd runs/sod
 ./run.sh
 ```
 
-`run.sh` runs this build of Mallard on 4 CPU threads (`./run.sh -t 8` for 8; `./run.sh -n 4` for 4 MPI ranks, or 4 GPUs on a GPU build with MPI). The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [terminal output](../guide/output.md#terminal-output)), and writes eleven snapshots (t = 0 to 0.2) and their series, which ParaView opens as a time series: `solut/sod_000000.vtkhdf` to `solut/sod_000010.vtkhdf` and `solut/sod.vtkhdf.series` in builds with HDF5 (`-DMallard_ENABLE_HDF5=ON`), or VTU files, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` and `solut/sod.pvd`, in builds without it such as this one.
+`run.sh` runs this build of Mallard on 4 CPU threads (`./run.sh -t 8` for 8; `./run.sh -n 4` for 4 MPI ranks, or 4 GPUs on a GPU build with MPI). The run takes about a second. Mallard prints a summary of the setup, then a progress row every 100 steps (step, time, time step, throughput, minimum density and pressure, maximum Mach number, share of troubled cells; see [terminal output](../guide/output.md#terminal-output)), and writes eleven snapshots (t = 0 to 0.2), which ParaView opens as a time series: all in one file, `solut/sod.vtkhdf`, in builds with HDF5 (`-DMallard_ENABLE_HDF5=ON`), or VTU files, `solut/sod_000000.vtu` to `solut/sod_000010.vtu` and `solut/sod.pvd`, in builds without it such as this one.
 
 The input file, `input.toml`, has one table per part of the problem; the comment above each table says what it sets and links to its keys in the [input reference](../input.md):
 
@@ -114,7 +114,7 @@ cd runs/riemann_2d
 PYTHON=../../.venv/bin/python ./post.sh
 ```
 
-`post.sh` plots the final density (`riemann.png`) and runs `animate.py`, which writes `riemann.mp4`, `riemann.gif` and the last frame as `riemann_final.png`: density with contours beside a numerical schlieren image, one frame per snapshot. Open `solut/riemann.vtkhdf.series` (`solut/riemann.pvd` without HDF5) in ParaView for anything else.
+`post.sh` plots the final density (`riemann.png`) and runs `animate.py`, which writes `riemann.mp4`, `riemann.gif` and the last frame as `riemann_final.png`: density with contours beside a numerical schlieren image, one frame per snapshot. Open `solut/riemann.vtkhdf` (`solut/riemann.pvd` without HDF5) in ParaView for anything else.
 
 ## 6. A 3D case {#6-a-3d-case}
 

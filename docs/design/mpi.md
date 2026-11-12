@@ -107,7 +107,7 @@ These are found during per-rank precomputation on owned plus halo cells, and wit
 
 ### 9. Output and restart
 
-- **Solution output:** VTKHDF by default, one shared file per snapshot written with collective I/O at global offsets (rank-count independent); VTU (per-rank pieces plus a `.pvtu` index and the `.pvd` series) without parallel HDF5.
+- **Solution output:** VTKHDF by default, one shared file of every snapshot written with collective I/O at global offsets (rank-count independent); VTU (per-rank pieces plus a `.pvtu` index and the `.pvd` series) without parallel HDF5.
 - **Restart:** HDF5, written by global cell id, so a run can restart on a **different rank count**. This is essential for hero runs, which rarely get the same allocation twice.
 
 ### 10. Dynamic load balancing

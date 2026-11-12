@@ -26,9 +26,7 @@ solution is, then animate SURFACE_DIR with --prefix q.
 """
 import argparse
 import glob
-import json
 import os
-import re
 import sys
 import tempfile
 
@@ -42,7 +40,9 @@ from PIL import Image
 from scipy.ndimage import gaussian_filter
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools/post"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
 from animate import write_gif, write_mp4  # noqa: E402
+from mallard.vtu import read_index, read_pyvista  # noqa: E402
 from plot_sphere_re300 import REFERENCES, load  # noqa: E402
 
 BG = "#0d1117"
@@ -54,17 +54,11 @@ R_SHEATH = 0.6
 
 
 def snapshot_files(solut, prefix):
-    index = os.path.join(solut, prefix + ".vtkhdf.series")
-    if os.path.exists(index):
-        entries = [(e["time"], e["name"]) for e in json.load(open(index))["files"]]
-    else:
-        text = open(os.path.join(solut, prefix + ".pvd")).read()
-        entries = re.findall(r'timestep="([^"]+)"[^>]*file="([^"]+)"', text)
-    return [(float(t), os.path.join(solut, f)) for t, f in entries if os.path.exists(os.path.join(solut, f))]
+    return [(t, f) for t, f in read_index(os.path.join(solut, prefix)) if os.path.exists(f)]
 
 
 def q_surface(path, q_level, spacing, sigma):
-    mesh = pv.read(path)
+    mesh = read_pyvista(path)
     if path.endswith(".vtp"):
         return mesh
     if "Q_CRITERION" not in mesh.cell_data:

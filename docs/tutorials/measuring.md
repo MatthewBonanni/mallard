@@ -185,7 +185,7 @@ mesh, which this wake has none of.
 **The cycle.** The box snapshot at t = 200 holds the 8 phase averages; four of them, a quarter period
 apart, show the alternating vortices of U_Y forming behind the cylinder and moving downstream. Each bin
 averages its part of each of the four cycles; a longer run smooths them. In ParaView, open
-`solut/box.vtkhdf.series` and color by `PHASE_<bin>_U_Y`, or by `MEAN_U_X` for the mean recirculation.
+`solut/box.vtkhdf` and color by `PHASE_<bin>_U_Y`, or by `MEAN_U_X` for the mean recirculation.
 
 ![Phase-averaged cross-stream velocity in the box at four phases of the shedding cycle](../images/tutorials/measuring_phase-light.svg#gh-light-mode-only)
 ![Phase-averaged cross-stream velocity in the box at four phases of the shedding cycle](../images/tutorials/measuring_phase-dark.svg#gh-dark-mode-only)

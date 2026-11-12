@@ -119,12 +119,13 @@ def snapshot_blocks(path):
 
 
 def recorded_time(path):
-    """The time an HDF5 or VTKHDF snapshot file records (of its last step), in s."""
+    """The time an HDF5 or VTKHDF snapshot file records (in a series file, of
+    a SeriesSnapshot's step, or of its last), in s."""
     with h5py.File(path, "r") as f:
         if "VTKHDF" in f:
             g = f["VTKHDF"]
             if "Steps" in g:
-                return float(g["Steps"]["Values"][-1])
+                return float(g["Steps"]["Values"][getattr(path, "position", -1)])
             return float(g["FieldData"]["TIME"][0]) if "TIME" in g.get("FieldData", {}) else 0.0
         return float(f["/"].attrs.get("time", 0.0))
 

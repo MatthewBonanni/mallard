@@ -739,6 +739,21 @@ std::vector<std::string> notices(const std::string & text) {
                       "preset, not first order; add [numerics.face_reconstruction] type = \"FO\" to reproduce "
                       "older first-order results");
     }
+    if (input.contains("write_data") && input.at("write_data").is_array()) {
+        for (const auto & entry : input.at("write_data").as_array()) {
+            if (!entry.is_table() || entry.contains("series") || entry.contains("region") || entry.contains("regions")) {
+                continue;
+            }
+            if (entry.contains("format") && !(entry.at("format").is_string() && entry.at("format").as_string() == "vtkhdf")) {
+                continue;
+            }
+            const std::string prefix =
+                entry.contains("prefix") && entry.at("prefix").is_string() ? entry.at("prefix").as_string() : "PREFIX";
+            out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output keeps every snapshot in one "
+                          "file, " + prefix + ".vtkhdf, by default; add series = false for one file per snapshot, " +
+                          prefix + "_<n>.vtkhdf, indexed by " + prefix + ".vtkhdf.series");
+        }
+    }
     return out;
 }
 

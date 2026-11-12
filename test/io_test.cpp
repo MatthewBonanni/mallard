@@ -215,11 +215,11 @@ std::string output_case(const std::string & dir, const std::string & output_keys
     if (have_hdf5()) {
         s << "[[write_data]]\nprefix = \"" << dir << "/h5/flow\"\nformat = \"xdmf\"\ninterval = 4\n"
           << "fields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
-          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/flow\"\nformat = \"vtkhdf\"\ninterval = 4\n"
+          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/flow\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 4\n"
           << "fields = [\"RHO\", \"U\", \"P\", \"MEAN_P\"]\n" << snapshot_keys
-          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/series\"\nseries = true\ninterval = 4\n"
+          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/series\"\ninterval = 4\n"
           << "fields = [\"RHO\", \"U\"]\n" << snapshot_keys
-          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/near\"\ninterval = 4\n"
+          << "[[write_data]]\nprefix = \"" << dir << "/vtkhdf/near\"\nseries = false\ninterval = 4\n"
           << "region = {type = \"disk\", center = [0.4, 0.5], radius = 0.3}\nfields = [\"P\"]\n" << snapshot_keys;
     }
     return s.str();
@@ -649,7 +649,7 @@ TEST(IOTest, VTKHDFHoldsTheCellsAndTheirValues) {
                               Data("U_X", Kokkos::subview(values, Kokkos::ALL(), 1)),
                               Data("U_Y", Kokkos::subview(values, Kokkos::ALL(), 2))};
     DataWriter writer;
-    writer.init(parse_toml("prefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 5\n"
+    writer.init(parse_toml("prefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 5\n"
                            "fields = [\"RHO\", \"U\"]\n"),
                 data, mesh);
     writer.write(10, 0.25_r);
@@ -806,6 +806,7 @@ TEST(IOTest, ResumedRunsContinueSnapshotNumberingAndSeries) {
         for (const auto & o : outputs) {
             s << "[[write_data]]\nprefix = \"" << dir << "/" << o.prefix << "\"\nformat = \"" << o.format
               << "\"\ntime_interval = 0.25\nfields = [\"RHO\"]\n";
+            if (o.format == "vtkhdf") s << "series = false\n";
             if (o.prefix.starts_with("region")) s << "region = {type = \"disk\", center = [0.5, 0.5], radius = 0.4}\n";
         }
         return s.str();
@@ -890,7 +891,7 @@ TEST(IOTest, VTKHDFWritesCurvedCellsAsQuadraticLagrangeCells) {
             "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
             "[output]\ncheck_interval = 1000000\n"
-            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\ninterval = 1\nfields = [\"RHO\"]\n"));
+            "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 1\nfields = [\"RHO\"]\n"));
         solver.run();
         const VtkhdfGrid grid(dir + "/f_000000.vtkhdf");
         const uint8_t quadratic = triangles ? 69 : 70, linear = triangles ? 5 : 9;

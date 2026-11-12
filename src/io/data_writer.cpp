@@ -291,9 +291,13 @@ void DataWriter::init(const Input & input,
                               .fix = "Use format = \"vtu\", run on one rank, or rebuild against a parallel HDF5"});
         }
     }
+    one_file = format == DataFormat::VTKHDF;
     if (input.contains("series")) {
-        if (format != DataFormat::VTKHDF) throw InputError("write_data.series is for format = \"vtkhdf\".");
-        one_file = find_value<bool>(input, "series");
+        if (input.contains("format") && format != DataFormat::VTKHDF) {
+            throw InputError("write_data.series is for format = \"vtkhdf\".");
+        }
+        const bool series = find_value<bool>(input, "series");
+        one_file = one_file && series;
     }
 
     if (cell_subset) {

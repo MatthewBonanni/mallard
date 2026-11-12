@@ -400,9 +400,9 @@ probes the run did not have:
 
 ```sh
 mallard post extract solut/restart_*.restart                  # every [[probes]] of the input, at each restart
-mallard post extract solut/flow.vtkhdf.series --probe wake -o wake
-mallard post extract solut/flow.vtkhdf.series --latest --region domain --fields RHO,RHOE
-mallard post extract solut/flow.vtkhdf.series --times 0.1:0.5 --fields MASS_FLUX --reductions integral \
+mallard post extract solut/flow.vtkhdf --probe wake -o wake
+mallard post extract solut/flow.vtkhdf --latest --region domain --fields RHO,RHOE
+mallard post extract solut/flow.vtkhdf --times 0.1:0.5 --fields MASS_FLUX --reductions integral \
     --region '{type = "cut_plane", point = [0.5, 0, 0], normal = [1, 0, 0]}'
 ```
 

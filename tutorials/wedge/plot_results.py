@@ -3,7 +3,7 @@
 
     python plot_results.py RUN_DIR [RUN_DIR ...] [--labels A B ...] [--out DIR]
 
-Each RUN_DIR holds a finished run of input.toml (solut/wedge.vtkhdf.series,
+Each RUN_DIR holds a finished run of input.toml (solut/wedge.vtkhdf,
 probe_line.csv); the last one is drawn in the field plot. Prints, per run, the
 shock angle (fitted through the corner to where the pressure crosses halfway
 up the theoretical jump along horizontal lines) and the mean pressure ratio

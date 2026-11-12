@@ -289,7 +289,7 @@ def rotational_data(args):
         text = (ROOT / "examples" / "rotational_sector" / f"{name}.toml").read_text()
         text = text.replace("t_stop = 0.5", "t_stop = 0.25").replace("time_interval = 0.5", "time_interval = 0.25")
         run(args.mallard, text, work, name=f"{name}.toml")
-    return compare(snapshot(str(work / "solut" / "sector_000001")), snapshot(str(work / "solut" / "annulus_000001")), 4)
+    return compare(snapshot(str(work / "solut" / "sector")), snapshot(str(work / "solut" / "annulus")), 4)
 
 
 def rotational_sector(P, args):
