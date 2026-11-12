@@ -170,7 +170,6 @@ OTHER_GUARDS = [
     ("src/solver/probes.cpp", "moment is not supported with physics.axisymmetric"),
     ("src/solver/synthetic_turbulence.cpp", "is not available on axisymmetric meshes"),
     ("src/numerics/teno.cpp", "single_precision_tables is not available with gas mixtures"),
-    ("src/solver/solver.cpp", 'cell_averages" is not available for mixtures yet'),
     ("src/chemistry/mechanism.cpp", "reaction type"),
     ("src/chemistry/mechanism.cpp", "(only ideal-gas)"),
     ("src/chemistry/mechanism.cpp", "transport model"),

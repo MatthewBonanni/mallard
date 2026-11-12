@@ -29,6 +29,7 @@
 #include <toml.hpp>
 
 #include "common_typedef.h"
+#include "diagnostic_code.h"
 #include "units.h"
 
 /**
@@ -175,6 +176,7 @@ struct InputError : std::runtime_error {
     explicit InputError(const char * text) : InputError(std::string(text)) {}
     explicit InputError(Diagnostic d) : std::runtime_error(explain(d)), diagnostic(std::move(d)) {}
     Diagnostic diagnostic;  // empty key for errors given as text only
+    const char * code = diagnostic_code::INPUT;
 };
 
 /** @brief A required key that is absent: names it, the line of its table, and its docs. */
