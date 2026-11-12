@@ -21,8 +21,8 @@ faces, and its own stencil selection by a Lebesgue bound.
 | File | Contents |
 |---|---|
 | `src/numerics/teno.h` | Monomials, Euler eigenvectors, the adaptive cutoff, packed stencil storage |
-| `src/numerics/teno.cpp` | Options, the 2D setup, the cache, and the reconstruction kernels |
-| `src/numerics/teno_setup.h`, `teno_setup.cpp` | The 3D setup on the device: stencil search, ranking metric, moments, fits |
+| `src/numerics/teno.cpp` | Options, the cache, and the reconstruction kernels |
+| `src/numerics/teno_setup.h`, `teno_setup.cpp` | The setup on the device: stencil search, ranking metric, moments, fits |
 | `src/numerics/teno_scalars.h` | Mixture scalars reconstructed with the flow's stencil choices |
 | `src/numerics/face_reconstruction.h`, `face_reconstruction.cpp` | Face quadrature, and the interface shared with first order and MUSCL |
 
@@ -510,11 +510,12 @@ The same points enter the Lebesgue constant $\eqref{eq:lebesgue}$.
 
 ## Setup and storage
 
-**2D** runs the setup on the host, a cell at a time on host threads.
-**3D** runs it on the device (`teno_setup::Setup3DHandle`): the geometry
-(scales $h_c$, moments, bounding boxes, ranking metrics) once, then the
-stencils, fits and Lebesgue constants of batches of cells sized to the free
-device memory, a team of threads per cell on GPUs. Cells whose search
+The setup runs on the device (`teno_setup::SetupHandle`): the geometry
+(scales $h_c$ and ranking metrics; the rules of curved cells in 2D; moments
+and bounding boxes in 3D) once, then the stencils, fits, Lebesgue constants
+and, in 2D, smoothness-indicator matrices of batches of cells sized to the
+free device memory: a thread per cell in 2D, a team of threads per cell on
+GPUs in 3D. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
 and on the host, so it is independent of the batch, the thread count and
