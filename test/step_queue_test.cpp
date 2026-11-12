@@ -547,6 +547,24 @@ TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
     EXPECT_EQ(rows, expected);
 }
 
+TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
+    // Convergence values change only at their signals' rows (an integral's and a staged probe's): the device
+    // evaluates a trigger on them between those rows, where the host updates them
+    Case c;
+    c.run = "n_steps = 80\ncfl = 0.5\n";
+    c.extra = "check_interval = 1000\n" + RESTARTS +
+              "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+              "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+              "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
+              "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\nmin_samples = 10\n"
+              "batches = 4\nfile = \"{dir}/convergence.csv\"\n"
+              "[[triggers]]\nname = \"enough\"\nwhen = \"convergence_pt_P_samples >= 3\"\ndo = \"stop\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("convergence_triggers", c);
+    EXPECT_LT(o.step, 80u);
+    EXPECT_EQ(o.step % 3, 0u);
+}
+
 TEST(StepQueueTest, OutputsByTimeAndTStop) {
     Case c;
     c.run = "t_stop = 0.1\ncfl = 0.3\n";

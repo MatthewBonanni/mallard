@@ -763,7 +763,7 @@ void Solver::begin_device_steps() {
     }
     // Fused chemistry is advanced by the host before a probe reads the state
     for (size_t k = 0; k < probes.size() && staged_probes.size() < 64 && !defer_chemistry; k++) {
-        if (!probes.can_stage(k)) continue;
+        if (!probes.can_stage(k) || convergence_reads_probe(k)) continue;
         probes.stage(k, n_records);
         staged_probes.push_back(k);
     }
@@ -802,6 +802,7 @@ step_queue::Horizon Solver::step_horizon() const {
     for (const auto & writer : data_writers) writer->due_limits(step, h.step_limit, h.t_limit);
     probes.due_limits(step, h.step_limit, h.t_limit);
     if (!statistics_on_device()) statistics.due_limits(step, h.step_limit);
+    convergence_due_limits(h);
     // The chemistry balancing's window ends after a step the host takes
     const uint64_t window = reacting ? cell_chemistry.steps_to_balance_window() : 0;
     if (reacting && window != std::numeric_limits<uint64_t>::max()) h.at_step(step + window);

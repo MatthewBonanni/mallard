@@ -70,7 +70,9 @@ void Solver::init_triggers() {
     convergence.init(input, all, find_value_or<std::string>(input, "initialize", "type", "") == "restart");
     std::vector<std::string> monitored_names, writers;
     for (const auto & [name, dimension] : all) monitored_names.push_back(name);
-    for (const auto & [name, dimension] : convergence.columns()) monitored_names.push_back("convergence_" + name);
+    if (convergence.enabled()) {
+        for (const auto & [name, dimension] : convergence.columns()) monitored_names.push_back("convergence_" + name);
+    }
     for (const auto & writer : data_writers) writers.push_back(writer->get_prefix());
     triggers.init(input, monitored_names, writers, statistics.enabled());
     if (!triggers.starts_statistics()) return;
@@ -111,11 +113,42 @@ bool Solver::triggers_on_device() const {
     if (triggers.empty() || defer_chemistry || !triggers.fit_device() || triggers.size() > 64) return false;
     // Monitors written by the host stop the device at their rows anyway; probes' values are reduced by the host
     if (triggers.reads(3)) return false;
-    const size_t n_monitored = triggers.variables().size() - probes.value_names().size();
-    for (size_t v = n_monitored; v < triggers.variables().size(); v++) {
+    const size_t end = triggers.variables().size() - (convergence.enabled() ? convergence.columns().size() : 0);
+    for (size_t v = end - probes.value_names().size(); v < end; v++) {
         if (triggers.reads(static_cast<uint16_t>(v))) return false;
     }
     return true;
+}
+
+bool Solver::convergence_on_device() const {
+    if (!convergence.enabled() || !triggers_on_device()) return false;
+    const size_t n = triggers.variables().size();
+    for (size_t v = n - convergence.columns().size(); v < n; v++) {
+        if (triggers.reads(static_cast<uint16_t>(v))) return true;
+    }
+    return false;
+}
+
+void Solver::convergence_due_limits(step_queue::Horizon & h) const {
+    if (!convergence_on_device()) return;
+    const size_t n_integrals = integral_monitor.interval > 0 ? integral_columns().size() : 0;
+    for (const size_t source : convergence.sources()) {
+        if (source < n_integrals) h.at_multiple(step, integral_monitor.interval);
+        size_t first = n_integrals;
+        for (const auto & monitor : force_monitors) {
+            const size_t n = 2 * N_DIM + (monitor.modeled ? 1 : 0);
+            if (source >= first && source < first + n) h.at_multiple(step, monitor.interval);
+            first += n;
+        }
+    }
+}
+
+bool Solver::convergence_reads_probe(const size_t k) const {
+    if (!convergence_on_device()) return false;
+    const std::vector<size_t> from = probes.value_probes();
+    const size_t first = monitored_steps().size() - from.size();
+    return std::any_of(convergence.sources().begin(), convergence.sources().end(),
+                       [&](size_t source) { return source >= first && from[source - first] == k; });
 }
 
 void Solver::evaluate_triggers() {

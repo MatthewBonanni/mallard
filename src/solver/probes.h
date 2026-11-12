@@ -285,6 +285,8 @@ class Probes {
         std::vector<double> values() const;
         /** @brief Step of each monitored value's latest write (NO_VALUE before it), as value_names(); on every rank. */
         std::vector<uint64_t> value_steps() const;
+        /** @brief Index of the probe each monitored value comes from, as value_names(). */
+        std::vector<size_t> value_probes() const;
         /** @brief Whether a probe wrote monitored values at this step. */
         bool wrote_values(uint64_t step) const;
         /** @brief Dimension of each monitored value, as value_names(). */
