@@ -1,0 +1,1 @@
+- Run health's `limited_cells` counts a MUSCL cell only when its smallest limiter is below 0.9, not below 1: smooth limiters such as Venkatakrishnan's sit just below 1 almost everywhere in smooth flow, so the old count was near 100% for any smooth run.

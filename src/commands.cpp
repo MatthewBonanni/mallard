@@ -124,6 +124,9 @@ constexpr Option INFO_OPTIONS[] = {
     {"--verify", "", "",
      "Run directories: also check each file's contents against the SHA-256 its output record holds, not only "
      "its size; reads every file once. Default: sizes only."},
+    {"--html", "", "",
+     "Run directories: write RUN_DIR/report.html, the run report, from RUN_DIR/mallard.jsonl, the page the run "
+     "writes itself: for a run still going, killed, or of a Mallard before 0.10. Default: off."},
     KOKKOS,
 };
 
@@ -231,6 +234,18 @@ constexpr Option CONVERGENCE_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option PACK_OPTIONS[] = {
+    {"--output", "-o", "FILE",
+     "The archive: .tar.gz (gzip-compressed, in builds with zlib) or .tar. Default: the run directory's name "
+     "with .tar.gz (.tar in builds without zlib), in the current directory."},
+    {"--with-outputs", "", "small|all|none",
+     "The run's outputs to pack besides its run record: small, its forces, integrals and probes (CSV files, "
+     "probe snapshots, spectra); all, also its snapshots and restart files; none. Default: small."},
+    {"--verify", "", "",
+     "Check the archive FILE instead: every file against the size and SHA-256 its manifest records, no file "
+     "missing or added, and the input, mesh and files read against the SHA-256 the run recorded."},
+};
+
 constexpr Option RESOLVE_OPTIONS[] = {
     {"--restart", "", "FILE", "The input of the run as started from this restart file."},
     KOKKOS,
@@ -267,6 +282,7 @@ constexpr std::string_view DIFF_ARGUMENTS[] = {"FILE_A", "FILE_B"};
 constexpr std::string_view FILES_ARGUMENTS[] = {"FILE", "[FILE...]"};
 constexpr std::string_view CONVERGENCE_ARGUMENTS[] = {"RUN_DIR", "RUN_DIR", "[RUN_DIR...]"};
 constexpr std::string_view CONVERT_ARGUMENTS[] = {"INPUT", "OUTPUT.h5"};
+constexpr std::string_view PACK_ARGUMENTS[] = {"RUN_DIR|FILE"};
 constexpr std::string_view OPTIONAL_INPUT[] = {"[INPUT]"};
 constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
 constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
@@ -518,7 +534,7 @@ constexpr Command COMMANDS[] = {
         .group = "Inspect",
         .summary = "What a mesh, snapshot, restart, probe or CSV file, or a run directory, holds",
         .synopsis = "mallard info FILE [--format text|json] [--input] [--mesh-fields PREFIX]\n"
-                    "mallard info RUN_DIR [--format text|json] [--input] [--verify]",
+                    "mallard info RUN_DIR [--format text|json] [--input] [--verify] [--html]",
         .description =
             "Reports what a file Mallard writes or reads holds, without an input file: its kind, format and format "
             "version; the mesh (cells, points, cell types, bounds, boundary and cell zones); its times and steps; "
@@ -536,21 +552,25 @@ constexpr Command COMMANDS[] = {
             "mesh). Output files are read by any build, of any dimension and precision; a mesh file by the solver "
             "of its dimension, which also reports its quality as mallard check does.\n"
             "\n"
-            "RUN_DIR is a directory a run wrote to: its start and end from mallard.jsonl, and every output file "
-            "in it and one level down, one table row each (the snapshots of a series as their index). Each file the "
+            "RUN_DIR is a directory a run wrote to: its start from mallard.jsonl and, from the same records as its "
+            "report.html, its outcome, health (lowest values, repairs, conservation), cost and warnings, each with "
+            "a status; then every output file in it and one level down, one table row each (the snapshots of a series as their index). Each file the "
             "run log records as written is checked against its record: missing, or a size (with --verify, a "
             "SHA-256) other than the one recorded, is reported. A file still named NAME.partial is one whose write "
-            "did not finish.",
+            "did not finish. With --html, writes the run report instead: a page of the run's outcome, identity, "
+            "configuration, health, monitors, cost and output, built from mallard.jsonl alone.",
         .options = INFO_OPTIONS,
         .arguments = FILE_ARGUMENTS,
         .examples = "$ mallard info solut/flow.vtkhdf.series\n"
                     "$ mallard info solut/restart_001000.restart --format json\n"
                     "$ mallard info solut/flow_000100.vtkhdf --input > input.toml   # rerun it\n"
                     "$ mallard info wing.msh --mesh-fields wing\n"
-                    "$ mallard info runs/cylinder",
+                    "$ mallard info runs/cylinder\n"
+                    "$ mallard info runs/cylinder --html            # rebuild runs/cylinder/report.html",
         .exit_status = "0  the file was read\n"
                        "1  a file cannot be read (missing, not Mallard's, newer, its write unfinished), a run "
-                       "directory's file differs from its output record, or --input finds no run block\n"
+                       "directory's file differs from its output record, --input finds no run block, or --html no "
+                       "mallard.jsonl\n"
                        "2  usage error",
         .dim = Case::file,
         .run = info_main,
@@ -774,6 +794,47 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::output,
         .run = convergence_main,
+    },
+    {
+        .name = "pack",
+        .group = "Share",
+        .summary = "One archive that reproduces a run, with a manifest of hashes",
+        .synopsis = "mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none]\n"
+                    "mallard pack --verify FILE",
+        .description =
+            "Packs the last run of a run directory into one tar archive, for a paper's supplement or a bug "
+            "report: what it needs to run again and what it wrote. What goes in comes from its run record "
+            "(mallard.jsonl, Mallard 0.10 and later), never from file names: the input as the run read it "
+            "(from its run block) and the resolved input, the mesh file (a generated mesh is made again from "
+            "the input), every other file it read (mechanisms, tables, profiles, probe points, the restart file "
+            "or remap source it started from), its start record (the run block: code, build, where and how it "
+            "ran), its run record, and the outputs --with-outputs asks for, as its output records and resolved "
+            "input name them. Each file is checked against the SHA-256 the run recorded of it, so a file "
+            "changed since the run read or wrote it is refused.\n"
+            "\n"
+            "The archive holds one directory, named as the archive: manifest.json (each file with its role, "
+            "size and SHA-256, and the command that reruns the run), run.json (the start record), "
+            "resolved.toml, case/ (the input, mesh and files read, laid out as they were around the run "
+            "directory, so the input's relative paths hold) and output/ (the outputs, by their paths in the run "
+            "directory). Unpacked anywhere with tar -xf, the rerun command of the manifest, in its directory, "
+            "reproduces the run: bit for bit on the same build and rank count. A file the input names by an "
+            "absolute path is packed too, under absolute/, but the rerun reads it from that path.\n"
+            "\n"
+            "--verify checks an archive: every file against its manifest, and the input, mesh and files read "
+            "against the run block's own hashes. The archive is gzip-compressed in builds with zlib "
+            "(Mallard_ENABLE_ZLIB), else plain tar; any tar reads both.",
+        .options = PACK_OPTIONS,
+        .arguments = PACK_ARGUMENTS,
+        .examples = "$ mallard pack runs/cylinder                         # cylinder.tar.gz\n"
+                    "$ mallard pack runs/cylinder -o cylinder_re100.tar.gz --with-outputs all\n"
+                    "$ mallard pack --verify cylinder.tar.gz\n"
+                    "$ tar -xf cylinder.tar.gz && cd cylinder/case && mallard -i input.toml",
+        .exit_status = "0  the archive was written, or every file of it checks\n"
+                       "1  the run record or a file cannot be read, a file differs from the run's record of it, "
+                       "or (--verify) a file is missing, added or differs\n"
+                       "2  usage error",
+        .dim = Case::none,
+        .run = pack_main,
     },
     {
         .name = "test",

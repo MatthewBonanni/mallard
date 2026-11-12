@@ -581,7 +581,9 @@ TEST(SolverTest, ResultIsIndependentOfThreadCount) {
     auto run = [&](int threads) {
         const std::string out = (dir / ("mallard_threads_" + std::to_string(threads) + ".bin")).string();
         std::filesystem::remove(out);
-        const std::string cmd = "MALLARD_THREAD_TEST_OUT=" + out + " \"" + exe +
+        // Unsharded: a sharded run (GTEST_TOTAL_SHARDS) would leave the child's one test to one shard
+        const std::string cmd = "env -u GTEST_TOTAL_SHARDS -u GTEST_SHARD_INDEX MALLARD_THREAD_TEST_OUT=" + out +
+                                " \"" + exe +
                                 "\" --gtest_filter=SolverTest.ResultIsIndependentOfThreadCount --kokkos-num-threads=" +
                                 std::to_string(threads) + " > /dev/null 2>&1";
         EXPECT_EQ(std::system(cmd.c_str()), 0) << cmd;

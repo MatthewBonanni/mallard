@@ -35,7 +35,7 @@ Maintain  mallard test | completion | --version
 | Reacting-flow analysis | Post | planned ([#513](https://github.com/MatthewBonanni/mallard/issues/513)) |
 | `post convergence` | Post | available (scalars and `--exact` norms); norms against the finest run planned |
 | `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
-| `pack` | Share | planned |
+| `pack`, `pack --verify` | Share | available; on the run record (the files a run read, the output records) |
 | `test`, `completion`, `--version` | Maintain | available |
 
 ## Rules
