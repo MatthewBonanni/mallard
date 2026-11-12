@@ -810,6 +810,20 @@ void TimedBoundaryFields::apply_profiles(const Kokkos::View<rtype> & time,
                                             profile_scale, bcs});
 }
 
+namespace {
+
+/** @brief failed(0) = 1 where any of the flags is nonzero (unallocated flags are none). */
+void flag_nonzero(const Kokkos::View<double *> & failed, const Kokkos::View<uint32_t> & runaway,
+                  const Kokkos::View<int32_t> & a, const Kokkos::View<int32_t> & b) {
+    const bool has_runaway = runaway.is_allocated(), has_a = a.is_allocated(), has_b = b.is_allocated();
+    if (!has_runaway && !has_a && !has_b) return;
+    Kokkos::parallel_for("boundary_error_flag", 1, KOKKOS_LAMBDA(const int) {
+        if ((has_runaway && runaway() != 0) || (has_a && a() != 0) || (has_b && b() != 0)) failed(0) = 1.0;
+    });
+}
+
+} // namespace
+
 void TimedBoundaryFields::check_profiles() const {
     if (profiles.empty()) return;
     int32_t e = 0;
@@ -844,6 +858,11 @@ void TimedBoundaryFields::apply(const Kokkos::View<rtype> & time, const Kokkos::
         Kokkos::parallel_for("timed_boundary_fields", static_cast<uint32_t>(faces_host.size()), functor);
     }
     apply_profiles(time, bcs);
+}
+
+void TimedBoundaryFields::flag_error(const Kokkos::View<double *> & failed) const {
+    if (empty()) return;
+    flag_nonzero(failed, programs.runaway, error_face, profile_error);
 }
 
 void TimedBoundaryFields::check() const {
@@ -947,6 +966,11 @@ void DirichletStates::apply(const Kokkos::View<rtype> & time, const Kokkos::View
                          DirichletStatesFunctor{face_state_index, face_set, face_x, programs, time, face_state});
 }
 
+void DirichletStates::flag_error(const Kokkos::View<double *> & failed) const {
+    if (faces_host.empty()) return;
+    flag_nonzero(failed, programs.runaway, {}, {});
+}
+
 void DirichletStates::check() const {
     if (faces_host.empty()) return;
     if (const uint32_t stopped = programs.stopped(); stopped > 0) {
@@ -1026,6 +1050,11 @@ void TimedInletTargets::finish() {
     std::vector<const kexpr::Program *> all;
     for (const auto & p : host_programs) all.push_back(p.get());
     programs = kexpr::ProgramTable<>(all);
+}
+
+void TimedInletTargets::flag_error(const Kokkos::View<double *> & failed) const {
+    if (host_chars.empty()) return;
+    flag_nonzero(failed, programs.runaway, error_face, {});
 }
 
 void TimedInletTargets::check() const {

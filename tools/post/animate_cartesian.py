@@ -8,11 +8,12 @@ numerical schlieren, beside the schlieren itself, rendered pixel-exact.
 
 extract turns each snapshot of SERIES_DIR (VTKHDF, or VTU or the PVTU of a
 distributed run) into GRID_DIR/NAME.npy, the cell values on the (ny, nx) grid
-in float32, and appends its time to GRID_DIR/times.txt. Only snapshots listed
-in the series index (.vtkhdf.series or .pvd) are read, so files still being
-written are skipped; --delete removes the snapshots afterwards and --follow
-keeps polling until the run's log says it finished, which keeps the disk use
-of long runs bounded.
+in float32, and appends its time to GRID_DIR/times.txt. The snapshots of a
+series file (.vtkhdf) are read, and of one file per snapshot only those
+listed in the series index (.vtkhdf.series or .pvd), so files still being
+written are skipped; --delete removes those snapshot files afterwards and
+--follow keeps polling until the run's log says it finished, which keeps the
+disk use of long runs bounded (with series = false, or VTU output).
 
 render computes every frame at the grid's resolution and area-averages it to
 the panel size, so meshes far finer than the screen show no aliasing; text is
@@ -47,8 +48,12 @@ FG = "#e8e8e8"
 
 
 def listed_snapshots(series_dir):
-    """Snapshots of the series indexes (written after each snapshot is complete)."""
+    """Snapshots of the series files and of the series indexes (written after each snapshot is complete)."""
     out = []
+    for f in sorted(glob.glob(os.path.join(series_dir, "*.vtkhdf"))):
+        from mallard.vtkhdf import is_series_file, snapshots
+        if is_series_file(f):
+            out += snapshots(f)
     for index in glob.glob(os.path.join(series_dir, "*.vtkhdf.series")):
         from mallard.vtkhdf import read_series
         out += [path for _, path in read_series(index)]
@@ -65,6 +70,8 @@ def extract(args):
         finished = args.follow and os.path.exists(args.follow) and re.search(r"^\W*Stopped", open(args.follow).read(), re.M) is not None
         for path in listed_snapshots(args.series_dir):
             stem = os.path.splitext(os.path.basename(path))[0]
+            if hasattr(path, "position"):
+                stem += f"_{path.position:06d}"
             out = os.path.join(args.grid_dir, stem + ".npy")
             if os.path.exists(out) or not os.path.exists(path):
                 continue
@@ -73,7 +80,7 @@ def extract(args):
             os.replace(out + ".tmp.npy", out)
             with open(times, "a") as fh:
                 fh.write(f"{stem} {t:.10g}\n")
-            if args.delete:
+            if args.delete and not hasattr(path, "position"):
                 pieces = re.findall(r'Source="([^"]+)"', open(path).read()) if path.endswith(".pvtu") else []
                 for p in pieces:
                     os.remove(os.path.join(os.path.dirname(path), p))

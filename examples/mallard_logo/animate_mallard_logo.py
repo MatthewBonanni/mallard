@@ -4,8 +4,8 @@
     animate_mallard_logo.py OUT.mp4 SNAPSHOT_DIR [SNAPSHOT_DIR ...] [--fps 20] [--crf 27] [--poster FILE.jpg --poster-t T]
         [--png FILE] [--frames-dir DIR]
 
-Reads every .vtkhdf snapshot of the directories and orders them by the TIME
-each carries, not by file name, so the pieces of a run continued from restarts
+Reads every snapshot of the .vtkhdf files of the directories and orders them
+by the time each records, not by file name, so the pieces of a run continued from restarts
 (in several directories, or numbered again from 0) join into one sequence; a
 time already seen is skipped. Prints the extremes of the density over the
 sequence. The MP4 is H.264 (CRF 27, about 4 MB) at 1920 x 1080 and holds the last frame for
@@ -31,7 +31,8 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.join(ROOT, "tools", "post"))
 from animate import Rasterizer, ffmpeg, pixel_to_cell, schlieren  # noqa: E402
-from mallard.vtu import read_vtu_cells  # noqa: E402
+from mallard.vtkhdf import snapshots as vtkhdf_snapshots  # noqa: E402
+from mallard.vtu import read_vtu_cells, recorded_time  # noqa: E402
 
 BG = "#0d0f14"
 FG = "#e8e8e8"
@@ -46,19 +47,18 @@ def snapshots(dirs):
     for d in dirs:
         for f in sorted(glob.glob(os.path.join(d, "*.vtkhdf"))):
             with h5py.File(f, "r") as h:
-                g = h["VTKHDF"]
-                if "Steps" in g:
-                    continue  # a series file of boundary data, not a snapshot
-                t = float(g["FieldData/TIME"][0])
-            key = round(t, 9)
-            if key not in seen:
-                seen[key] = (t, f)
+                if h["VTKHDF"].attrs["Type"] != b"UnstructuredGrid":
+                    continue  # boundary data, not a snapshot
+            for s in vtkhdf_snapshots(f):
+                t = recorded_time(s)
+                key = round(t, 9)
+                if key not in seen:
+                    seen[key] = (t, s)
     return [seen[k] for k in sorted(seen)]
 
 
 def density(path):
-    with h5py.File(path, "r") as h:
-        return h["VTKHDF/CellData/RHO"][...]
+    return read_vtu_cells(path)[4]["RHO"]
 
 
 def main():

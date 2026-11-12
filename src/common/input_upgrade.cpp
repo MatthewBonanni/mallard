@@ -22,6 +22,8 @@
 
 #include "input.h"
 #include "version.h"
+#include "diagnostic_code.h"
+#include "log.h"
 
 namespace input_upgrade {
 
@@ -746,11 +748,33 @@ std::vector<std::string> notices(const std::string & text) {
         const bool simpler = chemistry.contains("coupling") && chemistry.at("coupling").is_string() &&
                              chemistry.at("coupling").as_string() == "simpler";
         if (!off && !simpler) {
-            out.push_back("no chemistry.fuse_half_steps: since 0.11.0 Strang splitting fuses each step's closing "
+            out.push_back("no chemistry.fuse_half_steps: since 0.10.0 Strang splitting fuses each step's closing "
                           "chemistry half step with the next step's opening one (results change within the "
                           "chemistry's tolerances); add fuse_half_steps = false to [chemistry] to reproduce older "
                           "results");
         }
+    }
+    if (input.contains("write_data") && input.at("write_data").is_array()) {
+        for (const auto & entry : input.at("write_data").as_array()) {
+            if (!entry.is_table() || entry.contains("series") || entry.contains("region") || entry.contains("regions")) {
+                continue;
+            }
+            if (entry.contains("format") && !(entry.at("format").is_string() && entry.at("format").as_string() == "vtkhdf")) {
+                continue;
+            }
+            const std::string prefix =
+                entry.contains("prefix") && entry.at("prefix").is_string() ? entry.at("prefix").as_string() : "PREFIX";
+            out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output keeps every snapshot in one "
+                          "file, " + prefix + ".vtkhdf, by default; add series = false for one file per snapshot, " +
+                          prefix + "_<n>.vtkhdf, indexed by " + prefix + ".vtkhdf.series");
+        }
+    }
+    if (has("numerics", "preset") && input.at("numerics").at("preset").is_string() &&
+        input.at("numerics").at("preset").as_string() == "les" && !has("numerics", "time_integrator")) {
+        std::string note = "preset = \"les\": since 0.11.0 it runs SSPRK54 at cfl 2.0, not SSPRK3 at 0.8; add "
+                           "[numerics] time_integrator = \"SSPRK3\" to reproduce older results";
+        if (has("run", "cfl")) note += "; the cfl this input sets now applies to SSPRK54, which is cheapest near 2.0";
+        out.push_back(note);
     }
     return out;
 }
@@ -811,7 +835,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
 int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {
-        std::cerr << "mallard input upgrade: cannot open " << file << "\n";
+        logging::error(diagnostic_code::INPUT_UPGRADE, "mallard input upgrade: cannot open " + file);
         return 1;
     }
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -829,7 +853,7 @@ int upgrade_file(const std::string & file, bool check, int dim, const std::strin
         if (check) return findings.empty() ? 0 : 1;
         std::cout << upgraded;
     } catch (const std::exception & e) {
-        std::cerr << "mallard input upgrade: " << file << ": " << e.what() << "\n";
+        logging::error(diagnostic_code::INPUT_UPGRADE, "mallard input upgrade: " + file + ": " + e.what());
         return 1;
     }
     return 0;

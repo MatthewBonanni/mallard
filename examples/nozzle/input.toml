@@ -6,7 +6,7 @@
 #
 #   python make_nozzle_mesh.py nozzle.msh
 #   ../../build/src/mallard -i input.toml
-#   python plot_nozzle.py solut/nozzle_000001.vtkhdf
+#   python plot_nozzle.py solut/nozzle.vtkhdf
 #
 # The quasi-one-dimensional solution has the choked mass flow, the shock at
 # x = 3.409 (Mach 1.66 ahead of it) and a stagnation pressure ratio of 0.874

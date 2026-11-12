@@ -354,6 +354,35 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     acc_spec.assign(size_t(n_pos) * spec_width, 0.0);
     acc_mean.assign(size_t(n_pos) * F, 0.0);
     acc_shell.assign(pairs.size() * n_shells, 0.0);
+    d_spec = Kokkos::View<double *>("spectra_spec", acc_spec.size());
+    d_mean = Kokkos::View<double *>("spectra_mean", acc_mean.size());
+    d_shell = Kokkos::View<double *>("spectra_shell", acc_shell.size());
+    s_spec = Kokkos::View<double *>("spectra_sample_spec", acc_spec.size());
+    s_mean = Kokkos::View<double *>("spectra_sample_mean", acc_mean.size());
+    s_shell = Kokkos::View<double *>("spectra_sample_shell", acc_shell.size());
+    clock = Kokkos::View<Clock>("spectra_clock");
+}
+
+void Spectra::pull() const {
+    if (!clock.is_allocated()) return;
+    Clock k;
+    Kokkos::deep_copy(Kokkos::View<Clock, Kokkos::HostSpace>(&k), clock);
+    weight = k.weight;
+    t_last = k.t_last;
+    n_samples = k.n_samples;
+    using Host = Kokkos::View<double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>;
+    Kokkos::deep_copy(Host(acc_spec.data(), acc_spec.size()), d_spec);
+    Kokkos::deep_copy(Host(acc_mean.data(), acc_mean.size()), d_mean);
+    Kokkos::deep_copy(Host(acc_shell.data(), acc_shell.size()), d_shell);
+}
+
+void Spectra::push() {
+    Clock k{weight, 0.0, t_last, n_samples};
+    Kokkos::deep_copy(clock, Kokkos::View<Clock, Kokkos::HostSpace>(&k));
+    using Host = Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>;
+    Kokkos::deep_copy(d_spec, Host(acc_spec.data(), acc_spec.size()));
+    Kokkos::deep_copy(d_mean, Host(acc_mean.data(), acc_mean.size()));
+    Kokkos::deep_copy(d_shell, Host(acc_shell.data(), acc_shell.size()));
 }
 
 void Spectra::start(rtype t) {
@@ -364,6 +393,7 @@ void Spectra::start(rtype t) {
     std::fill(acc_spec.begin(), acc_spec.end(), 0.0);
     std::fill(acc_mean.begin(), acc_mean.end(), 0.0);
     std::fill(acc_shell.begin(), acc_shell.end(), 0.0);
+    push();
 }
 
 void Spectra::move(const Route & route, uint32_t width, const rtype * src_ptr, rtype * dst_ptr) const {
@@ -576,7 +606,18 @@ void Spectra::sum_planes(const Layout & layout) {
     });
 }
 
-void Spectra::sample(uint64_t step, rtype t, const CellSampler & sampler) {
+void Spectra::sample(const uint64_t step, const rtype t, const rtype * const t_device, const CellSampler & sampler) {
+    sample_device(t_device, sampler);
+    if (average) return;
+    pull();
+    std::ostringstream name;
+    const std::filesystem::path path(file);
+    name << (path.parent_path() / path.stem()).string() << "_" << std::setw(6) << std::setfill('0') << step
+         << path.extension().string();
+    if (comm::is_root()) write_file(name.str(), step, t, snapshot_block::reason::INTERVAL);
+}
+
+void Spectra::sample_device(const rtype * const t, const CellSampler & sampler) {
     const uint32_t F = static_cast<uint32_t>(fields.size());
     const auto values = cell_values;
     const auto code = codes;
@@ -601,54 +642,52 @@ void Spectra::sample(uint64_t step, rtype t, const CellSampler & sampler) {
     // Rows of every rank in plane order
     const Kokkos::View<double *> local(partial.data(), partial.size());
     if (distributed) comm::allgatherv_device(local, gathered, partial_counts, use_nccl);
-    const auto all = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), distributed ? gathered : local);
+    const Kokkos::View<double *> all = distributed ? gathered : local;
     const size_t width = partial.extent(1);
     const size_t rows = all.size() / width;
-    const double norm2 = 1.0 / (double(n_modes) * double(n_modes));
-    smp_spec.assign(acc_spec.size(), 0.0);
-    smp_mean.assign(acc_mean.size(), 0.0);
-    smp_shell.assign(acc_shell.size(), 0.0);
+    const double norm2 = 1.0 / (double(n_modes) * double(n_modes)), modes = double(n_modes);
+    const uint32_t sw = spec_width;
+    const auto spec = s_spec, mean_ = s_mean, shell_ = s_shell;
     if (!two_stage) {
         if (rows != n_pos) throw std::logic_error("spectra: missing rows");
-        for (size_t row = 0; row < rows; row++) {
-            for (uint32_t c = 0; c < spec_width; c++) smp_spec[row * spec_width + c] = all[row * width + c] * norm2;
-            for (uint32_t f = 0; f < F; f++) smp_mean[row * F + f] = all[row * width + spec_width + f] / double(n_modes);
-        }
+        Kokkos::parallel_for("spectra_rows", rows, KOKKOS_LAMBDA(const size_t row) {
+            for (uint32_t c = 0; c < sw; c++) spec(row * sw + c) = all(row * width + c) * norm2;
+            for (uint32_t f = 0; f < F; f++) mean_(row * F + f) = all(row * width + sw + f) / modes;
+        });
     } else {
-        for (size_t row = 0; row < rows; row++) {
-            for (uint32_t c = 0; c < spec_width; c++) smp_spec[c] += all[row * width + c];
-            for (size_t c = 0; c < smp_shell.size(); c++) smp_shell[c] += all[row * width + spec_width + F + c];
-        }
-        for (auto & v : smp_spec) v *= norm2;
-        for (auto & v : smp_shell) v *= norm2;
-        for (uint32_t f = 0; f < F; f++) smp_mean[f] = all[spec_width + f] / double(n_modes);
+        const size_t n_shell = shell_.extent(0);
+        // Sums over the rows in their order
+        Kokkos::parallel_for("spectra_plane_sums", sw + n_shell, KOKKOS_LAMBDA(const size_t i) {
+            const size_t c = i < sw ? i : sw + F + (i - sw);
+            double v = 0.0;
+            for (size_t row = 0; row < rows; row++) v += all(row * width + c);
+            if (i < sw) {
+                spec(i) = v * norm2;
+            } else {
+                shell_(i - sw) = v * norm2;
+            }
+        });
+        Kokkos::parallel_for("spectra_plane_means", F, KOKKOS_LAMBDA(const uint32_t f) {
+            mean_(f) = all(sw + f) / modes;
+        });
     }
-
-    if (!average) {
-        acc_spec = smp_spec;
-        acc_mean = smp_mean;
-        acc_shell = smp_shell;
-        n_samples++;
-        t_last = t;
-        std::ostringstream name;
-        const std::filesystem::path path(file);
-        name << (path.parent_path() / path.stem()).string() << "_" << std::setw(6) << std::setfill('0') << step
-             << path.extension().string();
-        if (comm::is_root()) write_file(name.str(), step, t, snapshot_block::reason::INTERVAL);
-        return;
+    const Kokkos::View<Clock> k = clock;
+    const bool averaged = average;
+    Kokkos::parallel_for("spectra_clock", 1, KOKKOS_LAMBDA(const int) {
+        Clock & c = k();
+        const double w = double(*t - c.t_last);
+        c.t_last = *t;
+        c.n_samples++;
+        c.weight = averaged ? c.weight + w : c.weight;
+        c.a = averaged ? w / c.weight : 0.0;
+    });
+    // Unaveraged: the sample itself
+    for (const auto & [acc, smp] : {std::pair{d_spec, s_spec}, std::pair{d_mean, s_mean}, std::pair{d_shell, s_shell}}) {
+        const Kokkos::View<double *> A = acc, S = smp;
+        Kokkos::parallel_for("spectra_accumulate", A.extent(0), KOKKOS_LAMBDA(const size_t i) {
+            A(i) = averaged ? A(i) + k().a * (S(i) - A(i)) : S(i);
+        });
     }
-    const double w = double(t - t_last);
-    t_last = t;
-    n_samples++;
-    accumulate(w);
-}
-
-void Spectra::accumulate(double w) {
-    weight += w;
-    const double a = w / weight;
-    for (size_t i = 0; i < acc_spec.size(); i++) acc_spec[i] += a * (smp_spec[i] - acc_spec[i]);
-    for (size_t i = 0; i < acc_mean.size(); i++) acc_mean[i] += a * (smp_mean[i] - acc_mean[i]);
-    for (size_t i = 0; i < acc_shell.size(); i++) acc_shell[i] += a * (smp_shell[i] - acc_shell[i]);
 }
 
 std::vector<std::complex<double>> Spectra::fluctuation(uint32_t pos, uint32_t p, uint32_t h) const {
@@ -656,6 +695,7 @@ std::vector<std::complex<double>> Spectra::fluctuation(uint32_t pos, uint32_t p,
     for (uint32_t i = 0; i < h; i++) offset += 2 * N[directions[i]];
     const uint32_t n = N[directions[h]];
     std::vector<std::complex<double>> S(n);
+    pull();
     const double * at = &acc_spec[size_t(pos) * spec_width + offset];
     for (uint32_t k = 0; k < n; k++) S[k] = {at[2 * k], at[2 * k + 1]};
     S[0] -= mean(pos, pairs[p].first) * mean(pos, pairs[p].second);
@@ -684,6 +724,7 @@ std::vector<double> Spectra::correlation(uint32_t pos, uint32_t p, uint32_t h) c
 }
 
 std::vector<double> Spectra::shell(uint32_t p) const {
+    pull();
     std::vector<double> E(acc_shell.begin() + p * n_shells, acc_shell.begin() + (p + 1) * n_shells);
     if (!E.empty()) E[0] -= mean(0, pairs[p].first) * mean(0, pairs[p].second);
     return E;
@@ -713,15 +754,18 @@ void Spectra::restore(const RestartData & restart, const std::string & file_name
     const double * n = restart.attribute(SAMPLES);
     t_last = tl ? static_cast<rtype>(*tl) : t;
     n_samples = n ? static_cast<uint64_t>(*n) : 0;
+    push();
 }
 
 RestartAttributes Spectra::attributes() const {
     if (!enabled() || !average) return {};
+    pull();
     return {{WEIGHT, weight}, {T_LAST, static_cast<double>(t_last)}, {SAMPLES, static_cast<double>(n_samples)}};
 }
 
 RestartArrays Spectra::arrays() const {
     if (!enabled() || !average) return {};
+    pull();
     RestartArrays a{{SPECTRUM, acc_spec}, {MEAN, acc_mean}};
     if (!acc_shell.empty()) a.emplace_back(SHELL, acc_shell);
     return a;
@@ -729,6 +773,7 @@ RestartArrays Spectra::arrays() const {
 
 void Spectra::write(uint64_t step, rtype t, const std::string & reason) const {
     if (!enabled() || !average || !comm::is_root()) return;
+    pull();
     write_file(file, step, t, reason);
 }
 
@@ -807,15 +852,15 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const
     logging::written(step, double(t), "spectra", name, reason, file);
 }
 
-std::string Spectra::summary() const {
-    std::string text = std::string(average ? "averaged" : "per sample") + " every " + logging::count(interval) +
-                       " steps from t = " + units::with(logging::real(double(t_start)), "s") + " along ";
+OutputSummary Spectra::summary() const {
+    std::string text = std::string(average ? "averaged" : "per sample") + " from t = " +
+                       units::with(logging::real(double(t_start)), "s") + " along ";
     for (size_t h = 0; h < directions.size(); h++) text += (h ? ", " : "") + std::string(1, AXES[directions[h]]);
     text += ": ";
     for (size_t p = 0; p < pairs.size(); p++) {
         text += (p ? ", " : "") + fields[pairs[p].first] + (pairs[p].first == pairs[p].second ? "" : "*" + fields[pairs[p].second]);
     }
-    text += " -> " + file;
-    if (n_samples > 0 && average) text += " (" + logging::count(n_samples) + " samples so far)";
-    return text;
+    pull();
+    if (n_samples > 0 && average) text += " (" + logging::count(n_samples, "sample") + " so far)";
+    return {.kind = "spectra", .file = file, .steps = interval, .contents = text};
 }

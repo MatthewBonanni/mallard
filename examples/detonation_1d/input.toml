@@ -12,7 +12,7 @@
 #
 # (Nx = 7868 or 15736 in both places for 20 or 40 cells per induction length),
 # then run and check the front with
-#   python plot_detonation.py solut/detonation.vtkhdf.series 1616.93 1.5251
+#   python plot_detonation.py solut/detonation 1616.93 1.5251
 
 [run]
 t_stop = 2.0e-4

@@ -92,7 +92,7 @@ RULES = {
     ("numerics.md", "### TENO-E options"): (lambda t: recon(t).get("bound_preserving", False), None),
     ("numerics.md", "## Riemann solvers"): (lambda t: "riemann_solver" in num(t), None),
     ("numerics.md", "## Time integration and other options"):
-        (lambda t: num(t).get("time_integrator", "SSPRK3") != "SSPRK3",
+        (lambda t: num(t).get("time_integrator", "SSPRK54" if num(t).get("preset") == "les" else "SSPRK3") != "SSPRK3",
          "every example keeps the default, `SSPRK3`; the others are in the time-integration tests"),
     ("output.md", "## Solution snapshots: `[[write_data]]`"): (lambda t: "write_data" in t, None),
     ("output.md", "### Terminal output"): (lambda t: "check_interval" in t.get("output", {}), None),
@@ -102,6 +102,8 @@ RULES = {
     ("statistics.md", "## Spectra and two-point correlations: `[statistics.spectra]`"):
         (lambda t: "spectra" in t.get("statistics", {}), "the in-situ statistics tests"),
     ("statistics.md", "## Phase averages: `[statistics.phase]`"): (lambda t: "phase" in t.get("statistics", {}), None),
+    ("statistics.md", "## Conditional statistics and PDFs: `[[statistics.conditional]]`"):
+        (lambda t: "conditional" in t.get("statistics", {}), None),
     ("probes.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
     ("probes.md", "### Region probes"): (lambda t: any("region" in p for p in t.get("probes", [])), None),
     ("physics.md", "## Euler and Navier–Stokes"): (lambda t: "type" in t.get("physics", {}), None),

@@ -107,9 +107,9 @@ def main():
         vtu = units(path("flow_000002.vtu"))
         h5 = units(path("flow_000002.h5"))
         xmf = units(path("flow_000002.xmf"))
-        vtkhdf = units(path("flow_000002.vtkhdf"))
+        vtkhdf = units(path("flow.vtkhdf"))
         assert vtu == h5 == xmf == vtkhdf, (vtu, h5, vtkhdf)
-        assert long_names(path("flow_000002.vtkhdf")) == long_names(path("flow_000002.vtu"))
+        assert long_names(path("flow.vtkhdf")) == long_names(path("flow_000002.vtu"))
         assert vtu["RHO"] == "kg m-3" and vtu["U"] == "m s-1" and vtu["COV_U_X_P"] == "kg s-3", vtu
         assert long_names(path("flow_000002.vtu")) == long_names(path("flow_000002.h5"))
         # h5py alone: the CF attributes are plain strings
@@ -141,8 +141,7 @@ def main():
                                  text=True).stdout
             return {f["name"]: f["units"] for f in json.loads(out)["fields"]}
 
-        for name in ["flow_000002.vtu", "flow_000002.h5", "flow_000002.xmf", "flow_000002.vtkhdf", "flow.pvd",
-                     "flow.vtkhdf.series"]:
+        for name in ["flow_000002.vtu", "flow_000002.h5", "flow_000002.xmf", "flow.vtkhdf", "flow.pvd"]:
             assert info(name) == vtu, (name, info(name), vtu)
         assert info("probe_h5.h5") == {k: probe[k] for k in ("RHO", "T")}, (info("probe_h5.h5"), probe)
         assert info("probe_vtkhdf.vtkhdf") == units(path("probe_vtkhdf.vtkhdf"))

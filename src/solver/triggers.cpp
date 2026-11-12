@@ -216,13 +216,48 @@ std::vector<size_t> Triggers::advance(const std::string & conditions, double t) 
             trigger.since = t;
         }
         // Within round-off of the time accumulated over the steps
-        if (!trigger.armed || t < trigger.since + trigger.hold * (1.0 - 1e-9)) continue;
+        if (!trigger.armed || t < trigger_hold_end(trigger.since, trigger.hold)) continue;
         trigger.armed = false;
         if (trigger.firings == 0) trigger.t_first = t;
         trigger.firings++;
         fired.push_back(i);
     }
     return fired;
+}
+
+bool Triggers::reads(const uint16_t v) const {
+    return std::any_of(triggers.begin(), triggers.end(), [&](const Trigger & trigger) {
+        return std::find(trigger.used.begin(), trigger.used.end(), v) != trigger.used.end();
+    });
+}
+
+bool Triggers::fit_device() const {
+    return std::all_of(triggers.begin(), triggers.end(), [](const Trigger & trigger) { return trigger.used.size() <= 32; });
+}
+
+std::vector<const kexpr::Program *> Triggers::conditions() const {
+    std::vector<const kexpr::Program *> programs;
+    for (const auto & trigger : triggers) programs.push_back(&trigger.condition);
+    return programs;
+}
+
+std::vector<Triggers::DeviceState> Triggers::device_states() const {
+    std::vector<DeviceState> states;
+    for (const auto & trigger : triggers) {
+        DeviceState s{trigger.armed ? 1u : 0u, trigger.holding ? 1u : 0u, trigger.repeat ? 1u : 0u,
+                      static_cast<uint32_t>(trigger.used.size()), trigger.since, trigger.hold, {}};
+        for (size_t i = 0; i < trigger.used.size() && i < 32; i++) s.used[i] = trigger.used[i];
+        states.push_back(s);
+    }
+    return states;
+}
+
+void Triggers::set_states(const std::vector<DeviceState> & states) {
+    for (size_t i = 0; i < triggers.size(); i++) {
+        triggers[i].armed = states[i].armed != 0;
+        triggers[i].holding = states[i].holding != 0;
+        triggers[i].since = states[i].since;
+    }
 }
 
 bool Triggers::starts_statistics() const {
@@ -296,7 +331,7 @@ std::vector<std::pair<std::string, std::string>> Triggers::summary() const {
     std::vector<std::pair<std::string, std::string>> items;
     for (const auto & trigger : triggers) {
         std::string state = trigger.firings == 0 ? "" : "; fired " + logging::count(trigger.firings) + "x";
-        items.emplace_back("trigger " + trigger.name,
+        items.emplace_back(trigger.name,
                            describe(trigger) + (trigger.repeat ? " (repeat)" : " (once)") + state);
     }
     return items;

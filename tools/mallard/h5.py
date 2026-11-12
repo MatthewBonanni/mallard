@@ -118,13 +118,24 @@ def snapshot_blocks(path):
         return [json.loads(_text(v).rstrip("\0")) for v in f["mallard_snapshot"][()]]
 
 
+def probe_sampling(path):
+    """The probe sampling block of a probe HDF5 or VTKHDF file (root attribute
+    mallard_sampling), as a dict; None for files before Mallard 0.10."""
+    with h5py.File(path, "r") as f:
+        if "mallard_sampling" not in f.attrs:
+            return None
+        value = f.attrs["mallard_sampling"]
+        return json.loads(_text(value[0] if not isinstance(value, (str, bytes)) else value))
+
+
 def recorded_time(path):
-    """The time an HDF5 or VTKHDF snapshot file records (of its last step), in s."""
+    """The time an HDF5 or VTKHDF snapshot file records (in a series file, of
+    a SeriesSnapshot's step, or of its last), in s."""
     with h5py.File(path, "r") as f:
         if "VTKHDF" in f:
             g = f["VTKHDF"]
             if "Steps" in g:
-                return float(g["Steps"]["Values"][-1])
+                return float(g["Steps"]["Values"][getattr(path, "position", -1)])
             return float(g["FieldData"]["TIME"][0]) if "TIME" in g.get("FieldData", {}) else 0.0
         return float(f["/"].attrs.get("time", 0.0))
 

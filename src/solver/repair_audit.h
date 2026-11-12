@@ -21,17 +21,17 @@
 
 #include "run_health.h"
 
-/** @brief Device handle of one repair site: copied into the kernels that repair. */
+/**
+ * @brief Device handle of one repair site: copied into the kernels that repair.
+ *        A site adds to change only the results of its own reductions, never
+ *        with atomics, so that the changes are the same bit for bit in every run.
+ */
 struct RepairRecorder {
     Kokkos::View<double *> change;          // (component): integrated change
     Kokkos::View<uint64_t[1]> activations;
     Kokkos::View<uint8_t *> touched;        // (cell): repaired since the last report (bit 0) or the start (bit 1)
 
     KOKKOS_INLINE_FUNCTION bool active() const { return change.extent(0) > 0; }
-
-    KOKKOS_INLINE_FUNCTION void add(const uint32_t component, const double amount) const {
-        Kokkos::atomic_add(&change(component), amount);
-    }
 
     /** @brief One activation in an owned cell of this rank (cell < 0: a cell of another rank). */
     KOKKOS_INLINE_FUNCTION void activate(const int64_t cell) const {

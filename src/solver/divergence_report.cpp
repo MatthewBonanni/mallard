@@ -126,7 +126,7 @@ Cause time_step(const Evidence & e) {
                                                              : "") +
                              ", above " + limit + ", the largest stable value of " + e.integrator +
                              " for smooth flow");
-        c.evidence.push_back(logging::count(e.n_over_limit) + " of " + logging::count(e.n_cells) + " cells (" +
+        c.evidence.push_back(logging::count(e.n_over_limit) + " of " + logging::count(e.n_cells, "cell") + " (" +
                              percent(fraction) + ") were above it" +
                              (widespread ? "" : ": the excess is local, so look at those cells first"));
     } else if (cfl > 0.8 * e.limit) {
@@ -184,10 +184,10 @@ Cause mesh(const Evidence & e) {
                          " (questionable above " + logging::format("%g", MeshQuality::LIMITS[m]) + "; the mesh's worst is " +
                          logging::format("%.3g", e.mesh_max[m]) + ")");
     if (local_cfl) {
-        c.evidence.push_back("only " + logging::count(e.n_over_limit) +
-                             " cells exceeded the stable CFL number: the time step suits the rest of the mesh");
+        c.evidence.push_back("only " + logging::count(e.n_over_limit, "cell") +
+                             " exceeded the stable CFL number: the time step suits the rest of the mesh");
     }
-    if (e.n_invalid <= 10) c.evidence.push_back("the failure is confined to " + logging::count(e.n_invalid) + " cells");
+    if (e.n_invalid <= 10) c.evidence.push_back("the failure is confined to " + logging::count(e.n_invalid, "cell"));
     std::sort(ids.begin(), ids.end());
     ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
     std::string list;
@@ -227,8 +227,8 @@ Cause boundary(const Evidence & e, const Zone * zone) {
     } else {
         c.fix = "check the condition and values of " + zone->name;
     }
-    c.evidence.push_back(logging::count(zone->near) + " of the " + logging::count(e.n_invalid) +
-                         " invalid cells are within two cells of " + zone->name);
+    c.evidence.push_back(logging::count(zone->near) + " of the " + logging::count(e.n_invalid, "invalid cell") +
+                         (e.n_invalid == 1 ? " is" : " are") + " within two cells of " + zone->name);
     return c;
 }
 
@@ -250,12 +250,12 @@ Cause initial_state(const Evidence & e) {
     if (e.n_inadmissible > 0 && at_start) {
         c.score = 0.95;
         c.evidence.push_back(start + " already has a non-positive density or pressure in " +
-                             logging::count(e.n_inadmissible) + " cells, e.g. " + cell_name(e, e.inadmissible) + ": rho " +
+                             logging::count(e.n_inadmissible, "cell") + ", e.g. " + cell_name(e, e.inadmissible) + ": rho " +
                              units::with(real(e.inadmissible.rho), "kg/m^3") + ", p " +
                              units::with(real(e.inadmissible.p), "Pa"));
     } else if (steps <= 10) {
         c.score = 0.35;
-        c.evidence.push_back("the run failed " + logging::count(steps) + (steps == 1 ? " step" : " steps") +
+        c.evidence.push_back("the run failed " + logging::count(steps, "step") +
                              " after its start, before the flow could develop");
     } else {
         return c;
@@ -450,7 +450,7 @@ std::string text(const Evidence & e, const std::vector<Cause> & causes, const bo
         if (c.zone >= 0) {
             notes += "\nboundary " + e.zones[size_t(c.zone)].name + " (" + e.zones[size_t(c.zone)].type + ") " +
                      (c.layers == 0 ? "on one of its faces"
-                                    : std::to_string(c.layers) + (c.layers == 1 ? " cell" : " cells") + " away");
+                                    : logging::count(uint64_t(c.layers), "cell") + " away");
         }
         std::string flags;
         if (c.repaired) flags += "repaired";

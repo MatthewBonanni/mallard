@@ -3,7 +3,7 @@
 
     python plot_results.py RUN_DIR [RUN_DIR ...] [--labels A B ...] [--out DIR]
 
-Each RUN_DIR holds a finished run of input.toml (solut/wedge.vtkhdf.series,
+Each RUN_DIR holds a finished run of input.toml (solut/wedge.vtkhdf,
 probe_line.csv); the last one is drawn in the field plot. Prints, per run, the
 shock angle (fitted through the corner to where the pressure crosses halfway
 up the theoretical jump along horizontal lines) and the mean pressure ratio
@@ -115,7 +115,7 @@ def main():
             ax.plot(s["y"], s["P"] / p1, color=t["series"][k % len(t["series"])], label=f"t = {1e3 * tt:.1f} ms")
         ax.set_xlabel("y at x = 1.5 [m]")
         ax.set_ylabel("p / p₁")
-        ax.legend(ncol=2, fontsize=10)
+        ax.legend(fontsize=10, loc="lower right", bbox_to_anchor=(1.0, 0.1))
         return fig
 
     def validation(t):

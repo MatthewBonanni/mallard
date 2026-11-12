@@ -68,8 +68,8 @@ const std::vector<Preset> & presets() {
             {reconstruction("limiter"), Input("none")},
             {{"numerics", "riemann_solver"}, Input("HLLC")},
             {{"numerics", "convective_flux"}, Input("hybrid")},
-            {{"numerics", "time_integrator"}, Input("SSPRK3")},
-            {{"run", "cfl"}, Input(0.8)},
+            {{"numerics", "time_integrator"}, Input("SSPRK54")},
+            {{"run", "cfl"}, Input(2.0)},
         }},
         {"reacting", {
             {reconstruction("type"), Input("MUSCL")},

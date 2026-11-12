@@ -308,11 +308,14 @@ def read_npz(path):
 
 
 def snapshots(run):
-    """Snapshot groups of RUN/solut: {index: [VTKHDF file, or VTU piece paths]}."""
-    groups = {}
+    """Snapshot groups of RUN/solut: {index: [VTKHDF snapshot, or VTU piece paths]}."""
+    from mallard.vtu import series
     solut = os.path.join(run, "solut")
-    for p in sorted(glob.glob(os.path.join(solut, "*.vtkhdf"))) or sorted(glob.glob(os.path.join(solut, "*.vtu"))):
-        m = re.search(r"_(\d+)(?:_p\d+)?\.(?:vtu|vtkhdf)$", os.path.basename(p))
+    if glob.glob(os.path.join(solut, "*.vtkhdf")):
+        return {k: [s] for k, s in enumerate(series(solut, "*.vtkhdf"))}
+    groups = {}
+    for p in sorted(glob.glob(os.path.join(solut, "*.vtu"))):
+        m = re.search(r"_(\d+)(?:_p\d+)?\.vtu$", os.path.basename(p))
         if m:
             groups.setdefault(int(m.group(1)), []).append(p)
     return groups

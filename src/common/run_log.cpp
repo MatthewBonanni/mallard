@@ -12,6 +12,7 @@
 #include <iostream>
 #include <optional>
 #include <stdexcept>
+#include <vector>
 
 #include "comm.h"
 #include "common_io.h"
@@ -25,9 +26,12 @@ namespace {
 
 std::ofstream out;
 std::optional<uint64_t> recorded_step;
+bool holding = false;
+std::vector<std::string> held;
 std::optional<run_page::Page> page;
 std::string report_file;
 bool ended = false, reported_progress = false;
+std::ostream * progress_out = nullptr;
 
 void write_report() {
     try {
@@ -57,6 +61,14 @@ void report(const std::string & line) {
     if (t == "progress" && !reported_progress) due = reported_progress = true;
     if (t == "end") ended = true;
     if (due) write_report();
+}
+
+void write_line(const std::string & line) {
+    if (out.is_open()) {
+        out << line << '\n';
+        out.flush();
+    }
+    if (page) report(line);
 }
 
 /** @brief The step of the last record that has one (its first "step" is the record's own). */
@@ -98,14 +110,33 @@ bool is_open() { return out.is_open(); }
 
 std::optional<uint64_t> last_step() { return recorded_step; }
 
-void write(const json::Object & record) {
-    if (!out.is_open() && !page) return;
-    const std::string line = record.str();
-    if (out.is_open()) {
-        out << line << '\n';
-        out.flush();
+void write(const json::Object & record, bool held_record) {
+    if (holding && held_record) {
+        held.push_back(record.str());
+        return;
     }
-    if (page) report(line);
+    write_line(record.str());
+}
+
+void hold() {
+    held.clear();
+    holding = comm::is_root();
+}
+
+void release(const json::Object & start) {
+    holding = false;
+    write(start);
+    for (const std::string & line : held) write_line(line);
+    held.clear();
+}
+
+void stream_progress(std::ostream * stream) { progress_out = stream; }
+
+bool streams_progress() { return progress_out != nullptr; }
+
+void write_progress(const json::Object & record) {
+    write(record);
+    if (progress_out && comm::is_root()) *progress_out << record.str() << std::endl;
 }
 
 } // namespace run_log

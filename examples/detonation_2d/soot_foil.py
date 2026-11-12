@@ -49,7 +49,7 @@ def triple_points(x, y, p, p0, x_front, depth=0.003, prominence=0.15):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("series", help="PREFIX.vtkhdf.series, or PREFIX.pvd (VTU)")
+    ap.add_argument("series", help="the series PREFIX (PREFIX.vtkhdf, or PREFIX.pvd of VTU output)")
     ap.add_argument("D_cj", type=float)
     ap.add_argument("--every", type=int, default=10)
     ap.add_argument("--prominence", type=float, default=0.15)

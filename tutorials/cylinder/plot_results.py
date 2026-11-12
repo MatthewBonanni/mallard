@@ -3,7 +3,7 @@
 
     python plot_results.py RUN_DIR [--t-start 60] [--out DIR]
 
-RUN_DIR holds a run of input.toml (forces_cylinder.csv, solut/cylinder.vtkhdf.series).
+RUN_DIR holds a run of input.toml (forces_cylinder.csv, solut/cylinder.vtkhdf).
 From --t-start on, prints the Strouhal number (from the lift's period), the
 mean drag coefficient and the lift amplitude against the references, and
 writes the figures cylinder_history (drag and lift against time) and

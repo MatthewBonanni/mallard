@@ -373,7 +373,9 @@ void Solver::write_checkpoint() {
 }
 
 void Solver::poll_control_files() {
-    if (control_file_interval == 0 || step % control_file_interval != 0 || !comm::is_root()) return;
+    // Once per interval of the steps the host has taken, also while steps run ahead of it
+    if (control_file_interval == 0 || step / control_file_interval == control_files_polled || !comm::is_root()) return;
+    control_files_polled = step / control_file_interval;
     std::error_code error;
     if (std::filesystem::remove("CHECKPOINT", error)) run_control::request(run_control::CHECKPOINT);
     if (std::filesystem::remove("STOP", error)) {

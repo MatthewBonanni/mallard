@@ -54,7 +54,7 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../tools"))
 from mallard import restart  # noqa: E402
-from mallard.vtu import grid_fields, series as snapshot_files  # noqa: E402
+from mallard.vtu import grid_fields, read_index  # noqa: E402
 
 FIELDS = ["RHO", "P", "T", "HRR", "Y_H2O", "OMEGA_H2O", "X_H2O", "D_H2O"]
 W_H2O = 18.01528e-3
@@ -81,7 +81,7 @@ class DeflagrationSpeed:
 
 
 def series(run_dir):
-    return snapshot_files(os.path.join(run_dir, "solut"), "autoignition_[0-9]*")
+    return [f for _, f in read_index(os.path.join(run_dir, "solut", "autoignition"))]
 
 
 def ddx(f, h, axis):

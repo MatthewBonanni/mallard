@@ -33,7 +33,7 @@ TOOLS = ROOT / "tools"
 OUT = ROOT / "docs" / "images" / "tools"
 sys.path[:0] = [str(TOOLS), str(TOOLS / "setup")]
 from mallard import restart  # noqa: E402
-from mallard.vtu import read_vtu, series  # noqa: E402
+from mallard.vtu import read_vtu, snapshot  # noqa: E402
 
 WORK = None
 MALLARD = None
@@ -437,7 +437,7 @@ def riemann(order):
         subprocess.run([str(MALLARD), "-i", "input.toml", "--kokkos-num-threads=4"], cwd=p, check=True,
                        stdout=subprocess.DEVNULL)
     d = once(f"riemann_{order}", make)
-    return d, series(str(d / "solut"), "riemann_[0-9]*")[-1]
+    return d, snapshot(str(d / "solut" / "riemann"))
 
 
 def tripanel(ax, vtu, P, contours=0):
