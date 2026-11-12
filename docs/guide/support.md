@@ -10,10 +10,13 @@ this page by platform, with the support policy.
 
 When a job runs:
 
-- **every PR**: the CI run a pull request needs before it merges (`ci.yml`), and every push to `main`;
-- **main**: every push to `main` only;
+- **every PR**: the gate, the CI run a pull request needs before it merges (`ci.yml`), and every push to `main`;
+- **main**: after every merge (`main` runs one at a time; merges that arrive while it runs are tested together next), and on a branch with `-f full=true`; a failure opens an issue labeled `ci-main`;
 - **device PRs**: pull requests whose changes touch device code ([`device_changes.sh`](../../tools/dev/device_changes.sh)), before they merge;
 - **nightly**, **release** (every version tag, and by hand on a branch) and **by hand** (before a release).
+
+A job *split across* N jobs runs as `<job>-1of<N>` to `<job>-<N>of<N>`, each building the
+same configuration and running every N-th test of each suite run (googletest's sharding).
 
 ## Builds
 
@@ -22,34 +25,34 @@ When a job runs:
 | OpenMP, 2D, HDF5, CGNS, zlib | x86-64 CPU | Run | Full suite (2 threads); upgrading every release's inputs; output units through h5py | every PR | `ci.yml/openmp` |
 | OpenMP, single precision, 2D, zlib | x86-64 CPU | Run | Full suite, two copies at once | every PR | `ci.yml/float` |
 | OpenMP, single precision, 3D, HDF5, CGNS | x86-64 CPU | Run | Full suite | every PR | `ci.yml/float-3d` |
-| Serial, MPI, 2D, dKaMinPar, HDF5, zlib | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3 | every PR | `ci.yml/mpi` |
-| Serial, MPI, 3D, HDF5 | x86-64 CPU | Run | Full suite on 1 and 3 ranks; MPI tests on 2 and 4 ranks | every PR | `ci.yml/mpi-3d` |
-| Serial, MPI, HDF5, 2D and 3D, installed | x86-64 CPU | Run | Every [tutorial](../tutorials/index.md) at reduced size on 2 ranks, with its Gmsh mesh and scripts; every case template; the installed bash, zsh and fish completion | every PR | `ci.yml/tutorials` |
+| Serial, MPI, 2D, dKaMinPar, HDF5, zlib | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3; split across 2 jobs | every PR | `ci.yml/mpi` |
+| Serial, MPI, 3D, HDF5 | x86-64 CPU | Run | Full suite on 3 ranks, and on 1 rank on main (PRs: the MPI tests on 1 rank); MPI tests on 2 and 4 ranks; split across 4 jobs | every PR | `ci.yml/mpi-3d` |
+| Serial, MPI, HDF5, 2D and 3D, installed | x86-64 CPU | Run | Every [tutorial](../tutorials/index.md) at reduced size on 2 ranks, with its Gmsh mesh and scripts; every case template; the installed bash, zsh and fish completion | main | `ci.yml/tutorials` |
 | Serial, 2D | x86-64 CPU | Run | Full suite | main | `ci.yml/serial` |
 | Serial, 3D, HDF5 | x86-64 CPU | Run | Full suite | main | `ci.yml/serial-3d` |
 | OpenMP, 2D, GCC 16 (Docker's `gcc:16.2.0`, Debian 13), CMake 4.2.3 | x86-64 CPU | Run | Full suite (2 threads) | every PR | `ci.yml/gcc-16` |
-| Serial, single precision, 2D, HDF5, Clang 22 (Ubuntu's) | x86-64 CPU | Run | Full suite | every PR | `ci.yml/clang-22` |
-| Serial, 3D, Clang 23 (apt.llvm.org) | x86-64 CPU | Run | Full suite | every PR | `ci.yml/clang-23` |
-| OpenMP, 2D, HDF5, CGNS, zlib, GCC 15 | arm64 CPU (Ubuntu 26.04) | Run | Full suite (2 threads) | every PR | `ci.yml/gcc-15-arm64` |
-| Serial, MPI, 2D, dKaMinPar, HDF5, zlib, GCC 15 | arm64 CPU (Ubuntu 26.04) | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks | every PR | `ci.yml/mpi-arm64` |
-| OpenMP, single precision, 3D, HDF5, CGNS, GCC 16 (Docker's `gcc:16.2.0`), CMake 4.2.3 | arm64 CPU | Run | Full suite (2 threads) | every PR | `ci.yml/gcc-16-arm64` |
-| OpenMP, single precision, 2D, zlib, Clang 22 (Ubuntu's) | arm64 CPU (Ubuntu 26.04) | Run | Full suite, two copies at once | every PR | `ci.yml/clang-22-arm64` |
-| Serial, 3D, HDF5, Clang 23 (apt.llvm.org) | arm64 CPU (Ubuntu 26.04) | Run | Full suite | every PR | `ci.yml/clang-23-arm64` |
-| Threads, 2D, Apple Clang 21 (Xcode 26) | arm64 CPU (macOS 26) | Run | Full suite (2 threads) | every PR | `ci.yml/macos` |
-| Threads, 3D, Apple Clang 21 (Xcode 26) | arm64 CPU (macOS 26) | Run | Full suite (2 threads) | every PR | `ci.yml/macos-3d` |
-| Threads, 2D, GCC 16 (Homebrew's) | arm64 CPU (macOS 26) | Run | Full suite (2 threads) | every PR | `ci.yml/macos-gcc` |
-| Spack `mallard@main %gcc@15`: OpenMP, MPI, HDF5, CGNS, zlib, 2D and 3D, with Spack's GCC 15, Open MPI and HDF5 | x86-64 CPU (Red Hat UBI 8) | Run | Full 2D and 3D suites; `spack test run` | every PR | `ci.yml/ubi8-spack` |
-| Same, on RHEL 9 | x86-64 CPU (Red Hat UBI 9) | Run | Full 2D and 3D suites; `spack test run` | every PR | `ci.yml/ubi9-spack` |
+| Serial, single precision, 2D, HDF5, Clang 22 (Ubuntu's) | x86-64 CPU | Run | Full suite | main | `ci.yml/clang-22` |
+| Serial, 3D, Clang 23 (apt.llvm.org) | x86-64 CPU | Run | Full suite, split across 2 jobs | every PR | `ci.yml/clang-23` |
+| OpenMP, 2D, HDF5, CGNS, zlib, GCC 15 | arm64 CPU (Ubuntu 26.04) | Run | Full suite (2 threads) | main | `ci.yml/gcc-15-arm64` |
+| Serial, MPI, 2D, dKaMinPar, HDF5, zlib, GCC 15 | arm64 CPU (Ubuntu 26.04) | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks | main | `ci.yml/mpi-arm64` |
+| OpenMP, single precision, 3D, HDF5, CGNS, GCC 16 (Docker's `gcc:16.2.0`), CMake 4.2.3 | arm64 CPU | Run | Full suite (2 threads) | main | `ci.yml/gcc-16-arm64` |
+| OpenMP, single precision, 2D, zlib, Clang 22 (Ubuntu's) | arm64 CPU (Ubuntu 26.04) | Run | Full suite, two copies at once | main | `ci.yml/clang-22-arm64` |
+| Serial, 3D, HDF5, Clang 23 (apt.llvm.org) | arm64 CPU (Ubuntu 26.04) | Run | Full suite | main | `ci.yml/clang-23-arm64` |
+| Threads, 2D, Apple Clang 21 (Xcode 26) | arm64 CPU (macOS 26) | Run | Full suite (2 threads) | main | `ci.yml/macos` |
+| Threads, 3D, Apple Clang 21 (Xcode 26) | arm64 CPU (macOS 26) | Run | Full suite (2 threads) | main | `ci.yml/macos-3d` |
+| Threads, 2D, GCC 16 (Homebrew's) | arm64 CPU (macOS 26) | Run | Full suite (2 threads) | main | `ci.yml/macos-gcc` |
+| Spack `mallard@main %gcc@15`: OpenMP, MPI, HDF5, CGNS, zlib, 2D and 3D, with Spack's GCC 15, Open MPI and HDF5 | x86-64 CPU (Red Hat UBI 8) | Run | Full 2D and 3D suites; `spack test run` | main | `ci.yml/ubi8-spack` |
+| Same, on RHEL 9 | x86-64 CPU (Red Hat UBI 9) | Run | Full 2D and 3D suites; `spack test run` | main | `ci.yml/ubi9-spack` |
 | CUDA 12.9 (sm_80), OpenMP host, MPI, GPU-aware MPI, NCCL, parallel HDF5, CGNS, 2D and 3D | NVIDIA A100 | Run | Full suite on one GPU (with CUDA graphs, the default); MPI tests on 2 ranks, one GPU each, GPU-aware, with NCCL's and MPI's halo exchanges, each compared bit for bit with a serial run; [performance suite](../../benchmarks/README.md) against its baselines | device PRs (GPU CI) | |
 | CUDA 12.9 (sm_80), single precision, same options, 2D | NVIDIA A100 | Run | Full suite on one GPU | device PRs (GPU CI) | |
 | CUDA 13.2 (sm_80), same options, 2D and 3D | NVIDIA A100 | Run | Full suites on one GPU, except the tests that signal runs through `mpiexec` (the image's MPI is Open MPI 5) | device PRs (GPU CI) | |
 | CUDA 13.5 (sm_80), OpenMP host, MPI, GPU-aware MPI, 2D and 3D | | Compile | | main, device PRs | `ci.yml/cuda-13.5` |
-| CUDA 13.4 (sm_80), same options | | Compile | | main, device PRs | `ci.yml/cuda-13.4` |
-| CUDA 13.5 (sm_90), same options | arm64 (Grace) | Compile | | main, device PRs | `ci.yml/cuda-13.5-arm64` |
+| CUDA 13.4 (sm_80), same options | | Compile | | main | `ci.yml/cuda-13.4` |
+| CUDA 13.5 (sm_90), same options | arm64 (Grace) | Compile | | main | `ci.yml/cuda-13.5-arm64` |
 | HIP (ROCm 10.1, gfx90a), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an AMD GPU | device PRs | `ci.yml/hip` |
 | SYCL (oneAPI 2026.2, Intel GEN), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an Intel GPU | device PRs | `ci.yml/sycl` |
 | Serial, MPI, HDF5, 2D, AddressSanitizer and UBSan | x86-64 CPU | Run | Full suite on 1 rank; MPI tests on 2 ranks | nightly | `sanitizers.yml/asan-ubsan` |
-| Serial, HDF5, CGNS, Clang, libFuzzer, ASan and UBSan | x86-64 CPU | Run | Input and mesh reader harnesses: a minute each in 2D (every PR); ten minutes each in 2D and 3D (nightly) | every PR, nightly | `ci.yml/fuzz`, `fuzz.yml/fuzz` |
+| Serial, HDF5, CGNS, Clang, libFuzzer, ASan and UBSan | x86-64 CPU | Run | Input and mesh reader harnesses: a minute each in 2D (every PR); ten minutes each in 2D and 3D (nightly) | main, nightly | `ci.yml/fuzz`, `fuzz.yml/fuzz` |
 | Serial, 2D and 3D | x86-64 CPU | Run | [Convergence studies](../verification/index.md) | by hand | `verification.yml/verification` |
 
 ## Containers and Spack
