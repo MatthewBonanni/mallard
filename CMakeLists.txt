@@ -348,7 +348,7 @@ install(DIRECTORY templates examples mechanisms tools tutorials
     PATTERN __pycache__ EXCLUDE
     PATTERN solut EXCLUDE)
 # The key catalog of mallard list keys
-install(FILES docs/input-keys.json DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/docs)
+install(DIRECTORY docs/input-keys DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/docs)
 install(FILES LICENSE NOTICE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(DIRECTORY licenses DESTINATION ${CMAKE_INSTALL_DOCDIR})
 

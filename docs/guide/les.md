@@ -36,7 +36,12 @@ preset = "les"             # hybrid flux: central where smooth, HLLC at
 budget = true              # model vs numerical dissipation in integrals.csv
 ```
 
-*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+*Used in:*
+[`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les),
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles),
+[`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
 
 The `les` [preset](numerics.md#presets), second order (MUSCL), is the setup of the `channel_les`
 and `cbc_les` examples: the channel at
@@ -52,7 +57,12 @@ decaying grid turbulence within the measured spectra
 model = "wale"     # sigma (default in 3D), wale, vreman or smagorinsky
 ```
 
-*Used in:* [`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+*Used in:*
+[`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les),
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles),
+[`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
 
 | `model` | Eddy viscosity vanishes for | Use |
 |---|---|---|
@@ -122,7 +132,12 @@ convective_flux = "hybrid"
 budget = true      # the model's, the scheme's and molecular dissipation
 ```
 
-*Used in:* [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180), [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les), [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles), [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+*Used in:*
+[`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
+[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles),
+[`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
 
 Upwind Riemann solvers dissipate kinetic energy at the grid scale, the very
 scales the SGS model is meant to handle. `convective_flux = "hybrid"` uses the
@@ -158,7 +173,9 @@ T_burnt = 2384.28
 # n_res = 5               # cells across the thickened flame (default)
 ```
 
-*Used in:* [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body), [`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+*Used in:*
+[`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
 
 Premixed flames are thinner than LES cells. The dynamically thickened flame
 model (TFLES; Colin et al. 2000, Légier et al. 2002) multiplies diffusivities
@@ -218,7 +235,8 @@ T = 1.0
 wall_model = { model = "gfm", exchange_distance = 0.3, edge_distance = 1.0 }
 ```
 
-*Used in:* [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
+*Used in:*
+[`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles).
 
 Wall-modeled LES resolves only the outer layer: a wall gets its shear stress
 and heat flux from a model fed by the LES state at an exchange point a height
