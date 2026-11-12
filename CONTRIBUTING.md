@@ -193,14 +193,14 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   the tests, so a test must not depend on another having run in the same process, and a
   test that reruns the test binary unsets `GTEST_TOTAL_SHARDS` and `GTEST_SHARD_INDEX`.
   Documentation-only changes skip the build jobs (the run takes about a minute).
-- **`main` runs everything after each merge**: every supported compiler on x86-64 and
-  arm64, macOS, Spack on RHEL 8 and 9, every CUDA version, the tutorials and case
-  templates, and the fuzzers. One run at a time: merges that arrive while it runs are
-  tested together next. A failure opens an issue labeled `ci-main`, fixed before anything
-  else lands; the next passing run closes it. `-f full=true` runs all of it on a branch,
+- **`main` runs everything every 3 hours** when it has changed: every supported compiler
+  on x86-64 and arm64, macOS, Spack on RHEL 8 and 9, every CUDA version, the tutorials and
+  case templates, and the fuzzers, so a full run never holds the runners PRs need. Each
+  merge runs the gate on `main` too. A failure opens an issue labeled `ci-main`, fixed
+  before anything else lands; the next passing full run closes it. `-f full=true` runs all of it on a branch,
   for a change that targets one of those platforms.
-- **Trains**: maintainers land several ready PRs on one run by merging their heads onto
-  `main` in a `train/*` branch and running the gate there; `train.yml`, dispatched on
+- **Batches**: maintainers land several ready PRs on one run by merging their heads onto
+  `main` in a `batch/*` branch and running the gate there; `batch.yml`, dispatched on
   `main` with that run and the heads, checks that the run passed and contains each head,
   then sets `CI` on them.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only

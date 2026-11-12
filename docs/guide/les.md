@@ -148,7 +148,7 @@ shock sensor (restricted to compressions) fires:
 |---|---|---|
 | `sensor_threshold` | 0.65 | Sensor value above which a compressing cell is a shock (1 disables the Riemann solver) |
 | `upwind_floor` | 0 | Upwind fraction everywhere else; 0.05 damps grid-scale noise on very irregular meshes |
-| `central` | `cell_averages` with TENO, else `reconstructed` | The central flux's states: the two cells' values (the kinetic energy changes by exactly the pressure work) or the reconstructed face states; TENO's states make the central flux add energy ([design](../design/les.md#44-central-flux-for-teno-689)) |
+| `central` | `cell_averages` with TENO, else `reconstructed` | The central flux's states: the two cells' values (the kinetic energy changes by exactly the pressure work) or the reconstructed face states; TENO's states make the central flux add energy, and so do MUSCL's with no viscosity or model to remove it (Euler: set `cell_averages`) ([design](../design/les.md#44-central-flux-for-teno-689)) |
 
 `[integrals] budget = true` adds the kinetic-energy budget to
 `integrals.csv`: `-ke_rate_viscous` (molecular), `-ke_rate_sgs` (model) and

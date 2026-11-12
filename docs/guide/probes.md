@@ -169,6 +169,16 @@ to zero:
 ![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-light.svg#gh-light-mode-only)
 ![Measurements around a cylinder at Re = 40: mass flux samples on a closed circle and a cut line, the wall pressure and skin-friction coefficients against angle, first-cell y+ with its mean and maximum, and the drag and the circle's net outflow over time](../images/guide/probe_measurements-dark.svg#gh-dark-mode-only)
 
+### In the run record and report
+
+Each progress row of the [run record](output.md#run-record-mallardjsonl)
+holds each probe's latest reductions, and a one-point probe's latest values,
+with the step and time of its last write; the start record gives their units.
+These are the values [triggers](running.md#triggers) read, and
+[`report.html`](output.md#run-report-reporthtml) plots them, a group per
+probe. The record keeps the first 64 over every probe, in the order of
+`[[probes]]`; the probe's own files hold all of them at every write.
+
 ### Accuracy and pitfalls
 
 With TENO, `sampling = "point"` reads each cell's reconstruction polynomial at

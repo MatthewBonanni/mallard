@@ -13,9 +13,9 @@
 
 #include <algorithm>
 #include <array>
-#include <sstream>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "input.h"
 #include "region_input.h"
 
@@ -175,7 +175,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         if (!entry->is_table()) throw InputError(where + " must be a table.");
         if (legacy && entry->contains("time_dependent")) {
             if (!entry->at("time_dependent").is_boolean()) throw InputError("source.time_dependent must be true or false.");
-            logging::warning("source.time_dependent is ignored: expressions of t are re-evaluated at every stage.");
+            logging::warning(diagnostic_code::KEY_IGNORED, "source.time_dependent is ignored: expressions of t are re-evaluated at every stage.");
         }
         const std::string label = !legacy && entry->contains("name") ? find_value<std::string>(*entry, "name") : where;
         const bool total = !legacy && find_value_or<bool>(*entry, "total", false);
@@ -194,9 +194,9 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
             if (!(integral > 0.0)) throw InputError(where + ".region contains no part of any cell.");
             row = static_cast<int32_t>(weight_rows.size());
             weight_rows.push_back(std::move(fractions));
-            std::ostringstream s;
-            s << r.summary() << ", measure " << logging::real(integral);
-            region_text = s.str();
+            region_text = r.summary();
+            m_summary.quantity(label + " region " + (N_DIM == 2 ? "area" : "volume"), logging::real(integral),
+                               units::column(N_DIM == 2 ? "m^2" : "m^3"), "the region's part of the mesh");
         }
 
         // (column, expression, name)
@@ -263,7 +263,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         for (const auto & v : values) text += (text.empty() ? "" : ", ") + std::get<2>(v);
         text += total ? " (integrated totals)" : " (per unit volume)";
         text += kinds.empty() ? ", steady" : ", of " + kinds;
-        m_summary.emplace_back("Source " + label, text + "; " + region_text);
+        m_summary.setting("Source " + label, text + "; " + region_text);
     }
 
     std::vector<const kexpr::Program *> pointers;

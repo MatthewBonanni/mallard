@@ -151,7 +151,8 @@ listed in the [input reference](../input.md#units), and a unit of another
 dimension stops the run before it starts:
 
 ```text
-error: input.toml: line 14: boundaries.p: "300 K" has the dimension of temperature (K). Expected pressure (kg m^-1 s^-2), e.g. in Pa, kPa, MPa, bar, atm, psi; a number without a unit is in SI. See docs/guide/input_files.md#units.
+error E-INPUT: input.toml: line 14: boundaries.p: "300 K" has the dimension of temperature (K). Expected pressure (kg m^-1 s^-2), e.g. in Pa, kPa, MPa, bar, atm, psi; a number without a unit is in SI. See docs/guide/input_files.md#units.
+  docs/guide/input_files.md#e-input
 ```
 
 **Writing units.** A number, an optional space, then the unit:
@@ -292,9 +293,10 @@ the wrong table, or one the chosen settings do not use (for example
 listed with its line and the closest key Mallard looked for:
 
 ```text
-error: input.toml: keys that are unknown or unused with these settings (mallard check lists them all):
+error E-KEY-UNUSED: input.toml: keys that are unknown or unused with these settings (mallard check lists them all):
   line 8: mesh.Nyy (did you mean mesh.Ny?)
   line 11: mesh.t_stop (did you mean run.t_stop?)
+  docs/guide/input_files.md#e-key-unused
 ```
 
 When another error stops the setup first, the keys with a suggestion are
@@ -307,8 +309,10 @@ wrong, lists the accepted values or the closest one, says what to do, and
 links the docs that explain the key; `mallard check` reports it the same way:
 
 ```text
-error: input.toml: line 6: mesh.Nx: is 16 (a float), but must be a non-negative integer. Write it without a decimal point: 16. See docs/input.md#mesh.
-error: input.toml: line 20: boundaries[name = "inlet"].type: "wall" is not accepted (did you mean "wall_adiabatic", "wall_heat_flux" or "wall_isothermal"?). Accepted values: ... See docs/input.md#boundaries.
+error E-INPUT: input.toml: line 6: mesh.Nx: is 16 (a float), but must be a non-negative integer. Write it without a decimal point: 16. See docs/input.md#mesh.
+  docs/guide/input_files.md#e-input
+error E-INPUT: input.toml: line 20: boundaries[name = "inlet"].type: "wall" is not accepted (did you mean "wall_adiabatic", "wall_heat_flux" or "wall_isothermal"?). Accepted values: ... See docs/input.md#boundaries.
+  docs/guide/input_files.md#e-input
 ```
 
 A value of the wrong type is always an error, never replaced by the default.
@@ -475,7 +479,7 @@ The report opens and closes with the result, and the exit status is 1 if there i
 
 ### Diagnostics
 
-Each error and warning has a stable code that scripts can match. Errors (`E-`) make the exit status 1; warnings (`W-`) do not.
+Each error and warning has a stable code that scripts can match. Errors (`E-`) make the exit status 1; warnings (`W-`) do not. A run reports the same codes, and those of its own warnings and errors ([Warnings and errors](running.md#warnings-and-errors)).
 
 | Code | What it means | What to do |
 |---|---|---|
@@ -514,7 +518,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
 | `regions`, `case_view` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's file |
-| `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{max, mean, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
+| `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ...): `{quantity, value, units, target, status, basis, x}` |
 | `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, and by category `at_setup_peak` and `steady` |
@@ -618,7 +622,8 @@ setup stops on an error, with the keys read up to there. The setup's accessors
 tutorial, in 2D and 3D, into
 [`docs/input-keys.json`](../input-keys.json), which the website's input builder
 reads; CI checks that it is up to date, and `tools/dev/input_catalog.py docs`
-that the defaults this reference states match it.
+that every key this reference documents is in it and that the defaults it states
+match it.
 
 `mallard list keys` shows that catalog as tables, one per input table, with
 each key's type, units, default and accepted values; `mallard list keys

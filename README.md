@@ -62,6 +62,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
   - `mallard post extract` for probes and region integrals of existing output
   - tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
+- A [run report](docs/guide/output.md#run-report-reporthtml), `report.html`, from every run: outcome, configuration, health, plots of the monitors, cost and output, one self-contained page ([sample](docs/images/guide/run_report_sample.html))
 - A [divergence report](docs/guide/running.md#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView, with [derived fields](docs/guide/output.md#derived-fields): Mach number, Q-criterion, λ₂ and numerical schlieren
 - Probes on points, curves, surfaces, boundaries and regions
@@ -105,6 +106,7 @@ mallard -i input.toml --kokkos-num-threads=8                   # installed (cont
 - `mallard list fields|keys input.toml` lists the output fields and input keys of a case
 - `mallard ctl <run-dir> status|stop` steers it while it runs
 - `mallard info solut` tells what a run wrote
+- open the run's `report.html` first
 
 Start with the [tutorials](docs/tutorials/index.md), then see:
 

@@ -30,7 +30,9 @@
 #include "mesh_quality.h"
 #include "output_reader.h"
 #include "provenance.h"
+#include "run_page.h"
 #include "snapshot_block.h"
+#include "diagnostic_code.h"
 
 namespace fs = std::filesystem;
 
@@ -502,14 +504,15 @@ json::Value run_block(const std::string & dir, const Record & record) {
 
 int print_input(const json::Value & block, const std::string & what) {
     if (block.is_null()) {
-        std::cerr << "mallard info: " << what << " has no run block (files of Mallard 0.9 and later have one), "
-                  << "so no input.\n";
+        logging::error(diagnostic_code::INFO, "mallard info: " + what +
+                                                  " has no run block (files of Mallard 0.9 and later have one), so no "
+                                                  "input.");
         return 1;
     }
     bool resolved = false;
     const std::string input = recorded_input(block, resolved);
     if (input.empty()) {
-        std::cerr << "mallard info: the run block of " << what << " records no input.\n";
+        logging::error(diagnostic_code::INFO, "mallard info: the run block of " + what + " records no input.");
         return 1;
     }
     std::cout << input;
@@ -542,7 +545,24 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
     return problems;
 }
 
+/** @brief Writes DIR/report.html from DIR/mallard.jsonl. */
+int run_report(const std::string & dir) {
+    const fs::path log = fs::path(dir) / "mallard.jsonl";
+    if (!fs::exists(log)) {
+        logging::error(diagnostic_code::INFO, "mallard info: " + dir +
+                                                  " has no mallard.jsonl, which --html builds the run report from "
+                                                  "([output] run_log = \"\" writes none; the run's own report.html, "
+                                                  "[output] report, does not need it).");
+        return 1;
+    }
+    const std::string page = (fs::path(dir) / "report.html").string();
+    run_page::write(page, run_page::from_file(log.string()).html());
+    std::cout << "Wrote " << page << "\n";
+    return 0;
+}
+
 int run_directory(const std::string & dir, const cli::Args & args) {
+    if (args.has("--html")) return run_report(dir);
     const Record record = run_record(dir);
     if (args.has("--input")) return print_input(run_block(dir, record), dir);
     std::vector<output::Contents> files;
@@ -594,24 +614,9 @@ int run_directory(const std::string & dir, const cli::Args & args) {
         if (const json::Value * restart = s.find("restart"); restart && !s.find("restart_of")) {
             item("Restarted from", text(restart->find("file")) + ", step " + text(restart->find("step")));
         }
-        if (record.end.type == json::Value::Type::OBJECT) {
-            const json::Value & e = record.end;
-            const json::Value * wall = e.find("wall");
-            // Run logs before 0.10 give only the reason
-            const json::Value * outcome = e.find("outcome");
-            item("Ended", (outcome ? outcome->string + ": " : "") + text(e.find("reason")));
-            item("Last step", text(e.find("step")));
-            for (const auto & [key, name] : {std::pair{"last_snapshot", "Last snapshot"}, {"last_restart", "Last restart"}}) {
-                if (const json::Value * f = e.find(key)) {
-                    item(name, text(f->find("path")) + ", step " + text(f->find("step")) + ", t = " + text(f->find("t")) + " s");
-                }
-            }
-            item("Simulated time", "t = " + text(e.find("t")) + " s at the end");
-            item("Wall time", logging::duration(wall ? wall->number : 0.0) + ", the whole run");
-        } else {
-            item("Ended", "no end record: still running, or killed (SIGKILL, a lost node)");
-            item("Last step", text(record.last.find("step")) + ", of the last record");
-        }
+    }
+    if (record.found) {
+        std::cout << run_page::from_file((fs::path(dir) / "mallard.jsonl").string()).text(logging::color_stdout());
     }
     logging::section("Output files", count(files.size()) + " files");
     std::vector<std::vector<std::string>> rows;
@@ -695,11 +700,13 @@ void print_quality_table(const std::array<QualitySummary, MeshQuality::N_METRICS
 /** @brief mallard info on a mesh file: read once, for its summary and, as a Mesh, its quality. */
 int mesh_info(const std::string & path, const cli::Args & args, int argc, char ** argv) {
     if (args.has("--input")) {
-        std::cerr << "mallard info: " << path << " is a mesh file, which records no input.\n";
+        logging::error(diagnostic_code::INFO, "mallard info: " + path + " is a mesh file, which records no input.");
         return 1;
     }
     const std::string quality_file = args.value_or("--mesh-fields", args.value_or("--quality", ""));
-    if (args.has("--quality") && comm::is_root()) std::cerr << "mallard info --quality is deprecated: use --mesh-fields\n";
+    if (args.has("--quality")) {
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard info --quality is deprecated: use --mesh-fields");
+    }
     const MeshBlock block = output::read_mesh(path);
     output::Contents c = output::mesh_contents(path, block);
     Kokkos::ScopeGuard kokkos(argc, argv);
@@ -753,6 +760,9 @@ int info_main(const cli::Args & args) {
         }
         if (mesh_file) return mesh_info(path, args, argc, argv);
         if (fs::is_directory(path, error)) return run_directory(path, args);
+        if (args.has("--html")) {
+            return cli::usage_error(*cli::command("info"), "--html takes a run directory, not " + path);
+        }
         output::Contents c = output::open(path);
         if (args.has("--input")) return print_input(parsed_run(c), path);
         if (!c.snapshots.empty() && !c.fields.empty()) output::read_ranges(c, c.snapshots.size() - 1);
@@ -762,7 +772,7 @@ int info_main(const cli::Args & args) {
             print_contents(c);
         }
     } catch (const std::exception & e) {
-        std::cerr << "mallard info: " << e.what() << "\n";
+        logging::error(diagnostic_code::INFO, std::string("mallard info: ") + e.what());
         return 1;
     }
     return 0;
