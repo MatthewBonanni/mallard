@@ -248,7 +248,8 @@ json::Value general_catalog() {
         if (!std::filesystem::is_directory(catalog)) continue;
         std::vector<std::pair<std::string, std::filesystem::path>> files;
         for (const auto & entry : std::filesystem::directory_iterator(catalog)) {
-            if (entry.path().extension() == ".json") files.emplace_back(key_of_file(entry.path().stem().string()), entry.path());
+            if (entry.path().extension() != ".json") continue;
+            files.emplace_back(key_of_file(entry.path().stem().string()), entry.path());
         }
         std::sort(files.begin(), files.end());
         json::Value out;
