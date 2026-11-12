@@ -568,7 +568,8 @@ int Solver::base_halo_layers() const {
     const bool viscous = find_value_or<std::string>(input, "physics", "type", "euler") == "navier_stokes";
     // The hybrid flux's sensor reads the velocity gradients of halo-layer-1 cells too
     const bool hybrid = find_value_or<std::string>(input, "numerics", "convective_flux", "riemann") == "hybrid";
-    return (type == "FO" && !viscous && !hybrid) ? 1 : 2;
+    // Fields of the velocity gradient in conditions read it in the cells' vertex neighbors
+    return (type == "FO" && !viscous && !hybrid && !region::conditions_read_gradients(input)) ? 1 : 2;
 }
 
 void Solver::trim_halo() {
@@ -979,7 +980,7 @@ void Solver::init_boundaries() {
             Kokkos::deep_copy(faces, h_faces);
             average_pressure_outlets.push_back(
                 {static_cast<int32_t>(i_bc), faces, Kokkos::View<double *[2]>("outlet_pA_A", owned.size()),
-                 ExactSums<2>(static_cast<uint32_t>(owned.size()), is_distributed(), halo.uses_nccl()), fields});
+                 ExactSums(2, static_cast<uint32_t>(owned.size()), is_distributed(), halo.uses_nccl()), fields});
         }
         n_owned_selected = comm::allreduce(n_owned_selected, comm::Op::SUM);
         std::string details;
@@ -1120,6 +1121,7 @@ region::CellFields Solver::cell_fields() const {
         fields.R_universal = chemistry::GAS_CONSTANT;
     } else {
         fields.R = double(physics.R);
+        fields.gamma = double(physics.get_gamma());
     }
     return fields;
 }

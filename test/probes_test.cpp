@@ -1286,6 +1286,46 @@ TEST(ProbesTest, RegionsOfTheSolutionAreTheSameOnAnyNumberOfRanks) {
     }
 }
 
+TEST(ProbesTest, RegionsOfVelocityGradientFieldsAreTheSameOnAnyNumberOfRanks) {
+    // First order and inviscid: the halo is one layer deep unless a condition reads the velocity gradient,
+    // which the levels' fit reads in every vertex neighbor
+    const std::string dir = fresh_dir("gradient_ranks");
+    auto input = [&](const std::string & suffix) {
+        std::string probes;
+        const std::vector<std::pair<std::string, std::string>> regions = {
+            {"vortical", "{type = \"where\", condition = \"Q_CRITERION > 5 and MACH < 2\"}"},
+            {"level", "{type = \"isosurface\", field = \"Q_CRITERION\", value = 5}"}};
+        for (const auto & [name, region] : regions) {
+            probes += "[[probes]]\nname = \"" + name + "\"\nfields = [\"RHO\", \"P\"]\nregion = " + region +
+                      "\nreductions = [\"integral\", \"max\"]\nreductions_file = \"" + dir + "/" + name + "_" +
+                      suffix + ".csv\"\n";
+        }
+        std::string text = box_case(12, SINE_RHO, "type = \"FO\"\n", probes, "n_steps = 2\ncfl = 0.4\n");
+        const std::string u = "u = " + vector3("0.3", "-0.1", "0.2");
+        text.replace(text.find(u), u.size(),
+                     "u = " + vector3("sin(2 * pi * x) * cos(2 * pi * y)", "-cos(2 * pi * x) * sin(2 * pi * y)", "0.2"));
+        return text;
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input("serial")));
+    run(serial);
+    for (const char * name : {"vortical", "level"}) {
+        const std::string file = dir + "/" + name;
+        EXPECT_EQ(without_run_metadata(read_all(file + "_distributed.csv")), without_run_metadata(read_all(file + "_serial.csv")))
+            << name << " on " << comm::size() << " ranks";
+        const auto rows = read_csv(file + "_serial.csv");
+        ASSERT_EQ(rows.size(), 3u) << name;
+        EXPECT_GT(rows.front().at(name == std::string("level") ? (N_DIM == 2 ? "length" : "area")
+                                                                : (N_DIM == 2 ? "area" : "volume")),
+                  0.0)
+            << name;
+    }
+}
+
 TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMassMomentumAndEnergy) {
     // A density wave convected through a circle (sphere): the rate of change of
     // the mass, momentum and total energy inside, a region probe's integrals of

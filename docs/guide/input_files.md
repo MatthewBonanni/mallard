@@ -624,7 +624,8 @@ setup stops on an error, with the keys read up to there. The setup's accessors
 tutorial, in 2D and 3D, into
 [`docs/input-keys.json`](../input-keys.json), which the website's input builder
 reads; CI checks that it is up to date, and `tools/dev/input_catalog.py docs`
-that the defaults this reference states match it.
+that every key this reference documents is in it and that the defaults it states
+match it.
 
 `mallard list keys` shows that catalog as tables, one per input table, with
 each key's type, units, default and accepted values; `mallard list keys
