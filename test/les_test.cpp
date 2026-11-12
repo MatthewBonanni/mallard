@@ -879,6 +879,32 @@ TEST(HybridFlux, CellAverageCentralFluxConservesMassMomentumAndEnergy) {
     FOR_I_CONSERVATIVE EXPECT_NEAR(after[i], before[i], precision_tol<double>(1e-12, 1e-5) * (std::abs(before[i]) + before[0]));
 }
 
+TEST(HybridFlux, MixtureCellAverageCentralFluxChangesKineticEnergyOnlyByThePressureWork) {
+    // Each side's [gamma, e0] enters only the energy flux, so the cells' values give the single gas's identity
+    auto budget = [](const std::string & numerics, const std::string & central) {
+        std::string input = mixture_box("", STRATIFIED);
+        input.replace(input.find("[numerics]\n"), 11, "[numerics]\nconvective_flux = \"hybrid\"\n" + numerics);
+        auto solver = make_solver(input + "[numerics.hybrid]\nsensor_threshold = 1.0\n" + central);
+        solver->run();
+        // The round-off scale: the faces' pressure work, of order p |u| A each, cancels in the sum
+        double scale = 0.0;
+        for (uint32_t c = 0; c < solver->get_mesh()->n_owned(); c++) {
+            scale += 1e5 * 30.0 * std::pow(double(solver->get_mesh()->h_cell_measure(c)), (N_DIM - 1.0) / N_DIM);
+        }
+        const KineticEnergyBudget b = solver->kinetic_energy_budget();
+        return std::array<double, 3>{double(b.convective), double(b.pressure_work), comm::allreduce(scale, comm::Op::SUM)};
+    };
+    for (const std::string numerics : {"", "double_flux = true\n"}) {
+        const auto [convective, work, scale] = budget(numerics, "central = \"cell_averages\"\n");
+        EXPECT_NEAR(convective, work, precision_tol<double>(1e-12, 1e-5) * scale) << numerics;
+    }
+    // The reconstructed states depart by a few percent of the net pressure work, below single precision's round-off
+    if constexpr (std::is_same_v<rtype, double>) {
+        const auto reconstructed = budget("", "");
+        EXPECT_GT(std::abs(reconstructed[0] - reconstructed[1]), 0.01 * std::abs(reconstructed[1]));
+    }
+}
+
 TEST(HybridFlux, CentralKeyNeedsTheHybridFluxAndAKnownValue) {
     const std::string box = periodic_box(MESH, 4, "", "", "n_steps = 0\ncfl = 0.5\n");
     EXPECT_THROW(make_solver(box + "[numerics.hybrid]\ncentral = \"cell_averages\"\n"), InputError);
