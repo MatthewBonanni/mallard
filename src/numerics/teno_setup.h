@@ -1,7 +1,7 @@
 /**
  * @file teno_setup.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief TENO-E table setup in 3D, per cell on the device (internal to the TENO implementation).
+ * @brief TENO-E table setup, per cell on the device (internal to the TENO implementation).
  * @version 0.1
  * @date 2026-10-09
  *
@@ -214,7 +214,7 @@ TableBatch device_copy(const TableBatchT<Kokkos::HostSpace> & h);
  */
 enum Status : uint8_t { OK = 0, OUT_OF_SCRATCH = 1, TOO_MANY_PLANES = 2 };
 
-/** @brief Options and sizes of the 3D setup. */
+/** @brief Options and sizes of the setup. */
 struct Options {
     uint8_t degree = 4;
     uint8_t nk = 0;
@@ -228,6 +228,7 @@ struct Options {
     uint8_t curved_wall_degree = 3;  // largest central degree of stencils reaching a curved wall without mirrors
     uint16_t wall_ns = 0;            // central stencil size to start from at that degree
     double stencil_factor = 2.0;     // central stencil size per fitted monomial
+    std::vector<double> face_points;  // 2D: the face quadrature's points on [-1, 1]
 };
 
 /** @brief Timings of the last setup, in seconds. */
@@ -238,21 +239,22 @@ struct Timings {
     uint64_t n_host_cells = 0;
 };
 
+class Setup2D;
 class Setup3D;
 
 /**
- * @brief The 3D TENO-E precomputation of a mesh: the geometry it needs (cell
- *        moments, bounding boxes and ranking metrics), computed once, and the
- *        tables of any batch of cells. Every cell's tables are a function of
+ * @brief The TENO-E precomputation of a mesh: the geometry it needs (ranking
+ *        metrics, and in 3D cell moments and bounding boxes), computed once,
+ *        and the tables of any batch of cells. Every cell's tables are a function of
  *        the mesh alone, computed with the same sequence of floating-point
  *        operations on the device and on the host, so they do not depend on
  *        the batch, the thread count or where they ran.
  */
-class Setup3DHandle {
+class SetupHandle {
     public:
-        Setup3DHandle(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> face_quad_points,
+        SetupHandle(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> face_quad_points,
                       Kokkos::View<rtype **> face_quad_weights, const Options & options);
-        ~Setup3DHandle();
+        ~SetupHandle();
 
         /**
          * @brief Tables of cells[0..n) into slots 0..n of out (out.slots >= n);
@@ -270,12 +272,12 @@ class Setup3DHandle {
         /**
          * @brief The central moments of cells [0, n_rows), from which the
          *        troubled passes form the smoothness matrices: the setup's own
-         *        array if it has n_rows rows.
+         *        array if it has n_rows rows (3D; empty in 2D).
          */
         teno::Moments moments(uint32_t n_rows) const;
 
     private:
-        std::unique_ptr<Setup3D> impl;
+        std::unique_ptr<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>> impl;
 };
 
 /** @brief The terms of every smoothness-matrix entry of the given degree, in the order the setup sums them. */

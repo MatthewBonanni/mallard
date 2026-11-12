@@ -1056,8 +1056,11 @@ constexpr Command COMMANDS[] = {
         .description =
             "Prints a script that makes the shell complete mallard's commands, their options and the values those "
             "take: input files for -i, latest and restart files for --restart, template names for mallard new, "
-            "run directories for mallard ctl and its requests. It is made from the same table as the help pages, "
-            "so it knows every command of this build; templates come from mallard new when completing.\n"
+            "run directories for mallard ctl and its requests, sections and keys of the key catalog for mallard "
+            "list keys, output fields of the field catalog for --fields, each item after a comma too. It is made "
+            "from the same table as the help pages and from the catalogs mallard list keys and mallard list fields "
+            "print, so it knows every command, key and field of this build; templates come from mallard new when "
+            "completing.\n"
             "\n"
             "An install (cmake --install, Spack, the containers) puts the scripts where the shells look: "
             "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "
