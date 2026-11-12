@@ -234,6 +234,18 @@ constexpr Option CONVERGENCE_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option PACK_OPTIONS[] = {
+    {"--output", "-o", "FILE",
+     "The archive: .tar.gz (gzip-compressed, in builds with zlib) or .tar. Default: the run directory's name "
+     "with .tar.gz (.tar in builds without zlib), in the current directory."},
+    {"--with-outputs", "", "small|all|none",
+     "The run's outputs to pack besides its run record: small, its forces, integrals and probes (CSV files, "
+     "probe snapshots, spectra); all, also its snapshots and restart files; none. Default: small."},
+    {"--verify", "", "",
+     "Check the archive FILE instead: every file against the size and SHA-256 its manifest records, no file "
+     "missing or added, and the input, mesh and files read against the SHA-256 the run recorded."},
+};
+
 constexpr Option RESOLVE_OPTIONS[] = {
     {"--restart", "", "FILE", "The input of the run as started from this restart file."},
     KOKKOS,
@@ -270,6 +282,7 @@ constexpr std::string_view DIFF_ARGUMENTS[] = {"FILE_A", "FILE_B"};
 constexpr std::string_view FILES_ARGUMENTS[] = {"FILE", "[FILE...]"};
 constexpr std::string_view CONVERGENCE_ARGUMENTS[] = {"RUN_DIR", "RUN_DIR", "[RUN_DIR...]"};
 constexpr std::string_view CONVERT_ARGUMENTS[] = {"INPUT", "OUTPUT.h5"};
+constexpr std::string_view PACK_ARGUMENTS[] = {"RUN_DIR|FILE"};
 constexpr std::string_view OPTIONAL_INPUT[] = {"[INPUT]"};
 constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
 constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
@@ -781,6 +794,47 @@ constexpr Command COMMANDS[] = {
                        "2  usage error",
         .dim = Case::output,
         .run = convergence_main,
+    },
+    {
+        .name = "pack",
+        .group = "Share",
+        .summary = "One archive that reproduces a run, with a manifest of hashes",
+        .synopsis = "mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none]\n"
+                    "mallard pack --verify FILE",
+        .description =
+            "Packs the last run of a run directory into one tar archive, for a paper's supplement or a bug "
+            "report: what it needs to run again and what it wrote. What goes in comes from its run record "
+            "(mallard.jsonl, Mallard 0.10 and later), never from file names: the input as the run read it "
+            "(from its run block) and the resolved input, the mesh file (a generated mesh is made again from "
+            "the input), every other file it read (mechanisms, tables, profiles, probe points, the restart file "
+            "or remap source it started from), its start record (the run block: code, build, where and how it "
+            "ran), its run record, and the outputs --with-outputs asks for, as its output records and resolved "
+            "input name them. Each file is checked against the SHA-256 the run recorded of it, so a file "
+            "changed since the run read or wrote it is refused.\n"
+            "\n"
+            "The archive holds one directory, named as the archive: manifest.json (each file with its role, "
+            "size and SHA-256, and the command that reruns the run), run.json (the start record), "
+            "resolved.toml, case/ (the input, mesh and files read, laid out as they were around the run "
+            "directory, so the input's relative paths hold) and output/ (the outputs, by their paths in the run "
+            "directory). Unpacked anywhere with tar -xf, the rerun command of the manifest, in its directory, "
+            "reproduces the run: bit for bit on the same build and rank count. A file the input names by an "
+            "absolute path is packed too, under absolute/, but the rerun reads it from that path.\n"
+            "\n"
+            "--verify checks an archive: every file against its manifest, and the input, mesh and files read "
+            "against the run block's own hashes. The archive is gzip-compressed in builds with zlib "
+            "(Mallard_ENABLE_ZLIB), else plain tar; any tar reads both.",
+        .options = PACK_OPTIONS,
+        .arguments = PACK_ARGUMENTS,
+        .examples = "$ mallard pack runs/cylinder                         # cylinder.tar.gz\n"
+                    "$ mallard pack runs/cylinder -o cylinder_re100.tar.gz --with-outputs all\n"
+                    "$ mallard pack --verify cylinder.tar.gz\n"
+                    "$ tar -xf cylinder.tar.gz && cd cylinder/case && mallard -i input.toml",
+        .exit_status = "0  the archive was written, or every file of it checks\n"
+                       "1  the run record or a file cannot be read, a file differs from the run's record of it, "
+                       "or (--verify) a file is missing, added or differs\n"
+                       "2  usage error",
+        .dim = Case::none,
+        .run = pack_main,
     },
     {
         .name = "test",
