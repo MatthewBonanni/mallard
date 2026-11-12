@@ -131,16 +131,15 @@ to output
 ([Ketcheson 2008](../references.md#ketcheson-2008), [2010](../references.md#ketcheson-2010)),
 written for the deviations from U<sup>n</sup>:
 `S += delta_i (Y_{i-1} - U^n)`, `Y_i = U^n + gamma1_i (Y_{i-1} - U^n) + gamma2_i S + beta_i dt L(Y_{i-1})`.
-A steady state then stays bitwise steady (rounded weights summing to $1 - 2^{-54}$
-are what changed SSPRK3's carbuncle behavior in 0.7, [below](#stationary-shocks-on-cell-faces)),
+A steady state then stays bitwise steady (weights that round to a sum of
+$1 - 2^{-54}$ change the carbuncle behavior, [below](#stationary-shocks-on-cell-faces)),
 and one fused kernel per stage updates every register. For SSPRK54 the
 coefficients come from Spiteri and Ruuth's Shu–Osher form re-solved to 50
 digits (the fourth-order conditions hold to 1e-50, and their 15-digit values
 agree to 1e-15); its equal ratios $\alpha/\beta = 1.508$ make $\delta_4$ and $\gamma_3$
 vanish, so U<sup>n</sup>, the solution and `S = alpha_52 (Y_2 - U^n)` suffice.
 `CK45` is the 2N form `D = A_i D + dt L(U)`, `U += B_i D`, with the RHS kept
-apart from D. None changes the existing integrators: restart files of FE,
-SSPRK3 and RK4 runs are byte-identical to those of the previous main. All run inside the step's
+apart from D. All run inside the step's
 CUDA graph (dt read on the device), with SIMPLER and Strang splitting, and
 take bitwise the same steps on any number of ranks.
 
@@ -166,6 +165,9 @@ of its small-`cfl` value up to at least the pulse limit, except TENO6 with
 RDPK3Sp35 (2.40 quads, 2.27 triangles) and TENO4 on triangles with RDPK3Sp35
 (2.34), and TENO6 on triangles with SSPRK54 (2.96). The safe value on these cells is 2.2 for all three,
 against 1.2 (SSPRK3) and 1.35 (RK4).
+
+The [theory manual](../theory/time_integration.md#runge-kutta-methods) plots
+the stability regions of all six methods and the convergence below.
 
 **Temporal convergence** (vortex, 40 x 40 quads, TENO5, to t = 2; maximum
 density difference from RK4 at `cfl` 0.02 on the same mesh):
@@ -290,9 +292,10 @@ depends only on how the time integrator rounds:
   40 x 40 grid (the setup of `carbuncle_growth` in `test/solver_test.cpp`
   with no drift), both grow an O(0.1-1) carbuncle with FE, RK4 and SSPRK3.
   This holds with or without FMA contraction and at CFL 0.18-0.3.
-- Until 0.7.0 the SSPRK3 last stage was `2/3 U2 + 1/3 U`. Its rounded weights
-  sum to 1 - 2^-54, which nudged the state down by an ulp in a fraction of
-  the cells every step and happened to keep that wave speed positive.
+- Written as `2/3 U2 + 1/3 U`, the SSPRK3 last stage has rounded weights
+  that sum to 1 - 2^-54. They nudge the state down by an ulp in a fraction
+  of the cells every step, which happens to keep that wave speed positive.
+  Mallard writes the stage as an interpolation, whose weights sum to one.
 
 A shock that moves, or that sits inside a cell, never puts the sonic speed on
 a face. For example, the same shock drifting at 0.03, as in
