@@ -63,16 +63,7 @@ const char * const SAMPLES = "STATISTICS_SAMPLES";
 
 } // namespace
 
-void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
-                      const bool use_nccl) {
-    if (!input.contains("statistics")) return;
-    const Input & table = input.at("statistics");
-    interval = find_value_or<uint64_t>(table, "interval", 1);
-    if (interval == 0) throw InputError("statistics.interval must be positive.");
-    t_start = find_real_or(table, "t_start", dim::time, 0.0);
-    reset = find_value_or<bool>(table, "reset", false);
-    if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start, use_nccl);
-    if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start, use_nccl);
+void Statistics::read_fields(const Input & table) {
     auto add_field = [&](const std::string & name) {
         const auto it = std::find(fields.begin(), fields.end(), name);
         if (it != fields.end()) return static_cast<uint32_t>(it - fields.begin());
@@ -98,6 +89,28 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
         }
         products.push_back(pair);
     }
+}
+
+std::vector<std::string> Statistics::variables(const Input & input) {
+    if (!input.contains("statistics")) return {};
+    const Input & table = input.at("statistics");
+    Statistics s;
+    s.read_fields(table);
+    if (table.contains("phase")) s.phase.read_variables(table.at("phase"));
+    return s.variables();
+}
+
+void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
+                      const bool use_nccl) {
+    if (!input.contains("statistics")) return;
+    const Input & table = input.at("statistics");
+    interval = find_value_or<uint64_t>(table, "interval", 1);
+    if (interval == 0) throw InputError("statistics.interval must be positive.");
+    t_start = find_real_or(table, "t_start", dim::time, 0.0);
+    reset = find_value_or<bool>(table, "reset", false);
+    if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start, use_nccl);
+    if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start, use_nccl);
+    read_fields(table);
     if (fields.empty()) {
         if (spectra.enabled() || phase.enabled()) return;
         for (const auto & probe : find_value_or<std::vector<Input>>(input, "probes", {})) {
@@ -278,12 +291,8 @@ Dimension variable_dimension(const std::string & name) {
 
 } // namespace
 
-void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
-                        uint32_t n_cells, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
+void PhaseAverage::read_variables(const Input & table) {
     const std::string key = "statistics.phase";
-    interval = find_value_or<uint64_t>(table, "interval", interval_in);
-    if (interval == 0) throw InputError(key + ".interval must be positive.");
-    t_start = find_real_or(table, "t_start", dim::time, t_start_in);
     bins = find_value_or<uint32_t>(table, "bins", 0);
     if (bins == 0) throw InputError(key + ".bins must be positive.");
     fields = find_value_or<std::vector<std::string>>(table, "fields", {});
@@ -293,6 +302,15 @@ void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vecto
             throw InputError(key + ".fields: \"" + fields[i] + "\" is listed twice.");
         }
     }
+}
+
+void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
+                        uint32_t n_cells, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
+    const std::string key = "statistics.phase";
+    interval = find_value_or<uint64_t>(table, "interval", interval_in);
+    if (interval == 0) throw InputError(key + ".interval must be positive.");
+    t_start = find_real_or(table, "t_start", dim::time, t_start_in);
+    read_variables(table);
     std::vector<int32_t> h_codes;
     for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, key + ".fields"));
     codes = to_device(h_codes, "phase_codes");

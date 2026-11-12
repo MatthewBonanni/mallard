@@ -579,10 +579,11 @@ Without an input file, lists every field the [[write_data]], [[probes]] and
 [statistics] fields take, by group, with its units, its description and what a
 case needs to have it, and the patterns (Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).
 
-With an input file, sets the case up as mallard check does (reading its mesh,
-writing nothing) and lists exactly the fields [[write_data]] fields accept for
-it: its species, its physics, chemistry, LES and statistics, and its dimension;
-then the common fields it does not have, with what they need.
+With an input file, reads it and its mechanism (not its mesh, which need not
+exist yet) and lists exactly the fields [[write_data]] fields accept for it: its
+species, its physics, chemistry, LES and statistics, and its dimension (mallard
+--dim 3 list fields for a 3D case whose mesh file does not exist yet); then the
+common fields it does not have, with what they need.
 
 Options:
   --format text|json  text: one table per group (of fields) or table (of keys),
@@ -600,7 +601,7 @@ Examples:
 
 Exit status:
   0  listed
-  1  the case cannot be set up (the errors are printed)
+  1  the input or its mechanism cannot be read (the errors are printed)
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-fields
@@ -611,9 +612,9 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard list species INPUT [--format text|json]
 
-Sets the case up as mallard check does and lists its species, one table row
-each, in the order of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s>
-fields. A single gas has none.
+Reads the input and its mechanism (not its mesh, which need not exist yet) and
+lists its species, one table row each, in the order of the mechanism: the <s> of
+its Y_<s>, X_<s> and RHOY_<s> fields. A single gas has none.
 
 Options:
   --format text|json  text: one table per group (of fields) or table (of keys),
@@ -630,7 +631,7 @@ Examples:
 
 Exit status:
   0  listed
-  1  the case cannot be set up (the errors are printed)
+  1  the input or its mechanism cannot be read (the errors are printed)
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-species

@@ -113,6 +113,8 @@ class SourceTerms {
                     bool use_nccl);
 
         bool empty() const { return m_empty; }
+        /** @brief Whether an input has source terms (not empty()), from the input alone (no mesh). */
+        static bool in_input(const Input & input) { return !tables_of(input).empty(); }
         /** @brief Whether some expression reads t (the stage time must be set on the device). */
         bool time_dependent() const { return m_time; }
         /** @brief Whether some expression reads a domain average (a global sum per stage). */
@@ -141,6 +143,8 @@ class SourceTerms {
         void check_loops() const;
 
     private:
+        /** @brief The tables of the input that hold source terms, and where each is ("source", "sources[0]"). */
+        static std::vector<std::pair<const Input *, std::string>> tables_of(const Input & input);
         std::shared_ptr<Mesh> mesh;
         CellFields fields;
         uint32_t n_species = 0;

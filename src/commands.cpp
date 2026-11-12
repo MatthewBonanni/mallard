@@ -585,16 +585,17 @@ constexpr Command COMMANDS[] = {
             "take, by group, with its units, its description and what a case needs to have it, and the patterns "
             "(Y_<s>, MEAN_<A>, COV_<A>_<B>, ...).\n"
             "\n"
-            "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
-            "lists exactly the fields [[write_data]] fields accept for it: its species, its physics, chemistry, "
-            "LES and statistics, and its dimension; then the common fields it does not have, with what they need.",
+            "With an input file, reads it and its mechanism (not its mesh, which need not exist yet) and lists "
+            "exactly the fields [[write_data]] fields accept for it: its species, its physics, chemistry, LES and "
+            "statistics, and its dimension (mallard --dim 3 list fields for a 3D case whose mesh file does not "
+            "exist yet); then the common fields it does not have, with what they need.",
         .options = LIST_OPTIONS,
         .arguments = OPTIONAL_INPUT,
         .examples = "$ mallard list fields\n"
                     "$ mallard list fields input.toml\n"
                     "$ mallard list fields input.toml --format json",
         .exit_status = "0  listed\n"
-                       "1  the case cannot be set up (the errors are printed)\n"
+                       "1  the input or its mechanism cannot be read (the errors are printed)\n"
                        "2  usage error",
         .dim = Case::input,
         .run = list_fields_main,
@@ -605,14 +606,15 @@ constexpr Command COMMANDS[] = {
         .summary = "The species of a case",
         .synopsis = "mallard list species INPUT [--format text|json]",
         .description =
-            "Sets the case up as mallard check does and lists its species, one table row each, in the order "
-            "of its mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s> fields. A single gas has none.",
+            "Reads the input and its mechanism (not its mesh, which need not exist yet) and lists its species, one "
+            "table row each, in the order of the mechanism: the <s> of its Y_<s>, X_<s> and RHOY_<s> fields. A "
+            "single gas has none.",
         .options = LIST_OPTIONS,
         .arguments = INPUT_ARGUMENT,
         .examples = "$ mallard list species flame.toml\n"
                     "$ mallard list species flame.toml --format json",
         .exit_status = "0  listed\n"
-                       "1  the case cannot be set up (the errors are printed)\n"
+                       "1  the input or its mechanism cannot be read (the errors are printed)\n"
                        "2  usage error",
         .dim = Case::input,
         .run = list_species_main,

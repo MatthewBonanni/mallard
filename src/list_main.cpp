@@ -29,14 +29,15 @@
 
 namespace {
 
-/** @brief What a case's setup gives: its output fields, species and key catalog, or the errors that stopped it. */
+/** @brief What a case's setup gives: its output fields, species or key catalog, or the errors that stopped it. */
 struct CaseFields {
     std::vector<std::string> fields, species, errors;
     std::string keys;  // key_catalog
 };
 
-/** @brief Sets the case up as mallard check does, without its report, and collects what it writes. */
-CaseFields set_up(const std::string & input_file, const cli::Args & args) {
+/** @brief Runs body(solver, out) on a new Solver, with Kokkos, without its output, and collects its errors. */
+template <typename F>
+CaseFields quietly(const std::string & input_file, const cli::Args & args, F && body) {
     int argc = args.argc;
     char ** argv = args.argv;
     Kokkos::ScopeGuard kokkos(argc, argv);
@@ -46,15 +47,7 @@ CaseFields set_up(const std::string & input_file, const cli::Args & args) {
     std::streambuf * cout = std::cout.rdbuf(quiet.rdbuf());
     try {
         Solver solver;
-        CheckOptions options;
-        options.input_file = input_file;
-        const CheckReport report = solver.check(parse_input(input_file), options);
-        out.errors = report.errors();
-        if (report.setup_done) {
-            out.fields = solver.output_fields();
-            out.species = solver.get_species_names();
-            out.keys = key_catalog(resolve_input(solver.resolved_input()));
-        }
+        body(solver, out);
     } catch (const InputError & e) {
         out.errors.push_back(input_file + ": " + e.what());
     } catch (const std::exception & e) {
@@ -62,6 +55,25 @@ CaseFields set_up(const std::string & input_file, const cli::Args & args) {
     }
     std::cout.rdbuf(cout);
     return out;
+}
+
+/** @brief The case's fields and species, from its input and mechanism without its mesh. */
+CaseFields set_up(const std::string & input_file, const cli::Args & args) {
+    return quietly(input_file, args, [&](Solver & solver, CaseFields & out) {
+        out.fields = solver.init_fields(parse_input(input_file));
+        out.species = solver.get_species_names();
+    });
+}
+
+/** @brief The keys the case's setup reads: sets it up as mallard check does, without its report. */
+CaseFields set_up_keys(const std::string & input_file, const cli::Args & args) {
+    return quietly(input_file, args, [&](Solver & solver, CaseFields & out) {
+        CheckOptions options;
+        options.input_file = input_file;
+        const CheckReport report = solver.check(parse_input(input_file), options);
+        out.errors = report.errors();
+        if (report.setup_done) out.keys = key_catalog(resolve_input(solver.resolved_input()));
+    });
 }
 
 int report_errors(const CaseFields & c) {
@@ -325,7 +337,7 @@ int list_keys_main(const cli::Args & args) {
             return 1;
         }
     } else {
-        const CaseFields c = set_up(input_file, args);
+        const CaseFields c = set_up_keys(input_file, args);
         if (c.keys.empty()) return report_errors(c);
         catalog = json::parse(c.keys);
     }

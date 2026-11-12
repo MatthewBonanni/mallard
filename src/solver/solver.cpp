@@ -2122,21 +2122,83 @@ void Solver::register_data() {
     }
 }
 
-std::vector<std::string> Solver::output_fields() const {
-    std::vector<std::string> names;
-    for (const auto & d : data) names.push_back(d.name());
-    std::vector<std::string> on_request = {"P_MAX"};
-    for (const char * name : derived::NAMES) on_request.emplace_back(name);
-    for (const char * name : MeshQuality::FIELDS) on_request.emplace_back(name);
-    for (const char * name : stencils::FIELDS) on_request.emplace_back(name);
+namespace {
+
+/** @brief The fields setup computes only when a writer asks for them. */
+std::vector<std::string> on_request_fields() {
+    std::vector<std::string> names = {"P_MAX"};
+    for (const char * name : derived::NAMES) names.emplace_back(name);
+    for (const char * name : MeshQuality::FIELDS) names.emplace_back(name);
+    for (const char * name : stencils::FIELDS) names.emplace_back(name);
     if constexpr (N_DIM == 2) {
-        on_request.emplace_back("VORTICITY");
+        names.emplace_back("VORTICITY");
     } else {
-        FOR_I_DIM on_request.push_back(std::string("VORTICITY_") + "XYZ"[i]);
+        FOR_I_DIM names.push_back(std::string("VORTICITY_") + "XYZ"[i]);
     }
-    for (const auto & name : on_request) {
-        if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
+    return names;
+}
+
+} // namespace
+
+std::vector<std::string> Solver::output_fields() const {
+    const std::vector<std::string> on_request = on_request_fields();
+    std::vector<std::string> names;
+    for (const auto & d : data) {
+        if (std::find(on_request.begin(), on_request.end(), d.name()) == on_request.end()) names.push_back(d.name());
     }
+    names.insert(names.end(), on_request.begin(), on_request.end());
+    return names;
+}
+
+std::vector<std::string> Solver::init_fields(const Input & input_in) {
+    input = input_in;
+    deprecated_keys = input_upgrade::apply(input);
+    preset = numerics_preset::apply(input);
+    init_physics();
+    // In the order of register_data
+    std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+    for (const auto & s : species_names) names.push_back("RHOY_" + s);
+    if (is_mixture()) {
+        for (const auto & s : species_names) {
+            names.push_back("Y_" + s);
+            names.push_back("X_" + s);
+        }
+        names.emplace_back("T_SEED");
+        if (is_viscous()) {
+            names.emplace_back("MU");
+            names.emplace_back("LAMBDA");
+            for (const auto & s : species_names) names.push_back("D_" + s);
+            if (mixture.transport.thermal_diffusion) {
+                for (const auto & s : species_names) names.push_back("DT_" + s);
+            }
+        }
+        if (reacting) {
+            for (const char * name : {"CHEM_H", "CHEM_COST", "HRR"}) names.emplace_back(name);
+            for (const auto & s : species_names) names.push_back("OMEGA_" + s);
+        }
+        if (radiating) names.emplace_back("QRAD");
+    }
+    names.insert(names.end(), PRIMITIVE_NAMES.begin(), PRIMITIVE_NAMES.end());
+    names.emplace_back("CFL");
+    if (sources::SourceTerms::in_input(input)) {
+        for (const auto & name : CONSERVATIVE_NAMES) names.push_back("SOURCE_" + std::string(name));
+        for (const auto & s : species_names) names.push_back("SOURCE_RHOY_" + s);
+    }
+    if (LES::in_input(input)) {
+        names.emplace_back("MU_T");
+        if (input.at("les").contains("combustion")) {
+            if (find_value_or<std::string>(input.at("les").at("combustion"), "model", "") == "pasr") {
+                names.emplace_back("PASR_KAPPA");
+            } else {
+                for (const char * name : {"TF_F", "TF_E", "TF_OMEGA"}) names.emplace_back(name);
+            }
+        }
+    }
+    for (const auto & name : Statistics::variables(input)) names.push_back(name);
+    const Input reconstruction = toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
+    if (find_value_or<std::string>(reconstruction, "type", "FO") == "TENO") names.emplace_back("TENO_SIGMA");
+    const std::vector<std::string> on_request = on_request_fields();
+    names.insert(names.end(), on_request.begin(), on_request.end());
     return names;
 }
 

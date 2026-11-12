@@ -135,6 +135,20 @@ struct Accumulate {
 
 } // namespace
 
+std::vector<std::pair<const Input *, std::string>> SourceTerms::tables_of(const Input & input) {
+    std::vector<std::pair<const Input *, std::string>> out;
+    if (input.contains("source")) {
+        const Input & s = input.at("source");
+        if (s.contains("rho") || s.contains("rhou") || s.contains("rhoE")) out.emplace_back(&s, "source");
+    }
+    if (input.contains("sources")) {
+        if (!input.at("sources").is_array()) throw InputError("sources must be an array of tables: [[sources]].");
+        const auto & list = input.at("sources").as_array();
+        for (size_t i = 0; i < list.size(); i++) out.emplace_back(&list[i], "sources[" + std::to_string(i) + "]");
+    }
+    return out;
+}
+
 SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh_,
                          const std::vector<std::string> & species, const CellFields & fields_,
                          region::Regions & regions, const bool use_nccl) :
@@ -152,16 +166,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
     const bool mixture = n_species > 0;
     const uint32_t n_owned = mesh->n_owned();
 
-    std::vector<std::pair<const Input *, std::string>> entries;
-    if (input.contains("source")) {
-        const Input & s = input.at("source");
-        if (s.contains("rho") || s.contains("rhou") || s.contains("rhoE")) entries.emplace_back(&s, "source");
-    }
-    if (input.contains("sources")) {
-        if (!input.at("sources").is_array()) throw InputError("sources must be an array of tables: [[sources]].");
-        const auto & list = input.at("sources").as_array();
-        for (size_t i = 0; i < list.size(); i++) entries.emplace_back(&list[i], "sources[" + std::to_string(i) + "]");
-    }
+    const std::vector<std::pair<const Input *, std::string>> entries = tables_of(input);
     m_empty = entries.empty();
     if (m_empty) return;
 

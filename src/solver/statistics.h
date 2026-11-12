@@ -80,6 +80,8 @@ class PhaseAverage {
         /** @brief Read [statistics.phase] (table), sampling every interval steps from t_start. */
         void init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
                   uint32_t n_cells, uint64_t interval, rtype t_start, bool use_nccl);
+        /** @brief Read the bins and fields of [statistics.phase] (table), which name its variables. */
+        void read_variables(const Input & table);
 
         bool enabled() const { return !fields.empty(); }
         /** @brief Triggered phases follow the signal before t_start too. */
@@ -174,6 +176,8 @@ class Statistics {
 
         /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., PHASE_<bin>_<field>... */
         std::vector<std::string> variables() const;
+        /** @brief The variables() of the [statistics] of an input, from the input alone (no mesh). */
+        static std::vector<std::string> variables(const Input & input);
         void register_data(std::vector<Data> & data) const;
         void copy_device_to_host();
 
@@ -229,6 +233,8 @@ class Statistics {
         PhaseAverage phase;
 
         void start_means(rtype t);
+        /** @brief Read fields and products of [statistics] (table). */
+        void read_fields(const Input & table);
 };
 
 /**
