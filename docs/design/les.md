@@ -664,8 +664,8 @@ correction the reconstruction adds to the mean of the cells. `[numerics.hybrid] 
   [Modesti & Pirozzoli 2017](../references.md#modesti-pirozzoli-2017)). Every interior face
   changes the kinetic energy by exactly the pressure work, on any mesh, but the central part is
   second order: in smooth flow TENO sets only the dissipation near shocks.
-- **`reconstructed`** (the default with MUSCL, first order and gas mixtures): KEEP on the
-  reconstructed face states.
+- **`reconstructed`** (the default with MUSCL and first order): KEEP on the reconstructed face
+  states.
 
 A third candidate was evaluated and not adopted: KEEP on the reconstructed states plus, per
 interior face, a momentum diffusion $-\alpha \Delta u$ with its work
@@ -678,8 +678,14 @@ removed energy as heat: the kinetic-energy form of the entropy correction of Abg
 
 Tests: `HybridFlux.TENOsCentralFluxChangesKineticEnergyOnlyByThePressureWork` (TENO states on
 simplices; `reconstructed` departs from it), `HybridFlux.CellAverageCentralFluxConservesMassMomentumAndEnergy`,
-and `MPITest.HybridConvectiveFluxMatchesSerial` with TENO (the halo cells' values). Single gas
-only (#801).
+and `MPITest.HybridConvectiveFluxMatchesSerial` with TENO (the halo cells' values). For a gas
+mixture, `cell_averages` gives each cell's values its own surrogates `gamma` and `e0`, as the
+mixture KEEP flux of section 4.3 does with the face's (with double flux, each side's central flux
+takes its cell's frozen surrogates on both sides). They enter only the energy flux, so the
+kinetic energy still changes by exactly the pressure work
+(`HybridFlux.MixtureCellAverageCentralFluxChangesKineticEnergyOnlyByThePressureWork`, with and
+without double flux); a pressure-equilibrium-preserving energy flux (#293) changes only the
+energy flux and keeps this identity.
 
 **Shocks** (`examples/sod` and `examples/shu_osher`, TENO5 on 200 cells, the examples'
 Riemann solvers; L1 density error against the exact solution and against TENO5 on 3,200

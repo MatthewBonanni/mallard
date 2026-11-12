@@ -104,6 +104,30 @@ struct UpwindSensorFunctor {
 };
 
 /**
+ * @brief The two cells' W of an interior face for the hybrid flux's central
+ *        part with central = "cell_averages" (docs/design/les.md, section
+ *        4.4), cell 1's in the face's (cell 0's) frame. Off (W_cells empty):
+ *        the central part takes the reconstructed states.
+ */
+struct CentralStates {
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
+    PeriodicMaps periodic;
+    Kokkos::View<uint8_t *> face_shift;
+
+    KOKKOS_INLINE_FUNCTION
+    bool on() const { return W_cells.extent(0) > 0; }
+
+    KOKKOS_INLINE_FUNCTION
+    void load(const uint32_t i_face, const int32_t c0, const int32_t c1, rtype * W_0, rtype * W_1) const {
+        FOR_I_CONSERVATIVE {
+            W_0[i] = W_cells(c0, i);
+            W_1[i] = W_cells(c1, i);
+        }
+        if (periodic.rotated()) periodic.rotate(face_shift(i_face), W_1 + 1);
+    }
+};
+
+/**
  * @brief Integrates the convective flux over every face into face_flux, the
  *        rate of change it causes in cells_of_face(:, 0) (cells_of_face(:, 1)
  *        receives its negative). Boundary faces use the boundary ghost state
@@ -129,10 +153,7 @@ struct ConvectiveFluxFunctor {
     rtype low_mach_cutoff;  // 1 disables the low-Mach correction
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell (UpwindSensorFunctor), else empty
     Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
-    CentralFlux central_flux = CentralFlux::RECONSTRUCTED;
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;  // the cells' W, read when central_flux is CELL_AVERAGES
-    PeriodicMaps periodic;
-    Kokkos::View<uint8_t *> face_shift;
+    CentralStates central_states;  // hybrid flux, central = "cell_averages": the cells' W
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -159,16 +180,9 @@ struct ConvectiveFluxFunctor {
         const bool hybrid = upwind.extent(0) > 0;
         const rtype phi =
             hybrid ? face_upwind_fraction(upwind, boundaries, cells_of_face(i_face, 0), c1, i_face) : 1.0_r;
-        // Interior faces whose central part reads the cell values, W_1 in the face's (cell 0's) frame
-        const bool cell_central = hybrid && c1 >= 0 && central_flux == CentralFlux::CELL_AVERAGES;
+        const bool cell_central = hybrid && c1 >= 0 && central_states.on();
         rtype W_0[N_CONSERVATIVE], W_1[N_CONSERVATIVE];
-        if (cell_central) {
-            FOR_I_CONSERVATIVE {
-                W_0[i] = W_cells(cells_of_face(i_face, 0), i);
-                W_1[i] = W_cells(c1, i);
-            }
-            if (periodic.rotated()) periodic.rotate(face_shift(i_face), W_1 + 1);
-        }
+        if (cell_central) central_states.load(i_face, cells_of_face(i_face, 0), c1, W_0, W_1);
 
         rtype total[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
