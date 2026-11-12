@@ -409,6 +409,48 @@ struct Clipper {
     }
 };
 
+/** @brief A bound of the distance from cell c's centroid to its points (curved cells: to their bounding box). */
+double cell_radius(const Mesh & mesh, const uint32_t c) {
+    Vec x0 = {0.0, 0.0, 0.0};
+    for (size_t d = 0; d < N_DIM; d++) x0[d] = double(mesh.h_cell_coords(c, d));
+    double radius = 0.0;
+    for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
+        Vec x = {0.0, 0.0, 0.0};
+        for (size_t d = 0; d < N_DIM; d++) x[d] = double(mesh.h_node_coords(mesh.h_node_of_cell(c, k), d));
+        radius = std::max(radius, norm(sub(x, x0)));
+    }
+    if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(c)) {
+        curved::Vec3 lo, hi;
+        mesh.curved_geometry->bounds(c, lo, hi);
+        for (size_t d = 0; d < N_DIM; d++) radius = std::max(radius, std::max(std::abs(lo[d] - x0[d]), std::abs(hi[d] - x0[d])) * std::sqrt(double(N_DIM)));
+    }
+    return radius;
+}
+
+bool is_condition(const Region & region, const uint32_t i) { return region.filled()[i].kind == Filled::Kind::CONDITION; }
+
+bool has_condition(const Region & region, const uint32_t i) {
+    const Filled & f = region.filled()[i];
+    return f.kind == Filled::Kind::CONDITION ||
+           std::any_of(f.parts.begin(), f.parts.end(), [&](const uint32_t k) { return has_condition(region, k); });
+}
+
+/** @brief Whether a condition bounds or clips a piece. */
+bool conditional(const Region & region, const Piece & p) {
+    for (const auto * list : {&p.carriers, &p.inside, &p.outside}) {
+        for (const uint32_t i : *list) {
+            if (has_condition(region, i)) return true;
+        }
+    }
+    return false;
+}
+
+/** @brief Whether a piece is cut from its carriers' conditions' levels. */
+bool cut_from_conditions(const Region & region, const Piece & p) {
+    return p.zones.empty() && p.cells < 0 &&
+           std::any_of(p.carriers.begin(), p.carriers.end(), [&](const uint32_t i) { return is_condition(region, i); });
+}
+
 const Mesh & no_mesh() {
     static const Mesh mesh;
     return mesh;
@@ -494,30 +536,23 @@ class Builder {
             }
         }
 
-        bool is_condition(const uint32_t i) const { return m_region.filled()[i].kind == Filled::Kind::CONDITION; }
-
-        /** @brief Whether a condition bounds or clips the piece. */
-        bool conditional(const Piece & p) const {
-            for (const auto * list : {&p.carriers, &p.inside, &p.outside}) {
-                for (const uint32_t i : *list) {
-                    if (has(i)) return true;
-                }
-            }
-            return false;
-        }
-        bool has(const uint32_t i) const {
-            const Filled & f = m_region.filled()[i];
-            return f.kind == Filled::Kind::CONDITION ||
-                   std::any_of(f.parts.begin(), f.parts.end(), [&](const uint32_t k) { return has(k); });
-        }
+        bool is_condition(const uint32_t i) const { return region::is_condition(m_region, i); }
+        bool conditional(const Piece & p) const { return region::conditional(m_region, p); }
 
         /** @brief The linear level of condition i of the filled regions at x in local cell c. */
         double condition_level(const uint32_t i, const Vec & x, const int32_t c) const {
             if (c < 0) throw std::logic_error("region::elements: a condition is evaluated in its cell.");
             const uint32_t k = m_region.filled()[i].first, cell = static_cast<uint32_t>(c);
-            double g = (*m_levels)(cell, k, 0);
-            for (size_t d = 0; d < N_DIM; d++) g += (*m_levels)(cell, k, 1 + d) * (x[d] - double(m_mesh.h_cell_coords(cell, d)));
+            const size_t row = level_row(cell);
+            double g = m_levels->values(row, k, 0);
+            for (size_t d = 0; d < N_DIM; d++) g += m_levels->values(row, k, 1 + d) * (x[d] - double(m_mesh.h_cell_coords(cell, d)));
             return g;
+        }
+
+        size_t level_row(const uint32_t c) const {
+            const auto it = std::lower_bound(m_levels->cells.begin(), m_levels->cells.end(), c);
+            if (it == m_levels->cells.end() || *it != c) throw std::logic_error("region::elements: no levels in a cell.");
+            return static_cast<size_t>(it - m_levels->cells.begin());
         }
 
         /** @brief The level of a carrier at x in cell c: its signed distance (implicit function), or condition's level. */
@@ -951,8 +986,9 @@ class Builder {
             // Planes, and conditions' linear levels in each cell, are cut exactly without subdividing
             const bool conditions = std::any_of(p.carriers.begin(), p.carriers.end(), [&](const uint32_t i) { return is_condition(i); });
             if (conditions) {
-                for (uint32_t c = 0; c < m_mesh.n_owned(); c++) {
-                    if (off_conditions(p, c)) continue;
+                for (size_t row = 0; row < m_levels->cells.size(); row++) {
+                    const uint32_t c = m_levels->cells[row];
+                    if (off_conditions(p, c, row)) continue;
                     for (const auto & s : simplices(c)) extract(p, c, s, 0, 0);
                 }
                 return;
@@ -974,24 +1010,16 @@ class Builder {
             }
         }
 
-        /** @brief Whether a condition's linear level in cell c keeps its sign over a sphere around the cell. */
-        bool off_conditions(const Piece & p, const uint32_t c) const {
-            const uint32_t n = m_mesh.h_n_nodes_of_cell(c);
-            Vec x0 = {0.0, 0.0, 0.0};
-            for (size_t d = 0; d < N_DIM; d++) x0[d] = double(m_mesh.h_cell_coords(c, d));
-            double radius = 0.0;
-            for (uint32_t k = 0; k < n; k++) radius = std::max(radius, norm(sub(node(m_mesh.h_node_of_cell(c, k)), x0)));
-            if (m_mesh.curved_geometry && m_mesh.curved_geometry->cell_is_curved(c)) {
-                curved::Vec3 lo, hi;
-                m_mesh.curved_geometry->bounds(c, lo, hi);
-                for (size_t d = 0; d < N_DIM; d++) radius = std::max(radius, std::max(std::abs(lo[d] - x0[d]), std::abs(hi[d] - x0[d])) * std::sqrt(double(N_DIM)));
-            }
+        /** @brief Whether a condition's linear level in cell c (row of levels) keeps its sign over a sphere around the cell. */
+        bool off_conditions(const Piece & p, const uint32_t c, const size_t row) const {
+            const double radius = cell_radius(m_mesh, c);
+            const auto & L = m_levels->values;
             for (const uint32_t i : p.carriers) {
                 if (!is_condition(i)) continue;
                 const uint32_t k = m_region.filled()[i].first;
                 double slope = 0.0;
-                for (size_t d = 0; d < N_DIM; d++) slope += (*m_levels)(c, k, 1 + d) * (*m_levels)(c, k, 1 + d);
-                if (std::abs((*m_levels)(c, k, 0)) > 1.01 * std::sqrt(slope) * radius) return true;
+                for (size_t d = 0; d < N_DIM; d++) slope += L(row, k, 1 + d) * L(row, k, 1 + d);
+                if (std::abs(L(row, k, 0)) > 1.01 * std::sqrt(slope) * radius) return true;
             }
             return false;
         }
@@ -1641,6 +1669,25 @@ Elements elements(const Mesh & mesh, const Region & region) {
 Elements elements(const Mesh & mesh, const Region & region, const Levels & levels) {
     if (region.dimension() == N_DIM) throw std::logic_error("region::elements: the region is filled.");
     return Builder(mesh, region, &levels).build();
+}
+
+LevelCells level_cells(const Mesh & mesh, const Region & region) {
+    LevelCells out;
+    for (const Piece & p : region.pieces()) {
+        if (cut_from_conditions(region, p)) {
+            std::vector<uint32_t> & k = out.conditions.emplace_back();
+            for (const uint32_t i : p.carriers) {
+                if (is_condition(region, i)) k.push_back(region.filled()[i].first);
+            }
+        } else if (conditional(region, p)) {
+            out.every = true;
+        }
+    }
+    if (!out.conditions.empty()) {
+        out.radii.resize(mesh.n_owned());
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) out.radii[c] = cell_radius(mesh, c);
+    }
+    return out;
 }
 
 Measures measures_in_domain(const Mesh & mesh, const Region & region, const std::vector<double> & fractions) {
