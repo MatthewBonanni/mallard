@@ -42,6 +42,12 @@ on:
           only them; empty runs all
         type: string
         default: ''
+      gtest_filter:
+        description: >-
+          Run only these tests (googletest --gtest_filter, -* for none) in the backend jobs, which
+          still build and run their other checks in full; empty runs every test
+        type: string
+        default: ''
 
 permissions:
   actions: read
@@ -278,6 +284,17 @@ jobs:
           SHARD: ${{ matrix.backend.shard }}
           SHARDS: ${{ matrix.backend.shards }}
         run: printf 'GTEST_TOTAL_SHARDS=%s\nGTEST_SHARD_INDEX=%s\n' "$SHARDS" "$((SHARD - 1))" >> "$GITHUB_ENV"
+      # Both read by every suite run below: googletest's filter, and a JUnit report per process
+      # (tools/dev/test_coverage.py's map and this report let a dispatch rerun only the
+      # tests a change can affect)
+      - name: Select the tests and record their results
+        env:
+          FILTER: ${{ inputs.gtest_filter }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/junit"
+          echo "MALLARD_TEST_XML=$RUNNER_TEMP/junit" >> "$GITHUB_ENV"
+          printf '%s\n' "$FILTER" > "$RUNNER_TEMP/junit/filter.txt"
+          if [ -n "$FILTER" ]; then echo "GTEST_FILTER=$FILTER" >> "$GITHUB_ENV"; fi
       - name: Install MPI
         timeout-minutes: 25
         if: matrix.backend.mpi
@@ -395,17 +412,26 @@ jobs:
           MALLARD_TEST_TIMEOUT: 600
         run: |
           mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
+          # A filter of this step, restricted to the dispatch's GTEST_FILTER (empty: no test)
+          list() { mpirun -n 1 ./build/src/mallard test --gtest_list_tests --gtest_filter="$1" |
+                   awk '/^[^ ].*\.$/ { s = $1 } /^  / { print s $1 }' | sort; }
+          only() {
+            if [ -z "${GTEST_FILTER:-}" ]; then echo "$1"; return; fi
+            comm -12 <(list "$1") <(list "$GTEST_FILTER") | paste -sd: -
+          }
           if [ "$FULL" = true ]; then
             mpirun -n 1 ./build/src/mallard test
           else
-            mpirun -n 1 ./build/src/mallard test --gtest_filter="$mpi_tests:CliTest.*:FrontEndTest.*:RunControlTest.*"
+            one=$(only "$mpi_tests:CliTest.*:FrontEndTest.*:RunControlTest.*")
+            if [ -n "$one" ]; then mpirun -n 1 ./build/src/mallard test --gtest_filter="$one"; fi
           fi
+          mpi=$(only "$mpi_tests")
           # Every test on 3 ranks, so none assumes a single rank; two rank
           # counts at once, so tests that share a file path collide
-          mpirun -n 2 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests" & two=$!
+          if [ -n "$mpi" ]; then mpirun -n 2 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi" & two=$!; fi
           mpirun -n 3 --oversubscribe ./build/src/mallard test --gtest_brief=1 & three=$!
-          ok=true; wait $two || ok=false; wait $three || ok=false; $ok
-          mpirun -n 4 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi_tests"
+          ok=true; if [ -n "$mpi" ]; then wait "$two" || ok=false; fi; wait $three || ok=false; $ok
+          if [ -n "$mpi" ]; then mpirun -n 4 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi"; fi
       # Every rank in the report, and no warning about a sensible placement
       - name: Rank report (MPI)
         if: matrix.backend.name == 'mpi' && (!matrix.backend.shard || matrix.backend.shard == 1)
@@ -423,6 +449,14 @@ jobs:
             [ "$rows" -eq "$n" ] || { echo "expected $n rows in the rank report, found $rows"; exit 1; }
             if grep -q 'warning:' "$dir/out.txt"; then echo "unexpected warning"; exit 1; fi
           done
+      - name: Upload the test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ matrix.backend.job }}
+          path: ${{ runner.temp }}/junit
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Report the job's result
         if: always()
         env:

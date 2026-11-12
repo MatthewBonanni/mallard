@@ -196,6 +196,11 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   only=openmp,mpi-3d` (backend names, `tutorials`, `device`, `spack`, `fuzz`, whatever their tier;
   any other name fails the run). The `CI` status records the subset. A resolution in build files,
   shared headers or anything the whole suite exercises needs the full run.
+- **Only the tests a change can affect**: `-f gtest_filter=<pattern>` runs only those tests
+  in the backend jobs (`-*` for none), which still build and run their other checks in full.
+  Each push to `main` maps every test to the files it depends on (`coverage.yml`,
+  `tools/dev/test_coverage.py`), and each backend job uploads its results as JUnit XML
+  (`junit-<job>`), so the tooling that dispatches CI can pick the filter.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
   run when a branch's changes touch device code: `tools/dev/device_changes.sh` decides (a
   changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
