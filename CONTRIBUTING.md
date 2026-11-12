@@ -187,8 +187,8 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   tested together next. A failure opens an issue labeled `ci-main`, fixed before anything
   else lands; the next passing run closes it. `-f full=true` runs all of it on a branch,
   for a change that targets one of those platforms.
-- **Trains**: maintainers land several ready PRs on one run by merging their heads onto
-  `main` in a `train/*` branch and running the gate there; `train.yml`, dispatched on
+- **Batches**: maintainers land several ready PRs on one run by merging their heads onto
+  `main` in a `batch/*` branch and running the gate there; `batch.yml`, dispatched on
   `main` with that run and the heads, checks that the run passed and contains each head,
   then sets `CI` on them.
 - **After resolving a merge conflict** on a PR whose CI already passed, rerun only
