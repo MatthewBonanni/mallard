@@ -1,1 +1,0 @@
-- The run's setup banner gives the models' constants as quantities with their units in a column: the gas's gamma, R, cp and cv, the viscosity law's, the source terms' (gravity, mass flow, region areas or volumes, sponges, radiation), TENO's stencil sizes and switch, the MUSCL limiter's, the step controller's tolerances and PID coefficients, and LES's, TFLES's and PaSR's (#849).

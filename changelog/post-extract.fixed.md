@@ -1,1 +1,0 @@
-- The resolved input (`mallard input resolve`, `input.resolved` of the provenance) of a region probe no longer sets `type`, `file`, `format` or `sampling`, keys a region probe rejects, so it sets up again.

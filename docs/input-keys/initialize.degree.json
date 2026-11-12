@@ -1,0 +1,12 @@
+{
+ "default": "2",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/riemann_2d_quads/remap.toml",
+  "examples/taylor_green_3d/remap.toml"
+ ],
+ "type": "integer"
+}
