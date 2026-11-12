@@ -99,25 +99,25 @@ void check_environment(CheckReport & report) {
     e.hosts = static_cast<int>(per_host.size());
     for (const auto & [host, n] : per_host) e.ranks_per_host = std::max(e.ranks_per_host, n);
 
-    for (const std::string & warning : binding::check(e.ranks)) report.warning(check_code::ENV_PLACEMENT, warning);
+    for (const std::string & warning : binding::check(e.ranks)) report.warning(diagnostic_code::ENV_PLACEMENT, warning);
     std::vector<int> unbound;
     for (const binding::Placement & p : e.ranks) {
         if (p.threads > 1 && !p.omp_bind) unbound.push_back(p.rank);
     }
     if (std::string(Kokkos::DefaultHostExecutionSpace::name()) == "OpenMP" && !unbound.empty()) {
-        report.warning(check_code::ENV_THREAD_BINDING,
+        report.warning(diagnostic_code::ENV_THREAD_BINDING,
                        "OMP_PROC_BIND and OMP_PLACES are unset on " + ranks_text(unbound) +
                            ": their OpenMP threads may migrate between cores; set OMP_PROC_BIND=spread and "
                            "OMP_PLACES=threads");
     }
     if (gpu_aware_built && e.gpu_aware_library == 0) {
-        report.error(check_code::ENV_GPU_AWARE_MPI,
+        report.error(diagnostic_code::ENV_GPU_AWARE_MPI,
                      "this build passes device buffers to MPI (Mallard_GPU_AWARE_MPI), but the MPI library says it "
                      "cannot read device memory; use a GPU-aware MPI build (with CUDA or ROCm support), or rebuild "
                      "with -DMallard_GPU_AWARE_MPI=OFF");
     }
     if (several && device_memory && !e.nccl_used && !gpu_aware_built) {
-        report.warning(check_code::ENV_HOST_STAGING,
+        report.warning(diagnostic_code::ENV_HOST_STAGING,
                        comm::nccl_available()
                            ? "halo exchanges go through MPI ([parallel] halo_exchange = \"mpi\"), which this build "
                              "does not give device buffers: each copies them to host memory and back; use "

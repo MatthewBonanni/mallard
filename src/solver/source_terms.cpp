@@ -17,6 +17,7 @@
 
 #include "comm.h"
 #include "device_sums.h"
+#include "diagnostic_code.h"
 #include "input.h"
 #include "region_input.h"
 #include "region_motion.h"
@@ -185,7 +186,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         if (!entry->is_table()) throw InputError(where + " must be a table.");
         if (legacy && entry->contains("time_dependent")) {
             if (!entry->at("time_dependent").is_boolean()) throw InputError("source.time_dependent must be true or false.");
-            logging::warning("source.time_dependent is ignored: expressions of t are re-evaluated at every stage.");
+            logging::warning(diagnostic_code::KEY_IGNORED, "source.time_dependent is ignored: expressions of t are re-evaluated at every stage.");
         }
         const std::string label = !legacy && entry->contains("name") ? find_value<std::string>(*entry, "name") : where;
         const bool total = !legacy && find_value_or<bool>(*entry, "total", false);

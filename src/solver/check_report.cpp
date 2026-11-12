@@ -54,11 +54,7 @@ Status CheckReport::status() const {
     return s;
 }
 
-std::string CheckDiagnostic::docs() const {
-    std::string anchor = code;
-    std::transform(anchor.begin(), anchor.end(), anchor.begin(), [](unsigned char c) { return std::tolower(c); });
-    return "docs/guide/input_files.md#" + anchor;
-}
+std::string CheckDiagnostic::docs() const { return diagnostic_code::docs(code); }
 
 namespace {
 
@@ -131,21 +127,21 @@ void overview(report::Text & text, const CheckReport & r) {
 }
 
 void input_section(report::Text & text, const CheckReport & r) {
-    const size_t n_unused = n_of(r, check_code::KEY_UNUSED), n_deprecated = n_of(r, check_code::KEY_DEPRECATED);
-    const bool stopped = n_of(r, check_code::INPUT) + n_of(r, check_code::SETUP) > 0;
+    const size_t n_unused = n_of(r, diagnostic_code::KEY_UNUSED), n_deprecated = n_of(r, diagnostic_code::KEY_DEPRECATED);
+    const bool stopped = n_of(r, diagnostic_code::INPUT) + n_of(r, diagnostic_code::SETUP) > 0;
     const Status setup = stopped ? Status::ERROR : Status::OK;
     std::vector<Row> rows;
-    rows.push_back({setup, {"setup", stopped ? "stopped on an error: see " + std::string(n_of(r, check_code::INPUT)
-                                                                                        ? check_code::INPUT
-                                                                                        : check_code::SETUP)
+    rows.push_back({setup, {"setup", stopped ? "stopped on an error: see " + std::string(n_of(r, diagnostic_code::INPUT)
+                                                                                        ? diagnostic_code::INPUT
+                                                                                        : diagnostic_code::SETUP)
                                              : "completed: mesh, partition, boundaries, numerics, initial state"}});
     rows.push_back({n_unused ? Status::ERROR : Status::OK,
                     {"unknown or unused keys",
-                     n_unused ? plural(n_unused, "key") + ": see " + check_code::KEY_UNUSED
+                     n_unused ? plural(n_unused, "key") + ": see " + diagnostic_code::KEY_UNUSED
                               : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
     rows.push_back({n_deprecated ? Status::WARNING : Status::OK,
                     {"deprecated keys",
-                     n_deprecated ? plural(n_deprecated, "key") + ": see " + check_code::KEY_DEPRECATED : "none"}});
+                     n_deprecated ? plural(n_deprecated, "key") + ": see " + diagnostic_code::KEY_DEPRECATED : "none"}});
     Status s = setup;
     for (const Row & row : rows) s = report::worse(s, row.status);
     text.section("Input", s);
@@ -230,8 +226,7 @@ void regions_section(report::Text & text, const CheckReport & r) {
 }
 
 void quality_section(report::Text & text, const CheckReport & r) {
-    constexpr std::array<const char *, MeshQuality::N_METRICS> UNITS = {"deg", "dimensionless", "dimensionless",
-                                                                         "dimensionless"};
+    constexpr auto UNITS = MeshQuality::UNITS;
     std::vector<Row> rows;
     std::vector<Row> worst;
     Status s = Status::OK;
@@ -313,7 +308,7 @@ void memory_section(report::Text & text, const CheckReport & r) {
     Status s = Status::NONE;
     std::string device = "-";
     if (r.device_capacity > 0) {
-        s = n_of(r, check_code::MEMORY_DEVICE) ? Status::ERROR : Status::OK;
+        s = n_of(r, diagnostic_code::MEMORY_DEVICE) ? Status::ERROR : Status::OK;
         device = format("%.0f%% of %s", 100.0 * double(r.target_bytes_peak) / double(r.device_capacity),
                         bytes(double(r.device_capacity)).c_str());
     }
@@ -367,7 +362,7 @@ void sizing_section(report::Text & text, const CheckReport & r) {
     const std::string unit = r.sizing_gpu ? "GPU" : "rank";
     const std::string units = unit + "s";
     std::vector<Row> rows;
-    const Status fixed = n_of(r, check_code::SIZING_FIXED) ? Status::WARNING : Status::OK;
+    const Status fixed = n_of(r, diagnostic_code::SIZING_FIXED) ? Status::WARNING : Status::OK;
     auto memory_row = [&](const std::string & quantity, const double b, const std::string & basis) {
         const std::string text_bytes = bytes(b);
         const size_t space = text_bytes.find(' ');
@@ -384,7 +379,7 @@ void sizing_section(report::Text & text, const CheckReport & r) {
     }
     if (r.max_local_cells == 0) {
         rows.push_back(
-            {fixed, {"most cells per " + unit, "0", "cells", "", "see " + std::string(check_code::SIZING_FIXED)}});
+            {fixed, {"most cells per " + unit, "0", "cells", "", "see " + std::string(diagnostic_code::SIZING_FIXED)}});
     } else {
         rows.push_back({fixed,
                         {"most cells per " + unit, count(r.max_local_cells), "owned and halo cells", "",
@@ -393,7 +388,7 @@ void sizing_section(report::Text & text, const CheckReport & r) {
                              (r.sizing_setup ? ", at the setup's peak" : ", in the steady state")}});
         if (r.min_ranks == 0) {
             rows.push_back({Status::WARNING,
-                            {"fewest " + units, "-", units, "", "see " + std::string(check_code::SIZING_PARTS)}});
+                            {"fewest " + units, "-", units, "", "see " + std::string(diagnostic_code::SIZING_PARTS)}});
         } else {
             rows.push_back({Status::OK,
                             {"fewest " + units, std::to_string(r.min_ranks), units, "",
@@ -543,7 +538,7 @@ void environment_section(report::Text & text, const CheckReport & r) {
                            plural(uint64_t(e.hosts), "host") + ", up to " + std::to_string(e.ranks_per_host) +
                            " per host"
                      : "not built"}},
-        {status_of({check_code::ENV_GPU_AWARE_MPI, check_code::ENV_HOST_STAGING}),
+        {status_of({diagnostic_code::ENV_GPU_AWARE_MPI, diagnostic_code::ENV_HOST_STAGING}),
          {"GPU-aware MPI", !mpi ? "not built"
                            : !gpu ? "not needed: the fields are in host memory"
                            : block_value(build, "gpu_aware_mpi") == "yes"
@@ -561,10 +556,10 @@ void environment_section(report::Text & text, const CheckReport & r) {
         {Status::OK, {"CGNS", version_or(deps, "cgns", "not built")}},
         {Status::OK, {"zlib", version_or(deps, "zlib", "not built")}},
         {Status::OK, {"KaMinPar", block_value(build, "kaminpar") == "yes" ? "built" : "not built"}},
-        {status_of({check_code::ENV_PLACEMENT, check_code::ENV_THREAD_BINDING}),
-         {"placement", status_of({check_code::ENV_PLACEMENT, check_code::ENV_THREAD_BINDING}) == Status::OK
+        {status_of({diagnostic_code::ENV_PLACEMENT, diagnostic_code::ENV_THREAD_BINDING}),
+         {"placement", status_of({diagnostic_code::ENV_PLACEMENT, diagnostic_code::ENV_THREAD_BINDING}) == Status::OK
                            ? "no problem found"
-                           : std::string("see ") + check_code::ENV_PLACEMENT + " and " + check_code::ENV_THREAD_BINDING}},
+                           : std::string("see ") + diagnostic_code::ENV_PLACEMENT + " and " + diagnostic_code::ENV_THREAD_BINDING}},
     };
     Status s = Status::OK;
     for (const Row & row : rows) s = report::worse(s, row.status);
@@ -618,6 +613,56 @@ std::string environment_json(const CheckEnvironment & e) {
     return o.str();
 }
 
+std::string diagnostics_json(const CheckReport & r) {
+    return array_json(r.diagnostics, [](const CheckDiagnostic & d) {
+        return json::Object()
+            .add("severity", std::string(report::status_name(d.severity)))
+            .add("code", d.code)
+            .add("message", d.message)
+            .add("docs", d.docs())
+            .str();
+    });
+}
+
+std::string quality_json(const CheckReport & r) {
+    json::Object q;
+    for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
+        const QualitySummary & s = r.quality[m];
+        q.raw(MeshQuality::FIELDS[m], json::Object()
+                                          .add("name", std::string(MeshQuality::NAMES[m]))
+                                          .add("max", s.max)
+                                          .add("mean", s.mean)
+                                          .add("units", std::string(MeshQuality::UNITS[m]))
+                                          .add("limit", MeshQuality::LIMITS[m])
+                                          .add("above_limit", s.n_over_limit)
+                                          .raw("worst", array_json(s.worst, [](const QualityCell & c) {
+                                                   return json::Object()
+                                                       .add("value", c.value)
+                                                       .add("cell", c.cell)
+                                                       .raw("x", point_json(c.x))
+                                                       .str();
+                                               }))
+                                          .str());
+    }
+    return q.str();
+}
+
+std::string resolution_json(const CheckReport & r) {
+    json::Object resolution;
+    for (const CheckEstimate & e : r.resolution) {
+        resolution.raw(e.id, json::Object()
+                                 .add("quantity", e.quantity)
+                                 .add("value", e.value)
+                                 .add("units", e.units)
+                                 .add("target", e.target)
+                                 .add("status", std::string(report::status_name(e.status)))
+                                 .add("basis", e.basis)
+                                 .raw("x", e.located ? point_json(e.x) : "null")
+                                 .str());
+    }
+    return resolution.str();
+}
+
 } // namespace
 
 std::string check_text(const CheckReport & r, const bool color) {
@@ -650,14 +695,7 @@ std::string check_json(const CheckReport & r) {
         .add("setup_done", r.setup_done)
         .add("dim", N_DIM);
     o.raw("environment", environment_json(r.environment));
-    o.raw("diagnostics", array_json(r.diagnostics, [](const CheckDiagnostic & d) {
-              return json::Object()
-                  .add("severity", std::string(report::status_name(d.severity)))
-                  .add("code", d.code)
-                  .add("message", d.message)
-                  .add("docs", d.docs())
-                  .str();
-          }));
+    o.raw("diagnostics", diagnostics_json(r));
     o.raw("unused_keys", array_json(r.unused, [](const Diagnostic & d) {
               return json::Object()
                   .add("key", d.key)
@@ -696,24 +734,7 @@ std::string check_json(const CheckReport & r) {
           }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     if (r.has_quality) {
-        json::Object q;
-        for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
-            const QualitySummary & s = r.quality[m];
-            q.raw(MeshQuality::FIELDS[m], json::Object()
-                                              .add("max", s.max)
-                                              .add("mean", s.mean)
-                                              .add("limit", MeshQuality::LIMITS[m])
-                                              .add("above_limit", s.n_over_limit)
-                                              .raw("worst", array_json(s.worst, [](const QualityCell & c) {
-                                                       return json::Object()
-                                                           .add("value", c.value)
-                                                           .add("cell", c.cell)
-                                                           .raw("x", point_json(c.x))
-                                                           .str();
-                                                   }))
-                                              .str());
-        }
-        o.raw("mesh_quality", q.str());
+        o.raw("mesh_quality", quality_json(r));
         o.raw("mesh_fields_file", r.mesh_fields_file.empty() ? "null" : json::quote(r.mesh_fields_file));
         o.raw("stencil_file", r.stencil_file.empty() ? "null" : json::quote(r.stencil_file));
     } else {
@@ -737,19 +758,7 @@ std::string check_json(const CheckReport & r) {
     } else {
         o.raw("time_step", "null");
     }
-    json::Object resolution;
-    for (const CheckEstimate & e : r.resolution) {
-        resolution.raw(e.id, json::Object()
-                                 .add("quantity", e.quantity)
-                                 .add("value", e.value)
-                                 .add("units", e.units)
-                                 .add("target", e.target)
-                                 .add("status", std::string(report::status_name(e.status)))
-                                 .add("basis", e.basis)
-                                 .raw("x", e.located ? point_json(e.x) : "null")
-                                 .str());
-    }
-    o.raw("resolution", resolution.str());
+    o.raw("resolution", resolution_json(r));
     if (r.bytes > 0) {
         o.raw("memory", json::Object()
                             .add("device_memory", r.device_memory)
@@ -811,6 +820,18 @@ std::string check_json(const CheckReport & r) {
         o.raw("cost", "null");
     }
     return o.str();
+}
+
+json::Object check_summary(const CheckReport & r) {
+    json::Object time_step;
+    time_step.add("integrator", r.integrator).add("cfl_limit", r.cfl_limit).add("set_by", r.dt_limit);
+    if (r.dt_limit == "CFL") time_step.add("cfl", r.cfl);
+    return json::Object()
+        .add("status", std::string(report::status_name(r.status())))
+        .raw("diagnostics", diagnostics_json(r))
+        .raw("mesh_quality", r.has_quality ? quality_json(r) : "null")
+        .raw("time_step", time_step.str())
+        .raw("resolution", resolution_json(r));
 }
 
 void print_check(const CheckReport & r, const bool json) {
