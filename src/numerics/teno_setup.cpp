@@ -1,7 +1,7 @@
 /**
  * @file teno_setup.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief TENO-E table setup in 3D, per cell on the device.
+ * @brief TENO-E table setup, per cell on the device.
  * @version 0.1
  * @date 2026-10-09
  *
@@ -12,7 +12,8 @@
  * code. This file is compiled without contracting multiplies and adds into
  * FMAs (src/CMakeLists.txt), and uses only correctly rounded operations
  * (+, -, *, /, sqrt) on the device, so both give bitwise identical tables.
- * The cube roots and the ranking metrics (log, exp) are computed on the host.
+ * The cube roots, the ranking metrics (log, exp) and the rules of curved cells
+ * are computed on the host.
  */
 
 #include "teno_setup.h"
@@ -623,15 +624,18 @@ KOKKOS_INLINE_FUNCTION OutLanes out_lanes(const TableBatchT<Space> & b, const si
 
 /**
  * @brief Least-squares pseudo-inverse of the m x n matrix A (row-major, full
- *        column rank) by Householder QR, as pseudo_inverse() in teno.cpp but
- *        with the reflection vectors kept below the diagonal of A and the
- *        result in place of Q: on return P(l, s) = X(s * n + l). The upper
- *        triangle of A and every entry of P take exactly the operations of the
- *        dense version, whose lower triangle is never read.
+ *        column rank) by Householder QR after scaling each column to unit
+ *        length, with the reflection vectors kept below the diagonal of A and
+ *        the result in place of Q: on return P(l, s) = X(s * n + l).
+ * @param reject_round_off Also reject a column shorter than GEOMETRY_TOL
+ *        times the longest (3D): a column of round-off, such as the xy
+ *        monomial over centroids that all lie on axis planes, would pass the
+ *        rank test once scaled.
  * @return False if A is too ill conditioned.
  */
 KOKKOS_INLINE_FUNCTION
-bool pseudo_inverse(const Lane<double> & A, const Lane<double> & X, const int m, const int n, const double max_condition) {
+bool pseudo_inverse(const Lane<double> & A, const Lane<double> & X, const int m, const int n, const double max_condition,
+                    const bool reject_round_off = true) {
     double col_scale[teno::MAX_NK], beta[teno::MAX_NK], v_diag[teno::MAX_NK], d[teno::MAX_NK];
     for (int j = 0; j < n; j++) {
         double s = 0.0;
@@ -640,12 +644,14 @@ bool pseudo_inverse(const Lane<double> & A, const Lane<double> & X, const int m,
         if (s == 0.0) return false;
         col_scale[j] = s;
     }
-    double largest = col_scale[0];
-    for (int j = 1; j < n; j++) {
-        if (largest < col_scale[j]) largest = col_scale[j];
-    }
-    for (int j = 0; j < n; j++) {
-        if (col_scale[j] < GEOMETRY_TOL * largest) return false;
+    if (reject_round_off) {
+        double largest = col_scale[0];
+        for (int j = 1; j < n; j++) {
+            if (largest < col_scale[j]) largest = col_scale[j];
+        }
+        for (int j = 0; j < n; j++) {
+            if (col_scale[j] < GEOMETRY_TOL * largest) return false;
+        }
     }
     for (int j = 0; j < n; j++) {
         for (int i = 0; i < m; i++) A[i * n + j] /= col_scale[j];
@@ -739,6 +745,116 @@ double lebesgue_constant(const Lane<double> & psi, const int n_rows, const int n
     return lambda;
 }
 
+/** @brief Insert visit (c, lattice) into w's open-addressing set of cap slots; 1 if new, 0 if present, -1 if full. */
+template <class W>
+KOKKOS_INLINE_FUNCTION int insert_visit(const W & w, const uint32_t cap, uint32_t & n_hash, const uint32_t c,
+                                        const uint32_t lattice) {
+    if (2 * (n_hash + 1) > cap) return -1;
+    const uint64_t key = uint64_t(c) | (uint64_t(lattice & 1023u) << 32) | (uint64_t((lattice >> 10) & 1023u) << 42) |
+                         (uint64_t((lattice >> 20) & 1023u) << 52);
+    const uint64_t mask = cap - 1;
+    for (uint64_t slot = ((key * 0x9E3779B97F4A7C15ULL) >> 32) & mask;; slot = (slot + 1) & mask) {
+        const uint64_t k = w.hash[slot];
+        if (k == key) return 0;
+        if (k == ~uint64_t(0)) {
+            w.hash[slot] = key;
+            n_hash++;
+            return 1;
+        }
+    }
+}
+
+/**
+ * @brief Breadth-first layers of vertex neighbors, in w's visits (at most
+ *        visit_cap) and hash set (hash_cap slots): grows the next layer; false
+ *        if none is left. ok turns false when the scratch is full; truncated
+ *        once a layer grows from a cell of the outermost halo layer, which
+ *        misses neighbors on other ranks.
+ */
+template <class G, class W>
+KOKKOS_INLINE_FUNCTION bool grow_layer(const G & g, const W & w, const uint32_t hash_cap, const uint32_t visit_cap,
+                                       uint32_t * end, int & n_end, bool & exhausted, uint32_t & n_hash, bool & truncated,
+                                       bool & ok) {
+    if (exhausted) return false;
+    if (n_end == 66) {
+        ok = false;
+        return false;
+    }
+    const uint32_t begin = n_end > 1 ? end[n_end - 2] : 0;
+    const uint32_t last = end[n_end - 1];
+    uint32_t count = last;
+    for (uint32_t k = begin; k < last; k++) {
+        const uint32_t c = w.visit_cell[k];
+        const uint32_t lattice = w.visit_lattice[k];
+        if (c >= g.n_complete) truncated = true;
+        for (uint32_t j = g.offsets_cells_of_cell(c); j < g.offsets_cells_of_cell(c + 1); j++) {
+            const uint8_t s = g.cells_of_cell_shift(j);
+            const uint32_t nb = g.cells_of_cell(j);
+            const uint32_t nb_lattice = lattice_add(lattice, g.shift_lattice(s, 0), g.shift_lattice(s, 1), g.shift_lattice(s, 2));
+            const int added = insert_visit(w, hash_cap, n_hash, nb, nb_lattice);
+            if (added < 0 || (added == 1 && count == visit_cap)) {
+                ok = false;
+                return false;
+            }
+            if (added == 1) {
+                w.visit_cell[count] = nb;
+                w.visit_lattice[count] = nb_lattice;
+                count++;
+            }
+        }
+    }
+    if (count == last) {
+        exhausted = true;
+        return false;
+    }
+    end[n_end++] = count;
+    return true;
+}
+
+/** @brief Depth of the search that adds layers (grow_layer) while at most n_min cells are gathered. */
+template <class G, class W>
+KOKKOS_INLINE_FUNCTION int reach_layers(const G & g, const W & w, const uint32_t hash_cap, const uint32_t visit_cap,
+                                        const uint32_t n_min, const int max_layers, uint32_t * end, int & n_end,
+                                        bool & exhausted, uint32_t & n_hash, bool & truncated, bool & ok) {
+    int depth = 0;
+    while (depth < max_layers && end[depth] <= n_min) {
+        if (depth + 1 == n_end && !grow_layer(g, w, hash_cap, visit_cap, end, n_end, exhausted, n_hash, truncated, ok)) break;
+        depth++;
+    }
+    return depth;
+}
+
+/** @brief Whether entry a sorts before entry b: by key, ties in position order. */
+template <class W>
+KOKKOS_INLINE_FUNCTION bool sorts_before(const W & w, const uint32_t a, const uint32_t b) {
+    const double ka = w.entry_key[a], kb = w.entry_key[b];
+    return ka < kb || (!(kb < ka) && a < b);
+}
+
+/** @brief Heap sort of the first n of w.entry_order; the order is total, so it equals any other sort's. */
+template <class W>
+KOKKOS_INLINE_FUNCTION void sort_entries(const W & w, const uint32_t n) {
+    auto sift = [&](uint32_t root, const uint32_t size) {
+        const uint32_t item = w.entry_order[root];
+        while (true) {
+            uint32_t child = 2 * root + 1;
+            if (child >= size) break;
+            if (child + 1 < size && sorts_before(w, w.entry_order[child], w.entry_order[child + 1])) child++;
+            if (!sorts_before(w, item, w.entry_order[child])) break;
+            w.entry_order[root] = w.entry_order[child];
+            root = child;
+        }
+        w.entry_order[root] = item;
+    };
+    for (uint32_t k = n / 2; k-- > 0;) sift(k, n);
+    for (uint32_t size = n; size > 1; size--) {
+        const uint32_t top = w.entry_order[0];
+        w.entry_order[0] = w.entry_order[size - 1];
+        w.entry_order[size - 1] = top;
+        sift(0, size - 1);
+    }
+}
+
 /** @brief The per-cell setup of a batch of cells, on one memory space. */
 template <class ExecSpace>
 struct CellSetup {
@@ -802,81 +918,6 @@ struct CellSetup {
     }
 
     // ---- the search ---------------------------------------------------------------------------
-
-    /** @brief Insert a visit into the open-addressing set; 1 if new, 0 if present, -1 if full. */
-    KOKKOS_INLINE_FUNCTION
-    int insert(const Lanes & w, uint32_t & n_hash, const uint32_t c, const uint32_t lattice) const {
-        if (2 * (n_hash + 1) > scratch.caps.hash) return -1;
-        const uint64_t key = uint64_t(c) | (uint64_t(lattice & 1023u) << 32) | (uint64_t((lattice >> 10) & 1023u) << 42) |
-                             (uint64_t((lattice >> 20) & 1023u) << 52);
-        const uint64_t mask = scratch.caps.hash - 1;
-        for (uint64_t slot = ((key * 0x9E3779B97F4A7C15ULL) >> 32) & mask;; slot = (slot + 1) & mask) {
-            const uint64_t k = w.hash[slot];
-            if (k == key) return 0;
-            if (k == ~uint64_t(0)) {
-                w.hash[slot] = key;
-                n_hash++;
-                return 1;
-            }
-        }
-    }
-
-    /**
-     * @brief Breadth-first layers of vertex neighbors (see Layers in teno.cpp):
-     *        grows the next layer; false if none is left. ok turns false when
-     *        the scratch is full.
-     */
-    KOKKOS_INLINE_FUNCTION
-    bool grow(const Lanes & w, uint32_t * end, int & n_end, bool & exhausted, uint32_t & n_hash, bool & truncated,
-              bool & ok) const {
-        if (exhausted) return false;
-        if (n_end == 66) {
-            ok = false;
-            return false;
-        }
-        const uint32_t begin = n_end > 1 ? end[n_end - 2] : 0;
-        const uint32_t last = end[n_end - 1];
-        uint32_t count = last;
-        for (uint32_t k = begin; k < last; k++) {
-            const uint32_t c = w.visit_cell[k];
-            const uint32_t lattice = w.visit_lattice[k];
-            if (c >= g.n_complete) truncated = true;
-            for (uint32_t j = g.offsets_cells_of_cell(c); j < g.offsets_cells_of_cell(c + 1); j++) {
-                const uint8_t s = g.cells_of_cell_shift(j);
-                const uint32_t nb = g.cells_of_cell(j);
-                const uint32_t nb_lattice =
-                    lattice_add(lattice, g.shift_lattice(s, 0), g.shift_lattice(s, 1), g.shift_lattice(s, 2));
-                const int added = insert(w, n_hash, nb, nb_lattice);
-                if (added < 0 || (added == 1 && count == scratch.caps.visits)) {
-                    ok = false;
-                    return false;
-                }
-                if (added == 1) {
-                    w.visit_cell[count] = nb;
-                    w.visit_lattice[count] = nb_lattice;
-                    count++;
-                }
-            }
-        }
-        if (count == last) {
-            exhausted = true;
-            return false;
-        }
-        end[n_end++] = count;
-        return true;
-    }
-
-    /** @brief Depth of the search that adds layers while at most n_min cells are gathered. */
-    KOKKOS_INLINE_FUNCTION
-    int reach(const Lanes & w, const uint32_t n_min, const int max_layers, uint32_t * end, int & n_end,
-              bool & exhausted, uint32_t & n_hash, bool & truncated, bool & ok) const {
-        int depth = 0;
-        while (depth < max_layers && end[depth] <= n_min) {
-            if (depth + 1 == n_end && !grow(w, end, n_end, exhausted, n_hash, truncated, ok)) break;
-            depth++;
-        }
-        return depth;
-    }
 
     /** @brief Whether p lies strictly inside the copy of visited cell v (see inside_cell in teno.cpp). */
     KOKKOS_INLINE_FUNCTION
@@ -1067,39 +1108,8 @@ struct CellSetup {
             w.entry_key[e] = distance2(x, x0, i);
             w.entry_order[e] = e;
         }
-        sort(w, n_entries);
+        sort_entries(w, n_entries);
         return int(n_entries);
-    }
-
-    /** @brief Whether entry a sorts before entry b: by key, ties in position order. */
-    KOKKOS_INLINE_FUNCTION
-    bool before(const Lanes & w, const uint32_t a, const uint32_t b) const {
-        const double ka = w.entry_key[a], kb = w.entry_key[b];
-        return ka < kb || (!(kb < ka) && a < b);
-    }
-
-    /** @brief Heap sort of the entry order; the order is total, so it equals any other sort's. */
-    KOKKOS_INLINE_FUNCTION
-    void sort(const Lanes & w, const uint32_t n) const {
-        auto sift = [&](uint32_t root, const uint32_t size) {
-            const uint32_t item = w.entry_order[root];
-            while (true) {
-                uint32_t child = 2 * root + 1;
-                if (child >= size) break;
-                if (child + 1 < size && before(w, w.entry_order[child], w.entry_order[child + 1])) child++;
-                if (!before(w, item, w.entry_order[child])) break;
-                w.entry_order[root] = w.entry_order[child];
-                root = child;
-            }
-            w.entry_order[root] = item;
-        };
-        for (uint32_t k = n / 2; k-- > 0;) sift(k, n);
-        for (uint32_t size = n; size > 1; size--) {
-            const uint32_t top = w.entry_order[0];
-            w.entry_order[0] = w.entry_order[size - 1];
-            w.entry_order[size - 1] = top;
-            sift(0, size - 1);
-        }
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -1437,12 +1447,12 @@ struct CellSetup {
         uint32_t n_hash = 0;
         w.visit_cell[0] = i;
         w.visit_lattice[0] = LATTICE_ZERO;
-        insert(w, n_hash, i, LATTICE_ZERO);
+        insert_visit(w, scratch.caps.hash, n_hash, i, LATTICE_ZERO);
         int layers_used = 0;
 
         // Large central stencil: the smallest within MAX_LEBESGUE_3D, else the
         // smallest within LEBESGUE_SLACK of the best conditioned one
-        const int depth_large = reach(w, ns_max, 64, end, n_end, exhausted, n_hash, truncated, ok);
+        const int depth_large = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, ns_max, 64, end, n_end, exhausted, n_hash, truncated, ok);
         if (!ok) return OUT_OF_SCRATCH;
         layers_used = depth_large > layers_used ? depth_large : layers_used;
         int entries_depth = 0;
@@ -1527,7 +1537,7 @@ struct CellSetup {
 
         // Small sector stencils, one per face: entries whose direction from the
         // centroid lies in the cone spanned by the face's vertices
-        const int depth_wide = reach(w, 8 * uint32_t(nss), 6, end, n_end, exhausted, n_hash, truncated, ok);
+        const int depth_wide = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, 8 * uint32_t(nss), 6, end, n_end, exhausted, n_hash, truncated, ok);
         if (!ok) return OUT_OF_SCRATCH;
         layers_used = depth_wide > layers_used ? depth_wide : layers_used;
         gather_depth = uint8_t(layers_used);
@@ -3688,22 +3698,1128 @@ class Setup3D {
         Timings timing;
 };
 
-Setup3DHandle::Setup3DHandle(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
-                             Kokkos::View<rtype **> quad_weights, const Options & options)
-    : impl(std::make_unique<Setup3D>(mesh, boundaries, quad_points, quad_weights, options)) {}
+// ---- 2D -----------------------------------------------------------------------------------------
 
-Setup3DHandle::~Setup3DHandle() = default;
+#if N_DIM == 2
 
-void Setup3DHandle::compute(const Kokkos::View<uint32_t *> & cells, const uint32_t n, TableBatch & out) {
+namespace {
+
+/** @brief The mesh and per-cell geometry the 2D setup reads, in one memory space. */
+template <class Space>
+struct Geometry2D {
+    template <typename T>
+    using V = Kokkos::View<T, Kokkos::DefaultExecutionSpace::array_layout, Space>;
+    template <typename T>
+    using R = Kokkos::View<T, Kokkos::LayoutRight, Space>;
+    V<rtype *[N_DIM]> cell_coords, face_normals, face_coords, node_coords, shifts;
+    V<rtype *> face_area;
+    V<uint32_t *> offsets_cells_of_cell, cells_of_cell, offsets_faces_of_cell, faces_of_cell, offsets_nodes_of_face,
+        nodes_of_face, offsets_nodes_of_cell, nodes_of_cell;
+    V<uint8_t *> cells_of_cell_shift, face_shift;
+    V<int32_t *[2]> cells_of_face;
+    V<rtype ***> quad_points;  // (face, q, d): curved meshes
+    R<int8_t *[3]> shift_lattice;
+    R<double *[3]> translations;  // periodic translation of each lattice direction
+    uint32_t n_translations = 0;
+    // Rotational periodicity: the rotating lattice direction (-1: none), and at
+    // row k + MAX_TURNS the rotation by k times its angle (2 x 2, row-major)
+    // and its part of the map's translation
+    int rotation_dir = -1;
+    R<double *[6]> turn_maps;
+    R<int32_t *> boundary_ordinal;  // (face): teno::entry_code
+    R<double *> cell_h;             // square root of the area
+    R<uint8_t *> mirror_face;       // (face): mirrors stencil entries
+    R<uint8_t *> wall_cell;         // (cell): has a curved wall face without mirror images (empty if none)
+    R<double *[9]> metric;          // (reconstructed cell)
+    R<double *[3]> triangle_rule;   // (q, [xi, eta, w]) on the reference triangle
+    R<uint32_t *> rule_start;       // (cell + 1): curved cells' rules in rule_points (empty if none)
+    R<double *[3]> rule_points;     // (q, [x, y, w])
+    R<double *> face_gauss;         // (q): half of each face quadrature point on [-1, 1]
+    uint32_t n_complete = 0;
+    bool curved = false;
+    bool axisymmetric = false;
+};
+
+/** @brief The rigid map x -> Q x + t of a periodic lattice offset (periodic_lattice_map). */
+struct LatticeMap2D {
+    double q[4] = {1.0, 0.0, 0.0, 1.0};
+    double t[2] = {0.0, 0.0};
+    int turns = 0;
+
+    /** @brief Image of the point (x, y): x + t exactly when the map does not turn. */
+    KOKKOS_INLINE_FUNCTION void point(const double x, const double y, double & qx, double & qy) const {
+        if (turns == 0) {
+            qx = x + t[0];
+            qy = y + t[1];
+            return;
+        }
+        qx = (q[0] * x + q[1] * y) + t[0];
+        qy = (q[2] * x + q[3] * y) + t[1];
+    }
+
+    /** @brief Preimage of the point (x, y). */
+    KOKKOS_INLINE_FUNCTION void inverse(double x, double y, double & qx, double & qy) const {
+        x -= t[0];
+        y -= t[1];
+        qx = turns == 0 ? x : q[0] * x + q[2] * y;
+        qy = turns == 0 ? y : q[1] * x + q[3] * y;
+    }
+
+    /** @brief Image of the vector (x, y). */
+    KOKKOS_INLINE_FUNCTION void vector(const double x, const double y, double & qx, double & qy) const {
+        qx = turns == 0 ? x : q[0] * x + q[1] * y;
+        qy = turns == 0 ? y : q[2] * x + q[3] * y;
+    }
+};
+
+/** @brief Sizes of each cell's scratch arrays in 2D. */
+struct Caps2D {
+    uint32_t visits = 512;
+    uint32_t hash = 1024;  // power of two, at least twice visits + 2
+    uint32_t entries = 1024;
+    uint32_t lines = 16;
+    uint32_t line_faces = 128;
+    uint32_t rows = 0;  // least-squares rows
+    uint32_t sector = 0;
+
+    Caps2D scaled(const uint32_t k) const {
+        Caps2D c = *this;
+        c.visits *= k;
+        c.hash *= k;
+        c.entries *= k;
+        c.lines *= k;
+        c.line_faces *= k;
+        return c;
+    }
+
+    /** @brief Bytes of scratch per cell. */
+    size_t bytes(const uint8_t nk) const {
+        return size_t(visits) * 8 + size_t(hash) * 8 + size_t(entries) * 36 + size_t(lines) * 36 + size_t(line_faces) * 44 +
+               size_t(rows) * (8 * 3 * size_t(nk) + 16) + size_t(nk) * nk * 8 + size_t(MAX_PSI_ROWS) * nk * 8 +
+               size_t(nk) * (nk + 1) * 4 + size_t(sector) * 4;
+    }
+};
+
+/** @brief Scratch arrays of the cells of a batch (or of the host threads) in 2D. */
+template <class Space>
+struct Scratch2D {
+    SlotArray<uint32_t, Space> visit_cell, visit_lattice, entry_visit, entry_order, line_first, lf_line, sector, tried_n;
+    SlotArray<int32_t, Space> entry_face, lf_face, lf_turns;
+    SlotArray<uint64_t, Space> hash;
+    SlotArray<double, Space> entry_x, entry_y, entry_key, lines, lf, means, A, X, psi, coef, tried_lebesgue, si;
+    Caps2D caps;
+    uint32_t slots = 0;
+
+    Scratch2D() = default;
+    Scratch2D(const Caps2D & c, const uint32_t n, const uint8_t nk, const bool interleaved)
+        : visit_cell("teno_setup_visits", c.visits, n, interleaved),
+          visit_lattice("teno_setup_visit_lattice", c.visits, n, interleaved),
+          entry_visit("teno_setup_entries", c.entries, n, interleaved),
+          entry_order("teno_setup_order", c.entries, n, interleaved),
+          line_first("teno_setup_line_first", c.lines, n, interleaved),
+          lf_line("teno_setup_line_face_line", c.line_faces, n, interleaved),
+          sector("teno_setup_sector", c.sector, n, interleaved), tried_n("teno_setup_tried", c.rows, n, interleaved),
+          entry_face("teno_setup_entry_face", c.entries, n, interleaved),
+          lf_face("teno_setup_line_faces", c.line_faces, n, interleaved),
+          lf_turns("teno_setup_line_face_turns", c.line_faces, n, interleaved),
+          hash("teno_setup_hash", c.hash, n, interleaved), entry_x("teno_setup_entry_x", c.entries, n, interleaved),
+          entry_y("teno_setup_entry_y", c.entries, n, interleaved),
+          entry_key("teno_setup_keys", c.entries, n, interleaved),
+          lines("teno_setup_lines", size_t(c.lines) * 4, n, interleaved),
+          lf("teno_setup_line_face_geometry", size_t(c.line_faces) * 4, n, interleaved),
+          means("teno_setup_means", size_t(c.rows) * nk, n, interleaved),
+          A("teno_setup_A", size_t(c.rows) * nk, n, interleaved),
+          X("teno_setup_X", size_t(std::max<uint32_t>(c.rows, nk)) * nk, n, interleaved),
+          psi("teno_setup_psi", size_t(MAX_PSI_ROWS) * nk, n, interleaved),
+          coef("teno_setup_coef", c.rows, n, interleaved),
+          tried_lebesgue("teno_setup_tried_lebesgue", c.rows, n, interleaved),
+          si("teno_setup_si", size_t(nk) * (nk + 1) / 2, n, interleaved), caps(c), slots(n) {}
+};
+
+/** @brief One thread's view of its 2D scratch. */
+struct Lanes2D {
+    Lane<uint32_t> visit_cell, visit_lattice, entry_visit, entry_order, line_first, lf_line, sector, tried_n;
+    Lane<int32_t> entry_face, lf_face, lf_turns;
+    Lane<uint64_t> hash;
+    Lane<double> entry_x, entry_y, entry_key, lines, lf, means, A, X, psi, coef, tried_lebesgue, si;
+};
+
+template <class Space>
+KOKKOS_INLINE_FUNCTION Lanes2D lanes_of(const Scratch2D<Space> & s, const size_t slot) {
+    return Lanes2D{s.visit_cell.lane(slot), s.visit_lattice.lane(slot), s.entry_visit.lane(slot),
+                   s.entry_order.lane(slot), s.line_first.lane(slot),   s.lf_line.lane(slot),
+                   s.sector.lane(slot),      s.tried_n.lane(slot),      s.entry_face.lane(slot),
+                   s.lf_face.lane(slot),     s.lf_turns.lane(slot),     s.hash.lane(slot),
+                   s.entry_x.lane(slot),     s.entry_y.lane(slot),      s.entry_key.lane(slot),
+                   s.lines.lane(slot),       s.lf.lane(slot),           s.means.lane(slot),
+                   s.A.lane(slot),           s.X.lane(slot),            s.psi.lane(slot),
+                   s.coef.lane(slot),        s.tried_lebesgue.lane(slot), s.si.lane(slot)};
+}
+
+/**
+ * @brief The per-cell 2D setup of a batch of cells, one thread per cell.
+ *        Stencil entries are interior cells, or mirror images of interior
+ *        cells across a straight boundary line carrying the boundary
+ *        condition's ghost state; across periodic boundaries, cells are taken
+ *        at their copy's map.
+ */
+template <class ExecSpace>
+struct CellSetup2D {
+    using Space = typename ExecSpace::memory_space;
+    static constexpr bool ON_HOST = Kokkos::SpaceAccessibility<ExecSpace, Kokkos::HostSpace>::accessible;
+
+    Geometry2D<Space> g;
+    Scratch2D<Space> scratch;
+    TableBatchT<Space> out;
+    Kokkos::View<uint32_t *, Space> cells;
+    // Host threads take scratch by token; device threads use their batch slot
+    std::conditional_t<ON_HOST, Kokkos::Experimental::UniqueToken<ExecSpace, Kokkos::Experimental::UniqueTokenScope::Global>,
+                       int>
+        token;
+    uint8_t r = 0, nk = 0;
+    uint16_t ns = 0, nss = 0, ns_max = 0, nss_max = 0;
+    double max_condition = 1e8;
+    // Central fits of cells whose stencils reach a curved wall without mirror
+    // images: the lower degree (r itself: none) and its stencil size
+    uint8_t wall_r = 0;
+    uint16_t wall_ns = 0;
+    rtype stencil_factor = 2.0;
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const uint32_t t) const {
+        if constexpr (ON_HOST) {
+            const int id = token.acquire();
+            run(t, lanes_of(scratch, static_cast<size_t>(id)));
+            token.release(id);
+        } else {
+            run(t, lanes_of(scratch, t));
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void run(const uint32_t t, const Lanes2D & w) const {
+        uint8_t depth = 0, failed = 0, invalid = 0;
+        uint16_t n_large = 0, n_small = 0;
+        uint16_t small_size[teno::MAX_FACES] = {};
+        const uint8_t status = cell(cells(t), t, w, depth, failed, invalid, n_large, small_size, n_small);
+        out.status(t) = status;
+        out.gather_depth(t) = depth;
+        out.failed_large(t) = failed;
+        out.invalid_small(t) = invalid;
+        out.large_size(t) = n_large;
+        out.small_total(t) = n_small;
+        for (int k = 0; k < teno::MAX_FACES; k++) out.small_size(t, k) = small_size[k];
+    }
+
+    // ---- maps -----------------------------------------------------------------------------------
+
+    KOKKOS_INLINE_FUNCTION
+    LatticeMap2D lattice_map(const uint32_t lattice) const {
+        LatticeMap2D m;
+        for (int a = 0; a < 2; a++) {
+            for (uint32_t j = 0; j < g.n_translations; j++) m.t[a] += lattice_component(lattice, int(j)) * g.translations(j, a);
+        }
+        if (g.rotation_dir < 0) return m;
+        m.turns = lattice_component(lattice, g.rotation_dir);
+        if (m.turns == 0) return m;
+        const int k = m.turns + MAX_TURNS;
+        for (int a = 0; a < 4; a++) m.q[a] = g.turn_maps(k, a);
+        for (int a = 0; a < 2; a++) m.t[a] += g.turn_maps(k, 4 + a);
+        return m;
+    }
+
+    /** @brief The map from cell i's frame to that of face f (its cell 0's). */
+    KOKKOS_INLINE_FUNCTION
+    LatticeMap2D face_map(const uint32_t f, const uint32_t i) const {
+        if (g.cells_of_face(f, 1) != int32_t(i)) return LatticeMap2D();
+        const uint8_t s = g.face_shift(f);
+        LatticeMap2D m = lattice_map(lattice_add(LATTICE_ZERO, g.shift_lattice(s, 0), g.shift_lattice(s, 1), g.shift_lattice(s, 2)));
+        if (m.turns == 0) {
+            for (int d = 0; d < N_DIM; d++) m.t[d] = double(g.shifts(s, d));
+        }
+        return m;
+    }
+
+    // ---- the search -----------------------------------------------------------------------------
+
+    /** @brief Whether (px, py) lies strictly inside the copy of visited cell v; on an edge is outside. */
+    KOKKOS_INLINE_FUNCTION
+    bool point_in_cell(const Lanes2D & w, const uint32_t v, double px, double py, const double h) const {
+        const uint32_t c = w.visit_cell[v];
+        const uint32_t k0 = g.offsets_nodes_of_cell(c);
+        const uint32_t n = g.offsets_nodes_of_cell(c + 1) - k0;
+        lattice_map(w.visit_lattice[v]).inverse(px, py, px, py);
+        const double tol = precision_tol<double>(1e-12, 1e-5) * h * h;
+        int sign = 0;
+        for (uint32_t k = 0; k < n; k++) {
+            const uint32_t a = g.nodes_of_cell(k0 + k), b = g.nodes_of_cell(k0 + (k + 1) % n);
+            const double ax = double(g.node_coords(a, 0)), ay = double(g.node_coords(a, 1));
+            const double cross = (double(g.node_coords(b, 0)) - ax) * (py - ay) - (double(g.node_coords(b, 1)) - ay) * (px - ax);
+            const int s = (cross > tol) - (cross < -tol);
+            if (s == 0) return false;
+            if (sign == 0) sign = s;
+            if (s != sign) return false;
+        }
+        return true;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    double distance2(const uint32_t i, const double dx, const double dy) const {
+        return g.metric(i, 0) * dx * dx + (g.metric(i, 1) + g.metric(i, 3)) * dx * dy + g.metric(i, 4) * dy * dy;
+    }
+
+    /** @brief Add line face f, seen from visit v with map m, to the lines; false when the scratch is full. */
+    KOKKOS_INLINE_FUNCTION
+    bool add_line_face(const Lanes2D & w, const uint32_t c, const uint32_t f, const LatticeMap2D & m, const double h,
+                       uint32_t & n_lines, uint32_t & n_lf) const {
+        const Caps2D & caps = scratch.caps;
+        double fx = double(g.face_normals(f, 0)) / double(g.face_area(f));
+        double fy = double(g.face_normals(f, 1)) / double(g.face_area(f));
+        if ((double(g.cell_coords(c, 0)) - double(g.face_coords(f, 0))) * fx +
+                (double(g.cell_coords(c, 1)) - double(g.face_coords(f, 1))) * fy <
+            0.0) {
+            fx = -fx;
+            fy = -fy;
+        }
+        double nx, ny, x, y;
+        m.vector(fx, fy, nx, ny);
+        m.point(double(g.face_coords(f, 0)), double(g.face_coords(f, 1)), x, y);
+        int match = -1;
+        for (uint32_t p = 0; p < n_lines; p++) {
+            const uint32_t first = w.line_first[p];
+            const double lnx = w.lines[4 * p], lny = w.lines[4 * p + 1];
+            const double off = (x - w.lf[4 * first]) * lnx + (y - w.lf[4 * first + 1]) * lny;
+            if (Kokkos::fabs(nx * lnx + ny * lny - 1.0) < GEOMETRY_TOL && Kokkos::fabs(off) < GEOMETRY_TOL * h) {
+                match = int(p);
+                break;
+            }
+        }
+        if (match < 0) {
+            if (n_lines == caps.lines) return false;
+            w.lines[4 * n_lines] = nx;
+            w.lines[4 * n_lines + 1] = ny;
+            w.lines[4 * n_lines + 2] = Kokkos::Experimental::finite_max_v<double>;
+            w.lines[4 * n_lines + 3] = Kokkos::Experimental::finite_min_v<double>;
+            w.line_first[n_lines] = n_lf;
+            match = int(n_lines++);
+        } else {
+            for (uint32_t k = 0; k < n_lf; k++) {
+                if (w.lf_line[k] == uint32_t(match) && w.lf_face[k] == int32_t(f) && w.lf[4 * k] == x &&
+                    w.lf[4 * k + 1] == y && w.lf_turns[k] == m.turns) {
+                    return true;
+                }
+            }
+        }
+        if (n_lf == caps.line_faces) return false;
+        w.lf_line[n_lf] = uint32_t(match);
+        w.lf_face[n_lf] = int32_t(f);
+        w.lf_turns[n_lf] = m.turns;
+        w.lf[4 * n_lf] = x;
+        w.lf[4 * n_lf + 1] = y;
+        w.lf[4 * n_lf + 2] = nx;
+        w.lf[4 * n_lf + 3] = ny;
+        n_lf++;
+        const uint32_t p = uint32_t(match);
+        const uint32_t first = w.line_first[p];
+        for (uint32_t a = 0; a < 2; a++) {
+            const uint32_t node = g.nodes_of_face(g.offsets_nodes_of_face(f) + a);
+            double qx, qy;
+            m.point(double(g.node_coords(node, 0)), double(g.node_coords(node, 1)), qx, qy);
+            const double s = -(qx - w.lf[4 * first]) * w.lines[4 * p + 1] + (qy - w.lf[4 * first + 1]) * w.lines[4 * p];
+            if (s < w.lines[4 * p + 2]) w.lines[4 * p + 2] = s;
+            if (w.lines[4 * p + 3] < s) w.lines[4 * p + 3] = s;
+        }
+        return true;
+    }
+
+    /**
+     * @brief Stencil candidates of the first n_visits visits, sorted by
+     *        distance: the cells, and their mirror images across the straight
+     *        boundary lines the cells touch. A reflection stands for the flow
+     *        beyond the boundary only where it crosses the line's faces, from
+     *        the side of the domain that the target cell is on: across the
+     *        extension of a facet of a curved wall, or across the far side of
+     *        a thin body, it lands on another part of the flow. Images that
+     *        land inside the domain (non-convex boundaries) are not ghosts.
+     *        Returns their number, or -1 when the scratch is full.
+     */
+    KOKKOS_INLINE_FUNCTION
+    int gather(const Lanes2D & w, const uint32_t i, const uint32_t n_visits, const double x0, const double y0,
+               const double h) const {
+        uint32_t n_lines = 0, n_lf = 0;
+        for (uint32_t v = 0; v < n_visits; v++) {
+            const uint32_t c = w.visit_cell[v];
+            const LatticeMap2D m = lattice_map(w.visit_lattice[v]);
+            for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
+                const uint32_t f = g.faces_of_cell(k);
+                if (!g.mirror_face(f)) continue;
+                if (!add_line_face(w, c, f, m, h, n_lines, n_lf)) return -1;
+            }
+        }
+        const double tol = GEOMETRY_TOL * h;
+        uint32_t n_entries = 0;
+        for (uint32_t v = 0; v < n_visits; v++) {
+            const uint32_t c = w.visit_cell[v];
+            double cx, cy;
+            lattice_map(w.visit_lattice[v]).point(double(g.cell_coords(c, 0)), double(g.cell_coords(c, 1)), cx, cy);
+            if (!(c == i && w.visit_lattice[v] == LATTICE_ZERO)) {
+                if (n_entries == scratch.caps.entries) return -1;
+                w.entry_visit[n_entries] = v;
+                w.entry_face[n_entries] = -1;
+                w.entry_x[n_entries] = cx;
+                w.entry_y[n_entries] = cy;
+                n_entries++;
+            }
+            for (uint32_t p = 0; p < n_lines; p++) {
+                const uint32_t first = w.line_first[p];
+                const double fx = w.lf[4 * first], fy = w.lf[4 * first + 1];
+                const double lnx = w.lines[4 * p], lny = w.lines[4 * p + 1];
+                const double s = -(cx - fx) * lny + (cy - fy) * lnx;
+                if ((cx - fx) * lnx + (cy - fy) * lny <= 0.0 || (x0 - fx) * lnx + (y0 - fy) * lny <= 0.0 ||
+                    s < w.lines[4 * p + 2] - tol || s > w.lines[4 * p + 3] + tol) {
+                    continue;
+                }
+                const double d = (cx - fx) * lnx + (cy - fy) * lny;
+                const double ex = cx - 2.0 * d * lnx;
+                const double ey = cy - 2.0 * d * lny;
+                bool inside = false;
+                for (uint32_t o = 0; o < n_visits && !inside; o++) inside = point_in_cell(w, o, ex, ey, h);
+                if (inside) continue;
+                // The ghost state comes from the line's face nearest to the image
+                double best = Kokkos::Experimental::finite_max_v<double>;
+                int32_t nearest = -1;
+                for (uint32_t k = 0; k < n_lf; k++) {
+                    if (w.lf_line[k] != p) continue;
+                    const double dx = w.lf[4 * k] - 0.5 * (ex + cx);
+                    const double dy = w.lf[4 * k + 1] - 0.5 * (ey + cy);
+                    if (dx * dx + dy * dy < best) {
+                        best = dx * dx + dy * dy;
+                        nearest = int32_t(k);
+                    }
+                }
+                if (n_entries == scratch.caps.entries) return -1;
+                w.entry_visit[n_entries] = v;
+                w.entry_face[n_entries] = nearest;
+                w.entry_x[n_entries] = ex;
+                w.entry_y[n_entries] = ey;
+                n_entries++;
+            }
+        }
+        for (uint32_t e = 0; e < n_entries; e++) {
+            w.entry_key[e] = distance2(i, w.entry_x[e] - x0, w.entry_y[e] - y0);
+            w.entry_order[e] = e;
+        }
+        sort_entries(w, n_entries);
+        return int(n_entries);
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    double key(const Lanes2D & w, const uint32_t j) const { return w.entry_key[w.entry_order[j]]; }
+
+    /** @brief Face field (teno::entry_code) of entry e. */
+    KOKKOS_INLINE_FUNCTION
+    int32_t code(const Lanes2D & w, const uint32_t e) const {
+        const int turns = g.rotation_dir < 0 ? 0 : lattice_component(w.visit_lattice[w.entry_visit[e]], g.rotation_dir);
+        const int32_t k = w.entry_face[e];
+        if (k < 0) return teno::entry_code(-1, -1, turns, 0);
+        const int32_t f = w.lf_face[k];
+        return teno::entry_code(f, g.boundary_ordinal(f), w.lf_turns[k], turns - w.lf_turns[k]);
+    }
+
+    // ---- integrals ------------------------------------------------------------------------------
+
+    /**
+     * @brief Integrate f(x, y, w) over cell c in the frame of a cell at (x0,
+     *        y0) of size h, with weights of the scaled frame (curved cells: of
+     *        the physical one, whose sum is the area), each point taken by
+     *        image(x, y, qx, qy) first: by its rule if curved, else by fan
+     *        triangulation from its first vertex.
+     */
+    template <class Image, class F>
+    KOKKOS_INLINE_FUNCTION void integrate(const uint32_t c, const double x0, const double y0, const double h, Image && image,
+                                          F && f) const {
+        if (g.curved && g.rule_start(c + 1) > g.rule_start(c)) {
+            for (uint32_t q = g.rule_start(c); q < g.rule_start(c + 1); q++) {
+                double qx, qy;
+                image(g.rule_points(q, 0), g.rule_points(q, 1), qx, qy);
+                f((qx - x0) / h, (qy - y0) / h, g.rule_points(q, 2));
+            }
+            return;
+        }
+        const uint32_t k0 = g.offsets_nodes_of_cell(c);
+        const uint32_t n = g.offsets_nodes_of_cell(c + 1) - k0;
+        double px[teno::MAX_FACES], py[teno::MAX_FACES];
+        for (uint32_t k = 0; k < n; k++) {
+            const uint32_t node = g.nodes_of_cell(k0 + k);
+            double qx, qy;
+            image(double(g.node_coords(node, 0)), double(g.node_coords(node, 1)), qx, qy);
+            px[k] = (qx - x0) / h;
+            py[k] = (qy - y0) / h;
+        }
+        for (uint32_t k = 1; k + 1 < n; k++) {
+            const double ax = px[k] - px[0], ay = py[k] - py[0];
+            const double bx = px[k + 1] - px[0], by = py[k + 1] - py[0];
+            const double det = Kokkos::fabs(ax * by - ay * bx);
+            for (uint32_t q = 0; q < g.triangle_rule.extent(0); q++) {
+                const double x = px[0] + g.triangle_rule(q, 0) * ax + g.triangle_rule(q, 1) * bx;
+                const double y = py[0] + g.triangle_rule(q, 0) * ay + g.triangle_rule(q, 1) * by;
+                f(x, y, g.triangle_rule(q, 2) * det);
+            }
+        }
+    }
+
+    /**
+     * @brief Means of the monomials of degree <= deg over the copy of cell c
+     *        at a lattice offset, mirrored across line face k (-1: none), in
+     *        the frame of the target cell at (x0, y0) of size h.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void monomial_means(const Lanes2D & w, const uint32_t c, const uint32_t lattice, const int32_t k, const double x0,
+                        const double y0, const double h, const uint8_t deg, double * means) const {
+        const LatticeMap2D m = lattice_map(lattice);
+        double mirror[4] = {0.0, 0.0, 0.0, 0.0};
+        if (k >= 0) {
+            for (int a = 0; a < 4; a++) mirror[a] = w.lf[4 * k + a];
+        }
+        auto image = [&](const double px, const double py, double & qx, double & qy) {
+            double mx, my;
+            m.point(px, py, mx, my);
+            if (k < 0) {
+                qx = mx;
+                qy = my;
+                return;
+            }
+            const double d = (mx - mirror[0]) * mirror[2] + (my - mirror[1]) * mirror[3];
+            qx = mx - 2.0 * d * mirror[2];
+            qy = my - 2.0 * d * mirror[3];
+        };
+        const uint8_t n = teno::n_dof(deg);
+        for (uint8_t l = 0; l < n; l++) means[l] = 0.0;
+        double area = 0.0;
+        const bool curved_cell = g.curved && g.rule_start(c + 1) > g.rule_start(c);
+        integrate(c, x0, y0, h, image, [&](const double x, const double y, double wq) {
+            double phi[teno::MAX_NK];
+            teno::monomials(deg, x, y, phi);
+            // Axisymmetric cell averages weight by the radius; |r| makes the
+            // mirror image of a cell across the axis carry its mirrored average
+            if (g.axisymmetric && !curved_cell) wq *= Kokkos::fabs(y0 + h * y);
+            for (uint8_t l = 0; l < n; l++) means[l] += wq * phi[l];
+            area += wq;
+        });
+        for (uint8_t l = 0; l < n; l++) means[l] /= area;
+    }
+
+    /** @brief Means of the monomials of degree <= deg over the j-th sorted entry. */
+    KOKKOS_INLINE_FUNCTION
+    void entry_means(const Lanes2D & w, const uint32_t j, const double x0, const double y0, const double h,
+                     const uint8_t deg, double * means) const {
+        const uint32_t e = w.entry_order[j];
+        const uint32_t v = w.entry_visit[e];
+        monomial_means(w, w.visit_cell[v], w.visit_lattice[v], w.entry_face[e], x0, y0, h, deg, means);
+    }
+
+    /**
+     * @brief Upper triangle of the smoothness-indicator matrix of cell i,
+     *        M_lm = sum_{1<=|b|<=r} |b|!/b! int D^b phi_l D^b phi_m, into w.si.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void smoothness_matrix(const Lanes2D & w, const uint32_t i, const double x0, const double y0, const double h) const {
+        const int n_si = int(nk) * (int(nk) + 1) / 2;
+        for (int k = 0; k < n_si; k++) w.si[k] = 0.0;
+        auto falling = [](const int a, const int p) {
+            double c = 1.0;
+            for (int t = 0; t < p; t++) c *= (a - t);
+            return c;
+        };
+        const bool curved_cell = g.curved && g.rule_start(i + 1) > g.rule_start(i);
+        auto identity = [](const double px, const double py, double & qx, double & qy) {
+            qx = px;
+            qy = py;
+        };
+        integrate(i, x0, y0, h, identity, [&](const double x, const double y, const double wq) {
+            const double weight = curved_cell ? wq / (h * h) : wq;
+            double d[teno::MAX_NK];
+            for (int bp = 0; bp <= r; bp++) {
+                for (int bq = 0; bp + bq <= r; bq++) {
+                    if (bp + bq == 0) continue;
+                    for (uint8_t l = 0; l < nk; l++) {
+                        uint8_t a, b;
+                        teno::exponents(l, a, b);
+                        d[l] = (a >= bp && b >= bq) ? falling(a, bp) * falling(b, bq) * teno::ipow(x, uint8_t(a - bp)) *
+                                                          teno::ipow(y, uint8_t(b - bq))
+                                                    : 0.0;
+                    }
+                    // The binomial weight makes each degree's sum the squared norm of the derivative tensor
+                    const double wb = weight * (falling(bp + bq, bp) / falling(bp, bp));
+                    int k = 0;
+                    for (uint8_t l = 0; l < nk; l++) {
+                        for (uint8_t m = l; m < nk; m++) w.si[k++] += wb * d[l] * d[m];
+                    }
+                }
+            }
+        });
+    }
+
+    // ---- one cell -------------------------------------------------------------------------------
+
+    KOKKOS_INLINE_FUNCTION
+    uint8_t cell(const uint32_t i, const uint32_t slot, const Lanes2D & w, uint8_t & gather_depth, uint8_t & failed,
+                 uint8_t & invalid, uint16_t & n_large, uint16_t * small_size, uint16_t & n_small) const {
+        const double x0 = double(g.cell_coords(i, 0)), y0 = double(g.cell_coords(i, 1));
+        const double h = g.cell_h(i);
+        const auto scale = out.scale.lane(slot);
+        const auto basis_mean = out.basis_mean.lane(slot);
+        scale[0] = rtype(h);
+
+        double mean0[teno::MAX_NK];
+        monomial_means(w, i, LATTICE_ZERO, -1, x0, y0, h, r, mean0);
+        for (int l = 0; l < nk; l++) basis_mean[l] = rtype(mean0[l]);
+
+        // Zero-mean basis at the cell's face quadrature points
+        int n_psi = 0;
+        for (uint32_t k = g.offsets_faces_of_cell(i); k < g.offsets_faces_of_cell(i + 1); k++) {
+            const uint32_t f = g.faces_of_cell(k);
+            const uint32_t na = g.nodes_of_face(g.offsets_nodes_of_face(f));
+            const uint32_t nb = g.nodes_of_face(g.offsets_nodes_of_face(f) + 1);
+            const LatticeMap2D m = face_map(f, i);
+            for (uint32_t q = 0; q < g.face_gauss.extent(0); q++) {
+                const double s_q = g.face_gauss(q);
+                double x[2], phi[teno::MAX_NK];
+                for (int d = 0; d < 2; d++) {
+                    x[d] = g.curved ? double(g.quad_points(f, q, d))
+                                    : double(g.face_coords(f, d)) +
+                                          s_q * (double(g.node_coords(nb, d)) - double(g.node_coords(na, d)));
+                }
+                m.inverse(x[0], x[1], x[0], x[1]);
+                teno::monomials(r, (x[0] - x0) / h, (x[1] - y0) / h, phi);
+                for (int l = 0; l < nk; l++) w.psi[n_psi * nk + l] = phi[l] - mean0[l];
+                n_psi++;
+            }
+        }
+
+        // The search: vertex-neighbor layers around the cell
+        for (uint32_t k = 0; k < scratch.caps.hash; k++) w.hash[k] = ~uint64_t(0);
+        uint32_t end[66];
+        int n_end = 1;
+        end[0] = 1;
+        bool exhausted = false, truncated = false, ok = true;
+        uint32_t n_hash = 0;
+        w.visit_cell[0] = i;
+        w.visit_lattice[0] = LATTICE_ZERO;
+        insert_visit(w, scratch.caps.hash, n_hash, i, LATTICE_ZERO);
+        int layers_used = 0;
+
+        // Large central stencil, grown until the least-squares system has full
+        // rank and is well conditioned: the smallest within MAX_LEBESGUE_2D,
+        // else the one of the smallest Lebesgue constant
+        const int depth_large = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, ns_max, 64, end, n_end, exhausted, n_hash, truncated, ok);
+        if (!ok) return OUT_OF_SCRATCH;
+        layers_used = depth_large > layers_used ? depth_large : layers_used;
+        int entries_depth = 0;
+        int n_entries = 0;
+        if (depth_large != entries_depth) {
+            entries_depth = depth_large;
+            n_entries = gather(w, i, end[depth_large], x0, y0, h);
+            if (n_entries < 0) return OUT_OF_SCRATCH;
+        }
+        // Never split a group of equidistant candidates: keeps stencils
+        // independent of cell numbering, so mirror-symmetric meshes give
+        // mirror-symmetric reconstructions
+        const double tie = GEOMETRY_TOL * h * h;
+        auto splits_tie = [&](const uint32_t n_list, const uint32_t n) {
+            return n < n_list && Kokkos::fabs(key(w, n) - key(w, n - 1)) < tie;
+        };
+        FlatAxes spanned;
+        for (int e = 0; e < n_entries; e++) {
+            if (w.entry_face[e] >= 0) continue;
+            const double offset[3] = {(w.entry_x[e] - x0) / h, (w.entry_y[e] - y0) / h, 0.0};
+            spanned.add(offset);
+        }
+        const uint8_t flat = spanned.axes();
+        // Stencils reaching a curved wall without mirror images (one-sided there)
+        // fit at most the lower degree, from that degree's stencil size
+        uint8_t r_fit = r;
+        uint16_t n_start = ns;
+        if (g.wall_cell.extent(0) > 0 && wall_r < r) {
+            bool near = g.wall_cell(i) != 0;
+            for (uint32_t k = 0; k < uint32_t(n_entries) && k < ns && !near; k++) {
+                near = g.wall_cell(w.visit_cell[w.entry_visit[w.entry_order[k]]]) != 0;
+            }
+            if (near) {
+                r_fit = wall_r;
+                n_start = wall_ns;
+            }
+        }
+        const FitColumns fit = fit_columns(flat, teno::n_dof(r_fit));
+        const int nf = fit.n;
+        // Sized for the monomials of the spanned axes
+        if (flat != 0) n_start = static_cast<uint16_t>(Kokkos::ceil(stencil_factor * rtype(nf)));
+        uint32_t n_means = 0;
+        auto build = [&](const int m) {
+            for (; n_means < uint32_t(m); n_means++) {
+                double means[teno::MAX_NK];
+                entry_means(w, n_means, x0, y0, h, r, means);
+                for (uint32_t l = 0; l < nk; l++) w.means[n_means * nk + l] = means[l];
+            }
+            for (int s = 0; s < m; s++) {
+                for (int j = 0; j < nf; j++) w.A[s * nf + j] = w.means[s * nk + fit.col[j]] - mean0[fit.col[j]];
+            }
+            const bool ok_fit = pseudo_inverse(w.A, w.X, m, nf, max_condition, false);
+            // Coefficients above the fit's degree are zero
+            if (ok_fit) widen(w.X, m, fit, nk);
+            return ok_fit;
+        };
+        uint16_t n_used = n_start;
+        uint32_t n_built = 0;
+        bool found = false;
+        double best = Kokkos::Experimental::finite_max_v<double>;
+        const uint32_t try_max = uint32_t(n_entries) < ns_max ? uint32_t(n_entries) : ns_max;
+        for (uint32_t n_try = n_start; n_try <= try_max; n_try++) {
+            if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
+            if (!build(static_cast<int>(n_try))) continue;
+            n_built = n_try;
+            const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef);
+            if (lebesgue < best) {
+                best = lebesgue;
+                n_used = static_cast<uint16_t>(n_try);
+                found = true;
+            }
+            if (lebesgue <= MAX_LEBESGUE_2D) break;
+        }
+        if (found && n_built != n_used) build(n_used);
+        if (!found) {
+            // A stencil cut off by the halo is retried once the halo is deep enough
+            if (!truncated) failed = 1;
+        } else {
+            n_large = n_used;
+            const auto cells_out = out.large_cells.lane(slot);
+            const auto faces_out = out.large_faces.lane(slot);
+            const auto pinv_out = out.large_pinv.lane(slot);
+            for (uint32_t s = 0; s < n_used; s++) {
+                const uint32_t e = w.entry_order[s];
+                cells_out[s] = int32_t(w.visit_cell[w.entry_visit[e]]);
+                faces_out[s] = code(w, e);
+                for (uint32_t l = 0; l < nk; l++) pinv_out[s * nk + l] = rtype(w.X[s * nk + l]);
+            }
+        }
+
+        // Small sector stencils, one per face: entries whose offset from the
+        // centroid lies in the cone spanned by the face's vertices
+        const int depth_wide = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, 8 * uint32_t(nss), 6, end, n_end, exhausted, n_hash, truncated, ok);
+        if (!ok) return OUT_OF_SCRATCH;
+        layers_used = depth_wide > layers_used ? depth_wide : layers_used;
+        gather_depth = uint8_t(layers_used);
+        if (depth_wide != entries_depth) {
+            entries_depth = depth_wide;
+            n_entries = gather(w, i, end[depth_wide], x0, y0, h);
+            if (n_entries < 0) return OUT_OF_SCRATCH;
+        }
+        const FitColumns fit_small = fit_columns(flat, teno::NK_SMALL);
+        const auto small_cells = out.small_cells.lane(slot);
+        const auto small_faces = out.small_faces.lane(slot);
+        const auto small_pinv = out.small_pinv.lane(slot);
+        uint32_t k_face = 0;
+        for (uint32_t kf = g.offsets_faces_of_cell(i); kf < g.offsets_faces_of_cell(i + 1); kf++, k_face++) {
+            const uint32_t f = g.faces_of_cell(kf);
+            const uint32_t na = g.nodes_of_face(g.offsets_nodes_of_face(f));
+            const uint32_t nb = g.nodes_of_face(g.offsets_nodes_of_face(f) + 1);
+            // The face's nodes are its cell 0's
+            const LatticeMap2D m = face_map(f, i);
+            double ax, ay, bx, by;
+            m.inverse(double(g.node_coords(na, 0)), double(g.node_coords(na, 1)), ax, ay);
+            m.inverse(double(g.node_coords(nb, 0)), double(g.node_coords(nb, 1)), bx, by);
+            ax -= x0;
+            ay -= y0;
+            bx -= x0;
+            by -= y0;
+            const double det = ax * by - ay * bx;
+            uint32_t count = 0;
+            for (int j = 0; j < n_entries; j++) {
+                // Entries past nss_max + 1 cannot change the stencil or the tie tests
+                if (count > nss_max) break;
+                const uint32_t e = w.entry_order[j];
+                const double dx = w.entry_x[e] - x0;
+                const double dy = w.entry_y[e] - y0;
+                const double alpha = (dx * by - dy * bx) / det;
+                const double beta = (ax * dy - ay * dx) / det;
+                if (alpha >= -GEOMETRY_TOL && beta >= -GEOMETRY_TOL) w.sector[count++] = static_cast<uint32_t>(j);
+            }
+            auto splits = [&](const uint32_t n) {
+                return n < count && Kokkos::fabs(key(w, w.sector[n]) - key(w, w.sector[n - 1])) < tie;
+            };
+            uint32_t n_sector = nss;
+            while (n_sector < nss_max && splits(n_sector)) n_sector++;
+            if (count < nss || splits(n_sector)) {
+                invalid++;
+                continue;
+            }
+            for (uint32_t s = 0; s < n_sector; s++) {
+                double means[teno::MAX_NK];
+                entry_means(w, w.sector[s], x0, y0, h, 2, means);
+                for (int j = 0; j < fit_small.n; j++) {
+                    w.A[int(s) * fit_small.n + j] = means[fit_small.col[j]] - mean0[fit_small.col[j]];
+                }
+            }
+            if (!pseudo_inverse(w.A, w.X, static_cast<int>(n_sector), fit_small.n, max_condition, false)) {
+                invalid++;
+                continue;
+            }
+            widen(w.X, static_cast<int>(n_sector), fit_small, teno::NK_SMALL);
+            small_size[k_face] = static_cast<uint16_t>(n_sector);
+            for (uint32_t s = 0; s < n_sector; s++) {
+                const uint32_t e = w.entry_order[w.sector[s]];
+                small_cells[n_small + s] = int32_t(w.visit_cell[w.entry_visit[e]]);
+                small_faces[n_small + s] = code(w, e);
+                for (uint32_t l = 0; l < teno::NK_SMALL; l++) {
+                    small_pinv[(n_small + s) * teno::NK_SMALL + l] = rtype(w.X[s * teno::NK_SMALL + l]);
+                }
+            }
+            n_small = static_cast<uint16_t>(n_small + n_sector);
+        }
+
+        smoothness_matrix(w, i, x0, y0, h);
+        const auto si = out.si.lane(slot);
+        for (int k = 0; k < int(nk) * (int(nk) + 1) / 2; k++) si[k] = rtype(w.si[k]);
+        return OK;
+    }
+};
+
+}  // namespace
+
+/** @brief The 2D setup of one mesh. */
+class Setup2D {
+    public:
+        Setup2D(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
+                Kokkos::View<rtype **>, const Options & opt)
+            : options(opt) {
+            Kokkos::Timer timer;
+            r = opt.degree;
+            nk = opt.nk;
+            ns = opt.ns;
+            wall_r = opt.curved_wall_degree < opt.degree ? opt.curved_wall_degree : opt.degree;
+            wall_ns = opt.wall_ns;
+            nss = opt.nss;
+            ns_max = static_cast<uint16_t>(std::ceil(3.5 * nk));
+            nss_max = 2 * nss;
+            const uint32_t n_cells = mesh.n_cells;
+            using HostRange = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
+
+            Geometry2D<HostMem> & h = host;
+            h.cell_coords = mesh.h_cell_coords;
+            h.face_normals = mesh.h_face_normals;
+            h.face_coords = mesh.h_face_coords;
+            h.node_coords = mesh.h_node_coords;
+            h.shifts = mesh.h_shifts;
+            h.face_area = mesh.h_face_area;
+            h.offsets_cells_of_cell = mesh.h_offsets_cells_of_cell;
+            h.cells_of_cell = mesh.h_cells_of_cell;
+            h.offsets_faces_of_cell = mesh.h_offsets_faces_of_cell;
+            h.faces_of_cell = mesh.h_faces_of_cell;
+            h.offsets_nodes_of_face = mesh.h_offsets_nodes_of_face;
+            h.nodes_of_face = mesh.h_nodes_of_face;
+            h.offsets_nodes_of_cell = mesh.h_offsets_nodes_of_cell;
+            h.nodes_of_cell = mesh.h_nodes_of_cell;
+            h.cells_of_cell_shift = mesh.h_cells_of_cell_shift;
+            h.face_shift = mesh.h_face_shift;
+            h.cells_of_face = mesh.h_cells_of_face;
+            h.n_complete = mesh.n_complete();
+            h.axisymmetric = mesh.axisymmetric;
+            h.shift_lattice = Geometry2D<HostMem>::R<int8_t *[3]>("teno_setup_shift_lattice", mesh.shift_lattice.size());
+            for (size_t s = 0; s < mesh.shift_lattice.size(); s++) {
+                for (size_t a = 0; a < 3; a++) h.shift_lattice(s, a) = mesh.shift_lattice[s][a];
+            }
+            h.n_translations = static_cast<uint32_t>(mesh.periodic_translations.size());
+            h.translations = Geometry2D<HostMem>::R<double *[3]>("teno_setup_translations", 3);
+            for (size_t j = 0; j < mesh.periodic_translations.size(); j++) {
+                for (size_t a = 0; a < N_DIM; a++) h.translations(j, a) = double(mesh.periodic_translations[j][a]);
+            }
+            h.turn_maps = Geometry2D<HostMem>::R<double *[6]>("teno_setup_turn_maps", mesh.is_rotational() ? 2 * MAX_TURNS + 1 : 0);
+            if (mesh.is_rotational()) {
+                const PeriodicRotation & rotation = mesh.periodic_rotation;
+                h.rotation_dir = rotation.direction;
+                for (int k = -MAX_TURNS; k <= MAX_TURNS; k++) {
+                    const auto Q = rotation_matrix(rotation.axis, k * rotation.angle);
+                    for (size_t a = 0; a < 2; a++) {
+                        double Rc = 0.0;
+                        for (size_t b = 0; b < 3; b++) Rc += Q[a][b] * rotation.center[b];
+                        h.turn_maps(k + MAX_TURNS, 2 * a) = Q[a][0];
+                        h.turn_maps(k + MAX_TURNS, 2 * a + 1) = Q[a][1];
+                        h.turn_maps(k + MAX_TURNS, 4 + a) = rotation.center[a] - Rc;
+                    }
+                }
+            }
+            h.boundary_ordinal = Geometry2D<HostMem>::R<int32_t *>("teno_setup_boundary_ordinal", mesh.n_faces);
+            for (uint32_t f = 0, b = 0; f < mesh.n_faces; f++) {
+                h.boundary_ordinal(f) = mesh.h_cells_of_face(f, 1) < 0 ? int32_t(b++) : -1;
+            }
+            h.cell_h = Geometry2D<HostMem>::R<double *>("teno_setup_h", n_cells);
+            Kokkos::parallel_for("teno_setup_h", HostRange(0, n_cells),
+                                 [&](const uint32_t c) { h.cell_h(c) = std::sqrt(double(mesh.h_cell_volume(c))); });
+            auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
+            auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
+            h.mirror_face = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);
+            Kokkos::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
+                h.mirror_face(f) = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
+                                   h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION &&
+                                   !one_sided_face(mesh, h_bcs(h_face_bc(f)), f, opt.curved_mirrors);
+            });
+            if (mesh.curved_geometry && !opt.curved_mirrors && opt.curved_wall_degree < opt.degree) {
+                h.wall_cell = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_wall_cell", n_cells);
+                for (uint32_t f = 0; f < mesh.n_faces; f++) {
+                    if (mesh.h_cells_of_face(f, 1) >= 0 || h_face_bc(f) < 0) continue;
+                    if (one_sided_face(mesh, h_bcs(h_face_bc(f)), f, false)) h.wall_cell(mesh.h_cells_of_face(f, 0)) = 1;
+                }
+            }
+            const uint32_t n_rec = mesh.n_reconstructed();
+            n_target = opt.cells ? uint32_t(opt.cells->size()) : n_rec;
+            h.metric = Geometry2D<HostMem>::R<double *[9]>("teno_setup_metric", n_rec);
+            Kokkos::parallel_for("teno_setup_metric",
+                                 Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(
+                                     0, n_target),
+                                 [&](const uint32_t k) {
+                const uint32_t i = opt.cells ? (*opt.cells)[k] : k;
+                const std::array<double, 9> m = ranking_metric(mesh, h_face_bc, h_bcs, i);
+                for (size_t a = 0; a < 9; a++) h.metric(i, a) = m[a];
+            });
+            // Collapsed Gauss with r + 2 points per direction, exact to degree 2r + 2
+            {
+                std::vector<double> gx, gw;
+                gauss_legendre(r + 2, gx, gw);
+                h.triangle_rule = Geometry2D<HostMem>::R<double *[3]>("teno_setup_triangle_rule", gx.size() * gx.size());
+                size_t q = 0;
+                for (size_t a = 0; a < gx.size(); a++) {
+                    for (size_t b = 0; b < gx.size(); b++) {
+                        const double s = 0.5 * (gx[a] + 1.0);
+                        const double t = 0.5 * (gx[b] + 1.0);
+                        h.triangle_rule(q, 0) = s;
+                        h.triangle_rule(q, 1) = t * (1.0 - s);
+                        h.triangle_rule(q, 2) = 0.25 * gw[a] * gw[b] * (1.0 - s);
+                        q++;
+                    }
+                }
+            }
+            // Curved cells: rules exact to the degree of the smoothness indicators
+            h.curved = mesh.curved_geometry != nullptr;
+            if (h.curved) {
+                const curved::Geometry & geometry = *mesh.curved_geometry;
+                h.quad_points = Kokkos::create_mirror_view_and_copy(HostMem(), quad_points);
+                std::vector<std::vector<curved::Vec3>> xs(n_cells);
+                std::vector<std::vector<double>> ws(n_cells);
+                Kokkos::parallel_for("teno_setup_curved_rules",
+                                     Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(
+                                         0, n_cells),
+                                     [&](const uint32_t c) {
+                    if (geometry.cell_is_curved(c)) geometry.cell_rule(c, 2 * r, xs[c], ws[c]);
+                });
+                h.rule_start = Geometry2D<HostMem>::R<uint32_t *>("teno_setup_rule_start", n_cells + 1);
+                for (uint32_t c = 0; c < n_cells; c++) h.rule_start(c + 1) = h.rule_start(c) + uint32_t(ws[c].size());
+                h.rule_points = Geometry2D<HostMem>::R<double *[3]>("teno_setup_rule_points", h.rule_start(n_cells));
+                for (uint32_t c = 0; c < n_cells; c++) {
+                    for (size_t q = 0; q < ws[c].size(); q++) {
+                        h.rule_points(h.rule_start(c) + q, 0) = xs[c][q][0];
+                        h.rule_points(h.rule_start(c) + q, 1) = xs[c][q][1];
+                        h.rule_points(h.rule_start(c) + q, 2) = ws[c][q];
+                    }
+                }
+            }
+            h.face_gauss = Geometry2D<HostMem>::R<double *>("teno_setup_face_gauss", opt.face_points.size());
+            for (size_t q = 0; q < opt.face_points.size(); q++) h.face_gauss(q) = 0.5 * opt.face_points[q];
+
+            Geometry2D<DefaultMem> & d = device;
+            d.cell_coords = mesh.cell_coords;
+            d.face_normals = mesh.face_normals;
+            d.face_coords = mesh.face_coords;
+            d.node_coords = mesh.node_coords;
+            d.shifts = mesh.shifts;
+            d.face_area = mesh.face_area;
+            d.offsets_cells_of_cell = mesh.offsets_cells_of_cell;
+            d.cells_of_cell = mesh.cells_of_cell;
+            d.offsets_faces_of_cell = mesh.offsets_faces_of_cell;
+            d.faces_of_cell = mesh.faces_of_cell;
+            d.offsets_nodes_of_face = mesh.offsets_nodes_of_face;
+            d.nodes_of_face = mesh.nodes_of_face;
+            d.offsets_nodes_of_cell = mesh.offsets_nodes_of_cell;
+            d.nodes_of_cell = mesh.nodes_of_cell;
+            d.cells_of_cell_shift = mesh.cells_of_cell_shift;
+            d.face_shift = mesh.face_shift;
+            d.cells_of_face = mesh.cells_of_face;
+            d.quad_points = quad_points;
+            d.n_complete = h.n_complete;
+            d.axisymmetric = h.axisymmetric;
+            d.curved = h.curved;
+            d.n_translations = h.n_translations;
+            d.rotation_dir = h.rotation_dir;
+            d.shift_lattice = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.shift_lattice);
+            d.translations = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.translations);
+            d.turn_maps = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.turn_maps);
+            d.boundary_ordinal = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.boundary_ordinal);
+            d.cell_h = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.cell_h);
+            d.mirror_face = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.mirror_face);
+            if (h.wall_cell.extent(0)) d.wall_cell = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.wall_cell);
+            d.metric = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.metric);
+            d.triangle_rule = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.triangle_rule);
+            d.rule_start = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_start);
+            d.rule_points = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.rule_points);
+            d.face_gauss = Kokkos::create_mirror_view_and_copy(DefaultMem(), h.face_gauss);
+            caps.rows = std::max<uint32_t>(ns_max, nss_max);
+            caps.sector = nss_max + 1;
+            timing.geometry = timer.seconds();
+        }
+
+        uint16_t max_large() const { return ns_max; }
+        uint16_t max_small() const { return uint16_t(teno::MAX_FACES * nss_max); }
+
+        uint32_t batch_cells() const {
+            if (options.batch_cells > 0) return options.batch_cells;
+            if constexpr (DEVICE_IS_HOST) return 8192;
+            // Scratch and outputs within about a quarter of the free device memory
+            size_t free_bytes = size_t(8) << 30;
+#if defined(KOKKOS_ENABLE_CUDA)
+            size_t total = 0;
+            cudaMemGetInfo(&free_bytes, &total);
+#endif
+            const size_t out_bytes = size_t(ns_max) * (8 + 8 * size_t(nk)) + size_t(max_small()) * (8 + 8 * teno::NK_SMALL) +
+                                     8 * (size_t(nk) * (nk + 3) / 2 + 1) + 32;
+            size_t n = free_bytes / 4 / (out_bytes + caps.bytes(nk));
+            n = std::min<size_t>(n, 65536);
+            n = std::max<size_t>(n / 1024 * 1024, 1024);
+            return static_cast<uint32_t>(n);
+        }
+
+        void compute(const Kokkos::View<uint32_t *> & cells, const uint32_t n, TableBatch & out) {
+            Kokkos::Timer timer;
+            if (options.host_only) {
+                std::vector<uint32_t> all(n);
+                auto h_cells = Kokkos::create_mirror_view_and_copy(HostMem(), Kokkos::subview(cells, std::make_pair(0u, n)));
+                for (uint32_t t = 0; t < n; t++) all[t] = t;
+                on_host(h_cells, all, out);
+                timing.tables += timer.seconds();
+                return;
+            }
+            const uint32_t slots = DEVICE_IS_HOST ? static_cast<uint32_t>(Kokkos::DefaultExecutionSpace().concurrency())
+                                                  : out.slots;
+            if (scratch.slots != slots) {
+                scratch = Scratch2D<DefaultMem>();
+                scratch = Scratch2D<DefaultMem>(caps, slots, nk, !DEVICE_IS_HOST);
+            }
+            Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task<Kokkos::DefaultExecutionSpace>(device, scratch, out, cells));
+            Kokkos::fence();
+            // Cells whose search outgrew the scratch: again on the host, with more room
+            auto status = Kokkos::create_mirror_view_and_copy(HostMem(), Kokkos::subview(out.status, std::make_pair(0u, n)));
+            std::vector<uint32_t> redo;
+            for (uint32_t t = 0; t < n; t++) {
+                if (status(t) != OK) redo.push_back(t);
+            }
+            if (!redo.empty()) {
+                Kokkos::Timer host_timer;
+                auto h_cells = Kokkos::create_mirror_view_and_copy(HostMem(), Kokkos::subview(cells, std::make_pair(0u, n)));
+                on_host(h_cells, redo, out);
+                timing.host_cells += host_timer.seconds();
+                timing.n_host_cells += redo.size();
+            }
+            timing.tables += timer.seconds();
+        }
+
+        const Timings & timings() const { return timing; }
+
+        teno::Moments moments(uint32_t) const { return teno::Moments(); }
+
+    private:
+        template <class Exec>
+        CellSetup2D<Exec> task(const Geometry2D<typename Exec::memory_space> & geometry,
+                               const Scratch2D<typename Exec::memory_space> & s,
+                               const TableBatchT<typename Exec::memory_space> & batch,
+                               const Kokkos::View<uint32_t *, typename Exec::memory_space> & batch_cells) const {
+            return CellSetup2D<Exec>{geometry, s, batch, batch_cells, {}, r, nk, ns, nss, ns_max, nss_max,
+                                     double(options.max_condition), wall_r, wall_ns, rtype(options.stencil_factor)};
+        }
+
+        /** @brief Where cell c is, for errors. */
+        std::string describe(const uint32_t c) const {
+            return logging::format("cell %u at (%.6g, %.6g)", c, double(host.cell_coords(c, 0)), double(host.cell_coords(c, 1)));
+        }
+
+        /** @brief Tables of the batch slots in which (cells[t]) on the host, growing the scratch until they fit. */
+        void on_host(const Kokkos::View<uint32_t *, HostMem> & cells, std::vector<uint32_t> which, TableBatch & out) {
+            const uint32_t n_threads = static_cast<uint32_t>(Kokkos::DefaultHostExecutionSpace().concurrency());
+            constexpr uint32_t MAX_SCALE = 1024;
+            for (uint32_t scale = 1; !which.empty(); scale *= 4) {
+                if (scale > MAX_SCALE) {
+                    const Caps2D most = caps.scaled(MAX_SCALE);
+                    throw std::runtime_error(logging::format(
+                        "TENO setup: the stencil search of %s (and %zu more) does not fit in memory with %ux the "
+                        "scratch (%u visits, %u entries, %u mirror lines, %u mirror faces).",
+                        describe(cells(which[0])).c_str(), which.size() - 1, MAX_SCALE, most.visits, most.entries,
+                        most.lines, most.line_faces));
+                }
+                const uint32_t m = static_cast<uint32_t>(which.size());
+                Kokkos::View<uint32_t *, HostMem> h_cells("teno_setup_host_cells", m);
+                for (uint32_t j = 0; j < m; j++) h_cells(j) = cells(which[j]);
+                TableBatchT<HostMem> h_out(m, nk, ns_max, max_small(), false);
+                Scratch2D<HostMem> h_scratch(caps.scaled(scale), n_threads, nk, false);
+                Kokkos::parallel_for("teno_setup_cells_host",
+                                     Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
+                                     task<Kokkos::DefaultHostExecutionSpace>(host, h_scratch, h_out, h_cells));
+                Kokkos::fence();
+                std::vector<uint32_t> done, done_slot, again;
+                for (uint32_t j = 0; j < m; j++) {
+                    if (h_out.status(j) == OK) {
+                        done.push_back(j);
+                        done_slot.push_back(which[j]);
+                    } else {
+                        again.push_back(which[j]);
+                    }
+                }
+                // Compact the finished ones and move them to their slots of out
+                const uint32_t n_done = static_cast<uint32_t>(done.size());
+                if (n_done > 0) {
+                    Kokkos::View<uint32_t *, HostMem> h_src("teno_setup_src", n_done), h_dst("teno_setup_dst", n_done);
+                    for (uint32_t j = 0; j < n_done; j++) {
+                        h_src(j) = done[j];
+                        h_dst(j) = done_slot[j];
+                    }
+                    TableBatchT<HostMem> h_compact(n_done, nk, ns_max, max_small(), out.large_cells.interleaved);
+                    copy_slots<HostMem>(h_out, h_compact, h_src, {}, n_done);
+                    Kokkos::fence();
+                    TableBatchT<DefaultMem> d_compact = device_copy(h_compact);
+                    auto d_dst = Kokkos::create_mirror_view_and_copy(DefaultMem(), h_dst);
+                    copy_slots<DefaultMem>(d_compact, out, {}, d_dst, n_done);
+                    Kokkos::fence();
+                }
+                which.swap(again);
+            }
+        }
+
+        Options options;
+        uint8_t r = 0, nk = 0, wall_r = 0;
+        uint16_t ns = 0, nss = 0, ns_max = 0, nss_max = 0, wall_ns = 0;
+        Caps2D caps;
+        Geometry2D<HostMem> host;
+        Geometry2D<DefaultMem> device;
+        Scratch2D<DefaultMem> scratch;
+        uint32_t n_target = 0;
+        Timings timing;
+};
+
+#endif
+
+SetupHandle::SetupHandle(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
+                         Kokkos::View<rtype **> quad_weights, const Options & options)
+    : impl(std::make_unique<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>>(mesh, boundaries, quad_points, quad_weights,
+                                                                             options)) {}
+
+SetupHandle::~SetupHandle() = default;
+
+void SetupHandle::compute(const Kokkos::View<uint32_t *> & cells, const uint32_t n, TableBatch & out) {
     impl->compute(cells, n, out);
 }
 
-uint32_t Setup3DHandle::batch_cells() const { return impl->batch_cells(); }
-uint16_t Setup3DHandle::max_large() const { return impl->max_large(); }
-uint16_t Setup3DHandle::max_small() const { return impl->max_small(); }
-const Timings & Setup3DHandle::timings() const { return impl->timings(); }
+uint32_t SetupHandle::batch_cells() const { return impl->batch_cells(); }
+uint16_t SetupHandle::max_large() const { return impl->max_large(); }
+uint16_t SetupHandle::max_small() const { return impl->max_small(); }
+const Timings & SetupHandle::timings() const { return impl->timings(); }
 
-teno::Moments Setup3DHandle::moments(const uint32_t n_rows) const { return impl->moments(n_rows); }
+teno::Moments SetupHandle::moments(const uint32_t n_rows) const { return impl->moments(n_rows); }
 
 teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
     const Tables t(degree);
