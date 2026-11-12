@@ -343,7 +343,7 @@ class Probes {
             std::vector<double> mean_nodes, mean_quadrature, mean_weights;
             std::vector<uint64_t> mean_cells;
             ProbeReference reference;
-            probe::Geometry geometry;  // regions: no nodes; quadrature weights f V in global cell order
+            probe::Geometry geometry;  // regions: no nodes; quadrature weights f V of the cells covered, by global cell
             bool from_region = false;
             bool resampled = false;  // a surface region on an n_points grid
             bool snapshot = false;   // of a [[write_data]] entry
@@ -366,12 +366,18 @@ class Probes {
             double measure = 0.0;      // of the samples, at the latest reduction
             std::vector<double> gathered_nodes, gathered_quad;  // of the latest write, reused
             std::shared_ptr<region::Region> copy;  // copies = "each": the copy it covers
-            /** @brief A moving filled region: its fractions, and its cells (every owned one) with their measures. */
+            /**
+             * @brief A moving filled region: its fractions, the measures of the owned cells, and at each move the
+             *        owned cells it covers (f V > 0, the first of covered) with their f V.
+             */
             struct Motion {
+                const Mesh * mesh = nullptr;
                 std::shared_ptr<region::MovingFractions> fractions;
-                std::vector<uint32_t> cells;
-                std::vector<double> volumes;
-                std::vector<size_t> order;  // rank 0: the gathered weights in global cell order
+                Kokkos::View<double *> volumes;
+                Kokkos::View<uint32_t *> covered;
+                Kokkos::View<double *> weights;
+                uint64_t n_cells = 0;         // of the mesh, which its averages are kept per
+                std::vector<uint64_t> cells;  // rank 0: the global cell of each gathered sample
                 bool distributed = false;
             };
             std::shared_ptr<Motion> motion;
@@ -387,14 +393,17 @@ class Probes {
                 std::vector<uint64_t> quad_cells;  // rank 0: the global cell of each gathered quadrature point
             };
             std::shared_ptr<Isosurface> isosurface;
-            /** @brief The quadrature weights f V of a moving region at time t (collective). */
+            /**
+             * @brief A moving region at time t: its samples, the owned cells it covers, and (rank 0) their
+             *        weights f V in global cell order (collective).
+             */
             void move(double t);
             /** @brief The isosurface where the solution puts it at time t, and its samples (collective). */
             void extract(double t);
             /** @brief Whether its time averages are kept per cell: a moving region's or an isosurface's. */
             bool cell_means() const { return average && (motion || isosurface); }
             /** @brief The cells its time averages may cover (cell_means): those of the mesh. */
-            uint64_t n_mean_cells() const { return motion ? quadrature.n_global : isosurface ? isosurface->n_cells : 0; }
+            uint64_t n_mean_cells() const { return motion ? motion->n_cells : isosurface ? isosurface->n_cells : 0; }
             /**
              * @brief Rank 0 of time averages kept per cell: the weights and values of the cells, mean w q /
              *        mean w (moving regions: w = f V; isosurfaces: the sums over each cell's quadrature points).

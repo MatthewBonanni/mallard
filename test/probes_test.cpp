@@ -2186,6 +2186,28 @@ TEST(ProbesTest, MovingRegionsMeasureWhereTheyAreAtEachWriteAndCopiesReportEach)
     }
 }
 
+TEST(ProbesTest, RegionsOfTheSolutionCoveringNoCellMeasureZero) {
+    // rho > 2 holds in no cell of a uniform flow: at each write the measure and integral are zero,
+    // and the extremes those of no cell
+    const std::string dir = fresh_dir("region_solution_empty");
+    const std::string probes = "[[probes]]\nname = \"dense\"\nregion = {type = \"where\", condition = \"RHO > 2\"}\n"
+                               "fields = [\"RHO\"]\nreductions = [\"integral\", \"max\"]\n"
+                               "reductions_file = \"" + dir + "/dense.csv\"\n";
+    Solver solver;
+    solver.init(parse_toml(box_case(8, "1.0", "type = \"MUSCL\"\n", probes, "n_steps = 2\ndt = 1.0e-5\n")));
+    run(solver);
+    if (comm::is_root()) {
+        const auto rows = read_csv(dir + "/dense.csv");
+        ASSERT_EQ(rows.size(), 3u);
+        for (const auto & row : rows) {
+            EXPECT_EQ(row.at(N_DIM == 2 ? "area" : "volume"), 0.0);
+            EXPECT_EQ(row.at("integral_RHO"), 0.0);
+            EXPECT_EQ(row.at("max_RHO"), -std::numeric_limits<double>::infinity());
+        }
+    }
+    comm::barrier();
+}
+
 TEST(ProbesTest, CutQuadratureIntegratesPolynomialsOverABallToRoundOff) {
     // A ball cutting the simplices of a grid over [-1, 1]^N: its volume and second moments, and those of the
     // few points fitted to each simplex's full quadrature
