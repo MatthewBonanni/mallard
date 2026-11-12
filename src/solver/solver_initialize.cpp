@@ -11,6 +11,7 @@
 
 #include "solver.h"
 
+#include "diagnostic_code.h"
 #include "input.h"
 
 #include <algorithm>
@@ -118,7 +119,7 @@ void Solver::init_solution_restart() {
         return !then.empty() && !now.empty() && then != now;
     };
     if (comm::is_root() && differs("mesh")) {
-        logging::warning("Restart file " + file + " was written on a mesh file of other contents (the sha256 in its "
+        logging::warning(diagnostic_code::MESH_DIFFERS, "Restart file " + file + " was written on a mesh file of other contents (the sha256 in its "
                          "provenance differs) with as many cells: check that it is the mesh of this run.");
     }
     initial_state += comm::is_root() && differs("input") ? "; written by another input)" : ")";
@@ -138,14 +139,14 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     // CHEM_H (last chemistry sub-step) only seeds the integrator: a reacting run
     // may start from a non-reacting one, and a non-reacting run ignores it
     std::vector<std::string> expected = restart_variables();
-    const std::vector<std::string> averages = statistics.variables();
+    const std::vector<std::string> averages = statistics.restart_variables();
     auto is_average = [&](const std::string & name) {
         return std::find(averages.begin(), averages.end(), name) != averages.end();
     };
     for (const auto & name : restart.names) {
         // Averages carry over only into a run that keeps them
         if (name == "CHEM_H" || name == "P_MAX" || name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0 ||
-            name.rfind("PHASE_", 0) == 0) continue;
+            name.rfind("PHASE_", 0) == 0 || name.rfind("BATCH_", 0) == 0) continue;
         if (std::find(expected.begin(), expected.end(), name) == expected.end()) {
             throw std::runtime_error("Restart file " + file + " has variable " + name + ", which this run does not " +
                                      (name.rfind("RHOY_", 0) == 0 ? "transport." : "know."));
@@ -190,6 +191,7 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     if (!state_reader) statistics.restore(restart, file, t);
     probes.restore_averages(restart, file, t, statistics.resets());
     probes.restore_spectra(restart, file, statistics.resets());
+    if (resume_output && !statistics.resets()) convergence.restore(restart, file, averages_start());
     if (step_controller.enabled()) step_controller.restore(restart.attributes);
     restore_characteristic_state(restart);
     if (!resume_output) return;

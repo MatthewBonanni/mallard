@@ -3718,85 +3718,14 @@
   "set_in": [],
   "type": "integer"
  },
- "output.mixture": {
+ "output.report": {
+  "default": "\"report.html\"",
   "dims": [
    2,
    3
   ],
-  "set_in": [
-   "examples/flame_turbulence/input.toml"
-  ]
- },
- "output.mixture.fuel": {
-  "dims": [
-   3
-  ],
-  "set_in": []
- },
- "output.mixture.fuel_species": {
-  "default": "\"\"",
-  "dims": [
-   3
-  ],
   "set_in": [],
   "type": "string"
- },
- "output.mixture.oxidizer": {
-  "dims": [
-   3
-  ],
-  "set_in": []
- },
- "output.mixture.oxidizer_species": {
-  "default": "\"\"",
-  "dims": [
-   3
-  ],
-  "set_in": [],
-  "type": "string"
- },
- "output.mixture.progress": {
-  "dims": [
-   3
-  ],
-  "set_in": [
-   "examples/flame_turbulence/input.toml"
-  ]
- },
- "output.mixture.progress.T_burnt": {
-  "dimension": "temperature (K)",
-  "dims": [
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/flame_turbulence/input.toml"
-  ],
-  "type": "number"
- },
- "output.mixture.progress.T_unburnt": {
-  "dimension": "temperature (K)",
-  "dims": [
-   3
-  ],
-  "required": true,
-  "set_in": [
-   "examples/flame_turbulence/input.toml"
-  ],
-  "type": "number"
- },
- "output.mixture.progress.species": {
-  "dims": [
-   3
-  ],
-  "set_in": []
- },
- "output.reference": {
-  "dims": [
-   2,
-   3
-  ],
-  "set_in": []
  },
  "output.run_log": {
   "default": "\"mallard.jsonl\"",
@@ -5840,102 +5769,14 @@
    "examples/channel_wmles/lm5200.toml",
    "examples/channel_wmles/tl_m1.7.toml",
    "examples/channel_wmles/tl_m3.0.toml",
-   "examples/flame_turbulence/input.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ]
  },
- "statistics.conditional": {
-  "default": "[]",
-  "dims": [
-   3
-  ],
-  "set_in": [
-   "examples/flame_turbulence/input.toml"
-  ],
-  "type": "array"
- },
- "statistics.conditional.bins": {
-  "default": "[50]",
-  "dims": [
-   3
-  ],
-  "set_in": [],
-  "type": "array"
- },
- "statistics.conditional.fields": {
-  "default": "[]",
-  "dims": [
-   3
-  ],
-  "set_in": [
-   "examples/flame_turbulence/input.toml"
-  ],
-  "type": "array"
- },
- "statistics.conditional.file": {
-  "default": "\"conditional_PROGRESS_VARIABLE.csv\"",
-  "dims": [
-   3
-  ],
-  "set_in": [
-   "examples/flame_turbulence/input.toml"
-  ],
-  "type": "string"
- },
- "statistics.conditional.interval": {
-  "default": "10",
-  "dims": [
-   3
-  ],
-  "set_in": [],
-  "type": "integer"
- },
- "statistics.conditional.on": {
-  "default": "\"\"",
-  "dims": [
-   3
-  ],
-  "set_in": [
-   "examples/flame_turbulence/input.toml"
-  ],
-  "type": "string"
- },
- "statistics.conditional.range": {
-  "default": "[0.0, 1.0]",
-  "dims": [
-   3
-  ],
-  "set_in": [],
-  "type": "array"
- },
- "statistics.conditional.region": {
+ "statistics.convergence": {
   "dims": [
    3
   ],
   "set_in": []
- },
- "statistics.conditional.t_start": {
-  "default": "0.0002",
-  "dimension": "time (s)",
-  "dims": [
-   3
-  ],
-  "set_in": [],
-  "type": "number"
- },
- "statistics.conditional.weight": {
-  "default": "\"volume\"",
-  "dims": [
-   3
-  ],
-  "set_in": [
-   "examples/flame_turbulence/input.toml"
-  ],
-  "type": "string",
-  "values": [
-   "mass",
-   "volume"
-  ]
  },
  "statistics.fields": {
   "default": "[]",
@@ -5967,8 +5808,7 @@
    "examples/channel_wmles/lm2000.toml",
    "examples/channel_wmles/lm5200.toml",
    "examples/channel_wmles/tl_m1.7.toml",
-   "examples/channel_wmles/tl_m3.0.toml",
-   "examples/flame_turbulence/input.toml"
+   "examples/channel_wmles/tl_m3.0.toml"
   ],
   "type": "integer"
  },
@@ -6025,7 +5865,6 @@
    "examples/channel_wmles/lm5200.toml",
    "examples/channel_wmles/tl_m1.7.toml",
    "examples/channel_wmles/tl_m3.0.toml",
-   "examples/flame_turbulence/input.toml",
    "examples/turbulent_inflow_duct/input.toml"
   ],
   "type": "number"

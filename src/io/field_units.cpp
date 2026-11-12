@@ -15,6 +15,8 @@
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <tuple>
 
 namespace {
 
@@ -220,6 +222,22 @@ std::optional<FieldDescription> find(const std::string & name) {
         }
         return std::nullopt;
     }
+    if (starts_with(name, "CI_MEAN_") || starts_with(name, "CI_COV_")) {
+        auto of = find(name.substr(3));
+        if (!of) return std::nullopt;
+        return FieldDescription{of->dimension, "confidence interval half width of the " + of->long_name, "", ""};
+    }
+    // Restart state of the batches of [statistics]
+    for (const auto & [prefix, power, what] : {std::tuple{"BATCH_AVG_", 1, "mean over the closed batches of the "},
+                                               std::tuple{"BATCH_M2_", 2, "sum of squared deviations over the closed batches of the "},
+                                               std::tuple{"BATCH_", 1, "current batch's "}}) {
+        if (!starts_with(name, prefix)) continue;
+        const std::string average = name.substr(std::string(prefix).size());
+        if (!starts_with(average, "MEAN_") && !starts_with(average, "COV_")) continue;
+        auto of = find(average);
+        if (!of) return std::nullopt;
+        return FieldDescription{power == 2 ? of->dimension.times(of->dimension) : of->dimension, what + of->long_name, "", ""};
+    }
     if (starts_with(name, "PHASE_")) {
         const size_t at = name.find('_', 6);
         if (at == std::string::npos || at == 6) return std::nullopt;
@@ -261,7 +279,8 @@ std::string group(const std::string & name) {
     }
     if (starts_with(name, "SOURCE_")) return "sources";
     if (starts_with(name, "STENCIL_")) return STENCILS;
-    for (const char * prefix : {"MEAN_", "COV_", "PHASE_", "RMS_", "FAVRE_MEAN_", "FAVRE_COV_"}) {
+    for (const char * prefix : {"MEAN_", "COV_", "PHASE_", "RMS_", "FAVRE_MEAN_", "FAVRE_COV_", "CI_MEAN_", "CI_COV_",
+                                "BATCH_MEAN_", "BATCH_COV_", "BATCH_AVG_", "BATCH_M2_"}) {
         if (starts_with(name, prefix)) return "statistics";
     }
     return "";
@@ -287,13 +306,14 @@ std::vector<CatalogField> catalog() {
         {"RMS_<A>", dim::none, "", "statistics", "mallard post average, of A with its variance"},
         {"FAVRE_MEAN_<A>", dim::none, "", "statistics", "mallard post average --favre"},
         {"FAVRE_COV_<A>_<B>", dim::none, "", "statistics", "mallard post average --favre, of A*B"},
+        {"CI_<average>", dim::none, "", "statistics", "[statistics] batch, of a MEAN_ or COV_ average"},
         {"STENCIL_<id>", dim::none, "", STENCILS, "mallard check --mesh-fields with --cells or --region"},
     };
     const char * long_names[] = {"source of A, per second", "time average of A", "covariance of A and B",
                                  "phase average of A in a bin", "root mean square fluctuation of A",
                                  "Favre (density-weighted) time average of A", "Favre covariance of A and B",
-                                 "membership in the stencils of cell id"};
-    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "A's", "A's", "A's times B's", "1"};
+                                 "confidence interval half width of an average", "membership in the stencils of cell id"};
+    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "A's", "A's", "A's times B's", "the average's", "1"};
     for (size_t i = 0; i < std::size(derived); i++) {
         out.push_back({derived[i].name, units[i], long_names[i], derived[i].group, derived[i].needs});
     }

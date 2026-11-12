@@ -610,7 +610,8 @@ void Solver::launch_mixture_flux_functor() {
         face_mdot,
         low_mach_cutoff,
         cell_upwind,
-        face_reconstruction->face_quad_normals};
+        face_reconstruction->face_quad_normals,
+        central_states()};
     // Faces of owned cells, as the single-gas flux
     if (rhs_faces.extent(0) == 0) {
         Kokkos::parallel_for("mixture_flux", HeavyRange<>(0, mesh->n_faces), functor);
@@ -639,7 +640,8 @@ void Solver::launch_double_flux_functor() {
         face_mdot,
         low_mach_cutoff,
         cell_upwind,
-        face_reconstruction->face_quad_normals};
+        face_reconstruction->face_quad_normals,
+        central_states()};
     if (rhs_faces.extent(0) == 0) {
         Kokkos::parallel_for("double_flux", HeavyRange<>(0, mesh->n_faces), functor);
     } else {

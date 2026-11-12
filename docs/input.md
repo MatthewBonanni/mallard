@@ -791,6 +791,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 |---|---|
 | `sensor_threshold` | Ducros sensor above which a cell compressing the flow is a shock, default 0.65 (1 disables the Riemann solver) |
 | `upwind_floor` | Upwind fraction of the other cells, default 0; a small value (e.g. 0.05) damps grid-scale noise on very irregular meshes, at the cost of numerical dissipation the budget then reports |
+| `central` | The central flux's states: `cell_averages`, KEEP on the two cells' values, which changes the kinetic energy by exactly the pressure work on interior faces (second order where the sensor is off; the reconstructed states still feed the Riemann part); or `reconstructed`, KEEP on the reconstructed face states, which conserves kinetic energy only to the reconstruction's accuracy and can add it. Default `cell_averages` with TENO (with TENO's states the central flux adds kinetic energy), `reconstructed` with MUSCL and first order (the `les` preset's; with no viscosity or SGS model to remove energy, MUSCL's states add it too, so Euler runs set `cell_averages`). With a gas mixture, `cell_averages` takes each cell's `gamma` and `e0` (with `double_flux`, the cell's frozen ones). [Design](design/les.md#44-central-flux-for-teno-689) |
 
 ### `[numerics.face_reconstruction]`
 
@@ -939,6 +940,20 @@ changing it.
 | `t_start` | Start time, default 0; a [trigger](#triggers) with `"start statistics"` starts them instead |
 | `interval` | Every this many steps, default 1 |
 | `reset` | `true` starts the averages afresh on a restart instead of continuing those of the restart file (default `false`) |
+| `batch` | Confidence intervals of the averages by batch means: the duration of a batch (time), at least 10 integrated autocorrelation times; default none (no intervals) |
+| `confidence` | Confidence of those intervals, default 0.95 (with `batch`) |
+
+With `batch`, the samples also fall in consecutive batches of that duration
+from the start of the averages (a sample in the batch that holds its time);
+each batch keeps its own averages, and when a sample opens a batch, the last
+one's averages join the mean and the sum of squared deviations of the batch
+values (Welford). `CI_MEAN_<A>` and `CI_COV_<A>_<B>` are the half widths
+`t s / sqrt(n)` of the intervals over the `n` closed batches (Student's t with
+`n - 1` degrees of freedom; NaN before two). Memory: three more device arrays
+per average (the current batch and the two batch sums), four times what the
+averages take, and on the host also the half widths; restart files carry
+the batch state as `BATCH_<average>`, `BATCH_AVG_<average>` and
+`BATCH_M2_<average>`.
 
 The averages are output variables for `[[write_data]]`: `MEAN_<A>` and
 `COV_<A>_<B>`, the covariance `<A'B'> = <AB> - <A><B>` (kept directly, by a
@@ -1067,6 +1082,37 @@ means and sums of squared deviations by its position in the list; one holding
 an entry of other variables, bins or fields there is an error unless
 `statistics.reset = true`. `mallard post average --conditional` computes them
 from saved snapshots.
+
+### `[statistics.convergence]`
+
+The end of the initial transient and confidence intervals of monitored values
+([guide](guide/statistics.md#convergence-statisticsconvergence)): each listed
+value gets a sample each time its monitor writes it. MSER-5 on each signal
+finds where its transient ends, again each time its series has grown by 5%;
+the run is stationary once an end in the first half of the series has been
+accepted for every signal, from the latest of the latest accepted ends
+(`t_stationary`, which can move later as the series grow). From then on, the samples after `t_stationary` and after
+the start of the `[statistics]` averages give the mean and the variance
+(of `(x - mean)^2`) with confidence intervals by non-overlapping batch means
+and Student's t, the integrated autocorrelation time `tau` (samples, Sokal's
+window `M >= 5 tau`) and `n_eff = samples / tau`. Converged: stationary, every
+half width within `tolerance` of the mean (and `variance_tolerance` of the
+variance) and every batch at least `10 tau` long. Triggers read the values as
+`convergence_stationary`, `convergence_t_stationary`, `convergence_converged`
+and `convergence_<signal>_{mean, ci, variance, variance_ci, tau, n_eff,
+samples}` (NaN before the run is stationary); restart files carry the
+histories (reset with `statistics.reset`). Runs on the host, on every rank,
+only when a signal has a new sample.
+
+| Key | Description |
+|---|---|
+| `signals` | Monitored values, named as in `[[triggers]]`: `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, `<probe>_<variable>`. Required |
+| `confidence` | Confidence of the intervals, default 0.95 |
+| `batches` | Batches of the batch means (at least 2), default 20 |
+| `tolerance` | Relative half width of every mean at which the run is converged (adds `converged`), default none |
+| `variance_tolerance` | Also of every variance (needs `tolerance`), default none |
+| `min_samples` | Samples of a signal before MSER-5 is tried (at least 10), default 100 |
+| `file` | Output CSV (`step, t` and the values, with units), default `convergence.csv` |
 
 ## `[[probes]]`
 
@@ -1394,7 +1440,7 @@ step ([Triggers](guide/running.md#triggers)).
 
 | Key | Description |
 |---|---|
-| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>` and, for probes of one point, `<probe>_<variable>`; true when not 0. Required |
+| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
 | `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set). Required |
 | `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
 | `for` | Simulated time the condition must hold before it fires, default 0 |
@@ -1673,6 +1719,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 |---|---|
 | `check_interval` | Print a progress row every this many steps (default 1) |
 | `run_log` | The machine-readable run record, one JSON record per line: a start record with the run block, a progress record per progress row, an output record per file written, warnings and errors, and an end record ([format](guide/output.md#run-record-mallardjsonl)). Appended to when the run starts from a restart file. `""` writes none. Default `"mallard.jsonl"` |
+| `report` | The [run report](guide/output.md#run-report-reporthtml): one self-contained HTML page of the run (outcome, identity, configuration, health, plots of the monitors, cost, output index, divergence), built from the run's records and written at the first progress row, after each restart file and at the end, also of a run that stops, diverges or fails. Works with `run_log = ""` too. `""` writes none. Default `"report.html"` |
 | `divergence_report` | Prefix of the [divergence report](guide/running.md#the-divergence-report) a run that diverges writes: `PREFIX.txt`, `PREFIX.json` and the snapshot of the failure's neighborhood `PREFIX_neighborhood_<step>.vtkhdf` (`.vtu` without HDF5); the report is printed and in the run record either way. `""` writes no files. Default `"divergence_report"` |
 | `health` | Run health diagnostics at each progress row: admissibility margins, numerics and chemistry activity, output timings, the audit of numerical repairs and the conservation ledger, in the run record's progress records and a summary at the end of the terminal output ([details](guide/output.md#run-health)). Default `true` |
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the run block; `false` skips reading it again for very large meshes. Default `true` |
