@@ -1,0 +1,66 @@
+# From run to figure (2D build, Navier-Stokes): the steady wake of a cylinder
+# at Re = 40 and Mach 0.2, run on three meshes and post-processed afterwards.
+# Tutorial: docs/tutorials/post_processing.md.
+# Mesh: gmsh ../cylinder/cylinder.geo -2 -o cylinder.msh
+#
+# Units as in the cylinder tutorial: D = 1, free-stream density and sound
+# speed 1, U = 0.2, p = T = 1 / gamma, and mu = rho U D / Re = 0.005. Below
+# Re = 47 the wake does not shed: two vortices stay attached behind the
+# cylinder and the flow becomes steady.
+
+[run]
+t_stop = 200.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "cylinder.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["0.2 * (1 - exp(-4 * (x^2 + y^2 - 0.25)))", "0.0"]
+p = "0.7142857142857143"
+
+[[boundaries]]
+name = "cylinder"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "farfield"
+type = "farfield"
+u = [0.2, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+check_nan = true
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 3
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.005
+Pr = 0.72
+
+[output]
+check_interval = 2000
+
+[[forces]]
+zone = "cylinder"
+interval = 20
+file = "forces_cylinder.csv"
+
+[[write_data]]
+prefix = "./solut/wake"
+time_interval = 50.0
+fields = ["RHO", "U", "P"]

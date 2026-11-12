@@ -138,7 +138,10 @@ that adds or changes behavior includes:
      `docs/design/`, and new references in [docs/references.md](docs/references.md);
    - figures drawn by a script in `tools/docs/` as a light/dark SVG pair
      (`python tools/docs/make_figures.py --mallard build/src/mallard`), never
-     hand-edited images.
+     hand-edited images;
+   - a new output field in the units table of `src/io/field_units.cpp` (or the
+     derived-field catalog `src/solver/derived_catalog.h`), and in the output
+     guide's field table (`python tools/docs/fields.py --mallard build/src/mallard`).
 4. **An example** in `examples/<case>/` with its `input.toml` and a row in
    [examples/README.md](examples/README.md), ideally compared with a reference
    (exact solution, experiment, DNS). Add it to the example list in

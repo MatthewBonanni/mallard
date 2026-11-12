@@ -32,14 +32,14 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 
 | Dimension | Keys |
 |---|---|
-| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
+| Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
 | Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
-| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
+| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
-| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`; `boundaries.p0`; `physics.p_ref` |
-| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries and `probes.reference` |
-| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`, `output.reference`; `boundaries.p0`; `physics.p_ref` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference` |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
 | Acceleration (m/s^2) | `source.gravity` |
 | Rate (1/s) | `sponges.strength` |
@@ -53,7 +53,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 
 Every other real-valued key (`cfl`, `gamma`, `Pr`, mole fractions, model
 constants, tolerances, ...) is dimensionless. `statistics.phase.level` has the dimension of its
-`variable` (`P`: pressure, `T`: temperature, `U_X`: velocity, ...).
+`variable` (`P`: pressure, `T`: temperature, `U_X`: velocity, ...), and `statistics.conditional.range` those of the variables of `on`.
 
 ## Checking an input
 
@@ -719,7 +719,7 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence-turbulence).
 | Key | Description |
 |---|---|
 | `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z` (not `t`, even when `u` depends on `t`), positive semidefinite |
-| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `tools/post/plane_average.py` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
+| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `mallard post average --homogeneous` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
 | `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed); with a `u` of `t`, that of `t = 0`, so set it when the mean starts at rest or varies widely |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
@@ -935,11 +935,25 @@ changing it.
 
 | Key | Description |
 |---|---|
-| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE` and, for mixtures, `Y_<species>` and `RHOY_<species>` |
-| `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`) whose covariance to keep; their means are kept too |
+| `fields` | Variables to average: `RHO`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, the conserved `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, for mixtures `Y_<species>` and `RHOY_<species>`, with `[chemistry]` the heat release rate `HRR` and the mass production rates `OMEGA_<species>` (evaluated at each sample from the state), and the [derived fields](guide/output.md#derived-fields) of the derived and mixture groups of `mallard list fields` (`MACH`, `P0`, `ENSTROPHY`, `MIXTURE_FRACTION`, ...), computed at each sample as `[[write_data]]` writes them, with the `[output]` input they need |
+| `products` | Pairs `"A*B"` of those variables (e.g. `"U_X*U_X"`, `"U_X*U_Y"`, `"T*T"`, `"P*MACH"`) whose covariance to keep; their means are kept too |
 | `t_start` | Start time, default 0; a [trigger](#triggers) with `"start statistics"` starts them instead |
 | `interval` | Every this many steps, default 1 |
 | `reset` | `true` starts the averages afresh on a restart instead of continuing those of the restart file (default `false`) |
+| `batch` | Confidence intervals of the averages by batch means: the duration of a batch (time), at least 10 integrated autocorrelation times; default none (no intervals) |
+| `confidence` | Confidence of those intervals, default 0.95 (with `batch`) |
+
+With `batch`, the samples also fall in consecutive batches of that duration
+from the start of the averages (a sample in the batch that holds its time);
+each batch keeps its own averages, and when a sample opens a batch, the last
+one's averages join the mean and the sum of squared deviations of the batch
+values (Welford). `CI_MEAN_<A>` and `CI_COV_<A>_<B>` are the half widths
+`t s / sqrt(n)` of the intervals over the `n` closed batches (Student's t with
+`n - 1` degrees of freedom; NaN before two). Memory: three more device arrays
+per average (the current batch and the two batch sums), four times what the
+averages take, and on the host also the half widths; restart files carry
+the batch state as `BATCH_<average>`, `BATCH_AVG_<average>` and
+`BATCH_M2_<average>`.
 
 The averages are output variables for `[[write_data]]`: `MEAN_<A>` and
 `COV_<A>_<B>`, the covariance `<A'B'> = <AB> - <A><B>` (kept directly, by a
@@ -950,11 +964,14 @@ to round-off when they are small), e.g. `MEAN_U` (a vector), `COV_U_X_U_Y`, or
 number of ranks; a restart file without them starts them afresh, and one with
 only some of them is an error unless `reset = true`. With
 `chemistry.fuse_half_steps`, sampling steps read the state like output does.
-`tools/post/plane_average.py` averages them further over homogeneous directions
-(e.g. over x and z of a channel, as a function of y). `fields` and
-`products` may be left out when `[statistics.spectra]` or
-`[statistics.phase]` is given, or a probe with `average = true`; both take `interval` and `t_start` from
-`[statistics]` unless they set their own, and `reset` applies to them too.
+`mallard post average --statistics --homogeneous x,z` averages them further
+over homogeneous directions (e.g. over x and z of a channel, as a function of
+y), and `mallard post average` computes the same averages from saved
+snapshots of a run without them
+([guide](guide/statistics.md#averages-of-saved-snapshots-mallard-post-average)). `fields` and
+`products` may be left out when `[statistics.spectra]`,
+`[statistics.phase]` or `[[statistics.conditional]]` is given, or a probe with `average = true`; these take
+`interval` and `t_start` from `[statistics]` unless they set their own, and `reset` applies to them too.
 Probes may list the averages as variables (`MEAN_P`, ...), and probes with
 `average = true` sample on the schedule of `interval` and `t_start`
 ([time averages](#probes)).
@@ -1029,6 +1046,74 @@ weights and the trigger state.
 | `probe`, `variable`, `level` | The trigger point `[x, y(, z)]`, its variable and the level of its upward crossings (default 0) |
 | `interval`, `t_start` | Sampling, default those of `[statistics]` |
 
+### `[[statistics.conditional]]`
+
+PDFs of one variable, joint PDFs of two, and the conditional means and
+variances of fields on them, e.g. on the mixture fraction or the progress
+variable of a flame ([guide](guide/statistics.md#conditional-statistics-and-pdfs-statisticsconditional)).
+Each sample adds every owned cell, weighted by its volume (or mass) times its
+fraction in `region` and the time since the previous sample, to the bin of its
+values of `on`; cells outside the ranges count in the total weight only. The
+per-bin sums of a sample are exact (fixed point of two 64-bit integer limbs,
+reduced over the ranks with NCCL in NCCL runs, else MPI), so the results are
+the same bit for bit on any number of ranks, and every rank holds them.
+
+| Key | Description |
+|---|---|
+| `on` | One variable (a PDF) or an array of two (a joint PDF): any of the `[statistics]` fields. Required |
+| `bins` | Equal bins of each range: an integer for every variable, or an array of one per variable, 1 to 65536 and at most 1048576 in all (default 50) |
+| `range` | `[low, high]` of the variable (`[[low, high], [low, high]]` for two), in its units; default `[0.0, 1.0]` for `MIXTURE_FRACTION` and `PROGRESS_VARIABLE`, required for other variables. The upper end falls in the last bin |
+| `fields` | Variables whose conditional mean and variance to keep: any of the `[statistics]` fields (default none: the PDF only) |
+| `weight` | `"volume"` (default) or `"mass"`: density-weighted (Favre) PDFs and moments |
+| `region` | A region of the mesh's dimension, its name, or a region of the mesh: each cell weighted by its fraction in it (default the whole mesh) |
+| `file` | Output CSV file, default `conditional_<on>.csv` (`conditional_<on>_<on>.csv` for two variables); entries need files of their own |
+| `interval`, `t_start` | Sampling, default those of `[statistics]` |
+
+The file, written with the other output (`[[write_data]]`) and at the end,
+holds the run and snapshot comment lines (the averaging window and samples), a
+`# conditional` comment line (the variables, bins, ranges, weighting, region
+and `outside`, the fraction of the total weight outside the ranges), the
+header and a units line, then a row per bin, the second variable's bins
+fastest: the bin centers, `PDF` (the bin's weight over the total weight and
+the bin's width: per unit of each variable), and per field `MEAN_<f>`,
+`COV_<f>_<f>` (the conditional variance) and `RMS_<f>`, `nan` in bins no
+cell reached. Restart files (format version 6) carry each entry's weights,
+means and sums of squared deviations by its position in the list; one holding
+an entry of other variables, bins or fields there is an error unless
+`statistics.reset = true`. `mallard post average --conditional` computes them
+from saved snapshots.
+
+### `[statistics.convergence]`
+
+The end of the initial transient and confidence intervals of monitored values
+([guide](guide/statistics.md#convergence-statisticsconvergence)): each listed
+value gets a sample each time its monitor writes it. MSER-5 on each signal
+finds where its transient ends, again each time its series has grown by 5%;
+the run is stationary once an end in the first half of the series has been
+accepted for every signal, from the latest of the latest accepted ends
+(`t_stationary`, which can move later as the series grow). From then on, the samples after `t_stationary` and after
+the start of the `[statistics]` averages give the mean and the variance
+(of `(x - mean)^2`) with confidence intervals by non-overlapping batch means
+and Student's t, the integrated autocorrelation time `tau` (samples, Sokal's
+window `M >= 5 tau`) and `n_eff = samples / tau`. Converged: stationary, every
+half width within `tolerance` of the mean (and `variance_tolerance` of the
+variance) and every batch at least `10 tau` long. Triggers read the values as
+`convergence_stationary`, `convergence_t_stationary`, `convergence_converged`
+and `convergence_<signal>_{mean, ci, variance, variance_ci, tau, n_eff,
+samples}` (NaN before the run is stationary); restart files carry the
+histories (reset with `statistics.reset`). Runs on the host, on every rank,
+only when a signal has a new sample.
+
+| Key | Description |
+|---|---|
+| `signals` | Monitored values, named as in `[[triggers]]`: `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, `<probe>_<variable>`. Required |
+| `confidence` | Confidence of the intervals, default 0.95 |
+| `batches` | Batches of the batch means (at least 2), default 20 |
+| `tolerance` | Relative half width of every mean at which the run is converged (adds `converged`), default none |
+| `variance_tolerance` | Also of every variance (needs `tolerance`), default none |
+| `min_samples` | Samples of a signal before MSER-5 is tried (at least 10), default 100 |
+| `file` | Output CSV (`step, t` and the values, with units), default `convergence.csv` |
+
 ## `[[probes]]`
 
 Samples of the solution on a geometry (points, curves, surfaces, exact cut planes or boundary zones;
@@ -1049,7 +1134,7 @@ ranks. A probe that is not due costs nothing.
 | `boundary` | Instead of a type: a boundary zone name, or a list of them; each face is a sample (below) |
 | `boundary_type` | Instead of, or with, `boundary`: every zone whose `[[boundaries]]` condition has this `type`, or `wall` for all walls |
 | `region` | Instead of `type`: a [region](#regions), or the name of one in [`[regions]`](#named-regions-regions), whose cells the probe reduces (below); it must fill space (a volume; an area in 2D). Default none |
-| `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP` |
+| `reference` | `{rho, u = [...], p}`: free stream of `CF` and `CP`. Default: `[output] reference` |
 | `sampling` | `cell` (default): the average of the cell holding each sample. `point`: the value at the sample, from the reconstruction (see below) |
 | `interval` / `time_interval` | Every this many steps (default 1) / this much simulation time; with `time_interval` the time step is shortened to land on each output time, as for `[[write_data]]` |
 | `format` | `csv` (default), `hdf5` (builds with `-DMallard_ENABLE_HDF5=ON`), `vtkhdf` (likewise: one VTKHDF `PolyData` file of the samples, as vertices or polylines, with their point values at every output time; ParaView opens it as a time series) or `vtp` |
@@ -1355,7 +1440,7 @@ step ([Triggers](guide/running.md#triggers)).
 
 | Key | Description |
 |---|---|
-| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>` and, for probes of one point, `<probe>_<variable>`; true when not 0. Required |
+| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
 | `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set). Required |
 | `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
 | `for` | Simulated time the condition must hold before it fires, default 0 |
@@ -1640,7 +1725,18 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the run block; `false` skips reading it again for very large meshes. Default `true` |
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
+| `reference` | `{rho, u = [...], p}`: the free stream of the [derived field](guide/output.md#derived-fields) `CP`, and the default `reference` of every `[[probes]]` entry's `CF` and `CP` (a probe's own replaces it). Default none: `CP` is then an error that asks for it |
 | `write_stencils` | Path of an HDF5 file of every cell's reconstruction stencils as the run builds them, written once at the setup ([layout](guide/output.md#mesh-and-stencil-fields)); `""` writes none. Needs HDF5. Default `""` |
+
+### `[output.mixture]`
+
+Gas mixtures: what the [mixture fields](guide/output.md#mixture-fields) `MIXTURE_FRACTION`, `PROGRESS_VARIABLE`, `FLAME_INDEX` and `SCALAR_DISSIPATION` are relative to. Every key is optional; a field whose input is missing is an error that names the key.
+
+| Key | Description |
+|---|---|
+| `fuel`, `oxidizer` | The two streams of Bilger's mixture fraction, both or neither: a composition (`{X = {CH4 = 1}}`, `{Y = {...}}`, numbers) or the name of a `[[boundaries]]` entry whose uniform `X` or `Y` they take (`"fuel_inlet"`) |
+| `fuel_species`, `oxidizer_species` | The species of the flame index. Default: with the streams, the most abundant species of the fuel stream with C or H, and of the oxidizer stream with O and neither C nor H (`CH4` and `O2` of methane and air) |
+| `progress` | `{species = [...], burnt = ...}`: c = the sum of the species' mass fractions divided by `burnt` (default 1: the raw sum); or `{T_unburnt = ..., T_burnt = ...}`: c = (T - T_unburnt) / (T_burnt - T_unburnt) |
 
 The run's summary reports the size of the files written and the time spent writing them (in the background with `async`); `output` in its wall time is what the run waited for.
 
@@ -1661,7 +1757,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 | Key | Description |
 |---|---|
 | `prefix` | Output path prefix; directories are created as needed |
-| `format` | Which to choose: [output](guide/output.md#which-format). `vtkhdf` (default: VTK's HDF5 format, see below; ParaView 5.12+, PyVista, h5py), `vtu` (with a `.pvd` series next to it; any VTK XML reader, e.g. Tecplot, and builds without HDF5), `xdmf` (XDMF indexes over HDF5 files, see below; VisIt, meshio, ParaView of any version) or `restart`. `hdf5`, the name of `xdmf` before 0.10.0, is an error (VTKHDF is HDF5 too); `mallard input upgrade` rewrites it to `vtkhdf`. Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
+| `format` | Which to choose: [output](guide/output.md#which-format). `vtkhdf` (default: VTK's HDF5 format, see below; ParaView 5.12+, PyVista, the [Python package](guide/python.md), h5py), `vtu` (with a `.pvd` series next to it; any VTK XML reader, e.g. Tecplot, and builds without HDF5), `xdmf` (XDMF indexes over HDF5 files, see below; VisIt, meshio, ParaView of any version) or `restart`. `hdf5`, the name of `xdmf` before 0.10.0, is an error (VTKHDF is HDF5 too); `mallard input upgrade` rewrites it to `vtkhdf`. Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
 | `series` | (`vtkhdf`) `false` (default): one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`; `true`: every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
 | `fields` | (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), `Q_CRITERION` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs; called `Q` before 0.10.0, which is now an error), `LAMBDA2` (the middle eigenvalue of S² + Ω², negative in vortex cores) and `SCHLIEREN` (the density gradient magnitude, kg/m⁴), with the gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares; see [derived fields](guide/output.md#derived-fields)), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`, and the [mesh and stencil fields](guide/output.md#mesh-and-stencil-fields) `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` and `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION`. A trailing `*` selects every field with that prefix, e.g. `Y_*`; `mallard list fields input.toml` lists those of a case |
@@ -1692,7 +1788,7 @@ the units and descriptions are HDF5 attributes of each dataset (`units`,
 `long_name`), and the root group carries the run block (`mallard_run`) and the format
 `version` as HDF5 attributes and the snapshot blocks as the dataset `mallard_snapshot`, which VTK ignores;
 the field data holds `TIME` and `STEP` ([snapshot metadata](guide/output.md#snapshot-metadata)).
-`tools/mallard/vtkhdf.py` reads the files.
+The [Python package](guide/python.md) reads the files (`mallard.open`).
 
 `format = "xdmf"` (`"hdf5"` before 0.10.0; builds with `-DMallard_ENABLE_HDF5=ON`; several ranks need
 parallel HDF5) scales to large runs: every rank writes its part of one file per
@@ -1717,7 +1813,7 @@ two files instead of one per rank. A shared file pays off on parallel file
 systems; on one node's local disk, which serializes writes to a file, VTU
 pieces write faster beyond a few ranks (2.1M hexahedra, 16 ranks: 115 ms per
 HDF5 snapshot against 72 ms, 1 rank: 140 ms against 1.1 s). VTU output remains
-the simpler choice for small runs. `tools/mallard/h5.py` reads the files.
+the simpler choice for small runs. The [Python package](guide/python.md) reads the files (`mallard.open`).
 
 ## `mallard reactor`
 
