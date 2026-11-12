@@ -791,6 +791,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 |---|---|
 | `sensor_threshold` | Ducros sensor above which a cell compressing the flow is a shock, default 0.65 (1 disables the Riemann solver) |
 | `upwind_floor` | Upwind fraction of the other cells, default 0; a small value (e.g. 0.05) damps grid-scale noise on very irregular meshes, at the cost of numerical dissipation the budget then reports |
+| `central` | The central flux's states: `cell_averages`, KEEP on the two cells' values, which changes the kinetic energy by exactly the pressure work on interior faces (second order where the sensor is off; the reconstructed states still feed the Riemann part); or `reconstructed`, KEEP on the reconstructed face states, which conserves kinetic energy only to the reconstruction's accuracy and can add it. Default `cell_averages` with TENO (with TENO's states the central flux adds kinetic energy), `reconstructed` with MUSCL and first order (the `les` preset's; with no viscosity or SGS model to remove energy, MUSCL's states add it too, so Euler runs set `cell_averages`). With a gas mixture, `cell_averages` takes each cell's `gamma` and `e0` (with `double_flux`, the cell's frozen ones). [Design](design/les.md#44-central-flux-for-teno-689) |
 
 ### `[numerics.face_reconstruction]`
 
