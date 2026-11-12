@@ -89,7 +89,7 @@ class CrossedLevels {
         Kokkos::View<const uint32_t *> offsets, conditions;  // of each piece cut from conditions' levels
         Kokkos::View<const double *> radii;
         Kokkos::View<uint32_t *> cells;
-        Kokkos::View<double **[N_DIM + 1]> values;
+        Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight> values;
 };
 
 /**

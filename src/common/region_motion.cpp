@@ -241,7 +241,7 @@ CrossedLevels::CrossedLevels(const Mesh & mesh, const Region & region, std::shar
     conditions = upload(h_conditions, "region_crossed_conditions");
     radii = upload(reads.radii, "region_crossed_radii");
     cells = Kokkos::View<uint32_t *>("region_crossed_cells", n_owned);
-    values = Kokkos::View<double **[N_DIM + 1]>("region_crossed_levels", n_owned, m_levels->size());
+    values = Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight>("region_crossed_levels", n_owned, m_levels->size());
 }
 
 Levels CrossedLevels::update(const double t) const {
@@ -281,8 +281,10 @@ Levels CrossedLevels::update(const double t) const {
     Levels out;
     const auto h_cells = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(cells, rows));
     out.cells.assign(h_cells.data(), h_cells.data() + n);
-    out.values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),
-                                                     Kokkos::subview(values, rows, Kokkos::ALL, Kokkos::ALL));
+    const Kokkos::View<double **[N_DIM + 1], Kokkos::LayoutRight, Kokkos::HostSpace> h_values(
+        Kokkos::view_alloc(Kokkos::WithoutInitializing, "region_crossed_levels"), n, n_k);
+    Kokkos::deep_copy(h_values, Kokkos::subview(values, rows, Kokkos::ALL, Kokkos::ALL));
+    out.values = h_values;
     return out;
 }
 

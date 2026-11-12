@@ -15,6 +15,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "diagnostic_code.h"
 #include "log.h"
 #include "mechanism.h"
 #include "run_log.h"
@@ -85,7 +86,7 @@ struct MarginsFunctor {
     }
 };
 
-/** @brief Over owned cells: TENO-troubled cells, cells whose MUSCL limiter is active, and the sum of upwind fractions. */
+/** @brief Over owned cells: TENO-troubled cells, cells the MUSCL limiter cuts, the sum of upwind fractions. */
 struct ActivityFunctor {
     Kokkos::View<rtype *> sigma;
     rtype sigma_threshold;
@@ -107,7 +108,7 @@ struct ActivityFunctor {
         if (limiters.extent(0) > 0) {
             rtype phi = 1.0_r;
             FOR_I_CONSERVATIVE phi = Kokkos::fmin(phi, limiters(c, i));
-            if (phi < 1.0_r) a.v[1] += 1.0;
+            if (phi < rtype(health::LIMITED_BELOW)) a.v[1] += 1.0;
         }
         if (upwind.extent(0) > 0) a.v[2] += static_cast<double>(upwind(c));
     }
@@ -317,7 +318,7 @@ void Solver::report_health(const step_queue::ProgressLocals & locals, const std:
     const double mean_rho = sums[2] > 0.0 ? sums[0] / sums[2] : 0.0, mean_p = sums[2] > 0.0 ? sums[1] / sums[2] : 0.0;
     auto warn = [&](const std::string & kind, const std::string & message) {
         if (!run_health.warned.insert(kind).second) return;
-        logging::warning(message);
+        logging::warning(diagnostic_code::HEALTH_MARGIN, message);
     };
     for (const auto & e : report.margins) {
         if (!e.valid) continue;

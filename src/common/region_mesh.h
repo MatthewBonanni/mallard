@@ -70,7 +70,7 @@ Elements elements(const Mesh & mesh, const Region & region);
  */
 struct Levels {
     std::vector<uint32_t> cells;
-    Kokkos::View<const double **[N_DIM + 1], Kokkos::HostSpace> values;
+    Kokkos::View<const double **[N_DIM + 1], Kokkos::LayoutRight, Kokkos::HostSpace> values;
 };
 
 /**
