@@ -1,0 +1,17 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/channel_inflow_retau180/input.toml",
+  "examples/flame_outflow/input.toml",
+  "examples/pulsed_jet/input.toml",
+  "examples/shock_bubble_3d/input.toml",
+  "examples/source_regions/input.toml",
+  "examples/turbulent_inflow_duct/input.toml",
+  "tutorials/wedge/input.toml"
+ ],
+ "type": "array"
+}

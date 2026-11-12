@@ -1,0 +1,11 @@
+{
+ "default": "false",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/average_outlet/input.toml"
+ ],
+ "type": "bool"
+}

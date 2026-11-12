@@ -1,0 +1,14 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/channel_inflow_retau180/input.toml",
+  "examples/channel_les/input.toml",
+  "examples/channel_les/input_590.toml",
+  "examples/channel_retau180/input.toml"
+ ],
+ "type": "array"
+}

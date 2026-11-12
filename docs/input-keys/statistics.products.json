@@ -1,0 +1,18 @@
+{
+ "default": "[]",
+ "dims": [
+  3
+ ],
+ "set_in": [
+  "examples/channel_inflow_retau180/input.toml",
+  "examples/channel_les/input.toml",
+  "examples/channel_les/input_590.toml",
+  "examples/channel_retau180/input.toml",
+  "examples/channel_wmles/lm2000.toml",
+  "examples/channel_wmles/lm5200.toml",
+  "examples/channel_wmles/tl_m1.7.toml",
+  "examples/channel_wmles/tl_m3.0.toml",
+  "examples/turbulent_inflow_duct/input.toml"
+ ],
+ "type": "array"
+}
