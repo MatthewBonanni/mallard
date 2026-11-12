@@ -1449,6 +1449,21 @@ void Solver::init_numerics() {
     }
     hybrid_threshold = find_real_or(hybrid_input, "sensor_threshold", dim::none, 0.65_r);
     hybrid_floor = find_real_or(hybrid_input, "upwind_floor", dim::none, 0.0_r);
+    static const std::map<std::string, CentralFlux> central_fluxes = {
+        {"reconstructed", CentralFlux::RECONSTRUCTED}, {"cell_averages", CentralFlux::CELL_AVERAGES}};
+    // TENO's states make KEEP add kinetic energy (docs/design/les.md, section 4.4)
+    const std::string central = find_value_or<std::string>(hybrid_input, "central",
+                                                           teno && !is_mixture() ? "cell_averages" : "reconstructed");
+    if (!central_fluxes.contains(central)) {
+        throw not_accepted(hybrid_input, "numerics.hybrid.central", central, {"cell_averages", "reconstructed"});
+    }
+    hybrid_central = central_fluxes.at(central);
+    if (hybrid_central == CentralFlux::CELL_AVERAGES && is_mixture()) {
+        throw InputError({.key = "numerics.hybrid.central",
+                          .line = line_of(hybrid_input, "central"),
+                          .message = "\"cell_averages\" is not available for mixtures yet",
+                          .fix = "Use central = \"reconstructed\" (the default for mixtures)"});
+    }
     if (!(hybrid_threshold >= 0.0_r && hybrid_threshold <= 1.0_r) || !(hybrid_floor >= 0.0_r && hybrid_floor <= 1.0_r)) {
         throw InputError({.key = "numerics.hybrid",
                           .line = line_of(hybrid_input),
@@ -2539,8 +2554,12 @@ void Solver::print_setup(const ResolvedInput & resolved) const {
     for (const auto & item : face_reconstruction->summary()) numerical.push_back(item);
     numerical.emplace_back("Riemann solver", RIEMANN_SOLVER_NAMES.at(riemann_solver_type));
     if (hybrid_flux) {
-        numerical.emplace_back("Convective flux", "hybrid: KEEP central, the Riemann solver where the compression "
-                                                  "sensor exceeds its threshold");
+        numerical.emplace_back("Convective flux", std::string("hybrid: KEEP central on the ") +
+                                                      (hybrid_central == CentralFlux::CELL_AVERAGES
+                                                           ? "cell values"
+                                                           : "reconstructed states") +
+                                                      ", the Riemann solver where the compression sensor exceeds "
+                                                      "its threshold");
     }
     numerical.emplace_back("Time integrator", TIME_INTEGRATOR_NAMES.at(time_integrator->get_type()));
     if (step_controller.enabled()) numerical.emplace_back("Step controller", step_controller.summary());
