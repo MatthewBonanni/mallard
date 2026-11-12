@@ -35,6 +35,7 @@
 #include "case_view.h"
 #include "probe_geometry.h"
 #include "probe_spectra.h"
+#include "common_io.h"
 #include "probe_surface.h"
 #include "data.h"
 #include "statistics.h"
@@ -242,7 +243,8 @@ class Probes {
         /** @brief The latest of them, of each probe that has written (rank 0 when distributed). */
         std::vector<MonitorValues> recorded() const;
 
-        std::vector<std::pair<std::string, std::string>> summary() const;
+        /** @brief The outputs as the setup banner lists them, one per probe. */
+        std::vector<OutputSummary> summary() const;
         /**
          * @brief The case view's blocks of the probes on geometries of their own (not regions, which the
          *        view has already): their points, polylines or polygons, on rank 0 (empty elsewhere).

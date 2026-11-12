@@ -1314,25 +1314,25 @@ void TENO::init(const Input & input) {
     largest_stencil = comm::allreduce(largest_stencil, comm::Op::MAX);
 }
 
-logging::Items TENO::summary() const {
-    using logging::format;
-    std::string stencils = format("large %d+1 (largest %u), small %d+1", static_cast<int>(n_stencil_large),
-                                  largest_stencil, static_cast<int>(n_stencil_small));
+report::Summary TENO::summary() const {
+    using logging::count;
+    report::Summary s;
+    s.setting("Reconstruction", logging::format("TENO, order %d (degree %d)", degree + 1, degree));
+    s.setting("TENO switch", std::string("characteristic ") + (characteristic ? "yes" : "no") + ", bound-preserving " +
+                                 (bound_preserving ? "yes" : "no") + (C_T > 0.0_r ? "" : ", C_T adaptive"));
+    if (!setup_status.empty()) s.setting("TENO setup", setup_status);
+    if (!cache_status.empty()) s.setting("TENO cache", cache_status);
+    s.quantity("TENO face quadrature points", count(n_face_quadrature_points()), "points", "per face");
+    s.quantity("TENO large stencil", count(n_stencil_large + 1u), "cells", "the cell and its neighbors");
+    s.quantity("TENO largest stencil", count(largest_stencil), "cells", "");
+    s.quantity("TENO small stencil", count(n_stencil_small + 1u), "cells", "the cell and its neighbors");
     if (n_sector_unavailable > 0 && comm::size() == 1) {
-        stencils += format(", %lld sector stencils cut by boundaries", static_cast<long long>(n_sector_unavailable));
+        s.quantity("TENO sector stencils cut", count(static_cast<uint64_t>(n_sector_unavailable)), "stencils",
+                   "by boundaries");
     }
-    logging::Items out = {
-        {"Reconstruction", format("TENO, order %d (degree %d), %d face quadrature points", degree + 1, degree,
-                                  static_cast<int>(n_face_quadrature_points()))},
-        {"TENO stencils", stencils},
-        {"TENO switch", "threshold " + logging::real(double(sigma_threshold)) + ", C_T " +
-                            (C_T > 0.0_r ? logging::real(double(C_T)) : std::string("adaptive")) + ", characteristic " +
-                            (characteristic ? "yes" : "no") + ", bound-preserving " +
-                            (bound_preserving ? "yes" : "no")},
-    };
-    if (!setup_status.empty()) out.emplace_back("TENO setup", setup_status);
-    if (!cache_status.empty()) out.emplace_back("TENO cache", cache_status);
-    return out;
+    s.quantity("TENO troubled_threshold", logging::real(double(sigma_threshold)), "-", "switch");
+    if (C_T > 0.0_r) s.quantity("TENO C_T", logging::real(double(C_T)), "-", "cutoff");
+    return s;
 }
 
 uint8_t TENO::n_face_quadrature_points() const {
