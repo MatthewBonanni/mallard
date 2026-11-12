@@ -535,7 +535,9 @@ TEST(CliTest, InfoOfARunDirectorySummarizesItsOutcomeHealthCostAndWarnings) {
     std::istringstream lines(r.out);
     std::string line, previous = "";
     for (bool first = true; std::getline(lines, line); first = false, previous = line) {
-        if (!first && line.starts_with("== ")) EXPECT_EQ(previous, "") << line << "\n" << r.out;
+        if (!first && line.starts_with("== ")) {
+            EXPECT_EQ(previous, "") << line << "\n" << r.out;
+        }
     }
 }
 
