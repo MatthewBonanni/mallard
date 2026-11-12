@@ -26,6 +26,7 @@
 #include "boundary.h"
 #include "gradient.h"
 #include "log.h"
+#include "report.h"
 #include "teno.h"
 
 enum class FaceReconstructionType {
@@ -71,7 +72,7 @@ class FaceReconstruction {
         /**
          * @brief Display lines for the run log.
          */
-        virtual logging::Items summary() const;
+        virtual report::Summary summary() const;
 
         /**
          * @brief Set the mesh.
@@ -297,7 +298,7 @@ class MUSCL : public FaceReconstruction {
         MUSCL();
         ~MUSCL();
         void init(const Input & input) override;
-        logging::Items summary() const override;
+        report::Summary summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
@@ -331,7 +332,7 @@ class TENO : public FaceReconstruction {
         TENO();
         ~TENO();
         void init(const Input & input) override;
-        logging::Items summary() const override;
+        report::Summary summary() const override;
         uint8_t n_face_quadrature_points() const override;
         void calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;

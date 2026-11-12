@@ -36,6 +36,7 @@
 #include "region_input.h"
 #include "run_page.h"
 #include "snapshot_block.h"
+#include "diagnostic_code.h"
 
 namespace fs = std::filesystem;
 
@@ -184,11 +185,101 @@ void print_snapshot_block(const output::Contents & c) {
     }
     item("Format", b.format + (b.format_version >= 0 ? ", version " + std::to_string(b.format_version) : ""));
     item("Solver precision", b.solver_precision.empty() ? "-" : b.solver_precision);
+    if (!b.reconstruction.method.empty()) {
+        std::string fallback;
+        for (const std::string & m : b.reconstruction.fallback) fallback += (fallback.empty() ? "" : ", then ") + m;
+        item("Point values", b.reconstruction.method + ", order " + std::to_string(b.reconstruction.order) +
+                                 (fallback.empty() ? "" : "; falling back to " + fallback));
+    }
     if (b.averaged) {
         item("Averaged over", "t = " + seconds(b.average_start) + " to " + seconds(b.average_end) + " s, " +
                                   (b.samples >= 0 ? count(static_cast<uint64_t>(b.samples)) : std::string("-")) +
                                   " samples");
     }
+    std::vector<std::vector<std::string>> rows;
+    for (const snapshot_block::Field & f : b.fields) {
+        const snapshot_block::Average & a = f.average;
+        if (a.kind.empty()) continue;
+        std::string what = a.kind + " of " + list_text(a.of, ", ");
+        if (a.kind == "phase") {
+            what += ", bin " + std::to_string(a.bin) + " of " + std::to_string(a.bins) +
+                    (a.trigger.empty() ? " of the period " + seconds(a.period) + " s" : " of " + a.trigger + "'s cycle");
+        }
+        rows.push_back({f.name, what, a.weighting.empty() ? "-" : a.weighting,
+                        "t = " + seconds(a.start) + " to " + seconds(a.end) + " s",
+                        a.samples >= 0 ? count(static_cast<uint64_t>(a.samples)) : "-",
+                        a.interval >= 0 ? std::to_string(a.interval) : "-"});
+    }
+    if (!rows.empty()) {
+        logging::line("  Averaged fields: what each averages (Reynolds: unweighted by density), each sample weighted "
+                      "by the time since the previous one.");
+        logging::table({"field", "average", "weighting", "window", "samples", "every [steps]"}, rows);
+    }
+}
+
+/** @brief The probe sampling block of a probe file: how its values are read, and where each located sample is. */
+void print_probe_sampling(const output::Contents & c) {
+    if (c.sampling.empty()) return;
+    json::Value b;
+    try {
+        b = json::parse(c.sampling);
+    } catch (const std::exception &) {
+        return;
+    }
+    logging::section("Probe sampling", "where the samples are read");
+    const json::Value * r = b.find("reconstruction");
+    if (r && r->type == json::Value::Type::OBJECT) {
+        std::string fallback;
+        for (const json::Value & m : (*r)["fallback"].array) fallback += (fallback.empty() ? "" : ", then ") + m.string;
+        item("Sampling", "point: " + (*r)["method"].string + ", order " +
+                             std::to_string(static_cast<int>((*r)["order"].number)) +
+                             (fallback.empty() ? "" : "; falling back to " + fallback));
+    } else {
+        item("Sampling", "cell: the value of the cell holding each sample");
+    }
+    std::string values;
+    for (const json::Value & v : b["variables"].array) {
+        values += (values.empty() ? "" : ", ") + v["name"].string + " " + v["value"].string;
+    }
+    item("Values", values.empty() ? "-" : values);
+    const json::Value * clipped = b.find("clipped");
+    std::string dropped;
+    if (clipped && clipped->type == json::Value::Type::OBJECT) {
+        dropped = count(static_cast<uint64_t>((*clipped)["dropped"].number)) + " of " +
+                  count(static_cast<uint64_t>((*clipped)["of"].number)) + " samples outside the mesh dropped";
+        for (const char * m : {"length", "area", "volume"}) {
+            if (const json::Value * f = clipped->find(std::string(m) + "_fraction")) {
+                dropped += " (" + format("%.3g", 100.0 * f->number) + "% of the " + m + ")";
+            }
+        }
+    }
+    const json::Value * points = b.find("points");
+    if (!points || points->type != json::Value::Type::OBJECT) {
+        item("Locations", "at the faces, cut cells or elements the probe is made of");
+        if (!dropped.empty()) item("Clipped", dropped);
+        return;
+    }
+    const json::Value & p = *points;
+    const uint64_t n = static_cast<uint64_t>(p["n"].number);
+    item("Located samples", count(n) + (dropped.empty() ? "" : "; " + dropped));
+    item("Distance", "requested point to where it is read: max " + format("%.6g", p["max_distance"].number) +
+                         " m, mean " + format("%.6g", p["mean_distance"].number) + " m");
+    auto xyz = [](const json::Value & x) {
+        std::string out;
+        for (const json::Value & d : x.array) out += (out.empty() ? "" : ", ") + format("%.6g", d.number);
+        return "(" + out + ")";
+    };
+    constexpr uint64_t ROWS = 12;
+    std::vector<std::vector<std::string>> rows;
+    for (uint64_t i = 0; i < n; i++) {
+        if (n > ROWS && i == ROWS / 2) {
+            rows.push_back({"...", count(n - ROWS) + " more; --format json lists every one"});
+            i = n - ROWS / 2;
+        }
+        rows.push_back({std::to_string(i), xyz(p["requested"].array[i]), format("%.0f", p["cell"].array[i].number),
+                        xyz(p["centroid"].array[i]), format("%.6g", p["distance"].array[i].number)});
+    }
+    logging::table({"sample", "requested [m]", "cell", "cell centroid [m]", "distance [m]"}, rows);
 }
 
 /** @brief "t = 0.002 s, step 2", or the range of several times. */
@@ -316,16 +407,22 @@ void print_fields(const output::Contents & c) {
                                         range ? format("%.6g", f.min) : "-", range ? format("%.6g", f.max) : "-"};
         if (block) {
             const snapshot_block::Field * stored = block->field(f.name);
+            row.push_back(stored && !stored->value.empty() ? stored->value : "-");
             row.push_back(stored && !stored->stored.empty() ? stored->stored : "-");
         }
         row.push_back(f.long_name.empty() ? "-" : f.long_name);
         rows.push_back(std::move(row));
     }
-    logging::table(block ? std::vector<std::string>{"field", "units", "components", "min", "max", "stored", "description"}
+    logging::table(block ? std::vector<std::string>{"field", "units", "components", "min", "max", "value", "stored",
+                                                    "description"}
                          : std::vector<std::string>{"field", "units", "components", "min", "max", "description"},
                    rows);
     unrecorded_note(rows);
     if (vectors) logging::line("  min and max of fields with several components are of their magnitude.");
+    if (block) {
+        logging::line("  value: cell_average, the cell's average; cell_state, computed from the cell's averaged state; "
+                      "point_value, the reconstruction's value at the sample.");
+    }
 }
 
 void print_restart(const output::Contents & c) {
@@ -373,6 +470,7 @@ void print_contents(const output::Contents & c) {
     const json::Value p = parsed_run(c);
     if (!p.is_null()) print_run(p);
     print_snapshot_block(c);
+    print_probe_sampling(c);
 }
 
 /** @brief A file an output record of the run log lists: as complete, of this size and SHA-256 (empty: not hashed). */
@@ -442,14 +540,15 @@ json::Value run_block(const std::string & dir, const Record & record) {
 
 int print_input(const json::Value & block, const std::string & what) {
     if (block.is_null()) {
-        std::cerr << "mallard info: " << what << " has no run block (files of Mallard 0.9 and later have one), "
-                  << "so no input.\n";
+        logging::error(diagnostic_code::INFO, "mallard info: " + what +
+                                                  " has no run block (files of Mallard 0.9 and later have one), so no "
+                                                  "input.");
         return 1;
     }
     bool resolved = false;
     const std::string input = recorded_input(block, resolved);
     if (input.empty()) {
-        std::cerr << "mallard info: the run block of " << what << " records no input.\n";
+        logging::error(diagnostic_code::INFO, "mallard info: the run block of " + what + " records no input.");
         return 1;
     }
     std::cout << input;
@@ -486,9 +585,10 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
 int run_report(const std::string & dir) {
     const fs::path log = fs::path(dir) / "mallard.jsonl";
     if (!fs::exists(log)) {
-        std::cerr << "mallard info: " << dir << " has no mallard.jsonl, which --html builds the run report from "
-                  << "([output] run_log = \"\" writes none; the run's own report.html, [output] report, does not "
-                     "need it).\n";
+        logging::error(diagnostic_code::INFO, "mallard info: " + dir +
+                                                  " has no mallard.jsonl, which --html builds the run report from "
+                                                  "([output] run_log = \"\" writes none; the run's own report.html, "
+                                                  "[output] report, does not need it).");
         return 1;
     }
     const std::string page = (fs::path(dir) / "report.html").string();
@@ -636,11 +736,13 @@ void print_quality_table(const std::array<QualitySummary, MeshQuality::N_METRICS
 /** @brief mallard info on a mesh file: read once, for its summary and, as a Mesh, its quality. */
 int mesh_info(const std::string & path, const cli::Args & args, int argc, char ** argv) {
     if (args.has("--input")) {
-        std::cerr << "mallard info: " << path << " is a mesh file, which records no input.\n";
+        logging::error(diagnostic_code::INFO, "mallard info: " + path + " is a mesh file, which records no input.");
         return 1;
     }
     const std::string quality_file = args.value_or("--mesh-fields", args.value_or("--quality", ""));
-    if (args.has("--quality") && comm::is_root()) std::cerr << "mallard info --quality is deprecated: use --mesh-fields\n";
+    if (args.has("--quality")) {
+        logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard info --quality is deprecated: use --mesh-fields");
+    }
     const MeshBlock block = output::read_mesh(path);
     output::Contents c = output::mesh_contents(path, block);
     Kokkos::ScopeGuard kokkos(argc, argv);
@@ -718,7 +820,7 @@ int info_main(const cli::Args & args) {
             print_contents(c);
         }
     } catch (const std::exception & e) {
-        std::cerr << "mallard info: " << e.what() << "\n";
+        logging::error(diagnostic_code::INFO, std::string("mallard info: ") + e.what());
         return 1;
     }
     return 0;

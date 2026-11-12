@@ -119,7 +119,7 @@ class Convergence {
         /** @brief Continue a restart file's histories and values (afresh if it has none). */
         void restore(const RestartData & restart, const std::string & restart_file, double window_start);
 
-        std::vector<std::pair<std::string, std::string>> summary() const;
+        std::vector<OutputSummary> summary() const;
         const std::string & file_name() const { return file; }
 
     private:

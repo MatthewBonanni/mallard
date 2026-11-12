@@ -544,7 +544,9 @@ TEST(IO3DTest, RegionOutputWritesItsCellsAndOnlyTheirNodes) {
     const std::string dir = (scratch_dir() / "mallard_vtu3d_subset").string();
     auto mesh = mixed_mesh();
     CellFields fields(mesh->n_cells, {"RHO"});
-    CellSubset prisms{"prisms", {}, std::vector<double>(mesh->n_cells, 0.0)};
+    CellSubset prisms;
+    prisms.name = "prisms";
+    prisms.fractions.assign(mesh->n_cells, 0.0);
     std::set<uint32_t> nodes;
     for (uint32_t c = 0; c < mesh->n_owned(); c++) {
         if (mesh->h_n_nodes_of_cell(c) != 6) continue;

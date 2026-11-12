@@ -21,6 +21,7 @@
 
 #include "common.h"
 #include "log.h"
+#include "report.h"
 #include "mechanism.h"
 #include "reactor.h"
 #include "state.h"
@@ -137,7 +138,7 @@ class MixtureModel {
                            rtype * rhoY) const;
 
         /** @brief Display lines for the run log. */
-        logging::Items summary() const;
+        report::Summary summary() const;
 
     private:
         chemistry::Mechanism mech;

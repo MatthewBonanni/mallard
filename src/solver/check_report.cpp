@@ -173,6 +173,11 @@ std::string measure_units(const CheckRegion & g) {
     return "m^3";
 }
 
+std::string surface_units(const CheckRegion & g) {
+    if (N_DIM == 2) return g.per_radian ? "m^2 per radian" : "m";
+    return "m^2";
+}
+
 void regions_section(report::Text & text, const CheckReport & r) {
     if (r.regions.empty()) return;
     std::vector<Row> rows;
@@ -181,17 +186,42 @@ void regions_section(report::Text & text, const CheckReport & r) {
         static const char * kinds[4] = {"points", "curve", "surface", ""};
         const std::string kind = g.dimension == N_DIM ? "filled" : kinds[g.dimension];
         const std::string made = g.of_mesh                 ? "the mesh's"
+                                 : g.solution              ? "the solution, during the run"
                                  : g.dimension == N_DIM    ? "cell fractions"
                                  : g.exact                 ? "exact"
                                                            : "extracted, resolution " + std::to_string(g.resolution);
-        const Status row = g.cells > 0 ? Status::OK : Status::ERROR;
+        const Status row = g.cells > 0 || g.solution ? Status::OK : Status::ERROR;
         s = report::worse(s, row);
-        rows.push_back({row, {g.name, kind, logging::real(g.measure), measure_units(g), count(g.cells), made}});
+        rows.push_back({row, {g.name, kind, g.solution ? "-" : logging::real(g.measure), measure_units(g),
+                              g.solution ? "-" : count(g.cells), made}});
     }
     text.section("Regions", s);
     text.note("The mesh's own (the domain, its boundary and cell zones) and every region the case uses; cells: the "
               "cells each touches. A region of the case that touches no cell is an error.");
     text.table({"region", "kind", {"measure", Kind::VALUE}, {"units", Kind::UNITS}, "cells", "made from"}, rows);
+    // Filled regions of the case: their part in the domain against their own measures
+    std::vector<Row> measures;
+    for (const CheckRegion & g : r.regions) {
+        if (g.of_mesh || g.dimension != N_DIM || g.solution) continue;
+        const bool own = std::isfinite(g.own_measure);
+        const std::string outside =
+            own && g.own_measure > 0.0 ? logging::real(100.0 * std::max(0.0, 1.0 - g.measure / g.own_measure)) + "%" : "-";
+        const std::string tolerance = !own ? "-" : g.own_tolerance == 0.0 ? "exact" : logging::real(g.own_tolerance);
+        measures.push_back({Status::OK, {g.name, N_DIM == 2 && !g.per_radian ? "area" : "volume", logging::real(g.measure),
+                                         own ? logging::real(g.own_measure) : "-", measure_units(g), tolerance, outside}});
+        measures.push_back({Status::OK, {g.name, N_DIM == 2 && !g.per_radian ? "perimeter" : "surface area",
+                                         logging::real(g.surface), own ? logging::real(g.own_surface) : "-",
+                                         surface_units(g), tolerance, ""}});
+    }
+    if (!measures.empty()) {
+        text.note("Filled regions: their part in the domain (its surface: theirs inside the domain and the domain's "
+                  "boundary inside them) and their own measures, independent of the mesh (\"-\" for regions of the "
+                  "mesh or unbounded ones), exact or within a relative tolerance; outside: the share outside the "
+                  "domain.");
+        text.table({"region", "quantity", {"in domain", Kind::VALUE}, {"own", Kind::VALUE}, {"units", Kind::UNITS},
+                    "tolerance", "outside"},
+                   measures);
+    }
     if (!r.view_file.empty()) text.line("Case view (every region and zone, for ParaView): " + r.view_file);
     if (!r.view_images.empty()) {
         std::string images;
@@ -697,6 +727,14 @@ std::string check_json(const CheckReport & r) {
                   .add("cells", g.cells)
                   .add("exact", g.exact)
                   .raw("resolution", g.exact ? "null" : std::to_string(g.resolution))
+                  .add("solution", g.solution)
+                  .add("surface", g.surface)
+                  .raw("own", std::isfinite(g.own_measure) ? json::Object()
+                                                                 .add("measure", g.own_measure)
+                                                                 .add("surface", g.own_surface)
+                                                                 .add("tolerance", g.own_tolerance)
+                                                                 .str()
+                                                           : "null")
                   .str();
           }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
