@@ -950,10 +950,11 @@ derived fields of its stored state, without rerunning, so the fields need not be
 chosen before a long run. It runs the run's own code, with its reconstruction
 and gradients: a field is what [[write_data]] would have written at that step,
 the same values for restart files and snapshots of the conservative variables,
-the same to rounding for snapshots of RHO, U and P. --fields takes the fields of
-the derived and mixture groups of mallard list fields; those that need input the
-run did not give (the reference of CP, the streams of MIXTURE_FRACTION) take it
-from --reference and --mixture.
+the same to rounding for snapshots of RHO, U and P. --fields takes the fields
+mallard list fields says it writes, the gradient fields VORTICITY and
+Q_CRITERION among them, not what only the run itself records (CFL, P_MAX,
+TENO_SIGMA); those that need input the run did not give (the reference of CP,
+the streams of MIXTURE_FRACTION) take it from --reference and --mixture.
 
 FILE, the case and the choice of snapshots are as for mallard post extract: the
 case comes from -i, else from FILE's run block, and its mesh must be the file's;
@@ -963,9 +964,9 @@ files are never overwritten. Under mpirun -n N the fields are computed on N
 ranks.
 
 Options:
-  --fields LIST          The derived fields to write, separated by commas
-                         (MACH,P0,Q_CRITERION), as mallard list fields lists
-                         them in its derived and mixture groups. Required.
+  --fields LIST          The fields to write, separated by commas
+                         (MACH,P0,Q_CRITERION): those mallard list fields says
+                         mallard post derive writes. Required.
   -i FILE                The input file of the case: its mesh, physics, numerics
                          and [output] reference and mixture. Default: the input
                          in the run block of FILE (Mallard 0.10 and later record

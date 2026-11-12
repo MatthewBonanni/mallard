@@ -103,11 +103,21 @@ int format_error(const cli::Args & args, const char * command) {
 std::string count_text(size_t n) { return std::to_string(n) + (n == 1 ? " field" : " fields"); }
 
 std::string field_json(const std::string & name, const std::string & units, const std::string & long_name,
-                       const std::string & group, const std::string & needs) {
+                       const std::string & group, const std::string & needs, bool post_derive) {
     json::Object o;
     o.add("name", name).add("units", units).add("long_name", long_name).add("group", group);
     if (!needs.empty()) o.add("needs", needs);
+    if (post_derive) o.add("post_derive", true);
     return o.str();
+}
+
+/** @brief The line naming the fields of names that mallard post derive writes, or "" if none. */
+std::string post_derive_text(const std::vector<std::string> & names) {
+    std::string list;
+    for (const std::string & name : names) {
+        if (field_units::post_derive(name)) list += (list.empty() ? "" : ", ") + name;
+    }
+    return list.empty() ? "" : "mallard post derive writes, from snapshots and restart files: " + list + ".\n";
 }
 
 template <typename T, typename F>
@@ -123,7 +133,7 @@ int list_catalog(const cli::Args & args) {
         std::cout << json::Object()
                          .raw("input", "null")
                          .raw("fields", json_array(catalog, [](const CatalogField & f) {
-                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs);
+                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, f.post_derive);
                               }))
                          .str()
                   << "\n";
@@ -139,7 +149,9 @@ int list_catalog(const cli::Args & args) {
             rows.clear();
         }
     }
-    std::cout << "\nmallard list fields input.toml lists the fields of one case.\n";
+    std::vector<std::string> names;
+    for (const CatalogField & f : catalog) names.push_back(f.name);
+    std::cout << "\n" << post_derive_text(names) << "mallard list fields input.toml lists the fields of one case.\n";
     return 0;
 }
 
@@ -161,10 +173,11 @@ int list_fields_main(const cli::Args & args) {
                          .add("dim", N_DIM)
                          .raw("fields", json_array(c.fields, [](const std::string & name) {
                                   const FieldDescription d = field_units::describe(name);
-                                  return field_json(name, d.units(), d.long_name, field_units::group(name), "");
+                                  return field_json(name, d.units(), d.long_name, field_units::group(name), "",
+                                                    field_units::post_derive(name));
                               }))
                          .raw("missing", json_array(absent, [](const CatalogField & f) {
-                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs);
+                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, f.post_derive);
                               }))
                          .str()
                   << "\n";
@@ -190,7 +203,8 @@ int list_fields_main(const cli::Args & args) {
         for (const CatalogField & f : absent) rows.push_back({f.name, units_text(f.units), f.needs});
         logging::table({"field", "units", "needs"}, rows);
     }
-    std::cout << "\nVectors also go by their name without _X, _Y, _Z (U); a trailing * selects every field it starts "
+    std::cout << "\n" << post_derive_text(fields)
+              << "Vectors also go by their name without _X, _Y, _Z (U); a trailing * selects every field it starts "
                  "(Y_*).\n";
     return 0;
 }
