@@ -36,6 +36,7 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
+#include "diagnostic_code.h"
 #include "log.h"
 
 namespace run_control {
@@ -210,7 +211,7 @@ void set_accepting(bool on) {
         }
         if (!replaced.empty()) {
             install_signal_handlers();
-            logging::warning("the handlers of " + replaced + " were replaced during setup; Mallard's are restored");
+            logging::warning(diagnostic_code::SIGNAL_HANDLERS, "the handlers of " + replaced + " were replaced during setup; Mallard's are restored");
         }
     }
     accepting.store(on);
@@ -265,13 +266,13 @@ bool Server::start() {
     struct stat info {};
     if (lstat(SOCKET_NAME, &info) == 0) {
         if (!S_ISSOCK(info.st_mode)) {
-            logging::warning(std::string(SOCKET_NAME) + " exists and is not a socket; no control socket for this run");
+            logging::warning(diagnostic_code::CONTROL_SOCKET, std::string(SOCKET_NAME) + " exists and is not a socket; no control socket for this run");
             return false;
         }
         const int fd = connect_to(SOCKET_NAME);
         if (fd >= 0) {
             close(fd);
-            logging::warning(std::string("another run answers on ") + SOCKET_NAME +
+            logging::warning(diagnostic_code::CONTROL_SOCKET, std::string("another run answers on ") + SOCKET_NAME +
                              " in this directory; no control socket for this run");
             return false;
         }
@@ -280,7 +281,7 @@ bool Server::start() {
     const sockaddr_un address = socket_address(SOCKET_NAME);
     listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (listen_fd < 0) {
-        logging::warning(std::string("no control socket: ") + std::strerror(errno));
+        logging::warning(diagnostic_code::CONTROL_SOCKET, std::string("no control socket: ") + std::strerror(errno));
         return false;
     }
     set_cloexec(listen_fd);
@@ -288,7 +289,7 @@ bool Server::start() {
     const int bound = bind(listen_fd, reinterpret_cast<const sockaddr *>(&address), sizeof(address));
     umask(mask);
     if (bound != 0 || chmod(SOCKET_NAME, 0600) != 0 || listen(listen_fd, 8) != 0 || pipe(wake) != 0) {
-        logging::warning(std::string("no control socket: ") + std::strerror(errno));
+        logging::warning(diagnostic_code::CONTROL_SOCKET, std::string("no control socket: ") + std::strerror(errno));
         close(listen_fd);
         listen_fd = -1;
         if (bound == 0) unlink(SOCKET_NAME);

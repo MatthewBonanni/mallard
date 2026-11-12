@@ -64,6 +64,7 @@ struct MixtureFluxFunctor {
     rtype low_mach_cutoff;
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell, else empty
     Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
+    CentralStates central_states;  // hybrid flux, central = "cell_averages": the cells' W and [gamma, e0]
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -81,6 +82,15 @@ struct MixtureFluxFunctor {
         const bool hybrid = upwind.extent(0) > 0;
         const rtype phi =
             hybrid ? face_upwind_fraction(upwind, boundaries, cells_of_face(i_face, 0), c1, i_face) : 1.0_r;
+        const bool cell_central = hybrid && c1 >= 0 && central_states.on();
+        rtype W_0[N_CONSERVATIVE], W_1[N_CONSERVATIVE], th_0[2] = {}, th_1[2] = {};
+        if (cell_central) {
+            central_states.load(i_face, cells_of_face(i_face, 0), c1, W_0, W_1);
+            for (uint8_t k = 0; k < 2; k++) {
+                th_0[k] = cell_thermo(cells_of_face(i_face, 0), k);
+                th_1[k] = cell_thermo(c1, k);
+            }
+        }
 
         rtype flux[N_CONSERVATIVE] = {};
         for (uint8_t i_quad = 0; i_quad < n_quad; i_quad++) {
@@ -116,7 +126,12 @@ struct MixtureFluxFunctor {
             }
             const riemann::SideThermo side_l{th_l[0], th_l[1]}, side_r{th_r[0], th_r[1]};
             rtype central[N_CONSERVATIVE] = {};
-            if (hybrid) riemann::KEEP::calc_flux(central, n_point, W_l, W_r, side_l, side_r);
+            if (cell_central) {
+                riemann::KEEP::calc_flux(central, n_point, W_0, W_1, riemann::SideThermo{th_0[0], th_0[1]},
+                                         riemann::SideThermo{th_1[0], th_1[1]});
+            } else if (hybrid) {
+                riemann::KEEP::calc_flux(central, n_point, W_l, W_r, side_l, side_r);
+            }
             if (phi > 0.0_r) {
                 if (low_mach_cutoff < 1.0_r &&
                     (c1 >= 0 || boundaries.bcs(boundaries.face_bc(i_face)).is_characteristic())) {
@@ -167,6 +182,7 @@ struct MixtureDoubleFluxFunctor {
     rtype low_mach_cutoff;
     Kokkos::View<rtype *> upwind;  // hybrid flux: upwind fraction of each cell, else empty
     Kokkos::View<rtype ***> quad_normals;  // curved meshes: (face, q, dim) unit normals; else empty
+    CentralStates central_states;  // hybrid flux, central = "cell_averages": the cells' W
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
@@ -187,6 +203,9 @@ struct MixtureDoubleFluxFunctor {
         unit<N_DIM>(n_vec, n_unit);
         const bool hybrid = upwind.extent(0) > 0;
         const rtype phi = hybrid ? face_upwind_fraction(upwind, boundaries, c0, c1, i_face) : 1.0_r;
+        const bool cell_central = hybrid && c1 >= 0 && central_states.on();
+        rtype W_0[N_CONSERVATIVE], W_1[N_CONSERVATIVE];
+        if (cell_central) central_states.load(i_face, c0, c1, W_0, W_1);
 
         rtype flux[N_CONSERVATIVE] = {};
         rtype energy_1 = 0.0_r;
@@ -217,8 +236,8 @@ struct MixtureDoubleFluxFunctor {
             // Each side's central flux with its own frozen thermodynamics on both sides
             rtype K_0[N_CONSERVATIVE] = {}, K_1[N_CONSERVATIVE] = {};
             if (hybrid) {
-                riemann::KEEP::calc_flux(K_0, n_point, W_l, W_r, th_0, th_0);
-                riemann::KEEP::calc_flux(K_1, n_point, W_l, W_r, th_1, th_1);
+                riemann::KEEP::calc_flux(K_0, n_point, cell_central ? W_0 : W_l, cell_central ? W_1 : W_r, th_0, th_0);
+                riemann::KEEP::calc_flux(K_1, n_point, cell_central ? W_0 : W_l, cell_central ? W_1 : W_r, th_1, th_1);
             }
             if (low_mach_cutoff < 1.0_r) {
                 if (c1 >= 0) {
