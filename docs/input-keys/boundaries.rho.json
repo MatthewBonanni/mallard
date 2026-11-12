@@ -1,0 +1,11 @@
+{
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "examples/double_mach/input.toml",
+  "examples/noh_axisymmetric/input.toml",
+  "examples/shu_osher/input.toml",
+  "tutorials/cluster/input.toml"
+ ]
+}

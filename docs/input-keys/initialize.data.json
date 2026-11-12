@@ -1,0 +1,9 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/shock_bubble_2d/input.toml"
+ ]
+}
