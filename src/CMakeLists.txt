@@ -7,6 +7,7 @@ add_library(MallardCore STATIC
     common/region_input.cpp
     common/region_mesh.cpp
     io/case_view.cpp
+    io/case_image.cpp
     common/tabulated.cpp
     common/common_io.cpp
     common/input.cpp
@@ -66,8 +67,10 @@ add_library(MallardCore STATIC
     physics/physics.cpp
     solver/cell_chemistry.cpp
     solver/chemistry_balance.cpp
+    solver/conditional_statistics.cpp
     solver/chemistry_benchmark.cpp
     solver/conservation_ledger.cpp
+    solver/statistical_convergence.cpp
     solver/derived_fields.cpp
     solver/numerics_preset.cpp
     solver/repair_audit.cpp
@@ -104,6 +107,8 @@ add_library(MallardCore STATIC
     solver/remap.cpp
     solver/spectra.cpp
     solver/statistics.cpp
+    solver/favre_average.cpp
+    common/homogeneous_average.cpp
     io/archive.cpp
     io/compression.cpp
     io/field_units.cpp
@@ -253,6 +258,12 @@ add_executable(mallard main.cpp)
 target_link_libraries(mallard PRIVATE MallardCommands)
 set_target_properties(mallard PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
 mallard_target_warnings(mallard)
+if(Mallard_ENABLE_PYTHON)
+    add_library(MallardReader SHARED io/reader_c_api.cpp)
+    target_link_libraries(MallardReader PRIVATE MallardCore)
+    set_target_properties(MallardReader PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
+    mallard_target_warnings(MallardReader)
+endif()
 # Run as mallard, either solver runs the one of the case's dimension (front_end.h)
 add_custom_command(TARGET mallard POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E create_symlink mallard${Mallard_DIM}d $<TARGET_FILE_DIR:mallard>/mallard)

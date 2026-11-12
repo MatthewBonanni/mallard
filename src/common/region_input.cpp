@@ -1036,6 +1036,22 @@ Region read(const Input & value, const std::string & where, const Input * names,
     return Region(parse(value, where, names, mesh));
 }
 
+Region boundary(const Region & filled) {
+    Definition d;
+    d.pieces = boundary_pieces(filled.filled(), filled.root(), false);
+    d.dimension = N_DIM - 1;
+    d.closed = true;
+    d.nodes = filled.nodes();
+    d.vertices = filled.vertices();
+    d.programs = filled.programs();
+    d.filled = filled.filled();
+    d.conditions = filled.conditions();
+    d.bounded = filled.bounded();
+    d.resolution = filled.resolution();
+    d.summary = "boundary(" + filled.summary() + ")";
+    return Region(std::move(d));
+}
+
 void require_full_dimension(const Region & region, const Input & value, const std::string & where) {
     if (region.dimension() == N_DIM) return;
     const std::string what = region.name().empty() ? "this region" : "\"" + region.name() + "\"";

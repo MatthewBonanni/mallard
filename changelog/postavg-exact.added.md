@@ -1,0 +1,1 @@
+- `mallard post average --homogeneous`: the profile is the same bit for bit on any number of ranks and any `[mesh] cell_order`, its sums over each row exact (fixed point), so profiles of a run's states and of its `[statistics]` snapshot (`--statistics`) agree exactly.

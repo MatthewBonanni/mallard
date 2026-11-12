@@ -26,8 +26,10 @@
 #include "input.h"
 
 #include "common_typedef.h"
+#include "conditional_statistics.h"
 #include "data.h"
 #include "data_writer.h"
+#include "derived_fields.h"
 #include "mesh.h"
 #include "snapshot_block.h"
 #include "spectra.h"
@@ -37,19 +39,28 @@
  * @brief Cell values that statistics and probes sample, by code: 0 is RHO,
  *        1 + i the primitive PRIMITIVE_NAMES[i], FIRST_CONSERVED + i the
  *        conserved CONSERVATIVE_NAMES[1 + i] (RHOU_*, RHOE), FIRST_SPECIES + k
- *        the mass fraction Y_k of species k and FIRST_PARTIAL_DENSITY + k its
- *        partial density RHOY_k. The primitives must be current.
+ *        the mass fraction Y_k of species k, FIRST_PARTIAL_DENSITY + k its
+ *        partial density RHOY_k, FIRST_CHEMISTRY the heat release rate HRR,
+ *        FIRST_CHEMISTRY + 1 + k the net production rate OMEGA_k of species k,
+ *        and FIRST_DERIVED + j column j of the derived fields
+ *        (derived_catalog.h). The primitives, and the derived fields and rates
+ *        sampled, must be current.
  */
 struct CellSampler {
     StateView U;
     SpeciesView rhoY;
     Kokkos::View<rtype *[N_PRIMITIVE]> P;
+    Kokkos::View<rtype **> derived = {};
+    Kokkos::View<rtype *> hrr = {};
+    Kokkos::View<rtype **, Kokkos::LayoutRight> production = {};
 
     static constexpr int32_t RHO = 0;
     static constexpr int32_t FIRST_PRIMITIVE = 1;
     static constexpr int32_t FIRST_CONSERVED = 1 + N_PRIMITIVE;
     static constexpr int32_t FIRST_SPECIES = FIRST_CONSERVED + N_CONSERVATIVE - 1;
     static constexpr int32_t FIRST_PARTIAL_DENSITY = 1 << 16;
+    static constexpr int32_t FIRST_CHEMISTRY = 1 << 20;
+    static constexpr int32_t FIRST_DERIVED = 1 << 24;
 
     KOKKOS_INLINE_FUNCTION
     rtype operator()(const uint32_t c, const int32_t code) const {
@@ -57,12 +68,22 @@ struct CellSampler {
         if (code < FIRST_CONSERVED) return P(c, code - FIRST_PRIMITIVE);
         if (code < FIRST_SPECIES) return U(c, code - FIRST_CONSERVED + 1);
         if (code < FIRST_PARTIAL_DENSITY) return rhoY(c, code - FIRST_SPECIES) / U(c, 0);
-        return rhoY(c, code - FIRST_PARTIAL_DENSITY);
+        if (code < FIRST_CHEMISTRY) return rhoY(c, code - FIRST_PARTIAL_DENSITY);
+        if (code == FIRST_CHEMISTRY) return hrr(c);
+        if (code < FIRST_DERIVED) return production(c, code - FIRST_CHEMISTRY - 1);
+        return derived(c, code - FIRST_DERIVED);
     }
 
-    /** @brief Code of a variable name (RHO, a primitive, RHOU_*, RHOE, Y_<species>, RHOY_<species>); throws InputError naming key. */
+    /**
+     * @brief Code of a variable name (RHO, a primitive, RHOU_*, RHOE, Y_<species>, RHOY_<species>, with
+     *        derived a derived field it computes, and with chemistry HRR and OMEGA_<species>); throws
+     *        InputError naming key.
+     */
     static int32_t code(const std::string & name, const std::vector<std::string> & species_names,
-                        const std::string & key);
+                        const std::string & key, const derived::Selection * derived = nullptr,
+                        bool chemistry = false);
+    /** @brief Whether a code samples the heat release or production rates. */
+    static bool is_chemistry(int32_t code) { return code >= FIRST_CHEMISTRY && code < FIRST_DERIVED; }
 };
 
 /**
@@ -99,7 +120,8 @@ class PhaseAverage {
         void set_start(rtype t) { t_start = t; }
         void restore(const RestartData & restart, const std::string & file, rtype t, bool reset);
         RestartAttributes attributes() const;
-        std::string summary() const;
+        /** @brief The output as the setup banner lists it. */
+        OutputSummary summary() const;
 
         uint64_t samples() const { return n_samples; }
         uint32_t n_bins() const { return bins; }
@@ -148,24 +170,39 @@ class PhaseAverage {
  *            cov_ab += a (d_a (b_new - mean_b,new) - cov_ab),
  *        so each output field is the current average itself. Restart files
  *        carry the averages and the weights, so a restarted run continues them
- *        bitwise. [statistics.spectra] adds spectra and two-point correlations
+ *        bitwise. With a batch duration T_b, the samples also fall in batches
+ *        of T_b from the start of the averages (a sample in the batch that
+ *        holds its time), each averaged the same way; when a sample opens a
+ *        batch, the last one's averages join the mean and the sum of squared
+ *        deviations of the batch values (batch_means.h), which give the
+ *        confidence intervals CI_<average>. [statistics.spectra] adds spectra and two-point correlations
  *        along homogeneous directions (Spectra), [statistics.phase] phase
  *        averages (PhaseAverage).
  */
 class Statistics {
     public:
-        /** @brief Read [statistics] (if any) and allocate the mesh's cells. */
+        /**
+         * @brief Read [statistics] (if any) and allocate the mesh's cells; derived fields average
+         *        the columns derived computes, and context gives what conditional statistics take.
+         */
         void init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
-                  bool use_nccl = false);
+                  const derived::Selection & derived = {}, const ConditionalStatistics::Context & context = {});
+        /** @brief The derived fields [statistics] fields and products average, for the solver to compute. */
+        static std::vector<derived::Field> derived_fields(const Input & input);
+        /** @brief Whether the means sample derived fields, which must be current when they sample. */
+        bool samples_derived() const { return derived_sampled; }
+        /** @brief Whether the means or conditional statistics sample HRR or OMEGA_<species>, which must be current. */
+        bool samples_chemistry() const { return chemistry_sampled; }
 
-        bool enabled() const { return means_enabled() || spectra.enabled() || phase.enabled(); }
+        bool enabled() const { return means_enabled() || spectra.enabled() || phase.enabled() || !conditional.empty(); }
         bool means_enabled() const { return !fields.empty(); }
         /** @brief Sampling of the means, also that of time-averaged probes: every interval steps once t > t_start. */
         uint64_t sampling_interval() const { return interval; }
         rtype sampling_start() const { return t_start; }
         bool resets() const { return reset; }
         bool due(uint64_t step, rtype t) const {
-            return (means_enabled() && step % interval == 0 && t > t_start) || spectra.due(step, t) || phase.due(step, t);
+            return (means_enabled() && step % interval == 0 && t > t_start) || spectra.due(step, t) || phase.due(step, t) ||
+                   std::any_of(conditional.begin(), conditional.end(), [&](const auto & c) { return c.due(step, t); });
         }
         /** @brief Lowers step_limit to the first step after step at which a sample may be due. */
         void due_limits(uint64_t step, uint64_t & step_limit) const {
@@ -175,10 +212,15 @@ class Statistics {
         /** @brief Add the sample at (step, t) of cells [0, n_owned) to whatever is due (collective). */
         void sample(uint64_t step, rtype t, const CellSampler & sampler, uint32_t n_owned);
 
-        /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., PHASE_<bin>_<field>... */
+        /** @brief Output variables: MEAN_<field>..., COV_<a>_<b>..., CI_ of each with batches, PHASE_<bin>_<field>... */
         std::vector<std::string> variables() const;
         /** @brief What each of variables() averages, for the snapshot blocks. */
         std::vector<std::pair<std::string, snapshot_block::Average>> field_averages() const;
+        /** @brief What restart files carry: the averages, the batch state BATCH_<average>, BATCH_AVG_<average>, BATCH_M2_<average> and the phases. */
+        std::vector<std::string> restart_variables() const;
+        /** @brief Whether the averages have confidence intervals by batches. */
+        bool batches_enabled() const { return batch > 0.0_r; }
+        uint64_t batches() const { return n_batches; }
         void register_data(std::vector<Data> & data) const;
         void copy_device_to_host();
 
@@ -195,22 +237,27 @@ class Statistics {
             t_start = t;
             spectra.set_start(t);
             phase.set_start(t);
+            for (auto & c : conditional) c.set_start(t);
         }
         RestartAttributes attributes() const;
-        RestartArrays arrays() const { return spectra.arrays(); }
-        /** @brief Write the averaged spectra (rank 0), with the other output. */
-        void write(uint64_t step, rtype t, const std::string & reason) const { spectra.write(step, t, reason); }
+        RestartArrays arrays() const;
+        /** @brief Write the averaged spectra and conditional statistics (rank 0), with the other output. */
+        void write(uint64_t step, rtype t, const std::string & reason) const;
 
-        std::vector<std::pair<std::string, std::string>> summary() const;
+        /** @brief The outputs as the setup banner lists them: the means, spectra and phase averages. */
+        std::vector<OutputSummary> summary() const;
         uint64_t samples() const { return n_samples; }
         /** @brief The means' averaging window: from where the first sample's weight starts to the last sample (NaN before one). */
         double average_start() const { return n_samples ? double(t_last - weight) : std::numeric_limits<double>::quiet_NaN(); }
         double average_end() const { return n_samples ? double(t_last) : std::numeric_limits<double>::quiet_NaN(); }
         const Spectra & get_spectra() const { return spectra; }
         const PhaseAverage & get_phase() const { return phase; }
+        const std::vector<ConditionalStatistics> & get_conditional() const { return conditional; }
         /** @brief Host copies (see copy_device_to_host): (cell, field) means, (cell, product) covariances. */
         const auto & host_means() const { return h_mean; }
         const auto & host_covariances() const { return h_cov; }
+        /** @brief Host copy of the half widths: (cell, average), the means' then the covariances'. */
+        const auto & host_intervals() const { return h_ci; }
 
     private:
         std::vector<std::string> fields;
@@ -218,6 +265,8 @@ class Statistics {
         uint64_t interval = 1;
         rtype t_start = 0.0;
         bool reset = false;
+        bool derived_sampled = false;
+        bool chemistry_sampled = false;
 
         Kokkos::View<int32_t *> codes;
         Kokkos::View<uint32_t *[2]> pairs;
@@ -226,12 +275,24 @@ class Statistics {
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_mean;
         Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_cov;
 
+        // Batches: (cell, average) of the current batch, and the mean and m2 of the closed ones
+        rtype batch = 0.0;  // duration; 0: none
+        double confidence = 0.95;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft> batch_value, batch_avg, batch_m2;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_batch_value, h_batch_avg, h_batch_m2;
+        Kokkos::View<rtype **, Kokkos::LayoutLeft>::host_mirror_type h_ci;
+        uint64_t n_batches = 0;     // closed
+        uint64_t batch_index = 0;   // of the current batch, from the start of the averages
+        rtype batch_weight = 0.0;   // of the current batch
+        rtype batch_origin = 0.0;   // start of the averages
+
         rtype weight = 0.0;
         rtype t_last = 0.0;
         uint64_t n_samples = 0;
 
         Spectra spectra;
         PhaseAverage phase;
+        std::vector<ConditionalStatistics> conditional;
 
         void start_means(rtype t);
 };
