@@ -1,0 +1,11 @@
+{
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/shock_bubble_3d/input.toml",
+  "examples/triple_flame/input.toml",
+  "examples/triple_flame/thick/input.toml"
+ ]
+}

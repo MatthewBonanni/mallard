@@ -1,0 +1,11 @@
+{
+ "dimension": "velocity (m s^-1)",
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/turbulent_hot_spot_2d/input.toml"
+ ],
+ "type": "number"
+}

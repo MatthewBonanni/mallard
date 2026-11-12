@@ -1,0 +1,12 @@
+{
+ "dimension": "acceleration (m s^-2)",
+ "dims": [
+  2,
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "examples/poiseuille_pipe/input.toml"
+ ],
+ "type": "array"
+}
