@@ -21,7 +21,7 @@ Maintain  mallard test | completion | --version
 | `--restart latest` | Run | available |
 | `new`, `input upgrade`, `input resolve` | Set up | available |
 | `check input.toml` | Inspect | available |
-| `check --view DIR` (the case view) | Inspect | regions and boundary zones available; the rest planned ([#546](https://github.com/MatthewBonanni/mallard/issues/546)) |
+| `check --view DIR`, `info MESH --view DIR` (the case view) | Inspect | available: ParaView file and annotated images; particle injectors with them ([#759](https://github.com/MatthewBonanni/mallard/issues/759)) |
 | `check` with no input (the environment) | Inspect | available |
 | `info <file>`, `info <run-dir>` | Inspect | available; on the [output reader](output_reader.md) |
 | `info <run-dir> --html` (the run report) | Inspect | planned ([#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
@@ -30,8 +30,8 @@ Maintain  mallard test | completion | --version
 | `mesh convert` | Mesh | available |
 | `mesh extrude` | Mesh | planned |
 | `post extract` | Post | available; on the [output reader](output_reader.md#mallard-post-extract) |
-| `post derive` | Post | planned ([#511](https://github.com/MatthewBonanni/mallard/issues/511)) |
-| `post average` | Post | planned ([#512](https://github.com/MatthewBonanni/mallard/issues/512)) |
+| `post derive` | Post | available; on `post extract`'s case setup, with the in-run [derived fields](../guide/output.md#derived-fields) |
+| `post average` | Post | available; on `post extract`'s case setup, with the in-run [statistics](../guide/statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | Reacting-flow analysis | Post | planned ([#513](https://github.com/MatthewBonanni/mallard/issues/513)) |
 | `post convergence` | Post | available (scalars and `--exact` norms); norms against the finest run planned |
 | `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
